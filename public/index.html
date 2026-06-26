@@ -42,8 +42,8 @@
 	.stat.err b { color: var(--red); }
 
 	/* ---- layout ---- */
-	main { flex: 1; display: grid; grid-template-columns: 248px 1fr 0px; min-height: 0; transition: grid-template-columns .15s; }
-	main.detail-open { grid-template-columns: 248px 1fr 340px; }
+	main { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: hidden; transition: grid-template-columns .15s; }
+	main.detail-open { grid-template-columns: 248px minmax(0, 1fr) 340px; }
 	aside, .detail { background: var(--panel); overflow-y: auto; }
 	aside { border-right: 1px solid var(--border); padding: 12px; }
 	.detail { border-left: 1px solid var(--border); padding: 14px; }
@@ -124,13 +124,32 @@
 	.receipt .r-when { font-size: 11px; color: var(--faint); white-space: nowrap; }
 
 	/* ---- graph ---- */
-	#graphWrap { position: relative; flex: 1; min-height: 0; }
-	#graph { width: 100%; height: 100%; }
-	.graph-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 5; }
-	.legend { position: absolute; bottom: 10px; left: 10px; display: flex; flex-wrap: wrap; gap: 4px 12px;
-		background: #0d1117cc; border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px; max-width: 70%; z-index: 5; }
+	#graphWrap { position: relative; height: 100%; min-height: 520px; overflow: hidden; isolation: isolate;
+		background:
+			linear-gradient(135deg, rgba(88,166,255,.11), transparent 28%),
+			linear-gradient(225deg, rgba(188,140,255,.12), transparent 30%),
+			linear-gradient(180deg, #111722 0%, #0b1018 58%, #090d13 100%);
+	}
+	#graphWrap::before { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+		background-image:
+			linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+		background-size: 34px 34px; mask-image: linear-gradient(to bottom, #000 0%, transparent 92%);
+	}
+	#graphWrap::after { content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+		background: radial-gradient(circle at 50% 45%, rgba(88,166,255,.17), transparent 34%),
+			linear-gradient(90deg, rgba(0,0,0,.38), transparent 22%, transparent 78%, rgba(0,0,0,.32));
+	}
+	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
+	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 7px; z-index: 5; }
+	.graph-tools .mini { background: rgba(22,27,34,.82); backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.22); }
+	.legend { position: absolute; right: 14px; bottom: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px;
+		background: rgba(13,17,23,.76); backdrop-filter: blur(10px); border: 1px solid rgba(139,148,158,.22);
+		border-radius: 9px; padding: 8px 11px; max-width: min(560px, calc(100% - 28px)); z-index: 5; box-shadow: 0 12px 38px rgba(0,0,0,.28); }
 	.legend span { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); text-transform: capitalize; }
-	.graph-err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; color: var(--muted); }
+	.graph-err { position: absolute; inset: 0; z-index: 4; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; color: var(--muted); }
+	.graph-empty { max-width: 360px; padding: 22px 24px; border: 1px solid rgba(139,148,158,.24); border-radius: 12px;
+		background: rgba(13,17,23,.72); box-shadow: 0 18px 44px rgba(0,0,0,.28); }
 
 	/* ---- misc ---- */
 	.empty { color: var(--faint); font-style: italic; padding: 18px; text-align: center; }
@@ -152,6 +171,13 @@
 	.toast.err { border-left-color: var(--red); }
 	.banner { background: #3a1d1b; color: #ffb4ad; border: 1px solid var(--red); border-radius: 8px; padding: 9px 13px; margin: 10px 14px; display: none; }
 	.kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
+	@media (max-width: 900px) {
+		main, main.detail-open { grid-template-columns: 210px minmax(0, 1fr); }
+		.detail { position: fixed; inset: auto 0 0 0; max-height: 46vh; z-index: 20; border-left: 0; border-top: 1px solid var(--border); box-shadow: 0 -18px 40px rgba(0,0,0,.35); }
+		main:not(.detail-open) .detail { display: none; }
+		.legend { left: 14px; right: 14px; justify-content: flex-start; }
+		#graphWrap, #graph { min-height: 460px; }
+	}
 </style>
 </head>
 <body>
@@ -202,9 +228,9 @@ const fmtDate = (ms) => { if (!ms) return ""; const d = new Date(Number(ms)); re
 const ago = (ms) => { const s=(Date.now()-Number(ms))/1000; if(s<60)return"just now"; if(s<3600)return Math.floor(s/60)+"m ago"; if(s<86400)return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; };
 
 const CAT_COLORS = {
-	person:"#58a6ff", family:"#f778ba", relationship:"#ff7b72", project:"#bc8cff", system:"#79c0ff",
-	tool:"#56d364", skill:"#e3b341", habit:"#d29922", health:"#f85149", goal:"#3fb950",
-	preference:"#a5d6ff", identity:"#ffa657", life_event:"#ff9bce", place:"#7ee787",
+	person:"#ff8ec7", family:"#ff7ab6", relationship:"#ff7b72", project:"#bc8cff", system:"#79c0ff",
+	tool:"#56d364", skill:"#f2cc60", habit:"#d29922", health:"#ff6b6b", goal:"#3fb950",
+	preference:"#f0883e", identity:"#ffa657", life_event:"#ff9bce", place:"#7ee787",
 	organization:"#d2a8ff", possession:"#9aa5b1", interest:"#f0883e", other:"#8b949e",
 };
 const catColor = (c) => CAT_COLORS[c] || CAT_COLORS.other;
@@ -214,6 +240,7 @@ const S = {
 	key: localStorage.getItem("uml_key") || "",
 	view: "graph",
 	data: null, receipts: [], selected: null, network: null,
+	resizeObserver: null, fitTimer: null,
 };
 
 $("#userId").value = S.userId; $("#key").value = S.key;
@@ -296,6 +323,8 @@ function renderView() {
 }
 
 function viewGraph(v) {
+	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
+	if (S.resizeObserver) { try { S.resizeObserver.disconnect(); } catch {} S.resizeObserver = null; }
 	const wrap = el("div"); wrap.id = "graphWrap";
 	wrap.innerHTML = `
 		<div class="graph-tools">
@@ -303,10 +332,102 @@ function viewGraph(v) {
 			<button class="ghost mini" onclick="graphReset()">Reset zoom</button>
 		</div>
 		<div id="graph"></div>
-		<div class="graph-err" id="graphErr"></div>
+		<div class="graph-err" id="graphErr" style="display:flex"><div class="graph-empty"><b>Preparing graph</b><br><span class="help">Mapping memories...</span></div></div>
 		<div class="legend" id="legend"></div>`;
 	v.appendChild(wrap);
 	requestAnimationFrame(drawGraph);
+}
+
+function nodeScore(n) {
+	return (n.summary ? 2 : 0) + (n.slices?.length || 0) * 2 + (n.events?.length || 0) * 3 +
+		(["project","system","family","health"].includes(n.category) ? 2 : 0);
+}
+
+function radialPosition(n, sortedIndex, total) {
+	if (total <= 1) return { x: 0, y: 0 };
+	if (total > 4 && sortedIndex === 0) return { x: 0, y: 0 };
+	const ringIndex = total > 4 ? sortedIndex - 1 : sortedIndex;
+	const ringCount = total > 4 ? total - 1 : total;
+	const radius = Math.max(165, Math.min(330, 116 + ringCount * 18));
+	const angle = -Math.PI / 2 + (ringIndex / ringCount) * Math.PI * 2;
+	const wobble = ringIndex % 2 ? 28 : 0;
+	return {
+		x: Math.round(Math.cos(angle) * (radius + wobble)),
+		y: Math.round(Math.sin(angle) * (radius * .68 + wobble * .45) - 24),
+	};
+}
+
+function graphNode(n, sortedIndex, total, hasEdges) {
+	const count = (n.slices?.length || 0) + (n.events?.length || 0);
+	const selected = S.selected === n.id;
+	const color = catColor(n.category);
+	const data = {
+		id: n.id,
+		label: n.label,
+		title: `${esc(n.label)} (${esc(n.category)})`,
+		shape: "dot",
+		size: (selected ? 27 : 21) + Math.min(count, 8),
+		borderWidth: selected ? 4 : 3,
+		borderWidthSelected: 5,
+		color: {
+			background: "#111827",
+			border: color,
+			highlight: { background: "#1f2937", border: "#f8fafc" },
+			hover: { background: "#172033", border: color },
+		},
+		font: {
+			color: "#f8fafc",
+			size: selected ? 16 : 13,
+			face: "ui-sans-serif, system-ui, Segoe UI, sans-serif",
+			strokeWidth: 5,
+			strokeColor: "rgba(9,13,19,.92)",
+		},
+		shadow: { enabled: true, color: `${color}55`, size: selected ? 22 : 14, x: 0, y: 0 },
+		margin: 10,
+	};
+	if (!hasEdges) Object.assign(data, radialPosition(n, sortedIndex, total));
+	if (n.state === "inactive") data.color.background = "#21151a";
+	return data;
+}
+
+function graphFit(duration = 450) {
+	if (!S.network || !S.data) return;
+	const ids = (S.data.nodes || []).map((n) => n.id);
+	if (!ids.length) return;
+	try {
+		S.network.redraw();
+		S.network.fit({
+			nodes: ids,
+			animation: { duration, easingFunction: "easeInOutCubic" },
+			minZoomLevel: .18,
+			maxZoomLevel: 1.12,
+		});
+	} catch {}
+}
+
+function graphFocus(id) {
+	if (!S.network || !id) return;
+	try {
+		S.network.selectNodes([id]);
+		S.network.focus(id, {
+			scale: 1.08,
+			animation: { duration: 420, easingFunction: "easeInOutCubic" },
+		});
+	} catch {}
+}
+
+function bindGraphResize(wrap) {
+	if (!("ResizeObserver" in window)) return;
+	S.resizeObserver = new ResizeObserver(() => {
+		if (!S.network) return;
+		clearTimeout(S.fitTimer);
+		S.fitTimer = setTimeout(() => {
+			try { S.network.setSize("100%", "100%"); S.network.redraw(); } catch {}
+			if (S.selected) graphFocus(S.selected);
+			else graphFit(220);
+		}, 120);
+	});
+	S.resizeObserver.observe(wrap);
 }
 
 function drawGraph() {
@@ -314,36 +435,50 @@ function drawGraph() {
 	const edges = (S.data && S.data.edges) || [];
 	const errBox = $("#graphErr"); const cont = $("#graph");
 	const showErr = (m) => { if (errBox){ errBox.style.display="flex"; errBox.innerHTML = m; } if (cont) cont.style.display="none"; };
+	if (errBox) { errBox.style.display = "none"; errBox.innerHTML = ""; }
+	if (cont) cont.style.display = "block";
 	// legend (only categories present)
 	const present = [...new Set(nodes.map(n=>n.category))];
 	$("#legend").innerHTML = present.length
 		? present.map(c=>`<span><span class="dot" style="background:${catColor(c)}"></span>${esc(c)}</span>`).join("")
 		: "";
-	if (!nodes.length) { showErr(`<div>No nodes to graph yet.<br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
+	if (!nodes.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
 	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
 	try {
-		const vn = new vis.DataSet(nodes.map(n => ({
-			id: n.id, label: n.label,
-			color: { background: catColor(n.category), border: "#0d1117", highlight: { background: catColor(n.category), border: "#fff" } },
-			font: { color: "#e6edf3", size: 14 }, shape: "dot", size: 15 + Math.min((n.slices?.length||0)+(n.events?.length||0), 12),
-		})));
 		const byId = Object.fromEntries(nodes.map(n=>[n.id,n.label]));
-		const ve = new vis.DataSet(edges.filter(e=>byId[e.from_node]&&byId[e.to_node]).map(e => ({
+		const graphEdges = edges.filter(e=>byId[e.from_node]&&byId[e.to_node]);
+		const hasEdges = graphEdges.length > 0;
+		const sorted = [...nodes].sort((a,b)=>nodeScore(b)-nodeScore(a));
+		const order = new Map(sorted.map((n,i)=>[n.id,i]));
+		const vn = new vis.DataSet(nodes.map(n => graphNode(n, order.get(n.id) ?? 0, nodes.length, hasEdges)));
+		const ve = new vis.DataSet(graphEdges.map((e, i) => ({
 			id: e.id, from: e.from_node, to: e.to_node, label: (e.type||"").replace(/_/g," "), arrows: "to",
-			color: { color: "#3a4452", highlight: "#58a6ff" }, font: { color: "#8b949e", size: 10, strokeWidth: 0, background: "#0d1117" },
+			color: { color: "rgba(148,163,184,.46)", highlight: "#58a6ff", hover: "#79c0ff" },
+			width: 1.4,
+			selectionWidth: 2.8,
+			smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
+			font: { color: "#cbd5e1", size: 10, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
 		})));
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
-			physics: { stabilization: true, barnesHut: { gravitationalConstant: -8000, springLength: 130 } },
-			interaction: { hover: true, tooltipDelay: 120 },
-			nodes: { borderWidth: 2 },
+			autoResize: true,
+			layout: { improvedLayout: hasEdges },
+			physics: hasEdges ? {
+				stabilization: { iterations: 130, fit: false },
+				barnesHut: { gravitationalConstant: -4200, springLength: 125, springConstant: .045, avoidOverlap: .45 },
+			} : false,
+			interaction: { hover: true, tooltipDelay: 120, zoomView: true, dragView: true, dragNodes: true },
+			nodes: { borderWidth: 3 },
+			edges: { arrows: { to: { enabled: true, scaleFactor: .65 } } },
 		});
 		S.network.on("click", (p) => { if (p.nodes && p.nodes[0]) select(p.nodes[0]); });
-		S.network.once("stabilizationIterationsDone", () => { S.network.fit({ animation: { duration: 400 } }); });
+		S.network.on("doubleClick", () => graphFit());
+		S.network.once("afterDrawing", () => setTimeout(() => graphFit(450), 20));
+		S.network.once("stabilizationIterationsDone", () => graphFit(450));
+		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
 	} catch (e) { showErr(`<div>Graph failed to render: ${esc(e.message)}<br><span class="help">Use the Table tab to see your memories.</span></div>`); }
 }
-function graphFit() { if (S.network) S.network.fit({ animation: { duration: 400 } }); }
-function graphReset() { if (S.network) S.network.moveTo({ scale: 1, animation: { duration: 300 } }); }
+function graphReset() { graphFit(320); }
 
 function viewCards(v) {
 	const nodes = (S.data && S.data.nodes) || [];
@@ -505,7 +640,18 @@ function viewDev(v) {
 }
 
 /* ---------------- detail panel ---------------- */
-function select(id) { S.selected = id; document.querySelectorAll(".nl-item").forEach(x=>x.classList.remove("sel")); renderNodeList(); renderDetail(); if (S.network && S.view==="graph") { try { S.network.selectNodes([id]); S.network.focus(id, { scale: 1.1, animation: true }); } catch {} } }
+function select(id) {
+	S.selected = id;
+	document.querySelectorAll(".nl-item").forEach(x=>x.classList.remove("sel"));
+	renderNodeList();
+	renderDetail();
+	if (S.network && S.view==="graph") {
+		setTimeout(() => {
+			try { S.network.setSize("100%", "100%"); S.network.redraw(); } catch {}
+			graphFocus(id);
+		}, 180);
+	}
+}
 
 function renderDetail() {
 	const d = $("#detail"); const main = $("#main");
@@ -539,7 +685,13 @@ function renderDetail() {
 		${edges.length ? edges.map(e=>{ const out=e.from_node===n.id; const other=out?e.to_node:e.from_node;
 			return `<div class="edge-row" style="cursor:pointer" onclick="select('${other}')">${out?"→":"←"} <b>${esc(e.type.replace(/_/g," "))}</b> ${esc(nameOf(other))}</div>`; }).join("") : `<div class="empty" style="padding:6px">None.</div>`}`;
 }
-function closeDetail() { S.selected = null; $("#main").classList.remove("detail-open"); $("#detail").innerHTML = ""; renderNodeList(); }
+function closeDetail() {
+	S.selected = null;
+	$("#main").classList.remove("detail-open");
+	$("#detail").innerHTML = "";
+	renderNodeList();
+	if (S.network && S.view==="graph") setTimeout(() => graphFit(260), 180);
+}
 
 async function copyText(t, msg) { try { await navigator.clipboard.writeText(t); toast(msg||"Copied"); } catch { toast("Copy failed — select & copy manually", true); } }
 
