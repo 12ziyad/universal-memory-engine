@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UML — My Memory</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+	:root {
+		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
+		--border: #2b333f; --border2: #3a4452;
+		--text: #e6edf3; --muted: #8b949e; --faint: #6e7681; --accent: #58a6ff;
+		--green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #bc8cff;
+	}
+	* { box-sizing: border-box; }
+	html, body { height: 100%; }
+	body { margin: 0; font: 13.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
+	a { color: var(--accent); }
+	code { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace; }
+
+	/* ---- top bar ---- */
+	header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+		padding: 9px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+	h1 { font-size: 15px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+	h1 .brain { font-size: 18px; }
+	input, select { background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+		padding: 6px 9px; border-radius: 7px; font-size: 13px; outline: none; }
+	input:focus, select:focus { border-color: var(--accent); }
+	input#userId { width: 130px; } input#key { width: 120px; }
+	button { background: var(--accent); color: #04121f; border: 0; padding: 6px 12px; border-radius: 7px;
+		font-weight: 600; cursor: pointer; font-size: 12.5px; }
+	button:hover { filter: brightness(1.08); }
+	button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border2); }
+	button.ghost:hover { border-color: var(--accent); filter: none; }
+	button.mini { padding: 3px 8px; font-size: 11px; }
+	.spacer { flex: 1; }
+	.stats { display: flex; gap: 7px; flex-wrap: wrap; }
+	.stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+		padding: 4px 10px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: baseline; }
+	.stat b { color: var(--text); font-size: 14px; font-weight: 650; }
+	.stat.err b { color: var(--red); }
+
+	/* ---- layout ---- */
+	main { flex: 1; display: grid; grid-template-columns: 248px 1fr 0px; min-height: 0; transition: grid-template-columns .15s; }
+	main.detail-open { grid-template-columns: 248px 1fr 340px; }
+	aside, .detail { background: var(--panel); overflow-y: auto; }
+	aside { border-right: 1px solid var(--border); padding: 12px; }
+	.detail { border-left: 1px solid var(--border); padding: 14px; }
+	.content { min-width: 0; display: flex; flex-direction: column; }
+
+	/* ---- view tabs ---- */
+	.tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
+	.tab { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 5px 11px; border-radius: 7px; font-weight: 600; }
+	.tab:hover { color: var(--text); background: var(--panel2); }
+	.tab.active { color: var(--text); background: var(--panel2); border-color: var(--border2); }
+	.view { flex: 1; overflow: auto; padding: 14px; min-height: 0; }
+	.view.pad0 { padding: 0; }
+
+	/* ---- sidebar ---- */
+	.side-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint);
+		margin: 14px 2px 7px; display: flex; justify-content: space-between; align-items: center; }
+	.side-h:first-child { margin-top: 2px; }
+	.nl-item { padding: 7px 9px; border-radius: 7px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+		border: 1px solid transparent; }
+	.nl-item:hover { background: var(--panel2); }
+	.nl-item.sel { background: var(--panel2); border-color: var(--accent); }
+	.nl-item .lbl { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.nl-item .meta { font-size: 10.5px; color: var(--faint); }
+	.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+	.cand { padding: 5px 9px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--border);
+		margin: 4px 0; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
+	.cand .s { color: var(--faint); font-size: 10.5px; }
+
+	/* ---- badges / chips ---- */
+	.badge { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; font-weight: 650; text-transform: capitalize; white-space: nowrap; }
+	.state-active { background: #14391f; color: var(--green); }
+	.state-inactive { background: #3a1d1b; color: var(--red); }
+	.state-paused { background: #3a2f12; color: var(--amber); }
+	.state-completed { background: #1b2a4a; color: var(--accent); }
+	.imp-life_significant { background: #3a1d1b; color: var(--red); }
+	.imp-important { background: #3a2f12; color: var(--amber); }
+	.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
+		background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+
+	/* ---- cards ---- */
+	.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+	.card { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 13px; cursor: pointer; transition: border-color .12s; }
+	.card:hover { border-color: var(--accent); }
+	.card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+	.card .title { font-size: 15.5px; font-weight: 650; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.card .cat { font-size: 11px; color: var(--faint); text-transform: capitalize; margin-bottom: 8px; }
+	.card .summary { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; font-style: italic; }
+	.card .mini-line { font-size: 11.5px; color: var(--muted); margin: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.card .counts { display: flex; gap: 6px; margin-top: 9px; }
+
+	/* ---- table ---- */
+	table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+	th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+	th { color: var(--faint); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .05em; position: sticky; top: 0; background: var(--bg); }
+	tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
+
+	/* ---- detail panel ---- */
+	.detail h2 { font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+	.detail .sub { color: var(--faint); text-transform: capitalize; font-size: 12px; margin-bottom: 10px; }
+	.d-sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint);
+		margin: 16px 0 7px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+	.slice, .event, .edge-row { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; margin: 5px 0; font-size: 12.5px; }
+	.slice.old { opacity: .5; }
+	.slice .k, .event .when { font-size: 10.5px; color: var(--faint); display: block; margin-top: 2px; }
+	.event .act { font-weight: 650; text-transform: capitalize; }
+	.timeline-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+	.timeline-item .tl-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+	.tl-main { flex: 1; min-width: 0; }
+	.tl-node { font-weight: 650; cursor: pointer; } .tl-node:hover { color: var(--accent); }
+	.tl-when { font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+	/* ---- receipts ---- */
+	.receipt { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--green); border-radius: 9px; padding: 11px 13px; margin-bottom: 9px; }
+	.receipt.zero { border-left-color: var(--faint); }
+	.receipt .r-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 4px; }
+	.receipt .r-src { font-size: 11px; color: var(--accent); font-weight: 650; text-transform: uppercase; letter-spacing: .03em; }
+	.receipt .r-sum { font-size: 13px; }
+	.receipt .r-when { font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+	/* ---- graph ---- */
+	#graphWrap { position: relative; flex: 1; min-height: 0; }
+	#graph { width: 100%; height: 100%; }
+	.graph-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 5; }
+	.legend { position: absolute; bottom: 10px; left: 10px; display: flex; flex-wrap: wrap; gap: 4px 12px;
+		background: #0d1117cc; border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px; max-width: 70%; z-index: 5; }
+	.legend span { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); text-transform: capitalize; }
+	.graph-err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; color: var(--muted); }
+
+	/* ---- misc ---- */
+	.empty { color: var(--faint); font-style: italic; padding: 18px; text-align: center; }
+	.help { color: var(--muted); font-size: 12.5px; }
+	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 16px; margin-bottom: 14px; max-width: 720px; }
+	.box h3 { margin: 0 0 10px; font-size: 14px; }
+	.mcp-url { background: var(--bg); border: 1px solid var(--border2); border-radius: 8px; padding: 9px 11px;
+		font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; color: var(--accent); }
+	.steps { margin: 8px 0 0; padding-left: 18px; } .steps li { margin: 4px 0; color: var(--muted); }
+	.test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 9px; }
+	.test-btn { text-align: left; background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+		padding: 11px 13px; border-radius: 9px; font-weight: 600; }
+	.test-btn:hover { border-color: var(--accent); filter: none; }
+	.test-btn small { display: block; color: var(--faint); font-weight: 400; margin-top: 3px; font-size: 11px; }
+	#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 50;
+		display: flex; flex-direction: column; gap: 8px; align-items: center; }
+	.toast { background: var(--panel); border: 1px solid var(--border2); border-left: 3px solid var(--accent);
+		border-radius: 9px; padding: 10px 15px; font-size: 13px; max-width: 560px; box-shadow: 0 8px 30px #0008; }
+	.toast.err { border-left-color: var(--red); }
+	.banner { background: #3a1d1b; color: #ffb4ad; border: 1px solid var(--red); border-radius: 8px; padding: 9px 13px; margin: 10px 14px; display: none; }
+	.kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+	<h1><span class="brain">🧠</span> UML</h1>
+	<input id="userId" placeholder="userId" autocomplete="off" />
+	<input id="key" type="password" placeholder="API key" autocomplete="off" />
+	<button id="load">Load</button>
+	<button class="ghost" id="copyMcp">Copy MCP URL</button>
+	<div class="spacer"></div>
+	<div class="stats" id="stats"></div>
+</header>
+
+<div class="banner" id="banner"></div>
+
+<main id="main">
+	<aside>
+		<div class="side-h"><span>Nodes</span><span id="nlCount" class="kv"></span></div>
+		<div id="nodeList"></div>
+		<div class="side-h" style="margin-top:18px"><span>Candidates</span><span id="candCount" class="kv"></span></div>
+		<div id="candList"></div>
+	</aside>
+
+	<div class="content">
+		<div class="tabs" id="tabs">
+			<button class="tab active" data-view="graph">Graph</button>
+			<button class="tab" data-view="cards">Cards</button>
+			<button class="tab" data-view="table">Table</button>
+			<button class="tab" data-view="timeline">Timeline</button>
+			<button class="tab" data-view="saves">Saves</button>
+			<button class="tab" data-view="test">Test</button>
+			<button class="tab" data-view="setup">Setup</button>
+			<button class="tab" data-view="dev">Model</button>
+		</div>
+		<div class="view pad0" id="view"></div>
+	</div>
+
+	<div class="detail" id="detail"></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[m]));
+const fmtDate = (ms) => { if (!ms) return ""; const d = new Date(Number(ms)); return d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}) + " " + d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}); };
+const ago = (ms) => { const s=(Date.now()-Number(ms))/1000; if(s<60)return"just now"; if(s<3600)return Math.floor(s/60)+"m ago"; if(s<86400)return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; };
+
+const CAT_COLORS = {
+	person:"#58a6ff", family:"#f778ba", relationship:"#ff7b72", project:"#bc8cff", system:"#79c0ff",
+	tool:"#56d364", skill:"#e3b341", habit:"#d29922", health:"#f85149", goal:"#3fb950",
+	preference:"#a5d6ff", identity:"#ffa657", life_event:"#ff9bce", place:"#7ee787",
+	organization:"#d2a8ff", possession:"#9aa5b1", interest:"#f0883e", other:"#8b949e",
+};
+const catColor = (c) => CAT_COLORS[c] || CAT_COLORS.other;
+
+const S = {
+	userId: localStorage.getItem("uml_user") || "",
+	key: localStorage.getItem("uml_key") || "",
+	view: "graph",
+	data: null, receipts: [], selected: null, network: null,
+};
+
+$("#userId").value = S.userId; $("#key").value = S.key;
+
+function toast(msg, isErr) {
+	const t = el("div", "toast" + (isErr ? " err" : ""), esc(msg));
+	$("#toast").appendChild(t);
+	setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, isErr ? 6000 : 4200);
+}
+function banner(msg) { const b = $("#banner"); if (!msg) { b.style.display = "none"; return; } b.textContent = msg; b.style.display = "block"; }
+
+function mcpToken() {
+	try { return btoa(`${S.userId}:${S.key}`).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); } catch { return ""; }
+}
+function mcpUrl() { return `${location.origin}/mcp/${mcpToken()}`; }
+
+async function api(path, opts={}) {
+	const res = await fetch(path, { ...opts, headers: { "x-api-key": S.key, "content-type": "application/json", ...(opts.headers||{}) } });
+	if (!res.ok) { const t = await res.text().catch(()=> ""); throw new Error(`${res.status} ${t.slice(0,120)}`); }
+	return res.json();
+}
+
+async function load() {
+	S.userId = $("#userId").value.trim(); S.key = $("#key").value.trim();
+	localStorage.setItem("uml_user", S.userId); localStorage.setItem("uml_key", S.key);
+	if (!S.userId || !S.key) { banner("Enter a userId and API key, then press Load."); return; }
+	banner("");
+	try {
+		const [graph, receipts] = await Promise.all([
+			api(`/v1/graph?userId=${encodeURIComponent(S.userId)}`),
+			api(`/v1/receipts?userId=${encodeURIComponent(S.userId)}`).catch(() => ({ receipts: [] })),
+		]);
+		S.data = graph; S.receipts = receipts.receipts || [];
+		if (S.selected && !graph.nodes.find((n) => n.id === S.selected)) S.selected = null;
+		renderAll();
+		toast(`Loaded ${graph.nodes.length} node(s).`);
+	} catch (e) { banner("Load failed: " + e.message); }
+}
+
+function renderAll() { renderStats(); renderNodeList(); renderCandidates(); renderView(); renderDetail(); }
+
+function renderStats() {
+	const s = (S.data && S.data.stats) || { nodes:0, slices:0, events:0, edges:0, candidates:0 };
+	$("#stats").innerHTML =
+		[["nodes",s.nodes],["slices",s.slices],["events",s.events],["edges",s.edges],["candidates",s.candidates]]
+		.map(([k,v]) => `<div class="stat"><b>${v}</b>${k}</div>`).join("");
+}
+
+function renderNodeList() {
+	const wrap = $("#nodeList"); wrap.innerHTML = "";
+	const nodes = (S.data && S.data.nodes) || [];
+	$("#nlCount").textContent = nodes.length;
+	if (!nodes.length) { wrap.appendChild(el("div","empty","No nodes yet.")); return; }
+	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
+		const item = el("div", "nl-item" + (S.selected===n.id?" sel":""));
+		item.innerHTML = `<span class="dot" style="background:${catColor(n.category)}"></span>
+			<span class="lbl">${esc(n.label)}</span>
+			<span class="meta">${esc(n.category)}</span>`;
+		item.onclick = () => select(n.id);
+		wrap.appendChild(item);
+	}
+}
+
+function renderCandidates() {
+	const wrap = $("#candList"); wrap.innerHTML = "";
+	const cands = (S.data && S.data.candidates) || [];
+	$("#candCount").textContent = cands.length;
+	if (!cands.length) { wrap.appendChild(el("div","empty","None.")); return; }
+	for (const c of cands) wrap.appendChild(el("div","cand", `<span>${esc(c.label)}</span><span class="s">${esc(c.strength)} ·${c.mentions||1}×</span>`));
+}
+
+/* ---------------- views ---------------- */
+function setView(v) { S.view = v; document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v)); renderView(); }
+
+function renderView() {
+	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
+	if (!S.data && S.view!=="setup" && S.view!=="test") { v.innerHTML = `<div class="empty">Press Load to view your memory.</div>`; return; }
+	v.innerHTML = "";
+	({ graph: viewGraph, cards: viewCards, table: viewTable, timeline: viewTimeline, saves: viewSaves, test: viewTest, setup: viewSetup, dev: viewDev }[S.view] || viewGraph)(v);
+}
+
+function viewGraph(v) {
+	const wrap = el("div"); wrap.id = "graphWrap";
+	wrap.innerHTML = `
+		<div class="graph-tools">
+			<button class="ghost mini" onclick="graphFit()">Fit</button>
+			<button class="ghost mini" onclick="graphReset()">Reset zoom</button>
+		</div>
+		<div id="graph"></div>
+		<div class="graph-err" id="graphErr"></div>
+		<div class="legend" id="legend"></div>`;
+	v.appendChild(wrap);
+	requestAnimationFrame(drawGraph);
+}
+
+function drawGraph() {
+	const nodes = (S.data && S.data.nodes) || [];
+	const edges = (S.data && S.data.edges) || [];
+	const errBox = $("#graphErr"); const cont = $("#graph");
+	const showErr = (m) => { if (errBox){ errBox.style.display="flex"; errBox.innerHTML = m; } if (cont) cont.style.display="none"; };
+	// legend (only categories present)
+	const present = [...new Set(nodes.map(n=>n.category))];
+	$("#legend").innerHTML = present.length
+		? present.map(c=>`<span><span class="dot" style="background:${catColor(c)}"></span>${esc(c)}</span>`).join("")
+		: "";
+	if (!nodes.length) { showErr(`<div>No nodes to graph yet.<br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
+	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
+	try {
+		const vn = new vis.DataSet(nodes.map(n => ({
+			id: n.id, label: n.label,
+			color: { background: catColor(n.category), border: "#0d1117", highlight: { background: catColor(n.category), border: "#fff" } },
+			font: { color: "#e6edf3", size: 14 }, shape: "dot", size: 15 + Math.min((n.slices?.length||0)+(n.events?.length||0), 12),
+		})));
+		const byId = Object.fromEntries(nodes.map(n=>[n.id,n.label]));
+		const ve = new vis.DataSet(edges.filter(e=>byId[e.from_node]&&byId[e.to_node]).map(e => ({
+			id: e.id, from: e.from_node, to: e.to_node, label: (e.type||"").replace(/_/g," "), arrows: "to",
+			color: { color: "#3a4452", highlight: "#58a6ff" }, font: { color: "#8b949e", size: 10, strokeWidth: 0, background: "#0d1117" },
+		})));
+		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
+			physics: { stabilization: true, barnesHut: { gravitationalConstant: -8000, springLength: 130 } },
+			interaction: { hover: true, tooltipDelay: 120 },
+			nodes: { borderWidth: 2 },
+		});
+		S.network.on("click", (p) => { if (p.nodes && p.nodes[0]) select(p.nodes[0]); });
+		S.network.once("stabilizationIterationsDone", () => { S.network.fit({ animation: { duration: 400 } }); });
+		if (S.selected) S.network.selectNodes([S.selected]);
+	} catch (e) { showErr(`<div>Graph failed to render: ${esc(e.message)}<br><span class="help">Use the Table tab to see your memories.</span></div>`); }
+}
+function graphFit() { if (S.network) S.network.fit({ animation: { duration: 400 } }); }
+function graphReset() { if (S.network) S.network.moveTo({ scale: 1, animation: { duration: 300 } }); }
+
+function viewCards(v) {
+	const nodes = (S.data && S.data.nodes) || [];
+	if (!nodes.length) { v.appendChild(el("div","empty","No nodes yet.")); return; }
+	const grid = el("div","cards");
+	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
+		const cur = (n.slices||[]).filter(s=>s.is_current);
+		const card = el("div","card");
+		card.innerHTML = `
+			<div class="top"><span class="dot" style="background:${catColor(n.category)}"></span>
+				<span class="title">${esc(n.label)}</span>
+				<span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
+			<div class="cat">${esc(n.category)}</div>
+			${n.summary ? `<div class="summary">${esc(n.summary)}</div>` : ""}
+			${cur.slice(0,3).map(s=>`<div class="mini-line">• ${esc(s.text)}</div>`).join("")}
+			<div class="counts">
+				<span class="chip">${cur.length} slice${cur.length!==1?"s":""}</span>
+				<span class="chip">${(n.events||[]).length} event${(n.events||[]).length!==1?"s":""}</span>
+			</div>`;
+		card.onclick = () => select(n.id);
+		grid.appendChild(card);
+	}
+	v.appendChild(grid);
+}
+
+function viewTable(v) {
+	const nodes = (S.data && S.data.nodes) || [];
+	if (!nodes.length) { v.appendChild(el("div","empty","No nodes yet.")); return; }
+	const t = el("table");
+	t.innerHTML = `<thead><tr><th>Node</th><th>Category</th><th>State</th><th>Slices</th><th>Events</th><th>Updated</th></tr></thead>`;
+	const tb = el("tbody");
+	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
+		const tr = el("tr","click");
+		const cur = (n.slices||[]).filter(s=>s.is_current).length;
+		tr.innerHTML = `<td><span class="dot" style="background:${catColor(n.category)};display:inline-block;margin-right:7px"></span>${esc(n.label)}</td>
+			<td>${esc(n.category)}</td><td><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></td>
+			<td>${cur}</td><td>${(n.events||[]).length}</td><td class="kv">${n.updated_at?ago(n.updated_at):""}</td>`;
+		tr.onclick = () => select(n.id);
+		tb.appendChild(tr);
+	}
+	t.appendChild(tb); v.appendChild(t);
+}
+
+function viewTimeline(v) {
+	const nodes = (S.data && S.data.nodes) || [];
+	const items = [];
+	for (const n of nodes) for (const e of (n.events||[])) items.push({ ...e, label: n.label, nodeId: n.id });
+	items.sort((a,b)=>(b.created_at||0)-(a.created_at||0));
+	if (!items.length) { v.appendChild(el("div","empty","No events yet.")); return; }
+	const wrap = el("div"); wrap.style.maxWidth = "760px";
+	for (const e of items.slice(0,200)) {
+		const row = el("div","timeline-item");
+		row.innerHTML = `<span class="tl-dot" style="background:${catColor((nodes.find(n=>n.id===e.nodeId)||{}).category)}"></span>
+			<div class="tl-main"><span class="tl-node">${esc(e.label)}</span>
+				<span class="act" style="color:var(--muted)"> — ${esc((e.action||"").replace(/_/g," "))}</span>
+				${e.importance && e.importance!=="ordinary" ? `<span class="badge imp-${esc(e.importance)}" style="margin-left:6px">${esc(e.importance.replace(/_/g," "))}</span>`:""}
+				<div class="kv" style="font-size:12px">${esc(e.text||"")}</div></div>
+			<span class="tl-when">${fmtDate(e.created_at)}</span>`;
+		row.querySelector(".tl-node").onclick = () => select(e.nodeId);
+		wrap.appendChild(row);
+	}
+	v.appendChild(wrap);
+}
+
+function viewSaves(v) {
+	if (!S.receipts.length) { v.appendChild(el("div","empty","No save receipts yet. Saves from the MCP tools and the Test tab appear here.")); return; }
+	const wrap = el("div"); wrap.style.maxWidth = "760px";
+	for (const r of S.receipts) {
+		const zero = (r.saved_total||0) === 0;
+		const row = el("div","receipt" + (zero?" zero":""));
+		row.innerHTML = `<div class="r-top"><span class="r-src">${esc(r.source)}</span><span class="r-when">${fmtDate(r.created_at)}</span></div>
+			<div class="r-sum">${esc(r.summary || "")}</div>`;
+		wrap.appendChild(row);
+	}
+	v.appendChild(wrap);
+}
+
+function viewTest(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box"><h3>Quick tests (no ChatGPT needed)</h3>
+		<div class="help" style="margin-bottom:11px">These call <code>/v1/save</code> &amp; <code>/v1/recall</code> as your user. Saves run the real model; reload to see them land.</div>
+		<div class="test-grid" id="testGrid"></div></div>`;
+	v.appendChild(wrap);
+	const tests = [
+		["Save: I started boxing", "memory · creates Boxing", () => doSave({ mode:"memory", content:"I started boxing and train three days a week" })],
+		["Save: My grandmother passed away", "memory · family + life event", () => doSave({ mode:"memory", content:"My grandmother passed away" })],
+		["Save: I prefer simple explanations", "memory · a preference", () => doSave({ mode:"memory", content:"I prefer simple explanations" })],
+		["Save conversation (sample)", "digest a messy chat", () => doSave({ mode:"conversation", conversationId:"sample-chat", messages: SAMPLE_CHAT })],
+		["Recall: boxing", "query your memory", () => doRecall("boxing")],
+		["Recall: my family", "query your memory", () => doRecall("my family")],
+	];
+	const grid = $("#testGrid");
+	for (const [t, sub, fn] of tests) { const b = el("button","test-btn", `${esc(t)}<small>${esc(sub)}</small>`); b.onclick = fn; grid.appendChild(b); }
+}
+const SAMPLE_CHAT = [
+	{ role:"user", content:"yo whats up" },
+	{ role:"assistant", content:"Not much! How can I help today?" },
+	{ role:"user", content:"I'm building a memory engine called UML, it runs on Cloudflare Workers" },
+	{ role:"user", content:"it uses D1 for storage and Vectorize for search" },
+	{ role:"user", content:"haha nice" },
+	{ role:"user", content:"I connect it to ChatGPT and Claude over MCP" },
+	{ role:"user", content:"btw I prefer simple explanations" },
+	{ role:"user", content:"whats the weather like?" },
+];
+
+async function doSave(payload) {
+	try {
+		const r = await api("/v1/save", { method:"POST", body: JSON.stringify({ userId: S.userId, ...payload }) });
+		toast(r.summary || "Saved.");
+		setTimeout(load, 700);
+	} catch (e) { toast("Save failed: " + e.message, true); }
+}
+async function doRecall(query) {
+	try {
+		const r = await api("/v1/recall", { method:"POST", body: JSON.stringify({ userId: S.userId, query }) });
+		toast(r.context ? `Recall "${query}":\n${r.context}` : `Recall "${query}": nothing found.`);
+	} catch (e) { toast("Recall failed: " + e.message, true); }
+}
+
+function viewSetup(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="box"><h3>Your MCP connector URL</h3>
+			<div class="mcp-url" id="setupUrl">${esc(mcpUrl())}</div>
+			<div style="margin-top:9px"><button class="mini" onclick="copyText(mcpUrl(),'MCP URL copied')">Copy URL</button></div>
+			<div class="help" style="margin-top:9px">This URL embeds <code>userId:key</code>. Treat it like a password. To rotate, change the global <code>API_KEY</code> secret (<code>wrangler secret put API_KEY</code>) — every connector URL must be regenerated afterwards.</div>
+		</div>
+		<div class="box"><h3>Connect ChatGPT</h3>
+			<ol class="steps">
+				<li>Settings → Connectors → <b>Add custom connector</b> (or Developer mode → MCP).</li>
+				<li>Paste the URL above. No auth / headers needed — identity is in the URL.</li>
+				<li>Enable the <code>save_memory</code>, <code>save_conversation</code>, and <code>recall_memory</code> tools.</li>
+			</ol>
+		</div>
+		<div class="box"><h3>Connect Claude</h3>
+			<ol class="steps">
+				<li>Settings → Connectors → <b>Add custom connector</b>.</li>
+				<li>Paste the URL above (Claude uses URL-only remote MCP — no bearer header).</li>
+				<li>Approve the three memory tools when prompted in a chat.</li>
+			</ol>
+		</div>`;
+	v.appendChild(wrap);
+}
+
+function viewDev(v) {
+	const active = (S.data && S.data.model) || "—";
+	const models = (S.data && S.data.models) || [];
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="box"><h3>Extraction model</h3>
+			<div class="help" style="margin-bottom:9px">The active extraction model is configured server-side via <code>LLM_MODEL</code> (a one-line switch in <code>wrangler.jsonc</code>). This dropdown shows what's active; changing it here is informational only (a real switch needs redeploy).</div>
+			<select id="modelSel" style="min-width:320px">
+				${models.map(m=>`<option ${m===active?"selected":""}>${esc(m)}</option>`).join("") || `<option>${esc(active)}</option>`}
+			</select>
+			<div style="margin-top:12px" class="kv">Active: <b>${esc(active)}</b></div>
+			<div class="kv" style="margin-top:4px">Pass-2 summaries &amp; digest use a cheaper model; embeddings use <code>bge-base-en</code>.</div>
+		</div>`;
+	v.appendChild(wrap);
+}
+
+/* ---------------- detail panel ---------------- */
+function select(id) { S.selected = id; document.querySelectorAll(".nl-item").forEach(x=>x.classList.remove("sel")); renderNodeList(); renderDetail(); if (S.network && S.view==="graph") { try { S.network.selectNodes([id]); S.network.focus(id, { scale: 1.1, animation: true }); } catch {} } }
+
+function renderDetail() {
+	const d = $("#detail"); const main = $("#main");
+	const n = S.data && S.data.nodes.find(x=>x.id===S.selected);
+	if (!n) { main.classList.remove("detail-open"); d.innerHTML = ""; return; }
+	main.classList.add("detail-open");
+	const cur = (n.slices||[]).filter(s=>s.is_current);
+	const old = (n.slices||[]).filter(s=>!s.is_current);
+	const evs = [...(n.events||[])].sort((a,b)=>(b.created_at||0)-(a.created_at||0));
+	const edges = (S.data.edges||[]).filter(e=>e.from_node===n.id||e.to_node===n.id);
+	const nameOf = (id) => (S.data.nodes.find(x=>x.id===id)||{}).label || "?";
+	d.innerHTML = `
+		<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+			<h2><span class="dot" style="background:${catColor(n.category)}"></span>${esc(n.label)}</h2>
+			<button class="ghost mini" onclick="closeDetail()">✕</button>
+		</div>
+		<div class="sub">${esc(n.category)} · <span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
+		${n.summary ? `<div class="help" style="font-style:italic">${esc(n.summary)}</div>` : ""}
+
+		<div class="d-sec">Current details (${cur.length})</div>
+		${cur.length ? cur.map(s=>`<div class="slice">${esc(s.text)}<span class="k">${esc(s.kind)}</span></div>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
+
+		${old.length ? `<div class="d-sec">Superseded (${old.length})</div>` + old.map(s=>`<div class="slice old">${esc(s.text)}<span class="k">${esc(s.kind)}</span></div>`).join("") : ""}
+
+		<div class="d-sec">Event timeline (${evs.length})</div>
+		${evs.length ? evs.map(e=>`<div class="event"><span class="act">${esc((e.action||"").replace(/_/g," "))}</span>
+			${e.importance&&e.importance!=="ordinary"?`<span class="badge imp-${esc(e.importance)}" style="margin-left:6px">${esc(e.importance.replace(/_/g," "))}</span>`:""}
+			<div class="kv">${esc(e.text||"")}</div><span class="when">${fmtDate(e.created_at)}</span></div>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
+
+		<div class="d-sec">Connections (${edges.length})</div>
+		${edges.length ? edges.map(e=>{ const out=e.from_node===n.id; const other=out?e.to_node:e.from_node;
+			return `<div class="edge-row" style="cursor:pointer" onclick="select('${other}')">${out?"→":"←"} <b>${esc(e.type.replace(/_/g," "))}</b> ${esc(nameOf(other))}</div>`; }).join("") : `<div class="empty" style="padding:6px">None.</div>`}`;
+}
+function closeDetail() { S.selected = null; $("#main").classList.remove("detail-open"); $("#detail").innerHTML = ""; renderNodeList(); }
+
+async function copyText(t, msg) { try { await navigator.clipboard.writeText(t); toast(msg||"Copied"); } catch { toast("Copy failed — select & copy manually", true); } }
+
+/* ---------------- wire up ---------------- */
+$("#load").onclick = load;
+$("#copyMcp").onclick = () => { if (!S.userId||!S.key) return toast("Enter userId + key first", true); copyText(mcpUrl(), "MCP URL copied"); };
+$("#userId").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
+$("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
+$("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t) setView(t.dataset.view); });
+renderView();
+if (S.userId && S.key) load();
+</script>
+</body>
+</html>

@@ -1,0 +1,436 @@
+/**
+ * The gates: the backend is the real judge. For every object the model proposed,
+ * the backend independently decides keep / downgrade / reject. The model never
+ * writes final truth — this module turns proposals into an approved write plan.
+ *
+ * Order of processing matters: nodes first (so events/slices/edges can resolve
+ * and attach to nodes created in the same batch), then events, slices, edges,
+ * candidates.
+ *
+ * Worth-saving is judged by category-of-MEANING + junk rules, never by membership
+ * in a short whitelist:
+ *   - an unknown category is canonicalized (CATEGORY_ALIASES) or kept as "other",
+ *     never dropped just for being off-list;
+ *   - an event/slice whose subject node the model forgot AUTO-CREATES that node
+ *     (anti-orphan), so "my grandmother died" still lands as Grandmother +
+ *     passed_away even when the model only emits the event;
+ *   - junk is still rejected: pronouns/fillers, status-as-node, duplicates,
+ *     low-confidence maybes (parked as candidates), self-loops.
+ */
+
+import {
+	CATEGORIES,
+	CATEGORY_ALIASES,
+	ACTIONS,
+	IMPORTANCE,
+	EDGE_TYPES,
+	SLICE_KINDS,
+	CANDIDATE_STRENGTHS,
+	ACTION_TO_STATE,
+} from "../config.js";
+import { newId } from "../lib/ids.js";
+import { getUserNodes, getUserCandidates } from "../lib/db.js";
+import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
+
+// Slice kinds that hold a single "current" value, so a new one supersedes the old.
+const SUPERSEDE_KINDS = new Set(["progress", "preference"]);
+// Window for treating a same-action event as a duplicate of an ongoing incident.
+const EVENT_DEDUPE_MS = 24 * 60 * 60 * 1000;
+
+// When the model emits a life event but forgets its subject node, infer the
+// auto-created subject's category from the action (best default, model node wins
+// if it also proposed one). "my grandmother passed away" → subject is family.
+const ACTION_SUBJECT_CATEGORY = {
+	passed_away: "family",
+	born: "family",
+	married: "relationship",
+	broke_up: "relationship",
+	diagnosed: "health",
+	injured: "health",
+	recovered: "health",
+	moved: "place",
+};
+
+function valid(value, allowed, fallback) {
+	return allowed.includes(value) ? value : fallback;
+}
+
+/** Normalize a model-supplied category to a comparable key ("Life-Event" → "life_event"). */
+function catKey(s) {
+	return String(s ?? "")
+		.toLowerCase()
+		.trim()
+		.replace(/[\s-]+/g, "_");
+}
+
+/**
+ * Map a model's category onto the canonical set by MEANING. Returns a canonical
+ * category, or null if genuinely unrecognizable (caller then keeps "other" — the
+ * node is NOT dropped just for an off-list category).
+ */
+export function canonicalizeCategory(raw) {
+	const key = catKey(raw);
+	if (!key) return null;
+	if (CATEGORIES.includes(key)) return key;
+	if (CATEGORY_ALIASES[key]) return CATEGORY_ALIASES[key];
+	// tolerate a trailing plural ("tools" → tool, "relatives" → family)
+	if (key.endsWith("s")) {
+		const sing = key.slice(0, -1);
+		if (CATEGORIES.includes(sing)) return sing;
+		if (CATEGORY_ALIASES[sing]) return CATEGORY_ALIASES[sing];
+	}
+	return null;
+}
+
+/** Looks like a status/change phrase, not a durable thing (→ should be an event). */
+function looksLikeStatus(label) {
+	const first = normalizeLabel(label).split(" ")[0];
+	return ACTIONS.includes(first) || ["stopped", "started", "quit", "finished"].includes(first);
+}
+
+// Pronouns / fillers a weak model sometimes proposes as nodes ("I train..." → node "I").
+const JUNK_LABELS = new Set([
+	"i", "me", "my", "mine", "myself", "you", "your", "yours", "it", "its", "this", "that",
+	"these", "those", "they", "them", "we", "us", "he", "she", "him", "her", "thing", "things",
+	"stuff", "something", "someone", "anything", "everything", "everyone", "people",
+]);
+
+/** Reject labels that are pronouns/fillers or too short to be a real entity. */
+function isJunkLabel(label) {
+	const norm = normalizeLabel(label);
+	if (!norm) return true;
+	if (norm.replace(/\s+/g, "").length < 2) return true; // "i", single chars, punctuation only
+	const words = norm.split(" ").filter(Boolean);
+	return words.length > 0 && words.every((w) => JUNK_LABELS.has(w));
+}
+
+/**
+ * Canonical match: does this label really refer to an existing node?
+ * Checks the model's hint first, then exact / containment / fuzzy.
+ */
+function matchExisting(label, matchesExistingId, existing, existingById) {
+	if (matchesExistingId && existingById.has(matchesExistingId)) {
+		return existingById.get(matchesExistingId);
+	}
+	const norm = normalizeLabel(label);
+	if (!norm) return null;
+	const labelTokens = tokens(label);
+	let best = null;
+	let bestScore = 0;
+	for (const node of existing) {
+		const nNorm = normalizeLabel(node.label);
+		if (nNorm === norm) return node; // exact
+		if (wordContains(norm, nNorm) || wordContains(nNorm, norm)) return node; // containment
+		const j = jaccard(labelTokens, tokens(node.label));
+		const lev = levenshteinRatio(norm, nNorm);
+		const score = Math.max(j, lev);
+		if (score > bestScore) {
+			bestScore = score;
+			best = node;
+		}
+	}
+	if (best && (bestScore >= 0.6)) return best;
+	return null;
+}
+
+async function recentEventExists(env, userId, nodeId, action, now) {
+	const row = await env.DB.prepare(
+		"SELECT 1 FROM events WHERE user_id = ? AND node_id = ? AND action = ? AND created_at >= ? LIMIT 1",
+	)
+		.bind(userId, nodeId, action, now - EVENT_DEDUPE_MS)
+		.first();
+	return Boolean(row);
+}
+
+/**
+ * User-settings gate (stub, but the hook is real). Drops objects whose category
+ * is disabled, or everything when capture is paused. `private` marking is a
+ * future hook (no column yet).
+ */
+export function applyUserSettings(objects, settings) {
+	if (settings.paused) return [];
+	const disabled = new Set(settings.disabledCategories ?? []);
+	if (disabled.size === 0) return objects;
+	return objects.filter((o) => {
+		if (o.kind === "node" || o.kind === "candidate") return !disabled.has(o.category);
+		return true;
+	});
+}
+
+const DEFAULT_SETTINGS = { paused: false, disabledCategories: [] };
+
+export async function applyGates(
+	env,
+	config,
+	userId,
+	proposal,
+	shortlist = [],
+	settings = DEFAULT_SETTINGS,
+	opts = {},
+) {
+	const now = Date.now();
+	// Path A (user-commanded save): keep anything durable, drop only obvious junk.
+	const manual = Boolean(opts.manual);
+	const confMin = manual ? config.manualConfidenceMin : config.confidenceMin;
+
+	const plan = {
+		newNodes: [],
+		nodeStateUpdates: [],
+		nodeTouches: new Set(),
+		sliceSupersede: [],
+		newSlices: [],
+		newEvents: [],
+		newEdges: [],
+		newCandidates: [],
+		candidateBumps: [],
+		affectedNodeIds: new Set(),
+		autoCreated: [], // labels of nodes synthesized by the anti-orphan rule
+		rejected: [],
+	};
+
+	const objects = applyUserSettings(proposal.objects ?? [], settings);
+
+	const existing = await getUserNodes(env, userId);
+	const existingById = new Map(existing.map((n) => [n.id, n]));
+	const candidates = await getUserCandidates(env, userId);
+	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
+
+	// label(normalized) -> resolved node id, including nodes created in this batch.
+	const resolved = new Map();
+	const reject = (o, reason) => plan.rejected.push({ kind: o.kind, label: o.label ?? o.on, reason });
+
+	/** Create a brand-new node and make it resolvable for the rest of this batch. */
+	function createNode(label, category, role = null, state = null, auto = false) {
+		const id = newId("node");
+		plan.newNodes.push({
+			id,
+			user_id: userId,
+			label,
+			category: canonicalizeCategory(category) ?? "other",
+			role: role ?? null,
+			state: valid(state, ["active", "paused", "inactive", "completed"], "active"),
+			summary: null,
+			created_at: now,
+			updated_at: now,
+		});
+		resolved.set(normalizeLabel(label), id);
+		existing.push({ id, label, category, state: "active" });
+		existingById.set(id, { id, label, category, state: "active" });
+		plan.affectedNodeIds.add(id);
+		if (auto) plan.autoCreated.push(label);
+		return id;
+	}
+
+	function resolveRef(ref) {
+		if (!ref) return null;
+		const norm = normalizeLabel(ref);
+		if (resolved.has(norm)) return { id: resolved.get(norm) };
+		const match = matchExisting(ref, null, existing, existingById);
+		if (match) {
+			resolved.set(norm, match.id);
+			return { id: match.id };
+		}
+		return null;
+	}
+
+	/**
+	 * Resolve a subject reference, or AUTO-CREATE a minimal node for it when the
+	 * model emitted an event/slice but forgot the node (anti-orphan). Refuses to
+	 * synthesize a node from a pronoun/filler or a status phrase.
+	 */
+	function resolveOrCreateRef(ref, hintCategory) {
+		const r = resolveRef(ref);
+		if (r) return r;
+		if (!ref || isJunkLabel(ref) || looksLikeStatus(ref)) return null;
+		const id = createNode(ref, hintCategory ?? "other", null, null, true);
+		return { id };
+	}
+
+	function addCandidate(label, strength, clusterHint) {
+		const norm = normalizeLabel(label);
+		// Already a node? Then it isn't a candidate.
+		if (matchExisting(label, null, existing, existingById)) return;
+		const existingCand = candidateByLabel.get(norm);
+		if (existingCand) {
+			plan.candidateBumps.push({ id: existingCand.id, mentions: (existingCand.mentions ?? 1) + 1 });
+			return;
+		}
+		if (plan.newCandidates.some((c) => normalizeLabel(c.label) === norm)) return;
+		plan.newCandidates.push({
+			id: newId("candidate"),
+			user_id: userId,
+			label,
+			strength: valid(strength, CANDIDATE_STRENGTHS, "weak"),
+			mentions: 1,
+			cluster_hint: clusterHint ?? null,
+			created_at: now,
+		});
+	}
+
+	const order = { node: 0, event: 1, slice: 2, edge: 3, candidate: 4 };
+	const sorted = [...objects].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+
+	for (const obj of sorted) {
+		const conf = Number(obj.confidence ?? 0);
+
+		// ---- NODE GATE -------------------------------------------------------
+		if (obj.kind === "node") {
+			if (isJunkLabel(obj.label)) {
+				// A pronoun/filler is never a durable entity — drop it entirely
+				// (any edge that referenced it then fails endpoint resolution).
+				reject(obj, "junk_label");
+				continue;
+			}
+			// Judge by MEANING: unknown category becomes "other", it is NOT dropped.
+			const category = canonicalizeCategory(obj.category) ?? "other";
+			if (conf < confMin) {
+				// Genuinely weak → park as a candidate (still visible in the UI),
+				// not silently lost.
+				addCandidate(obj.label, "weak", null);
+				reject(obj, "low_confidence_downgraded");
+				continue;
+			}
+			const match = matchExisting(obj.label, obj.matches_existing, existing, existingById);
+			if (match) {
+				// Canonical match → update, do NOT create a duplicate.
+				resolved.set(normalizeLabel(obj.label), match.id);
+				plan.nodeTouches.add(match.id);
+				plan.affectedNodeIds.add(match.id);
+				continue;
+			}
+			if (looksLikeStatus(obj.label)) {
+				reject(obj, "node_is_status");
+				continue;
+			}
+			createNode(obj.label, category, obj.role, obj.state);
+			continue;
+		}
+
+		// ---- EVENT GATE ------------------------------------------------------
+		if (obj.kind === "event") {
+			if (conf < confMin) {
+				reject(obj, "low_confidence");
+				continue;
+			}
+			const action = valid(obj.action, ACTIONS, "other");
+			// Anti-orphan: synthesize the subject node if the model forgot it, with a
+			// category inferred from the action (family for passed_away, etc.).
+			const node = resolveOrCreateRef(obj.on, ACTION_SUBJECT_CATEGORY[action]);
+			if (!node) {
+				reject(obj, "event_no_node");
+				continue;
+			}
+			if (await recentEventExists(env, userId, node.id, action, now)) {
+				reject(obj, "duplicate_event");
+				continue;
+			}
+			plan.newEvents.push({
+				id: newId("event"),
+				user_id: userId,
+				node_id: node.id,
+				action,
+				text: obj.text ?? "",
+				importance: valid(obj.importance, IMPORTANCE, "ordinary"),
+				happened_at: now,
+				created_at: now,
+			});
+			plan.affectedNodeIds.add(node.id);
+			// A lifecycle event also updates the node's state.
+			const newState = ACTION_TO_STATE[action];
+			if (newState) plan.nodeStateUpdates.push({ id: node.id, state: newState });
+			continue;
+		}
+
+		// ---- SLICE GATE ------------------------------------------------------
+		if (obj.kind === "slice") {
+			if (conf < confMin) {
+				reject(obj, "low_confidence");
+				continue;
+			}
+			const text = String(obj.text ?? "").trim();
+			if (!text) {
+				reject(obj, "empty_slice");
+				continue;
+			}
+			// Anti-orphan: attach to the subject node, creating it if missing.
+			const node = resolveOrCreateRef(obj.on);
+			if (!node) {
+				reject(obj, "slice_no_node");
+				continue;
+			}
+			const kind = valid(obj.kind_detail, SLICE_KINDS, "other");
+			// Supersede an older single-valued slice (mark is_current = 0) before append.
+			if (SUPERSEDE_KINDS.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+			plan.newSlices.push({
+				id: newId("slice"),
+				user_id: userId,
+				node_id: node.id,
+				text,
+				kind,
+				is_current: 1,
+				created_at: now,
+			});
+			plan.affectedNodeIds.add(node.id);
+			continue;
+		}
+
+		// ---- EDGE GATE -------------------------------------------------------
+		if (obj.kind === "edge") {
+			if (conf < confMin) {
+				reject(obj, "low_confidence");
+				continue;
+			}
+			const from = resolveRef(obj.from);
+			const to = resolveRef(obj.to);
+			// Only between two existing/durable nodes, only on an explicit relation.
+			if (!from || !to) {
+				reject(obj, "edge_endpoint_missing");
+				continue;
+			}
+			if (from.id === to.id) {
+				reject(obj, "edge_self_loop");
+				continue;
+			}
+			const type = valid(obj.type, EDGE_TYPES, "related_to");
+			if (
+				plan.newEdges.some(
+					(e) => e.from_node === from.id && e.to_node === to.id && e.type === type,
+				)
+			) {
+				reject(obj, "duplicate_edge");
+				continue;
+			}
+			plan.newEdges.push({
+				id: newId("edge"),
+				user_id: userId,
+				from_node: from.id,
+				to_node: to.id,
+				type,
+				created_at: now,
+			});
+			plan.affectedNodeIds.add(from.id);
+			plan.affectedNodeIds.add(to.id);
+			continue;
+		}
+
+		// ---- CANDIDATE GATE --------------------------------------------------
+		if (obj.kind === "candidate") {
+			addCandidate(obj.label, obj.strength, obj.cluster_hint);
+			continue;
+		}
+
+		reject(obj, "unknown_kind");
+	}
+
+	plan.hasWrites =
+		plan.newNodes.length > 0 ||
+		plan.newSlices.length > 0 ||
+		plan.newEvents.length > 0 ||
+		plan.newEdges.length > 0 ||
+		plan.newCandidates.length > 0 ||
+		plan.nodeStateUpdates.length > 0 ||
+		plan.nodeTouches.size > 0 ||
+		plan.candidateBumps.length > 0;
+
+	return plan;
+}

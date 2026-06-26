@@ -7,13 +7,68 @@
 	"name": "uml",
 	"main": "src/index.js",
 	"compatibility_date": "2026-06-23",
+	"assets": {
+		"directory": "./public"
+	},
 	"observability": {
 		"enabled": true
 	},
 	"upload_source_maps": true,
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "uml-memory",
+			"database_id": "3202df08-e568-4e53-a8cd-a85630db50f8",
+			"migrations_dir": "migrations"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "USER_MEMORY",
+				"class_name": "UserMemory"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"UserMemory"
+			]
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	},
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "uml-node-embeddings"
+		}
+	],
+	"vars": {
+		"USE_VECTORS": "true",
+		"ENABLE_PASS2": "true",
+		"LLM_PROVIDER": "workers-ai",
+		// Extraction model (Priority 2 bake-off winner): Qwen3-30B-A3B — top accuracy,
+		// reliable JSON, ~6s avg / ~7s max (well under the live budget), and far more
+		// robust on messy/ambiguous input than the 8B. One-line switch.
+		"LLM_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+		// Qwen was returning valid-looking JSON cut off mid-object in production
+		// without an explicit output budget. Keep enough room for multi-message
+		// manual saves and poisoned-chunk retries.
+		"LLM_MAX_TOKENS": "4096",
+		// Cheap model kept for Pass-2 summaries + the save_conversation digest.
+		"LLM_SUMMARY_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+		"LLM_SUMMARY_MAX_TOKENS": "256",
+		"LLM_DIGEST_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+		"LLM_DIGEST_MAX_TOKENS": "768",
+		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
