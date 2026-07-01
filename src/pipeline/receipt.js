@@ -22,6 +22,11 @@ const REASON_PHRASE = {
 	duplicate_edge: "duplicate link",
 	edge_endpoint_missing: "incomplete link",
 	edge_self_loop: "self-link",
+	invalid_edge_type: "unsupported link type",
+	bad_title: "bad title",
+	suppressed_blocked: "suppressed",
+	manual_candidate_disabled: "manual candidate disabled",
+	manual_collect_kept_inside_page: "kept inside page",
 	unknown_kind: "unrecognized",
 };
 
@@ -56,6 +61,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 	}
 
 	const saved = {
+		pages: (p.newPages ?? []).length,
 		nodes: newNodeLabels.length,
 		newNodeLabels,
 		autoCreated,
@@ -64,20 +70,45 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		events: (p.newEvents ?? []).length,
 		edges: (p.newEdges ?? []).length,
 		candidates: (p.newCandidates ?? []).length + (p.candidateBumps ?? []).length,
+		reinforcedSlices: (p.sliceTouches ?? []).length,
+		reinforcedEvents: (p.eventTouches ?? []).length,
+		reinforcedEdges: (p.edgeTouches ?? []).length,
 	};
 
 	const savedTotal =
-		saved.nodes + saved.updatedNodes + saved.slices + saved.events + saved.edges + saved.candidates;
+		saved.pages +
+		saved.nodes +
+		saved.updatedNodes +
+		saved.slices +
+		saved.events +
+		saved.edges +
+		saved.candidates +
+		saved.reinforcedSlices +
+		saved.reinforcedEvents +
+		saved.reinforcedEdges;
 
 	return {
 		outcome,
 		source: meta.source ?? "ingest",
+		source_mode: meta.source_mode ?? meta.sourceMode ?? null,
+		extraction_run_id: meta.extraction_run_id ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		saved,
 		savedTotal,
 		skipped: rejected.length,
 		skippedReasons,
+		actions: {
+			createdNodes: (p.newNodes ?? []).map((n) => ({ id: n.id, label: n.label })),
+			createdSlices: (p.newSlices ?? []).map((s) => ({ id: s.id, node_id: s.node_id, kind: s.kind })),
+			createdEvents: (p.newEvents ?? []).map((e) => ({ id: e.id, node_id: e.node_id, action: e.action })),
+			createdEdges: (p.newEdges ?? []).map((e) => ({ id: e.id, from_node: e.from_node, to_node: e.to_node, type: e.type })),
+			reinforcedNodes: [...updatedNodes].map((id) => ({ id })),
+			reinforcedSlices: p.sliceTouches ?? [],
+			reinforcedEvents: p.eventTouches ?? [],
+			reinforcedEdges: p.edgeTouches ?? [],
+			skippedObjects: rejected,
+		},
 		created_at: Date.now(),
 	};
 }
@@ -87,9 +118,12 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 	return {
 		outcome,
 		source: meta.source ?? "ingest",
+		source_mode: meta.source_mode ?? meta.sourceMode ?? null,
+		extraction_run_id: meta.extraction_run_id ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		saved: {
+			pages: 0,
 			nodes: 0,
 			newNodeLabels: [],
 			autoCreated: [],
@@ -98,6 +132,9 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 			events: 0,
 			edges: 0,
 			candidates: 0,
+			reinforcedSlices: 0,
+			reinforcedEvents: 0,
+			reinforcedEdges: 0,
 		},
 		savedTotal: 0,
 		skipped: meta.skipped ?? 0,
@@ -112,6 +149,7 @@ export function formatReceipt(receipt) {
 	if (!receipt) return "Captured.";
 	const s = receipt.saved ?? {};
 	const parts = [];
+	if (s.pages) parts.push(plural(s.pages, "page"));
 	if (s.nodes) {
 		const labels = (s.newNodeLabels ?? []).filter(Boolean);
 		parts.push(plural(s.nodes, "node") + (labels.length ? ` (${labels.join(", ")})` : ""));
@@ -121,6 +159,9 @@ export function formatReceipt(receipt) {
 	if (s.events) parts.push(plural(s.events, "event"));
 	if (s.edges) parts.push(plural(s.edges, "edge"));
 	if (s.candidates) parts.push(plural(s.candidates, "candidate"));
+	if (s.reinforcedSlices) parts.push(`${s.reinforcedSlices} reinforced slice${s.reinforcedSlices === 1 ? "" : "s"}`);
+	if (s.reinforcedEvents) parts.push(`${s.reinforcedEvents} reinforced event${s.reinforcedEvents === 1 ? "" : "s"}`);
+	if (s.reinforcedEdges) parts.push(`${s.reinforcedEdges} reinforced edge${s.reinforcedEdges === 1 ? "" : "s"}`);
 
 	if (receipt.savedTotal === 0) {
 		const reason =
@@ -136,5 +177,6 @@ export function formatReceipt(receipt) {
 		const reasons = [...new Set(Object.keys(receipt.skippedReasons).map(phraseFor))].slice(0, 3);
 		line += ` Skipped: ${receipt.skipped} (${reasons.join(", ")}).`;
 	}
+	if (receipt.extraction_run_id) line += ` Receipt: ${receipt.extraction_run_id}.`;
 	return line;
 }

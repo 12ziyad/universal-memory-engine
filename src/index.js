@@ -14,6 +14,13 @@ import { recall } from "./pipeline/recall.js";
 import { ingestMessages } from "./pipeline/ingest.js";
 import { saveMemory, saveConversation } from "./pipeline/manual.js";
 import { getUserReceipts } from "./lib/db.js";
+import {
+	archiveObject,
+	clearFailedReceipts,
+	deleteAllMemories,
+	deleteLastExtraction,
+	deleteObject,
+} from "./pipeline/cleanup.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
 
 export { UserMemory } from "./durable/user-memory.js";
@@ -69,12 +76,13 @@ const routes = {
 		// The whole brain for one user: nodes with ALL their slices (current + old,
 		// each carrying is_current) and their events newest-first, plus edges and
 		// the loose "maybe" candidates. The graph page renders all of it.
-		const [nodesResult, slicesResult, eventsResult, edgesResult, candidatesResult] = await env.DB.batch([
-			env.DB.prepare("SELECT * FROM nodes WHERE user_id = ?").bind(userId),
-			env.DB.prepare("SELECT * FROM slices WHERE user_id = ? ORDER BY created_at DESC").bind(userId),
-			env.DB.prepare("SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC").bind(userId),
-			env.DB.prepare("SELECT * FROM edges WHERE user_id = ?").bind(userId),
-			env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? ORDER BY created_at DESC").bind(userId),
+		const [nodesResult, pagesResult, slicesResult, eventsResult, edgesResult, candidatesResult] = await env.DB.batch([
+			env.DB.prepare("SELECT * FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT * FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL ORDER BY updated_at DESC").bind(userId),
+			env.DB.prepare("SELECT * FROM slices WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
+			env.DB.prepare("SELECT * FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
+			env.DB.prepare("SELECT * FROM edges WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL ORDER BY created_at DESC").bind(userId),
 		]);
 
 		const slicesByNode = new Map();
@@ -98,6 +106,7 @@ const routes = {
 		const config = getConfig(env);
 		const stats = {
 			nodes: nodes.length,
+			pages: pagesResult.results.length,
 			slices: slicesResult.results.length,
 			events: eventsResult.results.length,
 			edges: edgesResult.results.length,
@@ -106,6 +115,7 @@ const routes = {
 
 		return json({
 			nodes,
+			pages: pagesResult.results,
 			edges: edgesResult.results,
 			candidates: candidatesResult.results,
 			stats,
@@ -156,6 +166,37 @@ const routes = {
 		return json({ receipts });
 	},
 
+	"POST /v1/actions/delete-last-extraction": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId) return json({ error: "userId is required" }, 400);
+		return json(await deleteLastExtraction(env, body.userId));
+	},
+
+	"POST /v1/actions/delete-object": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId || !body.kind || !body.id) return json({ error: "userId, kind and id are required" }, 400);
+		return json(await deleteObject(env, body.userId, body));
+	},
+
+	"POST /v1/actions/archive-object": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId || !body.kind || !body.id) return json({ error: "userId, kind and id are required" }, 400);
+		return json(await archiveObject(env, body.userId, body));
+	},
+
+	"POST /v1/actions/delete-all": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId) return json({ error: "userId is required" }, 400);
+		const result = await deleteAllMemories(env, body.userId, body.confirm);
+		return json(result, result.deleted ? 200 : 400);
+	},
+
+	"POST /v1/actions/clear-failed-receipts": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId) return json({ error: "userId is required" }, 400);
+		return json(await clearFailedReceipts(env, body.userId));
+	},
+
 	"POST /v1/recall": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
 		const { userId, query } = body;
@@ -171,16 +212,18 @@ const routes = {
 		const userId = new URL(request.url).searchParams.get("userId");
 		if (!userId) return json({ error: "userId is required" }, 400);
 
-		const [nodesCount, slicesCount, eventsCount, candidatesCount, checkpoint] = await env.DB.batch([
-			env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(userId),
-			env.DB.prepare("SELECT COUNT(*) AS count FROM slices WHERE user_id = ?").bind(userId),
-			env.DB.prepare("SELECT COUNT(*) AS count FROM events WHERE user_id = ?").bind(userId),
-			env.DB.prepare("SELECT COUNT(*) AS count FROM candidates WHERE user_id = ?").bind(userId),
+		const [nodesCount, pagesCount, slicesCount, eventsCount, candidatesCount, checkpoint] = await env.DB.batch([
+			env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT COUNT(*) AS count FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT COUNT(*) AS count FROM slices WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT COUNT(*) AS count FROM events WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT COUNT(*) AS count FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL").bind(userId),
 			env.DB.prepare("SELECT last_processed_msg_id FROM checkpoints WHERE user_id = ?").bind(userId),
 		]);
 
 		return json({
 			nodes: nodesCount.results[0].count,
+			pages: pagesCount.results[0].count,
 			slices: slicesCount.results[0].count,
 			events: eventsCount.results[0].count,
 			candidates: candidatesCount.results[0].count,

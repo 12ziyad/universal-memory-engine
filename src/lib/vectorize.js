@@ -36,3 +36,13 @@ export async function queryNodeVectors(env, config, { userId, values, topK }) {
 		return [];
 	}
 }
+
+/** Best-effort cleanup for stale node vectors after soft deletion. */
+export async function deleteNodeVectors(env, config, ids) {
+	if (!config.useVectors || !env.VECTORIZE || !ids?.length) return;
+	try {
+		await env.VECTORIZE.deleteByIds(ids);
+	} catch (err) {
+		console.warn("vectorize delete failed:", err?.message ?? err);
+	}
+}

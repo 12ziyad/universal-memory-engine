@@ -42,6 +42,22 @@ async function events(userId) {
 	const { results } = await env.DB.prepare("SELECT * FROM events WHERE user_id = ?").bind(userId).all();
 	return results;
 }
+async function edges(userId) {
+	const { results } = await env.DB.prepare("SELECT * FROM edges WHERE user_id = ? AND deleted_at IS NULL").bind(userId).all();
+	return results;
+}
+async function pages(userId) {
+	const { results } = await env.DB.prepare("SELECT * FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL").bind(userId).all();
+	return results;
+}
+async function candidates(userId) {
+	const { results } = await env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? AND deleted_at IS NULL").bind(userId).all();
+	return results;
+}
+async function runs(userId) {
+	const { results } = await env.DB.prepare("SELECT * FROM extraction_runs WHERE user_id = ? ORDER BY created_at DESC").bind(userId).all();
+	return results;
+}
 async function seedNode(userId, id, label, category, state = "active") {
 	const now = Date.now();
 	await env.DB.prepare(
@@ -97,10 +113,79 @@ describe("Path A - save_memory (manual, immediate)", () => {
 		expect(n[0].state).toBe("inactive"); // flipped by the stopped event
 		expect(await events(userId)).toHaveLength(1);
 	});
+
+	it("rejects bad sentence-fragment titles instead of creating nodes", async () => {
+		const userId = "m-bad-title";
+		const { body } = await save({
+			userId,
+			mode: "memory",
+			content: "want to see a detailed and interactive prototype",
+			_test: {
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "want to see a detailed and interactive prototype", category: "project", confidence: 0.95 },
+					],
+					notes: "",
+				},
+			},
+		});
+		expect(body.summary).toContain("Saved: 0");
+		expect(await nodes(userId)).toHaveLength(0);
+	});
+
+	it("does not create candidates on manual_direct", async () => {
+		const userId = "m-no-manual-candidate";
+		await save({
+			userId,
+			mode: "memory",
+			content: "Maybe I should try piano someday",
+			_test: {
+				llmResponse: {
+					objects: [{ kind: "candidate", label: "Piano", strength: "weak", confidence: 0.5 }],
+					notes: "",
+				},
+			},
+		});
+		expect(await candidates(userId)).toHaveLength(0);
+	});
+
+	it("repeated grandmother passed-away memory reinforces one event", async () => {
+		const userId = "m-grandmother-reinforce";
+		const llmResponse = {
+			objects: [
+				{ kind: "node", label: "Grandmother", category: "family", matches_existing: null, confidence: 0.95 },
+				{ kind: "event", on: "Grandmother", action: "passed_away", text: "Grandmother passed away", importance: "life_significant", confidence: 0.95 },
+			],
+			notes: "",
+		};
+		await save({ userId, mode: "memory", content: "my grandmother died", _test: { llmResponse } });
+		await save({ userId, mode: "memory", content: "my grandmother passed away", _test: { llmResponse } });
+		expect(await nodes(userId)).toHaveLength(1);
+		const ev = await events(userId);
+		expect(ev).toHaveLength(1);
+		expect(ev[0].reinforcement_count).toBeGreaterThan(0);
+	});
+
+	it("repeated same edge reinforces instead of duplicating", async () => {
+		const userId = "m-edge-reinforce";
+		const llmResponse = {
+			objects: [
+				{ kind: "node", label: "UML", category: "project", matches_existing: null, confidence: 0.95 },
+				{ kind: "node", label: "D1", category: "tool", matches_existing: null, confidence: 0.95 },
+				{ kind: "edge", from: "UML", to: "D1", type: "uses", confidence: 0.95 },
+			],
+			notes: "",
+		};
+		await save({ userId, mode: "memory", content: "UML uses D1", _test: { llmResponse } });
+		await save({ userId, mode: "memory", content: "UML also uses D1", _test: { llmResponse } });
+		const ed = await edges(userId);
+		expect(ed).toHaveLength(1);
+		expect(ed[0].reinforcement_count).toBeGreaterThan(0);
+	});
 });
 
-describe("Path A - save_conversation (digest then extract)", () => {
-	it("digests a messy chat into facts, then extracts nodes/edges", async () => {
+describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
+	it("digests a messy chat into exactly one memory page, not graph fan-out", async () => {
 		const userId = "m-conv";
 		const { body } = await save({
 			userId,
@@ -115,24 +200,17 @@ describe("Path A - save_conversation (digest then extract)", () => {
 				{ role: "user", content: "what's the weather?" },
 			],
 			_test: {
-				// digest condenses the messy chat to clean lines…
 				digestResponse: "User is building UML.\nUML runs on Cloudflare.\nUML uses D1 and Vectorize.",
-				// …then extraction proposes nodes + an edge from those lines.
-				llmResponse: {
-					objects: [
-						{ kind: "node", label: "UML", category: "project", matches_existing: null, confidence: 0.95 },
-						{ kind: "node", label: "Cloudflare", category: "tool", matches_existing: null, confidence: 0.9 },
-						{ kind: "edge", from: "UML", to: "Cloudflare", type: "runs_on", confidence: 0.9 },
-						{ kind: "slice", on: "UML", text: "Uses D1 and Vectorize", kind_detail: "technical_detail", confidence: 0.9 },
-					],
-					notes: "",
-				},
 			},
 		});
 		expect(body.fired).toBe(true);
-		expect(body.summary).toContain("Received 6 message(s).");
-		const labels = (await nodes(userId)).map((n) => n.label).sort();
-		expect(labels).toEqual(["Cloudflare", "UML"]);
+		expect(body.summary).toContain("memory page");
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		expect(p[0].title).toBe("UML Architecture Decisions");
+		expect(p[0].full_markdown).toContain("UML uses D1 and Vectorize");
+		expect(await nodes(userId)).toHaveLength(0);
+		expect(await candidates(userId)).toHaveLength(0);
 	});
 
 	it("returns a clear 'Saved: 0' when the chat has no durable facts", async () => {
@@ -169,14 +247,89 @@ describe("Path A - save_conversation (digest then extract)", () => {
 		});
 
 		expect(body.fired).toBe(true);
-		expect(body.summary).toContain("Saved conversation summary");
-		const n = await nodes(userId);
-		expect(n).toHaveLength(1);
-		expect(n[0]).toMatchObject({ label: "GTA 6 / PS5 Research", category: "interest" });
-		const sl = await slices(userId);
-		expect(sl).toHaveLength(1);
-		expect(sl[0].text).toContain("User discussed/researched GTA 6 / PS5 Research");
-		expect(sl[0].text).toContain("EMI safety");
+		expect(body.summary).toContain("memory page");
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		expect(p[0].title).toBe("GTA 6 / PS5 Research");
+		expect(p[0].full_markdown).toContain("EMI safety");
+		expect(await nodes(userId)).toHaveLength(0);
+	});
+
+	it("topic filter saves car details and skips bike details", async () => {
+		const userId = "m-topic-car";
+		const { body } = await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [
+				{ role: "user", content: "I compared car mileage and car service costs." },
+				{ role: "user", content: "I also checked bike helmet prices and bike insurance." },
+			],
+			_test: {
+				digestResponse:
+					"Car mileage matters for the user's purchase research.\nCar service costs are a concern.\nBike helmet prices were discussed.\nBike insurance was discussed.",
+			},
+		});
+		expect(body.fired).toBe(true);
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		expect(p[0].title).toBe("Car Research");
+		expect(p[0].full_markdown).toContain("Car mileage");
+		expect(p[0].full_markdown).not.toContain("Bike helmet");
+		expect(await nodes(userId)).toHaveLength(0);
+	});
+
+	it("later bike collect creates a separate bike page", async () => {
+		const userId = "m-topic-bike";
+		await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [{ role: "user", content: "save everything about car from this chat, skip bike" }],
+			_test: { digestResponse: "Car mileage matters.\nBike helmet prices were discussed." },
+		});
+		await save({
+			userId,
+			mode: "conversation",
+			topic: "bike",
+			messages: [{ role: "user", content: "save bike later" }],
+			_test: { digestResponse: "Bike helmet prices were discussed.\nBike insurance was discussed." },
+		});
+		const p = (await pages(userId)).map((page) => page.title).sort();
+		expect(p).toEqual(["Bike Research", "Car Research"]);
+		expect(await nodes(userId)).toHaveLength(0);
+	});
+
+	it("delete last extraction removes the page and suppression blocks immediate recreation", async () => {
+		const userId = "m-delete-last";
+		await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [{ role: "user", content: "Car mileage matters." }],
+			_test: { digestResponse: "Car mileage matters." },
+		});
+		expect(await pages(userId)).toHaveLength(1);
+
+		const deleted = await call("/v1/actions/delete-last-extraction", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ userId }),
+		});
+		expect(deleted.status).toBe(200);
+		expect(deleted.body.deleted).toBe(true);
+		expect(await pages(userId)).toHaveLength(0);
+
+		const second = await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [{ role: "user", content: "Car mileage matters." }],
+			_test: { digestResponse: "Car mileage matters." },
+		});
+		expect(second.body.fired).toBe(false);
+		expect(second.body.summary).toContain("suppressed");
+		expect(await pages(userId)).toHaveLength(0);
 	});
 });
 
@@ -201,6 +354,7 @@ describe("Receipts (Priority 5)", () => {
 		expect(top.source).toBe("save_memory");
 		expect(top.summary).toContain("Saved:");
 		expect(top.saved_nodes).toBe(1);
+		expect(top.extraction_run_id).toMatch(/^run_/);
 	});
 });
 

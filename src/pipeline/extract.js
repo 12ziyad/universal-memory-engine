@@ -29,6 +29,7 @@ import { applyGates } from "./gates.js";
 import { writeApproved } from "./write.js";
 import { runPass2 } from "./pass2.js";
 import { buildReceipt, emptyReceipt } from "./receipt.js";
+import { createExtractionRun, updateExtractionRun } from "../lib/db.js";
 
 async function proposeSplit(env, config, userId, chunk, recent, overrides) {
 	const objects = [];
@@ -75,9 +76,39 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 	return { proposal, rescued: false };
 }
 
+function runListsFromPlan(plan) {
+	return {
+		createdNodes: (plan.newNodes ?? []).map((n) => ({ id: n.id, label: n.label })),
+		createdSlices: (plan.newSlices ?? []).map((s) => ({ id: s.id, node_id: s.node_id, kind: s.kind })),
+		createdEvents: (plan.newEvents ?? []).map((e) => ({ id: e.id, node_id: e.node_id, action: e.action })),
+		createdEdges: (plan.newEdges ?? []).map((e) => ({ id: e.id, from_node: e.from_node, to_node: e.to_node, type: e.type })),
+		updatedObjects: [
+			...[...(plan.nodeTouches ?? [])].map((id) => ({ kind: "node", id })),
+			...(plan.nodeStateUpdates ?? []).map((u) => ({ kind: "node", id: u.id, state: u.state })),
+		],
+		reinforcedObjects: [
+			...(plan.sliceTouches ?? []).map((s) => ({ kind: "slice", id: s.id })),
+			...(plan.eventTouches ?? []).map((e) => ({ kind: "event", id: e.id })),
+			...(plan.edgeTouches ?? []).map((e) => ({ kind: "edge", id: e.id })),
+		],
+		skippedObjects: plan.rejected ?? [],
+	};
+}
+
 export async function runExtraction(env, userId, chunk, recent, overrides = {}) {
 	const config = getConfig(env);
 	const meta = { source: overrides.source ?? "ingest", ...(overrides.meta ?? {}) };
+	let extractionRunId = null;
+	if (overrides.manual) {
+		extractionRunId = await createExtractionRun(env, userId, {
+			toolName: overrides.source ?? "save_memory",
+			sourceMode: overrides.source === "save_conversation" ? "manual_collect" : "manual_direct",
+			topicFilter: meta.topic_filter ?? null,
+			status: "running",
+		});
+		meta.extraction_run_id = extractionRunId;
+		meta.source_mode = overrides.source === "save_conversation" ? "manual_collect" : "manual_direct";
+	}
 
 	// D — packet (three separated parts).
 	const packet = buildPacket(chunk, recent);
@@ -100,6 +131,12 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	if (rescued) meta.splitRescue = true;
 	if (!proposal._ok) {
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
+		if (extractionRunId) {
+			await updateExtractionRun(env, userId, extractionRunId, {
+				status: "failed",
+				error: "the extractor returned nothing readable",
+			});
+		}
 		return {
 			outcome: "llm_failed",
 			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", meta),
@@ -114,6 +151,12 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.
 	if (!plan.hasWrites) {
 		console.warn(`extraction meaningful_no_write user=${userId}`);
+		if (extractionRunId) {
+			await updateExtractionRun(env, userId, extractionRunId, {
+				status: "skipped",
+				skippedObjects: plan.rejected ?? [],
+			});
+		}
 		return {
 			outcome: "meaningful_no_write",
 			rejected: plan.rejected,
@@ -127,6 +170,12 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		result = await writeApproved(env, config, userId, plan);
 	} catch (err) {
 		console.error(`extraction db_write_failed user=${userId}:`, err?.message ?? err);
+		if (extractionRunId) {
+			await updateExtractionRun(env, userId, extractionRunId, {
+				status: "failed",
+				error: String(err?.message ?? err),
+			});
+		}
 		return {
 			outcome: "db_write_failed",
 			error: String(err?.message ?? err),
@@ -135,6 +184,12 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	}
 
 	const receipt = buildReceipt("wrote", plan, meta);
+	if (extractionRunId) {
+		await updateExtractionRun(env, userId, extractionRunId, {
+			status: "wrote",
+			...runListsFromPlan(plan),
+		});
+	}
 
 	// I — Pass 2 (background, cheap). Never affects Pass-1 writes.
 	try {

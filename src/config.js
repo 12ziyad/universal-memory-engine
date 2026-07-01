@@ -119,14 +119,15 @@ export const ACTIONS = [
 export const IMPORTANCE = ["ordinary", "important", "life_significant"];
 
 export const EDGE_TYPES = [
-	"uses",
 	"part_of",
+	"uses",
 	"depends_on",
+	"drives",
 	"supports",
 	"improves",
-	"drives",
-	"stores_in",
-	"connects_to",
+	"blocked_by",
+	"caused",
+	"replaced_by",
 	"related_to",
 ];
 

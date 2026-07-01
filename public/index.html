@@ -44,10 +44,10 @@
 	/* ---- layout ---- */
 	main { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: hidden; transition: grid-template-columns .15s; }
 	main.detail-open { grid-template-columns: 248px minmax(0, 1fr) 340px; }
-	aside, .detail { background: var(--panel); overflow-y: auto; }
+	aside, .detail { background: var(--panel); overflow-y: auto; min-height: 0; }
 	aside { border-right: 1px solid var(--border); padding: 12px; }
 	.detail { border-left: 1px solid var(--border); padding: 14px; }
-	.content { min-width: 0; display: flex; flex-direction: column; }
+	.content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 	/* ---- view tabs ---- */
 	.tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
@@ -93,6 +93,8 @@
 	.card .summary { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; font-style: italic; }
 	.card .mini-line { font-size: 11.5px; color: var(--muted); margin: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.card .counts { display: flex; gap: 6px; margin-top: 9px; }
+	.card.page { border-left: 3px solid var(--accent); }
+	.page-md { white-space: pre-wrap; color: var(--muted); background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 12.5px; max-height: 360px; overflow: auto; }
 
 	/* ---- table ---- */
 	table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -142,6 +144,7 @@
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
 	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 7px; z-index: 5; }
+	.graph-tools input { width: 150px; background: rgba(22,27,34,.86); backdrop-filter: blur(8px); }
 	.graph-tools .mini { background: rgba(22,27,34,.82); backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.22); }
 	.legend { position: absolute; right: 14px; bottom: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px;
 		background: rgba(13,17,23,.76); backdrop-filter: blur(10px); border: 1px solid rgba(139,148,158,.22);
@@ -195,6 +198,8 @@
 
 <main id="main">
 	<aside>
+		<div class="side-h"><span>Memory Pages</span><span id="pageCount" class="kv"></span></div>
+		<div id="pageList"></div>
 		<div class="side-h"><span>Nodes</span><span id="nlCount" class="kv"></span></div>
 		<div id="nodeList"></div>
 		<div class="side-h" style="margin-top:18px"><span>Candidates</span><span id="candCount" class="kv"></span></div>
@@ -243,6 +248,21 @@ const S = {
 	resizeObserver: null, fitTimer: null,
 };
 
+const nodeKey = (id) => `node:${id}`;
+const pageKey = (id) => `page:${id}`;
+const itemKey = (kind, id) => (kind === "page" || kind === "memory_page" ? pageKey(id) : nodeKey(id));
+function selectedNode() {
+	const key = String(S.selected || "");
+	const id = key.startsWith("node:") ? key.slice(5) : key;
+	return S.data && S.data.nodes.find((n) => n.id === id);
+}
+function selectedPage() {
+	const key = String(S.selected || "");
+	if (!key.startsWith("page:")) return null;
+	const id = key.slice(5);
+	return S.data && (S.data.pages || []).find((p) => p.id === id);
+}
+
 $("#userId").value = S.userId; $("#key").value = S.key;
 
 function toast(msg, isErr) {
@@ -274,19 +294,37 @@ async function load() {
 			api(`/v1/receipts?userId=${encodeURIComponent(S.userId)}`).catch(() => ({ receipts: [] })),
 		]);
 		S.data = graph; S.receipts = receipts.receipts || [];
-		if (S.selected && !graph.nodes.find((n) => n.id === S.selected)) S.selected = null;
+		if (S.selected && !graph.nodes.find((n) => nodeKey(n.id) === S.selected) && !(graph.pages || []).find((p) => pageKey(p.id) === S.selected)) {
+			S.selected = null;
+		}
 		renderAll();
-		toast(`Loaded ${graph.nodes.length} node(s).`);
+		toast(`Loaded ${(graph.pages || []).length} page(s), ${graph.nodes.length} node(s).`);
 	} catch (e) { banner("Load failed: " + e.message); }
 }
 
-function renderAll() { renderStats(); renderNodeList(); renderCandidates(); renderView(); renderDetail(); }
+function renderAll() { renderStats(); renderPageList(); renderNodeList(); renderCandidates(); renderView(); renderDetail(); }
 
 function renderStats() {
-	const s = (S.data && S.data.stats) || { nodes:0, slices:0, events:0, edges:0, candidates:0 };
+	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
 	$("#stats").innerHTML =
-		[["nodes",s.nodes],["slices",s.slices],["events",s.events],["edges",s.edges],["candidates",s.candidates]]
+		[["pages",s.pages||0],["nodes",s.nodes],["slices",s.slices],["events",s.events],["edges",s.edges],["candidates",s.candidates]]
 		.map(([k,v]) => `<div class="stat"><b>${v}</b>${k}</div>`).join("");
+}
+
+function renderPageList() {
+	const wrap = $("#pageList"); wrap.innerHTML = "";
+	const pages = (S.data && S.data.pages) || [];
+	$("#pageCount").textContent = pages.length;
+	if (!pages.length) { wrap.appendChild(el("div","empty","No pages yet.")); return; }
+	for (const p of pages) {
+		const key = pageKey(p.id);
+		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
+		item.innerHTML = `<span class="dot" style="background:${catColor("system")}"></span>
+			<span class="lbl">${esc(p.title)}</span>
+			<span class="meta">page</span>`;
+		item.onclick = () => select(p.id, "page");
+		wrap.appendChild(item);
+	}
 }
 
 function renderNodeList() {
@@ -295,11 +333,12 @@ function renderNodeList() {
 	$("#nlCount").textContent = nodes.length;
 	if (!nodes.length) { wrap.appendChild(el("div","empty","No nodes yet.")); return; }
 	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
-		const item = el("div", "nl-item" + (S.selected===n.id?" sel":""));
+		const key = nodeKey(n.id);
+		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
 		item.innerHTML = `<span class="dot" style="background:${catColor(n.category)}"></span>
 			<span class="lbl">${esc(n.label)}</span>
 			<span class="meta">${esc(n.category)}</span>`;
-		item.onclick = () => select(n.id);
+		item.onclick = () => select(n.id, "node");
 		wrap.appendChild(item);
 	}
 }
@@ -328,6 +367,7 @@ function viewGraph(v) {
 	const wrap = el("div"); wrap.id = "graphWrap";
 	wrap.innerHTML = `
 		<div class="graph-tools">
+			<input id="graphSearch" placeholder="Focus" onkeydown="if(event.key==='Enter') graphSearchFocus()" />
 			<button class="ghost mini" onclick="graphFit()">Fit</button>
 			<button class="ghost mini" onclick="graphReset()">Reset zoom</button>
 		</div>
@@ -359,10 +399,10 @@ function radialPosition(n, sortedIndex, total) {
 
 function graphNode(n, sortedIndex, total, hasEdges) {
 	const count = (n.slices?.length || 0) + (n.events?.length || 0);
-	const selected = S.selected === n.id;
+	const selected = S.selected === nodeKey(n.id);
 	const color = catColor(n.category);
 	const data = {
-		id: n.id,
+		id: nodeKey(n.id),
 		label: n.label,
 		title: `${esc(n.label)} (${esc(n.category)})`,
 		shape: "dot",
@@ -390,9 +430,39 @@ function graphNode(n, sortedIndex, total, hasEdges) {
 	return data;
 }
 
+function graphPage(p, sortedIndex, total) {
+	const selected = S.selected === pageKey(p.id);
+	const color = "#58a6ff";
+	const size = Math.min(38, 26 + Math.round(Number(p.heat_score || 1) * 2));
+	return {
+		id: pageKey(p.id),
+		label: p.title,
+		title: `${esc(p.title)} (memory page)`,
+		shape: "box",
+		size,
+		borderWidth: selected ? 4 : 2,
+		color: {
+			background: selected ? "#172033" : "#101923",
+			border: color,
+			highlight: { background: "#1f2937", border: "#f8fafc" },
+			hover: { background: "#172033", border: color },
+		},
+		font: {
+			color: "#f8fafc",
+			size: selected ? 16 : 14,
+			face: "ui-sans-serif, system-ui, Segoe UI, sans-serif",
+			strokeWidth: 5,
+			strokeColor: "rgba(9,13,19,.92)",
+		},
+		shadow: { enabled: true, color: `${color}55`, size: selected ? 24 : 16, x: 0, y: 0 },
+		margin: 12,
+		...radialPosition(p, sortedIndex, total),
+	};
+}
+
 function graphFit(duration = 450) {
 	if (!S.network || !S.data) return;
-	const ids = (S.data.nodes || []).map((n) => n.id);
+	const ids = [...(S.data.pages || []).map((p) => pageKey(p.id)), ...(S.data.nodes || []).map((n) => nodeKey(n.id))];
 	if (!ids.length) return;
 	try {
 		S.network.redraw();
@@ -430,19 +500,61 @@ function bindGraphResize(wrap) {
 	S.resizeObserver.observe(wrap);
 }
 
+function edgeStyle(e, i) {
+	const type = e.type || "related_to";
+	const base = {
+		id: e.id,
+		from: nodeKey(e.from_node),
+		to: nodeKey(e.to_node),
+		label: type.replace(/_/g," "),
+		arrows: "to",
+		width: Math.max(1, Math.min(4, 1.2 + Number(e.weight || 1) * .4)),
+		selectionWidth: 2.8,
+		smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
+		font: { color: "#cbd5e1", size: 10, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
+	};
+	const styles = {
+		part_of: { dashes: false, color: "rgba(210,168,255,.62)" },
+		uses: { dashes: false, color: "rgba(126,231,135,.66)" },
+		depends_on: { dashes: [8,6], color: "rgba(121,192,255,.64)" },
+		supports: { dashes: false, color: "rgba(63,185,80,.48)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
+		drives: { dashes: false, color: "rgba(242,204,96,.75)" },
+		improves: { dashes: false, color: "rgba(86,211,100,.72)" },
+		blocked_by: { dashes: [4,4], color: "rgba(248,81,73,.78)" },
+		caused: { dashes: false, color: "rgba(255,123,114,.78)" },
+		replaced_by: { dashes: [10,7], color: "rgba(139,148,158,.52)" },
+		related_to: { dashes: [2,7], color: "rgba(148,163,184,.28)" },
+	};
+	const s = styles[type] || styles.related_to;
+	return { ...base, dashes: s.dashes, smooth: s.smooth || base.smooth, color: { color: s.color, highlight: "#58a6ff", hover: "#79c0ff" } };
+}
+
+function graphSearchFocus() {
+	const q = normalizeSearch($("#graphSearch")?.value || "");
+	if (!q || !S.data) return;
+	const page = (S.data.pages || []).find((p) => normalizeSearch(p.title).includes(q));
+	if (page) return select(page.id, "page");
+	const node = (S.data.nodes || []).find((n) => normalizeSearch(n.label).includes(q));
+	if (node) return select(node.id, "node");
+	toast("No graph match found.", true);
+}
+
+function normalizeSearch(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
+
 function drawGraph() {
 	const nodes = (S.data && S.data.nodes) || [];
+	const pages = (S.data && S.data.pages) || [];
 	const edges = (S.data && S.data.edges) || [];
 	const errBox = $("#graphErr"); const cont = $("#graph");
 	const showErr = (m) => { if (errBox){ errBox.style.display="flex"; errBox.innerHTML = m; } if (cont) cont.style.display="none"; };
 	if (errBox) { errBox.style.display = "none"; errBox.innerHTML = ""; }
 	if (cont) cont.style.display = "block";
 	// legend (only categories present)
-	const present = [...new Set(nodes.map(n=>n.category))];
+	const present = [...new Set([...nodes.map(n=>n.category), ...(pages.length ? ["memory_page"] : [])])];
 	$("#legend").innerHTML = present.length
-		? present.map(c=>`<span><span class="dot" style="background:${catColor(c)}"></span>${esc(c)}</span>`).join("")
+		? present.map(c=>`<span><span class="dot" style="background:${c==="memory_page"?"#58a6ff":catColor(c)}"></span>${esc(c)}</span>`).join("")
 		: "";
-	if (!nodes.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
+	if (!nodes.length && !pages.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
 	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
 	try {
 		const byId = Object.fromEntries(nodes.map(n=>[n.id,n.label]));
@@ -450,15 +562,10 @@ function drawGraph() {
 		const hasEdges = graphEdges.length > 0;
 		const sorted = [...nodes].sort((a,b)=>nodeScore(b)-nodeScore(a));
 		const order = new Map(sorted.map((n,i)=>[n.id,i]));
-		const vn = new vis.DataSet(nodes.map(n => graphNode(n, order.get(n.id) ?? 0, nodes.length, hasEdges)));
-		const ve = new vis.DataSet(graphEdges.map((e, i) => ({
-			id: e.id, from: e.from_node, to: e.to_node, label: (e.type||"").replace(/_/g," "), arrows: "to",
-			color: { color: "rgba(148,163,184,.46)", highlight: "#58a6ff", hover: "#79c0ff" },
-			width: 1.4,
-			selectionWidth: 2.8,
-			smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
-			font: { color: "#cbd5e1", size: 10, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
-		})));
+		const pageNodes = pages.map((p, i) => graphPage(p, i, Math.max(pages.length, 1)));
+		const graphNodes = nodes.map(n => graphNode(n, order.get(n.id) ?? 0, nodes.length, hasEdges));
+		const vn = new vis.DataSet([...pageNodes, ...graphNodes]);
+		const ve = new vis.DataSet(graphEdges.map((e, i) => edgeStyle(e, i)));
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
 			autoResize: true,
 			layout: { improvedLayout: hasEdges },
@@ -482,8 +589,24 @@ function graphReset() { graphFit(320); }
 
 function viewCards(v) {
 	const nodes = (S.data && S.data.nodes) || [];
-	if (!nodes.length) { v.appendChild(el("div","empty","No nodes yet.")); return; }
+	const pages = (S.data && S.data.pages) || [];
+	if (!nodes.length && !pages.length) { v.appendChild(el("div","empty","No memories yet.")); return; }
 	const grid = el("div","cards");
+	for (const p of pages) {
+		const card = el("div","card page");
+		card.innerHTML = `
+			<div class="top"><span class="dot" style="background:#58a6ff"></span>
+				<span class="title">${esc(p.title)}</span>
+				<span class="badge state-active">page</span></div>
+			<div class="cat">${esc(p.topic_filter || "manual_collect")}</div>
+			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}
+			<div class="counts">
+				<span class="chip">memory page</span>
+				<span class="chip">${p.updated_at?ago(p.updated_at):""}</span>
+			</div>`;
+		card.onclick = () => select(p.id, "page");
+		grid.appendChild(card);
+	}
 	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
 		const cur = (n.slices||[]).filter(s=>s.is_current);
 		const card = el("div","card");
@@ -498,7 +621,7 @@ function viewCards(v) {
 				<span class="chip">${cur.length} slice${cur.length!==1?"s":""}</span>
 				<span class="chip">${(n.events||[]).length} event${(n.events||[]).length!==1?"s":""}</span>
 			</div>`;
-		card.onclick = () => select(n.id);
+		card.onclick = () => select(n.id, "node");
 		grid.appendChild(card);
 	}
 	v.appendChild(grid);
@@ -506,17 +629,26 @@ function viewCards(v) {
 
 function viewTable(v) {
 	const nodes = (S.data && S.data.nodes) || [];
-	if (!nodes.length) { v.appendChild(el("div","empty","No nodes yet.")); return; }
+	const pages = (S.data && S.data.pages) || [];
+	if (!nodes.length && !pages.length) { v.appendChild(el("div","empty","No memories yet.")); return; }
 	const t = el("table");
-	t.innerHTML = `<thead><tr><th>Node</th><th>Category</th><th>State</th><th>Slices</th><th>Events</th><th>Updated</th></tr></thead>`;
+	t.innerHTML = `<thead><tr><th>Memory</th><th>Type</th><th>State</th><th>Slices</th><th>Events</th><th>Updated</th></tr></thead>`;
 	const tb = el("tbody");
+	for (const p of pages) {
+		const tr = el("tr","click");
+		tr.innerHTML = `<td><span class="dot" style="background:#58a6ff;display:inline-block;margin-right:7px"></span>${esc(p.title)}</td>
+			<td>memory_page</td><td><span class="badge state-active">${esc(p.health_state || "active")}</span></td>
+			<td>-</td><td>-</td><td class="kv">${p.updated_at?ago(p.updated_at):""}</td>`;
+		tr.onclick = () => select(p.id, "page");
+		tb.appendChild(tr);
+	}
 	for (const n of [...nodes].sort((a,b)=>(b.updated_at||0)-(a.updated_at||0))) {
 		const tr = el("tr","click");
 		const cur = (n.slices||[]).filter(s=>s.is_current).length;
 		tr.innerHTML = `<td><span class="dot" style="background:${catColor(n.category)};display:inline-block;margin-right:7px"></span>${esc(n.label)}</td>
 			<td>${esc(n.category)}</td><td><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></td>
 			<td>${cur}</td><td>${(n.events||[]).length}</td><td class="kv">${n.updated_at?ago(n.updated_at):""}</td>`;
-		tr.onclick = () => select(n.id);
+		tr.onclick = () => select(n.id, "node");
 		tb.appendChild(tr);
 	}
 	t.appendChild(tb); v.appendChild(t);
@@ -537,20 +669,32 @@ function viewTimeline(v) {
 				${e.importance && e.importance!=="ordinary" ? `<span class="badge imp-${esc(e.importance)}" style="margin-left:6px">${esc(e.importance.replace(/_/g," "))}</span>`:""}
 				<div class="kv" style="font-size:12px">${esc(e.text||"")}</div></div>
 			<span class="tl-when">${fmtDate(e.created_at)}</span>`;
-		row.querySelector(".tl-node").onclick = () => select(e.nodeId);
+		row.querySelector(".tl-node").onclick = () => select(e.nodeId, "node");
 		wrap.appendChild(row);
 	}
 	v.appendChild(wrap);
 }
 
 function viewSaves(v) {
-	if (!S.receipts.length) { v.appendChild(el("div","empty","No save receipts yet. Saves from the MCP tools and the Test tab appear here.")); return; }
 	const wrap = el("div"); wrap.style.maxWidth = "760px";
+	wrap.innerHTML = `<div class="box" style="max-width:760px">
+		<h3>Cleanup</h3>
+		<div style="display:flex;gap:8px;flex-wrap:wrap">
+			<button class="ghost mini" onclick="deleteLastRun()">Delete last extraction</button>
+			<button class="ghost mini" onclick="clearFailedReceipts()">Clear failed receipts</button>
+			<button class="ghost mini" onclick="deleteAllMemory()">Delete all memories</button>
+		</div>
+	</div>`;
+	if (!S.receipts.length) { wrap.appendChild(el("div","empty","No save receipts yet. Saves from the MCP tools and the Test tab appear here.")); v.appendChild(wrap); return; }
 	for (const r of S.receipts) {
 		const zero = (r.saved_total||0) === 0;
+		let detail = {};
+		try { detail = JSON.parse(r.detail || "{}"); } catch {}
+		const runId = r.extraction_run_id || detail.extraction_run_id || "";
 		const row = el("div","receipt" + (zero?" zero":""));
 		row.innerHTML = `<div class="r-top"><span class="r-src">${esc(r.source)}</span><span class="r-when">${fmtDate(r.created_at)}</span></div>
-			<div class="r-sum">${esc(r.summary || "")}</div>`;
+			<div class="r-sum">${esc(r.summary || "")}</div>
+			${runId ? `<div class="kv" style="font-size:11px;margin-top:4px">run <b>${esc(runId)}</b></div>` : ""}`;
 		wrap.appendChild(row);
 	}
 	v.appendChild(wrap);
@@ -598,6 +742,39 @@ async function doRecall(query) {
 	} catch (e) { toast("Recall failed: " + e.message, true); }
 }
 
+async function postAction(path, payload) {
+	return api(path, { method:"POST", body: JSON.stringify({ userId: S.userId, ...payload }) });
+}
+async function deleteLastRun() {
+	if (!confirm("Delete the objects created by the most recent extraction?")) return;
+	try {
+		const r = await postAction("/v1/actions/delete-last-extraction", {});
+		toast(r.deleted ? `Deleted last extraction ${r.extraction_run_id}.` : (r.reason || "Nothing deleted."));
+		await load();
+	} catch (e) { toast("Delete failed: " + e.message, true); }
+}
+async function clearFailedReceipts() {
+	if (!confirm("Clear failed/zero-save receipts?")) return;
+	try { const r = await postAction("/v1/actions/clear-failed-receipts", {}); toast(`Cleared ${r.changes || 0} receipt(s).`); await load(); }
+	catch (e) { toast("Clear failed: " + e.message, true); }
+}
+async function deleteAllMemory() {
+	const confirmText = prompt("Type DELETE to soft-delete all active memories for this user.");
+	if (confirmText !== "DELETE") return;
+	try { const r = await postAction("/v1/actions/delete-all", { confirm: confirmText }); toast(`Deleted ${r.pages || 0} page(s), ${r.nodes || 0} node(s).`); S.selected = null; await load(); }
+	catch (e) { toast("Delete all failed: " + e.message, true); }
+}
+async function deleteSelected(kind, id) {
+	if (!confirm(`Delete this ${kind}? Future extraction will suppress the same title/key.`)) return;
+	try { await postAction("/v1/actions/delete-object", { kind, id, suppress: true }); toast("Deleted."); S.selected = null; await load(); }
+	catch (e) { toast("Delete failed: " + e.message, true); }
+}
+async function archiveSelected(kind, id) {
+	if (!confirm(`Archive this ${kind}?`)) return;
+	try { await postAction("/v1/actions/archive-object", { kind, id }); toast("Archived."); S.selected = null; await load(); }
+	catch (e) { toast("Archive failed: " + e.message, true); }
+}
+
 function viewSetup(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `
@@ -640,22 +817,26 @@ function viewDev(v) {
 }
 
 /* ---------------- detail panel ---------------- */
-function select(id) {
-	S.selected = id;
+function select(id, kind = "node") {
+	if (String(id).startsWith("node:") || String(id).startsWith("page:")) S.selected = id;
+	else S.selected = itemKey(kind, id);
 	document.querySelectorAll(".nl-item").forEach(x=>x.classList.remove("sel"));
+	renderPageList();
 	renderNodeList();
 	renderDetail();
 	if (S.network && S.view==="graph") {
 		setTimeout(() => {
 			try { S.network.setSize("100%", "100%"); S.network.redraw(); } catch {}
-			graphFocus(id);
+			graphFocus(S.selected);
 		}, 180);
 	}
 }
 
 function renderDetail() {
 	const d = $("#detail"); const main = $("#main");
-	const n = S.data && S.data.nodes.find(x=>x.id===S.selected);
+	const p = selectedPage();
+	if (p) return renderPageDetail(p);
+	const n = selectedNode();
 	if (!n) { main.classList.remove("detail-open"); d.innerHTML = ""; return; }
 	main.classList.add("detail-open");
 	const cur = (n.slices||[]).filter(s=>s.is_current);
@@ -667,6 +848,10 @@ function renderDetail() {
 		<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
 			<h2><span class="dot" style="background:${catColor(n.category)}"></span>${esc(n.label)}</h2>
 			<button class="ghost mini" onclick="closeDetail()">✕</button>
+		</div>
+		<div style="display:flex;gap:7px;margin-bottom:8px">
+			<button class="ghost mini" onclick="archiveSelected('node','${n.id}')">Archive</button>
+			<button class="ghost mini" onclick="deleteSelected('node','${n.id}')">Delete</button>
 		</div>
 		<div class="sub">${esc(n.category)} · <span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
 		${n.summary ? `<div class="help" style="font-style:italic">${esc(n.summary)}</div>` : ""}
@@ -683,12 +868,41 @@ function renderDetail() {
 
 		<div class="d-sec">Connections (${edges.length})</div>
 		${edges.length ? edges.map(e=>{ const out=e.from_node===n.id; const other=out?e.to_node:e.from_node;
-			return `<div class="edge-row" style="cursor:pointer" onclick="select('${other}')">${out?"→":"←"} <b>${esc(e.type.replace(/_/g," "))}</b> ${esc(nameOf(other))}</div>`; }).join("") : `<div class="empty" style="padding:6px">None.</div>`}`;
+			return `<div class="edge-row" style="cursor:pointer" onclick="select('${other}','node')">${out?"→":"←"} <b>${esc(e.type.replace(/_/g," "))}</b> ${esc(nameOf(other))}</div>`; }).join("") : `<div class="empty" style="padding:6px">None.</div>`}`;
 }
+
+function renderPageDetail(p) {
+	const d = $("#detail"); const main = $("#main");
+	main.classList.add("detail-open");
+	let related = [], evidence = [];
+	try { related = JSON.parse(p.related_concepts_json || "[]"); } catch {}
+	try { evidence = JSON.parse(p.evidence_json || "[]"); } catch {}
+	d.innerHTML = `
+		<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+			<h2><span class="dot" style="background:#58a6ff"></span>${esc(p.title)}</h2>
+			<button class="ghost mini" onclick="closeDetail()">✕</button>
+		</div>
+		<div style="display:flex;gap:7px;margin-bottom:8px">
+			<button class="ghost mini" onclick="archiveSelected('page','${p.id}')">Archive</button>
+			<button class="ghost mini" onclick="deleteSelected('page','${p.id}')">Delete</button>
+		</div>
+		<div class="sub">memory page · ${esc(p.source_mode || "manual_collect")} · <span class="badge state-active">${esc(p.health_state || "active")}</span></div>
+		${p.short_summary ? `<div class="help" style="font-style:italic">${esc(p.short_summary)}</div>` : ""}
+		<div class="d-sec">Page</div>
+		<div class="page-md">${esc(p.full_markdown || "")}</div>
+		<div class="d-sec">Related concepts (${related.length})</div>
+		${related.length ? related.map(x=>`<span class="chip" style="margin:2px">${esc(x)}</span>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
+		<div class="d-sec">Evidence (${evidence.length})</div>
+		${evidence.length ? evidence.slice(0,8).map(e=>`<div class="slice">${esc(e.snippet || "")}<span class="k">${esc(e.source_type || "source")} ${e.timestamp ? "· " + fmtDate(e.timestamp) : ""}</span></div>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
+		<div class="d-sec">Receipt</div>
+		<div class="kv">run <b>${esc(p.extraction_run_id || "")}</b></div>`;
+}
+
 function closeDetail() {
 	S.selected = null;
 	$("#main").classList.remove("detail-open");
 	$("#detail").innerHTML = "";
+	renderPageList();
 	renderNodeList();
 	if (S.network && S.view==="graph") setTimeout(() => graphFit(260), 180);
 }

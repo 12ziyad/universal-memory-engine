@@ -65,12 +65,15 @@ export async function recall(env, config, userId, query) {
 	// Pull this user's graph slice in one round trip. Every read is scoped by
 	// user_id — there is no cross-user path.
 	const [nodesRes, slicesRes, eventsRes] = await env.DB.batch([
-		env.DB.prepare("SELECT id, label, category, state, summary FROM nodes WHERE user_id = ?").bind(userId),
 		env.DB.prepare(
-			"SELECT id, node_id, text, kind, created_at FROM slices WHERE user_id = ? AND is_current = 1",
+			`SELECT id, label, category, state, summary FROM nodes
+			 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
 		).bind(userId),
 		env.DB.prepare(
-			"SELECT id, node_id, action, text, importance, happened_at, created_at FROM events WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+			"SELECT id, node_id, text, kind, created_at FROM slices WHERE user_id = ? AND is_current = 1 AND deleted_at IS NULL",
+		).bind(userId),
+		env.DB.prepare(
+			"SELECT id, node_id, action, text, importance, happened_at, created_at FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
 		).bind(userId, EVENT_SCAN_LIMIT),
 	]);
 

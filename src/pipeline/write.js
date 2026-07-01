@@ -17,16 +17,47 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const n of plan.newNodes) {
 		stmts.push(
 			env.DB.prepare(
-				"INSERT INTO nodes (id, user_id, label, category, role, state, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			).bind(n.id, n.user_id, n.label, n.category, n.role, n.state, n.summary, n.created_at, n.updated_at),
+				`INSERT INTO nodes
+					(id, user_id, label, category, role, state, summary, created_at, updated_at,
+					 canonical_label, aliases_json, mention_count, session_count, last_seen_at,
+					 heat_score, confidence, health_state, importance_class, cluster)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				n.id,
+				n.user_id,
+				n.label,
+				n.category,
+				n.role,
+				n.state,
+				n.summary,
+				n.created_at,
+				n.updated_at,
+				n.canonical_label ?? null,
+				n.aliases_json ?? null,
+				n.mention_count ?? 1,
+				n.session_count ?? 1,
+				n.last_seen_at ?? n.updated_at,
+				n.heat_score ?? 1,
+				n.confidence ?? null,
+				n.health_state ?? "active",
+				n.importance_class ?? "ordinary",
+				n.cluster ?? null,
+			),
 		);
 	}
 
 	// Node state changes (lifecycle events) — also bumps updated_at.
 	for (const u of plan.nodeStateUpdates) {
 		stmts.push(
-			env.DB.prepare("UPDATE nodes SET state = ?, updated_at = ? WHERE id = ? AND user_id = ?").bind(
+			env.DB.prepare(
+				`UPDATE nodes
+				 SET state = ?, updated_at = ?, last_seen_at = ?,
+					 mention_count = COALESCE(mention_count, 0) + 1,
+					 heat_score = COALESCE(heat_score, 0) + 1
+				 WHERE id = ? AND user_id = ?`,
+			).bind(
 				u.state,
+				Date.now(),
 				Date.now(),
 				u.id,
 				userId,
@@ -38,7 +69,13 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const id of plan.nodeTouches) {
 		if (plan.nodeStateUpdates.some((u) => u.id === id)) continue;
 		stmts.push(
-			env.DB.prepare("UPDATE nodes SET updated_at = ? WHERE id = ? AND user_id = ?").bind(
+			env.DB.prepare(
+				`UPDATE nodes
+				 SET updated_at = ?, last_seen_at = ?, mention_count = COALESCE(mention_count, 0) + 1,
+					 heat_score = COALESCE(heat_score, 0) + 1
+				 WHERE id = ? AND user_id = ?`,
+			).bind(
+				Date.now(),
 				Date.now(),
 				id,
 				userId,
@@ -59,8 +96,18 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const s of plan.newSlices) {
 		stmts.push(
 			env.DB.prepare(
-				"INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind(s.id, s.user_id, s.node_id, s.text, s.kind, s.is_current, s.created_at),
+				`INSERT INTO slices
+					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current, s.created_at, s.created_at),
+		);
+	}
+
+	for (const s of plan.sliceTouches) {
+		stmts.push(
+			env.DB.prepare(
+				"UPDATE slices SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ? WHERE id = ? AND user_id = ?",
+			).bind(Date.now(), s.id, userId),
 		);
 	}
 
@@ -68,8 +115,29 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const e of plan.newEvents) {
 		stmts.push(
 			env.DB.prepare(
-				"INSERT INTO events (id, user_id, node_id, action, text, importance, happened_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			).bind(e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at),
+				`INSERT INTO events
+					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				e.id,
+				e.user_id,
+				e.node_id,
+				e.action,
+				e.text,
+				e.importance,
+				e.happened_at,
+				e.created_at,
+				e.created_at,
+				e.confidence ?? null,
+			),
+		);
+	}
+
+	for (const e of plan.eventTouches) {
+		stmts.push(
+			env.DB.prepare(
+				"UPDATE events SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ? WHERE id = ? AND user_id = ?",
+			).bind(Date.now(), e.id, userId),
 		);
 	}
 
@@ -77,8 +145,34 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const ed of plan.newEdges) {
 		stmts.push(
 			env.DB.prepare(
-				"INSERT INTO edges (id, user_id, from_node, to_node, type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-			).bind(ed.id, ed.user_id, ed.from_node, ed.to_node, ed.type, ed.created_at),
+				`INSERT INTO edges
+					(id, user_id, from_node, to_node, type, created_at, last_seen_at, weight, confidence, evidence_count)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				ed.id,
+				ed.user_id,
+				ed.from_node,
+				ed.to_node,
+				ed.type,
+				ed.created_at,
+				ed.created_at,
+				ed.weight ?? 1,
+				ed.confidence ?? null,
+				ed.evidence_count ?? 1,
+			),
+		);
+	}
+
+	for (const ed of plan.edgeTouches) {
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE edges
+				 SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1,
+					 weight = COALESCE(weight, 1) + 0.25,
+					 evidence_count = COALESCE(evidence_count, 0) + 1,
+					 last_seen_at = ?
+				 WHERE id = ? AND user_id = ?`,
+			).bind(Date.now(), ed.id, userId),
 		);
 	}
 

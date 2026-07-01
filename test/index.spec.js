@@ -68,8 +68,8 @@ describe("v1 routes (with a valid api key)", () => {
 		const response = await fetch("/v1/graph?userId=abc", { headers });
 		expect(response.status).toBe(200);
 		const graphBody = await response.json();
-		expect(graphBody).toMatchObject({ nodes: [], edges: [], candidates: [] });
-		expect(graphBody.stats).toEqual({ nodes: 0, slices: 0, events: 0, edges: 0, candidates: 0 });
+		expect(graphBody).toMatchObject({ nodes: [], pages: [], edges: [], candidates: [] });
+		expect(graphBody.stats).toEqual({ pages: 0, nodes: 0, slices: 0, events: 0, edges: 0, candidates: 0 });
 		expect(typeof graphBody.model).toBe("string");
 		expect(Array.isArray(graphBody.models)).toBe(true);
 	});
@@ -98,6 +98,7 @@ describe("v1 routes (with a valid api key)", () => {
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			nodes: 0,
+			pages: 0,
 			slices: 0,
 			events: 0,
 			candidates: 0,
@@ -155,6 +156,7 @@ describe("D1-backed data with user isolation", () => {
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			nodes: 1,
+			pages: 0,
 			slices: 1,
 			events: 1,
 			candidates: 0,
@@ -164,11 +166,12 @@ describe("D1-backed data with user isolation", () => {
 
 	it("isolates data so a different userId sees nothing", async () => {
 		const graphResponse = await fetch(`/v1/graph?userId=${otherUserId}`, { headers });
-		expect(await graphResponse.json()).toMatchObject({ nodes: [], edges: [], candidates: [] });
+		expect(await graphResponse.json()).toMatchObject({ nodes: [], pages: [], edges: [], candidates: [] });
 
 		const statusResponse = await fetch(`/v1/status?userId=${otherUserId}`, { headers });
 		expect(await statusResponse.json()).toEqual({
 			nodes: 0,
+			pages: 0,
 			slices: 0,
 			events: 0,
 			candidates: 0,

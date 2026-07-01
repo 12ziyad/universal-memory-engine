@@ -17,6 +17,8 @@ import { storeReceipt, getUserNodes } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
 
+export { saveConversation } from "./manual_collect.js";
+
 /** Shape the ingest result into a tool-ready { fired, summary, receipt, processing }. */
 function finalize(res, { prefix = "", processingNote }) {
 	if (!res.fired) {
@@ -175,7 +177,7 @@ export async function saveMemory(env, ctx, userId, content, opts = {}) {
  * save_conversation: digest a messy batch into clean fact-lines, THEN extract.
  * Scopes: { scope: "full" | "lastN" | "topic" | "summary", n, topic }.
  */
-export async function saveConversation(env, ctx, userId, messages, opts = {}) {
+async function saveConversationGraphLegacy(env, ctx, userId, messages, opts = {}) {
 	const config = getConfig(env);
 	const received = (messages ?? []).length;
 	const prefix = `Received ${received} message(s). `;

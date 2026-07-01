@@ -29,8 +29,9 @@ import {
 	ACTION_TO_STATE,
 } from "../config.js";
 import { newId } from "../lib/ids.js";
-import { getUserNodes, getUserCandidates } from "../lib/db.js";
+import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, getUserNodes } from "../lib/db.js";
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
+import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
 const SUPERSEDE_KINDS = new Set(["progress", "preference"]);
@@ -133,13 +134,27 @@ function matchExisting(label, matchesExistingId, existing, existingById) {
 	return null;
 }
 
-async function recentEventExists(env, userId, nodeId, action, now) {
+async function recentEventMatch(env, userId, nodeId, action, now) {
 	const row = await env.DB.prepare(
-		"SELECT 1 FROM events WHERE user_id = ? AND node_id = ? AND action = ? AND created_at >= ? LIMIT 1",
+		`SELECT id FROM events
+		 WHERE user_id = ? AND node_id = ? AND action = ? AND created_at >= ? AND deleted_at IS NULL
+		 ORDER BY created_at DESC LIMIT 1`,
 	)
 		.bind(userId, nodeId, action, now - EVENT_DEDUPE_MS)
 		.first();
-	return Boolean(row);
+	return row?.id ?? null;
+}
+
+async function matchingSliceId(env, userId, nodeId, kind, text) {
+	const { results } = await env.DB.prepare(
+		`SELECT id, text FROM slices
+		 WHERE user_id = ? AND node_id = ? AND kind = ? AND deleted_at IS NULL
+		 ORDER BY created_at DESC LIMIT 50`,
+	)
+		.bind(userId, nodeId, kind)
+		.all();
+	const norm = normalizeLabel(text);
+	return (results ?? []).find((s) => normalizeLabel(s.text) === norm)?.id ?? null;
 }
 
 /**
@@ -179,8 +194,11 @@ export async function applyGates(
 		nodeTouches: new Set(),
 		sliceSupersede: [],
 		newSlices: [],
+		sliceTouches: [],
 		newEvents: [],
+		eventTouches: [],
 		newEdges: [],
+		edgeTouches: [],
 		newCandidates: [],
 		candidateBumps: [],
 		affectedNodeIds: new Set(),
@@ -194,10 +212,14 @@ export async function applyGates(
 	const existingById = new Map(existing.map((n) => [n.id, n]));
 	const candidates = await getUserCandidates(env, userId);
 	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
+	const existingEdges = await getUserEdges(env, userId);
+	const suppressions = await getActiveSuppressions(env, userId);
+	const suppressionByKindKey = new Set(suppressions.map((s) => `${s.kind}:${s.canonical_key}`));
 
 	// label(normalized) -> resolved node id, including nodes created in this batch.
 	const resolved = new Map();
-	const reject = (o, reason) => plan.rejected.push({ kind: o.kind, label: o.label ?? o.on, reason });
+	const reject = (o, reason) => plan.rejected.push({ kind: o.kind, label: o.label ?? o.on ?? o.from, reason });
+	const isSuppressed = (kind, label) => suppressionByKindKey.has(`${kind}:${canonicalKey(label)}`);
 
 	/** Create a brand-new node and make it resolvable for the rest of this batch. */
 	function createNode(label, category, role = null, state = null, auto = false) {
@@ -206,12 +228,17 @@ export async function applyGates(
 			id,
 			user_id: userId,
 			label,
+			canonical_label: normalizeLabel(label),
 			category: canonicalizeCategory(category) ?? "other",
 			role: role ?? null,
 			state: valid(state, ["active", "paused", "inactive", "completed"], "active"),
 			summary: null,
 			created_at: now,
 			updated_at: now,
+			last_seen_at: now,
+			mention_count: 1,
+			session_count: 1,
+			heat_score: 1,
 		});
 		resolved.set(normalizeLabel(label), id);
 		existing.push({ id, label, category, state: "active" });
@@ -242,12 +269,15 @@ export async function applyGates(
 		const r = resolveRef(ref);
 		if (r) return r;
 		if (!ref || isJunkLabel(ref) || looksLikeStatus(ref)) return null;
+		if (isSuppressed("node", ref)) return null;
 		const id = createNode(ref, hintCategory ?? "other", null, null, true);
 		return { id };
 	}
 
 	function addCandidate(label, strength, clusterHint) {
+		if (manual) return;
 		const norm = normalizeLabel(label);
+		if (isSuppressed("candidate", label) || isSuppressed("node", label)) return;
 		// Already a node? Then it isn't a candidate.
 		if (matchExisting(label, null, existing, existingById)) return;
 		const existingCand = candidateByLabel.get(norm);
@@ -281,13 +311,21 @@ export async function applyGates(
 				reject(obj, "junk_label");
 				continue;
 			}
+			if (isBadTitle(obj.label)) {
+				reject(obj, "bad_title");
+				continue;
+			}
+			if (isSuppressed("node", obj.label)) {
+				reject(obj, "suppressed_blocked");
+				continue;
+			}
 			// Judge by MEANING: unknown category becomes "other", it is NOT dropped.
 			const category = canonicalizeCategory(obj.category) ?? "other";
 			if (conf < confMin) {
 				// Genuinely weak → park as a candidate (still visible in the UI),
 				// not silently lost.
 				addCandidate(obj.label, "weak", null);
-				reject(obj, "low_confidence_downgraded");
+				reject(obj, manual ? "low_confidence" : "low_confidence_downgraded");
 				continue;
 			}
 			const match = matchExisting(obj.label, obj.matches_existing, existing, existingById);
@@ -320,8 +358,10 @@ export async function applyGates(
 				reject(obj, "event_no_node");
 				continue;
 			}
-			if (await recentEventExists(env, userId, node.id, action, now)) {
-				reject(obj, "duplicate_event");
+			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now);
+			if (duplicateEventId) {
+				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
+				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
 			plan.newEvents.push({
@@ -359,6 +399,12 @@ export async function applyGates(
 				continue;
 			}
 			const kind = valid(obj.kind_detail, SLICE_KINDS, "other");
+			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text);
+			if (duplicateSliceId) {
+				plan.sliceTouches.push({ id: duplicateSliceId, node_id: node.id, kind });
+				plan.affectedNodeIds.add(node.id);
+				continue;
+			}
 			// Supersede an older single-valued slice (mark is_current = 0) before append.
 			if (SUPERSEDE_KINDS.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
 			plan.newSlices.push({
@@ -391,7 +437,20 @@ export async function applyGates(
 				reject(obj, "edge_self_loop");
 				continue;
 			}
-			const type = valid(obj.type, EDGE_TYPES, "related_to");
+			if (!EDGE_TYPES.includes(obj.type)) {
+				reject(obj, "invalid_edge_type");
+				continue;
+			}
+			const type = obj.type;
+			const existingEdge = existingEdges.find(
+				(e) => e.from_node === from.id && e.to_node === to.id && e.type === type,
+			);
+			if (existingEdge) {
+				plan.edgeTouches.push({ id: existingEdge.id, from_node: from.id, to_node: to.id, type });
+				plan.affectedNodeIds.add(from.id);
+				plan.affectedNodeIds.add(to.id);
+				continue;
+			}
 			if (
 				plan.newEdges.some(
 					(e) => e.from_node === from.id && e.to_node === to.id && e.type === type,
@@ -415,6 +474,10 @@ export async function applyGates(
 
 		// ---- CANDIDATE GATE --------------------------------------------------
 		if (obj.kind === "candidate") {
+			if (manual) {
+				reject(obj, "manual_candidate_disabled");
+				continue;
+			}
 			addCandidate(obj.label, obj.strength, obj.cluster_hint);
 			continue;
 		}
@@ -425,8 +488,11 @@ export async function applyGates(
 	plan.hasWrites =
 		plan.newNodes.length > 0 ||
 		plan.newSlices.length > 0 ||
+		plan.sliceTouches.length > 0 ||
 		plan.newEvents.length > 0 ||
+		plan.eventTouches.length > 0 ||
 		plan.newEdges.length > 0 ||
+		plan.edgeTouches.length > 0 ||
 		plan.newCandidates.length > 0 ||
 		plan.nodeStateUpdates.length > 0 ||
 		plan.nodeTouches.size > 0 ||
