@@ -25,6 +25,25 @@ async function softDeleteByIds(env, userId, table, ids, now) {
 	return count;
 }
 
+async function countTable(env, userId, table) {
+	const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`).bind(userId).first();
+	return row?.count ?? 0;
+}
+
+async function deleteFromTable(env, userId, table) {
+	const before = await countTable(env, userId, table);
+	await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId).run();
+	return before;
+}
+
+async function bestEffortDeleteFromTable(env, userId, table) {
+	try {
+		return await deleteFromTable(env, userId, table);
+	} catch (err) {
+		return { table, skipped: true, reason: err?.message ?? String(err) };
+	}
+}
+
 async function suppressNode(env, userId, nodeId, reason) {
 	const node = await env.DB.prepare("SELECT id, label FROM nodes WHERE id = ? AND user_id = ?")
 		.bind(nodeId, userId)
@@ -45,6 +64,26 @@ async function suppressPage(env, userId, pageId, reason) {
 		.first();
 	if (!page) return;
 	await suppressPageKey(env, userId, page, reason);
+}
+
+export function junkNodeReason(node) {
+	const raw = String(node?.label ?? "").trim();
+	const label = normalizeLabel(raw);
+	if (!label) return "empty title";
+	const words = label.split(/\s+/).filter(Boolean);
+	const starts = [
+		"want", "want to", "see", "discuss", "explore", "asked", "ask", "try", "trying", "need to", "would like",
+		"lets", "let us", "make", "create", "build different", "prototype", "impressive", "world facing",
+	];
+	if (starts.some((start) => label === start || label.startsWith(`${start} `))) return "starts like a chat instruction or sentence fragment";
+	if (/\b(i can|i will|you asked|you want|here is|here are|we can|we should|let me)\b/.test(label)) return "assistant/chat wording";
+	if (/\b(detailed|interactive prototype|different build|world facing|looks good|nice idea|cool|thanks|whats up)\b/.test(label) && words.length > 3) {
+		return "vague non-durable phrase";
+	}
+	if (/[?.!]$/.test(raw) || /\b(can you|could you|how do i|what if|why does)\b/.test(label)) return "question or request, not durable memory";
+	if (words.length >= 8 && !node?.summary && Number(node?.mention_count ?? 1) <= 1) return "too long and weak to be a durable concept";
+	if (words.length >= 6 && raw[0] === raw[0]?.toLowerCase() && !/[A-Z]{2,}|\b[A-Z][a-z]+/.test(raw)) return "lowercase sentence fragment";
+	return null;
 }
 
 export async function deleteLastExtraction(env, userId) {
@@ -142,26 +181,70 @@ export async function archiveObject(env, userId, { kind, id }) {
 }
 
 export async function deleteAllMemories(env, userId, confirm) {
-	if (confirm !== "DELETE") return { deleted: false, reason: "confirmation text required" };
+	if (confirm !== "DELETE ALL") return { deleted: false, reason: "exact confirmation text DELETE ALL required" };
+
+	const { results: nodeRows } = await env.DB.prepare("SELECT id FROM nodes WHERE user_id = ?").bind(userId).all();
+	const nodeIds = (nodeRows ?? []).map((row) => row.id);
+	await deleteNodeVectors(env, getConfig(env), nodeIds);
+
+	const counts = {
+		memory_pages: await deleteFromTable(env, userId, "memory_pages"),
+		nodes: await deleteFromTable(env, userId, "nodes"),
+		slices: await deleteFromTable(env, userId, "slices"),
+		events: await deleteFromTable(env, userId, "events"),
+		edges: await deleteFromTable(env, userId, "edges"),
+		candidates: await deleteFromTable(env, userId, "candidates"),
+		receipts: await deleteFromTable(env, userId, "receipts"),
+		extraction_runs: await deleteFromTable(env, userId, "extraction_runs"),
+		memory_suppressions: await deleteFromTable(env, userId, "memory_suppressions"),
+		checkpoints: await deleteFromTable(env, userId, "checkpoints"),
+	};
+
+	const optional = {};
+	for (const table of ["memory_page_related", "related_index", "index_records", "vector_index_records"]) {
+		optional[table] = await bestEffortDeleteFromTable(env, userId, table);
+	}
+
+	return {
+		deleted: true,
+		counts,
+		optional,
+		pages: counts.memory_pages,
+		nodes: counts.nodes,
+		vectorize: { attempted: nodeIds.length },
+	};
+}
+
+export async function cleanupJunkNodes(env, userId, { dryRun = false, confirm } = {}) {
+	const { results } = await env.DB.prepare(
+		`SELECT id, label, category, summary, mention_count, health_state, archived_at, suppressed_at
+		 FROM nodes
+		 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
+		 ORDER BY updated_at DESC, created_at DESC`,
+	)
+		.bind(userId)
+		.all();
+
+	const candidates = [];
+	for (const node of results ?? []) {
+		const reason = junkNodeReason(node);
+		if (reason) candidates.push({ id: node.id, label: node.label, category: node.category, reason });
+	}
+
+	if (dryRun) return { dryRun: true, count: candidates.length, candidates };
+	if (confirm !== "CLEAN JUNK") return { cleaned: false, reason: "exact confirmation text CLEAN JUNK required", count: candidates.length, candidates };
+
 	const now = Date.now();
-	const { results: nodes } = await env.DB.prepare("SELECT id, label FROM nodes WHERE user_id = ? AND deleted_at IS NULL")
-		.bind(userId)
-		.all();
-	const { results: pages } = await env.DB.prepare("SELECT * FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL")
-		.bind(userId)
-		.all();
-	for (const n of nodes ?? []) await suppressNode(env, userId, n.id, "delete_all");
-	for (const p of pages ?? []) await suppressPageKey(env, userId, p, "delete_all");
-	await env.DB.batch([
-		env.DB.prepare("UPDATE nodes SET deleted_at = ?, suppressed_at = ? WHERE user_id = ?").bind(now, now, userId),
-		env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE user_id = ?").bind(now, now, userId),
-		env.DB.prepare("UPDATE slices SET deleted_at = ? WHERE user_id = ?").bind(now, userId),
-		env.DB.prepare("UPDATE events SET deleted_at = ? WHERE user_id = ?").bind(now, userId),
-		env.DB.prepare("UPDATE edges SET deleted_at = ? WHERE user_id = ?").bind(now, userId),
-		env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE user_id = ?").bind(now, now, userId),
-	]);
-	await deleteNodeVectors(env, getConfig(env), (nodes ?? []).map((n) => n.id));
-	return { deleted: true, nodes: (nodes ?? []).length, pages: (pages ?? []).length };
+	for (const node of candidates) {
+		await suppressNode(env, userId, node.id, `cleanup_junk_nodes: ${node.reason}`);
+		await env.DB.prepare(
+			"UPDATE nodes SET archived_at = ?, suppressed_at = ?, health_state = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+		)
+			.bind(now, now, "junk", now, node.id, userId)
+			.run();
+	}
+	await deleteNodeVectors(env, getConfig(env), candidates.map((node) => node.id));
+	return { cleaned: true, archived: candidates.length, suppressed: candidates.length, candidates };
 }
 
 export async function clearFailedReceipts(env, userId) {
