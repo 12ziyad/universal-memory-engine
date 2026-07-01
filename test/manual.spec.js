@@ -87,7 +87,9 @@ describe("Path A - save_memory (manual, immediate)", () => {
 		expect(body.fired).toBe(true);
 		expect(body.summary).toContain("Saved:");
 		expect(body.summary).toContain("Boxing");
-		expect(await nodes(userId)).toHaveLength(1);
+		const n = await nodes(userId);
+		expect(n).toHaveLength(1);
+		expect(n[0].cluster).toBe("fitness_habits");
 	});
 
 	it("'save this: I stopped boxing' updates the existing node - no duplicate", async () => {
@@ -208,6 +210,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
 		expect(p[0].title).toBe("UML Architecture Decisions");
+		expect(p[0].cluster).toBe("projects_systems");
 		expect(p[0].full_markdown).toContain("UML uses D1 and Vectorize");
 		expect(await nodes(userId)).toHaveLength(0);
 		expect(await candidates(userId)).toHaveLength(0);
@@ -330,6 +333,40 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(second.body.fired).toBe(false);
 		expect(second.body.summary).toContain("suppressed");
 		expect(await pages(userId)).toHaveLength(0);
+	});
+
+	it("organize clusters repairs old unclustered nodes and pages", async () => {
+		const userId = "m-organize-clusters";
+		await seedNode(userId, "old-skill", "Machine Learning", "skill");
+		await env.DB.prepare(
+			`INSERT INTO memory_pages
+				(id, user_id, source_mode, title, canonical_title, short_summary, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+			.bind(
+				"old-page",
+				userId,
+				"manual_collect",
+				"UML Architecture Decisions",
+				"uml architecture decisions",
+				"UML uses D1 and Vectorize.",
+				Date.now(),
+				Date.now(),
+			)
+			.run();
+
+		const res = await call("/v1/actions/organize-clusters", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ userId }),
+		});
+		expect(res.status).toBe(200);
+		expect(res.body.updated).toBe(2);
+		expect((await nodes(userId))[0].cluster).toBe("skills_tech");
+		expect((await pages(userId))[0].cluster).toBe("projects_systems");
+
+		const graph = await call(`/v1/graph?userId=${userId}`, { headers });
+		expect(graph.body.clusters.map((c) => c.id).sort()).toEqual(["projects_systems", "skills_tech"]);
 	});
 });
 

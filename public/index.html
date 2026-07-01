@@ -34,6 +34,9 @@
 	button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border2); }
 	button.ghost:hover { border-color: var(--accent); filter: none; }
 	button.mini { padding: 3px 8px; font-size: 11px; }
+	button.icon { width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; border-radius: 6px; }
+	button.danger { background: #3a1d1b; color: #ffb4ad; border: 1px solid rgba(248,81,73,.5); }
+	button.danger:hover { border-color: var(--red); filter: none; }
 	.spacer { flex: 1; }
 	.stats { display: flex; gap: 7px; flex-wrap: wrap; }
 	.stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
@@ -67,6 +70,8 @@
 	.nl-item.sel { background: var(--panel2); border-color: var(--accent); }
 	.nl-item .lbl { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.nl-item .meta { font-size: 10.5px; color: var(--faint); }
+	.nl-item .row-actions { display: flex; gap: 4px; opacity: .45; }
+	.nl-item:hover .row-actions { opacity: 1; }
 	.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 	.cand { padding: 5px 9px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--border);
 		margin: 4px 0; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
@@ -143,6 +148,18 @@
 			linear-gradient(90deg, rgba(0,0,0,.38), transparent 22%, transparent 78%, rgba(0,0,0,.32));
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
+	.cluster-layer { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+	.cluster-region { position: absolute; width: 31%; min-width: 220px; aspect-ratio: 1.45;
+		border: 1px solid color-mix(in srgb, var(--c) 42%, transparent); border-radius: 48%;
+		background:
+			radial-gradient(ellipse at center, color-mix(in srgb, var(--c) 24%, transparent), transparent 66%),
+			radial-gradient(ellipse at 42% 50%, color-mix(in srgb, var(--c) 12%, transparent), transparent 72%);
+		box-shadow: 0 0 46px color-mix(in srgb, var(--c) 16%, transparent);
+		transform: translate(-50%, -50%);
+	}
+	.cluster-region .cluster-label { position: absolute; left: 50%; top: -22px; transform: translateX(-50%);
+		font-size: 13px; font-weight: 800; letter-spacing: .03em; color: #f8fafc; text-shadow: 0 2px 12px #000; white-space: nowrap; }
+	.cluster-region .cluster-count { color: var(--muted); font-weight: 650; margin-left: 5px; }
 	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 7px; z-index: 5; }
 	.graph-tools input { width: 150px; background: rgba(22,27,34,.86); backdrop-filter: blur(8px); }
 	.graph-tools .mini { background: rgba(22,27,34,.82); backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.22); }
@@ -239,6 +256,21 @@ const CAT_COLORS = {
 	organization:"#d2a8ff", possession:"#9aa5b1", interest:"#f0883e", other:"#8b949e",
 };
 const catColor = (c) => CAT_COLORS[c] || CAT_COLORS.other;
+const CLUSTER_FALLBACK = {
+	identity_career: { label:"Identity & Career", color:"#58a6ff", x:-460, y:-210 },
+	active_goals: { label:"Active Goals", color:"#f0883e", x:470, y:-220 },
+	projects_systems: { label:"Projects & Systems", color:"#bc8cff", x:0, y:-40 },
+	skills_tech: { label:"Skillset & Tech", color:"#a371f7", x:-420, y:230 },
+	fitness_habits: { label:"Fitness & Habits", color:"#7ee787", x:440, y:230 },
+	preferences_research: { label:"Preferences & Research", color:"#d29922", x:120, y:300 },
+	life_family: { label:"Life & Family", color:"#ff7ab6", x:0, y:-330 },
+	general_memory: { label:"General Memory", color:"#8b949e", x:0, y:360 },
+};
+function clusterInfo(id) {
+	return (S.data?.clusters || []).find(c => c.id === id) || CLUSTER_FALLBACK[id] || CLUSTER_FALLBACK.general_memory;
+}
+function clusterColor(id) { return clusterInfo(id).color || "#8b949e"; }
+function stop(e) { e.stopPropagation(); e.preventDefault(); }
 
 const S = {
 	userId: localStorage.getItem("uml_user") || "",
@@ -321,7 +353,8 @@ function renderPageList() {
 		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
 		item.innerHTML = `<span class="dot" style="background:${catColor("system")}"></span>
 			<span class="lbl">${esc(p.title)}</span>
-			<span class="meta">page</span>`;
+			<span class="meta">${esc(p.cluster_label || "page")}</span>
+			<span class="row-actions"><button class="ghost danger icon" title="Delete page" onclick="stop(event); deleteSelected('page','${p.id}')">×</button></span>`;
 		item.onclick = () => select(p.id, "page");
 		wrap.appendChild(item);
 	}
@@ -337,7 +370,8 @@ function renderNodeList() {
 		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
 		item.innerHTML = `<span class="dot" style="background:${catColor(n.category)}"></span>
 			<span class="lbl">${esc(n.label)}</span>
-			<span class="meta">${esc(n.category)}</span>`;
+			<span class="meta">${esc(n.category)}</span>
+			<span class="row-actions"><button class="ghost danger icon" title="Delete node" onclick="stop(event); deleteSelected('node','${n.id}')">×</button></span>`;
 		item.onclick = () => select(n.id, "node");
 		wrap.appendChild(item);
 	}
@@ -348,7 +382,7 @@ function renderCandidates() {
 	const cands = (S.data && S.data.candidates) || [];
 	$("#candCount").textContent = cands.length;
 	if (!cands.length) { wrap.appendChild(el("div","empty","None.")); return; }
-	for (const c of cands) wrap.appendChild(el("div","cand", `<span>${esc(c.label)}</span><span class="s">${esc(c.strength)} ·${c.mentions||1}×</span>`));
+	for (const c of cands) wrap.appendChild(el("div","cand", `<span>${esc(c.label)}</span><span class="s">${esc(c.strength)} ·${c.mentions||1}× <button class="ghost danger icon" title="Delete candidate" onclick="deleteSelected('candidate','${c.id}')">×</button></span>`));
 }
 
 /* ---------------- views ---------------- */
@@ -368,9 +402,11 @@ function viewGraph(v) {
 	wrap.innerHTML = `
 		<div class="graph-tools">
 			<input id="graphSearch" placeholder="Focus" onkeydown="if(event.key==='Enter') graphSearchFocus()" />
+			<button class="ghost mini" onclick="organizeClusters()">Organize</button>
 			<button class="ghost mini" onclick="graphFit()">Fit</button>
 			<button class="ghost mini" onclick="graphReset()">Reset zoom</button>
 		</div>
+		<div class="cluster-layer" id="clusterLayer"></div>
 		<div id="graph"></div>
 		<div class="graph-err" id="graphErr" style="display:flex"><div class="graph-empty"><b>Preparing graph</b><br><span class="help">Mapping memories...</span></div></div>
 		<div class="legend" id="legend"></div>`;
@@ -397,10 +433,20 @@ function radialPosition(n, sortedIndex, total) {
 	};
 }
 
+function clusterSlotPosition(clusterId, sortedIndex, total, kind = "node") {
+	const cluster = clusterInfo(clusterId);
+	const local = radialPosition({}, sortedIndex, Math.max(total, 2));
+	const scale = kind === "page" ? .12 : .38;
+	return {
+		x: Math.round((cluster.x || 0) + local.x * scale),
+		y: Math.round((cluster.y || 0) + local.y * scale),
+	};
+}
+
 function graphNode(n, sortedIndex, total, hasEdges) {
 	const count = (n.slices?.length || 0) + (n.events?.length || 0);
 	const selected = S.selected === nodeKey(n.id);
-	const color = catColor(n.category);
+	const color = clusterColor(n.cluster) || catColor(n.category);
 	const data = {
 		id: nodeKey(n.id),
 		label: n.label,
@@ -424,15 +470,15 @@ function graphNode(n, sortedIndex, total, hasEdges) {
 		},
 		shadow: { enabled: true, color: `${color}55`, size: selected ? 22 : 14, x: 0, y: 0 },
 		margin: 10,
+		...clusterSlotPosition(n.cluster || "general_memory", sortedIndex, total, "node"),
 	};
-	if (!hasEdges) Object.assign(data, radialPosition(n, sortedIndex, total));
 	if (n.state === "inactive") data.color.background = "#21151a";
 	return data;
 }
 
 function graphPage(p, sortedIndex, total) {
 	const selected = S.selected === pageKey(p.id);
-	const color = "#58a6ff";
+	const color = clusterColor(p.cluster) || "#58a6ff";
 	const size = Math.min(38, 26 + Math.round(Number(p.heat_score || 1) * 2));
 	return {
 		id: pageKey(p.id),
@@ -456,7 +502,7 @@ function graphPage(p, sortedIndex, total) {
 		},
 		shadow: { enabled: true, color: `${color}55`, size: selected ? 24 : 16, x: 0, y: 0 },
 		margin: 12,
-		...radialPosition(p, sortedIndex, total),
+		...clusterSlotPosition(p.cluster || "projects_systems", sortedIndex, total, "page"),
 	};
 }
 
@@ -541,6 +587,20 @@ function graphSearchFocus() {
 
 function normalizeSearch(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
 
+function renderClusterLayer() {
+	const layer = $("#clusterLayer");
+	if (!layer) return;
+	const clusters = (S.data?.clusters || []).filter(c => c.count > 0);
+	layer.innerHTML = clusters.map((c) => {
+		const left = Math.max(9, Math.min(91, 50 + Number(c.x || 0) / 10.5));
+		const top = Math.max(14, Math.min(88, 50 + Number(c.y || 0) / 7));
+		const width = Math.max(22, Math.min(34, 20 + Math.sqrt(c.count || 1) * 4));
+		return `<div class="cluster-region" style="--c:${esc(c.color)};left:${left}%;top:${top}%;width:${width}%">
+			<div class="cluster-label">Cluster: ${esc(c.label)} <span class="cluster-count">${c.count}</span></div>
+		</div>`;
+	}).join("");
+}
+
 function drawGraph() {
 	const nodes = (S.data && S.data.nodes) || [];
 	const pages = (S.data && S.data.pages) || [];
@@ -549,10 +609,10 @@ function drawGraph() {
 	const showErr = (m) => { if (errBox){ errBox.style.display="flex"; errBox.innerHTML = m; } if (cont) cont.style.display="none"; };
 	if (errBox) { errBox.style.display = "none"; errBox.innerHTML = ""; }
 	if (cont) cont.style.display = "block";
-	// legend (only categories present)
-	const present = [...new Set([...nodes.map(n=>n.category), ...(pages.length ? ["memory_page"] : [])])];
+	renderClusterLayer();
+	const present = (S.data?.clusters || []).filter(c => c.count > 0);
 	$("#legend").innerHTML = present.length
-		? present.map(c=>`<span><span class="dot" style="background:${c==="memory_page"?"#58a6ff":catColor(c)}"></span>${esc(c)}</span>`).join("")
+		? present.map(c=>`<span><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.label)} (${c.count})</span>`).join("")
 		: "";
 	if (!nodes.length && !pages.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
 	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
@@ -561,9 +621,22 @@ function drawGraph() {
 		const graphEdges = edges.filter(e=>byId[e.from_node]&&byId[e.to_node]);
 		const hasEdges = graphEdges.length > 0;
 		const sorted = [...nodes].sort((a,b)=>nodeScore(b)-nodeScore(a));
-		const order = new Map(sorted.map((n,i)=>[n.id,i]));
-		const pageNodes = pages.map((p, i) => graphPage(p, i, Math.max(pages.length, 1)));
-		const graphNodes = nodes.map(n => graphNode(n, order.get(n.id) ?? 0, nodes.length, hasEdges));
+		const clusterGroups = new Map();
+		for (const n of sorted) {
+			const key = n.cluster || "general_memory";
+			if (!clusterGroups.has(key)) clusterGroups.set(key, []);
+			clusterGroups.get(key).push(n);
+		}
+		const pageGroups = new Map();
+		for (const p of pages) {
+			const key = p.cluster || "projects_systems";
+			if (!pageGroups.has(key)) pageGroups.set(key, []);
+			pageGroups.get(key).push(p);
+		}
+		const graphNodes = [];
+		for (const group of clusterGroups.values()) group.forEach((n, i) => graphNodes.push(graphNode(n, i, group.length, hasEdges)));
+		const pageNodes = [];
+		for (const group of pageGroups.values()) group.forEach((p, i) => pageNodes.push(graphPage(p, i, group.length)));
 		const vn = new vis.DataSet([...pageNodes, ...graphNodes]);
 		const ve = new vis.DataSet(graphEdges.map((e, i) => edgeStyle(e, i)));
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
@@ -597,8 +670,9 @@ function viewCards(v) {
 		card.innerHTML = `
 			<div class="top"><span class="dot" style="background:#58a6ff"></span>
 				<span class="title">${esc(p.title)}</span>
-				<span class="badge state-active">page</span></div>
-			<div class="cat">${esc(p.topic_filter || "manual_collect")}</div>
+				<span class="badge state-active">page</span>
+				<button class="ghost danger icon" title="Delete page" onclick="stop(event); deleteSelected('page','${p.id}')">×</button></div>
+			<div class="cat">${esc(p.cluster_label || p.topic_filter || "manual_collect")}</div>
 			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}
 			<div class="counts">
 				<span class="chip">memory page</span>
@@ -613,8 +687,9 @@ function viewCards(v) {
 		card.innerHTML = `
 			<div class="top"><span class="dot" style="background:${catColor(n.category)}"></span>
 				<span class="title">${esc(n.label)}</span>
-				<span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
-			<div class="cat">${esc(n.category)}</div>
+				<span class="badge state-${esc(n.state)}">${esc(n.state)}</span>
+				<button class="ghost danger icon" title="Delete node" onclick="stop(event); deleteSelected('node','${n.id}')">×</button></div>
+			<div class="cat">${esc(n.category)} · ${esc(n.cluster_label || "General Memory")}</div>
 			${n.summary ? `<div class="summary">${esc(n.summary)}</div>` : ""}
 			${cur.slice(0,3).map(s=>`<div class="mini-line">• ${esc(s.text)}</div>`).join("")}
 			<div class="counts">
@@ -632,13 +707,14 @@ function viewTable(v) {
 	const pages = (S.data && S.data.pages) || [];
 	if (!nodes.length && !pages.length) { v.appendChild(el("div","empty","No memories yet.")); return; }
 	const t = el("table");
-	t.innerHTML = `<thead><tr><th>Memory</th><th>Type</th><th>State</th><th>Slices</th><th>Events</th><th>Updated</th></tr></thead>`;
+	t.innerHTML = `<thead><tr><th>Memory</th><th>Type</th><th>Cluster</th><th>State</th><th>Slices</th><th>Events</th><th>Updated</th><th></th></tr></thead>`;
 	const tb = el("tbody");
 	for (const p of pages) {
 		const tr = el("tr","click");
 		tr.innerHTML = `<td><span class="dot" style="background:#58a6ff;display:inline-block;margin-right:7px"></span>${esc(p.title)}</td>
-			<td>memory_page</td><td><span class="badge state-active">${esc(p.health_state || "active")}</span></td>
-			<td>-</td><td>-</td><td class="kv">${p.updated_at?ago(p.updated_at):""}</td>`;
+			<td>memory_page</td><td>${esc(p.cluster_label || "")}</td><td><span class="badge state-active">${esc(p.health_state || "active")}</span></td>
+			<td>-</td><td>-</td><td class="kv">${p.updated_at?ago(p.updated_at):""}</td>
+			<td><button class="ghost danger icon" title="Delete page" onclick="stop(event); deleteSelected('page','${p.id}')">×</button></td>`;
 		tr.onclick = () => select(p.id, "page");
 		tb.appendChild(tr);
 	}
@@ -646,8 +722,9 @@ function viewTable(v) {
 		const tr = el("tr","click");
 		const cur = (n.slices||[]).filter(s=>s.is_current).length;
 		tr.innerHTML = `<td><span class="dot" style="background:${catColor(n.category)};display:inline-block;margin-right:7px"></span>${esc(n.label)}</td>
-			<td>${esc(n.category)}</td><td><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></td>
-			<td>${cur}</td><td>${(n.events||[]).length}</td><td class="kv">${n.updated_at?ago(n.updated_at):""}</td>`;
+			<td>${esc(n.category)}</td><td>${esc(n.cluster_label || "")}</td><td><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></td>
+			<td>${cur}</td><td>${(n.events||[]).length}</td><td class="kv">${n.updated_at?ago(n.updated_at):""}</td>
+			<td><button class="ghost danger icon" title="Delete node" onclick="stop(event); deleteSelected('node','${n.id}')">×</button></td>`;
 		tr.onclick = () => select(n.id, "node");
 		tb.appendChild(tr);
 	}
@@ -681,6 +758,7 @@ function viewSaves(v) {
 		<h3>Cleanup</h3>
 		<div style="display:flex;gap:8px;flex-wrap:wrap">
 			<button class="ghost mini" onclick="deleteLastRun()">Delete last extraction</button>
+			<button class="ghost mini" onclick="organizeClusters()">Organize clusters</button>
 			<button class="ghost mini" onclick="clearFailedReceipts()">Clear failed receipts</button>
 			<button class="ghost mini" onclick="deleteAllMemory()">Delete all memories</button>
 		</div>
@@ -763,6 +841,14 @@ async function deleteAllMemory() {
 	if (confirmText !== "DELETE") return;
 	try { const r = await postAction("/v1/actions/delete-all", { confirm: confirmText }); toast(`Deleted ${r.pages || 0} page(s), ${r.nodes || 0} node(s).`); S.selected = null; await load(); }
 	catch (e) { toast("Delete all failed: " + e.message, true); }
+}
+async function organizeClusters() {
+	try {
+		const r = await postAction("/v1/actions/organize-clusters", {});
+		toast(`Organized clusters. Updated ${r.updated || 0} item(s).`);
+		await load();
+		if (S.view === "graph") setTimeout(() => graphFit(260), 220);
+	} catch (e) { toast("Organize failed: " + e.message, true); }
 }
 async function deleteSelected(kind, id) {
 	if (!confirm(`Delete this ${kind}? Future extraction will suppress the same title/key.`)) return;

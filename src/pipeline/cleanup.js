@@ -109,6 +109,12 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		await deleteNodeVectors(env, getConfig(env), [id]);
 		return { deleted: true, kind: "node", id };
 	}
+	if (kind === "candidate") {
+		await env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
+			.bind(now, suppress ? now : null, id, userId)
+			.run();
+		return { deleted: true, kind: "candidate", id };
+	}
 	return { deleted: false, reason: "unsupported kind" };
 }
 
@@ -125,6 +131,12 @@ export async function archiveObject(env, userId, { kind, id }) {
 			.bind(now, id, userId)
 			.run();
 		return { archived: true, kind: "node", id };
+	}
+	if (kind === "candidate") {
+		await env.DB.prepare("UPDATE candidates SET deleted_at = ? WHERE id = ? AND user_id = ?")
+			.bind(now, id, userId)
+			.run();
+		return { archived: true, kind: "candidate", id };
 	}
 	return { archived: false, reason: "unsupported kind" };
 }

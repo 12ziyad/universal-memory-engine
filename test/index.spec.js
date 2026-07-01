@@ -69,7 +69,7 @@ describe("v1 routes (with a valid api key)", () => {
 		expect(response.status).toBe(200);
 		const graphBody = await response.json();
 		expect(graphBody).toMatchObject({ nodes: [], pages: [], edges: [], candidates: [] });
-		expect(graphBody.stats).toEqual({ pages: 0, nodes: 0, slices: 0, events: 0, edges: 0, candidates: 0 });
+		expect(graphBody.stats).toEqual({ pages: 0, nodes: 0, clusters: 0, slices: 0, events: 0, edges: 0, candidates: 0 });
 		expect(typeof graphBody.model).toBe("string");
 		expect(Array.isArray(graphBody.models)).toBe(true);
 	});

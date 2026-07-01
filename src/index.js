@@ -21,6 +21,7 @@ import {
 	deleteLastExtraction,
 	deleteObject,
 } from "./pipeline/cleanup.js";
+import { buildClusterPayload, organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
 
 export { UserMemory } from "./durable/user-memory.js";
@@ -97,16 +98,24 @@ const routes = {
 			eventsByNode.get(event.node_id).push(event);
 		}
 
-		const nodes = nodesResult.results.map((node) => ({
+		const nodes = nodesResult.results.map((node) => withCluster({
 			...node,
 			slices: slicesByNode.get(node.id) ?? [],
 			events: eventsByNode.get(node.id) ?? [],
 		}));
+		const pages = pagesResult.results.map((page) => withCluster({
+			...page,
+			title: page.title,
+			category: page.topic_filter ?? "interest",
+			summary: page.short_summary,
+		}));
+		const clusters = buildClusterPayload(nodes, pages);
 
 		const config = getConfig(env);
 		const stats = {
 			nodes: nodes.length,
-			pages: pagesResult.results.length,
+			pages: pages.length,
+			clusters: clusters.length,
 			slices: slicesResult.results.length,
 			events: eventsResult.results.length,
 			edges: edgesResult.results.length,
@@ -115,7 +124,8 @@ const routes = {
 
 		return json({
 			nodes,
-			pages: pagesResult.results,
+			pages,
+			clusters,
 			edges: edgesResult.results,
 			candidates: candidatesResult.results,
 			stats,
@@ -195,6 +205,12 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		if (!body.userId) return json({ error: "userId is required" }, 400);
 		return json(await clearFailedReceipts(env, body.userId));
+	},
+
+	"POST /v1/actions/organize-clusters": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId) return json({ error: "userId is required" }, 400);
+		return json(await organizeUserClusters(env, body.userId));
 	},
 
 	"POST /v1/recall": async (request, env) => {

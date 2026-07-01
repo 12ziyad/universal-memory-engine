@@ -9,6 +9,7 @@ import {
 	updateExtractionRun,
 } from "../lib/db.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
+import { clusterForMemory } from "./clusters.js";
 import { canonicalTitle, generateTitle } from "./title.js";
 
 const RELATED_HINTS = [
@@ -187,6 +188,12 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 		evidence,
 	};
 	const fullMarkdown = markdownFor({ title, overview, keyPoints, decisions, technical, nextSteps, related, evidence });
+	const cluster = clusterForMemory({
+		title,
+		category: intent.topic ?? "interest",
+		summary: overview,
+		text,
+	});
 	return {
 		id: newId("page"),
 		node_id: null,
@@ -209,7 +216,7 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 		confidence: evidence.some((e) => e.source_type === "user_message") ? 0.9 : 0.78,
 		health_state: "active",
 		importance_class: decisions.length ? "important" : "ordinary",
-		cluster: intent.topic ? normalizeLabel(intent.topic) : canonicalTitle(title),
+		cluster,
 		role_type: "container",
 		related,
 		evidence,

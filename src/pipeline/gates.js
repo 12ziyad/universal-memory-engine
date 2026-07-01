@@ -31,6 +31,7 @@ import {
 import { newId } from "../lib/ids.js";
 import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, getUserNodes } from "../lib/db.js";
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
+import { clusterForMemory } from "./clusters.js";
 import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
@@ -224,12 +225,13 @@ export async function applyGates(
 	/** Create a brand-new node and make it resolvable for the rest of this batch. */
 	function createNode(label, category, role = null, state = null, auto = false) {
 		const id = newId("node");
+		const canonicalCategory = canonicalizeCategory(category) ?? "other";
 		plan.newNodes.push({
 			id,
 			user_id: userId,
 			label,
 			canonical_label: normalizeLabel(label),
-			category: canonicalizeCategory(category) ?? "other",
+			category: canonicalCategory,
 			role: role ?? null,
 			state: valid(state, ["active", "paused", "inactive", "completed"], "active"),
 			summary: null,
@@ -239,6 +241,7 @@ export async function applyGates(
 			mention_count: 1,
 			session_count: 1,
 			heat_score: 1,
+			cluster: clusterForMemory({ label, category: canonicalCategory }),
 		});
 		resolved.set(normalizeLabel(label), id);
 		existing.push({ id, label, category, state: "active" });
