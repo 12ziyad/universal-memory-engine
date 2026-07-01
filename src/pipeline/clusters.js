@@ -1,12 +1,28 @@
 import { normalizeLabel, tokens } from "../lib/text.js";
 
+function layout(x, y, count = 1) {
+	const n = Math.max(1, Number(count || 1));
+	const radiusX = Math.round(Math.min(460, Math.max(210, 160 + Math.sqrt(n) * 68)));
+	const radiusY = Math.round(Math.min(310, Math.max(150, 112 + Math.sqrt(n) * 46)));
+	return {
+		x,
+		y,
+		radiusX,
+		radiusY,
+		width: radiusX * 2,
+		height: radiusY * 2,
+		labelX: x,
+		labelY: y - radiusY - 32,
+	};
+}
+
 export const CLUSTERS = [
 	{
 		id: "identity_career",
 		label: "Identity & Career",
 		color: "#58a6ff",
-		x: -460,
-		y: -210,
+		x: -620,
+		y: -300,
 		keywords: ["identity", "career", "job", "work", "software", "engineer", "location", "bangalore"],
 		categories: ["identity", "organization", "place", "person"],
 	},
@@ -14,26 +30,35 @@ export const CLUSTERS = [
 		id: "active_goals",
 		label: "Active Goals",
 		color: "#f0883e",
-		x: 470,
-		y: -220,
+		x: 0,
+		y: -330,
 		keywords: ["goal", "income", "job", "plan", "target", "learning", "future"],
 		categories: ["goal", "life_event"],
+	},
+	{
+		id: "life_family",
+		label: "Life & Family",
+		color: "#ff7ab6",
+		x: 620,
+		y: -300,
+		keywords: ["family", "grandmother", "grandfather", "mother", "father", "relationship", "married", "passed"],
+		categories: ["family", "relationship"],
 	},
 	{
 		id: "projects_systems",
 		label: "Projects & Systems",
 		color: "#bc8cff",
-		x: 0,
-		y: -40,
-		keywords: ["project", "uml", "memory", "engine", "gpm", "app", "mcp", "dashboard", "graph"],
+		x: -380,
+		y: 90,
+		keywords: ["project", "uml", "universal memory", "memory", "engine", "gpm", "app", "mcp", "dashboard", "graph"],
 		categories: ["project", "system"],
 	},
 	{
 		id: "skills_tech",
 		label: "Skillset & Tech",
 		color: "#a371f7",
-		x: -420,
-		y: 230,
+		x: 390,
+		y: 90,
 		keywords: ["skill", "tech", "tool", "machine", "learning", "flutter", "d1", "vectorize", "cloudflare", "ai"],
 		categories: ["skill", "tool"],
 	},
@@ -41,8 +66,8 @@ export const CLUSTERS = [
 		id: "fitness_habits",
 		label: "Fitness & Habits",
 		color: "#7ee787",
-		x: 440,
-		y: 230,
+		x: -620,
+		y: 465,
 		keywords: ["fitness", "health", "habit", "run", "diet", "boxing", "discipline", "morning"],
 		categories: ["health", "habit"],
 	},
@@ -50,26 +75,17 @@ export const CLUSTERS = [
 		id: "preferences_research",
 		label: "Preferences & Research",
 		color: "#d29922",
-		x: 120,
-		y: 300,
+		x: 0,
+		y: 500,
 		keywords: ["research", "preference", "interest", "gta", "ps5", "car", "bike", "purchase"],
 		categories: ["preference", "interest", "possession"],
-	},
-	{
-		id: "life_family",
-		label: "Life & Family",
-		color: "#ff7ab6",
-		x: 0,
-		y: -330,
-		keywords: ["family", "grandmother", "relationship", "married", "passed", "mother", "father"],
-		categories: ["family", "relationship"],
 	},
 	{
 		id: "general_memory",
 		label: "General Memory",
 		color: "#8b949e",
-		x: 0,
-		y: 360,
+		x: 620,
+		y: 465,
 		keywords: [],
 		categories: ["other"],
 	},
@@ -78,11 +94,11 @@ export const CLUSTERS = [
 const BY_ID = new Map(CLUSTERS.map((cluster) => [cluster.id, cluster]));
 
 const SPECIAL_CLUSTER_PATTERNS = [
-	{ id: "projects_systems", re: /\b(uml|universal memory|memory engine|gpmai|memory layer)\b/ },
-	{ id: "fitness_habits", re: /\b(boxing|morning run|diet|fitness|discipline)\b/ },
-	{ id: "active_goals", re: /\b(goal|income|passive income|get a job|job search)\b/ },
+	{ id: "projects_systems", re: /\b(uml|universal memory|memory engine|gpmai|memory layer|mcp|dashboard|d1|vectorize)\b/ },
+	{ id: "fitness_habits", re: /\b(boxing|morning run|diet|fitness|discipline|workout|training)\b/ },
+	{ id: "active_goals", re: /\b(goal|income|passive income|get a job|job search|target|plan)\b/ },
 	{ id: "life_family", re: /\b(grandmother|grandfather|mother|father|family|married|passed away)\b/ },
-	{ id: "preferences_research", re: /\b(gta|ps5|car|bike|purchase research)\b/ },
+	{ id: "preferences_research", re: /\b(gta|ps5|car|bike|purchase research|emi|loan)\b/ },
 ];
 
 function scoreCluster(cluster, haystack, category) {
@@ -121,7 +137,13 @@ export function clusterMeta(id) {
 export function withCluster(item) {
 	const cluster = clusterForMemory(item);
 	const meta = clusterMeta(cluster);
-	return { ...item, cluster, cluster_label: meta.label, cluster_color: meta.color };
+	return {
+		...item,
+		cluster,
+		cluster_label: meta.label,
+		cluster_color: meta.color,
+		cluster_layout: layout(meta.x, meta.y, 1),
+	};
 }
 
 export function buildClusterPayload(nodes = [], pages = []) {
@@ -132,7 +154,20 @@ export function buildClusterPayload(nodes = [], pages = []) {
 	}
 	return CLUSTERS
 		.filter((cluster) => counts.has(cluster.id))
-		.map((cluster) => ({ ...cluster, count: counts.get(cluster.id) ?? 0 }));
+		.map((cluster) => {
+			const count = counts.get(cluster.id) ?? 0;
+			return {
+				...cluster,
+				count,
+				layout: layout(cluster.x, cluster.y, count),
+			};
+		});
+}
+
+export function clusterCounts(nodes = [], pages = []) {
+	const counts = {};
+	for (const cluster of buildClusterPayload(nodes, pages)) counts[cluster.id] = cluster.count;
+	return counts;
 }
 
 export async function organizeUserClusters(env, userId) {
@@ -148,8 +183,11 @@ export async function organizeUserClusters(env, userId) {
 	]);
 	const now = Date.now();
 	const stmts = [];
+	const organizedNodes = [];
+	const organizedPages = [];
 	for (const node of nodesRes.results ?? []) {
 		const cluster = clusterForMemory(node);
+		organizedNodes.push({ ...node, cluster });
 		if (node.cluster !== cluster) {
 			stmts.push(
 				env.DB.prepare("UPDATE nodes SET cluster = ?, updated_at = ? WHERE id = ? AND user_id = ?").bind(
@@ -168,6 +206,7 @@ export async function organizeUserClusters(env, userId) {
 			summary: page.short_summary,
 			cluster: page.cluster,
 		});
+		organizedPages.push({ ...page, cluster });
 		if (page.cluster !== cluster) {
 			stmts.push(
 				env.DB.prepare("UPDATE memory_pages SET cluster = ?, updated_at = ? WHERE id = ? AND user_id = ?").bind(
@@ -180,10 +219,13 @@ export async function organizeUserClusters(env, userId) {
 		}
 	}
 	if (stmts.length) await env.DB.batch(stmts);
+	const clusters = buildClusterPayload(organizedNodes, organizedPages);
 	return {
 		organized: true,
 		updated: stmts.length,
 		nodes: nodesRes.results?.length ?? 0,
 		pages: pagesRes.results?.length ?? 0,
+		clusters,
+		cluster_counts: Object.fromEntries(clusters.map((cluster) => [cluster.id, cluster.count])),
 	};
 }
