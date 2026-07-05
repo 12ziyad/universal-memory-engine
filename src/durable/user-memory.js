@@ -187,6 +187,15 @@ export class UserMemory extends DurableObject {
 		return { chunkSize: chunk.length, checkpoint };
 	}
 
+	/** Clear held ingest state after an explicit DELETE ALL reset. */
+	async resetAll() {
+		await this.ctx.blockConcurrencyWhile(async () => {
+			await this.ctx.storage.deleteAll();
+			this.busy = false;
+		});
+		return { reset: true };
+	}
+
 	async alarm() {
 		const { userId, chunk } = await this.#load();
 		if (!userId || chunk.length === 0) return;

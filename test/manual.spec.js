@@ -216,6 +216,93 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(await candidates(userId)).toHaveLength(0);
 	});
 
+	it("does not update an unrelated UML page for a Microsoft SWE resume discussion", async () => {
+		const userId = "m-microsoft-page-identity";
+		const now = Date.now() - 10_000;
+		await env.DB.prepare(
+			`INSERT INTO memory_pages
+				(id, user_id, source_mode, title, canonical_title, short_summary, full_markdown,
+				 created_at, updated_at, cluster)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+			.bind(
+				"uml-old-page",
+				userId,
+				"manual_collect",
+				"UML Architecture Decisions",
+				"uml architecture decisions",
+				"UML uses Cloudflare Workers, D1, Vectorize, and MCP.",
+				"# UML Architecture Decisions\nUML uses D1 and Vectorize.",
+				now,
+				now,
+				"projects_systems",
+			)
+			.run();
+
+		await save({
+			userId,
+			mode: "conversation",
+			conversationId: "career-chat",
+			messages: [
+				{
+					id: "m1",
+					role: "user",
+					content:
+						"Microsoft Recruiting acknowledged my SWE application for Bangalore. My resume has strong projects, but DSA and interview prep are a risk.",
+				},
+				{
+					id: "m2",
+					role: "assistant",
+					content: "Your projects are strong for the Microsoft SWE resume, but DSA/interview prep is the main risk.",
+				},
+				{
+					id: "m3",
+					role: "user",
+					content:
+						"Microsoft Recruiting acknowledged my SWE application for Bangalore. My resume has strong projects, but DSA and interview prep are a risk.",
+				},
+			],
+			_test: {
+				digestResponse:
+					"Microsoft Recruiting acknowledged the user's SWE application for Bangalore.\nThe user's resume has strong projects.\nDSA and interview prep are the main risk.",
+			},
+		});
+
+		const p = await pages(userId);
+		expect(p).toHaveLength(2);
+		const oldPage = p.find((page) => page.id === "uml-old-page");
+		const careerPage = p.find((page) => page.id !== "uml-old-page");
+		expect(oldPage.title).toBe("UML Architecture Decisions");
+		expect(oldPage.cluster).toBe("projects_systems");
+		expect(careerPage.title).toBe("Microsoft SWE Application and Resume Review");
+		expect(careerPage.cluster).toBe("career_applications");
+		const evidence = JSON.parse(careerPage.evidence_json || "[]");
+		expect(evidence.length).toBeLessThanOrEqual(3);
+		expect(new Set(evidence.map((item) => item.snippet)).size).toBe(evidence.length);
+	});
+
+	it("still updates an existing page when the new collect is strongly the same topic", async () => {
+		const userId = "m-same-topic-page-update";
+		await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [{ role: "user", content: "Car mileage matters for purchase research." }],
+			_test: { digestResponse: "Car mileage matters for purchase research." },
+		});
+		await save({
+			userId,
+			mode: "conversation",
+			topic: "car",
+			messages: [{ role: "user", content: "Car service cost is also important." }],
+			_test: { digestResponse: "Car service cost is important for purchase research." },
+		});
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		expect(p[0].title).toBe("Car Research");
+		expect(p[0].heat_score).toBeGreaterThan(1);
+	});
+
 	it("returns a clear 'Saved: 0' when the chat has no durable facts", async () => {
 		const userId = "m-conv-empty";
 		const { body } = await save({

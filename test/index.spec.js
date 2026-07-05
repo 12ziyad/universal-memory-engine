@@ -81,7 +81,7 @@ describe("v1 routes (with a valid api key)", () => {
 			body: JSON.stringify({ userId: "abc", query: "hi" }),
 		});
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ context: "", nodes: [] });
+		expect(await response.json()).toEqual({ context: "", nodes: [], pages: [] });
 	});
 
 	it("POST /v1/recall requires userId and query", async () => {
@@ -144,7 +144,12 @@ describe("D1-backed data with user isolation", () => {
 			user_id: userId,
 			label: "Boxing",
 			category: "habit",
+			visual_type: "node",
+			cluster_id: "fitness_habits",
 		});
+		expect(typeof body.nodes[0].x).toBe("number");
+		expect(typeof body.nodes[0].y).toBe("number");
+		expect(body.nodes[0].radius).toBeGreaterThan(0);
 		expect(body.nodes[0].slices).toHaveLength(1);
 		expect(body.nodes[0].slices[0]).toMatchObject({ text: "trains three days a week" });
 		expect(body.nodes[0].events).toHaveLength(1);
@@ -177,6 +182,53 @@ describe("D1-backed data with user isolation", () => {
 			candidates: 0,
 			lastCheckpoint: null,
 		});
+	});
+});
+
+describe("graph layout for memory pages", () => {
+	const headers = { "x-api-key": env.API_KEY };
+	const userId = "user-layout-page";
+	const now = Date.now();
+
+	beforeAll(async () => {
+		await env.DB.prepare(
+			`INSERT INTO memory_pages
+			 (id, user_id, source_mode, title, canonical_title, short_summary, key_points_json,
+			  related_concepts_json, created_at, updated_at, heat_score, cluster)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+			.bind(
+				"page-layout",
+				userId,
+				"manual_collect",
+				"UML Run 3.2 Memory Pages and Graph UX",
+				"uml run 3 2 memory pages and graph ux",
+				"Memory pages and graph UX.",
+				JSON.stringify(["Backend layout", "Card nodes"]),
+				JSON.stringify(["UML", "Graph UX"]),
+				now,
+				now,
+				4,
+				"projects_systems",
+			)
+			.run();
+	});
+
+	it("GET /v1/graph returns page visual layout data", async () => {
+		const response = await fetch(`/v1/graph?userId=${userId}`, { headers });
+		expect(response.status).toBe(200);
+		const body = await response.json();
+		expect(body.pages).toHaveLength(1);
+		expect(body.pages[0]).toMatchObject({
+			id: "page-layout",
+			visual_type: "page",
+			cluster_id: "projects_systems",
+			cluster_name: "Projects & Systems",
+		});
+		expect(typeof body.pages[0].x).toBe("number");
+		expect(typeof body.pages[0].y).toBe("number");
+		expect(body.pages[0].radius).toBeGreaterThan(30);
+		expect(body.clusters[0].display_label).toContain("Projects & Systems");
 	});
 });
 

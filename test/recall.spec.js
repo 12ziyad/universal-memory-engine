@@ -86,12 +86,55 @@ describe("/v1/recall - simple recall", () => {
 	it("isolates users - a different userId recalls nothing", async () => {
 		const { status, body } = await recall(otherUserId, "boxing");
 		expect(status).toBe(200);
-		expect(body).toEqual({ context: "", nodes: [] });
+		expect(body).toEqual({ context: "", nodes: [], pages: [] });
 	});
 
 	it("returns empty for an unrelated query", async () => {
 		const { status, body } = await recall(userId, "remind me about cooking pasta tonight");
 		expect(status).toBe(200);
-		expect(body).toEqual({ context: "", nodes: [] });
+		expect(body).toEqual({ context: "", nodes: [], pages: [] });
+	});
+});
+
+describe("/v1/recall - memory pages", () => {
+	const pageUserId = "u-recall-page";
+
+	beforeAll(async () => {
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO memory_pages
+			 (id, user_id, source_mode, title, canonical_title, topic_filter, short_summary,
+			  key_points_json, related_concepts_json, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+			.bind(
+				"page-recall",
+				pageUserId,
+				"manual_collect",
+				"UML Run 3.2 Memory Pages and Graph UX",
+				"uml run 3 2 memory pages and graph ux",
+				"uml",
+				"UML added manual_collect memory pages and improved graph UX.",
+				JSON.stringify(["Memory pages stay as pages", "Graph UX uses clean cluster layout"]),
+				JSON.stringify(["UML", "Graph UX", "Cloudflare"]),
+				now,
+				now,
+			)
+			.run();
+	});
+
+	it("recalls a manual_collect memory page with compact page context", async () => {
+		const { status, body } = await recall(pageUserId, "graph UX memory pages");
+		expect(status).toBe(200);
+		expect(body.nodes).toHaveLength(0);
+		expect(body.pages).toHaveLength(1);
+		expect(body.pages[0]).toMatchObject({
+			id: "page-recall",
+			title: "UML Run 3.2 Memory Pages and Graph UX",
+			source_mode: "manual_collect",
+		});
+		expect(body.context).toContain("Memory page: UML Run 3.2 Memory Pages and Graph UX");
+		expect(body.context).toContain("Memory pages stay as pages");
+		expect(body.context).not.toContain("# UML");
 	});
 });

@@ -111,7 +111,7 @@ export function buildMemoryServer(env, ctx, userId) {
 		},
 		async ({ query }) => {
 			const res = await recall(env, getConfig(env), userId, query);
-			if (!res.nodes.length) return text("No relevant memory found for that.");
+			if (!res.nodes.length && !res.pages.length) return text("No relevant memory found for that.");
 			return text(res.context);
 		},
 	);

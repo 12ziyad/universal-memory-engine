@@ -10,6 +10,7 @@ import {
 } from "../lib/db.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
 import { clusterForMemory } from "./clusters.js";
+import { dedupeEvidence, overlapRatio, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle } from "./title.js";
 
 const RELATED_HINTS = [
@@ -127,25 +128,57 @@ function relatedConcepts(lines, title, topic) {
 		.slice(0, 16);
 }
 
+function evidenceOverlap(line, text) {
+	const lineNorm = normalizeLabel(line);
+	const textNorm = normalizeLabel(text);
+	if (!lineNorm || !textNorm) return false;
+	if (textNorm.includes(lineNorm.slice(0, Math.min(100, lineNorm.length)))) return true;
+	const lineTokens = tokens(line);
+	const textTokens = tokens(text);
+	if (!lineTokens.length || !textTokens.length) return false;
+	const shared = lineTokens.filter((token) => textTokens.includes(token)).length;
+	return shared >= Math.min(4, Math.ceil(lineTokens.length * 0.5));
+}
+
+function clampSnippet(text) {
+	const clean = String(text ?? "").replace(/\s+/g, " ").trim();
+	if (clean.length <= 900) return clean;
+	return `${clean.slice(0, 897).trim()}...`;
+}
+
 function buildEvidence(lines, messages, receiptId) {
-	const userLines = (messages ?? [])
-		.filter((m) => (m.role ?? "user") === "user")
-		.map((m) => ({ text: String(m.content ?? "").trim(), ts: m.ts ?? null, id: m.id ?? null }))
+	const messageLines = (messages ?? [])
+		.filter((m) => ["user", "assistant"].includes(m.role ?? "user"))
+		.map((m) => ({ role: m.role ?? "user", text: String(m.content ?? "").trim(), ts: m.ts ?? null, id: m.id ?? null }))
 		.filter((m) => m.text);
 	const evidence = [];
-	for (const line of lines.slice(0, 12)) {
-		const match = userLines.find((m) => normalizeLabel(m.text).includes(normalizeLabel(line).slice(0, 80)));
+
+	for (const msg of messageLines) {
+		if (!lines.some((line) => evidenceOverlap(line, msg.text))) continue;
 		evidence.push({
-			source_type: match ? "user_message" : "digest",
-			source_message_id: match?.id ?? null,
-			source_role: match ? "user" : "digest",
-			snippet: match?.text ?? line,
-			timestamp: match?.ts ?? null,
+			source_type: `${msg.role}_message`,
+			source_message_id: msg.id ?? null,
+			source_role: msg.role,
+			snippet: clampSnippet(msg.text),
+			timestamp: msg.ts ?? null,
 			receipt_id: receiptId ?? null,
-			confidence: match ? 0.92 : 0.75,
+			confidence: msg.role === "user" ? 0.92 : 0.72,
 		});
 	}
-	return evidence;
+
+	const digestSnippet = lines.slice(0, 8).join(" ");
+	if (digestSnippet) {
+		evidence.push({
+			source_type: "digest",
+			source_message_id: null,
+			source_role: "digest",
+			snippet: clampSnippet(digestSnippet),
+			timestamp: null,
+			receipt_id: receiptId ?? null,
+			confidence: 0.75,
+		});
+	}
+	return dedupeEvidence(evidence, 12);
 }
 
 function markdownFor({ title, overview, keyPoints, decisions, technical, nextSteps, related, evidence }) {
@@ -177,7 +210,7 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 	const keyPoints = uniq(lines).slice(0, 30);
 	const overview = keyPoints.slice(0, 3).join(" ");
 	const related = relatedConcepts(lines, title, intent.topic);
-	const evidence = buildEvidence(lines, messages);
+	const evidence = buildEvidence(lines, messages, extractionRunId);
 	const sections = {
 		overview,
 		keyPoints,
@@ -226,15 +259,79 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 	};
 }
 
+function pageMatchPayload(page) {
+	return {
+		title: page.title,
+		topic: page.topic_filter,
+		summary: page.short_summary,
+		text: [
+			page.full_markdown,
+			page.key_points_json,
+			page.related_concepts_json,
+		].filter(Boolean).join("\n"),
+	};
+}
+
+function titleSimilarity(a, b) {
+	const left = normalizeLabel(a);
+	const right = normalizeLabel(b);
+	if (!left || !right) return 0;
+	if (left === right) return 1;
+	if (left.includes(right) || right.includes(left)) return 0.82;
+	return overlapRatio(tokens(left), tokens(right));
+}
+
+function clusterCompatible(page, draft) {
+	if (!page.cluster || !draft.cluster) return true;
+	if (page.cluster === draft.cluster) return true;
+	return page.cluster === "general_memory" || draft.cluster === "general_memory";
+}
+
+function scorePageMatch(page, draft, intent, conversationId) {
+	const similarity = topicSimilarity(pageMatchPayload(page), {
+		title: draft.title,
+		topic: draft.topic_filter,
+		summary: draft.short_summary,
+		text: [draft.full_markdown, draft.key_points_json, draft.related_concepts_json].join("\n"),
+	});
+	const sameTopic = Boolean(draft.topic_filter && page.topic_filter && page.topic_filter === draft.topic_filter);
+	const sameTitle = page.canonical_title === draft.canonical_title;
+	const sameConversation = Boolean(conversationId && page.source_conversation_id === conversationId);
+	const titleScore = Math.max(titleSimilarity(page.title, draft.title), titleSimilarity(page.canonical_title, draft.canonical_title));
+	const compatible = clusterCompatible(page, draft);
+	const pageSig = similarity.left;
+	const draftSig = similarity.right;
+	const domainConflict = pageSig.domainId && draftSig.domainId && pageSig.domainId !== draftSig.domainId;
+	let score =
+		similarity.score * 0.48 +
+		titleScore * 0.24 +
+		(sameTopic ? 0.2 : 0) +
+		(sameTitle ? 0.18 : 0) +
+		(sameConversation && intent.updateRequested ? 0.08 : 0) +
+		(compatible ? 0.08 : -0.22);
+	if (domainConflict) score -= 0.18;
+	const strong =
+		compatible &&
+		!domainConflict &&
+		(score >= 0.62 ||
+			(sameTopic && score >= 0.52) ||
+			(sameTitle && similarity.score >= 0.22) ||
+			(sameConversation && intent.updateRequested && score >= 0.58));
+	return {
+		page,
+		score,
+		strong,
+		reasons: { sameTopic, sameTitle, sameConversation, compatible, domainConflict, titleScore, topicScore: similarity.score },
+	};
+}
+
 function findPageMatch(pages, draft, intent, conversationId) {
 	if (intent.explicitNew) return null;
-	const sameConversation = (p) => conversationId && p.source_conversation_id === conversationId;
-	const sameTopic = (p) => draft.topic_filter && p.topic_filter === draft.topic_filter;
-	const sameTitle = (p) => p.canonical_title === draft.canonical_title;
-	return pages.find((p) => (
-		p.source_mode === "manual_collect" &&
-		(sameTopic(p) || sameTitle(p) || (intent.updateRequested && sameConversation(p)))
-	)) ?? null;
+	const scored = (pages ?? [])
+		.filter((p) => p.source_mode === "manual_collect")
+		.map((page) => scorePageMatch(page, draft, intent, conversationId))
+		.sort((a, b) => b.score - a.score || String(b.page.updated_at ?? 0).localeCompare(String(a.page.updated_at ?? 0)));
+	return scored.find((item) => item.strong)?.page ?? null;
 }
 
 function suppressedBy(rows, kind, key) {

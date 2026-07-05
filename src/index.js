@@ -16,13 +16,15 @@ import { saveMemory, saveConversation } from "./pipeline/manual.js";
 import { getUserReceipts } from "./lib/db.js";
 import {
 	archiveObject,
-	cleanupJunkNodes,
+	cleanJunkMemories,
 	clearFailedReceipts,
 	deleteAllMemories,
 	deleteLastExtraction,
 	deleteObject,
+	repairGraph,
 } from "./pipeline/cleanup.js";
-import { buildClusterPayload, clusterCounts, organizeUserClusters, withCluster } from "./pipeline/clusters.js";
+import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
+import { buildGraphLayout } from "./pipeline/layout.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
 
 export { UserMemory } from "./durable/user-memory.js";
@@ -50,11 +52,6 @@ function isAuthorized(request, env) {
 	return Boolean(env.API_KEY) && key === env.API_KEY;
 }
 
-function graphWhereForMode(mode) {
-	if (mode === "all" || mode === "debug") return "deleted_at IS NULL";
-	return "deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL AND COALESCE(health_state, 'active') != 'junk'";
-}
-
 const routes = {
 	"GET /health": () => json({ ok: true, service: "memory-engine", version: "0.1.0" }),
 
@@ -77,42 +74,29 @@ const routes = {
 	},
 
 	"GET /v1/graph": async (request, env) => {
-		const url = new URL(request.url);
-		const userId = url.searchParams.get("userId");
+		const userId = new URL(request.url).searchParams.get("userId");
 		if (!userId) return json({ error: "userId is required" }, 400);
-		const mode = ["clean", "all", "focus", "debug"].includes(url.searchParams.get("mode"))
-			? url.searchParams.get("mode")
-			: ["clean", "all", "focus", "debug"].includes(url.searchParams.get("viewMode"))
-				? url.searchParams.get("viewMode")
-				: "clean";
-		const nodeWhere = graphWhereForMode(mode);
-		const pageWhere = nodeWhere;
-		const candidateWhere = mode === "all" || mode === "debug" ? "deleted_at IS NULL" : "deleted_at IS NULL AND suppressed_at IS NULL";
 
 		// The whole brain for one user: nodes with ALL their slices (current + old,
-		// each carrying is_current) and their events newest-first, plus real edges and
-		// loose candidates. Graph mode only controls what is visible; it never creates
-		// fake persisted relations.
+		// each carrying is_current) and their events newest-first, plus edges and
+		// the loose "maybe" candidates. The graph page renders all of it.
 		const [nodesResult, pagesResult, slicesResult, eventsResult, edgesResult, candidatesResult] = await env.DB.batch([
-			env.DB.prepare(`SELECT * FROM nodes WHERE user_id = ? AND ${nodeWhere}`).bind(userId),
-			env.DB.prepare(`SELECT * FROM memory_pages WHERE user_id = ? AND ${pageWhere} ORDER BY updated_at DESC`).bind(userId),
+			env.DB.prepare("SELECT * FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
+			env.DB.prepare("SELECT * FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL ORDER BY updated_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM slices WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM edges WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
-			env.DB.prepare(`SELECT * FROM candidates WHERE user_id = ? AND ${candidateWhere} ORDER BY created_at DESC`).bind(userId),
+			env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL ORDER BY created_at DESC").bind(userId),
 		]);
 
-		const visibleNodeIds = new Set(nodesResult.results.map((node) => node.id));
 		const slicesByNode = new Map();
 		for (const slice of slicesResult.results) {
-			if (!visibleNodeIds.has(slice.node_id)) continue;
 			if (!slicesByNode.has(slice.node_id)) slicesByNode.set(slice.node_id, []);
 			slicesByNode.get(slice.node_id).push(slice);
 		}
 
 		const eventsByNode = new Map();
 		for (const event of eventsResult.results) {
-			if (!visibleNodeIds.has(event.node_id)) continue;
 			if (!eventsByNode.has(event.node_id)) eventsByNode.set(event.node_id, []);
 			eventsByNode.get(event.node_id).push(event);
 		}
@@ -128,30 +112,32 @@ const routes = {
 			category: page.topic_filter ?? "interest",
 			summary: page.short_summary,
 		}));
-		const clusters = buildClusterPayload(nodes, pages);
-		const counts = clusterCounts(nodes, pages);
+		const candidates = candidatesResult.results.map((candidate) => withCluster({
+			...candidate,
+			category: candidate.cluster_hint ?? "interest",
+			cluster: candidate.cluster_hint,
+			summary: null,
+		}));
+		const layout = buildGraphLayout(nodes, pages, candidates);
 
 		const config = getConfig(env);
 		const stats = {
-			nodes: nodes.length,
-			pages: pages.length,
-			clusters: clusters.length,
-			cluster_counts: counts,
-			slices: slicesResult.results.filter((slice) => visibleNodeIds.has(slice.node_id)).length,
-			events: eventsResult.results.filter((event) => visibleNodeIds.has(event.node_id)).length,
+			nodes: layout.nodes.length,
+			pages: layout.pages.length,
+			clusters: layout.clusters.length,
+			slices: slicesResult.results.length,
+			events: eventsResult.results.length,
 			edges: edgesResult.results.length,
-			candidates: candidatesResult.results.length,
+			candidates: layout.candidates.length,
 		};
 
 		return json({
-			nodes,
-			pages,
-			clusters,
-			cluster_counts: counts,
+			nodes: layout.nodes,
+			pages: layout.pages,
+			clusters: layout.clusters,
 			edges: edgesResult.results,
-			candidates: candidatesResult.results,
+			candidates: layout.candidates,
 			stats,
-			view_mode: mode,
 			model: config.llm.model,
 			models: EXTRACTION_MODELS,
 		});
@@ -217,14 +203,6 @@ const routes = {
 		return json(await archiveObject(env, body.userId, body));
 	},
 
-	"POST /v1/actions/delete-all-memory": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		const result = await deleteAllMemories(env, body.userId, body.confirm);
-		return json(result, result.deleted ? 200 : 400);
-	},
-
-	// Backward-compatible alias. It now uses the safer Run 3.4 confirmation text.
 	"POST /v1/actions/delete-all": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
 		if (!body.userId) return json({ error: "userId is required" }, 400);
@@ -232,11 +210,10 @@ const routes = {
 		return json(result, result.deleted ? 200 : 400);
 	},
 
-	"POST /v1/actions/cleanup-junk-nodes": async (request, env) => {
+	"POST /v1/actions/clean-junk": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
 		if (!body.userId) return json({ error: "userId is required" }, 400);
-		const result = await cleanupJunkNodes(env, body.userId, body);
-		return json(result, result.cleaned || result.dryRun ? 200 : 400);
+		return json(await cleanJunkMemories(env, body.userId, { confirm: body.confirm }));
 	},
 
 	"POST /v1/actions/clear-failed-receipts": async (request, env) => {
@@ -249,6 +226,12 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		if (!body.userId) return json({ error: "userId is required" }, 400);
 		return json(await organizeUserClusters(env, body.userId));
+	},
+
+	"POST /v1/actions/repair-graph": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		if (!body.userId) return json({ error: "userId is required" }, 400);
+		return json(await repairGraph(env, body.userId, body));
 	},
 
 	"POST /v1/recall": async (request, env) => {

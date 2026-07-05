@@ -35,8 +35,9 @@ Most AI tools keep memory inside one product. That makes memory fragmented:
 - Manual memory save path for explicit "remember this" flows.
 - Conversation save path that digests recent messages before extraction.
 - Recall path that returns compact personal context for assistants.
+- Recall includes both structured graph nodes and compact manual_collect memory pages.
 - MCP Streamable HTTP endpoint for ChatGPT, Claude, and compatible clients.
-- Dashboard with graph, node list, cards, table, timeline, receipts, setup, test, and model views.
+- Dashboard with deterministic graph layout, procedural cluster hulls, dynamic semantic clusters, latest-first sidebars, clean/all/focus/debug graph modes, node list, cards, table, timeline, receipts, reset, setup, test, and model views.
 - D1 relational storage for graph entities.
 - Durable Object per user for batching, retries, and background extraction.
 - Workers AI model configuration for extraction, digesting, summaries, and embeddings.
@@ -82,6 +83,7 @@ Dashboard + recall context
 | Entity | Purpose |
 | --- | --- |
 | `nodes` | Stable memory objects such as "Grandmother", "Boxing", or a project |
+| `memory_pages` | Manual_collect conversation pages with title, summary, key points, related concepts, and evidence |
 | `slices` | Durable descriptive facts attached to nodes |
 | `events` | Timeline entries that change or describe node state |
 | `edges` | Directed relationships between nodes |
@@ -120,16 +122,20 @@ MCP identity is encoded in the connector URL path as a per-user token. Treat gen
 | `/v1/receipts` | `GET` | `x-api-key` | Load recent save receipts. |
 | `/v1/status` | `GET` | `x-api-key` | Return graph counts and checkpoint state. |
 | `/v1/ingest` | `POST` | `x-api-key` | Batch message ingestion through the Durable Object. |
+| `/v1/actions/repair-graph` | `POST` | `x-api-key` | Organize clusters, preview/clean junk with confirmation, repair safe page titles, and return a receipt. |
+| `/v1/actions/clean-junk` | `POST` | `x-api-key` | Preview junk-looking nodes/candidates; archives/suppresses only with `CLEAN JUNK`. |
+| `/v1/actions/delete-all` | `POST` | `x-api-key` | Reset one selected user's memory rows only with `DELETE ALL`. |
 | `/mcp/<token>` | MCP | URL token | Streamable HTTP MCP endpoint. |
 
 ## Dashboard
 
 The web dashboard is served from `public/index.html`.
 
-- Graph view with category-colored nodes, fitting, selection focus, and empty/error states.
+- Graph view with backend-computed spaced positions, procedural canvas cluster hulls that fit visible nodes, subtle reduced-motion-aware hull polish, memory-page card nodes, UI-only related-concept guide lines, clean/all/focus/debug modes, fitting, selection focus, and empty/error states.
 - Node list for quick navigation.
 - Cards, table, and timeline views for inspecting saved memory.
 - Saves/receipts view for save results and background processing.
+- Reset view for selected-user-only memory deletion gated by exact `DELETE ALL` confirmation.
 - Setup view for API and MCP connection details.
 - Test panel for manual save, conversation save, and recall checks.
 - Model panel for seeing configured extraction model options.
@@ -212,10 +218,12 @@ If a key or MCP URL was exposed in chat, screenshots, logs, or a public repo, ro
 
 ## Current Status
 
-- Run 3.1 is deployed at `https://uml.gpmai.workers.dev`.
+- Run 3.4.4 is implemented in this repo: memory page identity, dynamic semantic clusters, evidence dedupe, sidebar latest-first ordering, graph spacing/color/living hull polish, safer cleanup/reset UX, graph repair, and title-quality fixes.
 - Tests pass locally.
 - Active extraction model is `@cf/qwen/qwen3-30b-a3b-fp8`.
-- Manual saves, conversation saves, recall, graph loading, receipts, and MCP tools are built.
+- Manual saves, conversation saves, memory page recall, graph loading, receipts, and MCP tools are built.
+- Graph view supports clean, all, focus, and debug modes. Clean is the default.
+- Safe reset/delete-all requires the exact confirmation string `DELETE ALL` for the selected user.
 - Path B live observation is intentionally not built yet.
 
 ## Roadmap

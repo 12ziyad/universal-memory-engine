@@ -1,32 +1,21 @@
 /**
- * Simple recall — given a user's free-text query, find the handful of their
- * memory nodes most relevant to it and return a compact, chat-ready context.
+ * Compact recall for graph nodes and manual_collect memory pages.
  *
- * Two signals, merged (same shape as the extraction shortlist):
- *   - keyword match in D1 (query words vs each node's label / summary / slice
- *     and event text),
- *   - semantic match via Vectorize (embed the query, find nearest node vectors).
- *
- * Vectorize/AI are optional; with vectors disabled (tests, local dev without
- * --remote) it degrades cleanly to keyword-only. This is deliberately light —
- * no heavy ranking or compression yet — and never returns the whole graph.
+ * D1 keyword recall is always available. Vectorize remains a best-effort boost
+ * for node ids only, so local tests stay deterministic when vectors are off.
  */
 
 import { embed } from "../lib/embeddings.js";
 import { queryNodeVectors } from "../lib/vectorize.js";
 import { tokens, normalizeLabel, wordContains } from "../lib/text.js";
 
-const TOP_N = 8; // nodes returned at most
-const MAX_EVENTS_PER_NODE = 8; // recent events kept per node
-const EVENT_SCAN_LIMIT = 500; // cap rows scanned for recent events
-const MAX_CONTEXT_NODES = 6; // lines in the context string
-const MAX_LINE_ITEMS = 4; // slice/event snippets per context line
+const TOP_N = 8;
+const MAX_EVENTS_PER_NODE = 8;
+const EVENT_SCAN_LIMIT = 500;
+const MAX_CONTEXT_NODES = 6;
+const MAX_CONTEXT_PAGES = 4;
+const MAX_LINE_ITEMS = 4;
 
-/**
- * Loose token match so "train" finds "trains"/"training" without a full stemmer:
- * equal, or one is a prefix of the other (only for tokens long enough that a
- * prefix is meaningful, to avoid matching short noise like "do").
- */
 function tokenMatches(a, b) {
 	if (a === b) return true;
 	if (a.length >= 4 && b.startsWith(a)) return true;
@@ -42,31 +31,54 @@ function keywordScore(corpusTokens, queryTokens) {
 	return matched;
 }
 
-/** One readable line per node a chat model can drop straight into its prompt. */
-function buildContext(nodes) {
+function parseJsonArray(value) {
+	try {
+		const parsed = JSON.parse(value || "[]");
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function buildContext(entries) {
 	const lines = [];
-	for (const n of nodes.slice(0, MAX_CONTEXT_NODES)) {
-		const sliceTexts = n.slices.map((s) => s.text);
-		// events arrive newest-first; read them chronologically in the summary.
-		const eventTexts = [...n.events].reverse().map((e) => e.text);
-		const items = [...sliceTexts, ...eventTexts].filter(Boolean).slice(0, MAX_LINE_ITEMS);
-		const tail = items.length ? ` — ${items.join("; ")}` : "";
-		lines.push(`${n.label} (${n.category}, state: ${n.state})${tail}`);
+	let nodeCount = 0;
+	let pageCount = 0;
+	for (const entry of entries) {
+		if (entry.type === "node" && nodeCount < MAX_CONTEXT_NODES) {
+			const n = entry.item;
+			const sliceTexts = n.slices.map((s) => s.text);
+			const eventTexts = [...n.events].reverse().map((e) => e.text);
+			const items = [...sliceTexts, ...eventTexts].filter(Boolean).slice(0, MAX_LINE_ITEMS);
+			const tail = items.length ? ` - ${items.join("; ")}` : "";
+			lines.push(`${n.label} (${n.category}, state: ${n.state})${tail}`);
+			nodeCount++;
+		}
+		if (entry.type === "page" && pageCount < MAX_CONTEXT_PAGES) {
+			const p = entry.item;
+			const points = (p.key_points ?? []).slice(0, 3);
+			const tail = [p.short_summary, points.length ? `Key points: ${points.join("; ")}` : ""]
+				.filter(Boolean)
+				.join(" ");
+			lines.push(`Memory page: ${p.title}${tail ? ` - ${tail}` : ""}`);
+			pageCount++;
+		}
 	}
 	return lines.join("\n");
 }
 
-/**
- * @returns {Promise<{ context: string, nodes: Array<{id,label,category,state,slices,events}> }>}
- */
 export async function recall(env, config, userId, query) {
 	const q = String(query ?? "").trim();
 
-	// Pull this user's graph slice in one round trip. Every read is scoped by
-	// user_id — there is no cross-user path.
-	const [nodesRes, slicesRes, eventsRes] = await env.DB.batch([
+	const [nodesRes, pagesRes, slicesRes, eventsRes] = await env.DB.batch([
 		env.DB.prepare(
 			`SELECT id, label, category, state, summary FROM nodes
+			 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
+		).bind(userId),
+		env.DB.prepare(
+			`SELECT id, title, topic_filter, short_summary, key_points_json, decisions_json,
+				 next_steps_json, related_concepts_json, updated_at, heat_score, source_mode
+			 FROM memory_pages
 			 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
 		).bind(userId),
 		env.DB.prepare(
@@ -78,9 +90,11 @@ export async function recall(env, config, userId, query) {
 	]);
 
 	const nodes = nodesRes.results ?? [];
-	if (nodes.length === 0 || q.length === 0) return { context: "", nodes: [] };
+	const pages = pagesRes.results ?? [];
+	if ((nodes.length === 0 && pages.length === 0) || q.length === 0) {
+		return { context: "", nodes: [], pages: [] };
+	}
 
-	// Bucket slices/events by node.
 	const slicesByNode = new Map();
 	for (const s of slicesRes.results ?? []) {
 		if (!slicesByNode.has(s.node_id)) slicesByNode.set(s.node_id, []);
@@ -89,16 +103,17 @@ export async function recall(env, config, userId, query) {
 	const eventsByNode = new Map();
 	for (const e of eventsRes.results ?? []) {
 		const list = eventsByNode.get(e.node_id) ?? [];
-		if (list.length < MAX_EVENTS_PER_NODE) list.push(e); // already newest-first
+		if (list.length < MAX_EVENTS_PER_NODE) list.push(e);
 		eventsByNode.set(e.node_id, list);
 	}
 
 	const queryTokens = tokens(q);
 	const queryNorm = normalizeLabel(q);
 	const byId = new Map(nodes.map((n) => [n.id, n]));
+	const pageById = new Map(pages.map((p) => [p.id, p]));
 	const scores = new Map();
+	const pageScores = new Map();
 
-	// 1. Keyword signal — query tokens vs label + summary + slice/event text.
 	for (const node of nodes) {
 		const slices = slicesByNode.get(node.id) ?? [];
 		const events = eventsByNode.get(node.id) ?? [];
@@ -106,37 +121,83 @@ export async function recall(env, config, userId, query) {
 			.filter(Boolean)
 			.join(" ");
 		let score = keywordScore(tokens(corpus), queryTokens);
-		// Strong boost when the node's label appears as a whole word in the query.
 		if (wordContains(queryNorm, normalizeLabel(node.label))) score += 2;
 		if (score > 0) scores.set(node.id, score);
 	}
 
-	// 2. Semantic signal (best-effort; a no-op when vectors are disabled).
+	for (const page of pages) {
+		const keyPoints = parseJsonArray(page.key_points_json);
+		const decisions = parseJsonArray(page.decisions_json);
+		const nextSteps = parseJsonArray(page.next_steps_json);
+		const related = parseJsonArray(page.related_concepts_json);
+		const corpus = [
+			page.title,
+			page.topic_filter,
+			page.short_summary,
+			...keyPoints,
+			...decisions,
+			...nextSteps,
+			...related,
+		].filter(Boolean).join(" ");
+		let score = keywordScore(tokens(corpus), queryTokens);
+		if (wordContains(queryNorm, normalizeLabel(page.title))) score += 3;
+		if (related.some((r) => wordContains(queryNorm, normalizeLabel(r)))) score += 1.5;
+		if (score > 0) pageScores.set(page.id, score + Number(page.heat_score ?? 1) * 0.1);
+	}
+
 	const vector = await embed(env, config, q);
 	const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: TOP_N + 4 });
 	for (const m of matches) {
 		if (byId.has(m.id)) scores.set(m.id, (scores.get(m.id) ?? 0) + (m.score ?? 0));
 	}
 
-	if (scores.size === 0) return { context: "", nodes: [] };
+	if (scores.size === 0 && pageScores.size === 0) return { context: "", nodes: [], pages: [] };
 
-	// Merge, sort, cut to the top N.
-	const topIds = [...scores.entries()]
-		.sort((a, b) => b[1] - a[1])
+	const entries = [
+		...[...scores.entries()].map(([id, score]) => ({ type: "node", id, score })),
+		...[...pageScores.entries()].map(([id, score]) => ({ type: "page", id, score })),
+	]
+		.sort((a, b) => b.score - a.score)
 		.slice(0, TOP_N)
-		.map(([id]) => id);
+		.map((entry) => ({
+			...entry,
+			item: entry.type === "node" ? byId.get(entry.id) : pageById.get(entry.id),
+		}))
+		.filter((entry) => entry.item);
 
-	const resultNodes = topIds.map((id) => {
-		const n = byId.get(id);
+	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => {
+		const n = byId.get(entry.id);
 		return {
 			id: n.id,
 			label: n.label,
 			category: n.category,
 			state: n.state,
-			slices: slicesByNode.get(id) ?? [],
-			events: eventsByNode.get(id) ?? [],
+			slices: slicesByNode.get(entry.id) ?? [],
+			events: eventsByNode.get(entry.id) ?? [],
 		};
 	});
 
-	return { context: buildContext(resultNodes), nodes: resultNodes };
+	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => {
+		const page = pageById.get(entry.id);
+		return {
+			id: page.id,
+			title: page.title,
+			source_mode: page.source_mode,
+			topic_filter: page.topic_filter,
+			short_summary: page.short_summary,
+			key_points: parseJsonArray(page.key_points_json).slice(0, 6),
+			related_concepts: parseJsonArray(page.related_concepts_json).slice(0, 8),
+		};
+	});
+
+	const contextEntries = entries.map((entry) => {
+		if (entry.type === "node") {
+			const node = resultNodes.find((n) => n.id === entry.id);
+			return node ? { type: "node", item: node } : null;
+		}
+		const page = resultPages.find((p) => p.id === entry.id);
+		return page ? { type: "page", item: page } : null;
+	}).filter(Boolean);
+
+	return { context: buildContext(contextEntries), nodes: resultNodes, pages: resultPages };
 }

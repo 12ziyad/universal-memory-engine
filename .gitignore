@@ -170,3 +170,4 @@ tmp/
 .env.*
 !.env.example
 .wrangler/
+uml.pdf
