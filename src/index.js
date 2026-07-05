@@ -26,6 +26,19 @@ import {
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
+import {
+	clearSessionCookie,
+	createConnectionToken,
+	getSessionUser,
+	listConnectionTokens,
+	login,
+	logout,
+	logoutAll,
+	resolveConnectionToken,
+	revokeConnectionToken,
+	signup,
+	timingSafeEqualString,
+} from "./auth.js";
 
 export { UserMemory } from "./durable/user-memory.js";
 
@@ -40,32 +53,148 @@ const EXTRACTION_MODELS = [
 	"@cf/moonshotai/kimi-k2.6",
 ];
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
+	const headers = new Headers(extraHeaders);
+	headers.set("content-type", "application/json");
 	return new Response(JSON.stringify(data), {
 		status,
-		headers: { "content-type": "application/json" },
+		headers,
 	});
 }
 
-function isAuthorized(request, env) {
+async function isAuthorized(request, env) {
 	const key = request.headers.get("x-api-key");
-	return Boolean(env.API_KEY) && key === env.API_KEY;
+	return Boolean(env.API_KEY) && Boolean(key) && await timingSafeEqualString(key, env.API_KEY);
+}
+
+function bearerToken(request) {
+	const auth = request.headers.get("authorization") || "";
+	const match = auth.match(/^Bearer\s+(.+)$/i);
+	return match?.[1]?.trim() || request.headers.get("x-uml-token") || "";
+}
+
+async function resolveMemoryUser(request, env, explicitUserId, { allowLegacy = true, allowedTokenTypes = ["api", "mcp"] } = {}) {
+	const session = await getSessionUser(env, request);
+	if (session) return session;
+
+	const token = bearerToken(request);
+	if (token) {
+		const tokenUser = await resolveConnectionToken(env, token, { allowedTypes: allowedTokenTypes });
+		if (tokenUser) return tokenUser;
+		return null;
+	}
+
+	if (allowLegacy && explicitUserId && await isAuthorized(request, env)) {
+		return { type: "legacy", userId: explicitUserId, user: null };
+	}
+	return null;
+}
+
+async function requireMemoryUser(request, env, explicitUserId, options = {}) {
+	const auth = await resolveMemoryUser(request, env, explicitUserId, options);
+	if (auth) return { auth, userId: auth.userId };
+	if (await isAuthorized(request, env)) {
+		return { response: json({ error: "userId is required" }, 400) };
+	}
+	return { response: json({ error: "unauthorized" }, 401) };
+}
+
+function redirectTo(request, path) {
+	return Response.redirect(new URL(path, request.url), 302);
+}
+
+function authPayload(auth) {
+	return {
+		authenticated: true,
+		user: auth.user,
+		session: auth.session ?? null,
+	};
+}
+
+function authFailureResponse(mode, error) {
+	console.error(`auth.${mode} failed`, { message: error?.message || String(error || "") });
+	const message = mode === "signup"
+		? "Could not create account. Please try again."
+		: "Could not log in. Please try again.";
+	return json({ error: message }, 500);
 }
 
 const routes = {
 	"GET /health": () => json({ ok: true, service: "memory-engine", version: "0.1.0" }),
 
+	"GET /auth/me": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ authenticated: false, user: null });
+		return json(authPayload(auth));
+	},
+
+	"POST /auth/signup": async (request, env) => {
+		try {
+			const body = await request.json().catch(() => ({}));
+			const result = await signup(env, request, body);
+			if (result.error) return json({ error: result.error }, result.status);
+			return json(
+				{ authenticated: true, user: result.user, session: { id: result.session.id, expires_at: result.session.expiresAt } },
+				result.status,
+				{ "set-cookie": result.session.cookie },
+			);
+		} catch (error) {
+			return authFailureResponse("signup", error);
+		}
+	},
+
+	"POST /auth/login": async (request, env) => {
+		try {
+			const body = await request.json().catch(() => ({}));
+			const result = await login(env, request, body);
+			if (result.error) return json({ error: result.error }, result.status);
+			return json(
+				{ authenticated: true, user: result.user, session: { id: result.session.id, expires_at: result.session.expiresAt } },
+				result.status,
+				{ "set-cookie": result.session.cookie },
+			);
+		} catch (error) {
+			return authFailureResponse("login", error);
+		}
+	},
+
+	"POST /auth/logout": async (request, env) => {
+		const result = await logout(env, request);
+		return json({ ok: true }, 200, { "set-cookie": result.cookie });
+	},
+
+	"POST /auth/logout-all": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401, { "set-cookie": clearSessionCookie(request) });
+		await logoutAll(env, auth.userId);
+		return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(request) });
+	},
+
+	"GET /auth/tokens": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		return json({ tokens: await listConnectionTokens(env, auth.userId) });
+	},
+
+	"POST /auth/tokens": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const body = await request.json().catch(() => ({}));
+		const result = await createConnectionToken(env, auth.userId, body);
+		return json(result, 201);
+	},
+
 	"POST /v1/ingest": async (request, env, ctx) => {
 		const body = await request.json().catch(() => ({}));
-		const { userId, messages, flush } = body;
-		if (!userId || !Array.isArray(messages)) {
-			return json({ error: "userId and messages[] are required" }, 400);
-		}
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		const { messages, flush } = body;
+		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
 
 		// Route through the shared ingest path. Extraction runs in the background
 		// (wait:false) so the caller isn't blocked. `_test` is an injection hook
 		// for deterministic tests (canned LLM output); production never sends it.
-		const { fired } = await ingestMessages(env, ctx, userId, messages, {
+		const { fired } = await ingestMessages(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
 			overrides: body._test ?? {},
 		});
@@ -74,8 +203,10 @@ const routes = {
 	},
 
 	"GET /v1/graph": async (request, env) => {
-		const userId = new URL(request.url).searchParams.get("userId");
-		if (!userId) return json({ error: "userId is required" }, 400);
+		const requestedUserId = new URL(request.url).searchParams.get("userId");
+		const auth = await requireMemoryUser(request, env, requestedUserId);
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
 
 		// The whole brain for one user: nodes with ALL their slices (current + old,
 		// each carrying is_current) and their events newest-first, plus edges and
@@ -148,8 +279,10 @@ const routes = {
 		// MCP save tools through the SAME engine. `_test` injects canned LLM/digest
 		// output for deterministic tests; production never sends it.
 		const body = await request.json().catch(() => ({}));
-		const { userId, mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
-		if (!userId) return json({ error: "userId is required" }, 400);
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
+		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
 		const t = body._test ?? {};
 		const overrides = {};
@@ -178,8 +311,9 @@ const routes = {
 
 	"GET /v1/receipts": async (request, env) => {
 		const url = new URL(request.url);
-		const userId = url.searchParams.get("userId");
-		if (!userId) return json({ error: "userId is required" }, 400);
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"));
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
 		const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 200);
 		const receipts = await getUserReceipts(env, userId, limit);
 		return json({ receipts });
@@ -187,67 +321,78 @@ const routes = {
 
 	"POST /v1/actions/delete-last-extraction": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		return json(await deleteLastExtraction(env, body.userId));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		return json(await deleteLastExtraction(env, auth.userId));
 	},
 
 	"POST /v1/actions/delete-object": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId || !body.kind || !body.id) return json({ error: "userId, kind and id are required" }, 400);
-		return json(await deleteObject(env, body.userId, body));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
+		return json(await deleteObject(env, auth.userId, body));
 	},
 
 	"POST /v1/actions/archive-object": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId || !body.kind || !body.id) return json({ error: "userId, kind and id are required" }, 400);
-		return json(await archiveObject(env, body.userId, body));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
+		return json(await archiveObject(env, auth.userId, body));
 	},
 
 	"POST /v1/actions/delete-all": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		const result = await deleteAllMemories(env, body.userId, body.confirm);
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		const result = await deleteAllMemories(env, auth.userId, body.confirm);
 		return json(result, result.deleted ? 200 : 400);
 	},
 
 	"POST /v1/actions/clean-junk": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		return json(await cleanJunkMemories(env, body.userId, { confirm: body.confirm }));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		return json(await cleanJunkMemories(env, auth.userId, { confirm: body.confirm }));
 	},
 
 	"POST /v1/actions/clear-failed-receipts": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		return json(await clearFailedReceipts(env, body.userId));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		return json(await clearFailedReceipts(env, auth.userId));
 	},
 
 	"POST /v1/actions/organize-clusters": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		return json(await organizeUserClusters(env, body.userId));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		return json(await organizeUserClusters(env, auth.userId));
 	},
 
 	"POST /v1/actions/repair-graph": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		if (!body.userId) return json({ error: "userId is required" }, 400);
-		return json(await repairGraph(env, body.userId, body));
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		return json(await repairGraph(env, auth.userId, body));
 	},
 
 	"POST /v1/recall": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const { userId, query } = body;
-		if (!userId || typeof query !== "string") {
-			return json({ error: "userId and query are required" }, 400);
-		}
+		const auth = await requireMemoryUser(request, env, body.userId);
+		if (auth.response) return auth.response;
+		const { query } = body;
+		if (typeof query !== "string") return json({ error: "query is required" }, 400);
 
-		const result = await recall(env, getConfig(env), userId, query);
+		const result = await recall(env, getConfig(env), auth.userId, query);
 		return json(result);
 	},
 
 	"GET /v1/status": async (request, env) => {
-		const userId = new URL(request.url).searchParams.get("userId");
-		if (!userId) return json({ error: "userId is required" }, 400);
+		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"));
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
 
 		const [nodesCount, pagesCount, slicesCount, eventsCount, candidatesCount, checkpoint] = await env.DB.batch([
 			env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
@@ -273,10 +418,23 @@ export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 
-		// MCP door (ChatGPT / Claude). Identity + auth live in the URL path token,
+		if ((request.method === "GET" || request.method === "HEAD") && ["/app", "/login", "/signup"].includes(url.pathname)) {
+			const auth = await getSessionUser(env, request);
+			if (url.pathname === "/app") return redirectTo(request, auth ? "/?app=1" : "/?view=login");
+			return redirectTo(request, auth ? "/?app=1" : `/?view=${url.pathname.slice(1)}`);
+		}
+
+		// MCP door for supported clients. Identity + auth live in the URL path token,
 		// so this bypasses the x-api-key gate and authenticates the token itself.
 		if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
 			return handleMcp(request, env, ctx, url);
+		}
+
+		if (request.method === "POST" && url.pathname.startsWith("/auth/tokens/") && url.pathname.endsWith("/revoke")) {
+			const auth = await getSessionUser(env, request);
+			if (!auth) return json({ error: "unauthorized" }, 401);
+			const id = url.pathname.slice("/auth/tokens/".length).replace(/\/revoke$/, "");
+			return json(await revokeConnectionToken(env, auth.userId, id));
 		}
 
 		const handler = routes[`${request.method} ${url.pathname}`];
@@ -285,19 +443,23 @@ export default {
 			return json({ error: "not found" }, 404);
 		}
 
-		if (url.pathname !== "/health" && !isAuthorized(request, env)) {
-			return json({ error: "unauthorized" }, 401);
-		}
-
 		return handler(request, env, ctx);
 	},
 };
 
 /** Authenticate the path token, then serve the MCP Streamable HTTP endpoint. */
-function handleMcp(request, env, ctx, url) {
+async function handleMcp(request, env, ctx, url) {
 	const token = url.pathname.slice("/mcp/".length).split("/")[0];
+	if (token?.startsWith("uml_live_")) {
+		const auth = await resolveConnectionToken(env, token, { allowedTypes: ["mcp"] });
+		if (!auth) return json({ error: "unauthorized mcp token" }, 401);
+		const server = buildMemoryServer(env, ctx, auth.userId);
+		const normalized = new Request(new URL("/mcp", url).toString(), request);
+		return createMcpHandler(server)(normalized, env, ctx);
+	}
+
 	const id = decodeMcpToken(token);
-	if (!id || !env.API_KEY || id.key !== env.API_KEY) {
+	if (!id || !env.API_KEY || !(await timingSafeEqualString(id.key, env.API_KEY))) {
 		return json({ error: "unauthorized mcp token" }, 401);
 	}
 

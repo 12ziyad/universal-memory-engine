@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>UML — My Memory</title>
+<title>UML - Universal Memory Layer</title>
+<link rel="icon" href="/assets/uml-logo.svg" type="image/svg+xml" />
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
 	:root {
@@ -18,6 +19,107 @@
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	code { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace; }
+
+	/* ---- product shell ---- */
+	body.public-mode header, body.public-mode main, body.public-mode #banner,
+	body.auth-mode header, body.auth-mode main, body.auth-mode #banner { display: none; }
+	body.app-mode #landing, body.app-mode #authView,
+	body.public-mode #authView, body.auth-mode #landing { display: none; }
+	body:not(.public-mode):not(.auth-mode):not(.app-mode) #landing,
+	body:not(.public-mode):not(.auth-mode):not(.app-mode) #authView { display: none; }
+	.dev-only { display: none !important; }
+	body.dev-mode .dev-only { display: inline-flex !important; }
+	body.dev-mode input.dev-only { display: inline-block !important; }
+	.brand-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; min-width: 0; }
+	.brand-lockup img { width: 42px; height: 42px; flex: 0 0 auto; filter: drop-shadow(0 0 18px rgba(80,216,255,.5)); }
+	.brand-lockup b { font-size: 18px; letter-spacing: .08em; }
+	.brand-lockup span { display: block; color: var(--muted); font-size: 11px; letter-spacing: .03em; margin-top: -3px; }
+	.logo-mark { width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 0 14px rgba(80,216,255,.42)); }
+	.public-shell { min-height: 100%; background:
+		linear-gradient(180deg, rgba(3,8,14,.96) 0%, rgba(4,18,24,.98) 48%, #03070d 100%),
+		linear-gradient(90deg, rgba(88,166,255,.08), rgba(63,185,80,.05) 42%, rgba(210,153,34,.06));
+		color: #f8fbff; overflow-x: hidden; }
+	.public-nav { position: sticky; top: 0; z-index: 30; min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 48px; border-bottom: 1px solid rgba(117,219,255,.12); background: rgba(3,8,14,.84); backdrop-filter: blur(14px); }
+	.nav-right { display: flex; align-items: center; gap: 18px; min-width: 0; }
+	.nav-links { display: flex; align-items: center; gap: 2px; }
+	.nav-links a, .nav-actions a { color: #c9e7ef; text-decoration: none; border-radius: 8px; }
+	.nav-links a { padding: 9px 10px; font-weight: 650; }
+	.nav-links a:hover { color: #fff; background: rgba(132,233,255,.08); }
+	.nav-actions { display: flex; align-items: center; gap: 8px; }
+	.public-note { color: #a9c4d2; max-width: 720px; font-size: 16px; line-height: 1.72; }
+	.landing-section { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 74px 0; }
+	.hero { min-height: min(760px, calc(100vh - 76px)); display: grid; grid-template-columns: minmax(0, .95fr) minmax(360px, 1fr); gap: 48px; align-items: center; padding-top: 42px; }
+	.hero-copy { min-width: 0; }
+	.product-kicker { display: inline-flex; align-items: center; gap: 12px; color: #84e9ff; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+	.product-kicker img { width: 54px; height: 54px; }
+	.hero-copy h1 { font-size: 66px; line-height: .98; margin: 18px 0; letter-spacing: 0; max-width: 780px; white-space: normal; overflow-wrap: break-word; }
+	.hero-copy p { font-size: 18px; line-height: 1.72; color: #b4ccd7; margin: 0 0 22px; max-width: 680px; }
+	.trust-line { color: #84cddd; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-top: 18px; }
+	.hero-actions, .cta-actions, .auth-actions, .quick-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+	.cta-primary, .cta-secondary { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; border-radius: 8px; padding: 9px 15px; font-weight: 750; white-space: nowrap; }
+	.cta-primary { background: linear-gradient(135deg, #9bf4ff, #58a6ff); color: #03111d; box-shadow: 0 0 34px rgba(80,216,255,.22); }
+	.cta-secondary { background: rgba(12,24,37,.74); color: #e6fbff; border: 1px solid rgba(132,233,255,.28); }
+	.story-diagram { position: relative; min-height: 448px; border: 1px solid rgba(132,233,255,.18); border-radius: 8px; overflow: hidden; padding: 28px; background:
+		linear-gradient(135deg, rgba(5,16,29,.76), rgba(7,13,20,.94)),
+		linear-gradient(90deg, rgba(88,166,255,.08), rgba(63,185,80,.05), rgba(210,153,34,.08));
+		box-shadow: inset 0 0 70px rgba(80,216,255,.05), 0 24px 80px rgba(0,0,0,.34); }
+	.diagram-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 34px 34px; opacity: .55; }
+	.story-flow { position: relative; z-index: 2; height: 100%; min-height: 392px; display: grid; grid-template-columns: minmax(112px, 120px) 48px minmax(150px, .9fr) 48px minmax(112px, 120px); align-items: center; gap: 8px; }
+	.story-bubble { border: 1px solid rgba(132,233,255,.22); border-radius: 8px; background: rgba(8,20,34,.88); padding: 18px; box-shadow: 0 14px 36px rgba(0,0,0,.2); }
+	.story-bubble strong { display: block; color: #fff; margin-bottom: 7px; font-size: 16px; }
+	.story-bubble span { color: #a9c4d2; }
+	.story-arrow { position: relative; height: 2px; background: linear-gradient(90deg, rgba(132,233,255,.1), #84e9ff); }
+	.story-arrow::after { content: ""; position: absolute; right: -1px; top: 50%; width: 10px; height: 10px; border-top: 2px solid #84e9ff; border-right: 2px solid #84e9ff; transform: translateY(-50%) rotate(45deg); }
+	.story-arrow.recall { background: linear-gradient(90deg, rgba(255,198,91,.1), #ffc65b); }
+	.story-arrow.recall::after { border-color: #ffc65b; }
+	.flow-dot { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; transform: translateY(-50%); background: #8df5ff; box-shadow: 0 0 20px #58d8ff; animation: flowForward 3.8s infinite ease-in-out; }
+	.story-arrow.recall .flow-dot { background: #ffc65b; box-shadow: 0 0 20px #ffc65b; animation: flowForward 3.8s infinite ease-in-out 1.7s; }
+	.story-core { border: 1px solid rgba(196,251,255,.5); border-radius: 8px; padding: 22px 16px; background: linear-gradient(180deg, rgba(15,48,68,.96), rgba(8,20,34,.96)); text-align: center; box-shadow: 0 0 42px rgba(80,216,255,.2); }
+	.story-core img { width: 76px; height: 76px; margin-bottom: 8px; filter: drop-shadow(0 0 16px rgba(80,216,255,.45)); }
+	.story-core b { display: block; font-size: 24px; letter-spacing: .1em; }
+	.story-core span { color: #dffbff; font-size: 12px; }
+	.core-tags { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin-top: 14px; }
+	.core-tags span { border: 1px solid rgba(132,233,255,.2); background: rgba(6,18,31,.82); color: #bdefff; border-radius: 999px; padding: 4px 10px; font-size: 11px; }
+	@keyframes flowForward { 0%, 100% { left: 8%; opacity: .15; } 12%, 72% { opacity: 1; } 82% { left: 86%; opacity: .2; } }
+	.problem-grid, .solution-grid, .connect-steps, .contact-grid, .settings-grid, .help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+	.product-card { border: 1px solid rgba(132,233,255,.16); background: rgba(8,20,34,.68); border-radius: 8px; padding: 18px; color: #dff7ff; min-width: 0; }
+	.product-card h3 { margin: 0 0 8px; color: #fff; font-size: 17px; }
+	.product-card p { margin: 0; color: #9ebdcc; }
+	.section-title { font-size: 42px; line-height: 1.08; margin: 0 0 14px; letter-spacing: 0; max-width: 900px; }
+	.solution-map { margin-top: 20px; display: grid; grid-template-columns: minmax(220px, .85fr) minmax(0, 1.15fr); gap: 18px; align-items: stretch; }
+	.solution-core { display: grid; place-items: center; text-align: center; border: 1px solid rgba(132,233,255,.2); border-radius: 8px; background: rgba(8,20,34,.78); padding: 24px; }
+	.solution-core img { width: 92px; height: 92px; filter: drop-shadow(0 0 18px rgba(80,216,255,.5)); }
+	.solution-core b { font-size: 28px; letter-spacing: .1em; }
+	.solution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.contact-card { border-color: rgba(255,198,91,.26); background: rgba(32,25,13,.48); }
+	.contact-card a { color: #ffe2a1; word-break: break-word; }
+	.site-footer { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 36px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; border-top: 1px solid rgba(132,233,255,.14); color: #8ab0c0; }
+	.footer-links { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+	.footer-links a { color: #a9c4d2; text-decoration: none; }
+	.reveal { opacity: 1; transform: none; transition: opacity .45s ease, transform .45s ease; }
+	.reveal.visible { opacity: 1; transform: translateY(0); }
+	.hero.reveal { opacity: 1; transform: none; }
+	.auth-shell { min-height: 100%; display: grid; place-items: center; padding: 32px 18px; background:
+		radial-gradient(circle at 50% 24%, rgba(80,216,255,.20), transparent 30%),
+		linear-gradient(180deg, #02060d, #07111d 58%, #03070d); }
+	.auth-card { width: min(440px, 100%); border: 1px solid rgba(132,233,255,.2); border-radius: 8px; background: rgba(8,20,34,.82); padding: 26px; box-shadow: 0 24px 80px rgba(0,0,0,.36); }
+	.auth-card .brand-lockup { margin-bottom: 22px; }
+	.auth-card h2 { margin: 0 0 8px; font-size: 26px; }
+	.auth-card p { color: var(--muted); margin: 0 0 18px; }
+	.form-row { display: grid; gap: 6px; margin: 12px 0; }
+	.form-row label { font-size: 12px; color: #9ebdcc; font-weight: 650; }
+	.form-row input, .form-row textarea { width: 100%; }
+	.auth-error { display: none; color: #ffb4ad; border: 1px solid rgba(248,81,73,.4); background: rgba(58,29,27,.6); padding: 9px 11px; border-radius: 8px; margin: 10px 0; }
+	.app-user { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #58a6ff, #ffc65b); color: #04121f; font-weight: 800; }
+	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+	.action-box h3 { margin: 0 0 8px; }
+	.action-box textarea { width: 100%; min-height: 120px; resize: vertical; background: var(--panel2); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 9px; }
+	.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--panel2); }
+	.token-secret { border: 1px solid rgba(255,198,91,.35); background: rgba(255,198,91,.08); color: #ffe4a3; border-radius: 8px; padding: 10px; margin: 10px 0; word-break: break-all; }
+	.search-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+	.search-row input { min-width: min(100%, 320px); flex: 1; }
 
 	/* ---- top bar ---- */
 	header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
@@ -185,22 +287,203 @@
 	.banner { background: #3a1d1b; color: #ffb4ad; border: 1px solid var(--red); border-radius: 8px; padding: 9px 13px; margin: 10px 14px; display: none; }
 	.kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
 	@media (max-width: 900px) {
+		.public-nav { padding: 12px 18px; align-items: flex-start; flex-direction: column; }
+		.nav-right { width: 100%; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+		.nav-links { flex-wrap: wrap; }
+		.hero { grid-template-columns: 1fr; min-height: auto; padding-top: 34px; }
+		.hero-copy h1 { font-size: 48px; }
+		.story-flow { grid-template-columns: 1fr; gap: 14px; min-height: auto; }
+		.story-arrow { width: 2px; height: 46px; justify-self: center; background: linear-gradient(180deg, rgba(132,233,255,.1), #84e9ff); }
+		.story-arrow::after { right: auto; top: auto; bottom: -1px; left: 50%; transform: translateX(-50%) rotate(135deg); }
+		.story-arrow.recall { background: linear-gradient(180deg, rgba(255,198,91,.1), #ffc65b); }
+		.flow-dot { left: 50%; top: 8%; transform: translateX(-50%); animation: flowDown 3.8s infinite ease-in-out; }
+		.story-arrow.recall .flow-dot { animation: flowDown 3.8s infinite ease-in-out 1.7s; }
+		.solution-map, .solution-grid { grid-template-columns: 1fr; }
 		main, main.detail-open { grid-template-columns: 210px minmax(0, 1fr); }
 		.detail { position: fixed; inset: auto 0 0 0; max-height: 46vh; z-index: 20; border-left: 0; border-top: 1px solid var(--border); box-shadow: 0 -18px 40px rgba(0,0,0,.35); }
 		main:not(.detail-open) .detail { display: none; }
 		.legend { left: 14px; right: 14px; justify-content: flex-start; }
 		#graphWrap, #graph { min-height: 460px; }
 	}
+	@media (max-width: 560px) {
+		.public-nav { padding: 10px 14px; gap: 10px; }
+		.public-nav .brand-lockup img { width: 36px; height: 36px; }
+		.nav-right { gap: 8px; }
+		.nav-links a { padding: 6px 7px; }
+		.cta-primary, .cta-secondary { min-height: 34px; padding: 7px 12px; }
+		.landing-section { width: min(100% - 28px, 1180px); padding: 56px 0; }
+		.landing-section.hero { padding: 28px 0 32px; gap: 18px; }
+		.product-kicker { font-size: 12px; gap: 10px; }
+		.product-kicker img { width: 40px; height: 40px; }
+		.hero-copy h1 { font-size: 34px; line-height: 1.06; margin: 14px 0; }
+		.hero-copy p { font-size: 16px; line-height: 1.55; margin-bottom: 18px; }
+		.trust-line { font-size: 12px; margin-top: 14px; }
+		.section-title { font-size: 31px; }
+		.nav-actions { width: 100%; }
+		.nav-actions a { flex: 1; }
+		.story-diagram { min-height: 170px; padding: 12px; }
+		.story-flow { grid-template-columns: minmax(0, 1fr) 28px minmax(82px, .8fr) 28px minmax(0, 1fr); gap: 4px; min-height: 146px; }
+		.story-arrow { width: auto; height: 2px; justify-self: stretch; background: linear-gradient(90deg, rgba(132,233,255,.1), #84e9ff); }
+		.story-arrow::after { right: -1px; top: 50%; bottom: auto; left: auto; transform: translateY(-50%) rotate(45deg); }
+		.story-arrow.recall { background: linear-gradient(90deg, rgba(255,198,91,.1), #ffc65b); }
+		.flow-dot { left: 8%; top: 50%; transform: translateY(-50%); animation: flowForward 3.8s infinite ease-in-out; }
+		.story-arrow.recall .flow-dot { animation: flowForward 3.8s infinite ease-in-out 1.7s; }
+		.story-bubble { padding: 10px; font-size: 11px; }
+		.story-bubble strong { font-size: 13px; margin-bottom: 5px; }
+		.story-bubble span { display: block; line-height: 1.3; }
+		.story-core { padding: 12px 8px; }
+		.story-core img { width: 42px; height: 42px; margin-bottom: 4px; }
+		.story-core b { font-size: 18px; }
+		.story-core span, .core-tags { display: none; }
+		.site-footer { width: min(100% - 28px, 1180px); align-items: flex-start; flex-direction: column; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.flow-dot, .reveal { animation: none; transition: none; }
+		.reveal { opacity: 1; transform: none; }
+	}
+	@keyframes flowDown { 0%, 100% { top: 8%; opacity: .15; } 12%, 72% { opacity: 1; } 82% { top: 86%; opacity: .2; } }
 </style>
 </head>
 <body>
-<header>
-	<h1><span class="brain">🧠</span> UML</h1>
-	<input id="userId" placeholder="userId" autocomplete="off" />
-	<input id="key" type="password" placeholder="API key" autocomplete="off" />
-	<button id="load">Load</button>
-	<button class="ghost" id="copyMcp">Copy MCP URL</button>
+<div id="landing" class="public-shell">
+	<nav class="public-nav">
+		<a class="brand-lockup" href="/" onclick="showPublic(event)">
+			<img src="/assets/uml-logo.svg" alt="UML logo" />
+			<span><b>UML</b><span>Universal Memory Layer</span></span>
+		</a>
+		<div class="nav-right">
+			<div class="nav-links" aria-label="Public navigation">
+				<a href="#problem">Problem</a>
+				<a href="#solution">Solution</a>
+				<a href="#connect">Connect</a>
+				<a href="#contact">Contact</a>
+			</div>
+			<div class="nav-actions">
+				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">Login</a>
+				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Sign up</a>
+			</div>
+		</div>
+	</nav>
+	<section class="landing-section hero reveal">
+		<div class="hero-copy">
+			<div class="product-kicker"><img src="/assets/uml-logo.svg" alt="" /> Universal Memory Layer</div>
+			<h1>One memory for every AI you use.</h1>
+			<p>Save context from ChatGPT-style assistants, Claude, coding agents, and your own apps into one shared memory layer. Recall it anywhere later without copy-paste or repeated explaining.</p>
+			<div class="hero-actions">
+				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Sign up</a>
+				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">Login</a>
+			</div>
+			<div class="trust-line">Private account memory. Revocable connectors. No repeated briefings.</div>
+		</div>
+		<div class="story-diagram" aria-label="Save and recall diagram">
+			<div class="diagram-grid"></div>
+			<div class="story-flow">
+				<div class="story-bubble">
+					<strong>Save</strong>
+					<span>Remember my UML project rules.</span>
+				</div>
+				<div class="story-arrow save" aria-hidden="true"><span class="flow-dot"></span></div>
+				<div class="story-core">
+					<img src="/assets/uml-logo.svg" alt="" />
+					<b>UML</b>
+					<span>organizes memory</span>
+					<div class="core-tags"><span>Pages</span><span>Nodes</span><span>Edges</span><span>Clusters</span></div>
+				</div>
+				<div class="story-arrow recall" aria-hidden="true"><span class="flow-dot"></span></div>
+				<div class="story-bubble">
+					<strong>Recall</strong>
+					<span>Here are your remembered UML rules.</span>
+				</div>
+			</div>
+		</div>
+	</section>
+	<section class="landing-section reveal" id="problem">
+		<h2 class="section-title">Your AI context is scattered.</h2>
+		<p class="public-note">People use multiple AI tools every day, but each tool starts with different memory. Users repeat project context, paste old decisions, and lose history across chats.</p>
+		<div class="problem-grid" style="margin-top:18px">
+			<div class="product-card"><h3>Every AI starts from zero</h3><p>Important context gets trapped in one chat or one tool.</p></div>
+			<div class="product-card"><h3>You keep copy-pasting context</h3><p>Work slows down when every assistant needs the same briefing.</p></div>
+			<div class="product-card"><h3>Important decisions disappear</h3><p>Plans, constraints, and preferences drift out of view.</p></div>
+			<div class="product-card"><h3>No shared memory across tools</h3><p>Your assistants cannot reliably learn from each other.</p></div>
+		</div>
+	</section>
+	<section class="landing-section reveal" id="solution">
+		<h2 class="section-title">UML is the shared memory layer between your AI tools.</h2>
+		<p class="public-note">UML stores durable memory as pages, nodes, events, slices, edges, and semantic clusters. Connected tools save what matters, reinforce existing memories, avoid duplicates, and recall the right context later.</p>
+		<div class="solution-map">
+			<div class="solution-core">
+				<div>
+					<img src="/assets/uml-logo.svg" alt="" />
+					<b>UML</b>
+					<p>Save once. Recall anywhere.</p>
+				</div>
+			</div>
+			<div class="solution-grid">
+				<div class="product-card"><h3>Save once</h3><p>Send facts, decisions, snippets, and conversations into one account memory.</p></div>
+				<div class="product-card"><h3>Organize automatically</h3><p>Pages, nodes, edges, clusters, slices, and events keep context structured.</p></div>
+				<div class="product-card"><h3>Recall anywhere</h3><p>Use browser sessions, MCP clients, API tokens, and custom agents.</p></div>
+				<div class="product-card"><h3>Avoid duplicates</h3><p>New saves can reinforce existing memories instead of creating noisy repeats.</p></div>
+			</div>
+		</div>
+	</section>
+	<section class="landing-section reveal" id="connect">
+		<h2 class="section-title">Connect UML in minutes.</h2>
+		<p class="public-note">Use the dashboard to create a private token for each tool, then paste the endpoint and token into that tool's connector or API settings.</p>
+		<div class="connect-steps">
+			<div class="product-card"><h3>1. Sign up or log in</h3><p>Your memory belongs to your account.</p></div>
+			<div class="product-card"><h3>2. Choose a tool</h3><p>Use MCP for supported clients and API tokens for custom apps.</p></div>
+			<div class="product-card"><h3>3. Generate a private token</h3><p>Each connected app gets its own revocable token.</p></div>
+			<div class="product-card"><h3>4. Paste endpoint and token</h3><p>Add them in the tool's connector, MCP, tools, or API settings.</p></div>
+		</div>
+		<div class="product-card contact-card" style="margin-top:14px">
+			<h3>Keep tokens private</h3>
+			<p>Never paste a live token into public chats, screenshots, repositories, or shared prompts. Revoke any token you no longer use.</p>
+		</div>
+	</section>
+	<section class="landing-section reveal" id="contact">
+		<h2 class="section-title">Start building with a memory layer that follows you.</h2>
+		<p class="public-note">Create an account, connect one tool, and start saving the context you never want to explain twice.</p>
+		<div class="contact-grid" style="margin-top:18px">
+			<div class="product-card">
+				<h3>Open your memory dashboard</h3>
+				<p>Sign up to generate private tokens, inspect saved memory, recall context, and reset data when needed.</p>
+				<div class="cta-actions" style="margin-top:16px">
+					<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Sign up</a>
+					<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">Login</a>
+				</div>
+			</div>
+			<div class="product-card contact-card">
+				<h3>Contact</h3>
+				<p>For help, partnership, or production feedback:</p>
+				<p style="margin-top:10px"><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
+			</div>
+		</div>
+	</section>
+	<footer class="site-footer">
+		<a class="brand-lockup" href="/" onclick="showPublic(event)">
+			<img src="/assets/uml-logo.svg" alt="UML logo" />
+			<span><b>UML</b><span>Universal Memory Layer</span></span>
+		</a>
+		<div class="footer-links">
+			<a href="#contact">Contact</a>
+			<span>Privacy</span>
+			<span>Terms</span>
+			<span>&copy; 2026 UML</span>
+		</div>
+	</footer>
+</div>
+
+<div id="authView" class="auth-shell"></div>
+
+<header id="appHeader">
+	<h1><img class="logo-mark" src="/assets/uml-logo.svg" alt="UML logo" /> UML</h1>
+	<input id="userId" class="dev-only" placeholder="userId" autocomplete="off" />
+	<input id="key" class="dev-only" type="password" placeholder="API key" autocomplete="off" />
+	<button id="load" class="dev-only">Load</button>
+	<button class="ghost dev-only" id="copyMcp">Copy legacy MCP URL</button>
 	<div class="spacer"></div>
+	<div class="app-user" id="appUser"></div>
+	<button class="ghost" id="logoutBtn">Logout</button>
 	<div class="stats" id="stats"></div>
 </header>
 
@@ -218,15 +501,19 @@
 
 	<div class="content">
 		<div class="tabs" id="tabs">
-			<button class="tab active" data-view="graph">Graph</button>
-			<button class="tab" data-view="cards">Cards</button>
-			<button class="tab" data-view="table">Table</button>
-			<button class="tab" data-view="timeline">Timeline</button>
-			<button class="tab" data-view="saves">Saves</button>
-			<button class="tab" data-view="reset">Reset</button>
-			<button class="tab" data-view="test">Test</button>
-			<button class="tab" data-view="setup">Setup</button>
-			<button class="tab" data-view="dev">Model</button>
+			<button class="tab active" data-view="home">Home</button>
+			<button class="tab" data-view="graph">Graph</button>
+			<button class="tab" data-view="memories">Memories</button>
+			<button class="tab" data-view="save">Save</button>
+			<button class="tab" data-view="recall">Recall</button>
+			<button class="tab" data-view="connect">Connect</button>
+			<button class="tab" data-view="help">Help</button>
+			<button class="tab" data-view="profile">Profile</button>
+			<button class="tab" data-view="settings">Settings</button>
+			<button class="tab dev-only" data-view="saves">Saves</button>
+			<button class="tab dev-only" data-view="test">Test</button>
+			<button class="tab dev-only" data-view="setup">Legacy Setup</button>
+			<button class="tab dev-only" data-view="dev">Model</button>
 		</div>
 		<div class="view pad0" id="view"></div>
 	</div>
@@ -273,9 +560,11 @@ function stop(e) { e.stopPropagation(); e.preventDefault(); }
 const S = {
 	userId: localStorage.getItem("uml_user") || "",
 	key: localStorage.getItem("uml_key") || "",
-	view: "graph",
+	view: "home",
 	graphMode: "clean",
 	focusCluster: "",
+	me: null, tokens: [], oneTimeToken: null, recallResult: null, memoryQuery: "",
+	devMode: new URLSearchParams(location.search).has("dev") || localStorage.getItem("uml_dev") === "1",
 	data: null, receipts: [], selected: null, network: null,
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
@@ -306,6 +595,7 @@ function compareLatestThenName(a, b, labelKey = "label") {
 }
 
 $("#userId").value = S.userId; $("#key").value = S.key;
+document.body.classList.toggle("dev-mode", S.devMode);
 
 function toast(msg, isErr) {
 	const t = el("div", "toast" + (isErr ? " err" : ""), esc(msg));
@@ -314,26 +604,177 @@ function toast(msg, isErr) {
 }
 function banner(msg) { const b = $("#banner"); if (!msg) { b.style.display = "none"; return; } b.textContent = msg; b.style.display = "block"; }
 
+function initials(user = S.me?.user) {
+	const label = user?.name || user?.email || "U";
+	return label.trim().slice(0, 1).toUpperCase() || "U";
+}
+
+function routeMode() {
+	const q = new URLSearchParams(location.search);
+	if (q.get("view") === "login" || location.pathname === "/login") return "login";
+	if (q.get("view") === "signup" || location.pathname === "/signup") return "signup";
+	if (q.has("app") || location.pathname === "/app") return "app";
+	return "public";
+}
+
+let revealObserver = null;
+
+function setMode(mode) {
+	document.body.classList.remove("public-mode", "auth-mode", "app-mode");
+	document.body.classList.add(mode === "app" ? "app-mode" : mode === "login" || mode === "signup" ? "auth-mode" : "public-mode");
+	if (mode === "public") requestAnimationFrame(initReveal);
+}
+
+function pushUrl(path) {
+	if (location.pathname + location.search !== path) history.pushState(null, "", path);
+}
+
+function showPublic(event) {
+	if (event) event.preventDefault();
+	pushUrl("/");
+	setMode("public");
+}
+
+function showAuth(mode = "login", event) {
+	if (event) event.preventDefault();
+	pushUrl(mode === "signup" ? "/signup" : "/login");
+	renderAuth(mode);
+	setMode(mode);
+}
+
+async function refreshMe() {
+	try {
+		const res = await fetch("/auth/me", { credentials: "include" });
+		const body = await res.json().catch(() => ({}));
+		S.me = body.authenticated ? body : null;
+		return S.me;
+	} catch {
+		S.me = null;
+		return null;
+	}
+}
+
+function renderAppUser() {
+	const wrap = $("#appUser");
+	if (!wrap) return;
+	const user = S.me?.user;
+	if (!user) { wrap.innerHTML = ""; return; }
+	wrap.innerHTML = `<span class="avatar">${esc(initials(user))}</span><span>${esc(user.name || user.email)}</span>`;
+}
+
+function renderAuth(mode = "login") {
+	const isSignup = mode === "signup";
+	const view = $("#authView");
+	view.innerHTML = `
+		<form class="auth-card" id="authForm">
+			<a class="brand-lockup" href="/" onclick="showPublic(event)">
+				<img src="/assets/uml-logo.svg" alt="UML logo" />
+				<span><b>UML</b><span>Universal Memory Layer</span></span>
+			</a>
+			<h2>${isSignup ? "Create your UML account" : "Log in to UML"}</h2>
+			<p>${isSignup ? "Start one private memory layer for supported AI tools and your own agents." : "Open your private memory dashboard."}</p>
+			<div class="auth-error" id="authError"></div>
+			${isSignup ? `<div class="form-row"><label for="authName">Name</label><input id="authName" autocomplete="name" placeholder="Your name" /></div>` : ""}
+			<div class="form-row"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div>
+			<div class="form-row"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="8" placeholder="At least 8 characters" /></div>
+			<div class="auth-actions" style="margin-top:16px">
+				<button type="submit">${isSignup ? "Sign up" : "Login"}</button>
+				<a class="cta-secondary" href="${isSignup ? "/login" : "/signup"}" onclick="showAuth('${isSignup ? "login" : "signup"}', event)">${isSignup ? "I have an account" : "Create account"}</a>
+			</div>
+		</form>`;
+	$("#authForm").onsubmit = async (event) => {
+		event.preventDefault();
+		await submitAuth(isSignup ? "signup" : "login");
+	};
+}
+
+async function submitAuth(mode) {
+	const err = $("#authError");
+	if (err) err.style.display = "none";
+	const fallback = mode === "signup" ? "Could not create account. Please try again." : "Could not log in. Please try again.";
+	const payload = {
+		email: $("#authEmail")?.value || "",
+		password: $("#authPassword")?.value || "",
+	};
+	if (mode === "signup") payload.name = $("#authName")?.value || "";
+	try {
+		const res = await fetch(`/auth/${mode}`, {
+			method: "POST",
+			credentials: "include",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(payload),
+		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(typeof body.error === "string" && body.error ? body.error : fallback);
+		S.me = body;
+		S.userId = body.user.id;
+		localStorage.setItem("uml_user", S.userId);
+		pushUrl("/app");
+		setMode("app");
+		renderAppUser();
+		await load();
+	} catch (e) {
+		if (err) {
+			err.textContent = e.message || fallback;
+			err.style.display = "block";
+		}
+	}
+}
+
+function initReveal() {
+	const items = [...document.querySelectorAll("#landing .reveal")];
+	if (!items.length) return;
+	if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) {
+		items.forEach((item) => item.classList.add("visible"));
+		return;
+	}
+	if (revealObserver) revealObserver.disconnect();
+	revealObserver = new IntersectionObserver((entries) => {
+		for (const entry of entries) {
+			if (!entry.isIntersecting) continue;
+			entry.target.classList.add("visible");
+			revealObserver.unobserve(entry.target);
+		}
+	}, { threshold: 0.12 });
+	items.forEach((item) => revealObserver.observe(item));
+}
+
 function mcpToken() {
 	try { return btoa(`${S.userId}:${S.key}`).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); } catch { return ""; }
 }
 function mcpUrl() { return `${location.origin}/mcp/${mcpToken()}`; }
+function mcpUrlForToken(token) { return `${location.origin}/mcp/${token || "{token}"}`; }
 
 async function api(path, opts={}) {
-	const res = await fetch(path, { ...opts, headers: { "x-api-key": S.key, "content-type": "application/json", ...(opts.headers||{}) } });
+	const headers = { "content-type": "application/json", ...(opts.headers||{}) };
+	if (S.devMode && S.key) headers["x-api-key"] = S.key;
+	const res = await fetch(path, { ...opts, credentials: "include", headers });
 	if (!res.ok) { const t = await res.text().catch(()=> ""); throw new Error(`${res.status} ${t.slice(0,120)}`); }
 	return res.json();
 }
 
+function scopedPayload(payload = {}) {
+	return S.devMode ? { userId: S.userId, ...payload } : payload;
+}
+
 async function load() {
-	S.userId = $("#userId").value.trim(); S.key = $("#key").value.trim();
-	localStorage.setItem("uml_user", S.userId); localStorage.setItem("uml_key", S.key);
-	if (!S.userId || !S.key) { banner("Enter a userId and API key, then press Load."); return; }
+	if (S.devMode) {
+		S.userId = $("#userId").value.trim(); S.key = $("#key").value.trim();
+		localStorage.setItem("uml_user", S.userId); localStorage.setItem("uml_key", S.key);
+		if (!S.userId || !S.key) { banner("Enter a userId and API key, then press Load."); return; }
+	} else if (S.me?.user?.id) {
+		S.userId = S.me.user.id;
+	} else {
+		banner("Log in to view your memory.");
+		return;
+	}
 	banner("");
 	try {
+		const graphPath = S.devMode ? `/v1/graph?userId=${encodeURIComponent(S.userId)}` : "/v1/graph";
+		const receiptsPath = S.devMode ? `/v1/receipts?userId=${encodeURIComponent(S.userId)}` : "/v1/receipts";
 		const [graph, receipts] = await Promise.all([
-			api(`/v1/graph?userId=${encodeURIComponent(S.userId)}`),
-			api(`/v1/receipts?userId=${encodeURIComponent(S.userId)}`).catch(() => ({ receipts: [] })),
+			api(graphPath),
+			api(receiptsPath).catch(() => ({ receipts: [] })),
 		]);
 		S.data = graph; S.receipts = receipts.receipts || [];
 		if (S.selected && !graph.nodes.find((n) => nodeKey(n.id) === S.selected) && !(graph.pages || []).find((p) => pageKey(p.id) === S.selected)) {
@@ -344,7 +785,7 @@ async function load() {
 	} catch (e) { banner("Load failed: " + e.message); }
 }
 
-function renderAll() { renderStats(); renderPageList(); renderNodeList(); renderCandidates(); renderView(); renderDetail(); }
+function renderAll() { renderStats(); renderAppUser(); renderPageList(); renderNodeList(); renderCandidates(); renderView(); renderDetail(); }
 
 function renderStats() {
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
@@ -400,9 +841,293 @@ function setView(v) { S.view = v; document.querySelectorAll(".tab").forEach(t =>
 
 function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
-	if (!S.data && S.view!=="setup" && S.view!=="test") { v.innerHTML = `<div class="empty">Press Load to view your memory.</div>`; return; }
+	if (!S.data && !["save","recall","connect","help","profile"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your UML memory...</div>`; return; }
 	v.innerHTML = "";
-	({ graph: viewGraph, cards: viewCards, table: viewTable, timeline: viewTimeline, saves: viewSaves, reset: viewReset, test: viewTest, setup: viewSetup, dev: viewDev }[S.view] || viewGraph)(v);
+	({
+		home: viewHome,
+		graph: viewGraph,
+		memories: viewMemories,
+		save: viewSave,
+		recall: viewRecall,
+		connect: viewConnect,
+		help: viewHelp,
+		profile: viewProfile,
+		settings: viewSettings,
+		cards: viewCards,
+		table: viewTable,
+		timeline: viewTimeline,
+		saves: viewSaves,
+		reset: viewReset,
+		test: viewTest,
+		setup: viewSetup,
+		dev: viewDev,
+	}[S.view] || viewHome)(v);
+}
+
+function viewHome(v) {
+	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
+	const empty = !s.pages && !s.nodes;
+	const name = S.me?.user?.name || S.me?.user?.email || "there";
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="box" style="max-width:920px">
+			<h3>Welcome, ${esc(name)}</h3>
+			<div class="help">${empty ? "Your UML memory is empty. Connect an AI tool or save your first memory." : "Your shared memory layer is ready for supported tools and custom agents."}</div>
+			<div class="stats" style="margin-top:12px">
+				${[["pages",s.pages||0],["nodes",s.nodes||0],["edges",s.edges||0],["tools",S.tokens.length||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
+			</div>
+			<div class="quick-actions" style="margin-top:14px">
+				<button onclick="setView('graph')">Open Graph</button>
+				<button class="ghost" onclick="setView('save')">Save Memory</button>
+				<button class="ghost" onclick="setView('connect')">Connect Tool</button>
+				<button class="ghost" onclick="setView('recall')">Ask Recall</button>
+			</div>
+		</div>
+		<div class="panel-grid">
+			<div class="action-box"><h3>Save once</h3><div class="help">Capture one fact or collect a full conversation into durable memory pages and nodes.</div></div>
+			<div class="action-box"><h3>Recall anywhere</h3><div class="help">Supported AI tools can retrieve relevant pages, nodes, slices, events, and clusters later.</div></div>
+			<div class="action-box"><h3>Private by account</h3><div class="help">Browser sessions and per-tool tokens resolve to your account automatically.</div></div>
+		</div>`;
+	v.appendChild(wrap);
+}
+
+function filteredPages() {
+	const q = normalizeSearch(S.memoryQuery);
+	const pages = (S.data?.pages || []);
+	if (!q) return pages;
+	return pages.filter((p) => normalizeSearch([p.title, p.short_summary, p.topic_filter, p.cluster_label].join(" ")).includes(q));
+}
+
+function filteredNodes() {
+	const q = normalizeSearch(S.memoryQuery);
+	const nodes = (S.data?.nodes || []);
+	if (!q) return nodes;
+	return nodes.filter((n) => normalizeSearch([n.label, n.summary, n.category, n.cluster_label, ...(n.slices || []).map(s => s.text)].join(" ")).includes(q));
+}
+
+function viewMemories(v) {
+	const pages = filteredPages();
+	const nodes = filteredNodes();
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="search-row">
+			<input id="memorySearch" placeholder="Search pages and nodes" value="${esc(S.memoryQuery)}" oninput="S.memoryQuery=this.value; renderView()" />
+			<button class="ghost" onclick="S.memoryQuery=''; renderView()">Clear</button>
+		</div>`;
+	const grid = el("div","cards");
+	for (const p of [...pages].sort((a,b)=>compareLatestThenName(a,b,"title"))) {
+		const card = el("div","card page");
+		card.innerHTML = `<div class="top"><span class="dot" style="background:#58a6ff"></span><span class="title">${esc(p.title)}</span><span class="badge state-active">page</span></div>
+			<div class="cat">${esc(p.cluster_label || p.topic_filter || "manual_collect")} · ${p.updated_at?ago(p.updated_at):""}</div>
+			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}`;
+		card.onclick = () => select(p.id, "page");
+		grid.appendChild(card);
+	}
+	for (const n of [...nodes].sort((a,b)=>compareLatestThenName(a,b,"label"))) {
+		const cur = (n.slices||[]).filter(s=>s.is_current);
+		const card = el("div","card");
+		card.innerHTML = `<div class="top"><span class="dot" style="background:${catColor(n.category)}"></span><span class="title">${esc(n.label)}</span><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
+			<div class="cat">${esc(n.category)} · ${esc(n.cluster_label || "General Memory")} · ${n.updated_at?ago(n.updated_at):""}</div>
+			${n.summary ? `<div class="summary">${esc(n.summary)}</div>` : ""}
+			${cur.slice(0,3).map(s=>`<div class="mini-line">• ${esc(s.text)}</div>`).join("")}`;
+		card.onclick = () => select(n.id, "node");
+		grid.appendChild(card);
+	}
+	if (!pages.length && !nodes.length) grid.appendChild(el("div","empty","No matching memories yet."));
+	wrap.appendChild(grid);
+	v.appendChild(wrap);
+}
+
+function viewSave(v) {
+	const wrap = el("div","panel-grid");
+	wrap.innerHTML = `
+		<div class="action-box">
+			<h3>Save a fact</h3>
+			<div class="help" style="margin-bottom:10px">Use Save a fact for one durable memory.</div>
+			<textarea id="factText" placeholder="Example: I prefer concise implementation notes."></textarea>
+			<div style="margin-top:10px"><button onclick="saveFactFromForm()">Save fact</button></div>
+		</div>
+		<div class="action-box">
+			<h3>Collect a conversation</h3>
+			<div class="help" style="margin-bottom:10px">Use Collect conversation for full chats, plans, or decisions.</div>
+			<textarea id="conversationText" placeholder="Paste chat notes or a short transcript. One line per message is fine."></textarea>
+			<div style="margin-top:10px"><button onclick="saveConversationFromForm()">Collect conversation</button></div>
+		</div>`;
+	v.appendChild(wrap);
+}
+
+async function saveFactFromForm() {
+	const content = $("#factText")?.value || "";
+	if (!content.trim()) return toast("Write a fact first.", true);
+	await doSave({ mode:"memory", content });
+	$("#factText").value = "";
+}
+
+async function saveConversationFromForm() {
+	const raw = $("#conversationText")?.value || "";
+	const lines = raw.split(/\n+/).map(x => x.trim()).filter(Boolean);
+	if (!lines.length) return toast("Paste a conversation first.", true);
+	await doSave({ mode:"conversation", conversationId:`dashboard-${Date.now()}`, messages: lines.map(content => ({ role:"user", content })) });
+	$("#conversationText").value = "";
+}
+
+function viewRecall(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="box" style="max-width:840px">
+			<h3>Ask your memory</h3>
+			<div class="search-row">
+				<input id="recallQuery" placeholder="Ask your memory..." onkeydown="if(event.key==='Enter') recallFromForm()" />
+				<button onclick="recallFromForm()">Recall</button>
+			</div>
+			<div id="recallResults"></div>
+		</div>`;
+	v.appendChild(wrap);
+	renderRecallResults();
+}
+
+async function recallFromForm() {
+	const query = $("#recallQuery")?.value || "";
+	if (!query.trim()) return toast("Ask a memory question first.", true);
+	await doRecall(query, { panel: true });
+}
+
+function renderRecallResults() {
+	const out = $("#recallResults");
+	if (!out) return;
+	const r = S.recallResult;
+	if (!r) { out.innerHTML = `<div class="empty">Matched pages, nodes, slices, and events will appear here.</div>`; return; }
+	if (!r.nodes?.length && !r.pages?.length) { out.innerHTML = `<div class="empty">No relevant memory found.</div>`; return; }
+	out.innerHTML = [
+		...(r.pages || []).map(p => `<div class="slice"><b>${esc(p.title)}</b><span class="k">${esc(p.short_summary || "Matched memory page")}</span></div>`),
+		...(r.nodes || []).map(n => `<div class="slice"><b>${esc(n.label)}</b><span class="k">${esc(n.category)} · ${(n.slices||[]).slice(0,2).map(s=>esc(s.text)).join("; ")}</span></div>`),
+		r.context ? `<div class="page-md" style="margin-top:10px">${esc(r.context)}</div>` : "",
+	].join("");
+}
+
+async function refreshTokens() {
+	if (!S.me && !S.devMode) return;
+	try {
+		const body = await api("/auth/tokens");
+		S.tokens = body.tokens || [];
+	} catch {
+		S.tokens = [];
+	}
+}
+
+async function generateToken(type) {
+	const label = $(`#${type}TokenLabel`)?.value || (type === "mcp" ? "MCP client" : "API client");
+	try {
+		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type, label }) });
+		S.oneTimeToken = result;
+		await refreshTokens();
+		renderView();
+	} catch (e) { toast("Token creation failed: " + e.message, true); }
+}
+
+async function revokeToken(id) {
+	if (!confirm("Revoking this token immediately stops that tool from saving or recalling memory.")) return;
+	try {
+		await api(`/auth/tokens/${encodeURIComponent(id)}/revoke`, { method:"POST" });
+		await refreshTokens();
+		renderView();
+	} catch (e) { toast("Revoke failed: " + e.message, true); }
+}
+
+function viewConnect(v) {
+	const latest = S.oneTimeToken;
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="panel-grid">
+			<div class="action-box"><h3>MCP connection</h3>
+				<div class="help">MCP URL = where UML's memory server lives. Token = private key that lets this tool use your memory.</div>
+				<div class="form-row"><label>Label</label><input id="mcpTokenLabel" placeholder="Claude, Cursor, Codex, custom agent" /></div>
+				<button onclick="generateToken('mcp')">Generate MCP token</button>
+			</div>
+			<div class="action-box"><h3>API access</h3>
+				<div class="help">Use API tokens for custom apps, actions, and agents that call UML directly.</div>
+				<div class="form-row"><label>Label</label><input id="apiTokenLabel" placeholder="Custom Agent" /></div>
+				<button onclick="generateToken('api')">Generate API token</button>
+			</div>
+		</div>
+		${latest ? `<div class="token-secret"><b>Copy this token now.</b> For your safety, UML will not show it again. If you lose it, generate a new token.<br><br>
+			<div><b>MCP URL</b>: <code>${esc(mcpUrlForToken(latest.token))}</code></div>
+			<div><b>Token</b>: <code>${esc(latest.token)}</code></div>
+			<div style="margin-top:8px"><button class="mini" onclick="copyText('${esc(latest.token)}','Token copied')">Copy token</button>
+			<button class="mini ghost" onclick="copyText('${esc(mcpUrlForToken(latest.token))}','MCP URL copied')">Copy MCP URL</button></div>
+		</div>` : ""}
+		<div class="box" style="max-width:980px"><h3>Tokens</h3><div id="tokenList"></div></div>
+		<div class="panel-grid">
+			<div class="action-box"><h3>Claude / MCP client</h3><ol class="steps"><li>Open Connect.</li><li>Generate an MCP token.</li><li>Copy the MCP URL and token.</li><li>Open the AI tool settings.</li><li>Find Connectors, MCP, or Tools.</li><li>Add a server and paste the URL and token if asked.</li><li>Save and test connection.</li></ol></div>
+			<div class="action-box"><h3>Cursor / Codex / coding assistant</h3><p class="help">If your coding assistant supports MCP or tools, add UML using your endpoint and token.</p></div>
+			<div class="action-box"><h3>ChatGPT-style assistant</h3><p class="help">If your workspace or custom assistant supports connectors, MCP, tools, or API actions, add UML using your endpoint and token. Otherwise use the API option with your own app or agent.</p></div>
+			<div class="action-box"><h3>API / custom app</h3><div class="mcp-url">POST /v1/save<br>Authorization: Bearer ${CONNECTION_TOKEN_PLACEHOLDER}</div><p class="help" style="margin-top:8px">Use the same header for /v1/recall and /v1/status.</p></div>
+		</div>
+		<div class="box" style="max-width:980px"><h3>Connected apps</h3><div class="help">Coming soon: Gmail, Google Calendar, GitHub, Notion, Spotify, Zomato/Food apps, and more.</div></div>`;
+	v.appendChild(wrap);
+	renderTokenList();
+}
+
+const CONNECTION_TOKEN_PLACEHOLDER = "uml_live_...";
+
+function renderTokenList() {
+	const list = $("#tokenList");
+	if (!list) return;
+	if (!S.tokens.length) { list.innerHTML = `<div class="empty">No tokens yet.</div>`; return; }
+	list.innerHTML = S.tokens.map(t => `<div class="token-row">
+		<div><b>${esc(t.label)}</b><div class="kv">${esc(t.type)} · ${esc(t.masked_token)} · created ${fmtDate(t.created_at)} · last used ${t.last_used_at ? fmtDate(t.last_used_at) : "never"}</div></div>
+		<span class="badge ${t.revoked_at ? "state-inactive" : "state-active"}">${esc(t.status)}</span>
+		<button class="ghost danger mini" onclick="revokeToken('${esc(t.id)}')" ${t.revoked_at ? "disabled" : ""}>Revoke</button>
+	</div>`).join("");
+}
+
+function viewHelp(v) {
+	const topics = [
+		["How UML works", "Connected tools save durable context into pages, nodes, slices, events, edges, and clusters. Recall asks that memory for compact context."],
+		["Connect Claude/MCP clients", "Generate an MCP token, copy the MCP URL, then add it in the client's connector or MCP server settings."],
+		["Connect Cursor/Codex", "Use the Connect tab's MCP setup if your coding assistant supports MCP or tool servers."],
+		["ChatGPT-style/custom assistants", "Use connectors, MCP, tools, or API actions when available. If not, connect through your own app or agent."],
+		["How tokens work", "Tokens identify one account and one tool. The full token is shown once, then only a masked version remains."],
+		["Rotate or revoke", "Generate a new token to rotate. Revoke stops that tool immediately."],
+		["Reset memory", "Settings contains a Danger Zone requiring DELETE ALL. It deletes only your memory rows, not your account."],
+		["Troubleshooting", "For signup or login issues, try again with a valid email and an 8+ character password. For connectors, check that the URL and token are pasted into the right fields and that the token has not been revoked."],
+		["Contact", "For help, production feedback, or partnership: founder@gpmai.dev or ejziyad@gmail.com."],
+	];
+	const grid = el("div","help-grid");
+	for (const [h,p] of topics) grid.appendChild(el("div","action-box", `<h3>${esc(h)}</h3><div class="help">${esc(p)}</div>`));
+	v.appendChild(grid);
+}
+
+function viewProfile(v) {
+	const u = S.me?.user || {};
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box">
+		<h3>Profile</h3>
+		<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "UML user")}</span></div>
+		<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
+		<div class="kv">Account id: <b>${esc(u.id || S.userId || "")}</b></div>
+		<div class="kv">Role / plan: <b>${esc(u.role || "user")}</b></div>
+		<div class="kv">Created: <b>${fmtDate(u.created_at)}</b></div>
+		<div style="margin-top:14px"><button class="ghost" onclick="logoutNow()">Logout</button></div>
+	</div>`;
+	v.appendChild(wrap);
+}
+
+function viewSettings(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="settings-grid">
+		<div class="action-box"><h3>Account</h3><div class="help">Email, profile, and session controls live here.</div></div>
+		<div class="action-box"><h3>Memory preferences</h3><div class="help">Review how saves and recalls behave for your account.</div></div>
+		<div class="action-box"><h3>Privacy</h3><div class="help">Your dashboard uses your browser session. Tools use per-app tokens.</div></div>
+		<div class="action-box"><h3>Connected tools</h3><div class="help">${S.tokens.length} token(s) created. Open Connect to rotate or revoke.</div></div>
+		<div class="action-box"><h3>Developer/API tokens</h3><div class="help">Create API and MCP tokens in Connect. Full token secrets are shown once only.</div></div>
+		<div class="action-box"><h3>Export memory</h3><div class="help">Export is planned; memory remains readable in Graph and Memories today.</div></div>
+		<div class="action-box"><h3>Sessions</h3><div class="help">Log out here or revoke all browser sessions.</div><div style="margin-top:10px"><button class="ghost" onclick="logoutAllNow()">Logout all sessions</button></div></div>
+	</div>`;
+	const danger = el("div");
+	viewReset(danger);
+	wrap.appendChild(danger);
+	v.appendChild(wrap);
 }
 
 function viewGraph(v) {
@@ -1021,7 +1746,7 @@ function drawGraph() {
 	$("#legend").innerHTML = present.length
 		? present.map(c=>`<span><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.label)} (${counts.get(c.id)})</span>`).join("")
 		: "";
-	if (!nodes.length && !pages.length && !candidates.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use the Test tab or your MCP connector to add memories.</span></div>`); return; }
+	if (!nodes.length && !pages.length && !candidates.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use Save or Connect to add your first memory.</span></div>`); return; }
 	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
 	try {
 		const byId = Object.fromEntries(nodes.map(n=>[n.id,n.label]));
@@ -1213,8 +1938,8 @@ function viewReset(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="box danger-zone">
-			<h3>Reset selected user memory</h3>
-			<div class="help">This permanently deletes memory rows for <b>${esc(S.userId || "selected user")}</b>. It does not reset other users.</div>
+			<h3>Danger Zone / Reset memory</h3>
+			<div class="help">This permanently deletes memory rows for <b>${esc(S.me?.user?.email || S.userId || "your account")}</b>. It does not reset other users or delete your account.</div>
 			<div class="kv" style="margin-top:10px">
 				<b>${stats.pages || 0}</b> page(s),
 				<b>${stats.nodes || 0}</b> node(s),
@@ -1263,20 +1988,24 @@ const SAMPLE_CHAT = [
 
 async function doSave(payload) {
 	try {
-		const r = await api("/v1/save", { method:"POST", body: JSON.stringify({ userId: S.userId, ...payload }) });
+		const r = await api("/v1/save", { method:"POST", body: JSON.stringify(scopedPayload(payload)) });
 		toast(r.summary || "Saved.");
 		setTimeout(load, 700);
 	} catch (e) { toast("Save failed: " + e.message, true); }
 }
-async function doRecall(query) {
+async function doRecall(query, opts = {}) {
 	try {
-		const r = await api("/v1/recall", { method:"POST", body: JSON.stringify({ userId: S.userId, query }) });
+		const r = await api("/v1/recall", { method:"POST", body: JSON.stringify(scopedPayload({ query })) });
+		if (opts.panel) {
+			S.recallResult = r;
+			renderRecallResults();
+		}
 		toast(r.context ? `Recall "${query}":\n${r.context}` : `Recall "${query}": nothing found.`);
 	} catch (e) { toast("Recall failed: " + e.message, true); }
 }
 
 async function postAction(path, payload) {
-	return api(path, { method:"POST", body: JSON.stringify({ userId: S.userId, ...payload }) });
+	return api(path, { method:"POST", body: JSON.stringify(scopedPayload(payload)) });
 }
 async function deleteLastRun() {
 	if (!confirm("Delete the objects created by the most recent extraction?")) return;
@@ -1362,22 +2091,22 @@ async function archiveSelected(kind, id) {
 function viewSetup(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="box"><h3>Your MCP connector URL</h3>
+		<div class="box"><h3>Legacy dev MCP connector URL</h3>
 			<div class="mcp-url" id="setupUrl">${esc(mcpUrl())}</div>
 			<div style="margin-top:9px"><button class="mini" onclick="copyText(mcpUrl(),'MCP URL copied')">Copy URL</button></div>
 			<div class="help" style="margin-top:9px">This URL embeds <code>userId:key</code>. Treat it like a password. To rotate, change the global <code>API_KEY</code> secret (<code>wrangler secret put API_KEY</code>) — every connector URL must be regenerated afterwards.</div>
 		</div>
-		<div class="box"><h3>Connect ChatGPT</h3>
+		<div class="box"><h3>Connect ChatGPT-style assistants</h3>
 			<ol class="steps">
-				<li>Settings → Connectors → <b>Add custom connector</b> (or Developer mode → MCP).</li>
-				<li>Paste the URL above. No auth / headers needed — identity is in the URL.</li>
+				<li>If your workspace or custom assistant supports connectors, MCP, tools, or API actions, add UML there.</li>
+				<li>Paste the URL above only for legacy dev testing.</li>
 				<li>Enable the <code>save_memory</code>, <code>save_conversation</code>, and <code>recall_memory</code> tools.</li>
 			</ol>
 		</div>
-		<div class="box"><h3>Connect Claude</h3>
+		<div class="box"><h3>Connect Claude / MCP clients</h3>
 			<ol class="steps">
-				<li>Settings → Connectors → <b>Add custom connector</b>.</li>
-				<li>Paste the URL above (Claude uses URL-only remote MCP — no bearer header).</li>
+				<li>Open your client's connector or MCP server settings.</li>
+				<li>Paste the URL above only for legacy dev testing.</li>
 				<li>Approve the three memory tools when prompted in a chat.</li>
 			</ol>
 		</div>`;
@@ -1512,14 +2241,63 @@ function closeDetail() {
 
 async function copyText(t, msg) { try { await navigator.clipboard.writeText(t); toast(msg||"Copied"); } catch { toast("Copy failed — select & copy manually", true); } }
 
+async function logoutNow() {
+	await fetch("/auth/logout", { method:"POST", credentials:"include" }).catch(() => {});
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null;
+	pushUrl("/");
+	setMode("public");
+}
+
+async function logoutAllNow() {
+	if (!confirm("Log out all browser sessions for this account?")) return;
+	await fetch("/auth/logout-all", { method:"POST", credentials:"include" }).catch(() => {});
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null;
+	pushUrl("/");
+	setMode("public");
+}
+
+async function initShell() {
+	const mode = routeMode();
+	await refreshMe();
+	if (S.me?.user?.id) {
+		S.userId = S.me.user.id;
+		localStorage.setItem("uml_user", S.userId);
+	}
+	if (mode === "login" || mode === "signup") {
+		if (S.me) {
+			pushUrl("/app");
+			setMode("app");
+			await refreshTokens();
+			await load();
+			return;
+		}
+		renderAuth(mode);
+		setMode(mode);
+		return;
+	}
+	if (mode === "app" || S.me) {
+		if (!S.me && !S.devMode) {
+			renderAuth("login");
+			setMode("login");
+			return;
+		}
+		setMode("app");
+		await refreshTokens();
+		await load();
+		return;
+	}
+	setMode("public");
+}
+
 /* ---------------- wire up ---------------- */
 $("#load").onclick = load;
 $("#copyMcp").onclick = () => { if (!S.userId||!S.key) return toast("Enter userId + key first", true); copyText(mcpUrl(), "MCP URL copied"); };
 $("#userId").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t) setView(t.dataset.view); });
-renderView();
-if (S.userId && S.key) load();
+$("#logoutBtn").onclick = logoutNow;
+window.addEventListener("popstate", () => initShell());
+initShell();
 </script>
 </body>
 </html>

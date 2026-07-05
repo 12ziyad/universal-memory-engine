@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+  <title id="title">UML Universal Memory Layer logo</title>
+  <desc id="desc">A glowing memory core with orbit nodes above the UML wordmark.</desc>
+  <defs>
+    <radialGradient id="core" cx="42%" cy="35%" r="65%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".25" stop-color="#7be8ff"/>
+      <stop offset=".58" stop-color="#2b9fd6"/>
+      <stop offset="1" stop-color="#0b1a2e"/>
+    </radialGradient>
+    <radialGradient id="gold" cx="38%" cy="28%" r="65%">
+      <stop offset="0" stop-color="#fff7bf"/>
+      <stop offset=".45" stop-color="#ffc65b"/>
+      <stop offset="1" stop-color="#9d5b13"/>
+    </radialGradient>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.09 0 0 0 0 0.74 0 0 0 0 1 0 0 0 .72 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGold" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 1 0 0 0 0 .62 0 0 0 0 .1 0 0 0 .62 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="640" height="640" fill="#02060d"/>
+  <g filter="url(#glow)">
+    <ellipse cx="320" cy="258" rx="190" ry="66" fill="none" stroke="#50d8ff" stroke-width="5" opacity=".62" transform="rotate(-13 320 258)"/>
+    <ellipse cx="320" cy="258" rx="190" ry="66" fill="none" stroke="#85f4ff" stroke-width="2" opacity=".72" transform="rotate(18 320 258)"/>
+    <circle cx="320" cy="258" r="76" fill="url(#core)" stroke="#c8f8ff" stroke-width="6"/>
+    <path d="M282 221c20-25 78-17 100 14 21 30 11 78-17 98 53-43 18-123-56-124-11 0-20 5-27 12z" fill="#ffffff" opacity=".42"/>
+    <circle cx="204" cy="186" r="28" fill="url(#core)" stroke="#d8fbff" stroke-width="5"/>
+    <circle cx="446" cy="185" r="25" fill="url(#gold)" stroke="#fff4bc" stroke-width="5" filter="url(#softGold)"/>
+    <circle cx="202" cy="286" r="24" fill="url(#gold)" stroke="#fff4bc" stroke-width="5" filter="url(#softGold)"/>
+    <circle cx="438" cy="282" r="23" fill="url(#core)" stroke="#d8fbff" stroke-width="5"/>
+    <path d="M235 202l53 32M394 228l33-25M226 279l68-11M385 270l34 8" stroke="#93edff" stroke-width="5" stroke-linecap="round" opacity=".88"/>
+    <path d="M272 160c38-22 101-25 143 4M249 344c49 25 103 28 154 1" stroke="#33cfff" stroke-width="3" stroke-linecap="round" opacity=".38"/>
+  </g>
+  <g font-family="Inter, ui-sans-serif, system-ui, Arial, sans-serif" text-anchor="middle">
+    <text x="320" y="446" fill="#f8fbff" font-size="92" font-weight="800" letter-spacing="8" stroke="#58d8ff" stroke-width="2" paint-order="stroke">UML</text>
+    <text x="320" y="496" fill="#75dbff" font-size="26" font-weight="500">Universal Memory Layer</text>
+  </g>
+</svg>

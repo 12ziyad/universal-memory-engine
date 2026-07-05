@@ -1,5 +1,5 @@
 /**
- * The MCP server — the "door" official ChatGPT and Claude connect through.
+ * The MCP server — the door supported MCP clients and custom agents connect through.
  *
  * Three tools, each routed through the EXISTING engine (no duplicated logic):
  *   - save_memory       → ingest path (single durable statement)
