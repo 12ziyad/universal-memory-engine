@@ -13,6 +13,7 @@
 
 import { DIALS } from "../config.js";
 import { jaccard, tokens } from "../lib/text.js";
+import { isStrongDurableSignal } from "./candidate_rules.js";
 
 export const ACTION = { IGNORE: "IGNORE", HOLD: "HOLD", FIRE: "FIRE" };
 
@@ -84,6 +85,7 @@ export function classifyMessage(content) {
 	if (EMOJI_ONLY_RE.test(text)) return "noise";
 	if (text.length <= 3) return "noise";
 	if (NOISE_RE.test(text)) return "noise";
+	if (isStrongDurableSignal(text)) return "signal";
 	if (SIGNAL_RE.test(text)) return "signal";
 	if (UTILITY_PREFIX_RE.test(text)) return "utility";
 	// A bare question with no first-person statement is utility, not memory.

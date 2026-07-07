@@ -161,7 +161,8 @@ export class UserMemory extends DurableObject {
 				await storeReceipt(this.env, userId, result.receipt.source, result.receipt, result.summary);
 			}
 
-			if (result.outcome === "wrote") {
+			const finalizedNoWrite = result.outcome === "no_write" && result.receipt?.reason === "user_opt_out";
+			if (result.outcome === "wrote" || finalizedNoWrite) {
 				// Remove only the messages we processed (a concurrent addMessages may
 				// have appended more), then advance the checkpoint.
 				const current = (await this.ctx.storage.get("chunk")) ?? [];
@@ -175,6 +176,7 @@ export class UserMemory extends DurableObject {
 			}
 			// meaningful_no_write / llm_failed / db_write_failed → keep chunk + checkpoint.
 
+			// user_opt_out no_write is final; meaningful_no_write/failed outcomes remain retryable.
 			return result;
 		} finally {
 			this.busy = false;

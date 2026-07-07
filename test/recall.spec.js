@@ -86,13 +86,29 @@ describe("/v1/recall - simple recall", () => {
 	it("isolates users - a different userId recalls nothing", async () => {
 		const { status, body } = await recall(otherUserId, "boxing");
 		expect(status).toBe(200);
-		expect(body).toEqual({ context: "", nodes: [], pages: [] });
+		expect(body).toMatchObject({
+			ok: true,
+			recall_mode: "light_recall",
+			context: "",
+			nodes: [],
+			pages: [],
+			items: [],
+			count: 0,
+		});
 	});
 
 	it("returns empty for an unrelated query", async () => {
 		const { status, body } = await recall(userId, "remind me about cooking pasta tonight");
 		expect(status).toBe(200);
-		expect(body).toEqual({ context: "", nodes: [], pages: [] });
+		expect(body).toMatchObject({
+			ok: true,
+			recall_mode: "light_recall",
+			context: "",
+			nodes: [],
+			pages: [],
+			items: [],
+			count: 0,
+		});
 	});
 });
 

@@ -31,11 +31,22 @@ import {
 import { newId } from "../lib/ids.js";
 import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, getUserNodes } from "../lib/db.js";
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
+import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
 import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
 const SUPERSEDE_KINDS = new Set(["progress", "preference"]);
+const UPDATE_MODE_SUPERSEDE_KINDS = new Set([
+	"feature_detail",
+	"technical_detail",
+	"progress",
+	"blocker",
+	"fix",
+	"decision",
+	"preference",
+	"other",
+]);
 // Window for treating a same-action event as a duplicate of an ongoing incident.
 const EVENT_DEDUPE_MS = 24 * 60 * 60 * 1000;
 
@@ -187,6 +198,9 @@ export async function applyGates(
 	const now = Date.now();
 	// Path A (user-commanded save): keep anything durable, drop only obvious junk.
 	const manual = Boolean(opts.manual);
+	const updateMode = Boolean(opts.updateMode);
+	const sourceText = String(opts.sourceText ?? "");
+	const supersedeKinds = updateMode ? UPDATE_MODE_SUPERSEDE_KINDS : SUPERSEDE_KINDS;
 	const confMin = manual ? config.manualConfidenceMin : config.confidenceMin;
 
 	const plan = {
@@ -277,25 +291,114 @@ export async function applyGates(
 		return { id };
 	}
 
-	function addCandidate(label, strength, clusterHint) {
+	async function materializeDurableSignal(obj) {
+		const durable = durablePlanFromText(sourceText, obj);
+		if (!durable) return false;
+		if (isSuppressed("node", durable.label)) {
+			reject(obj, "suppressed_blocked");
+			return true;
+		}
+		const node = resolveOrCreateRef(durable.label, durable.category);
+		if (!node) {
+			reject(obj, "durable_signal_no_node");
+			return true;
+		}
+		if (durable.type === "event") {
+			const action = valid(durable.action, ACTIONS, "other");
+			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now);
+			if (duplicateEventId) {
+				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
+				plan.affectedNodeIds.add(node.id);
+				return true;
+			}
+			plan.newEvents.push({
+				id: newId("event"),
+				user_id: userId,
+				node_id: node.id,
+				action,
+				text: durable.text,
+				importance: valid(durable.importance, IMPORTANCE, "important"),
+				happened_at: now,
+				created_at: now,
+				confidence: durable.confidence,
+			});
+			const newState = ACTION_TO_STATE[action];
+			if (newState) plan.nodeStateUpdates.push({ id: node.id, state: newState });
+			plan.affectedNodeIds.add(node.id);
+			return true;
+		}
+		const kind = valid(durable.sliceKind, SLICE_KINDS, "other");
+		const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, durable.text);
+		if (duplicateSliceId) {
+			plan.sliceTouches.push({ id: duplicateSliceId, node_id: node.id, kind });
+			plan.affectedNodeIds.add(node.id);
+			return true;
+		}
+		if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+		plan.newSlices.push({
+			id: newId("slice"),
+			user_id: userId,
+			node_id: node.id,
+			text: durable.text,
+			kind,
+			is_current: 1,
+			created_at: now,
+			confidence: durable.confidence,
+		});
+		plan.affectedNodeIds.add(node.id);
+		return true;
+	}
+
+	function addCandidate(label, strength, clusterHint, meta = {}) {
 		if (manual) return;
 		const norm = normalizeLabel(label);
 		if (isSuppressed("candidate", label) || isSuppressed("node", label)) return;
 		// Already a node? Then it isn't a candidate.
-		if (matchExisting(label, null, existing, existingById)) return;
+		const existingNode = matchExisting(label, meta.possibleExistingNodeId ?? null, existing, existingById);
+		if (existingNode) {
+			plan.nodeTouches.add(existingNode.id);
+			plan.affectedNodeIds.add(existingNode.id);
+			return;
+		}
 		const existingCand = candidateByLabel.get(norm);
 		if (existingCand) {
-			plan.candidateBumps.push({ id: existingCand.id, mentions: (existingCand.mentions ?? 1) + 1 });
+			plan.candidateBumps.push({
+				id: existingCand.id,
+				mentions: (existingCand.mentions ?? existingCand.mention_count ?? 1) + 1,
+				evidence: meta.evidence ?? sourceText,
+				now,
+			});
 			return;
 		}
 		if (plan.newCandidates.some((c) => normalizeLabel(c.label) === norm)) return;
+		const evidenceText = String(meta.evidence ?? sourceText ?? "").trim();
+		const clusterGuess = clusterHint ?? meta.clusterGuess ?? clusterForMemory({
+			label,
+			category: meta.roleGuess ?? "interest",
+			text: evidenceText,
+		});
 		plan.newCandidates.push({
 			id: newId("candidate"),
 			user_id: userId,
 			label,
+			label_guess: label,
+			canonical_key: canonicalKey(label),
+			role_guess: meta.roleGuess ?? null,
+			cluster_guess: clusterGuess ?? null,
 			strength: valid(strength, CANDIDATE_STRENGTHS, "weak"),
+			confidence: Number.isFinite(Number(meta.confidence)) ? Number(meta.confidence) : null,
+			status: "pending",
 			mentions: 1,
-			cluster_hint: clusterHint ?? null,
+			mention_count: 1,
+			session_count: 1,
+			cluster_hint: clusterGuess ?? null,
+			evidence_json: JSON.stringify(evidenceText ? [{ text: evidenceText, source: "message", ts: now }] : []),
+			possible_parent_id: meta.possibleParentId ?? null,
+			possible_existing_node_id: meta.possibleExistingNodeId ?? null,
+			reason: meta.reason ?? "weak_or_unclear_signal",
+			first_seen_at: now,
+			last_seen_at: now,
+			expires_at: meta.expiresAt ?? null,
 			created_at: now,
 		});
 	}
@@ -325,9 +428,15 @@ export async function applyGates(
 			// Judge by MEANING: unknown category becomes "other", it is NOT dropped.
 			const category = canonicalizeCategory(obj.category) ?? "other";
 			if (conf < confMin) {
+				if (await materializeDurableSignal({ ...obj, category, confidence: conf })) continue;
 				// Genuinely weak → park as a candidate (still visible in the UI),
 				// not silently lost.
-				addCandidate(obj.label, "weak", null);
+				addCandidate(obj.label, "weak", null, {
+					confidence: conf,
+					roleGuess: category,
+					reason: manual ? "manual_low_confidence_rejected" : "low_confidence_downgraded",
+					evidence: sourceText,
+				});
 				reject(obj, manual ? "low_confidence" : "low_confidence_downgraded");
 				continue;
 			}
@@ -409,7 +518,7 @@ export async function applyGates(
 				continue;
 			}
 			// Supersede an older single-valued slice (mark is_current = 0) before append.
-			if (SUPERSEDE_KINDS.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+			if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
 			plan.newSlices.push({
 				id: newId("slice"),
 				user_id: userId,
@@ -481,7 +590,14 @@ export async function applyGates(
 				reject(obj, "manual_candidate_disabled");
 				continue;
 			}
-			addCandidate(obj.label, obj.strength, obj.cluster_hint);
+			if (await materializeDurableSignal(obj)) continue;
+			addCandidate(obj.label, obj.strength, obj.cluster_hint, {
+				confidence: conf,
+				roleGuess: obj.category ?? obj.role_guess ?? null,
+				reason: obj.reason ?? "model_candidate",
+				evidence: sourceText,
+				possibleExistingNodeId: obj.matches_existing ?? obj.possible_existing_node_id ?? null,
+			});
 			continue;
 		}
 

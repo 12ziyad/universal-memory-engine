@@ -16,10 +16,18 @@ import { queryNodeVectors } from "../lib/vectorize.js";
 import { jaccard, tokens, wordContains, normalizeLabel } from "../lib/text.js";
 
 function keywordScore(node, queryTokens, queryNorm) {
-	const labelTokens = tokens(node.label);
+	let aliases = [];
+	try {
+		const parsed = JSON.parse(node.aliases_json || "[]");
+		if (Array.isArray(parsed)) aliases = parsed;
+	} catch {
+		aliases = [];
+	}
+	const labelTokens = tokens([node.label, ...aliases].join(" "));
 	let score = jaccard(labelTokens, queryTokens);
 	// Boost exact substring hits ("boxing" appears in the chunk).
 	if (wordContains(queryNorm, normalizeLabel(node.label))) score += 0.5;
+	if (aliases.some((alias) => wordContains(queryNorm, normalizeLabel(alias)))) score += 0.35;
 	return score;
 }
 

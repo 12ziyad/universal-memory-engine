@@ -253,6 +253,9 @@ export async function deleteAllMemories(env, userId, confirm) {
 		"candidates",
 		"receipts",
 		"extraction_runs",
+		"source_packets",
+		"memory_jobs",
+		"memory_profiles",
 		"memory_suppressions",
 		"checkpoints",
 	];

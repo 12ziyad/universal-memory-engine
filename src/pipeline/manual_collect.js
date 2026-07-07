@@ -4,6 +4,8 @@ import { normalizeLabel } from "../lib/text.js";
 import { digestConversation } from "./digest.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { filterDigestByTopic, parseCollectIntent, saveMemoryPage } from "./pages.js";
+import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
+import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 
 /**
  * Path A2: manual_collect.
@@ -14,10 +16,33 @@ import { filterDigestByTopic, parseCollectIntent, saveMemoryPage } from "./pages
  */
 export async function saveConversation(env, ctx, userId, messages, opts = {}) {
 	const config = getConfig(env);
-	const received = (messages ?? []).length;
-	const intent = parseCollectIntent(messages ?? [], opts);
+	const optOut = messagesContainMemoryOptOut(messages);
+	if (optOut.optedOut) {
+		const received = (messages ?? []).filter((m) => (m?.role ?? "user") === "user").length;
+		const { receipt, summary } = await storeOptOutReceipt(env, userId, "save_conversation", {
+			source_mode: "manual_collect",
+			received,
+			skipped: received || 1,
+			opt_out_phrase: optOut.phrase,
+		});
+		return { fired: false, processing: false, summary, receipt };
+	}
+	const normalized = await normalizeSourcePacket(userId, {
+		type: "message_batch",
+		sourceMode: "manual_collect",
+		messages,
+		conversationId: opts.conversationId,
+		threadId: opts.threadId,
+		sourceId: opts.sourceId,
+		idempotencyKey: opts.idempotencyKey,
+		scope: opts.memoryScope,
+	});
+	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	const source = sourceMeta(sourcePacket);
+	const received = normalized.messages.length;
+	const intent = parseCollectIntent(normalized.messages, opts);
 
-	const { digest, keptLines } = await digestConversation(env, config, messages ?? [], opts);
+	const { digest, keptLines } = await digestConversation(env, config, normalized.messages, opts);
 	const filteredDigest = filterDigestByTopic(digest, intent);
 	const filteredLines = filteredDigest ? filteredDigest.split("\n").filter((line) => line.trim()).length : 0;
 
@@ -26,12 +51,16 @@ export async function saveConversation(env, ctx, userId, messages, opts = {}) {
 			toolName: "save_conversation",
 			sourceMode: "manual_collect",
 			topicFilter: intent.topic ? normalizeLabel(intent.topic) : null,
+			sourcePacketId: source.source_packet_id,
+			idempotencyKey: source.idempotency_key,
+			scopeJson: source.scope_json,
 			status: "skipped",
 			skippedObjects: [{ kind: "memory_page", reason: "no durable facts in this chat" }],
 		});
 		const receipt = emptyReceipt("meaningful_no_write", "no durable facts in this chat (chatter/questions only)", {
 			source: "save_conversation",
 			source_mode: "manual_collect",
+			...source,
 			received,
 			digested: filteredLines,
 		});
@@ -44,10 +73,11 @@ export async function saveConversation(env, ctx, userId, messages, opts = {}) {
 
 	return saveMemoryPage(env, userId, {
 		digest: filteredDigest,
-		messages: messages ?? [],
+		messages: normalized.messages,
 		intent,
 		received,
 		keptLines: filteredLines || keptLines,
 		conversationId: opts.conversationId,
+		sourcePacket,
 	});
 }

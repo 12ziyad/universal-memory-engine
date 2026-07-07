@@ -19,7 +19,7 @@ export default defineWorkersConfig(async () => {
 						bindings: {
 							TEST_MIGRATIONS: migrations,
 							USE_VECTORS: "false",
-							ENABLE_PASS2: "false",
+							ENABLE_PASS2: "true",
 						},
 					},
 				},

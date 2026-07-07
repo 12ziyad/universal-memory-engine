@@ -14,17 +14,64 @@
  *     wait is what replaces the old unbounded await that caused >90s timeouts.
  */
 
+import { hashText, normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
+import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
+
 export async function ingestMessages(env, ctx, userId, messages, opts = {}) {
 	const { flush = false, overrides = {}, waitBudgetMs = 0 } = opts;
+	const optOut = messagesContainMemoryOptOut(messages);
+	if (optOut.optedOut) {
+		const source = overrides.source ?? opts.source ?? "ingest";
+		const sourceMode = opts.sourceMode
+			?? (overrides.manual
+				? (source === "save_conversation" ? "manual_collect" : "manual_direct")
+				: source);
+		const received = (messages ?? []).filter((m) => (m?.role ?? "user") === "user").length;
+		const { receipt, receiptId, summary } = await storeOptOutReceipt(env, userId, source, {
+			source_mode: sourceMode,
+			received,
+			skipped: received || 1,
+			opt_out_phrase: optOut.phrase,
+		});
+		return {
+			fired: false,
+			held: 0,
+			skipped: received,
+			result: { outcome: "no_write", receipt, summary },
+			receipt,
+			receiptId,
+			summary,
+			optedOut: true,
+			sourcePacket: null,
+		};
+	}
+	const normalized = await normalizeSourcePacket(userId, {
+		type: opts.sourceType ?? "message_batch",
+		sourceMode: opts.sourceMode ?? overrides.source ?? "ingest",
+		messages,
+		conversationId: opts.conversationId,
+		threadId: opts.threadId,
+		sourceId: opts.sourceId,
+		idempotencyKey: opts.idempotencyKey,
+		scope: opts.memoryScope,
+	});
+	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	const extractionOverrides = {
+		...overrides,
+		meta: {
+			...(overrides.meta ?? {}),
+			...sourceMeta(sourcePacket),
+		},
+	};
 
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
-	const { fired, held, skipped } = await stub.addMessages(userId, messages, { flush });
+	const { fired, held, skipped } = await stub.addMessages(userId, normalized.messages, { flush });
 
 	let result = null;
 	if (fired) {
 		// One guarded promise: keep it alive past the response AND optionally race
 		// it against the budget. A rejection can never surface as an unhandled error.
-		const p = stub.runExtraction(userId, overrides).catch((err) => {
+		const p = stub.runExtraction(userId, extractionOverrides).catch((err) => {
 			console.warn(`background extraction failed user=${userId}:`, err?.message ?? err);
 			return null;
 		});
@@ -38,7 +85,7 @@ export async function ingestMessages(env, ctx, userId, messages, opts = {}) {
 			clearTimeout(timer);
 		}
 	}
-	return { fired, held, skipped, result };
+	return { fired, held, skipped, result, sourcePacket };
 }
 
 /**
@@ -48,11 +95,6 @@ export async function ingestMessages(env, ctx, userId, messages, opts = {}) {
  * re-extracting it. Used by save_conversation when the caller omits ids.
  */
 export async function stableMsgId(conversationId, content) {
-	const data = new TextEncoder().encode(`${conversationId ?? "conv"}:${content ?? ""}`);
-	const digest = await crypto.subtle.digest("SHA-256", data);
-	const hex = [...new Uint8Array(digest)]
-		.slice(0, 12)
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
-	return `msg_${hex}`;
+	const hex = await hashText(`${conversationId ?? "conv"}:${content ?? ""}`);
+	return `msg_${hex.slice(0, 24)}`;
 }

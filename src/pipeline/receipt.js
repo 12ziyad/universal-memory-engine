@@ -67,6 +67,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		autoCreated,
 		updatedNodes: updatedNodes.size,
 		slices: (p.newSlices ?? []).length,
+		supersededSlices: (p.sliceSupersede ?? []).length,
 		events: (p.newEvents ?? []).length,
 		edges: (p.newEdges ?? []).length,
 		candidates: (p.newCandidates ?? []).length + (p.candidateBumps ?? []).length,
@@ -80,6 +81,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		saved.nodes +
 		saved.updatedNodes +
 		saved.slices +
+		saved.supersededSlices +
 		saved.events +
 		saved.edges +
 		saved.candidates +
@@ -92,6 +94,9 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		source: meta.source ?? "ingest",
 		source_mode: meta.source_mode ?? meta.sourceMode ?? null,
 		extraction_run_id: meta.extraction_run_id ?? null,
+		source_packet_id: meta.source_packet_id ?? meta.sourcePacketId ?? null,
+		idempotency_key: meta.idempotency_key ?? meta.idempotencyKey ?? null,
+		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		saved,
@@ -104,6 +109,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 			createdEvents: (p.newEvents ?? []).map((e) => ({ id: e.id, node_id: e.node_id, action: e.action })),
 			createdEdges: (p.newEdges ?? []).map((e) => ({ id: e.id, from_node: e.from_node, to_node: e.to_node, type: e.type })),
 			reinforcedNodes: [...updatedNodes].map((id) => ({ id })),
+			supersededSlices: p.sliceSupersede ?? [],
 			reinforcedSlices: p.sliceTouches ?? [],
 			reinforcedEvents: p.eventTouches ?? [],
 			reinforcedEdges: p.edgeTouches ?? [],
@@ -120,6 +126,9 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		source: meta.source ?? "ingest",
 		source_mode: meta.source_mode ?? meta.sourceMode ?? null,
 		extraction_run_id: meta.extraction_run_id ?? null,
+		source_packet_id: meta.source_packet_id ?? meta.sourcePacketId ?? null,
+		idempotency_key: meta.idempotency_key ?? meta.idempotencyKey ?? null,
+		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		saved: {
@@ -129,6 +138,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 			autoCreated: [],
 			updatedNodes: 0,
 			slices: 0,
+			supersededSlices: 0,
 			events: 0,
 			edges: 0,
 			candidates: 0,
@@ -156,6 +166,7 @@ export function formatReceipt(receipt) {
 	}
 	if (s.updatedNodes) parts.push(`${s.updatedNodes} updated`);
 	if (s.slices) parts.push(plural(s.slices, "slice"));
+	if (s.supersededSlices) parts.push(`${s.supersededSlices} superseded`);
 	if (s.events) parts.push(plural(s.events, "event"));
 	if (s.edges) parts.push(plural(s.edges, "edge"));
 	if (s.candidates) parts.push(plural(s.candidates, "candidate"));

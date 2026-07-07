@@ -25,6 +25,7 @@ import {
 } from "./pipeline/cleanup.js";
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
+import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
 import {
 	clearSessionCookie,
@@ -36,9 +37,13 @@ import {
 	logoutAll,
 	resolveConnectionToken,
 	revokeConnectionToken,
+	sha256Hex,
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
+import { emptyReceipt, formatReceipt } from "./pipeline/receipt.js";
+import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./pipeline/source.js";
+import { storeReceipt } from "./lib/db.js";
 
 export { UserMemory } from "./durable/user-memory.js";
 
@@ -92,11 +97,67 @@ async function resolveMemoryUser(request, env, explicitUserId, { allowLegacy = t
 
 async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 	const auth = await resolveMemoryUser(request, env, explicitUserId, options);
-	if (auth) return { auth, userId: auth.userId };
+	if (auth) {
+		const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput);
+		return { auth, userId: scoped.userId, memoryScope: scoped.memoryScope };
+	}
 	if (await isAuthorized(request, env)) {
 		return { response: json({ error: "userId is required" }, 400) };
 	}
 	return { response: json({ error: "unauthorized" }, 401) };
+}
+
+function cleanScopeValue(value, fallback = null) {
+	const text = String(value ?? "").trim();
+	return text || fallback;
+}
+
+async function scopedMemoryUserId(ownerUserId, externalUserId) {
+	if (!externalUserId || externalUserId === ownerUserId) return ownerUserId;
+	const digest = await sha256Hex(`uml-memory-scope:v1:${ownerUserId}:${externalUserId}`);
+	return `mem_${digest.slice(0, 32)}`;
+}
+
+async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}) {
+	const input = scopeInput && typeof scopeInput === "object" ? scopeInput : {};
+	if (auth.type === "legacy") {
+		const externalUserId = cleanScopeValue(explicitUserId, auth.userId);
+		return {
+			userId: externalUserId,
+			memoryScope: {
+				...input,
+				authType: "legacy",
+				memoryUserId: externalUserId,
+				ownerUserId: "legacy",
+				externalUserId,
+			},
+		};
+	}
+	const ownerUserId = auth.userId;
+	const externalUserId = cleanScopeValue(explicitUserId ?? input.externalUserId ?? input.userId, ownerUserId);
+	const memoryUserId = await scopedMemoryUserId(ownerUserId, externalUserId);
+	return {
+		userId: memoryUserId,
+		memoryScope: {
+			...input,
+			authType: auth.type,
+			memoryUserId,
+			ownerUserId,
+			externalUserId,
+		},
+	};
+}
+
+async function storeRouteReceipt(env, userId, sourcePacket, outcome, reason, source = "recall") {
+	const meta = sourceMeta(sourcePacket);
+	const receipt = emptyReceipt(outcome, reason, {
+		source,
+		source_mode: sourcePacket?.source_mode ?? null,
+		...meta,
+	});
+	const summary = formatReceipt(receipt);
+	const receiptId = await storeReceipt(env, userId, source, receipt, summary);
+	return { ...receipt, id: receiptId ?? null };
 }
 
 function redirectTo(request, path) {
@@ -186,7 +247,9 @@ const routes = {
 
 	"POST /v1/ingest": async (request, env, ctx) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			scopeInput: body.memoryScope ?? body.sourceScope,
+		});
 		if (auth.response) return auth.response;
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
@@ -194,12 +257,36 @@ const routes = {
 		// Route through the shared ingest path. Extraction runs in the background
 		// (wait:false) so the caller isn't blocked. `_test` is an injection hook
 		// for deterministic tests (canned LLM output); production never sends it.
-		const { fired } = await ingestMessages(env, ctx, auth.userId, messages, {
+		const { fired, held, skipped, sourcePacket, receipt: pipelineReceipt } = await ingestMessages(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
+			conversationId: body.conversationId,
+			threadId: body.threadId,
+			sourceId: body.sourceId,
+			idempotencyKey: body.idempotencyKey,
+			memoryScope: auth.memoryScope,
 			overrides: body._test ?? {},
 		});
 
-		return json({ received: true, fired: Boolean(fired) });
+		let receipt = pipelineReceipt ?? null;
+		if (!fired) {
+			if (!receipt) {
+				const outcome = held > 0 ? "accumulating" : "ignored";
+				const reason = held > 0
+					? "learning trigger is accumulating more context"
+					: "no durable learning signal found";
+				receipt = await storeRouteReceipt(env, auth.userId, sourcePacket, outcome, reason, "ingest");
+			}
+		}
+
+		return json({
+			received: true,
+			fired: Boolean(fired),
+			held,
+			skipped,
+			source_packet_id: sourcePacket?.id ?? null,
+			receipt_id: receipt?.id ?? null,
+			receipt,
+		});
 	},
 
 	"GET /v1/graph": async (request, env) => {
@@ -217,7 +304,12 @@ const routes = {
 			env.DB.prepare("SELECT * FROM slices WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM edges WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
-			env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL ORDER BY created_at DESC").bind(userId),
+			env.DB.prepare(
+				`SELECT * FROM candidates
+				 WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL
+				   AND COALESCE(status, 'pending') = 'pending'
+				 ORDER BY COALESCE(last_seen_at, created_at) DESC`,
+			).bind(userId),
 		]);
 
 		const slicesByNode = new Map();
@@ -245,8 +337,9 @@ const routes = {
 		}));
 		const candidates = candidatesResult.results.map((candidate) => withCluster({
 			...candidate,
-			category: candidate.cluster_hint ?? "interest",
-			cluster: candidate.cluster_hint,
+			label: candidate.label_guess ?? candidate.label,
+			category: candidate.role_guess ?? candidate.cluster_guess ?? candidate.cluster_hint ?? "interest",
+			cluster: candidate.cluster_guess ?? candidate.cluster_hint,
 			summary: null,
 		}));
 		const layout = buildGraphLayout(nodes, pages, candidates);
@@ -279,7 +372,9 @@ const routes = {
 		// MCP save tools through the SAME engine. `_test` injects canned LLM/digest
 		// output for deterministic tests; production never sends it.
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			scopeInput: body.memoryScope ?? body.sourceScope,
+		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
@@ -297,6 +392,10 @@ const routes = {
 				n,
 				topic,
 				conversationId,
+				threadId: body.threadId,
+				sourceId: body.sourceId,
+				idempotencyKey: body.idempotencyKey,
+				memoryScope: auth.memoryScope,
 				overrides,
 				digestResponse: t.digestResponse,
 			});
@@ -304,7 +403,13 @@ const routes = {
 			if (typeof content !== "string" || !content.trim()) {
 				return json({ error: "content is required for a memory save" }, 400);
 			}
-			res = await saveMemory(env, ctx, userId, content, { recentContext, overrides });
+			res = await saveMemory(env, ctx, userId, content, {
+				recentContext,
+				sourceId: body.sourceId,
+				idempotencyKey: body.idempotencyKey,
+				memoryScope: auth.memoryScope,
+				overrides,
+			});
 		}
 		return json({ fired: res.fired, processing: res.processing, summary: res.summary, receipt: res.receipt });
 	},
@@ -380,12 +485,38 @@ const routes = {
 
 	"POST /v1/recall": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			scopeInput: body.memoryScope ?? body.sourceScope,
+		});
 		if (auth.response) return auth.response;
 		const { query } = body;
 		if (typeof query !== "string") return json({ error: "query is required" }, 400);
 
-		const result = await recall(env, getConfig(env), auth.userId, query);
+		const normalized = await normalizeSourcePacket(auth.userId, {
+			type: "query",
+			sourceMode: "recall",
+			content: query,
+			sourceId: body.sourceId,
+			idempotencyKey: body.idempotencyKey,
+			threadId: body.threadId,
+			conversationId: body.conversationId,
+			topic: body.topic,
+			scope: auth.memoryScope,
+		});
+		const sourcePacket = await storeSourcePacket(env, normalized.packet);
+		const result = await recall(env, getConfig(env), auth.userId, query, {
+			memoryScope: auth.memoryScope,
+		});
+		const receipt = await storeRouteReceipt(
+			env,
+			auth.userId,
+			sourcePacket,
+			result.recall_mode === "no_recall" ? "no_recall" : "recalled",
+			result.recall_mode === "no_recall" ? "recall gate skipped memory lookup" : "bounded recall completed",
+			"recall",
+		);
+		result.receipt_id = receipt.id;
+		result.source_packet_id = sourcePacket?.id ?? null;
 		return json(result);
 	},
 
@@ -399,7 +530,11 @@ const routes = {
 			env.DB.prepare("SELECT COUNT(*) AS count FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
 			env.DB.prepare("SELECT COUNT(*) AS count FROM slices WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
 			env.DB.prepare("SELECT COUNT(*) AS count FROM events WHERE user_id = ? AND deleted_at IS NULL").bind(userId),
-			env.DB.prepare("SELECT COUNT(*) AS count FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL").bind(userId),
+			env.DB.prepare(
+				`SELECT COUNT(*) AS count FROM candidates
+				 WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL
+				   AND COALESCE(status, 'pending') = 'pending'`,
+			).bind(userId),
 			env.DB.prepare("SELECT last_processed_msg_id FROM checkpoints WHERE user_id = ?").bind(userId),
 		]);
 
@@ -437,6 +572,10 @@ export default {
 			return json(await revokeConnectionToken(env, auth.userId, id));
 		}
 
+		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
+			return handleCandidateRoutes(request, env, url);
+		}
+
 		const handler = routes[`${request.method} ${url.pathname}`];
 
 		if (!handler) {
@@ -467,4 +606,33 @@ async function handleMcp(request, env, ctx, url) {
 	// Normalize the path to /mcp so the transport never depends on the token suffix.
 	const normalized = new Request(new URL("/mcp", url).toString(), request);
 	return createMcpHandler(server)(normalized, env, ctx);
+}
+
+async function handleCandidateRoutes(request, env, url) {
+	if (request.method === "GET" && url.pathname === "/v1/candidates") {
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"));
+		if (auth.response) return auth.response;
+		const status = url.searchParams.get("status") || "pending";
+		const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 250);
+		return json({ candidates: await listCandidates(env, auth.userId, { status, limit }) });
+	}
+
+	if (request.method !== "POST") return json({ error: "not found" }, 404);
+	const match = url.pathname.match(/^\/v1\/candidates\/([^/]+)\/(promote|reject|merge)$/);
+	if (!match) return json({ error: "not found" }, 404);
+	const body = await request.json().catch(() => ({}));
+	const auth = await requireMemoryUser(request, env, body.userId, {
+		scopeInput: body.memoryScope ?? body.sourceScope,
+	});
+	if (auth.response) return auth.response;
+
+	const id = decodeURIComponent(match[1]);
+	const action = match[2];
+	const result = action === "promote"
+		? await promoteCandidate(env, auth.userId, id, body)
+		: action === "merge"
+			? await mergeCandidate(env, auth.userId, id, body)
+			: await rejectCandidate(env, auth.userId, id, body);
+	if (result?.ok === false) return json({ error: result.error }, result.status ?? 400);
+	return json(result);
 }

@@ -180,16 +180,61 @@ export async function writeApproved(env, config, userId, plan) {
 	for (const c of plan.newCandidates) {
 		stmts.push(
 			env.DB.prepare(
-				"INSERT INTO candidates (id, user_id, label, strength, mentions, cluster_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind(c.id, c.user_id, c.label, c.strength, c.mentions, c.cluster_hint, c.created_at),
+				`INSERT INTO candidates
+					(id, user_id, label, strength, mentions, cluster_hint, created_at,
+					 label_guess, canonical_key, role_guess, cluster_guess, confidence, status,
+					 first_seen_at, last_seen_at, session_count, mention_count, evidence_json,
+					 possible_parent_id, possible_existing_node_id, expires_at, reason)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				c.id,
+				c.user_id,
+				c.label,
+				c.strength,
+				c.mentions,
+				c.cluster_hint,
+				c.created_at,
+				c.label_guess ?? c.label,
+				c.canonical_key ?? null,
+				c.role_guess ?? null,
+				c.cluster_guess ?? c.cluster_hint ?? null,
+				c.confidence ?? null,
+				c.status ?? "pending",
+				c.first_seen_at ?? c.created_at,
+				c.last_seen_at ?? c.created_at,
+				c.session_count ?? 1,
+				c.mention_count ?? c.mentions ?? 1,
+				c.evidence_json ?? "[]",
+				c.possible_parent_id ?? null,
+				c.possible_existing_node_id ?? null,
+				c.expires_at ?? null,
+				c.reason ?? null,
+			),
 		);
 	}
 
 	// Candidate mention bumps.
 	for (const b of plan.candidateBumps) {
 		stmts.push(
-			env.DB.prepare("UPDATE candidates SET mentions = ? WHERE id = ? AND user_id = ?").bind(
+			env.DB.prepare(
+				`UPDATE candidates
+				 SET mentions = ?,
+					 mention_count = ?,
+					 session_count = COALESCE(session_count, 1) + 1,
+					 last_seen_at = ?,
+					 evidence_json = CASE
+						WHEN ? IS NULL OR ? = '' THEN COALESCE(evidence_json, '[]')
+						ELSE json_insert(COALESCE(evidence_json, '[]'), '$[#]', json_object('text', ?, 'source', 'message', 'ts', ?))
+					 END
+				 WHERE id = ? AND user_id = ?`,
+			).bind(
 				b.mentions,
+				b.mentions,
+				b.now ?? Date.now(),
+				b.evidence ?? null,
+				b.evidence ?? null,
+				b.evidence ?? null,
+				b.now ?? Date.now(),
 				b.id,
 				userId,
 			),

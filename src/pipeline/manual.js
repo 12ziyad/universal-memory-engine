@@ -21,6 +21,14 @@ export { saveConversation } from "./manual_collect.js";
 
 /** Shape the ingest result into a tool-ready { fired, summary, receipt, processing }. */
 function finalize(res, { prefix = "", processingNote }) {
+	if (res.optedOut || res.receipt) {
+		return {
+			fired: false,
+			processing: false,
+			summary: prefix + (res.summary ?? formatReceipt(res.receipt)),
+			receipt: res.receipt ?? null,
+		};
+	}
 	if (!res.fired) {
 		return {
 			fired: false,
@@ -168,6 +176,11 @@ export async function saveMemory(env, ctx, userId, content, opts = {}) {
 	const res = await ingestMessages(env, ctx, userId, messages, {
 		flush: true,
 		waitBudgetMs: opts.waitBudgetMs ?? config.saveWaitBudgetMs,
+		sourceType: "message",
+		sourceMode: "manual_direct",
+		sourceId: opts.sourceId,
+		idempotencyKey: opts.idempotencyKey,
+		memoryScope: opts.memoryScope,
 		overrides: { manual: true, source: "save_memory", ...(opts.overrides ?? {}) },
 	});
 	return finalize(res, {});

@@ -99,36 +99,48 @@ describe("session user isolation", () => {
 		expect(await res.json()).toEqual({ error: "unauthorized" });
 	});
 
-	it("ignores a forged userId on session requests and keeps graph/status/recall scoped to the session user", async () => {
+	it("treats session userId as external scope without trusting it as the owner", async () => {
 		const a = await signupAccount("alice");
 		const b = await signupAccount("bob");
 		await insertNode(a.user.id, "node-alice", "Alice Project");
 		await insertNode(b.user.id, "node-bob", "Bob Secret");
 
+		const ownGraph = await request("/v1/graph", { headers: { cookie: a.cookie } });
+		expect(ownGraph.status).toBe(200);
+		expect((await ownGraph.json()).nodes.map((n) => n.label)).toEqual(["Alice Project"]);
+
 		const graph = await request(`/v1/graph?userId=${encodeURIComponent(b.user.id)}`, { headers: { cookie: a.cookie } });
 		expect(graph.status).toBe(200);
 		const graphBody = await graph.json();
-		expect(graphBody.nodes.map((n) => n.label)).toEqual(["Alice Project"]);
+		expect(graphBody.nodes.map((n) => n.label)).toEqual([]);
 
 		const status = await request(`/v1/status?userId=${encodeURIComponent(b.user.id)}`, { headers: { cookie: a.cookie } });
-		expect(await status.json()).toMatchObject({ nodes: 1, slices: 1 });
+		expect(await status.json()).toMatchObject({ nodes: 0, slices: 0 });
 
 		const recall = await jsonRequest("/v1/recall", { userId: b.user.id, query: "Bob Secret" }, a.cookie);
-		expect(await recall.json()).toEqual({ context: "", nodes: [], pages: [] });
+		expect(await recall.json()).toMatchObject({ context: "", nodes: [], pages: [], count: 0 });
 	});
 
-	it("reset deletes only the logged-in user's memory even if another userId is supplied", async () => {
+	it("reset only deletes the selected scope for the logged-in owner", async () => {
 		const a = await signupAccount("reset-a");
 		const b = await signupAccount("reset-b");
 		await insertNode(a.user.id, "node-reset-a", "Reset A");
 		await insertNode(b.user.id, "node-reset-b", "Reset B");
 
-		const reset = await jsonRequest("/v1/actions/delete-all", { userId: b.user.id, confirm: "DELETE ALL" }, a.cookie);
-		expect(reset.status).toBe(200);
-		expect((await reset.json()).deleted).toBe(true);
+		const externalReset = await jsonRequest("/v1/actions/delete-all", { userId: b.user.id, confirm: "DELETE ALL" }, a.cookie);
+		expect(externalReset.status).toBe(200);
+		expect((await externalReset.json()).deleted).toBe(true);
 
-		const aCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(a.user.id).first();
-		const bCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(b.user.id).first();
+		let aCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(a.user.id).first();
+		let bCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(b.user.id).first();
+		expect(aCount.count).toBe(1);
+		expect(bCount.count).toBe(1);
+
+		const ownerReset = await jsonRequest("/v1/actions/delete-all", { confirm: "DELETE ALL" }, a.cookie);
+		expect(ownerReset.status).toBe(200);
+
+		aCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(a.user.id).first();
+		bCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?").bind(b.user.id).first();
 		expect(aCount.count).toBe(0);
 		expect(bCount.count).toBe(1);
 	});
@@ -189,8 +201,18 @@ describe("connection tokens", () => {
 
 describe("product shell routes", () => {
 	it("public landing page is present in the static shell", () => {
-		expect(html).toContain("One memory for every AI you use.");
-		expect(html).toContain("Save once. Recall anywhere.");
+		expect(html).toContain("Universal Memory Layer");
+		expect(html).toContain("One private memory graph for AI tools, agents, and apps.");
+		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
+		expect(html).toContain("Chat history is not memory.");
+		expect(html).toContain("Memory is structured meaning.");
+		expect(html).toContain("Backend is the authority, not the LLM.");
+		expect(html).toContain("When UML is connected through an MCP-capable AI client");
+		expect(html).toContain("Privacy Policy");
+		expect(html).toContain("Terms &amp; Conditions");
+		expect(html).toContain("Support");
+		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
+		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("founder@gpmai.dev");
 		expect(html).toContain("ejziyad@gmail.com");
 		expect(html).toContain("/assets/uml-logo.svg");

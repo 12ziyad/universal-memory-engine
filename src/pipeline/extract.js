@@ -29,7 +29,10 @@ import { applyGates } from "./gates.js";
 import { writeApproved } from "./write.js";
 import { runPass2 } from "./pass2.js";
 import { buildReceipt, emptyReceipt } from "./receipt.js";
-import { createExtractionRun, updateExtractionRun } from "../lib/db.js";
+import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
+import { messagesContainMemoryOptOut } from "./opt_out.js";
+
+const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 
 async function proposeSplit(env, config, userId, chunk, recent, overrides) {
 	const objects = [];
@@ -97,22 +100,42 @@ function runListsFromPlan(plan) {
 
 export async function runExtraction(env, userId, chunk, recent, overrides = {}) {
 	const config = getConfig(env);
-	const meta = { source: overrides.source ?? "ingest", ...(overrides.meta ?? {}) };
-	let extractionRunId = null;
-	if (overrides.manual) {
-		extractionRunId = await createExtractionRun(env, userId, {
-			toolName: overrides.source ?? "save_memory",
-			sourceMode: overrides.source === "save_conversation" ? "manual_collect" : "manual_direct",
-			topicFilter: meta.topic_filter ?? null,
-			status: "running",
+	const sourceMode = overrides.meta?.source_mode
+		?? (overrides.manual
+			? (overrides.source === "save_conversation" ? "manual_collect" : "manual_direct")
+			: "auto_ingest");
+	const meta = {
+		source: overrides.source ?? "ingest",
+		source_mode: sourceMode,
+		...(overrides.meta ?? {}),
+	};
+	const optOut = messagesContainMemoryOptOut(chunk);
+	if (optOut.optedOut) {
+		const receipt = emptyReceipt("no_write", "user_opt_out", {
+			...meta,
+			received: chunk.filter((m) => (m?.role ?? "user") === "user").length,
 		});
-		meta.extraction_run_id = extractionRunId;
-		meta.source_mode = overrides.source === "save_conversation" ? "manual_collect" : "manual_direct";
+		receipt.durable = false;
+		receipt.opt_out = true;
+		receipt.opt_out_phrase = optOut.phrase;
+		receipt.skippedReasons = { user_opt_out: receipt.received || 1 };
+		return { outcome: "no_write", receipt };
 	}
+	const extractionRunId = await createExtractionRun(env, userId, {
+		toolName: overrides.source ?? "ingest",
+		sourceMode,
+		topicFilter: meta.topic_filter ?? null,
+		sourcePacketId: meta.source_packet_id ?? null,
+		idempotencyKey: meta.idempotency_key ?? null,
+		scopeJson: meta.scope_json ?? null,
+		status: "running",
+	});
+	meta.extraction_run_id = extractionRunId;
 
 	// D — packet (three separated parts).
 	const packet = buildPacket(chunk, recent);
 	const text = chunkText(chunk);
+	const updateMode = UPDATE_MODE_RE.test(text);
 
 	// E — shortlist (~10 existing nodes, keyword + semantic).
 	const shortlist = await shortlistNodes(env, config, userId, text);
@@ -131,12 +154,10 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	if (rescued) meta.splitRescue = true;
 	if (!proposal._ok) {
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
-		if (extractionRunId) {
-			await updateExtractionRun(env, userId, extractionRunId, {
-				status: "failed",
-				error: "the extractor returned nothing readable",
-			});
-		}
+		await updateExtractionRun(env, userId, extractionRunId, {
+			status: "failed",
+			error: "the extractor returned nothing readable",
+		});
 		return {
 			outcome: "llm_failed",
 			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", meta),
@@ -146,17 +167,17 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	// G — gates (the backend judge). manual=true → lenient Path A gate.
 	const plan = await applyGates(env, config, userId, proposal, shortlist, overrides.settings, {
 		manual: Boolean(overrides.manual),
+		updateMode,
+		sourceText: text,
 	});
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.
 	if (!plan.hasWrites) {
 		console.warn(`extraction meaningful_no_write user=${userId}`);
-		if (extractionRunId) {
-			await updateExtractionRun(env, userId, extractionRunId, {
-				status: "skipped",
-				skippedObjects: plan.rejected ?? [],
-			});
-		}
+		await updateExtractionRun(env, userId, extractionRunId, {
+			status: "skipped",
+			skippedObjects: plan.rejected ?? [],
+		});
 		return {
 			outcome: "meaningful_no_write",
 			rejected: plan.rejected,
@@ -170,12 +191,10 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		result = await writeApproved(env, config, userId, plan);
 	} catch (err) {
 		console.error(`extraction db_write_failed user=${userId}:`, err?.message ?? err);
-		if (extractionRunId) {
-			await updateExtractionRun(env, userId, extractionRunId, {
-				status: "failed",
-				error: String(err?.message ?? err),
-			});
-		}
+		await updateExtractionRun(env, userId, extractionRunId, {
+			status: "failed",
+			error: String(err?.message ?? err),
+		});
 		return {
 			outcome: "db_write_failed",
 			error: String(err?.message ?? err),
@@ -184,18 +203,35 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	}
 
 	const receipt = buildReceipt("wrote", plan, meta);
-	if (extractionRunId) {
-		await updateExtractionRun(env, userId, extractionRunId, {
-			status: "wrote",
-			...runListsFromPlan(plan),
-		});
-	}
+	await updateExtractionRun(env, userId, extractionRunId, {
+		status: "wrote",
+		...runListsFromPlan(plan),
+	});
 
 	// I — Pass 2 (background, cheap). Never affects Pass-1 writes.
+	const jobId = await createMemoryJob(env, userId, {
+		type: "pass2_rollup",
+		status: "running",
+		idempotencyKey: `pass2:${extractionRunId}`,
+		sourcePacketId: meta.source_packet_id ?? null,
+		extractionRunId,
+		payload: { affectedNodeIds: result.affectedNodeIds },
+	});
+	if (jobId) await updateExtractionRun(env, userId, extractionRunId, { jobId });
 	try {
-		await runPass2(env, config, userId, result.affectedNodeIds);
+		const pass2 = await runPass2(env, config, userId, result.affectedNodeIds, { jobId });
+		await updateMemoryJob(env, userId, jobId, {
+			status: pass2?.ran ? "completed" : "skipped",
+			payload: { affectedNodeIds: result.affectedNodeIds, pass2 },
+			completedAt: Date.now(),
+		});
 	} catch (err) {
 		console.warn(`pass2 failed user=${userId}:`, err?.message ?? err);
+		await updateMemoryJob(env, userId, jobId, {
+			status: "failed",
+			error: String(err?.message ?? err),
+			completedAt: Date.now(),
+		});
 	}
 
 	return { outcome: "wrote", ...result, receipt };

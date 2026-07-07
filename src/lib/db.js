@@ -51,7 +51,15 @@ export async function getNodeEvents(env, userId, nodeId, limit = 20) {
 /** A user's existing candidates, keyed by normalized label for quick lookup. */
 export async function getUserCandidates(env, userId) {
 	const { results } = await env.DB.prepare(
-		"SELECT id, label, strength, mentions FROM candidates WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL",
+		`SELECT id, label, strength, mentions, cluster_hint, label_guess, canonical_key,
+			 role_guess, cluster_guess, confidence, status, first_seen_at, last_seen_at,
+			 session_count, mention_count, evidence_json, possible_parent_id,
+			 possible_existing_node_id, expires_at, reason
+		 FROM candidates
+		 WHERE user_id = ?
+		   AND deleted_at IS NULL
+		   AND suppressed_at IS NULL
+		   AND COALESCE(status, 'pending') = 'pending'`,
 	)
 		.bind(userId)
 		.all();
@@ -113,8 +121,8 @@ export async function createExtractionRun(env, userId, data = {}) {
 			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
 			 created_edges_json, updated_objects_json, reinforced_objects_json, skipped_objects_json,
-			 error, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 error, created_at, updated_at, source_packet_id, idempotency_key, scope_json, job_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			id,
@@ -135,6 +143,10 @@ export async function createExtractionRun(env, userId, data = {}) {
 			data.error ?? null,
 			now,
 			now,
+			data.source_packet_id ?? data.sourcePacketId ?? null,
+			data.idempotency_key ?? data.idempotencyKey ?? null,
+			data.scope_json ?? data.scopeJson ?? null,
+			data.job_id ?? data.jobId ?? null,
 		)
 		.run();
 	return id;
@@ -156,12 +168,26 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 		reinforced_objects_json: "reinforcedObjects",
 		skipped_objects_json: "skippedObjects",
 		error: "error",
+		source_packet_id: "sourcePacketId",
+		idempotency_key: "idempotencyKey",
+		scope_json: "scopeJson",
+		job_id: "jobId",
 	};
 	for (const [column, key] of Object.entries(map)) {
 		if (data[key] === undefined && data[column] === undefined) continue;
 		const value = data[key] ?? data[column];
 		fields.push(`${column} = ?`);
-		values.push(column.endsWith("_json") ? JSON.stringify(value ?? []) : value);
+		const listJsonColumns = new Set([
+			"created_pages_json",
+			"created_nodes_json",
+			"created_slices_json",
+			"created_events_json",
+			"created_edges_json",
+			"updated_objects_json",
+			"reinforced_objects_json",
+			"skipped_objects_json",
+		]);
+		values.push(listJsonColumns.has(column) ? JSON.stringify(value ?? []) : value);
 	}
 	fields.push("updated_at = ?");
 	values.push(Date.now());
@@ -182,8 +208,9 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 		await env.DB.prepare(
 			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total,
 				saved_nodes, saved_slices, saved_events, saved_edges, saved_candidates,
-				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id, saved_pages)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id,
+				saved_pages, source_packet_id, idempotency_key, scope_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				id,
@@ -205,6 +232,9 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				receipt?.created_at ?? Date.now(),
 				receipt?.extraction_run_id ?? null,
 				s.pages ?? 0,
+				receipt?.source_packet_id ?? null,
+				receipt?.idempotency_key ?? null,
+				receipt?.scope_json ?? null,
 			)
 			.run();
 		if (receipt?.extraction_run_id) {
@@ -215,6 +245,83 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 		console.warn("receipt store failed:", err?.message ?? err);
 		return null;
 	}
+}
+
+export async function createMemoryJob(env, userId, data = {}) {
+	const now = Date.now();
+	const id = data.id ?? newId("job");
+	const idempotencyKey = data.idempotency_key ?? data.idempotencyKey ?? null;
+	try {
+		await env.DB.prepare(
+			`INSERT INTO memory_jobs
+				(id, user_id, type, status, idempotency_key, source_packet_id, extraction_run_id,
+				 receipt_id, attempts, payload_json, error, run_after, created_at, updated_at, completed_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(user_id, idempotency_key) DO UPDATE SET
+				status = excluded.status,
+				source_packet_id = excluded.source_packet_id,
+				extraction_run_id = excluded.extraction_run_id,
+				receipt_id = excluded.receipt_id,
+				payload_json = excluded.payload_json,
+				error = excluded.error,
+				run_after = excluded.run_after,
+				updated_at = excluded.updated_at,
+				completed_at = excluded.completed_at`,
+		)
+			.bind(
+				id,
+				userId,
+				data.type ?? "job",
+				data.status ?? "queued",
+				idempotencyKey,
+				data.source_packet_id ?? data.sourcePacketId ?? null,
+				data.extraction_run_id ?? data.extractionRunId ?? null,
+				data.receipt_id ?? data.receiptId ?? null,
+				data.attempts ?? 0,
+				JSON.stringify(data.payload ?? data.payload_json ?? {}),
+				data.error ?? null,
+				data.run_after ?? data.runAfter ?? now,
+				now,
+				now,
+				data.completed_at ?? data.completedAt ?? null,
+			)
+			.run();
+		const row = idempotencyKey
+			? await env.DB.prepare("SELECT id FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?")
+				.bind(userId, idempotencyKey)
+				.first()
+			: { id };
+		return row?.id ?? id;
+	} catch (err) {
+		console.warn("memory job create failed:", err?.message ?? err);
+		return null;
+	}
+}
+
+export async function updateMemoryJob(env, userId, jobId, data = {}) {
+	if (!jobId) return;
+	const fields = [];
+	const values = [];
+	const map = {
+		status: "status",
+		receipt_id: "receiptId",
+		attempts: "attempts",
+		payload_json: "payload",
+		error: "error",
+		run_after: "runAfter",
+		completed_at: "completedAt",
+	};
+	for (const [column, key] of Object.entries(map)) {
+		if (data[key] === undefined && data[column] === undefined) continue;
+		const value = data[key] ?? data[column];
+		fields.push(`${column} = ?`);
+		values.push(column === "payload_json" ? JSON.stringify(value ?? {}) : value);
+	}
+	fields.push("updated_at = ?");
+	values.push(Date.now());
+	await env.DB.prepare(`UPDATE memory_jobs SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
+		.bind(...values, jobId, userId)
+		.run();
 }
 
 /** Recent save receipts for a user, newest first. */

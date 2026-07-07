@@ -3,14 +3,19 @@ import {
 	addSuppression,
 	canonicalKey,
 	createExtractionRun,
+	createMemoryJob,
 	getActiveSuppressions,
 	getUserPages,
 	storeReceipt,
 	updateExtractionRun,
+	updateMemoryJob,
 } from "../lib/db.js";
+import { getConfig } from "../config.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
 import { clusterForMemory } from "./clusters.js";
+import { runPass2 } from "./pass2.js";
 import { dedupeEvidence, overlapRatio, topicSimilarity } from "./signals.js";
+import { sourceEvidenceFromPacket, sourceMeta } from "./source.js";
 import { canonicalTitle, generateTitle } from "./title.js";
 
 const RELATED_HINTS = [
@@ -146,23 +151,36 @@ function clampSnippet(text) {
 	return `${clean.slice(0, 897).trim()}...`;
 }
 
-function buildEvidence(lines, messages, receiptId) {
-	const messageLines = (messages ?? [])
-		.filter((m) => ["user", "assistant"].includes(m.role ?? "user"))
-		.map((m) => ({ role: m.role ?? "user", text: String(m.content ?? "").trim(), ts: m.ts ?? null, id: m.id ?? null }))
-		.filter((m) => m.text);
+function buildEvidence(lines, messages, receiptId, sourcePacket) {
+	const packetEvidence = sourceEvidenceFromPacket(sourcePacket, { receiptId });
+	const messageLines = packetEvidence.length
+		? packetEvidence.map((item) => ({
+			role: item.source_role,
+			text: item.snippet,
+			ts: item.timestamp,
+			id: item.source_message_id,
+			content_hash: item.content_hash,
+			source_packet_id: item.source_packet_id,
+			confidence: item.confidence,
+		}))
+		: (messages ?? [])
+			.filter((m) => ["user", "assistant"].includes(m.role ?? "user"))
+			.map((m) => ({ role: m.role ?? "user", text: String(m.content ?? "").trim(), ts: m.ts ?? null, id: m.id ?? null }))
+			.filter((m) => m.text);
 	const evidence = [];
 
 	for (const msg of messageLines) {
 		if (!lines.some((line) => evidenceOverlap(line, msg.text))) continue;
 		evidence.push({
 			source_type: `${msg.role}_message`,
+			source_packet_id: msg.source_packet_id ?? sourcePacket?.id ?? null,
 			source_message_id: msg.id ?? null,
 			source_role: msg.role,
 			snippet: clampSnippet(msg.text),
 			timestamp: msg.ts ?? null,
+			content_hash: msg.content_hash ?? null,
 			receipt_id: receiptId ?? null,
-			confidence: msg.role === "user" ? 0.92 : 0.72,
+			confidence: msg.confidence ?? (msg.role === "user" ? 0.92 : 0.72),
 		});
 	}
 
@@ -170,10 +188,12 @@ function buildEvidence(lines, messages, receiptId) {
 	if (digestSnippet) {
 		evidence.push({
 			source_type: "digest",
+			source_packet_id: sourcePacket?.id ?? null,
 			source_message_id: null,
 			source_role: "digest",
 			snippet: clampSnippet(digestSnippet),
 			timestamp: null,
+			content_hash: sourcePacket?.content_hash ?? null,
 			receipt_id: receiptId ?? null,
 			confidence: 0.75,
 		});
@@ -199,7 +219,7 @@ function markdownFor({ title, overview, keyPoints, decisions, technical, nextSte
 	return parts.join("\n");
 }
 
-function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId }) {
+function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, sourcePacket }) {
 	const lines = String(digest ?? "")
 		.split(/\n+/)
 		.map((line) => line.trim())
@@ -210,7 +230,7 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 	const keyPoints = uniq(lines).slice(0, 30);
 	const overview = keyPoints.slice(0, 3).join(" ");
 	const related = relatedConcepts(lines, title, intent.topic);
-	const evidence = buildEvidence(lines, messages, extractionRunId);
+	const evidence = buildEvidence(lines, messages, extractionRunId, sourcePacket);
 	const sections = {
 		overview,
 		keyPoints,
@@ -245,6 +265,9 @@ function buildPageDraft({ digest, messages, intent, conversationId, extractionRu
 		evidence_json: JSON.stringify(evidence),
 		source_thread_id: null,
 		source_conversation_id: conversationId ?? null,
+		source_packet_id: sourcePacket?.id ?? null,
+		input_hash: sourcePacket?.content_hash ?? null,
+		idempotency_key: sourcePacket?.idempotency_key ?? null,
 		extraction_run_id: extractionRunId,
 		confidence: evidence.some((e) => e.source_type === "user_message") ? 0.9 : 0.78,
 		health_state: "active",
@@ -346,6 +369,9 @@ function pageReceipt({ action, page, runId, received, digested, relatedCount, sk
 		source: "save_conversation",
 		source_mode: "manual_collect",
 		extraction_run_id: runId,
+		source_packet_id: page.source_packet_id ?? null,
+		idempotency_key: page.idempotency_key ?? null,
+		scope_json: page.scope_json ?? null,
 		received,
 		digested,
 		saved: {
@@ -384,15 +410,22 @@ function pageSummary(action, page, receipt) {
 	return `${verb}:\n${page.title}${skipped}\nReceipt: ${receipt.extraction_run_id}`;
 }
 
-export async function saveMemoryPage(env, userId, { digest, messages, intent, received, keptLines, conversationId }) {
+export async function saveMemoryPage(env, userId, { digest, messages, intent, received, keptLines, conversationId, sourcePacket = null }) {
+	const source = sourceMeta(sourcePacket);
 	const runId = await createExtractionRun(env, userId, {
 		toolName: "save_conversation",
 		sourceMode: "manual_collect",
 		topicFilter: intent.topic ? normalizeLabel(intent.topic) : null,
+		sourcePacketId: source.source_packet_id,
+		idempotencyKey: source.idempotency_key,
+		scopeJson: source.scope_json,
 		status: "running",
 	});
 
-	const draft = buildPageDraft({ digest, messages, intent, conversationId, extractionRunId: runId });
+	const draft = {
+		...buildPageDraft({ digest, messages, intent, conversationId, extractionRunId: runId, sourcePacket }),
+		scope_json: source.scope_json ?? null,
+	};
 	const suppressions = await getActiveSuppressions(env, userId);
 	const suppression = suppressedBy(suppressions, "memory_page", draft.canonical_title)
 		?? (draft.topic_filter ? suppressedBy(suppressions, "memory_page", draft.topic_filter) : null);
@@ -430,6 +463,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				title = ?, canonical_title = ?, topic_filter = ?, short_summary = ?, full_markdown = ?,
 				sections_json = ?, key_points_json = ?, decisions_json = ?, next_steps_json = ?,
 				related_concepts_json = ?, evidence_json = ?, source_conversation_id = COALESCE(?, source_conversation_id),
+				source_packet_id = ?, input_hash = ?, idempotency_key = ?,
 				extraction_run_id = ?, updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
 				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
 			 WHERE id = ? AND user_id = ?`,
@@ -447,6 +481,9 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				page.related_concepts_json,
 				page.evidence_json,
 				conversationId ?? null,
+				page.source_packet_id,
+				page.input_hash,
+				page.idempotency_key,
 				runId,
 				now,
 				now,
@@ -463,9 +500,10 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				(id, user_id, node_id, node_kind, source_mode, title, canonical_title, topic_filter,
 				 short_summary, full_markdown, sections_json, key_points_json, decisions_json,
 				 next_steps_json, related_concepts_json, evidence_json, source_thread_id,
-				 source_conversation_id, extraction_run_id, created_at, updated_at, last_seen_at,
-				 heat_score, confidence, health_state, importance_class, cluster, role_type)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
+				 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
+				 cluster, role_type)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				page.id,
@@ -486,6 +524,9 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				page.evidence_json,
 				page.source_thread_id,
 				page.source_conversation_id,
+				page.source_packet_id,
+				page.input_hash,
+				page.idempotency_key,
 				runId,
 				now,
 				now,
@@ -512,6 +553,29 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 		reinforcedObjects: action === "reinforce" ? [{ kind: "memory_page", id: page.id, title: page.title }] : [],
 		skippedObjects: skipped,
 	});
+	const jobId = await createMemoryJob(env, userId, {
+		type: "pass2_rollup",
+		status: "running",
+		idempotencyKey: `pass2:${runId}`,
+		sourcePacketId: page.source_packet_id ?? null,
+		extractionRunId: runId,
+		payload: { affectedNodeIds: [], pageId: page.id },
+	});
+	if (jobId) await updateExtractionRun(env, userId, runId, { jobId });
+	try {
+		const pass2 = await runPass2(env, getConfig(env), userId, [], { jobId });
+		await updateMemoryJob(env, userId, jobId, {
+			status: pass2?.ran ? "completed" : "skipped",
+			payload: { affectedNodeIds: [], pageId: page.id, pass2 },
+			completedAt: Date.now(),
+		});
+	} catch (err) {
+		await updateMemoryJob(env, userId, jobId, {
+			status: "failed",
+			error: String(err?.message ?? err),
+			completedAt: Date.now(),
+		});
+	}
 	const summary = pageSummary(action, page, receipt);
 	const receiptId = await storeReceipt(env, userId, "save_conversation", receipt, summary);
 	if (receiptId) {

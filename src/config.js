@@ -113,6 +113,7 @@ export const ACTIONS = [
 	"achieved",
 	"joined",
 	"left",
+	"practiced",
 	"other",
 ];
 
@@ -153,6 +154,7 @@ export const ACTION_TO_STATE = {
 	resumed: "active",
 	launched: "active",
 	joined: "active",
+	practiced: "active",
 	stopped: "inactive",
 	removed: "inactive",
 	left: "inactive",
@@ -181,6 +183,7 @@ export function getConfig(env) {
 		// suite never reaches out to Workers AI / Vectorize.
 		useVectors: flag(env.USE_VECTORS, true),
 		enablePass2: flag(env.ENABLE_PASS2, true),
+		pass2UseAi: flag(env.PASS2_USE_AI, false),
 
 		// LLM (the proposer). Provider + model are configurable; route through an
 		// AI Gateway by setting AI_GATEWAY_ID.

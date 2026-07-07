@@ -52,7 +52,13 @@ describe("v1 routes (with a valid api key)", () => {
 			body: JSON.stringify({ userId: "abc", messages: [] }),
 		});
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ received: true, fired: false });
+		expect(await response.json()).toMatchObject({
+			received: true,
+			fired: false,
+			held: 0,
+			skipped: 0,
+			receipt: { outcome: "ignored", source: "ingest" },
+		});
 	});
 
 	it("POST /v1/ingest requires userId and messages[]", async () => {
@@ -81,7 +87,19 @@ describe("v1 routes (with a valid api key)", () => {
 			body: JSON.stringify({ userId: "abc", query: "hi" }),
 		});
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ context: "", nodes: [], pages: [] });
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			recall_mode: "no_recall",
+			context: "",
+			nodes: [],
+			pages: [],
+			items: [],
+			count: 0,
+			vector_used: false,
+			lexical_used: false,
+			graph_expansion_used: false,
+			compressed: false,
+		});
 	});
 
 	it("POST /v1/recall requires userId and query", async () => {
