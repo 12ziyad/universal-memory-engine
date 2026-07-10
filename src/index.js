@@ -10,10 +10,8 @@
 import { createMcpHandler } from "agents/mcp";
 
 import { getConfig } from "./config.js";
-import { recall } from "./pipeline/recall.js";
-import { ingestMessages } from "./pipeline/ingest.js";
-import { saveMemory, saveConversation } from "./pipeline/manual.js";
 import { getUserReceipts } from "./lib/db.js";
+import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
 import {
 	archiveObject,
 	cleanJunkMemories,
@@ -28,6 +26,12 @@ import { buildGraphLayout } from "./pipeline/layout.js";
 import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
 import {
+	runConversationCollectCommand,
+	runDirectSaveCommand,
+	runObserveMessagesCommand,
+	runRecallCommand,
+} from "./pipeline/commands.js";
+import {
 	clearSessionCookie,
 	createConnectionToken,
 	getSessionUser,
@@ -41,9 +45,6 @@ import {
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
-import { emptyReceipt, formatReceipt } from "./pipeline/receipt.js";
-import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./pipeline/source.js";
-import { storeReceipt } from "./lib/db.js";
 
 export { UserMemory } from "./durable/user-memory.js";
 
@@ -98,6 +99,14 @@ async function resolveMemoryUser(request, env, explicitUserId, { allowLegacy = t
 async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 	const auth = await resolveMemoryUser(request, env, explicitUserId, options);
 	if (auth) {
+		if (auth.type === "token") {
+			if (options.allowTokenAuth === false) {
+				return { response: json({ error: "forbidden", code: "token_not_allowed" }, 403) };
+			}
+			if (!tokenAllowsScope(auth.token?.scopes, options.requiredScope)) {
+				return { response: json({ error: "forbidden", code: "insufficient_scope" }, 403) };
+			}
+		}
 		const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput);
 		return { auth, userId: scoped.userId, memoryScope: scoped.memoryScope };
 	}
@@ -105,6 +114,13 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 		return { response: json({ error: "userId is required" }, 400) };
 	}
 	return { response: json({ error: "unauthorized" }, 401) };
+}
+
+function requireControlUser(request, env, explicitUserId, options = {}) {
+	return requireMemoryUser(request, env, explicitUserId, {
+		...options,
+		allowTokenAuth: false,
+	});
 }
 
 function cleanScopeValue(value, fallback = null) {
@@ -146,18 +162,6 @@ async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}) {
 			externalUserId,
 		},
 	};
-}
-
-async function storeRouteReceipt(env, userId, sourcePacket, outcome, reason, source = "recall") {
-	const meta = sourceMeta(sourcePacket);
-	const receipt = emptyReceipt(outcome, reason, {
-		source,
-		source_mode: sourcePacket?.source_mode ?? null,
-		...meta,
-	});
-	const summary = formatReceipt(receipt);
-	const receiptId = await storeReceipt(env, userId, source, receipt, summary);
-	return { ...receipt, id: receiptId ?? null };
 }
 
 function redirectTo(request, path) {
@@ -249,49 +253,33 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
+			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
 
-		// Route through the shared ingest path. Extraction runs in the background
-		// (wait:false) so the caller isn't blocked. `_test` is an injection hook
-		// for deterministic tests (canned LLM output); production never sends it.
-		const { fired, held, skipped, sourcePacket, receipt: pipelineReceipt } = await ingestMessages(env, ctx, auth.userId, messages, {
+		// Route through the shared command facade. Extraction runs in the
+		// background, so fired async requests return an accepted/processing receipt.
+		const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
 			conversationId: body.conversationId,
 			threadId: body.threadId,
 			sourceId: body.sourceId,
 			idempotencyKey: body.idempotencyKey,
 			memoryScope: auth.memoryScope,
+			source: "ingest",
+			sourceMode: "ingest",
 			overrides: body._test ?? {},
 		});
-
-		let receipt = pipelineReceipt ?? null;
-		if (!fired) {
-			if (!receipt) {
-				const outcome = held > 0 ? "accumulating" : "ignored";
-				const reason = held > 0
-					? "learning trigger is accumulating more context"
-					: "no durable learning signal found";
-				receipt = await storeRouteReceipt(env, auth.userId, sourcePacket, outcome, reason, "ingest");
-			}
-		}
-
-		return json({
-			received: true,
-			fired: Boolean(fired),
-			held,
-			skipped,
-			source_packet_id: sourcePacket?.id ?? null,
-			receipt_id: receipt?.id ?? null,
-			receipt,
-		});
+		return json(result);
 	},
 
 	"GET /v1/graph": async (request, env) => {
 		const requestedUserId = new URL(request.url).searchParams.get("userId");
-		const auth = await requireMemoryUser(request, env, requestedUserId);
+		const auth = await requireMemoryUser(request, env, requestedUserId, {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
 
@@ -374,9 +362,9 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
+			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const userId = auth.userId;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
 		const t = body._test ?? {};
@@ -387,7 +375,8 @@ const routes = {
 		let res;
 		if (mode === "conversation") {
 			if (!Array.isArray(messages)) return json({ error: "messages[] is required for conversation" }, 400);
-			res = await saveConversation(env, ctx, userId, messages, {
+			res = await runConversationCollectCommand(env, ctx, auth.userId, {
+				messages,
 				scope,
 				n,
 				topic,
@@ -403,20 +392,26 @@ const routes = {
 			if (typeof content !== "string" || !content.trim()) {
 				return json({ error: "content is required for a memory save" }, 400);
 			}
-			res = await saveMemory(env, ctx, userId, content, {
+			res = await runDirectSaveCommand(env, ctx, auth.userId, {
+				content,
 				recentContext,
+				conversationId,
+				threadId: body.threadId,
 				sourceId: body.sourceId,
 				idempotencyKey: body.idempotencyKey,
 				memoryScope: auth.memoryScope,
 				overrides,
+				waitBudgetMs: t.waitBudgetMs,
 			});
 		}
-		return json({ fired: res.fired, processing: res.processing, summary: res.summary, receipt: res.receipt });
+		return json(res);
 	},
 
 	"GET /v1/receipts": async (request, env) => {
 		const url = new URL(request.url);
-		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"));
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
 		const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 200);
@@ -426,14 +421,14 @@ const routes = {
 
 	"POST /v1/actions/delete-last-extraction": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		return json(await deleteLastExtraction(env, auth.userId));
 	},
 
 	"POST /v1/actions/delete-object": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
 		return json(await deleteObject(env, auth.userId, body));
@@ -441,7 +436,7 @@ const routes = {
 
 	"POST /v1/actions/archive-object": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
 		return json(await archiveObject(env, auth.userId, body));
@@ -449,7 +444,7 @@ const routes = {
 
 	"POST /v1/actions/delete-all": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		const result = await deleteAllMemories(env, auth.userId, body.confirm);
 		return json(result, result.deleted ? 200 : 400);
@@ -457,28 +452,28 @@ const routes = {
 
 	"POST /v1/actions/clean-junk": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		return json(await cleanJunkMemories(env, auth.userId, { confirm: body.confirm }));
 	},
 
 	"POST /v1/actions/clear-failed-receipts": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		return json(await clearFailedReceipts(env, auth.userId));
 	},
 
 	"POST /v1/actions/organize-clusters": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		return json(await organizeUserClusters(env, auth.userId));
 	},
 
 	"POST /v1/actions/repair-graph": async (request, env) => {
 		const body = await request.json().catch(() => ({}));
-		const auth = await requireMemoryUser(request, env, body.userId);
+		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		return json(await repairGraph(env, auth.userId, body));
 	},
@@ -487,41 +482,27 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
+			requiredScope: MEMORY_READ_SCOPE,
 		});
 		if (auth.response) return auth.response;
 		const { query } = body;
 		if (typeof query !== "string") return json({ error: "query is required" }, 400);
 
-		const normalized = await normalizeSourcePacket(auth.userId, {
-			type: "query",
-			sourceMode: "recall",
-			content: query,
+		const result = await runRecallCommand(env, auth.userId, query, {
 			sourceId: body.sourceId,
 			idempotencyKey: body.idempotencyKey,
 			threadId: body.threadId,
 			conversationId: body.conversationId,
 			topic: body.topic,
-			scope: auth.memoryScope,
-		});
-		const sourcePacket = await storeSourcePacket(env, normalized.packet);
-		const result = await recall(env, getConfig(env), auth.userId, query, {
 			memoryScope: auth.memoryScope,
 		});
-		const receipt = await storeRouteReceipt(
-			env,
-			auth.userId,
-			sourcePacket,
-			result.recall_mode === "no_recall" ? "no_recall" : "recalled",
-			result.recall_mode === "no_recall" ? "recall gate skipped memory lookup" : "bounded recall completed",
-			"recall",
-		);
-		result.receipt_id = receipt.id;
-		result.source_packet_id = sourcePacket?.id ?? null;
 		return json(result);
 	},
 
 	"GET /v1/status": async (request, env) => {
-		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"));
+		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
 
@@ -592,7 +573,9 @@ async function handleMcp(request, env, ctx, url) {
 	if (token?.startsWith("uml_live_")) {
 		const auth = await resolveConnectionToken(env, token, { allowedTypes: ["mcp"] });
 		if (!auth) return json({ error: "unauthorized mcp token" }, 401);
-		const server = buildMemoryServer(env, ctx, auth.userId);
+		const server = buildMemoryServer(env, ctx, auth.userId, {
+			scopes: auth.token?.scopes ?? [],
+		});
 		const normalized = new Request(new URL("/mcp", url).toString(), request);
 		return createMcpHandler(server)(normalized, env, ctx);
 	}
@@ -610,7 +593,7 @@ async function handleMcp(request, env, ctx, url) {
 
 async function handleCandidateRoutes(request, env, url) {
 	if (request.method === "GET" && url.pathname === "/v1/candidates") {
-		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"));
+		const auth = await requireControlUser(request, env, url.searchParams.get("userId"));
 		if (auth.response) return auth.response;
 		const status = url.searchParams.get("status") || "pending";
 		const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 250);
@@ -621,7 +604,7 @@ async function handleCandidateRoutes(request, env, url) {
 	const match = url.pathname.match(/^\/v1\/candidates\/([^/]+)\/(promote|reject|merge)$/);
 	if (!match) return json({ error: "not found" }, 404);
 	const body = await request.json().catch(() => ({}));
-	const auth = await requireMemoryUser(request, env, body.userId, {
+	const auth = await requireControlUser(request, env, body.userId, {
 		scopeInput: body.memoryScope ?? body.sourceScope,
 	});
 	if (auth.response) return auth.response;

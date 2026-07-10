@@ -1,10 +1,11 @@
 import { normalizeLabel } from "../lib/text.js";
 
 const EXPLICIT_RE = /^\s*(remember|save this|important|keep this)\s*[:,-]?\s+/i;
-const PREFERENCE_RE = /\b(i prefer|i like|i don't like|i do not like|my preference is)\b/i;
+const PREFERENCE_RE = /\b(i prefer|i like|i don't like|i do not like|i love|my preference is|my favou?rite|favou?rite .* is)\b/i;
 const PROJECT_RULE_RE = /\b(for\s+project\s+[^,.]+|always\s+check|deploy\s+(only\s+)?after|after tests|dry-?run|migration(s)? before deploy)\b/i;
+const PROJECT_EVENT_RE = /\b(started|launched|finished|completed|paused|stopped|resumed|building|working on)\s+(project\s+)?[a-z0-9][a-z0-9 .+#-]{1,60}\b/i;
 const LIFE_EVENT_RE = /\b(died|passed away|passed on|diagnosed|injured|moved to|moved out|moved in|got married|married|born|broke up)\b/i;
-const SKILL_ACTION_RE = /\b(started learning|start learning|am learning|i'm learning|learning|practiced|practised|trained|training)\b/i;
+const SKILL_ACTION_RE = /\b(started learning|start learning|started doing|start doing|started\s+(?!a\b|an\b|my\b|the\b|project\b)|took up|picked up|am learning|i'm learning|learning|practiced|practised|started practicing|trained|training)\b/i;
 const RELATIONSHIP_RE = /\b(is my|my .* is|best friend|teammate|team mate|grandmother|grandfather|mother|father|sister|brother|friend)\b/i;
 const CORRECTION_RE = /\b(actually|correction|replace|no longer|not anymore|from now on|instead|forget that)\b/i;
 const WEAK_RE = /\b(maybe|might|someday|some day|kind of|kinda|probably|not sure|thinking about)\b/i;
@@ -35,6 +36,8 @@ function extractProjectLabel(text) {
 function extractSkillLabel(text) {
 	const patterns = [
 		/\b(?:started learning|start learning|am learning|i'm learning|learning)\s+([a-z0-9][a-z0-9 .+#-]{1,50})/i,
+		/\b(?:started doing|start doing|took up|picked up|started practicing)\s+([a-z0-9][a-z0-9 .+#-]{1,50})/i,
+		/\bstarted\s+(?!a\b|an\b|my\b|the\b|project\b)([a-z0-9][a-z0-9 .+#-]{1,50})/i,
 		/\b(?:practiced|practised|trained|training)\s+([a-z0-9][a-z0-9 .+#-]{1,50})/i,
 	];
 	for (const pattern of patterns) {
@@ -47,6 +50,34 @@ function extractSkillLabel(text) {
 		}
 	}
 	return null;
+}
+
+function extractProjectEvent(text) {
+	const cleaned = clean(text);
+	const match = cleaned.match(/\b(started|launched|finished|completed|paused|stopped|resumed|building|working on)\s+((?:project\s+)?[a-z0-9][a-z0-9 .+#-]{1,60})/i);
+	if (!match?.[1] || !match?.[2]) return null;
+	const rawLabel = match[2]
+		.replace(/\b(today|now|this week|this month|yesterday|last week)\b/gi, "")
+		.replace(/[.,!?;:]+$/g, "")
+		.trim();
+	if (!/\bproject\b/i.test(rawLabel) && !/\b(project|app|system|service|website|tool|mcp|api|worker|dashboard)\b/i.test(cleaned)) {
+		return null;
+	}
+	const actionMap = {
+		started: "started",
+		launched: "launched",
+		finished: "completed",
+		completed: "completed",
+		paused: "paused",
+		stopped: "stopped",
+		resumed: "resumed",
+		building: "started",
+		"working on": "started",
+	};
+	return {
+		label: titleCase(rawLabel || "Project"),
+		action: actionMap[match[1].toLowerCase()] ?? "other",
+	};
 }
 
 function extractRelationshipLabel(text) {
@@ -121,6 +152,20 @@ export function durablePlanFromText(text, fallback = {}) {
 			importance: ["passed_away", "diagnosed", "married", "born"].includes(action) ? "life_significant" : "important",
 			confidence,
 			reason: "strong_life_event",
+		};
+	}
+
+	const projectEvent = extractProjectEvent(raw);
+	if (projectEvent) {
+		return {
+			type: "event",
+			label: labelGuess || projectEvent.label,
+			category: "project",
+			action: projectEvent.action,
+			text: raw,
+			importance: ["launched", "completed"].includes(projectEvent.action) ? "important" : "ordinary",
+			confidence,
+			reason: "project_event",
 		};
 	}
 

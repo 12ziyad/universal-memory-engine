@@ -221,7 +221,33 @@ export async function applyGates(
 		rejected: [],
 	};
 
-	const objects = applyUserSettings(proposal.objects ?? [], settings);
+	let objects = applyUserSettings(proposal.objects ?? [], settings);
+	if (!settings?.paused && objects.length === 0) {
+		const durable = durablePlanFromText(sourceText);
+		if (durable) {
+			objects = applyUserSettings([{
+				kind: "candidate",
+				label: durable.label,
+				category: durable.category,
+				strength: "strong",
+				confidence: durable.confidence,
+				reason: durable.reason,
+			}], settings);
+		}
+	}
+	const companionRefs = new Set();
+	const edgeRefs = new Set();
+	for (const obj of objects) {
+		if ((obj.kind === "event" || obj.kind === "slice") && obj.on) companionRefs.add(normalizeLabel(obj.on));
+		if (obj.kind === "edge") {
+			if (obj.from) edgeRefs.add(normalizeLabel(obj.from));
+			if (obj.to) edgeRefs.add(normalizeLabel(obj.to));
+		}
+	}
+	const hasCompanionObject = (label) => {
+		const norm = normalizeLabel(label);
+		return companionRefs.has(norm) || edgeRefs.has(norm);
+	};
 
 	const existing = await getUserNodes(env, userId);
 	const existingById = new Map(existing.map((n) => [n.id, n]));
@@ -403,6 +429,28 @@ export async function applyGates(
 		});
 	}
 
+	function pruneEmptyNewNodes() {
+		const attached = new Set();
+		for (const s of plan.newSlices) attached.add(s.node_id);
+		for (const e of plan.newEvents) attached.add(e.node_id);
+		for (const e of plan.newEdges) {
+			attached.add(e.from_node);
+			attached.add(e.to_node);
+		}
+		for (const u of plan.nodeStateUpdates) attached.add(u.id);
+
+		const kept = [];
+		for (const node of plan.newNodes) {
+			if (attached.has(node.id)) {
+				kept.push(node);
+				continue;
+			}
+			reject({ kind: "node", label: node.label }, "node_without_detail");
+			plan.affectedNodeIds.delete(node.id);
+		}
+		plan.newNodes = kept;
+	}
+
 	const order = { node: 0, event: 1, slice: 2, edge: 3, candidate: 4 };
 	const sorted = [...objects].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
 
@@ -450,6 +498,19 @@ export async function applyGates(
 			}
 			if (looksLikeStatus(obj.label)) {
 				reject(obj, "node_is_status");
+				continue;
+			}
+			if (!hasCompanionObject(obj.label)) {
+				if (await materializeDurableSignal({ ...obj, category, confidence: conf })) continue;
+				if (!manual) {
+					addCandidate(obj.label, "strong", null, {
+						confidence: conf,
+						roleGuess: category,
+						reason: "node_without_detail",
+						evidence: sourceText,
+					});
+				}
+				reject(obj, "node_without_detail");
 				continue;
 			}
 			createNode(obj.label, category, obj.role, obj.state);
@@ -586,11 +647,11 @@ export async function applyGates(
 
 		// ---- CANDIDATE GATE --------------------------------------------------
 		if (obj.kind === "candidate") {
+			if (await materializeDurableSignal(obj)) continue;
 			if (manual) {
 				reject(obj, "manual_candidate_disabled");
 				continue;
 			}
-			if (await materializeDurableSignal(obj)) continue;
 			addCandidate(obj.label, obj.strength, obj.cluster_hint, {
 				confidence: conf,
 				roleGuess: obj.category ?? obj.role_guess ?? null,
@@ -603,6 +664,8 @@ export async function applyGates(
 
 		reject(obj, "unknown_kind");
 	}
+
+	pruneEmptyNewNodes();
 
 	plan.hasWrites =
 		plan.newNodes.length > 0 ||

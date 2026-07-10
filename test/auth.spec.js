@@ -22,6 +22,17 @@ async function jsonRequest(path, body, cookie) {
 	});
 }
 
+async function jsonRequestWithHeaders(path, body, headers = {}) {
+	return request(path, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			...headers,
+		},
+		body: JSON.stringify(body),
+	});
+}
+
 function cookieFrom(res) {
 	return res.headers.get("set-cookie")?.split(";")[0] || "";
 }
@@ -176,8 +187,140 @@ describe("connection tokens", () => {
 		expect(revoke.status).toBe(200);
 		expect((await revoke.json()).revoked).toBe(true);
 
+		const afterRevokeList = await request("/auth/tokens", { headers: { cookie: a.cookie } });
+		const revokedRow = (await afterRevokeList.json()).tokens.find((t) => t.id === body.tokenRecord.id);
+		expect(revokedRow).toMatchObject({ status: "revoked" });
+		expect(revokedRow.revoked_at).toBeTruthy();
+
 		const rejected = await request("/v1/status", { headers: { authorization: `Bearer ${body.token}` } });
 		expect(rejected.status).toBe(401);
+	});
+
+	it("allows normal bearer tokens on safe memory routes and blocks control routes", async () => {
+		const a = await signupAccount("token-safe");
+		await insertNode(a.user.id, "node-token-safe", "Token Safe Project");
+
+		const created = await jsonRequest("/auth/tokens", { type: "api", label: "Scoped Agent" }, a.cookie);
+		const { token } = await created.json();
+		const bearer = { authorization: `Bearer ${token}` };
+
+		const status = await request("/v1/status", { headers: bearer });
+		expect(status.status).toBe(200);
+		expect(await status.json()).toMatchObject({ nodes: 1, slices: 1 });
+
+		const graph = await request("/v1/graph", { headers: bearer });
+		expect(graph.status).toBe(200);
+		expect((await graph.json()).nodes.map((n) => n.label)).toEqual(["Token Safe Project"]);
+
+		const receipts = await request("/v1/receipts", { headers: bearer });
+		expect(receipts.status).toBe(200);
+		expect(await receipts.json()).toMatchObject({ receipts: [] });
+
+		const recall = await jsonRequestWithHeaders("/v1/recall", { query: "Token Safe Project" }, bearer);
+		expect(recall.status).toBe(200);
+		expect(await recall.json()).toMatchObject({ ok: true, command_mode: "recall", processing: false });
+
+		const ingest = await jsonRequestWithHeaders(
+			"/v1/ingest",
+			{ messages: [{ id: "safe-1", role: "user", content: "ok thanks" }] },
+			bearer,
+		);
+		expect(ingest.status).toBe(200);
+		expect(await ingest.json()).toMatchObject({ ok: true, mode: "observe_messages" });
+
+		const save = await jsonRequestWithHeaders("/v1/save", { content: "ok thanks" }, bearer);
+		expect(save.status).toBe(200);
+		expect(await save.json()).toMatchObject({ ok: true, mode: "direct_save" });
+
+		const collect = await jsonRequestWithHeaders(
+			"/v1/save",
+			{
+				mode: "conversation",
+				scope: "summary",
+				conversationId: `token-safe-collect-${crypto.randomUUID()}`,
+				messages: [
+					{ id: "collect-1", role: "user", content: "I decided to keep UML on Cloudflare D1." },
+					{ id: "collect-2", role: "assistant", content: "Noted." },
+				],
+			},
+			bearer,
+		);
+		expect(collect.status).toBe(200);
+		expect(await collect.json()).toMatchObject({ ok: true, mode: "conversation_collect" });
+
+		for (const [path, body] of [
+			["/v1/actions/delete-all", { confirm: "DELETE ALL" }],
+			["/v1/actions/delete-object", { kind: "node", id: "node-token-safe" }],
+			["/v1/actions/repair-graph", {}],
+			["/v1/candidates/cand-token-safe/reject", {}],
+		]) {
+			const blocked = await jsonRequestWithHeaders(path, body, bearer);
+			expect(blocked.status).toBe(403);
+			expect(await blocked.json()).toEqual({ error: "forbidden", code: "token_not_allowed" });
+		}
+	});
+
+	it("enforces connection token scopes before routing safe memory writes", async () => {
+		const a = await signupAccount("token-scope");
+		await insertNode(a.user.id, "node-token-scope", "Token Scope Project");
+
+		const created = await jsonRequest(
+			"/auth/tokens",
+			{ type: "api", label: "Read Only Agent", scopes: ["memory:read"] },
+			a.cookie,
+		);
+		const { token } = await created.json();
+		const bearer = { authorization: `Bearer ${token}` };
+
+		const status = await request("/v1/status", { headers: bearer });
+		expect(status.status).toBe(200);
+		expect(await status.json()).toMatchObject({ nodes: 1 });
+
+		const recall = await jsonRequestWithHeaders("/v1/recall", { query: "Token Scope Project" }, bearer);
+		expect(recall.status).toBe(200);
+
+		const save = await jsonRequestWithHeaders("/v1/save", { content: "I started fencing." }, bearer);
+		expect(save.status).toBe(403);
+		expect(await save.json()).toEqual({ error: "forbidden", code: "insufficient_scope" });
+
+		const ingest = await jsonRequestWithHeaders(
+			"/v1/ingest",
+			{ messages: [{ id: "scope-1", role: "user", content: "I started fencing." }] },
+			bearer,
+		);
+		expect(ingest.status).toBe(403);
+		expect(await ingest.json()).toEqual({ error: "forbidden", code: "insufficient_scope" });
+	});
+
+	it("keeps dashboard sessions and legacy x-api-key access as control/admin paths", async () => {
+		const a = await signupAccount("control-session");
+		await insertNode(a.user.id, "node-control-session", "Control Session Project");
+
+		const sessionDelete = await jsonRequest(
+			"/v1/actions/delete-object",
+			{ kind: "node", id: "node-control-session" },
+			a.cookie,
+		);
+		expect(sessionDelete.status).toBe(200);
+		expect((await sessionDelete.json()).deleted).toBe(true);
+
+		const legacyUserId = `legacy-${crypto.randomUUID()}`;
+		await insertNode(legacyUserId, "node-legacy-control", "Legacy Control Project");
+		const legacyHeaders = { "x-api-key": env.API_KEY };
+
+		const legacyStatus = await request(`/v1/status?userId=${encodeURIComponent(legacyUserId)}`, {
+			headers: legacyHeaders,
+		});
+		expect(legacyStatus.status).toBe(200);
+		expect(await legacyStatus.json()).toMatchObject({ nodes: 1 });
+
+		const legacyDelete = await jsonRequestWithHeaders(
+			"/v1/actions/delete-all",
+			{ userId: legacyUserId, confirm: "DELETE ALL" },
+			legacyHeaders,
+		);
+		expect(legacyDelete.status).toBe(200);
+		expect((await legacyDelete.json()).deleted).toBe(true);
 	});
 
 	it("MCP tokens resolve the correct user", async () => {
@@ -211,6 +354,9 @@ describe("product shell routes", () => {
 		expect(html).toContain("Privacy Policy");
 		expect(html).toContain("Terms &amp; Conditions");
 		expect(html).toContain("Support");
+		expect(html).toContain("User memory belongs to the account that created it.");
+		expect(html).toContain("you can revoke them from Connect");
+		expect(html).toContain("Avoid sensitive or regulated data");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("founder@gpmai.dev");

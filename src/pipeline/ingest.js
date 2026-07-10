@@ -85,7 +85,16 @@ export async function ingestMessages(env, ctx, userId, messages, opts = {}) {
 			clearTimeout(timer);
 		}
 	}
-	return { fired, held, skipped, result, sourcePacket };
+	return {
+		fired,
+		held,
+		skipped,
+		result,
+		receipt: result?.receipt ?? null,
+		receiptId: result?.receipt?.id ?? null,
+		summary: result?.summary ?? null,
+		sourcePacket,
+	};
 }
 
 /**

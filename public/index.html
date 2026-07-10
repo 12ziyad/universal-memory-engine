@@ -205,7 +205,22 @@
 	.action-box h3 { margin: 0 0 8px; }
 	.action-box textarea { width: 100%; min-height: 120px; resize: vertical; background: var(--panel2); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 9px; }
 	.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--panel2); }
+	.token-row.revoked { opacity: .78; }
+	.token-row .token-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 	.token-secret { border: 1px solid rgba(255,198,91,.35); background: rgba(255,198,91,.08); color: #ffe4a3; border-radius: 8px; padding: 10px; margin: 10px 0; word-break: break-all; }
+	.secret-toolbar, .section-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+	.connect-section { border-left: 3px solid var(--accent); }
+	.connect-section.api { border-left-color: var(--green); }
+	.settings-section { min-height: 148px; }
+	.policy-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+	.policy-list li { margin: 5px 0; }
+	.modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(3,8,14,.74); backdrop-filter: blur(8px); }
+	.modal-backdrop[hidden] { display: none; }
+	.policy-modal { width: min(760px, 100%); max-height: min(82vh, 760px); overflow: auto; background: var(--panel); border: 1px solid var(--border2); border-radius: 8px; box-shadow: 0 24px 80px rgba(0,0,0,.48); padding: 18px; }
+	.policy-modal header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 0 0 12px; border: 0; background: transparent; }
+	.policy-modal h2 { margin: 0; font-size: 20px; }
+	.policy-modal p { color: var(--muted); margin: 8px 0; }
+	.review-hidden { display: none !important; }
 	.search-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 	.search-row input { min-width: min(100%, 320px); flex: 1; }
 
@@ -589,11 +604,11 @@
 		<div class="policy-grid" style="margin-top:18px">
 			<div class="product-card">
 				<h3>Privacy Policy</h3>
-				<p>UML does not sell user data. UML does not use user memory for unrelated purposes. User memory belongs to their account. Connected tools access memory only through private links/tokens. Users can revoke links. Users can reset memory. Token secrets/full private links are shown only once where applicable.</p>
+				<p>UML does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access UML only through private links or tokens you create. Reset memory deletes saved memory rows for the selected account/scope; it does not delete the account. Token secrets and full MCP URLs are shown only once where supported.</p>
 			</div>
 			<div class="product-card" id="terms">
 				<h3>Terms &amp; Conditions</h3>
-				<p>Use UML responsibly. User controls their account/memory. Connected tools are third-party services. User is responsible for keeping private links/tokens safe. UML may change features during early development.</p>
+				<p>UML is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless UML is appropriate for that use. Do not use UML for unsafe, abusive, illegal, or harmful activity.</p>
 			</div>
 		</div>
 	</section>
@@ -650,8 +665,10 @@
 		<div id="pageList"></div>
 		<div class="side-h"><span>Nodes</span><span id="nlCount" class="kv"></span></div>
 		<div id="nodeList"></div>
-		<div class="side-h" style="margin-top:18px"><span>Candidates</span><span id="candCount" class="kv"></span></div>
-		<div id="candList"></div>
+		<div id="candidateSidebarSection">
+			<div class="side-h" style="margin-top:18px"><span>Review Queue</span><span id="candCount" class="kv"></span></div>
+			<div id="candList"></div>
+		</div>
 	</aside>
 
 	<div class="content">
@@ -659,7 +676,7 @@
 			<button class="tab active" data-view="overview">Overview</button>
 			<button class="tab" data-view="memory">Memory</button>
 			<button class="tab" data-view="graph">Graph</button>
-			<button class="tab" data-view="candidates">Candidates</button>
+			<button class="tab review-tab" data-view="candidates" data-review-tab>Review <span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="connect">Connect</button>
 			<button class="tab" data-view="receipts">Receipts</button>
 			<button class="tab" data-view="rules">Rules</button>
@@ -676,6 +693,7 @@
 </main>
 
 <div id="toast"></div>
+<div id="policyModal" class="modal-backdrop" hidden></div>
 
 <script>
 const $ = (s, r=document) => r.querySelector(s);
@@ -717,7 +735,7 @@ const S = {
 	view: "overview",
 	graphMode: "clean",
 	focusCluster: "",
-	me: null, tokens: [], oneTimeToken: null, recallResult: null, memoryQuery: "", resetConfirmOpen: false,
+	me: null, tokens: [], oneTimeToken: null, oneTimeVisible: true, recallResult: null, memoryQuery: "", resetConfirmOpen: false,
 	devMode: new URLSearchParams(location.search).has("dev") || localStorage.getItem("uml_dev") === "1",
 	data: null, receipts: [], candidates: [], selected: null, network: null,
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
@@ -947,7 +965,47 @@ async function load() {
 	} catch (e) { banner("Load failed: " + e.message); }
 }
 
-function renderAll() { renderStats(); renderAppUser(); renderPageList(); renderNodeList(); renderCandidateSidebar(); renderView(); renderDetail(); }
+function candidateItems() {
+	return S.candidates || (S.data && S.data.candidates) || [];
+}
+
+function candidateCount() {
+	return candidateItems().length;
+}
+
+function updateReviewVisibility() {
+	const count = candidateCount();
+	const hidden = count === 0;
+	const tab = document.querySelector("[data-review-tab]");
+	if (tab) {
+		tab.hidden = hidden;
+		tab.classList.toggle("review-hidden", hidden);
+		const countEl = $("#reviewTabCount");
+		if (countEl) countEl.textContent = count ? `(${count})` : "";
+	}
+	const side = $("#candidateSidebarSection");
+	if (side) {
+		side.hidden = hidden;
+		side.classList.toggle("review-hidden", hidden);
+	}
+	if (hidden && S.view === "candidates") {
+		S.view = "overview";
+		if (document.body.classList.contains("app-mode") && hashView() === "candidates") {
+			history.replaceState(null, "", "/app#overview");
+		}
+	}
+}
+
+function renderAll() {
+	renderStats();
+	renderAppUser();
+	renderPageList();
+	renderNodeList();
+	renderCandidateSidebar();
+	updateReviewVisibility();
+	renderView();
+	renderDetail();
+}
 
 function renderStats() {
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
@@ -958,9 +1016,9 @@ function renderStats() {
 
 function renderCandidateSidebar() {
 	const wrap = $("#candList"); wrap.innerHTML = "";
-	const cands = S.candidates || (S.data && S.data.candidates) || [];
+	const cands = candidateItems();
 	$("#candCount").textContent = cands.length;
-	if (!cands.length) { wrap.appendChild(el("div","empty","None.")); return; }
+	if (!cands.length) { wrap.innerHTML = ""; return; }
 	for (const c of cands.slice(0, 20)) {
 		const label = c.labelGuess || c.label || "Candidate";
 		const mentions = c.mentionCount || c.mentions || 1;
@@ -1052,9 +1110,15 @@ function renderCandidates() {
 
 /* ---------------- views ---------------- */
 function setView(v, { updateHash = true } = {}) {
+	let redirected = false;
+	if (v === "candidates" && candidateCount() === 0) {
+		toast("No pending candidates to review.");
+		v = "overview";
+		redirected = true;
+	}
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
-	if (updateHash && APP_VIEWS.has(v) && document.body.classList.contains("app-mode")) {
+	if ((updateHash || redirected) && APP_VIEWS.has(v) && document.body.classList.contains("app-mode")) {
 		history.replaceState(null, "", `/app#${v}`);
 	}
 	renderView();
@@ -1319,27 +1383,26 @@ async function refreshTokens() {
 }
 
 async function generateToken(type) {
-	const label = $(`#${type}TokenLabel`)?.value || (type === "mcp" ? "MCP client" : "API client");
+	const fallback = type === "mcp" ? "MCP client" : "API client";
+	const label = ($(`#${type}TokenLabel`)?.value || fallback).trim();
 	try {
 		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type, label }) });
-		S.oneTimeToken = result;
+		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
 		await refreshTokens();
 		renderView();
 	} catch (e) { toast("Token creation failed: " + e.message, true); }
 }
 
-function selectedToolName() {
-	return $("#mcpToolChoice")?.value || "Claude";
-}
-
 async function generateMcpLink() {
-	const label = ($("#mcpConnectionName")?.value || selectedToolName() || "Claude").trim();
+	const label = ($("#mcpConnectionName")?.value || "Claude MCP").trim();
 	try {
 		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type:"mcp", label }) });
 		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
 		await refreshTokens();
 		renderView();
-	} catch (e) { toast("UML MCP Link creation failed: " + e.message, true); }
+	} catch (e) { toast("MCP URL creation failed: " + e.message, true); }
 }
 
 async function rotateConnection(id, label, type = "mcp") {
@@ -1348,6 +1411,7 @@ async function rotateConnection(id, label, type = "mcp") {
 		await api(`/auth/tokens/${encodeURIComponent(id)}/revoke`, { method:"POST" });
 		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type, label }) });
 		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
 		await refreshTokens();
 		renderView();
 	} catch (e) { toast("Rotate failed: " + e.message, true); }
@@ -1355,6 +1419,22 @@ async function rotateConnection(id, label, type = "mcp") {
 
 function clearOneTimeLink() {
 	S.oneTimeToken = null;
+	S.oneTimeVisible = true;
+	renderView();
+}
+
+function toggleOneTimeSecret() {
+	S.oneTimeVisible = !S.oneTimeVisible;
+	renderView();
+}
+
+function cancelConnectFlow() {
+	S.oneTimeToken = null;
+	S.oneTimeVisible = true;
+	const mcp = $("#mcpConnectionName");
+	const apiName = $("#apiTokenLabel");
+	if (mcp) mcp.value = "";
+	if (apiName) apiName.value = "";
 	renderView();
 }
 
@@ -1367,60 +1447,58 @@ async function revokeToken(id) {
 	} catch (e) { toast("Revoke failed: " + e.message, true); }
 }
 
+function oneTimeSecretPanel(latest) {
+	if (!latest?.tokenRecord || !latest.token) return "";
+	const isMcp = latest.tokenRecord.type === "mcp";
+	const secret = isMcp ? mcpUrlForToken(latest.token) : latest.token;
+	const title = isMcp ? "Generated MCP URL" : "Generated API token/key";
+	const copyLabel = isMcp ? "Copy MCP URL" : "Copy API token";
+	const help = isMcp
+		? "This MCP URL includes a private token. Copy it into the connector settings once, then close this panel."
+		: "This API token is shown once. Use it as Authorization: Bearer <token>, then close this panel.";
+	const display = S.oneTimeVisible ? esc(secret) : "Hidden. Use Reveal to inspect or Copy to copy it.";
+	return `<div class="token-secret" id="oneTimeSecretPanel">
+		<b>${title}</b><br>
+		<span class="help">Connection name: ${esc(latest.connectionName || latest.tokenRecord.label || "UML connection")}</span>
+		<div class="mcp-url" id="generatedSecret" style="margin-top:10px">${display}</div>
+		<div class="secret-toolbar">
+			<button class="mini" onclick="copyText('${esc(secret)}','${isMcp ? "MCP URL copied" : "API token copied"}')">${copyLabel}</button>
+			<button class="mini ghost" onclick="toggleOneTimeSecret()">${S.oneTimeVisible ? "Hide" : "Reveal"}</button>
+			<button class="mini ghost" onclick="clearOneTimeLink()">Close</button>
+		</div>
+		<div class="help" style="margin-top:9px">${help} UML will only list the masked token later. If you lose the secret, rotate or create a new connection.</div>
+	</div>`;
+}
+
 function viewConnect(v) {
 	const latest = S.oneTimeToken;
-	const latestIsMcp = latest?.tokenRecord?.type === "mcp";
-	const latestIsApi = latest?.tokenRecord?.type === "api";
-	const latestMcpLink = latestIsMcp ? mcpUrlForToken(latest.token) : "";
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="box" style="max-width:980px">
-			<h3>Connect an AI tool to UML</h3>
-			<div class="help">Create one private UML connection link for each tool. Paste the link into the tool's connector or MCP settings.</div>
+			<h3>Connect UML</h3>
+			<div class="help">Create a named private connection for each tool or app. MCP clients use a generated MCP URL. Custom apps use a generated API token/key.</div>
 		</div>
 		<div class="panel-grid">
-			<div class="action-box"><h3>1. Choose tool</h3>
-				<select id="mcpToolChoice" onchange="document.getElementById('mcpConnectionName').value=this.value">
-					<option>Claude</option>
-					<option>ChatGPT-style assistant</option>
-					<option>Cursor / Codex</option>
-					<option>Gemini</option>
-					<option>Custom MCP client</option>
-				</select>
+			<div class="action-box connect-section">
+				<h3>Generate MCP URL</h3>
+				<div class="help">Use this for Claude, Cursor, Codex, or any MCP-capable client. The generated URL includes the private token.</div>
+				<div class="form-row"><label for="mcpConnectionName">Connection name</label><input id="mcpConnectionName" placeholder="Claude desktop" /></div>
+				<div class="section-actions"><button onclick="generateMcpLink()">Generate MCP URL</button><button class="ghost" onclick="cancelConnectFlow()">Cancel</button></div>
 			</div>
-			<div class="action-box"><h3>2. Connection name</h3>
-				<div class="form-row"><label for="mcpConnectionName">Connection name</label><input id="mcpConnectionName" placeholder="Claude" value="Claude" /></div>
-			</div>
-			<div class="action-box"><h3>3. Generate link</h3>
-				<button onclick="generateMcpLink()">Generate UML MCP Link</button>
+			<div class="action-box connect-section api">
+				<h3>Generate API token/key</h3>
+				<div class="help">Use this for custom apps, agents, SDK-style integrations, or scripts that call the HTTP API directly.</div>
+				<div class="form-row"><label for="apiTokenLabel">Token name</label><input id="apiTokenLabel" placeholder="Custom production agent" /></div>
+				<div class="section-actions"><button onclick="generateToken('api')">Generate API token/key</button><button class="ghost" onclick="cancelConnectFlow()">Cancel</button></div>
 			</div>
 		</div>
-		${latestIsMcp ? `<div class="token-secret"><b>Connection name:</b> ${esc(latest.connectionName || latest.tokenRecord?.label || "Claude")}<br><br>
-			<b>UML MCP Link:</b><br><code>${esc(latestMcpLink)}</code>
-			<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-				<button class="mini" onclick="copyText('${esc(latestMcpLink)}','UML MCP Link copied')">Copy UML MCP Link</button>
-				<button class="mini ghost" onclick="clearOneTimeLink()">I copied it</button>
-			</div>
-			<div class="help" style="margin-top:9px">This link already includes your private token. Keep it secret. UML shows the full link only once. If you lose it, rotate the connection.</div>
-		</div>` : ""}
-		<div class="box" style="max-width:980px"><h3>Connected tools</h3><div id="tokenList"></div></div>
+		${oneTimeSecretPanel(latest)}
+		<div class="box" style="max-width:980px"><h3>Connections and tokens</h3><div class="help">Active rows can be revoked. Revoked rows remain visible for audit and are not usable.</div><div id="tokenList"></div></div>
 		<div class="panel-grid">
-			<div class="action-box"><h3>Claude</h3><ol class="steps"><li>Open Claude.</li><li>Go to Settings.</li><li>Open Connectors.</li><li>Add custom connector.</li><li>Name it UML.</li><li>Paste your UML MCP Link.</li><li>Leave OAuth Client ID and OAuth Client Secret empty if they are optional.</li><li>Save and test.</li></ol></div>
-			<div class="action-box"><h3>ChatGPT-style assistant</h3><ol class="steps"><li>Open app or assistant settings.</li><li>Find Apps, Connectors, Tools, MCP, or Actions.</li><li>Add UML if supported.</li><li>Paste your UML MCP Link if MCP is supported.</li><li>If MCP is not supported, use Advanced API access.</li></ol><p class="help">Official AI apps decide when they call connected tools. UML provides the shared memory link and recall/save tools.</p></div>
-			<div class="action-box"><h3>Cursor / Codex</h3><ol class="steps"><li>Open settings.</li><li>Find MCP, Tools, or Connectors.</li><li>Add a new MCP server.</li><li>Paste your UML MCP Link.</li><li>Save and test.</li></ol></div>
-			<div class="action-box"><h3>Gemini</h3><ol class="steps"><li>Use Gemini CLI or compatible MCP tooling.</li><li>Add UML as an MCP server.</li><li>Paste your UML MCP Link.</li><li>Test available tools.</li></ol></div>
-			<div class="action-box"><h3>Custom MCP client</h3><ol class="steps"><li>Create a private UML MCP Link.</li><li>Add UML as an MCP server in your client.</li><li>Paste the full link exactly once.</li><li>Test save and recall tools.</li></ol></div>
-		</div>
-		<details class="box" style="max-width:980px">
-			<summary><b>Advanced: API access</b></summary>
-			<div class="help" style="margin-top:10px">Most users do not need API access. Use this for custom apps, agents, and developer integrations.</div>
-			<div class="panel-grid" style="margin-top:12px">
-				<div class="action-box"><h3>Current routes</h3><div class="mcp-url">POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
-				<div class="action-box"><h3>Bearer token</h3><p class="help">Send API requests with an Authorization header.</p><div class="mcp-url">Authorization: Bearer uml_live_xxxxx</div></div>
-				<div class="action-box"><h3>Generate API token</h3><div class="form-row"><label for="apiTokenLabel">API connection name</label><input id="apiTokenLabel" placeholder="Custom Agent" /></div><button onclick="generateToken('api')">Generate API token</button></div>
-			</div>
-			${latestIsApi ? `<div class="token-secret"><b>Copy this API token now.</b> UML will not show it again.<br><br><code>${esc(latest.token)}</code><div style="margin-top:8px"><button class="mini" onclick="copyText('${esc(latest.token)}','API token copied')">Copy API token</button></div></div>` : ""}
-		</details>`;
+			<div class="action-box"><h3>MCP setup instructions</h3><ol class="steps"><li>Generate a named MCP URL.</li><li>Copy it while the one-time panel is open.</li><li>Open the client's MCP, connector, tools, or custom server settings.</li><li>Paste the full URL exactly once and save.</li><li>Test the available save and recall tools.</li></ol></div>
+			<div class="action-box"><h3>API token usage</h3><div class="help">Send the token as a bearer credential. Never paste it into public logs, prompts, or client-side code.</div><div class="mcp-url" style="margin-top:10px">Authorization: Bearer uml_live_xxxxx<br><br>POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
+			<div class="action-box"><h3>Security notes</h3><ul class="policy-list"><li>Full secrets are shown only once.</li><li>Revoke a token if a device, workspace, or private link may be exposed.</li><li>Use one connection per tool so you can revoke access cleanly.</li></ul></div>
+		</div>`;
 	v.appendChild(wrap);
 	renderTokenList();
 }
@@ -1431,27 +1509,27 @@ function renderTokenList() {
 	const list = $("#tokenList");
 	if (!list) return;
 	if (!S.tokens.length) { list.innerHTML = `<div class="empty">No tokens yet.</div>`; return; }
-	list.innerHTML = S.tokens.map(t => `<div class="token-row">
-		<div><b>${esc(t.label)}</b><div class="kv">${esc(t.type)} · ${esc(t.masked_token)} · created ${fmtDate(t.created_at)} · last used ${t.last_used_at ? fmtDate(t.last_used_at) : "never"}</div></div>
-		<span class="badge ${t.revoked_at ? "state-inactive" : "state-active"}">${esc(t.status)}</span>
-		<button class="ghost danger mini" onclick="revokeToken('${esc(t.id)}')" ${t.revoked_at ? "disabled" : ""}>Revoke</button>
-	</div>`).join("");
-}
-
-function renderTokenList() {
-	const list = $("#tokenList");
-	if (!list) return;
-	if (!S.tokens.length) { list.innerHTML = `<div class="empty">No tokens yet.</div>`; return; }
 	list.innerHTML = S.tokens.map(t => {
 		const active = !t.revoked_at && t.status !== "revoked";
-		const typeLabel = t.type === "mcp" ? "MCP connection" : "API access";
-		return `<div class="token-row">
-			<div><b>${esc(t.label)}</b><div class="kv">${typeLabel}<br>Created: ${fmtDate(t.created_at)}<br>Last used: ${t.last_used_at ? fmtDate(t.last_used_at) : "never"}<br>Full private link was shown only once. Rotate to create a new link.</div></div>
-			<span class="badge ${active ? "state-active" : "state-inactive"}">Status: ${active ? "Active" : "Revoked"}</span>
-			<button class="ghost mini" onclick="rotateConnection('${esc(t.id)}','${esc(t.label)}','${esc(t.type)}')" ${active ? "" : "disabled"}>Rotate link</button>
-			<button class="ghost danger mini" onclick="revokeToken('${esc(t.id)}')" ${active ? "" : "disabled"}>Revoke</button>
+		const typeLabel = t.type === "mcp" ? "MCP connection" : "API token/key";
+		return `<div class="token-row ${active ? "" : "revoked"}" data-token-status="${active ? "active" : "revoked"}">
+			<div><b>${esc(t.label || "Unnamed connection")}</b><div class="kv">${typeLabel} - ${esc(t.masked_token || "")}<br>Created: ${fmtDate(t.created_at)}<br>Last used: ${t.last_used_at ? fmtDate(t.last_used_at) : "never"}<br>${active ? "Full secret was shown only once. Rotate to create a fresh secret." : "Revoked row. This token can no longer save or recall memory."}</div></div>
+			<span class="badge ${active ? "state-active" : "state-inactive"}">${active ? "Active" : "Revoked"}</span>
+			<div class="token-actions">
+				<button class="ghost mini" data-token-action="rotate" data-token-id="${esc(t.id)}" data-token-label="${esc(t.label || "")}" data-token-type="${esc(t.type || "mcp")}" ${active ? "" : "disabled"}>Rotate</button>
+				<button class="ghost danger mini" data-token-action="revoke" data-token-id="${esc(t.id)}" ${active ? "" : "disabled"}>Revoke</button>
+			</div>
 		</div>`;
 	}).join("");
+	list.onclick = (event) => {
+		const button = event.target.closest("[data-token-action]");
+		if (!button) return;
+		const action = button.dataset.tokenAction;
+		const id = button.dataset.tokenId || "";
+		if (!id) return;
+		if (action === "rotate") rotateConnection(id, button.dataset.tokenLabel || "", button.dataset.tokenType || "mcp");
+		if (action === "revoke") revokeToken(id);
+	};
 }
 
 function viewReceipts(v) {
@@ -1567,27 +1645,102 @@ function viewProfile(v) {
 	v.appendChild(wrap);
 }
 
+const POLICY_CONTENT = {
+	terms: {
+		title: "Terms and Responsible Use",
+		body: `<p><b>Early product.</b> UML is an early product and may change as the memory engine, dashboard, API, and MCP support mature.</p>
+			<ul class="policy-list">
+				<li>You own your account and the memory you intentionally store in it.</li>
+				<li>Connected tools are third-party services. Their apps, models, connector settings, and data handling are outside UML control.</li>
+				<li>You are responsible for keeping tokens, API keys, and private MCP URLs safe. Treat them like passwords.</li>
+				<li>You can revoke tokens from Connect. Revoked tokens stop future access for that connection.</li>
+				<li>Do not use UML for abuse, unsafe automation, credential theft, surveillance, harassment, malware, or illegal activity.</li>
+				<li>Avoid sensitive, regulated, or high-risk data unless you have confirmed UML is appropriate for that use.</li>
+			</ul>`,
+	},
+	privacy: {
+		title: "Privacy and Memory Controls",
+		body: `<p>UML stores memory for your account so connected tools can save and recall useful context through the shared backend.</p>
+			<ul class="policy-list">
+				<li>UML does not sell user data or use user memory for unrelated purposes.</li>
+				<li>Memory belongs to your account. Connected tools access it only through private links or tokens you create.</li>
+				<li>Third-party tools may send UML messages or receive recalled context when you connect them. Review those tools' own policies.</li>
+				<li>Reset memory currently deletes saved memory rows for the selected account/scope, including pages, nodes, slices, events, edges, candidates, receipts, source packets, jobs, profiles, suppressions, checkpoints, and related vectors where available. It does not delete your account.</li>
+				<li>Token secrets and full MCP URLs are shown only once where supported. Token rows later show masked identifiers and revoke status.</li>
+			</ul>`,
+	},
+	support: {
+		title: "Support and Reports",
+		body: `<p>For support, reports, or production feedback, contact <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
+			<ul class="policy-list">
+				<li>For connection issues, include the tool name, token label, and setup path. Do not send full tokens or private MCP URLs.</li>
+				<li>For privacy or safety reports, include enough detail to reproduce the issue without exposing secrets.</li>
+				<li>If a token or private link may be exposed, revoke it from Connect immediately and create a new connection.</li>
+			</ul>`,
+	},
+};
+
+function openPolicyModal(kind = "terms") {
+	const modal = $("#policyModal");
+	const item = POLICY_CONTENT[kind] || POLICY_CONTENT.terms;
+	if (!modal) return;
+	modal.hidden = false;
+	modal.onclick = closePolicyModal;
+	modal.innerHTML = `<section class="policy-modal" role="dialog" aria-modal="true" aria-labelledby="policyTitle" onclick="event.stopPropagation()">
+		<header><div><h2 id="policyTitle">${esc(item.title)}</h2><div class="help">Production-grade account, privacy, and support guidance for the current early UML product.</div></div><button class="ghost mini" onclick="closePolicyModal()">Close</button></header>
+		${item.body}
+	</section>`;
+}
+
+function closePolicyModal() {
+	const modal = $("#policyModal");
+	if (!modal) return;
+	modal.hidden = true;
+	modal.innerHTML = "";
+}
+
 function viewSettings(v) {
 	const u = S.me?.user || {};
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
+	const activeTokens = S.tokens.filter(t => !t.revoked_at && t.status !== "revoked").length;
+	const revokedTokens = Math.max(0, S.tokens.length - activeTokens);
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="settings-grid">
-		<div class="action-box"><h3>Account</h3>
+		<div class="action-box settings-section"><h3>Account</h3>
 			<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "UML user")}</span></div>
 			<div class="kv">Name: <b>${esc(u.name || "")}</b></div>
 			<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
 			<div class="kv">Account ID: <b>${esc(u.id || S.userId || "")}</b></div>
-			<div class="kv">Memory: <b>${s.pages || 0}</b> pages, <b>${s.nodes || 0}</b> nodes</div>
-			<div class="kv">Connected tools count: <b>${S.tokens.length}</b></div>
-			<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="ghost" onclick="logoutNow()">Logout</button><button class="ghost" onclick="logoutAllNow()">Logout all sessions</button></div>
+			<div class="kv">Created: <b>${fmtDate(u.created_at)}</b></div>
+			<div class="section-actions"><button class="ghost" onclick="logoutNow()">Logout</button></div>
 		</div>
-		<div class="action-box"><h3>Support</h3><div class="help">Report an issue or contact support.</div><p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
-		<div class="action-box"><h3>Privacy</h3><div class="help">UML does not sell user data. UML does not use user memory for unrelated purposes. User memory belongs to their account. Connected tools access memory only through private links/tokens. Users can revoke links. Users can reset memory. Token secrets/full links are shown only once where applicable.</div></div>
-		<div class="action-box"><h3>Connected tools</h3><div class="help">${S.tokens.length} connection(s). Open Connect to rotate or revoke scoped private links.</div><div style="margin-top:10px"><button class="ghost mini" onclick="setView('connect')">Open Connect</button></div></div>
-		<div class="action-box"><h3>Memory preferences</h3><div class="help">Use Rules to preview capture modes by source, topic, keyword, schema, and importance.</div><div style="margin-top:10px"><button class="ghost mini" onclick="setView('rules')">Open Rules</button></div></div>
-		<div class="action-box"><h3>Sessions</h3><div class="help">Browser sessions use HttpOnly cookies. Log out current session or all sessions from Account.</div></div>
-		<div class="action-box"><h3>Advanced</h3><div class="help">Developer/API access lives under Connect -> Advanced: API access. Cleanup tools remain in hidden dev mode.</div></div>
-		<div class="action-box" id="terms-settings"><h3>Terms &amp; Conditions</h3><div class="help">Use UML responsibly. User controls their account/memory. Connected tools are third-party services. User is responsible for keeping private links/tokens safe. UML may change features during early development.</div></div>
+		<div class="action-box settings-section"><h3>Security</h3>
+			<div class="help">Browser sessions use HttpOnly cookies. Tokens and private MCP URLs should be treated like passwords.</div>
+			<div class="kv" style="margin-top:8px">Active connections: <b>${activeTokens}</b></div>
+			<div class="kv">Revoked connections: <b>${revokedTokens}</b></div>
+			<div class="section-actions"><button class="ghost mini" onclick="logoutAllNow()">Logout all sessions</button><button class="ghost mini" onclick="setView('connect')">Manage tokens</button></div>
+		</div>
+		<div class="action-box settings-section"><h3>Connections</h3>
+			<div class="help">${S.tokens.length} total connection(s). Create one MCP URL or API token/key per tool so access can be revoked cleanly.</div>
+			<div class="section-actions"><button class="ghost mini" onclick="setView('connect')">Open Connect</button></div>
+		</div>
+		<div class="action-box settings-section"><h3>Memory Controls</h3>
+			<div class="help">Current memory: <b>${s.pages || 0}</b> page(s), <b>${s.nodes || 0}</b> node(s), <b>${s.candidates || 0}</b> review candidate(s).</div>
+			<div class="section-actions"><button class="ghost mini" onclick="setView('rules')">Capture Rules</button>${candidateCount() ? `<button class="ghost mini" onclick="setView('candidates')">Open Review Queue</button>` : `<button class="ghost mini" disabled>No pending candidates</button>`}</div>
+		</div>
+		<div class="action-box settings-section"><h3>Data &amp; Privacy</h3>
+			<div class="help">You own your account memory. UML does not sell user data or use memory for unrelated purposes. Connected tools are third-party services and may send or receive context through tokens you create.</div>
+			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy details</button></div>
+		</div>
+		<div class="action-box settings-section"><h3>Support</h3>
+			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
+			<p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
+			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('support')">Support / report issue</button></div>
+		</div>
+		<div class="action-box settings-section"><h3>Legal / Terms</h3>
+			<div class="help">Early-product terms, privacy, responsible-use guidance, token responsibility, and third-party tool notices.</div>
+			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('terms')">Terms</button><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy</button><button class="ghost mini" onclick="openPolicyModal('support')">Support</button></div>
+		</div>
 	</div>`;
 	const danger = el("div");
 	viewReset(danger);
@@ -2807,6 +2960,7 @@ $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t) setView(t.dataset.view); });
 window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
+window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
 initShell();
 </script>
 </body>

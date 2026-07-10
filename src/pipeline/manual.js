@@ -21,12 +21,15 @@ export { saveConversation } from "./manual_collect.js";
 
 /** Shape the ingest result into a tool-ready { fired, summary, receipt, processing }. */
 function finalize(res, { prefix = "", processingNote }) {
-	if (res.optedOut || res.receipt) {
+	if (res.optedOut) {
 		return {
 			fired: false,
 			processing: false,
 			summary: prefix + (res.summary ?? formatReceipt(res.receipt)),
 			receipt: res.receipt ?? null,
+			receipt_id: res.receiptId ?? res.receipt?.id ?? null,
+			sourcePacket: res.sourcePacket ?? null,
+			source_packet_id: res.receipt?.source_packet_id ?? res.sourcePacket?.id ?? null,
 		};
 	}
 	if (!res.fired) {
@@ -35,10 +38,32 @@ function finalize(res, { prefix = "", processingNote }) {
 			processing: false,
 			summary: prefix + "Saved: 0. Reason: nothing durable here (chatter, a question, or a duplicate).",
 			receipt: null,
+			receipt_id: null,
+			sourcePacket: res.sourcePacket ?? null,
+			source_packet_id: res.sourcePacket?.id ?? null,
 		};
 	}
 	if (res.result && res.result.summary) {
-		return { fired: true, processing: false, summary: prefix + res.result.summary, receipt: res.result.receipt };
+		return {
+			fired: true,
+			processing: false,
+			summary: prefix + res.result.summary,
+			receipt: res.result.receipt,
+			receipt_id: res.result.receipt?.id ?? null,
+			sourcePacket: res.sourcePacket ?? null,
+			source_packet_id: res.result.receipt?.source_packet_id ?? res.sourcePacket?.id ?? null,
+		};
+	}
+	if (res.receipt) {
+		return {
+			fired: Boolean(res.fired),
+			processing: false,
+			summary: prefix + (res.summary ?? formatReceipt(res.receipt)),
+			receipt: res.receipt,
+			receipt_id: res.receiptId ?? res.receipt?.id ?? null,
+			sourcePacket: res.sourcePacket ?? null,
+			source_packet_id: res.receipt?.source_packet_id ?? res.sourcePacket?.id ?? null,
+		};
 	}
 	// Extraction is still running past the wait budget — accepted-receipt.
 	return {
@@ -46,6 +71,9 @@ function finalize(res, { prefix = "", processingNote }) {
 		processing: true,
 		summary: prefix + (processingNote ?? "Captured ✓ — processing now; your memory updates in a moment."),
 		receipt: null,
+		receipt_id: null,
+		sourcePacket: res.sourcePacket ?? null,
+		source_packet_id: res.sourcePacket?.id ?? null,
 	};
 }
 
@@ -178,6 +206,8 @@ export async function saveMemory(env, ctx, userId, content, opts = {}) {
 		waitBudgetMs: opts.waitBudgetMs ?? config.saveWaitBudgetMs,
 		sourceType: "message",
 		sourceMode: "manual_direct",
+		conversationId: opts.conversationId,
+		threadId: opts.threadId,
 		sourceId: opts.sourceId,
 		idempotencyKey: opts.idempotencyKey,
 		memoryScope: opts.memoryScope,

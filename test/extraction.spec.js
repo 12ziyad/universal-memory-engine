@@ -51,6 +51,10 @@ async function edges(userId) {
 	const { results } = await env.DB.prepare("SELECT * FROM edges WHERE user_id = ?").bind(userId).all();
 	return results;
 }
+async function candidates(userId) {
+	const { results } = await env.DB.prepare("SELECT * FROM candidates WHERE user_id = ? AND deleted_at IS NULL").bind(userId).all();
+	return results;
+}
 async function checkpoint(userId) {
 	const row = await env.DB.prepare(
 		"SELECT last_processed_msg_id FROM checkpoints WHERE user_id = ?",
@@ -94,6 +98,37 @@ describe("1. New node", () => {
 		const sl = await slices(userId);
 		expect(sl).toHaveLength(1);
 		expect(sl[0]).toMatchObject({ text: "Trains three days a week", kind: "progress", is_current: 1, node_id: n[0].id });
+	});
+
+	it("does not create an empty node from a node-only proposal", async () => {
+		const userId = "u-node-only-no-empty";
+		await ingest(userId, [msg("m1", "I use Notion for random notes")], {
+			flush: true,
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Notion", category: "tool", matches_existing: null, confidence: 0.95 },
+				],
+				notes: "",
+			},
+		});
+		expect(await nodes(userId)).toHaveLength(0);
+		expect(await slices(userId)).toHaveLength(0);
+		expect(await events(userId)).toHaveLength(0);
+		expect(await candidates(userId)).toHaveLength(1);
+	});
+
+	it("falls back to a durable life event when the proposal is empty", async () => {
+		const userId = "u-life-empty-fallback";
+		await ingest(userId, [msg("m1", "My grandmother died yesterday")], {
+			flush: true,
+			llmResponse: { objects: [], notes: "" },
+		});
+		const n = await nodes(userId);
+		expect(n).toHaveLength(1);
+		expect(n[0]).toMatchObject({ label: "Grandmother", category: "family" });
+		const ev = await events(userId);
+		expect(ev).toHaveLength(1);
+		expect(ev[0]).toMatchObject({ action: "passed_away", importance: "life_significant", node_id: n[0].id });
 	});
 });
 
@@ -209,7 +244,7 @@ describe("6. Edge only on explicit relation", () => {
 describe("7. meaningful_no_write safety", () => {
 	it("does not advance the checkpoint and retains the chunk when the LLM proposes nothing", async () => {
 		const userId = "u-nowrite";
-		const res = await ingest(userId, [msg("m1", "I started a brand new secret project")], {
+		const res = await ingest(userId, [msg("m1", "I have a brand new secret project idea")], {
 			llmResponse: { objects: [], notes: "nothing extractable" },
 		});
 		expect(res.fired).toBe(true); // it was meaningful and fired
@@ -268,7 +303,7 @@ describe("8. Re-sent messages are de-duplicated", () => {
 });
 
 describe("9. Junk pronoun labels are rejected", () => {
-	it("creates no node for a pronoun like 'I', and drops an edge that referenced it", async () => {
+	it("creates no node for a pronoun like 'I', and prunes the orphan edge endpoint", async () => {
 		const userId = "u-junk";
 		const res = await ingest(userId, [msg("m1", "I train three days a week")], {
 			flush: true,
@@ -284,8 +319,7 @@ describe("9. Junk pronoun labels are rejected", () => {
 		expect(res.fired).toBe(true);
 
 		const n = await nodes(userId);
-		expect(n).toHaveLength(1);
-		expect(n[0].label).toBe("Boxing"); // "I" rejected as junk
+		expect(n).toHaveLength(0); // "Boxing" had no durable slice/event/edge after I was rejected
 
 		const e = await edges(userId);
 		expect(e).toHaveLength(0); // the I->Boxing edge lost its endpoint and was dropped
@@ -400,7 +434,7 @@ describe("10. Life / family / health events now save (gate fix)", () => {
 		expect(ev[0]).toMatchObject({ action: "married", importance: "life_significant" });
 	});
 
-	it("keeps a node with a truly unknown category as 'other' instead of dropping it", async () => {
+	it("turns a node-only skill action with an unknown category into node plus event", async () => {
 		const userId = "u-other-cat";
 		await ingest(userId, [msg("m1", "I started doing pottery")], {
 			flush: true,
@@ -413,6 +447,9 @@ describe("10. Life / family / health events now save (gate fix)", () => {
 		});
 		const n = await nodes(userId);
 		expect(n).toHaveLength(1);
-		expect(n[0]).toMatchObject({ label: "Pottery", category: "other" });
+		expect(n[0]).toMatchObject({ label: "Pottery", category: "skill" });
+		const ev = await eventsOf(userId);
+		expect(ev).toHaveLength(1);
+		expect(ev[0]).toMatchObject({ action: "started", node_id: n[0].id });
 	});
 });

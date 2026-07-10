@@ -14,7 +14,7 @@ import { getConfig } from "../config.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
 import { clusterForMemory } from "./clusters.js";
 import { runPass2 } from "./pass2.js";
-import { dedupeEvidence, overlapRatio, topicSimilarity } from "./signals.js";
+import { dedupeEvidence, overlapRatio, safeJsonArray, topicSimilarity } from "./signals.js";
 import { sourceEvidenceFromPacket, sourceMeta } from "./source.js";
 import { canonicalTitle, generateTitle } from "./title.js";
 
@@ -106,6 +106,15 @@ export function filterDigestByTopic(digest, intent = {}) {
 
 function uniq(items) {
 	return [...new Set((items ?? []).map((x) => String(x).trim()).filter(Boolean))];
+}
+
+function safeJsonObject(value) {
+	try {
+		const parsed = JSON.parse(value || "{}");
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
 }
 
 function classifyLines(lines) {
@@ -310,6 +319,11 @@ function clusterCompatible(page, draft) {
 	return page.cluster === "general_memory" || draft.cluster === "general_memory";
 }
 
+function genericCanonicalTitle(value) {
+	const title = normalizeLabel(value);
+	return !title || title === "memory research" || title === "memory research session";
+}
+
 function scorePageMatch(page, draft, intent, conversationId) {
 	const similarity = topicSimilarity(pageMatchPayload(page), {
 		title: draft.title,
@@ -318,6 +332,7 @@ function scorePageMatch(page, draft, intent, conversationId) {
 		text: [draft.full_markdown, draft.key_points_json, draft.related_concepts_json].join("\n"),
 	});
 	const sameTopic = Boolean(draft.topic_filter && page.topic_filter && page.topic_filter === draft.topic_filter);
+	const topicConflict = Boolean(draft.topic_filter && page.topic_filter && draft.topic_filter !== page.topic_filter);
 	const sameTitle = page.canonical_title === draft.canonical_title;
 	const sameConversation = Boolean(conversationId && page.source_conversation_id === conversationId);
 	const titleScore = Math.max(titleSimilarity(page.title, draft.title), titleSimilarity(page.canonical_title, draft.canonical_title));
@@ -325,6 +340,7 @@ function scorePageMatch(page, draft, intent, conversationId) {
 	const pageSig = similarity.left;
 	const draftSig = similarity.right;
 	const domainConflict = pageSig.domainId && draftSig.domainId && pageSig.domainId !== draftSig.domainId;
+	const safeSameTitle = sameTitle && !genericCanonicalTitle(page.canonical_title) && titleScore >= 0.95;
 	let score =
 		similarity.score * 0.48 +
 		titleScore * 0.24 +
@@ -336,15 +352,18 @@ function scorePageMatch(page, draft, intent, conversationId) {
 	const strong =
 		compatible &&
 		!domainConflict &&
+		!topicConflict &&
 		(score >= 0.62 ||
 			(sameTopic && score >= 0.52) ||
+			(similarity.sameDomain && similarity.score >= 0.4 && titleScore >= 0.35) ||
+			(safeSameTitle && similarity.score >= 0.12) ||
 			(sameTitle && similarity.score >= 0.22) ||
 			(sameConversation && intent.updateRequested && score >= 0.58));
 	return {
 		page,
 		score,
 		strong,
-		reasons: { sameTopic, sameTitle, sameConversation, compatible, domainConflict, titleScore, topicScore: similarity.score },
+		reasons: { sameTopic, sameTitle, sameConversation, compatible, domainConflict, topicConflict, titleScore, topicScore: similarity.score },
 	};
 }
 
@@ -361,21 +380,84 @@ function suppressedBy(rows, kind, key) {
 	return rows.find((s) => s.kind === kind && s.canonical_key === key);
 }
 
+function pageArray(page, column, sectionKey) {
+	const direct = safeJsonArray(page?.[column]);
+	if (direct.length) return direct;
+	const sections = safeJsonObject(page?.sections_json);
+	return safeJsonArray(sections[sectionKey]);
+}
+
+function mergePageDraft(existing, draft, { preferDraftTitle = false } = {}) {
+	const keyPoints = uniq([...pageArray(existing, "key_points_json", "keyPoints"), ...(draft.keyPoints ?? [])]).slice(0, 30);
+	const decisions = uniq([...pageArray(existing, "decisions_json", "decisions"), ...(draft.decisions ?? [])]).slice(0, 20);
+	const nextSteps = uniq([...pageArray(existing, "next_steps_json", "nextSteps"), ...(draft.nextSteps ?? [])]).slice(0, 20);
+	const existingSections = safeJsonObject(existing?.sections_json);
+	const technical = uniq([
+		...safeJsonArray(existingSections.technicalDetails),
+		...classifyLines(draft.keyPoints ?? []).technical,
+	]).slice(0, 20);
+	const related = uniq([...safeJsonArray(existing?.related_concepts_json), ...(draft.related ?? [])]).slice(0, 16);
+	const evidence = dedupeEvidence([...safeJsonArray(existing?.evidence_json), ...(draft.evidence ?? [])], 12);
+	const title = preferDraftTitle ? (draft.title || existing.title) : (existing.title || draft.title);
+	const overview = keyPoints.slice(0, 3).join(" ") || draft.short_summary || existing.short_summary || "Collected memory page.";
+	const sections = {
+		overview,
+		keyPoints,
+		decisions,
+		technicalDetails: technical,
+		nextSteps,
+		relatedConcepts: related,
+		evidence,
+	};
+	const fullMarkdown = markdownFor({ title, overview, keyPoints, decisions, technical, nextSteps, related, evidence });
+	return {
+		...draft,
+		id: existing.id,
+		title,
+		canonical_title: canonicalTitle(title),
+		short_summary: overview.slice(0, 700),
+		full_markdown: fullMarkdown,
+		sections_json: JSON.stringify(sections),
+		key_points_json: JSON.stringify(keyPoints),
+		decisions_json: JSON.stringify(decisions),
+		next_steps_json: JSON.stringify(nextSteps),
+		related_concepts_json: JSON.stringify(related),
+		evidence_json: JSON.stringify(evidence),
+		related,
+		evidence,
+		keyPoints,
+		decisions,
+		nextSteps,
+	};
+}
+
+function isDuplicateCollect(match, draft, sourcePacket) {
+	if (!match || !draft.input_hash) return false;
+	if (match.input_hash !== draft.input_hash) return false;
+	return Boolean(
+		match.source_packet_id === draft.source_packet_id ||
+		match.idempotency_key === draft.idempotency_key ||
+		Number(sourcePacket?.seen_count ?? 0) > 1,
+	);
+}
+
 function pageReceipt({ action, page, runId, received, digested, relatedCount, skipped = [], suppressed = false }) {
 	const created = action === "create" ? [{ id: page.id, title: page.title }] : [];
 	const updated = action === "update" || action === "reinforce" ? [{ kind: "memory_page", id: page.id, title: page.title }] : [];
+	const duplicate = action === "duplicate";
 	const receipt = {
-		outcome: suppressed ? "suppressed" : "wrote",
+		outcome: suppressed ? "suppressed" : duplicate ? "skipped_duplicate" : "wrote",
 		source: "save_conversation",
 		source_mode: "manual_collect",
 		extraction_run_id: runId,
+		page_action: duplicate ? "skipped_duplicate" : action === "create" ? "created" : action === "update" ? "updated" : action === "reinforce" ? "reinforced" : action,
 		source_packet_id: page.source_packet_id ?? null,
 		idempotency_key: page.idempotency_key ?? null,
 		scope_json: page.scope_json ?? null,
 		received,
 		digested,
 		saved: {
-			pages: suppressed ? 0 : 1,
+			pages: suppressed || duplicate ? 0 : 1,
 			nodes: 0,
 			newNodeLabels: [],
 			autoCreated: [],
@@ -385,24 +467,37 @@ function pageReceipt({ action, page, runId, received, digested, relatedCount, sk
 			edges: 0,
 			candidates: 0,
 		},
-		savedTotal: suppressed ? 0 : 1,
+		savedTotal: suppressed || duplicate ? 0 : 1,
 		actions: {
 			createdPages: created,
 			updatedPages: updated,
 			reinforcedPages: action === "reinforce" ? updated : [],
-			skippedObjects: skipped,
+			skippedObjects: duplicate
+				? [{ kind: "memory_page", id: page.id, title: page.title, reason: "duplicate_memory_page", count: 1 }, ...skipped]
+				: skipped,
 			suppressedObjects: suppressed ? [{ kind: "memory_page", title: page.title }] : [],
 		},
-		skipped: skipped.length,
-		skippedReasons: Object.fromEntries(skipped.map((item) => [item.reason, (item.count ?? 1)])),
+		skipped: duplicate ? skipped.length + 1 : skipped.length,
+		skippedReasons: duplicate
+			? { duplicate_memory_page: 1, ...Object.fromEntries(skipped.map((item) => [item.reason, (item.count ?? 1)])) }
+			: Object.fromEntries(skipped.map((item) => [item.reason, (item.count ?? 1)])),
 		relatedConceptsKeptInPage: relatedCount,
 		created_at: Date.now(),
 	};
+	if (duplicate) receipt.reason = "duplicate memory page already exists";
 	return receipt;
 }
 
 function pageSummary(action, page, receipt) {
-	const verb = action === "create" ? "Saved as one memory page" : "Updated one memory page";
+	if (action === "duplicate") {
+		return `Skipped duplicate memory page:\n${page.title}\nReceipt: ${receipt.extraction_run_id}`;
+	}
+	const verb =
+		action === "create"
+			? "Created one memory page"
+			: action === "reinforce"
+				? "Reinforced one memory page"
+				: "Updated one memory page";
 	const related = receipt.relatedConceptsKeptInPage ?? 0;
 	const skipped = related
 		? `\n\nSkipped graph node creation for ${related} related concept(s) because this was manual_collect mode.`
@@ -457,7 +552,36 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 
 	if (match) {
 		action = intent.updateRequested ? "update" : "reinforce";
-		page = { ...draft, id: match.id, title: draft.title || match.title };
+		if (isDuplicateCollect(match, draft, sourcePacket)) {
+			action = "duplicate";
+			page = {
+				...draft,
+				id: match.id,
+				title: match.title || draft.title,
+				canonical_title: match.canonical_title || draft.canonical_title,
+			};
+			const receipt = pageReceipt({
+				action,
+				page,
+				runId,
+				received,
+				digested: keptLines,
+				relatedCount: 0,
+			});
+			await updateExtractionRun(env, userId, runId, {
+				status: "skipped_duplicate",
+				skippedObjects: receipt.actions.skippedObjects,
+			});
+			const summary = pageSummary(action, page, receipt);
+			const receiptId = await storeReceipt(env, userId, "save_conversation", receipt, summary);
+			if (receiptId) {
+				await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ?")
+					.bind(receiptId, page.id, userId)
+					.run();
+			}
+			return { fired: false, processing: false, summary, receipt };
+		}
+		page = mergePageDraft(match, draft, { preferDraftTitle: intent.updateRequested });
 		await env.DB.prepare(
 			`UPDATE memory_pages SET
 				title = ?, canonical_title = ?, topic_filter = ?, short_summary = ?, full_markdown = ?,

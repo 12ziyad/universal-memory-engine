@@ -60,6 +60,14 @@ describe("Auto Mode Phase 2 architecture ledger", () => {
 			_test: { llmResponse },
 		});
 		expect(first.status).toBe(200);
+		expect(first.body).toMatchObject({
+			ok: true,
+			mode: "direct_save",
+			source: "save_memory",
+			processing: false,
+		});
+		expect(first.body.source_packet_id).toMatch(/^src_/);
+		expect(first.body.receipt_id).toMatch(/^receipt_/);
 		expect(first.body.receipt.source_packet_id).toMatch(/^src_/);
 
 		const packets = await all("source_packets", userId);

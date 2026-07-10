@@ -38,6 +38,16 @@ async function save(userId, content, llmResponse) {
 	});
 }
 
+async function collect(userId, content, digestResponse = "Private collect should not be stored.") {
+	return call("/v1/save", {
+		userId,
+		mode: "conversation",
+		conversationId: `${userId}-conversation`,
+		messages: [msg(`${userId}-collect-msg`, content)],
+		_test: { digestResponse },
+	});
+}
+
 async function table(name, userId) {
 	const { results } = await env.DB.prepare(`SELECT * FROM ${name} WHERE user_id = ? ORDER BY created_at ASC`)
 		.bind(userId)
@@ -103,6 +113,18 @@ describe("memory opt-out / do-not-remember", () => {
 		expectOptOutReceipt(res.body.receipt);
 		expect(await table("nodes", userId)).toHaveLength(0);
 		expect(await table("events", userId)).toHaveLength(0);
+		expect(await table("source_packets", userId)).toHaveLength(0);
+		expect(await table("memory_jobs", userId)).toHaveLength(0);
+	});
+
+	it("/v1/save conversation with do-not-remember creates no_write receipt and no page", async () => {
+		const userId = "opt-collect-private";
+		const res = await collect(userId, "Do not remember this chat: my private project launch date is August 3.");
+		expect(res.status).toBe(200);
+		expect(res.body.fired).toBe(false);
+		expect(res.body.receipt).toMatchObject({ source: "save_conversation", source_mode: "manual_collect" });
+		expectOptOutReceipt(res.body.receipt);
+		expect(await table("memory_pages", userId)).toHaveLength(0);
 		expect(await table("source_packets", userId)).toHaveLength(0);
 		expect(await table("memory_jobs", userId)).toHaveLength(0);
 	});

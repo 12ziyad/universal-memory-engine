@@ -204,6 +204,7 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 export async function storeReceipt(env, userId, source, receipt, summary) {
 	const s = receipt?.saved ?? {};
 	const id = receipt?.id ?? newId("receipt");
+	const detail = receipt && typeof receipt === "object" ? { ...receipt, id } : receipt;
 	try {
 		await env.DB.prepare(
 			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total,
@@ -228,7 +229,7 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				receipt?.skipped ?? 0,
 				receipt?.received ?? null,
 				receipt?.digested ?? null,
-				JSON.stringify(receipt ?? {}),
+				JSON.stringify(detail ?? {}),
 				receipt?.created_at ?? Date.now(),
 				receipt?.extraction_run_id ?? null,
 				s.pages ?? 0,
@@ -237,6 +238,7 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				receipt?.scope_json ?? null,
 			)
 			.run();
+		if (receipt && typeof receipt === "object") receipt.id = id;
 		if (receipt?.extraction_run_id) {
 			await updateExtractionRun(env, userId, receipt.extraction_run_id, { receiptId: id });
 		}

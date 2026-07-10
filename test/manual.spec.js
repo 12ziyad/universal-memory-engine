@@ -30,6 +30,9 @@ function save(body) {
 function receipts(userId) {
 	return call(`/v1/receipts?userId=${userId}`, { headers });
 }
+function recall(userId, query) {
+	return call("/v1/recall", { method: "POST", headers, body: JSON.stringify({ userId, query }) });
+}
 async function nodes(userId) {
 	const { results } = await env.DB.prepare("SELECT * FROM nodes WHERE user_id = ?").bind(userId).all();
 	return results;
@@ -206,6 +209,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 			},
 		});
 		expect(body.fired).toBe(true);
+		expect(body.receipt.page_action).toBe("created");
 		expect(body.summary).toContain("memory page");
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
@@ -214,6 +218,43 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(p[0].full_markdown).toContain("UML uses D1 and Vectorize");
 		expect(await nodes(userId)).toHaveLength(0);
 		expect(await candidates(userId)).toHaveLength(0);
+	});
+
+	it("saving the same conversation twice skips the duplicate without another page", async () => {
+		const userId = "m-conv-exact-duplicate";
+		const payload = {
+			userId,
+			mode: "conversation",
+			conversationId: "dup-chat",
+			messages: [
+				{ role: "user", content: "UML pages should dedupe repeated conversation saves." },
+				{ role: "user", content: "The memory page should keep one clear digest." },
+			],
+			_test: {
+				digestResponse:
+					"UML pages should dedupe repeated conversation saves.\nThe memory page should keep one clear digest.",
+			},
+		};
+		const first = await save(payload);
+		const second = await save(payload);
+
+		expect(first.body.receipt).toMatchObject({ outcome: "wrote", page_action: "created", saved: { pages: 1 } });
+		expect(second.body.fired).toBe(false);
+		expect(second.body.summary).toContain("Skipped duplicate memory page");
+		expect(second.body.receipt).toMatchObject({
+			outcome: "skipped_duplicate",
+			page_action: "skipped_duplicate",
+			savedTotal: 0,
+			saved: { pages: 0 },
+			skippedReasons: { duplicate_memory_page: 1 },
+		});
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		const r = await receipts(userId);
+		const duplicateReceipt = r.body.receipts.find((receipt) => receipt.outcome === "skipped_duplicate");
+		expect(duplicateReceipt).toBeTruthy();
+		expect(duplicateReceipt.saved_pages).toBe(0);
+		expect(p[0].receipt_id).toBe(duplicateReceipt.id);
 	});
 
 	it("does not update an unrelated UML page for a Microsoft SWE resume discussion", async () => {
@@ -239,7 +280,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 			)
 			.run();
 
-		await save({
+		const saved = await save({
 			userId,
 			mode: "conversation",
 			conversationId: "career-chat",
@@ -267,6 +308,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 					"Microsoft Recruiting acknowledged the user's SWE application for Bangalore.\nThe user's resume has strong projects.\nDSA and interview prep are the main risk.",
 			},
 		});
+		expect(saved.body.receipt.page_action).toBe("created");
 
 		const p = await pages(userId);
 		expect(p).toHaveLength(2);
@@ -283,24 +325,56 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 
 	it("still updates an existing page when the new collect is strongly the same topic", async () => {
 		const userId = "m-same-topic-page-update";
-		await save({
+		const first = await save({
 			userId,
 			mode: "conversation",
 			topic: "car",
 			messages: [{ role: "user", content: "Car mileage matters for purchase research." }],
 			_test: { digestResponse: "Car mileage matters for purchase research." },
 		});
-		await save({
+		const second = await save({
 			userId,
 			mode: "conversation",
 			topic: "car",
 			messages: [{ role: "user", content: "Car service cost is also important." }],
 			_test: { digestResponse: "Car service cost is important for purchase research." },
 		});
+		expect(first.body.receipt.page_action).toBe("created");
+		expect(second.body.receipt.page_action).toBe("reinforced");
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
 		expect(p[0].title).toBe("Car Research");
 		expect(p[0].heat_score).toBeGreaterThan(1);
+		expect(p[0].full_markdown).toContain("Car mileage matters");
+		expect(p[0].full_markdown).toContain("Car service cost is important");
+	});
+
+	it("reinforces a safely detectable paraphrased same-topic collect and recall still finds the page", async () => {
+		const userId = "m-paraphrase-page-reinforce";
+		await save({
+			userId,
+			mode: "conversation",
+			messages: [{ role: "user", content: "Car mileage matters for purchase research." }],
+			_test: { digestResponse: "Car mileage matters for purchase research." },
+		});
+		const second = await save({
+			userId,
+			mode: "conversation",
+			messages: [{ role: "user", content: "Vehicle fuel economy is important while researching purchase options." }],
+			_test: { digestResponse: "Vehicle fuel economy matters for purchase research." },
+		});
+
+		expect(second.body.receipt).toMatchObject({ outcome: "wrote", page_action: "reinforced", saved: { pages: 1 } });
+		const p = await pages(userId);
+		expect(p).toHaveLength(1);
+		expect(p[0].full_markdown).toContain("Car mileage matters");
+		expect(p[0].full_markdown).toContain("Vehicle fuel economy matters");
+
+		const remembered = await recall(userId, "fuel economy purchase research");
+		expect(remembered.status).toBe(200);
+		expect(remembered.body.pages).toHaveLength(1);
+		expect(remembered.body.context).toContain("Memory page:");
+		expect(remembered.body.context).toContain("Vehicle fuel economy matters");
 	});
 
 	it("returns a clear 'Saved: 0' when the chat has no durable facts", async () => {
@@ -316,6 +390,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		});
 		expect(body.fired).toBe(false);
 		expect(body.summary).toContain("Saved: 0");
+		expect(body.receipt).toMatchObject({ outcome: "meaningful_no_write", savedTotal: 0, saved: { pages: 0 } });
 		// A "0" receipt is still stored so the Saves page shows the attempt.
 		const r = await receipts(userId);
 		expect(r.body.receipts.length).toBeGreaterThan(0);

@@ -57,13 +57,13 @@ describe("dashboard script", () => {
 		expect(html).toContain("When UML is connected through an MCP-capable AI client");
 		expect(html).toContain("The client or host model decides when to call them.");
 		expect(html).toContain("If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.");
-		expect(html).toContain("UML does not sell user data.");
-		expect(html).toContain("UML does not use user memory for unrelated purposes.");
-		expect(html).toContain("User memory belongs to their account.");
-		expect(html).toContain("private links/tokens");
-		expect(html).toContain("Users can revoke links.");
-		expect(html).toContain("Users can reset memory.");
-		expect(html).toContain("Token secrets/full private links are shown only once");
+		expect(html).toContain("UML does not sell user data");
+		expect(html).toContain("or use user memory for unrelated purposes");
+		expect(html).toContain("User memory belongs to the account that created it.");
+		expect(html).toContain("private links or tokens you create");
+		expect(html).toContain("you can revoke them from Connect");
+		expect(html).toContain("Reset memory deletes saved memory rows");
+		expect(html).toContain("Token secrets and full MCP URLs are shown only once");
 		expect(html).toContain("Privacy Policy");
 		expect(html).toContain("Terms &amp; Conditions");
 		expect(html).toContain("Support");
@@ -109,7 +109,7 @@ describe("dashboard script", () => {
 		expect(html).not.toContain('id="logoutBtn"');
 	});
 
-	it("keeps Memory, Candidates, Connect, Receipts, Rules, and Settings in the new IA", () => {
+	it("keeps Memory, Review, Connect, Receipts, Rules, and Settings in the new IA", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(script).toContain("function viewOverview(");
 		expect(script).toContain("function viewMemory(");
@@ -120,24 +120,81 @@ describe("dashboard script", () => {
 		expect(script).toContain("Save memory");
 		expect(script).toContain("Collect context");
 		expect(script).toContain("Recall / search");
-		expect(script).toContain("Connect an AI tool to UML");
-		expect(script).toContain("Create one private UML connection link for each tool. Paste the link into the tool's connector or MCP settings.");
+		expect(script).toContain("Connect UML");
+		expect(script).toContain("Create a named private connection for each tool or app.");
 		expect(script).toContain("Connection name");
-		expect(script).toContain("Generate UML MCP Link");
-		expect(script).toContain("UML MCP Link");
-		expect(script).toContain("Copy UML MCP Link");
-		expect(script).toContain("I copied it");
-		expect(script).toContain("Full private link was shown only once");
-		expect(script).toContain("Advanced: API access");
+		expect(script).toContain("Generate MCP URL");
+		expect(script).toContain("Generated MCP URL");
+		expect(script).toContain("Copy MCP URL");
+		expect(script).toContain("Generate API token/key");
+		expect(script).toContain("Generated API token/key");
+		expect(script).toContain("toggleOneTimeSecret()");
+		expect(script).toContain("clearOneTimeLink()");
+		expect(script).toContain("cancelConnectFlow()");
+		expect(script).toContain("Full secret was shown only once");
 		expect(script).toContain("Authorization: Bearer uml_live_xxxxx");
-		expect(script).toContain("Most users do not need API access.");
+		expect(script).toContain("API token usage");
 		expect(script).toContain("Receipts show what UML saved, updated, or ignored");
 		for (const mode of ["Important only", "Manual only", "Topic-based", "Keyword-based", "Schema-based", "Disabled"]) {
 			expect(script).toContain(mode);
 		}
-		for (const section of ["Account", "Support", "Privacy", "Connected tools", "Memory preferences", "Sessions", "Advanced", "Danger Zone"]) {
+		for (const section of ["Account", "Security", "Connections", "Memory Controls", "Data &amp; Privacy", "Support", "Legal / Terms", "Danger Zone"]) {
 			expect(script).toContain(section);
 		}
+	});
+
+	it("renders review mode only when candidates exist", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(html).toContain('data-review-tab');
+		expect(html).toContain('id="candidateSidebarSection"');
+		expect(script).toContain("function candidateItems()");
+		expect(script).toContain("function updateReviewVisibility()");
+		expect(script).toContain('tab.hidden = hidden');
+		expect(script).toContain('if (hidden && S.view === "candidates")');
+		expect(script).toContain('history.replaceState(null, "", "/app#overview")');
+		expect(script).toContain("let redirected = false;");
+		expect(script).toContain("redirected = true;");
+		expect(script).toContain("(updateHash || redirected)");
+		expect(script).toContain('No pending candidates to review.');
+	});
+
+	it("has production legal, privacy, and support modal content", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(html).toContain('id="policyModal"');
+		expect(script).toContain("const POLICY_CONTENT");
+		expect(script).toContain("Early product.");
+		expect(script).toContain("You own your account and the memory you intentionally store in it.");
+		expect(script).toContain("Connected tools are third-party services.");
+		expect(script).toContain("You are responsible for keeping tokens, API keys, and private MCP URLs safe.");
+		expect(script).toContain("You can revoke tokens from Connect.");
+		expect(script).toContain("Reset memory currently deletes saved memory rows");
+		expect(script).toContain("Avoid sensitive, regulated, or high-risk data");
+		expect(script).toContain("Do not use UML for abuse, unsafe automation");
+		expect(script).toContain("function openPolicyModal(");
+		expect(script).toContain("function closePolicyModal()");
+		expect(script).toContain("Support / report issue");
+	});
+
+	it("shows revoked connection row behavior in Connect", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(script).toContain('data-token-status="${active ? "active" : "revoked"}"');
+		expect(script).toContain("Revoked row. This token can no longer save or recall memory.");
+		expect(script).toContain("Active rows can be revoked. Revoked rows remain visible for audit and are not usable.");
+		expect(script).toContain("revokeToken(");
+		expect(script).toContain("disabled");
+	});
+
+	it("uses JS-safe delegated token actions for awkward token labels", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		const awkwardLabels = ["Ziyad's Claude", 'Quote " Tool', "Backslash \\\\ Tool", "<script>alert(1)</script>"];
+		expect(awkwardLabels).toContain("Ziyad's Claude");
+		expect(script).toContain('data-token-action="rotate"');
+		expect(script).toContain('data-token-label="${esc(t.label || "")}"');
+		expect(script).toContain('button.dataset.tokenLabel || ""');
+		expect(script).toContain('data-token-action="revoke"');
+		expect(script).toContain('event.target.closest("[data-token-action]")');
+		expect(script).not.toContain("onclick=\"rotateConnection('");
+		expect(script).not.toContain("onclick=\"revokeToken('");
 	});
 
 	it("includes a settings danger zone with exact confirmation gating", () => {

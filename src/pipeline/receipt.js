@@ -27,6 +27,8 @@ const REASON_PHRASE = {
 	suppressed_blocked: "suppressed",
 	manual_candidate_disabled: "manual candidate disabled",
 	manual_collect_kept_inside_page: "kept inside page",
+	node_without_detail: "node without durable detail",
+	durable_signal_no_node: "durable signal without a subject",
 	unknown_kind: "unrecognized",
 };
 
@@ -157,6 +159,12 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 /** The one-line human string a save tool returns. */
 export function formatReceipt(receipt) {
 	if (!receipt) return "Captured.";
+	if (receipt.outcome === "accepted") {
+		return `Accepted: ${receipt.reason || "memory extraction is processing"}.`;
+	}
+	if (receipt.outcome === "accumulating") {
+		return `Accepted: ${receipt.reason || "learning trigger is accumulating more context"}.`;
+	}
 	const s = receipt.saved ?? {};
 	const parts = [];
 	if (s.pages) parts.push(plural(s.pages, "page"));

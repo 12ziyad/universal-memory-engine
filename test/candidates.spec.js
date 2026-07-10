@@ -84,12 +84,42 @@ describe("candidate doctrine", () => {
 		expect((await table("slices", userId))[0]).toMatchObject({ kind: "preference" });
 	});
 
+	it("favorite node-only proposal becomes a preference slice, not an empty node", async () => {
+		const userId = "cand-favorite-node-only";
+		await ingest(userId, "My favorite UI style is dark mode.", {
+			objects: [
+				{ kind: "node", label: "Dark Mode", category: "preference", confidence: 0.95 },
+			],
+			notes: "",
+		});
+		expect(await pendingCandidates(userId)).toHaveLength(0);
+		const n = await table("nodes", userId);
+		expect(n).toHaveLength(1);
+		expect(n[0]).toMatchObject({ label: "Dark Mode", category: "preference" });
+		const sl = await table("slices", userId);
+		expect(sl).toHaveLength(1);
+		expect(sl[0]).toMatchObject({ node_id: n[0].id, kind: "preference" });
+		expect(sl[0].text).toContain("favorite UI style");
+	});
+
 	it("project workflow rule is durable", async () => {
 		const userId = "cand-rule";
 		await ingest(userId, "For Project Alpha, deploy after tests and dry-run.", candidateOnly("Deploy rule", "medium", 0.45));
 		expect(await pendingCandidates(userId)).toHaveLength(0);
 		expect((await table("nodes", userId))[0].label).toContain("Project Alpha");
 		expect((await table("slices", userId))[0]).toMatchObject({ kind: "decision" });
+	});
+
+	it("clear project event falls back to node plus event when the proposal is empty", async () => {
+		const userId = "cand-project-event-fallback";
+		await ingest(userId, "I launched Project Atlas today.", { objects: [], notes: "" });
+		expect(await pendingCandidates(userId)).toHaveLength(0);
+		const n = await table("nodes", userId);
+		expect(n).toHaveLength(1);
+		expect(n[0]).toMatchObject({ label: "Project Atlas", category: "project" });
+		const ev = await table("events", userId);
+		expect(ev).toHaveLength(1);
+		expect(ev[0]).toMatchObject({ action: "launched", node_id: n[0].id });
 	});
 
 	it("skill action is durable skill node plus event", async () => {
@@ -151,9 +181,11 @@ describe("candidate doctrine", () => {
 			notes: "",
 		};
 		await save(userId, "I started learning Flutter.", llmResponse);
-		await save(userId, "I started learning Flutter.", llmResponse);
+		await save(userId, "I started learning Flutter recently.", llmResponse);
 		expect(await table("nodes", userId)).toHaveLength(1);
-		expect(await table("events", userId)).toHaveLength(1);
+		const events = await table("events", userId);
+		expect(events).toHaveLength(1);
+		expect(events[0].reinforcement_count).toBeGreaterThan(0);
 		expect(await pendingCandidates(userId)).toHaveLength(0);
 	});
 });
