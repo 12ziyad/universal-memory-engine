@@ -356,8 +356,8 @@ const routes = {
 	},
 
 	"POST /v1/save": async (request, env, ctx) => {
-		// Manual Path A for the UI test buttons (and any direct caller). Mirrors the
-		// MCP save tools through the SAME engine. `_test` injects canned LLM/digest
+		// Manual Path A compatibility lane for the UI test buttons (and direct API
+		// callers). MCP saves use pipeline/manual_mcp.js. `_test` injects canned LLM/digest
 		// output for deterministic tests; production never sends it.
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireMemoryUser(request, env, body.userId, {

@@ -12,6 +12,8 @@ import { upsertNodeVector } from "../lib/vectorize.js";
 
 export async function writeApproved(env, config, userId, plan = {}) {
 	const stmts = [];
+	const commitEffects = [];
+	const fallbackEffects = [];
 	const newNodes = plan.newNodes ?? [];
 	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
 	const nodeTouches = plan.nodeTouches ?? [];
@@ -24,12 +26,64 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	const eventTouches = plan.eventTouches ?? [];
 	const newEdges = plan.newEdges ?? [];
 	const edgeTouches = plan.edgeTouches ?? [];
+	const edgeSupersede = plan.edgeSupersede ?? [];
 	const newCandidates = plan.newCandidates ?? [];
 	const candidateBumps = plan.candidateBumps ?? [];
 	const candidateResolutions = plan.candidateResolutions ?? [];
 	const newPages = plan.newPages ?? [];
 	const pageUpdates = plan.pageUpdates ?? [];
+	const pageClaims = plan.pageClaims ?? [];
 	const nodeSummaryUpdates = plan.nodeSummaryUpdates ?? [];
+
+	function trackNext(effect) {
+		commitEffects.push({ statementIndex: stmts.length, ...effect });
+	}
+
+	function queueManualFactClaim(item, objectKind, ownerNodeId, relatedNodeId = null) {
+		if (!item?.manual_fact_key) return false;
+		const now = item.created_at ?? Date.now();
+		stmts.push(
+			env.DB.prepare(
+				`INSERT INTO manual_fact_identities
+					(user_id, fact_key, object_kind, object_id, owner_node_id, related_node_id, created_at, updated_at)
+				 SELECT ?, ?, ?, ?, ?, ?, ?, ?
+				 WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)
+				   AND (? IS NULL OR EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?))
+				 ON CONFLICT(user_id, fact_key) DO UPDATE SET
+					object_id = CASE WHEN
+						(manual_fact_identities.object_kind = 'slice' AND EXISTS (
+							SELECT 1 FROM slices WHERE id = manual_fact_identities.object_id AND user_id = manual_fact_identities.user_id AND deleted_at IS NULL
+						)) OR
+						(manual_fact_identities.object_kind = 'event' AND EXISTS (
+							SELECT 1 FROM events WHERE id = manual_fact_identities.object_id AND user_id = manual_fact_identities.user_id AND deleted_at IS NULL
+						)) OR
+						(manual_fact_identities.object_kind = 'edge' AND EXISTS (
+							SELECT 1 FROM edges WHERE id = manual_fact_identities.object_id AND user_id = manual_fact_identities.user_id AND deleted_at IS NULL
+						))
+					THEN manual_fact_identities.object_id ELSE excluded.object_id END,
+					owner_node_id = CASE WHEN manual_fact_identities.object_id = excluded.object_id
+						THEN manual_fact_identities.owner_node_id ELSE excluded.owner_node_id END,
+					related_node_id = CASE WHEN manual_fact_identities.object_id = excluded.object_id
+						THEN manual_fact_identities.related_node_id ELSE excluded.related_node_id END,
+					updated_at = excluded.updated_at`,
+			).bind(
+				userId,
+				item.manual_fact_key,
+				objectKind,
+				item.id,
+				ownerNodeId,
+				relatedNodeId,
+				now,
+				now,
+				ownerNodeId,
+				userId,
+				relatedNodeId,
+				relatedNodeId,
+				userId,
+			),
+		);
+		return true;
+	}
 
 	// Claim canonical manual identities first. Concurrent batches serialize on the
 	// primary key; the winner's node id is never overwritten by a losing batch.
@@ -72,6 +126,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			n.cluster ?? null,
 		];
 		if (guarded) values.push(userId, n.identity_key, n.id);
+		if (guarded) trackNext({ kind: "nodes", id: n.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO nodes
@@ -147,29 +202,82 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		);
 	}
 
+	// Manual fact claims must run after node creation and before any supersede or
+	// fact insert. A losing concurrent save can then reinforce the winner without
+	// clearing the winner's current single-valued slice.
+	const manualFactGuards = new Map();
+	for (const slice of newSlices) {
+		manualFactGuards.set(slice.id, queueManualFactClaim(slice, "slice", slice.node_id));
+	}
+	for (const event of newEvents) {
+		manualFactGuards.set(event.id, queueManualFactClaim(event, "event", event.node_id));
+	}
+	for (const edge of newEdges) {
+		manualFactGuards.set(edge.id, queueManualFactClaim(edge, "edge", edge.from_node, edge.to_node));
+	}
+
 	// Supersede older single-valued slices BEFORE inserting the new current one.
 	for (const s of sliceSupersede) {
+		const guarded = Boolean(s.replacement_id);
 		stmts.push(
 			env.DB.prepare(
-				"UPDATE slices SET is_current = 0 WHERE user_id = ? AND node_id = ? AND kind = ? AND is_current = 1",
-			).bind(userId, s.node_id, s.kind),
+				`UPDATE slices SET is_current = 0
+				 WHERE user_id = ? AND node_id = ? AND kind = ? AND is_current = 1
+				   AND (? IS NULL OR id = ?)
+				   AND (? IS NULL OR EXISTS (
+					 SELECT 1 FROM manual_fact_identities
+					 WHERE user_id = ? AND object_kind = 'slice' AND object_id = ?
+				   ))`,
+			).bind(
+				userId,
+				s.node_id,
+				s.kind,
+				s.id ?? null,
+				s.id ?? null,
+				guarded ? s.replacement_id : null,
+				userId,
+				s.replacement_id ?? null,
+			),
 		);
 	}
 
 	// New slices.
 	for (const s of newSlices) {
-		const guarded = identityClaims.length > 0;
+		const factGuarded = manualFactGuards.get(s.id) === true;
+		const guarded = factGuarded || identityClaims.length > 0;
 		const values = [s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current, s.created_at, s.created_at];
-		if (guarded) values.push(s.node_id, userId);
+		if (factGuarded) values.push(userId, s.manual_fact_key, "slice", s.id);
+		else if (guarded) values.push(s.node_id, userId);
+		if (guarded) trackNext({ kind: "slices", id: s.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO slices
 					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at)
-				 ${guarded
+				 ${factGuarded
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+					   WHERE EXISTS (
+						 SELECT 1 FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
+					   )`
+					: guarded
 					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
 					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
+		if (factGuarded) {
+			fallbackEffects.push({ statementIndex: stmts.length, kind: "slice", plannedId: s.id });
+			stmts.push(
+				env.DB.prepare(
+					`UPDATE slices
+					 SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ?
+					 WHERE id = (
+						 SELECT object_id FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'slice'
+					 ) AND user_id = ? AND id != ?
+					 RETURNING id, node_id, kind`,
+				).bind(Date.now(), userId, s.manual_fact_key, userId, s.id),
+			);
+		}
 	}
 
 	for (const s of sliceTouches) {
@@ -182,21 +290,44 @@ export async function writeApproved(env, config, userId, plan = {}) {
 
 	// New events.
 	for (const e of newEvents) {
-		const guarded = identityClaims.length > 0;
+		const factGuarded = manualFactGuards.get(e.id) === true;
+		const guarded = factGuarded || identityClaims.length > 0;
 		const values = [
 			e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
 			e.created_at, e.confidence ?? null,
 		];
-		if (guarded) values.push(e.node_id, userId);
+		if (factGuarded) values.push(userId, e.manual_fact_key, "event", e.id);
+		else if (guarded) values.push(e.node_id, userId);
+		if (guarded) trackNext({ kind: "events", id: e.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO events
 					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence)
-				 ${guarded
+				 ${factGuarded
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					   WHERE EXISTS (
+						 SELECT 1 FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
+					   )`
+					: guarded
 					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
 					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
+		if (factGuarded) {
+			fallbackEffects.push({ statementIndex: stmts.length, kind: "event", plannedId: e.id });
+			stmts.push(
+				env.DB.prepare(
+					`UPDATE events
+					 SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ?
+					 WHERE id = (
+						 SELECT object_id FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'event'
+					 ) AND user_id = ? AND id != ?
+					 RETURNING id, node_id, action`,
+				).bind(Date.now(), userId, e.manual_fact_key, userId, e.id),
+			);
+		}
 	}
 
 	for (const e of eventTouches) {
@@ -207,25 +338,70 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		);
 	}
 
+	// Relationship corrections retire the exact old edge while preserving its row
+	// as history. Release the manual fact claim so a future correction can safely
+	// reactivate the same canonical relationship with a new active edge.
+	for (const edge of edgeSupersede) {
+		if (!edge?.id) continue;
+		trackNext({ kind: "edgeSuperseded", id: edge.id });
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE edges SET deleted_at = ?, last_seen_at = ?
+				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+			).bind(Date.now(), Date.now(), edge.id, userId),
+		);
+		stmts.push(
+			env.DB.prepare(
+				"DELETE FROM manual_fact_identities WHERE user_id = ? AND object_kind = 'edge' AND object_id = ?",
+			).bind(userId, edge.id),
+		);
+	}
+
 	// New edges.
 	for (const ed of newEdges) {
-		const guarded = identityClaims.length > 0;
+		const factGuarded = manualFactGuards.get(ed.id) === true;
+		const guarded = factGuarded || identityClaims.length > 0;
 		const values = [
 			ed.id, ed.user_id, ed.from_node, ed.to_node, ed.type, ed.created_at, ed.created_at,
 			ed.weight ?? 1, ed.confidence ?? null, ed.evidence_count ?? 1,
 		];
-		if (guarded) values.push(ed.from_node, userId, ed.to_node, userId);
+		if (factGuarded) values.push(userId, ed.manual_fact_key, "edge", ed.id);
+		else if (guarded) values.push(ed.from_node, userId, ed.to_node, userId);
+		if (guarded) trackNext({ kind: "edges", id: ed.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO edges
 					(id, user_id, from_node, to_node, type, created_at, last_seen_at, weight, confidence, evidence_count)
-				 ${guarded
+				 ${factGuarded
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					   WHERE EXISTS (
+						 SELECT 1 FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
+					   )`
+					: guarded
 					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)
 						 AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)`
 					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
+		if (factGuarded) {
+			fallbackEffects.push({ statementIndex: stmts.length, kind: "edge", plannedId: ed.id });
+			stmts.push(
+				env.DB.prepare(
+					`UPDATE edges
+					 SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1,
+						 weight = COALESCE(weight, 1) + 0.25,
+						 evidence_count = COALESCE(evidence_count, 0) + 1,
+						 last_seen_at = ?
+					 WHERE id = (
+						 SELECT object_id FROM manual_fact_identities
+						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'edge'
+					 ) AND user_id = ? AND id != ?
+					 RETURNING id, from_node, to_node, type`,
+				).bind(Date.now(), userId, ed.manual_fact_key, userId, ed.id),
+			);
+		}
 	}
 
 	for (const ed of edgeTouches) {
@@ -310,6 +486,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	// transaction as the graph write, preventing stale review rows on retries.
 	for (const resolution of candidateResolutions) {
 		if (!resolution?.id) continue;
+		trackNext({ kind: "candidates", id: resolution.id });
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE candidates
@@ -334,10 +511,62 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		);
 	}
 
-	// Optional MCP-manual page writes. These mirror the existing manual_collect
-	// INSERT/UPDATE statements, but participate in this graph transaction.
+	// Claim new MCP-manual page identities before inserting pages. Concurrent
+	// callers keep the first page id for a topic/title and never overwrite it.
+	for (const claim of pageClaims) {
+		if (!claim?.identity_key || !claim?.page_id) continue;
+		const now = claim.created_at ?? Date.now();
+		stmts.push(
+			env.DB.prepare(
+				`INSERT INTO manual_page_identities
+					(user_id, canonical_key, page_id, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)
+				 ON CONFLICT(user_id, canonical_key) DO UPDATE SET updated_at = excluded.updated_at`,
+			).bind(userId, claim.identity_key, claim.page_id, now, now),
+		);
+	}
+
+	// Optional MCP-manual page writes participate in this graph transaction.
 	for (const page of newPages) {
 		const now = page.created_at ?? Date.now();
+		const guarded = Boolean(page.identity_key);
+		const values = [
+			page.id,
+			userId,
+			page.node_id ?? null,
+			page.node_kind ?? "memory_page",
+			page.source_mode ?? "manual_collect",
+			page.title,
+			page.canonical_title,
+			page.topic_filter ?? null,
+			page.short_summary ?? null,
+			page.full_markdown ?? null,
+			page.sections_json ?? null,
+			page.key_points_json ?? null,
+			page.decisions_json ?? null,
+			page.next_steps_json ?? null,
+			page.related_concepts_json ?? null,
+			page.evidence_json ?? null,
+			page.source_thread_id ?? null,
+			page.source_conversation_id ?? null,
+			page.source_packet_id ?? null,
+			page.input_hash ?? null,
+			page.idempotency_key ?? null,
+			page.extraction_run_id ?? null,
+			page.receipt_id ?? null,
+			page.manual_revision ?? 0,
+			now,
+			page.updated_at ?? now,
+			page.last_seen_at ?? now,
+			page.heat_score ?? 1,
+			page.confidence ?? null,
+			page.health_state ?? "active",
+			page.importance_class ?? "ordinary",
+			page.cluster ?? null,
+			page.role_type ?? "container",
+		];
+		if (guarded) values.push(userId, page.identity_key, page.id);
+		trackNext({ kind: "pages", id: page.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO memory_pages
@@ -345,44 +574,17 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 short_summary, full_markdown, sections_json, key_points_json, decisions_json,
 					 next_steps_json, related_concepts_json, evidence_json, source_thread_id,
 					 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
-					 receipt_id,
+					 receipt_id, manual_revision,
 					 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
 					 cluster, role_type)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			).bind(
-				page.id,
-				userId,
-				page.node_id ?? null,
-				page.node_kind ?? "memory_page",
-				page.source_mode ?? "manual_collect",
-				page.title,
-				page.canonical_title,
-				page.topic_filter ?? null,
-				page.short_summary ?? null,
-				page.full_markdown ?? null,
-				page.sections_json ?? null,
-				page.key_points_json ?? null,
-				page.decisions_json ?? null,
-				page.next_steps_json ?? null,
-				page.related_concepts_json ?? null,
-				page.evidence_json ?? null,
-				page.source_thread_id ?? null,
-				page.source_conversation_id ?? null,
-				page.source_packet_id ?? null,
-				page.input_hash ?? null,
-				page.idempotency_key ?? null,
-				page.extraction_run_id ?? null,
-				page.receipt_id ?? null,
-				now,
-				page.updated_at ?? now,
-				page.last_seen_at ?? now,
-				page.heat_score ?? 1,
-				page.confidence ?? null,
-				page.health_state ?? "active",
-				page.importance_class ?? "ordinary",
-				page.cluster ?? null,
-				page.role_type ?? "container",
-			),
+				 ${guarded
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					   WHERE EXISTS (
+						 SELECT 1 FROM manual_page_identities
+						 WHERE user_id = ? AND canonical_key = ? AND page_id = ?
+					   )`
+					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+			).bind(...values),
 		);
 	}
 
@@ -390,6 +592,9 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		const page = update?.page;
 		if (!page?.id) continue;
 		const now = update.now ?? Date.now();
+		const expectedRevision = Number(update.expected_revision ?? 0);
+		const expectedUpdatedAt = update.expected_updated_at ?? null;
+		trackNext({ kind: "pageUpdates", id: page.id });
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE memory_pages SET
@@ -398,9 +603,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					related_concepts_json = ?, evidence_json = ?, source_conversation_id = COALESCE(?, source_conversation_id),
 					source_packet_id = ?, input_hash = ?, idempotency_key = ?,
 					extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+					manual_revision = COALESCE(manual_revision, 0) + 1,
 					updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
 					confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
-				 WHERE id = ? AND user_id = ?`,
+					 WHERE id = ? AND user_id = ?
+					   AND COALESCE(manual_revision, 0) = ?
+					   AND (? IS NULL OR updated_at = ?)`,
 			).bind(
 				page.title,
 				page.canonical_title,
@@ -426,6 +634,9 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				page.cluster ?? null,
 				page.id,
 				userId,
+				expectedRevision,
+				expectedUpdatedAt,
+				expectedUpdatedAt,
 			),
 		);
 	}
@@ -447,25 +658,38 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(env.DB.prepare("INSERT INTO __manual_atomic_failure__ (id) VALUES ('fail')"));
 	}
 
-	if (stmts.length > 0) {
-		await env.DB.batch(stmts); // atomic; throws on failure
-	}
+	const batchResults = stmts.length > 0
+		? await env.DB.batch(stmts) // atomic; throws on failure
+		: [];
 
+	// Reconcile from the atomic batch's own statement metadata. No database read
+	// occurs after commit, so a transient post-commit read cannot turn a successful
+	// durable write into a reported `db_write_failed` result.
 	let committed = null;
-	if (identityClaims.length) {
-		const probes = [
-			...newNodes.map((item) => ({ kind: "nodes", id: item.id })),
-			...newSlices.map((item) => ({ kind: "slices", id: item.id })),
-			...newEvents.map((item) => ({ kind: "events", id: item.id })),
-			...newEdges.map((item) => ({ kind: "edges", id: item.id })),
-		];
-		const results = probes.length
-			? await env.DB.batch(probes.map((probe) =>
-				env.DB.prepare(`SELECT id FROM ${probe.kind} WHERE id = ? AND user_id = ?`).bind(probe.id, userId)))
-			: [];
-		committed = { nodes: [], slices: [], events: [], edges: [] };
-		for (let index = 0; index < probes.length; index++) {
-			if ((results[index]?.results ?? []).length) committed[probes[index].kind].push(probes[index].id);
+	if (commitEffects.length || fallbackEffects.length) {
+		committed = {
+			nodes: [],
+			slices: [],
+			events: [],
+			edges: [],
+			candidates: [],
+			pages: [],
+			pageUpdates: [],
+			edgeSuperseded: [],
+			reinforcements: { slices: [], events: [], edges: [] },
+		};
+		for (const effect of commitEffects) {
+			const result = batchResults[effect.statementIndex];
+			const changes = Number(result?.meta?.changes ?? 0);
+			if (changes > 0 && committed[effect.kind]) committed[effect.kind].push(effect.id);
+		}
+		for (const effect of fallbackEffects) {
+			const result = batchResults[effect.statementIndex];
+			const row = (result?.results ?? [])[0];
+			if (!row?.id) continue;
+			const key = `${effect.kind}s`;
+			if (!committed.reinforcements[key]) continue;
+			committed.reinforcements[key].push({ ...row, id: row.id });
 		}
 	}
 

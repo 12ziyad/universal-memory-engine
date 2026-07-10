@@ -164,7 +164,7 @@ export async function storeSourcePacket(env, packet) {
 	const now = Date.now();
 	const id = packet.id ?? newId("src");
 	try {
-		await env.DB.prepare(
+		const row = await env.DB.prepare(
 			`INSERT INTO source_packets
 				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
 				 workspace_id, app_id, agent_id, session_id, source_scope,
@@ -190,7 +190,8 @@ export async function storeSourcePacket(env, packet) {
 				raw_meta_json = excluded.raw_meta_json,
 				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
 				received_at = excluded.received_at,
-				updated_at = excluded.updated_at`,
+				updated_at = excluded.updated_at
+			 RETURNING id, seen_count`,
 		)
 			.bind(
 				id,
@@ -221,11 +222,6 @@ export async function storeSourcePacket(env, packet) {
 				now,
 				now,
 			)
-			.run();
-		const row = await env.DB.prepare(
-			"SELECT id, seen_count FROM source_packets WHERE user_id = ? AND idempotency_key = ?",
-		)
-			.bind(packet.user_id, packet.idempotency_key)
 			.first();
 		return { ...packet, id: row?.id ?? id, seen_count: row?.seen_count ?? 1 };
 	} catch (err) {

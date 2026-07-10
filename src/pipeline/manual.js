@@ -4,8 +4,8 @@
  * (manual:true → keep anything durable, drop only obvious junk). Canonical match
  * still applies, so re-saving something already stored updates it (no duplicates).
  *
- * One implementation, shared by the MCP tools (save_memory / save_conversation)
- * and the authenticated /v1/save route that powers the UI test buttons.
+ * Compatibility implementation for the authenticated /v1/save route that
+ * powers the UI test buttons. MCP saves use the isolated manual_mcp.js lane.
  */
 
 import { getConfig } from "../config.js";

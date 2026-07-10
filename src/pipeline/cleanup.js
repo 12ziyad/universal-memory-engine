@@ -115,9 +115,13 @@ export async function cleanJunkMemories(env, userId, { confirm } = {}) {
 	for (const item of preview.items) {
 		if (item.kind === "node") {
 			await suppressNode(env, userId, item.id, `junk_cleanup:${item.reason}`);
-			await env.DB.prepare("UPDATE nodes SET archived_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
-				.bind(now, now, item.id, userId)
-				.run();
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, item.id),
+				env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
+					.bind(userId, item.id, item.id),
+				env.DB.prepare("UPDATE nodes SET archived_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
+					.bind(now, now, item.id, userId),
+			]);
 			nodeIds.push(item.id);
 			archived++;
 			suppressed++;
@@ -164,6 +168,19 @@ export async function deleteLastExtraction(env, userId) {
 		events: await softDeleteByIds(env, userId, "events", events.map((e) => e.id), now),
 		edges: await softDeleteByIds(env, userId, "edges", edges.map((e) => e.id), now),
 	};
+	const claimDeletes = [];
+	for (const page of pages) {
+		claimDeletes.push(env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, page.id));
+	}
+	for (const node of nodes) {
+		claimDeletes.push(env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, node.id));
+		claimDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
+			.bind(userId, node.id, node.id));
+	}
+	for (const item of [...slices, ...events, ...edges]) {
+		claimDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, item.id));
+	}
+	if (claimDeletes.length) await env.DB.batch(claimDeletes);
 	await deleteNodeVectors(env, getConfig(env), nodes.map((n) => n.id));
 	await env.DB.prepare("UPDATE extraction_runs SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?")
 		.bind("deleted", now, run.id, userId)
@@ -175,15 +192,19 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 	const now = Date.now();
 	if (kind === "page" || kind === "memory_page") {
 		if (suppress) await suppressPage(env, userId, id, "delete_selected");
-		await env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
-			.bind(now, suppress ? now : null, id, userId)
-			.run();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
+			env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
+				.bind(now, suppress ? now : null, id, userId),
+		]);
 		return { deleted: true, kind: "memory_page", id };
 	}
 	if (kind === "node") {
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
+			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
+				.bind(userId, id, id),
 			env.DB.prepare("UPDATE nodes SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?").bind(
 				now,
 				suppress ? now : null,
@@ -214,15 +235,19 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 export async function archiveObject(env, userId, { kind, id }) {
 	const now = Date.now();
 	if (kind === "page" || kind === "memory_page") {
-		await env.DB.prepare("UPDATE memory_pages SET archived_at = ? WHERE id = ? AND user_id = ?")
-			.bind(now, id, userId)
-			.run();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
+			env.DB.prepare("UPDATE memory_pages SET archived_at = ? WHERE id = ? AND user_id = ?").bind(now, id, userId),
+		]);
 		return { archived: true, kind: "memory_page", id };
 	}
 	if (kind === "node") {
-		await env.DB.prepare("UPDATE nodes SET archived_at = ? WHERE id = ? AND user_id = ?")
-			.bind(now, id, userId)
-			.run();
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
+			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
+				.bind(userId, id, id),
+			env.DB.prepare("UPDATE nodes SET archived_at = ? WHERE id = ? AND user_id = ?").bind(now, id, userId),
+		]);
 		return { archived: true, kind: "node", id };
 	}
 	if (kind === "candidate") {
@@ -261,12 +286,14 @@ export async function deleteAllMemories(env, userId, confirm) {
 		"manual_node_identities",
 		"checkpoints",
 	];
+	const internalManualTables = ["manual_fact_identities", "manual_page_identities"];
 	const counts = {};
 	for (const table of tables) {
 		const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`).bind(userId).first();
 		counts[table] = row?.count ?? 0;
 	}
-	await env.DB.batch(tables.map((table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)));
+	await env.DB.batch([...tables, ...internalManualTables]
+		.map((table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)));
 	await deleteNodeVectors(env, getConfig(env), (nodes ?? []).map((n) => n.id));
 	let durableObjectReset = false;
 	try {

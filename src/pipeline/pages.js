@@ -108,6 +108,24 @@ function uniq(items) {
 	return [...new Set((items ?? []).map((x) => String(x).trim()).filter(Boolean))];
 }
 
+function lineSupersededByCorrection(line, corrections = []) {
+	const normalized = normalizeLabel(line);
+	return corrections.some((correction) => {
+		const subject = normalizeLabel(correction?.subject?.label);
+		const oldTarget = normalizeLabel(correction?.old_target?.label);
+		if (!subject || !oldTarget) return false;
+		const relationshipPredicate = /\b(?:uses?|using|depends on|built with|powered by|technology|dependency)\b/.test(normalized);
+		return normalized.includes(oldTarget) && (normalized.includes(subject) || relationshipPredicate);
+	});
+}
+
+function correctedCurrentLines(rawLines, corrections = []) {
+	if (!corrections.length) return rawLines;
+	const correctionSources = new Set(corrections.map((item) => normalizeLabel(item.text)).filter(Boolean));
+	const kept = rawLines.filter((line) => !correctionSources.has(normalizeLabel(line)) && !lineSupersededByCorrection(line, corrections));
+	return uniq([...kept, ...corrections.map((item) => item.current_text).filter(Boolean)]);
+}
+
 function safeJsonObject(value) {
 	try {
 		const parsed = JSON.parse(value || "{}");
@@ -228,18 +246,32 @@ function markdownFor({ title, overview, keyPoints, decisions, technical, nextSte
 	return parts.join("\n");
 }
 
-export function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, receiptId = null, sourcePacket }) {
-	const lines = String(digest ?? "")
+export function buildPageDraft({
+	digest,
+	messages,
+	intent,
+	conversationId,
+	extractionRunId,
+	receiptId = null,
+	fallbackReceiptToRun = true,
+	preferredTitle = null,
+	corrections = [],
+	sourcePacket,
+}) {
+	const sourceLines = String(digest ?? "")
 		.split(/\n+/)
 		.map((line) => line.trim())
 		.filter(Boolean);
+	const lines = correctedCurrentLines(sourceLines, corrections);
 	const text = lines.join("\n");
-	const title = generateTitle(text, { topic: intent.topic });
+	const title = generateTitle(text, { topic: intent.topic, preferred: preferredTitle });
 	const { decisions, nextSteps, technical } = classifyLines(lines);
+	decisions.push(...corrections.map((item) => item.history_text).filter(Boolean));
 	const keyPoints = uniq(lines).slice(0, 30);
 	const overview = keyPoints.slice(0, 3).join(" ");
 	const related = relatedConcepts(lines, title, intent.topic);
-	const evidence = buildEvidence(lines, messages, receiptId ?? extractionRunId, sourcePacket);
+	const evidenceReceiptId = receiptId ?? (fallbackReceiptToRun ? extractionRunId : null);
+	const evidence = buildEvidence(sourceLines, messages, evidenceReceiptId, sourcePacket);
 	const sections = {
 		overview,
 		keyPoints,
@@ -388,16 +420,29 @@ function pageArray(page, column, sectionKey) {
 	return safeJsonArray(sections[sectionKey]);
 }
 
-export function mergePageDraft(existing, draft, { preferDraftTitle = false } = {}) {
-	const keyPoints = uniq([...pageArray(existing, "key_points_json", "keyPoints"), ...(draft.keyPoints ?? [])]).slice(0, 30);
-	const decisions = uniq([...pageArray(existing, "decisions_json", "decisions"), ...(draft.decisions ?? [])]).slice(0, 20);
-	const nextSteps = uniq([...pageArray(existing, "next_steps_json", "nextSteps"), ...(draft.nextSteps ?? [])]).slice(0, 20);
+export function mergePageDraft(existing, draft, { preferDraftTitle = false, corrections = [] } = {}) {
+	const keepCurrent = (line) => !lineSupersededByCorrection(line, corrections);
+	const keyPoints = uniq([
+		...pageArray(existing, "key_points_json", "keyPoints").filter(keepCurrent),
+		...(draft.keyPoints ?? []),
+	]).slice(0, 30);
+	const decisions = uniq([
+		...pageArray(existing, "decisions_json", "decisions").filter(keepCurrent),
+		...(draft.decisions ?? []),
+	]).slice(0, 20);
+	const nextSteps = uniq([
+		...pageArray(existing, "next_steps_json", "nextSteps").filter(keepCurrent),
+		...(draft.nextSteps ?? []),
+	]).slice(0, 20);
 	const existingSections = safeJsonObject(existing?.sections_json);
 	const technical = uniq([
-		...safeJsonArray(existingSections.technicalDetails),
+		...safeJsonArray(existingSections.technicalDetails).filter(keepCurrent),
 		...classifyLines(draft.keyPoints ?? []).technical,
 	]).slice(0, 20);
-	const related = uniq([...safeJsonArray(existing?.related_concepts_json), ...(draft.related ?? [])]).slice(0, 16);
+	const oldTargets = new Set(corrections.map((item) => normalizeLabel(item?.old_target?.label)).filter(Boolean));
+	const related = uniq([...safeJsonArray(existing?.related_concepts_json), ...(draft.related ?? [])])
+		.filter((item) => !oldTargets.has(normalizeLabel(item)))
+		.slice(0, 16);
 	const evidence = dedupeEvidence([...safeJsonArray(existing?.evidence_json), ...(draft.evidence ?? [])], 12);
 	const title = preferDraftTitle ? (draft.title || existing.title) : (existing.title || draft.title);
 	const overview = keyPoints.slice(0, 3).join(" ") || draft.short_summary || existing.short_summary || "Collected memory page.";

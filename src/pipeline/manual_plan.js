@@ -87,6 +87,7 @@ function planBase() {
 		eventTouches: [],
 		newEdges: [],
 		edgeTouches: [],
+		edgeSupersede: [],
 		newCandidates: [],
 		candidateBumps: [],
 		candidateResolutions: [],
@@ -98,6 +99,7 @@ function planBase() {
 		identityDecisions: [],
 		conflicts: [],
 		resolvedCandidates: [],
+		correctionActions: [],
 	};
 }
 
@@ -126,6 +128,10 @@ function textSimilarity(left, right) {
 	let shared = 0;
 	for (const word of a) if (b.has(word)) shared++;
 	return shared / (a.size + b.size - shared);
+}
+
+function manualFactKey(kind, ...parts) {
+	return JSON.stringify([kind, ...parts.map((part) => canonicalIdentity(part))]);
 }
 
 function sameSlice(left, right) {
@@ -160,6 +166,13 @@ function aliasesAfterObservation(node, observedLabels) {
 	return aliases.slice(0, 24);
 }
 
+function candidateIdentityMatchesNode(candidate, node, observedLabels = []) {
+	const candidateNames = [candidate?.label_guess, candidate?.label, candidate?.canonical_key].filter(Boolean);
+	const nodeNames = [...manualIdentityNames(node), ...observedLabels].filter(Boolean);
+	return candidateNames.some((candidateName) =>
+		nodeNames.some((nodeName) => manualIdentitySimilarity(candidateName, nodeName) >= 0.92));
+}
+
 function deterministicSummary(node, slices, events, stateOverride = null) {
 	const currentSlices = [...(slices ?? [])]
 		.filter((slice) => Number(slice.is_current ?? 1) === 1)
@@ -190,7 +203,10 @@ function runLists(plan) {
 		createdSlices: plan.newSlices.map((slice) => ({ id: slice.id, node_id: slice.node_id, kind: slice.kind })),
 		createdEvents: plan.newEvents.map((event) => ({ id: event.id, node_id: event.node_id, action: event.action })),
 		createdEdges: plan.newEdges.map((edge) => ({ id: edge.id, from_node: edge.from_node, to_node: edge.to_node, type: edge.type })),
-		updatedObjects: plan.nodeTouches.map((touch) => ({ kind: "node", id: touch.id ?? touch })),
+		updatedObjects: [
+			...plan.nodeTouches.map((touch) => ({ kind: "node", id: touch.id ?? touch })),
+			...plan.edgeSupersede.map((edge) => ({ kind: "edge", id: edge.id, status: "superseded" })),
+		],
 		reinforcedObjects: [
 			...plan.sliceTouches.map((item) => ({ kind: "slice", id: item.id })),
 			...plan.eventTouches.map((item) => ({ kind: "event", id: item.id })),
@@ -308,6 +324,26 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 		return virtual;
 	}
 
+	function resolveExistingOnly(identity) {
+		const decision = resolveManualIdentity(identity, allNodes);
+		plan.identityDecisions.push({
+			label: identity?.label,
+			decision: decision.decision === "new" ? "historical_not_found" : decision.decision,
+			node_id: decision.node?.id ?? null,
+			matched_by: decision.matched_name ?? null,
+			score: decision.score ?? null,
+		});
+		if (decision.decision === "ambiguous") {
+			plan.conflicts.push({ label: decision.label, reason: decision.reason, matches: decision.matches ?? [] });
+			return null;
+		}
+		if (decision.decision !== "existing") {
+			plan.rejected.push({ kind: "correction_old_target", label: identity?.label, reason: "historical_identity_not_found" });
+			return null;
+		}
+		return { node: decision.node, existed: true };
+	}
+
 	function addSlice(virtual, fact) {
 		const memory = fact.memory;
 		const existingSlices = [
@@ -321,18 +357,22 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			}
 			return;
 		}
+		const id = newId("slice");
 		const supersedes = fact.supersedes || CORRECTION_RE.test(input.submittedContent ?? "") || SINGLE_VALUE_SLICES.has(memory.slice_kind);
 		if (supersedes) {
 			for (const planned of plan.newSlices) {
 				if (planned.node_id === virtual.node.id && planned.kind === memory.slice_kind) planned.is_current = 0;
 			}
-			if ((state.slices ?? []).some((slice) =>
-				slice.node_id === virtual.node.id && slice.kind === memory.slice_kind && Number(slice.is_current ?? 1) === 1)) {
-				uniquePush(plan.sliceSupersede, { node_id: virtual.node.id, kind: memory.slice_kind }, (item) => `${item.node_id}:${item.kind}`);
-			}
+			// Always queue the supersede. A concurrent transaction may create a current
+			// value after this snapshot. The write is guarded by this replacement's fact
+			// claim so an identical losing save cannot clear the winner.
+			const prior = plan.sliceSupersede.find((item) =>
+				item.node_id === virtual.node.id && item.kind === memory.slice_kind);
+			if (prior) prior.replacement_id = id;
+			else plan.sliceSupersede.push({ node_id: virtual.node.id, kind: memory.slice_kind, replacement_id: id });
 		}
 		plan.newSlices.push({
-			id: newId("slice"),
+			id,
 			user_id: userId,
 			node_id: virtual.node.id,
 			text: memory.text,
@@ -340,6 +380,7 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			is_current: 1,
 			created_at: now,
 			manual_order: plan.newSlices.length,
+			manual_fact_key: manualFactKey("slice", virtual.node.id, memory.slice_kind, memory.text),
 		});
 	}
 
@@ -355,8 +396,9 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 				uniquePush(plan.eventTouches, { id: duplicate.id, node_id: virtual.node.id, action: duplicate.action }, (item) => item.id);
 			}
 		} else {
+			const id = newId("event");
 			plan.newEvents.push({
-				id: newId("event"),
+				id,
 				user_id: userId,
 				node_id: virtual.node.id,
 				action: memory.action,
@@ -366,6 +408,12 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 				created_at: now,
 				confidence: fact.confidence ?? null,
 				manual_order: plan.newEvents.length,
+				manual_fact_key: manualFactKey(
+					"event",
+					virtual.node.id,
+					memory.action,
+					ONE_OFF_EVENTS.has(memory.action) ? "one_off" : memory.text,
+				),
 			});
 		}
 		const nextState = ACTION_TO_STATE[memory.action];
@@ -381,11 +429,160 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 		}
 	}
 
+	function addRelationship(from, to, relationship) {
+		const duplicate = (state.edges ?? []).find((edge) =>
+			edge.from_node === from.node.id && edge.to_node === to.node.id && edge.type === relationship.type);
+		if (duplicate) {
+			uniquePush(plan.edgeTouches, {
+				id: duplicate.id,
+				from_node: duplicate.from_node,
+				to_node: duplicate.to_node,
+				type: duplicate.type,
+			}, (item) => item.id);
+			return duplicate;
+		}
+		const planned = plan.newEdges.find((edge) =>
+			edge.from_node === from.node.id && edge.to_node === to.node.id && edge.type === relationship.type);
+		if (planned) return planned;
+		const edge = {
+			id: newId("edge"),
+			user_id: userId,
+			from_node: from.node.id,
+			to_node: to.node.id,
+			type: relationship.type,
+			created_at: now,
+			confidence: relationship.confidence ?? null,
+			evidence_count: 1,
+			manual_fact_key: manualFactKey("edge", from.node.id, to.node.id, relationship.type),
+		};
+		plan.newEdges.push(edge);
+		return edge;
+	}
+
+	function correctionCurrentSlice(subject, oldTarget, correction) {
+		const text = String(correction.current_text ?? "").trim();
+		if (!text) return null;
+		const duplicate = [
+			...(state.slices ?? []).filter((slice) =>
+				slice.node_id === subject.node.id &&
+				Number(slice.is_current ?? 1) === 1 &&
+				sameSlice(slice.text, text)),
+			...plan.newSlices.filter((slice) => slice.node_id === subject.node.id && sameSlice(slice.text, text)),
+		][0];
+		let current = duplicate ?? null;
+		if (duplicate && (state.slices ?? []).some((slice) => slice.id === duplicate.id)) {
+			uniquePush(plan.sliceTouches, {
+				id: duplicate.id,
+				node_id: subject.node.id,
+				kind: duplicate.kind,
+			}, (item) => item.id);
+		}
+		if (!current) {
+			current = {
+				id: newId("slice"),
+				user_id: userId,
+				node_id: subject.node.id,
+				text,
+				kind: "technical_detail",
+				is_current: 1,
+				created_at: now,
+				manual_order: plan.newSlices.length,
+				manual_fact_key: manualFactKey("slice", subject.node.id, "technical_detail", text),
+			};
+			plan.newSlices.push(current);
+		}
+
+		if (!oldTarget?.node?.id || !correction.old_target?.label) return current;
+		const subjectKey = canonicalIdentity(subject.node.label);
+		const oldTargetKey = canonicalIdentity(correction.old_target.label);
+		const predicate = correction.type === "depends_on" ? /\b(?:depends? on|powered by)\b/i : /\buses?\b/i;
+		for (const slice of state.slices ?? []) {
+			if (![subject.node.id, oldTarget.node.id].includes(slice.node_id)) continue;
+			if (Number(slice.is_current ?? 1) !== 1 || slice.id === current.id) continue;
+			const sliceKey = canonicalIdentity(slice.text);
+			if (!sliceKey.includes(subjectKey) || !sliceKey.includes(oldTargetKey) || !predicate.test(slice.text)) continue;
+			uniquePush(plan.sliceSupersede, {
+				id: slice.id,
+				node_id: slice.node_id,
+				kind: slice.kind,
+				replacement_id: current.id,
+			}, (item) => item.id ?? `${item.node_id}:${item.kind}`);
+			plan.affectedNodeIds.add(slice.node_id);
+		}
+		return current;
+	}
+
 	for (const fact of integrity?.facts ?? []) {
 		const virtual = resolve(fact.identity, fact.memory?.text);
 		if (!virtual) continue;
 		if (fact.memory.kind === "event") addEvent(virtual, fact);
 		else addSlice(virtual, fact);
+	}
+
+	for (const correction of integrity?.corrections ?? []) {
+		const subject = resolve(correction.subject, correction.current_text ?? correction.text);
+		const oldTarget = correction.old_target ? resolveExistingOnly(correction.old_target) : null;
+		const newTarget = correction.new_target
+			? resolve(correction.new_target, correction.current_text ?? correction.text)
+			: null;
+		if (!subject || (correction.new_target && !newTarget)) continue;
+		if (oldTarget && newTarget && oldTarget.node.id === newTarget.node.id) {
+			plan.rejected.push({ kind: "correction", label: correction.subject.label, reason: "correction_same_target" });
+			continue;
+		}
+
+		let replacementEdge = null;
+		if (newTarget) {
+			replacementEdge = addRelationship(subject, newTarget, {
+				type: correction.type,
+				confidence: correction.confidence,
+			});
+		}
+		const currentSlice = correctionCurrentSlice(subject, oldTarget, correction);
+		let supersededEdge = null;
+		if (oldTarget) {
+			supersededEdge = (state.edges ?? []).find((edge) =>
+				edge.from_node === subject.node.id &&
+				edge.to_node === oldTarget.node.id &&
+				edge.type === correction.type) ?? null;
+			if (supersededEdge && supersededEdge.id !== replacementEdge?.id) {
+				uniquePush(plan.edgeSupersede, {
+					id: supersededEdge.id,
+					from_node: supersededEdge.from_node,
+					to_node: supersededEdge.to_node,
+					type: supersededEdge.type,
+					replacement_edge_id: replacementEdge?.id ?? null,
+					history_text: correction.history_text,
+				}, (item) => item.id);
+			}
+		}
+
+		if (correction.history_text) {
+			addEvent(subject, {
+				confidence: correction.confidence,
+				memory: {
+					kind: "event",
+					action: "changed_plan",
+					text: correction.history_text,
+					importance: "important",
+					happened_at: now,
+				},
+			});
+		}
+		plan.correctionActions.push({
+			subject_node_id: subject.node.id,
+			subject_label: subject.node.label,
+			type: correction.type,
+			old_target_node_id: oldTarget?.node.id ?? null,
+			old_target_label: correction.old_target?.label ?? null,
+			new_target_node_id: newTarget?.node.id ?? null,
+			new_target_label: correction.new_target?.label ?? null,
+			superseded_edge_id: supersededEdge?.id ?? null,
+			replacement_edge_id: replacementEdge?.id ?? null,
+			current_slice_id: currentSlice?.id ?? null,
+			history_text: correction.history_text,
+			current_text: correction.current_text,
+		});
 	}
 
 	for (const relationship of integrity?.relationships ?? []) {
@@ -396,28 +593,7 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			plan.rejected.push({ kind: "edge", label: relationship.from.label, reason: "edge_self_loop" });
 			continue;
 		}
-		const duplicate = (state.edges ?? []).find((edge) =>
-			edge.from_node === from.node.id && edge.to_node === to.node.id && edge.type === relationship.type);
-		if (duplicate) {
-			uniquePush(plan.edgeTouches, {
-				id: duplicate.id,
-				from_node: duplicate.from_node,
-				to_node: duplicate.to_node,
-				type: duplicate.type,
-			}, (item) => item.id);
-		} else if (!plan.newEdges.some((edge) =>
-			edge.from_node === from.node.id && edge.to_node === to.node.id && edge.type === relationship.type)) {
-			plan.newEdges.push({
-				id: newId("edge"),
-				user_id: userId,
-				from_node: from.node.id,
-				to_node: to.node.id,
-				type: relationship.type,
-				created_at: now,
-				confidence: relationship.confidence ?? null,
-				evidence_count: 1,
-			});
-		}
+		addRelationship(from, to, relationship);
 	}
 
 	// Edge endpoints are real durable identities too. A new endpoint without its
@@ -428,8 +604,9 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 		if (hasDetail) continue;
 		const support = supportTextByNode.get(node.id);
 		if (!support) continue;
+		const id = newId("slice");
 		plan.newSlices.push({
-			id: newId("slice"),
+			id,
 			user_id: userId,
 			node_id: node.id,
 			text: support,
@@ -437,6 +614,7 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			is_current: 1,
 			created_at: now,
 			manual_order: plan.newSlices.length,
+			manual_fact_key: manualFactKey("slice", node.id, "technical_detail", support),
 		});
 	}
 
@@ -467,7 +645,11 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 	for (const candidate of state.candidates ?? []) {
 		for (const [nodeId, labels] of observedByNode) {
 			const node = allNodes.find((item) => item.id === nodeId);
-			if (!node || !candidateMatchesManualNode(candidate, node, [...labels])) continue;
+			if (
+				!node ||
+				!candidateMatchesManualNode(candidate, node, [...labels]) ||
+				!candidateIdentityMatchesNode(candidate, node, [...labels])
+			) continue;
 			const existed = !node._manual_new;
 			const resolution = {
 				id: candidate.id,
@@ -487,12 +669,16 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 	for (const nodeId of plan.affectedNodeIds) {
 		const node = allNodes.find((item) => item.id === nodeId);
 		if (!node || (node._manual_new && !plan.newNodes.some((item) => item.id === nodeId))) continue;
+		const supersededSliceIds = new Set(plan.sliceSupersede
+			.filter((item) => item.node_id === nodeId && item.id)
+			.map((item) => item.id));
 		const supersededKinds = new Set(plan.sliceSupersede
-			.filter((item) => item.node_id === nodeId)
+			.filter((item) => item.node_id === nodeId && !item.id)
 			.map((item) => item.kind));
 		const slices = [
 			...(state.slices ?? []).filter((slice) =>
-				slice.node_id === nodeId && Number(slice.is_current ?? 1) === 1 && !supersededKinds.has(slice.kind)),
+				slice.node_id === nodeId && Number(slice.is_current ?? 1) === 1 &&
+				!supersededSliceIds.has(slice.id) && !supersededKinds.has(slice.kind)),
 			...plan.newSlices.filter((slice) => slice.node_id === nodeId && Number(slice.is_current ?? 1) === 1),
 		];
 		const events = [
@@ -512,7 +698,7 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 	plan.hasGraphWrites = Boolean(
 		plan.newNodes.length || plan.nodeTouches.length || plan.nodeStateUpdates.length || plan.nodeAliasUpdates.length ||
 		plan.newSlices.length || plan.sliceTouches.length || plan.sliceSupersede.length ||
-		plan.newEvents.length || plan.eventTouches.length || plan.newEdges.length || plan.edgeTouches.length ||
+		plan.newEvents.length || plan.eventTouches.length || plan.newEdges.length || plan.edgeTouches.length || plan.edgeSupersede.length ||
 		plan.candidateResolutions.length || plan.nodeSummaryUpdates.length,
 	);
 	plan.hasWrites = plan.hasGraphWrites;

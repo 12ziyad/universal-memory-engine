@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	candidateMatchesManualNode,
 	canonicalIdentity,
 	manualIdentitySimilarity,
 	resolveManualIdentity,
@@ -67,6 +68,34 @@ describe("manual identity resolution", () => {
 			decision: "new",
 			canonical_key: "project alpha",
 		});
+	});
+
+	it("does not auto-merge distinct object types that share only a stripped core", () => {
+		const service = node("node-atlas-service", "Atlas Service", [], "service");
+
+		const result = resolveManualIdentity(
+			{ label: "Atlas Database", category: "database" },
+			[service],
+		);
+
+		expect(manualIdentitySimilarity("Atlas Database", "Atlas Service")).toBe(0.84);
+		expect(result).toMatchObject({
+			decision: "ambiguous",
+			reason: "possible_existing_node_match",
+			matches: [{ id: "node-atlas-service" }],
+		});
+	});
+
+	it("does not resolve a candidate from a stale node-id hint without name evidence", () => {
+		const atlas = node("node-atlas", "Atlas", [], "project");
+		const candidate = {
+			label: "Redis",
+			label_guess: "Redis",
+			canonical_key: "redis",
+			possible_existing_node_id: atlas.id,
+		};
+
+		expect(candidateMatchesManualNode(candidate, atlas)).toBe(false);
 	});
 
 	it("keeps C, C#, and C++ as three distinct identities", () => {

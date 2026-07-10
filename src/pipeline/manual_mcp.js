@@ -10,6 +10,7 @@ import { extractManualFacts } from "./manual_extract.js";
 import { applyManualIntegrity } from "./manual_integrity.js";
 import { buildManualPagePlan } from "./manual_page.js";
 import { buildManualGraphPlan, loadManualGraphState } from "./manual_plan.js";
+import { refineManualIdentityTitles } from "./manual_titles.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { filterDigestByTopic, parseCollectIntent } from "./pages.js";
 import {
@@ -34,6 +35,7 @@ const GRAPH_PLAN_FIELDS = [
 	"eventTouches",
 	"newEdges",
 	"edgeTouches",
+	"edgeSupersede",
 	"newCandidates",
 	"candidateBumps",
 	"candidateResolutions",
@@ -49,6 +51,7 @@ function emptySaved() {
 		supersededSlices: 0,
 		events: 0,
 		edges: 0,
+		supersededEdges: 0,
 		candidates: 0,
 		reinforcedSlices: 0,
 		reinforcedEvents: 0,
@@ -109,6 +112,7 @@ function buildManualReceipt({
 		supersededSlices: (committedGraph.sliceSupersede ?? []).length,
 		events: (committedGraph.newEvents ?? []).length,
 		edges: (committedGraph.newEdges ?? []).length,
+		supersededEdges: (committedGraph.edgeSupersede ?? []).length,
 		candidates: 0,
 		reinforcedSlices: (committedGraph.sliceTouches ?? []).length,
 		reinforcedEvents: (committedGraph.eventTouches ?? []).length,
@@ -144,6 +148,7 @@ function buildManualReceipt({
 		skippedReasons: skippedReasons(skipped),
 		identity_decisions: graph.identityDecisions ?? [],
 		identity_conflicts: graph.conflicts ?? [],
+		page_conflicts: pagePlan?.page_conflicts ?? [],
 		actions: {
 			...pageActions,
 			createdNodes: (committedGraph.newNodes ?? []).map((node) => ({ id: node.id, label: node.label, summary: node.summary })),
@@ -153,6 +158,8 @@ function buildManualReceipt({
 			createdSlices: (committedGraph.newSlices ?? []).map((slice) => ({ id: slice.id, node_id: slice.node_id, kind: slice.kind })),
 			createdEvents: (committedGraph.newEvents ?? []).map((event) => ({ id: event.id, node_id: event.node_id, action: event.action })),
 			createdEdges: (committedGraph.newEdges ?? []).map((edge) => ({ id: edge.id, from_node: edge.from_node, to_node: edge.to_node, type: edge.type })),
+			supersededEdges: committedGraph.edgeSupersede ?? [],
+			corrections: forceZero ? [] : (graph.correctionActions ?? []),
 			reinforcedNodes: uniqueNodeTouches(committedGraph).map((nodeId) => ({ id: nodeId })),
 			supersededSlices: committedGraph.sliceSupersede ?? [],
 			reinforcedSlices: committedGraph.sliceTouches ?? [],
@@ -161,6 +168,7 @@ function buildManualReceipt({
 			resolvedCandidates: forceZero ? [] : (graph.resolvedCandidates ?? []),
 			skippedObjects: skipped,
 			identityConflicts: graph.conflicts ?? [],
+			pageConflicts: pagePlan?.page_conflicts ?? [],
 		},
 		created_at: Date.now(),
 	};
@@ -178,10 +186,14 @@ function receiptSummary(receipt, pagePlan = null) {
 			: pagePlan?.action === "reinforced"
 				? `Reinforced one memory page "${pagePlan.page.title}". `
 				: pagePlan?.action === "duplicate"
-					? `Skipped duplicate memory page "${pagePlan.page.title}". `
-					: pagePlan?.action === "suppressed"
-						? `Skipped suppressed memory page "${pagePlan.page.title}". `
-						: "";
+				? `Skipped duplicate memory page "${pagePlan.page.title}". `
+				: pagePlan?.action === "suppressed"
+					? `Skipped suppressed memory page "${pagePlan.page.title}". `
+					: pagePlan?.action === "conflict"
+						? `Memory page write conflict for "${pagePlan.page.title}". `
+						: pagePlan?.action === "ambiguous"
+							? `Memory page identity conflict for "${pagePlan.page.title}". `
+							: "";
 	if (receipt.identity_conflicts?.length) {
 		const conflict = receipt.identity_conflicts[0];
 		const choices = (conflict.matches ?? []).map((match) => match.label).filter(Boolean).join(" or ");
@@ -198,6 +210,7 @@ function receiptSummary(receipt, pagePlan = null) {
 		listPart(saved.slices, "slice"),
 		listPart(saved.events, "event"),
 		listPart(saved.edges, "edge"),
+		listPart(saved.supersededEdges, "superseded edge"),
 		listPart(saved.reinforcedSlices, "reinforced slice"),
 		listPart(saved.reinforcedEvents, "reinforced event"),
 		listPart(saved.reinforcedEdges, "reinforced edge"),
@@ -209,6 +222,11 @@ function receiptSummary(receipt, pagePlan = null) {
 
 function resultFromReceipt(mode, source, sourcePacket, receipt, summary, receiptId = null) {
 	const saved = receipt.saved ?? emptySaved();
+	const receiptPersisted = Boolean(receiptId);
+	receipt.receipt_persisted = receiptPersisted;
+	const finalSummary = receiptPersisted
+		? summary
+		: `${summary} Receipt persistence failed; the structured receipt is returned here but no receipt row was created.`;
 	return {
 		ok: receipt.outcome !== "db_write_failed",
 		command_mode: mode,
@@ -217,9 +235,13 @@ function resultFromReceipt(mode, source, sourcePacket, receipt, summary, receipt
 		status: receipt.outcome,
 		fired: receipt.savedTotal > 0,
 		processing: false,
-		summary,
+		summary: finalSummary,
 		source_packet_id: receipt.source_packet_id ?? sourcePacket?.id ?? null,
-		receipt_id: receiptId ?? receipt.id ?? null,
+		// `receipt_id` is a persistence pointer, not merely the in-memory receipt's
+		// generated correlation id. Never claim a row exists when storage failed.
+		receipt_id: receiptId ?? null,
+		receipt_persisted: receiptPersisted,
+		warnings: receiptPersisted ? [] : ["receipt_persistence_failed"],
 		receipt,
 		counts: {
 			received: receipt.received ?? null,
@@ -232,6 +254,7 @@ function resultFromReceipt(mode, source, sourcePacket, receipt, summary, receipt
 			slices: saved.slices ?? 0,
 			events: saved.events ?? 0,
 			edges: saved.edges ?? 0,
+			supersededEdges: saved.supersededEdges ?? 0,
 			candidates: 0,
 			resolvedCandidates: saved.resolvedCandidates ?? 0,
 			reinforcedSlices: saved.reinforcedSlices ?? 0,
@@ -239,12 +262,13 @@ function resultFromReceipt(mode, source, sourcePacket, receipt, summary, receipt
 			reinforcedEdges: saved.reinforcedEdges ?? 0,
 		},
 		identity_conflicts: receipt.identity_conflicts ?? [],
+		page_conflicts: receipt.page_conflicts ?? [],
 	};
 }
 
 async function storeFinalReceipt(env, userId, source, receipt, summary) {
 	const storedId = await storeReceipt(env, userId, source, receipt, summary);
-	return storedId ?? receipt.id ?? null;
+	return storedId ?? null;
 }
 
 function withoutGraphWrites(plan) {
@@ -265,11 +289,43 @@ function withoutGraphWrites(plan) {
 	return copy;
 }
 
+function duplicateRepairGraphPlan(plan) {
+	const repairNodeIds = new Set([
+		...(plan.newNodes ?? []).map((item) => item.id),
+		...(plan.newSlices ?? []).map((item) => item.node_id),
+		...(plan.newEvents ?? []).map((item) => item.node_id),
+		...(plan.newEdges ?? []).flatMap((item) => [item.from_node, item.to_node]),
+		...(plan.candidateResolutions ?? []).map((item) => item.node_id),
+		...(plan.nodeAliasUpdates ?? []).map((item) => item.id),
+	].filter(Boolean));
+	const copy = {
+		...plan,
+		nodeTouches: (plan.nodeTouches ?? []).filter((item) => repairNodeIds.has(item?.id ?? item)),
+		nodeStateUpdates: (plan.nodeStateUpdates ?? []).filter((item) => repairNodeIds.has(item.id)),
+		nodeSummaryUpdates: (plan.nodeSummaryUpdates ?? []).filter((item) => repairNodeIds.has(item.id)),
+		sliceSupersede: (plan.sliceSupersede ?? []).filter((item) =>
+			!item.replacement_id || (plan.newSlices ?? []).some((slice) => slice.id === item.replacement_id)),
+		sliceTouches: [],
+		eventTouches: [],
+		edgeTouches: [],
+		edgeSupersede: plan.edgeSupersede ?? [],
+	};
+	copy.hasGraphWrites = Boolean(
+		copy.newNodes?.length || copy.nodeTouches.length || copy.nodeStateUpdates.length || copy.nodeAliasUpdates?.length ||
+		copy.newSlices?.length || copy.sliceSupersede.length || copy.newEvents?.length || copy.newEdges?.length || copy.edgeSupersede.length ||
+		copy.candidateResolutions?.length || copy.nodeSummaryUpdates.length,
+	);
+	copy.hasWrites = copy.hasGraphWrites;
+	copy.runLists = runListsForPlan(copy);
+	return copy;
+}
+
 function combinePagePlan(graphPlan, pagePlan) {
 	return {
 		...graphPlan,
 		newPages: pagePlan?.newPages ?? [],
 		pageUpdates: pagePlan?.pageUpdates ?? [],
+		pageClaims: pagePlan?.pageClaims ?? [],
 		hasWrites: Boolean(graphPlan?.hasGraphWrites || pagePlan?.write),
 	};
 }
@@ -280,7 +336,10 @@ function runListsForPlan(plan) {
 		createdSlices: (plan.newSlices ?? []).map((slice) => ({ id: slice.id, node_id: slice.node_id, kind: slice.kind })),
 		createdEvents: (plan.newEvents ?? []).map((event) => ({ id: event.id, node_id: event.node_id, action: event.action })),
 		createdEdges: (plan.newEdges ?? []).map((edge) => ({ id: edge.id, from_node: edge.from_node, to_node: edge.to_node, type: edge.type })),
-		updatedObjects: uniqueNodeTouches(plan).map((id) => ({ kind: "node", id })),
+		updatedObjects: [
+			...uniqueNodeTouches(plan).map((id) => ({ kind: "node", id })),
+			...(plan.edgeSupersede ?? []).map((edge) => ({ kind: "edge", id: edge.id, status: "superseded" })),
+		],
 		reinforcedObjects: [
 			...(plan.sliceTouches ?? []).map((item) => ({ kind: "slice", id: item.id })),
 			...(plan.eventTouches ?? []).map((item) => ({ kind: "event", id: item.id })),
@@ -290,14 +349,25 @@ function runListsForPlan(plan) {
 	};
 }
 
-async function reconcileManualCommit(env, userId, plan, writeResult) {
+function reconcileManualCommit(plan, writeResult) {
 	if (!writeResult?.committed) return plan;
 	const committed = writeResult.committed;
-	const nodeIds = new Set(committed.nodes);
-	const sliceIds = new Set(committed.slices);
-	const eventIds = new Set(committed.events);
-	const edgeIds = new Set(committed.edges);
+	const nodeIds = new Set(committed.nodes ?? []);
+	const sliceIds = new Set(committed.slices ?? []);
+	const eventIds = new Set(committed.events ?? []);
+	const edgeIds = new Set(committed.edges ?? []);
+	const supersededEdgeIds = new Set(committed.edgeSuperseded ?? []);
+	const candidateIds = new Set(committed.candidates ?? []);
 	const missingNodes = (plan.newNodes ?? []).filter((node) => !nodeIds.has(node.id));
+	const fallback = committed.reinforcements ?? {};
+	const mergeTouches = (planned, reinforced) => {
+		const items = [...(planned ?? [])];
+		for (const item of reinforced ?? []) {
+			if (!item?.id || items.some((existing) => existing.id === item.id)) continue;
+			items.push(item);
+		}
+		return items;
+	};
 	const copy = {
 		...plan,
 		newNodes: (plan.newNodes ?? []).filter((node) => nodeIds.has(node.id)),
@@ -306,31 +376,48 @@ async function reconcileManualCommit(env, userId, plan, writeResult) {
 		newEdges: (plan.newEdges ?? []).filter((edge) => edgeIds.has(edge.id)),
 		nodeSummaryUpdates: (plan.nodeSummaryUpdates ?? []).filter((update) =>
 			!missingNodes.some((node) => node.id === update.id)),
-		candidateResolutions: (plan.candidateResolutions ?? []).filter((resolution) =>
-			!missingNodes.some((node) => node.id === resolution.node_id)),
-		resolvedCandidates: (plan.resolvedCandidates ?? []).filter((resolution) =>
-			!missingNodes.some((node) => node.id === resolution.node_id)),
+		sliceSupersede: (plan.sliceSupersede ?? []).filter((item) =>
+			!item.replacement_id || sliceIds.has(item.replacement_id)),
+		sliceTouches: mergeTouches(plan.sliceTouches, fallback.slices),
+		eventTouches: mergeTouches(plan.eventTouches, fallback.events),
+		edgeTouches: mergeTouches(plan.edgeTouches, fallback.edges),
+		edgeSupersede: (plan.edgeSupersede ?? []).filter((edge) => supersededEdgeIds.has(edge.id)),
+		candidateResolutions: (plan.candidateResolutions ?? []).filter((resolution) => candidateIds.has(resolution.id)),
+		resolvedCandidates: (plan.resolvedCandidates ?? []).filter((resolution) => candidateIds.has(resolution.id)),
 		conflicts: [...(plan.conflicts ?? [])],
 	};
+	copy.correctionActions = (plan.correctionActions ?? []).map((action) => {
+		const reinforced = (fallback.edges ?? []).find((edge) =>
+			edge.from_node === action.subject_node_id &&
+			edge.to_node === action.new_target_node_id &&
+			edge.type === action.type);
+		const touched = (plan.edgeTouches ?? []).find((edge) =>
+			edge.id === action.replacement_edge_id || (
+				edge.from_node === action.subject_node_id &&
+				edge.to_node === action.new_target_node_id &&
+				edge.type === action.type
+			));
+		return {
+			...action,
+			superseded_edge_id: action.superseded_edge_id && supersededEdgeIds.has(action.superseded_edge_id)
+				? action.superseded_edge_id
+				: null,
+			replacement_edge_id: action.replacement_edge_id && edgeIds.has(action.replacement_edge_id)
+				? action.replacement_edge_id
+				: reinforced?.id ?? touched?.id ?? null,
+		};
+	});
 	for (const missing of missingNodes) {
-		const winner = await env.DB.prepare(
-			`SELECT n.id, n.label, n.category
-			 FROM manual_node_identities i
-			 LEFT JOIN nodes n ON n.id = i.node_id AND n.user_id = i.user_id
-			 WHERE i.user_id = ? AND i.canonical_key = ?`,
-		)
-			.bind(userId, missing.identity_key)
-			.first();
 		copy.conflicts.push({
 			label: missing.label,
 			reason: "concurrent_identity_claim",
-			matches: winner?.id ? [{ id: winner.id, label: winner.label, category: winner.category, score: 1 }] : [],
+			matches: [],
 		});
 	}
 	copy.hasGraphWrites = Boolean(
 		copy.newNodes.length || copy.nodeTouches?.length || copy.nodeStateUpdates?.length || copy.nodeAliasUpdates?.length ||
 		copy.newSlices.length || copy.sliceTouches?.length || copy.sliceSupersede?.length ||
-		copy.newEvents.length || copy.eventTouches?.length || copy.newEdges.length || copy.edgeTouches?.length ||
+		copy.newEvents.length || copy.eventTouches?.length || copy.newEdges.length || copy.edgeTouches?.length || copy.edgeSupersede.length ||
 		copy.candidateResolutions.length,
 	);
 	copy.hasWrites = copy.hasGraphWrites;
@@ -338,18 +425,75 @@ async function reconcileManualCommit(env, userId, plan, writeResult) {
 	return copy;
 }
 
-function scopedUserText(messages) {
+function reconcilePageCommit(pagePlan, writeResult) {
+	if (!pagePlan?.write || !writeResult?.committed) return pagePlan;
+	const expectedKind = pagePlan.action === "created" ? "pages" : "pageUpdates";
+	if ((writeResult.committed[expectedKind] ?? []).includes(pagePlan.page?.id)) return pagePlan;
+	const reason = pagePlan.action === "created" ? "concurrent_page_claim" : "concurrent_page_update";
+	return {
+		...pagePlan,
+		action: "conflict",
+		write: false,
+		reason,
+		newPages: [],
+		pageUpdates: [],
+		pageClaims: [],
+		skipped: [...(pagePlan.skipped ?? []), {
+			kind: "memory_page",
+			id: pagePlan.page?.id ?? null,
+			label: pagePlan.page?.title ?? null,
+			reason,
+		}],
+	};
+}
+
+async function bestEffortUpdateRun(env, userId, runId, data) {
+	if (!runId) return;
+	try {
+		await updateExtractionRun(env, userId, runId, data);
+	} catch (error) {
+		console.warn("manual extraction-run finalization failed:", error?.message ?? error);
+	}
+}
+
+async function bestEffortLinkReceipt(env, userId, pageId, receiptId) {
+	if (!pageId || !receiptId) return;
+	try {
+		await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ?")
+			.bind(receiptId, pageId, userId)
+			.run();
+	} catch (error) {
+		console.warn("manual page receipt link failed:", error?.message ?? error);
+	}
+}
+
+function scopedUserMessages(messages) {
 	return (messages ?? [])
 		.filter((message) => (message?.role ?? "user") === "user")
 		.map((message) => String(message?.content ?? "").trim())
-		.filter(Boolean)
-		.join("\n");
+		.filter(Boolean);
+}
+
+function pageIdentityHints(integrity) {
+	const identities = [
+		...(integrity?.corrections ?? []).map((item) => item.subject),
+		...(integrity?.relationships ?? []).map((item) => item.from),
+		...(integrity?.facts ?? []).map((item) => item.identity),
+	].filter((identity) => identity?.label);
+	const seen = new Set();
+	return identities.filter((identity) => {
+		const key = String(identity.label).toLocaleLowerCase("en-US");
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 }
 
 function messagesForCollectScope(messages, input) {
 	const all = messages ?? [];
 	if (input.scope === "lastN") {
-		const count = Math.max(1, Number(input.n ?? 20));
+		const requested = Number(input.n ?? 20);
+		const count = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 20;
 		return all.slice(-count);
 	}
 	if (input.scope === "topic" && input.topic) {
@@ -360,30 +504,68 @@ function messagesForCollectScope(messages, input) {
 }
 
 function contentWords(value) {
-	return String(value ?? "").toLocaleLowerCase("en-US").match(/[a-z0-9]+/g) ?? [];
+	return String(value ?? "")
+		.normalize("NFKD")
+		.replace(/\p{M}+/gu, "")
+		.toLocaleLowerCase("en-US")
+		.match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 
-const DIGEST_GENERIC_WORDS = new Set([
-	"about", "also", "building", "changed", "decided", "important", "main", "matter", "matters",
-	"memory", "project", "projects", "purchase", "research", "started", "stopped", "storage", "the", "user", "uses", "using",
+const DIGEST_STOP_WORDS = new Set([
+	"a", "about", "also", "am", "an", "and", "are", "as", "at", "be", "been", "being", "by",
+	"for", "from", "had", "has", "have", "he", "her", "hers", "him", "his", "i", "in", "is", "it",
+	"its", "me", "my", "of", "on", "or", "our", "ours", "s", "she", "that", "the", "their", "theirs",
+	"them", "they", "this", "to", "user", "users", "was", "we", "were", "with", "you", "your", "yours",
 ]);
 
+const DIGEST_TOKEN_EQUIVALENTS = new Map([
+	["began", "start"], ["begin", "start"], ["beginning", "start"], ["started", "start"], ["starting", "start"],
+	["built", "build"], ["building", "build"], ["builds", "build"], ["developed", "build"], ["developing", "build"],
+	["chose", "decide"], ["chosen", "decide"], ["decided", "decide"], ["selected", "decide"],
+	["depends", "depend"], ["depended", "depend"], ["depending", "depend"],
+	["liked", "prefer"], ["likes", "prefer"], ["preferred", "prefer"], ["prefers", "prefer"], ["preferring", "prefer"],
+	["quit", "stop"], ["stopped", "stop"], ["stopping", "stop"],
+	["stored", "store"], ["stores", "store"], ["storing", "store"],
+	["used", "use"], ["uses", "use"], ["using", "use"],
+	["matters", "matter"], ["mattered", "matter"],
+]);
+
+const DIGEST_PREDICATE_WORDS = new Set([
+	"achieve", "build", "change", "complete", "decide", "depend", "diagnose", "finish", "join", "launch",
+	"leave", "matter", "move", "practice", "prefer", "resume", "start", "stop", "store", "use", "work",
+]);
+
+function digestClaimTokens(value) {
+	return [...new Set(contentWords(value)
+		.filter((word) => word.length > 1 && !DIGEST_STOP_WORDS.has(word))
+		.map((word) => DIGEST_TOKEN_EQUIVALENTS.get(word) ?? word))];
+}
+
+function digestLineGroundedInUserMessage(line, userMessage) {
+	const claim = digestClaimTokens(line);
+	const source = new Set(digestClaimTokens(userMessage));
+	if (!claim.length || !source.size) return false;
+	const shared = claim.filter((word) => source.has(word));
+	const predicates = claim.filter((word) => DIGEST_PREDICATE_WORDS.has(word));
+	if (predicates.some((word) => !source.has(word))) return false;
+	// Every material digest token must be present (after conservative inflection
+	// equivalence) in one user message. Partial overlap would allow a model to add
+	// an unsupported value such as "Redis" to a grounded "building Atlas" claim.
+	return shared.length === claim.length;
+}
+
 function groundDigest(digest, messages) {
-	const userText = scopedUserText(messages);
-	const sourceWords = new Set(contentWords(userText));
+	const userMessages = scopedUserMessages(messages);
 	return String(digest ?? "")
 		.split(/\n+/)
 		.map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
 		.filter(Boolean)
 		.filter((line) => !["noise", "utility"].includes(classifyMessage(line)))
-		.filter((line) => {
-			const words = [...new Set(contentWords(line).filter((word) => word.length > 2))];
-			if (!words.length) return false;
-			const shared = words.filter((word) => sourceWords.has(word)).length;
-			const anchors = words.filter((word) => !DIGEST_GENERIC_WORDS.has(word));
-			const anchored = !anchors.length || anchors.some((word) => sourceWords.has(word));
-			return anchored && shared >= Math.min(2, words.length);
-		})
+		// Ground the whole claim in one user turn. Bag-of-words overlap across the
+		// conversation can splice an entity from one user turn onto a predicate or
+		// value supplied by the assistant, which would leak assistant claims into
+		// both the page and graph.
+		.filter((line) => userMessages.some((message) => digestLineGroundedInUserMessage(line, message)))
 		.join("\n");
 }
 
@@ -417,7 +599,7 @@ async function finishNoWrite(env, userId, data) {
 	});
 	const summary = receiptSummary(receipt, data.pagePlan);
 	if (data.runId) {
-		await updateExtractionRun(env, userId, data.runId, {
+		await bestEffortUpdateRun(env, userId, data.runId, {
 			status: receipt.outcome,
 			skippedObjects: receipt.actions.skippedObjects,
 		});
@@ -501,11 +683,15 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		submittedContent: content,
 		recentContext: input.recentContext,
 		nodes: state.nodes,
+		graphState: state,
 		extractionResponse: input.extractionResponse ?? input.overrides?.llmResponse,
 	});
-	const integrity = applyManualIntegrity(proposal, {
+	const integrity = await refineManualIdentityTitles(env, config, applyManualIntegrity(proposal, {
 		submittedContent: content,
 		recentContext: input.recentContext,
+	}), state, {
+		submittedContent: content,
+		titleResponse: input.titleResponse ?? input.overrides?.titleResponse,
 	});
 	let plan = buildManualGraphPlan(userId, integrity, state, { submittedContent: content });
 	if (input.testFailAtomicWrite === true) plan.testFailAtomicWrite = true;
@@ -522,10 +708,11 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 			outcome: "ignored", reason: "no durable facts in the submitted content",
 		});
 	}
+	if (typeof input.testBeforeWrite === "function") await input.testBeforeWrite({ plan });
 
 	try {
 		const writeResult = await writeApproved(env, config, userId, plan);
-		plan = await reconcileManualCommit(env, userId, plan, writeResult);
+		plan = reconcileManualCommit(plan, writeResult);
 	} catch (error) {
 		const failure = buildManualReceipt({
 			id: receiptId, source, sourceMode, sourcePacket, runId, plan, received: 1,
@@ -533,7 +720,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		});
 		failure.error = String(error?.message ?? error);
 		const summary = receiptSummary(failure);
-		await updateExtractionRun(env, userId, runId, { status: "failed", error: failure.error });
+		await bestEffortUpdateRun(env, userId, runId, { status: "failed", error: failure.error });
 		const storedId = await storeFinalReceipt(env, userId, source, failure, summary);
 		return resultFromReceipt(mode, source, sourcePacket, failure, summary, storedId);
 	}
@@ -549,7 +736,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		outcome: plan.conflicts.length ? "wrote_with_identity_conflict" : "wrote",
 	});
 	const summary = receiptSummary(receipt);
-	await updateExtractionRun(env, userId, runId, { status: "wrote", ...plan.runLists });
+	await bestEffortUpdateRun(env, userId, runId, { status: "wrote", ...plan.runLists });
 	const storedId = await storeFinalReceipt(env, userId, source, receipt, summary);
 	return resultFromReceipt(mode, source, sourcePacket, receipt, summary, storedId);
 }
@@ -592,50 +779,107 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const groundedDigest = groundDigest(digestResult.digest, scopedMessages);
 	const digest = filterDigestByTopic(groundedDigest, intent);
 	const keptLines = digest ? digest.split(/\n+/).filter((line) => line.trim()).length : 0;
-	if (!digest) {
-		return finishNoWrite(env, userId, {
-			mode, source, sourceMode, sourcePacket, runId, receiptId, received, digested: 0,
-			outcome: "ignored", reason: "no durable user facts in the submitted conversation",
-		});
-	}
-
-	const pagePlan = await buildManualPagePlan(env, userId, {
-		digest,
-		messages: scopedMessages,
-		intent,
-		received,
-		keptLines,
-		conversationId: input.conversationId,
-		sourcePacket,
-		runId,
-		receiptId,
-	});
-	if (pagePlan.action === "duplicate" || pagePlan.action === "suppressed") {
-		return finishNoWrite(env, userId, {
-			mode, source, sourceMode, sourcePacket, runId, receiptId, pagePlan, received, digested: keptLines,
-			outcome: pagePlan.action === "duplicate" ? "skipped_duplicate" : "suppressed",
-			reason: pagePlan.reason,
-		});
-	}
-
 	const state = await loadManualGraphState(env, userId);
+	const submittedContent = scopedUserMessages(scopedMessages).join("\n");
 	const proposal = await extractManualFacts(env, config, {
-		submittedContent: digest,
+		submittedContent,
 		recentContext: "",
 		nodes: state.nodes,
+		graphState: state,
 		extractionResponse: input.extractionResponse ?? input.overrides?.llmResponse,
 	});
-	const integrity = applyManualIntegrity(proposal, { submittedContent: digest, recentContext: "" });
-	let graphPlan = buildManualGraphPlan(userId, integrity, state, { submittedContent: digest });
+	const integrity = await refineManualIdentityTitles(
+		env,
+		config,
+		applyManualIntegrity(proposal, { submittedContent, recentContext: "" }),
+		state,
+		{
+			submittedContent,
+			titleResponse: input.titleResponse ?? input.overrides?.titleResponse,
+		},
+	);
+	let graphPlan = buildManualGraphPlan(userId, integrity, state, { submittedContent });
+	const identityHints = pageIdentityHints(integrity);
+	let pagePlan = digest
+		? await buildManualPagePlan(env, userId, {
+			digest,
+			messages: scopedMessages,
+			intent,
+			received,
+			keptLines,
+			conversationId: input.conversationId,
+			sourcePacket,
+			runId,
+			receiptId,
+			identityHints,
+			preferredTitle: identityHints[0]?.label ?? null,
+			corrections: integrity.corrections,
+		})
+		: {
+			action: "skipped",
+			page: null,
+			write: false,
+			reason: "no_grounded_conversation_digest",
+			newPages: [],
+			pageUpdates: [],
+			pageClaims: [],
+			skipped: [{ kind: "memory_page", label: null, reason: "no_grounded_conversation_digest" }],
+		};
+	if (graphPlan.conflicts.length && integrity.corrections.length && pagePlan.write) {
+		pagePlan = {
+			...pagePlan,
+			action: "ambiguous",
+			write: false,
+			reason: "graph_identity_conflict",
+			newPages: [],
+			pageUpdates: [],
+			pageClaims: [],
+			page_conflicts: [
+				...(pagePlan.page_conflicts ?? []),
+				{ kind: "memory_page", label: pagePlan.page?.title ?? null, reason: "graph_identity_conflict" },
+			],
+		};
+	}
+	if (pagePlan.action === "duplicate") graphPlan = duplicateRepairGraphPlan(graphPlan);
 	const conflicts = graphPlan.conflicts;
 	if (conflicts.length) graphPlan = withoutGraphWrites(graphPlan);
 	graphPlan.conflicts = conflicts;
 	const combinedPlan = combinePagePlan(graphPlan, pagePlan);
 	if (input.testFailAtomicWrite === true) combinedPlan.testFailAtomicWrite = true;
+	if (!combinedPlan.hasWrites) {
+		const conflict = graphPlan.conflicts.length > 0;
+		const outcome = conflict
+			? "identity_conflict"
+			: pagePlan.action === "ambiguous"
+				? "page_identity_conflict"
+			: pagePlan.action === "duplicate"
+				? "skipped_duplicate"
+				: pagePlan.action === "suppressed"
+					? "suppressed"
+					: "ignored";
+		return finishNoWrite(env, userId, {
+			mode,
+			source,
+			sourceMode,
+			sourcePacket,
+			runId,
+			receiptId,
+			plan: graphPlan,
+			pagePlan,
+			received,
+			digested: keptLines,
+			outcome,
+			reason: conflict ? "ambiguous existing memory identity" : pagePlan.reason ?? "no durable user facts in the submitted conversation",
+		});
+	}
+	if (typeof input.testBeforeWrite === "function") {
+		await input.testBeforeWrite({ graphPlan, pagePlan, combinedPlan });
+	}
 
 	try {
 		const writeResult = await writeApproved(env, config, userId, combinedPlan);
-		graphPlan = await reconcileManualCommit(env, userId, graphPlan, writeResult);
+		graphPlan = reconcileManualCommit(graphPlan, writeResult);
+		pagePlan = reconcilePageCommit(pagePlan, writeResult);
 	} catch (error) {
 		const failure = buildManualReceipt({
 			id: receiptId, source, sourceMode, sourcePacket, runId, plan: graphPlan, pagePlan,
@@ -643,20 +887,32 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 		});
 		failure.error = String(error?.message ?? error);
 		const summary = receiptSummary(failure, null);
-		await updateExtractionRun(env, userId, runId, { status: "failed", error: failure.error });
+		await bestEffortUpdateRun(env, userId, runId, { status: "failed", error: failure.error });
 		const storedId = await storeFinalReceipt(env, userId, source, failure, summary);
 		return resultFromReceipt(mode, source, sourcePacket, failure, summary, storedId);
 	}
 
-	const outcome = graphPlan.conflicts.length ? "wrote_with_identity_conflict" : "wrote";
+	const pageConflict = pagePlan.action === "conflict" || pagePlan.action === "ambiguous";
+	const outcome = graphPlan.conflicts.length
+		? (graphPlan.hasGraphWrites || pagePlan.write ? "wrote_with_identity_conflict" : "identity_conflict")
+		: pageConflict
+			? (graphPlan.hasGraphWrites ? "wrote_with_page_conflict" : "page_write_conflict")
+			: "wrote";
+	const reason = graphPlan.conflicts.length
+		? (pagePlan.write ? "page saved; ambiguous graph identity not written" : "ambiguous graph identity not written")
+		: pageConflict
+			? pagePlan.reason
+			: pagePlan.action === "suppressed" || pagePlan.action === "duplicate" || pagePlan.action === "skipped"
+				? pagePlan.reason
+				: null;
 	const receipt = buildManualReceipt({
 		id: receiptId, source, sourceMode, sourcePacket, runId, plan: graphPlan, pagePlan,
 		received, digested: keptLines, outcome,
-		reason: graphPlan.conflicts.length ? "page saved; ambiguous graph identity not written" : null,
+		reason,
 	});
 	const summary = receiptSummary(receipt, pagePlan);
 	const pageItem = pagePlan.page ? [{ id: pagePlan.page.id, title: pagePlan.page.title }] : [];
-	await updateExtractionRun(env, userId, runId, {
+	await bestEffortUpdateRun(env, userId, runId, {
 		status: outcome,
 		...(graphPlan.runLists ?? {}),
 		createdPages: pagePlan.action === "created" ? pageItem : [],
@@ -671,10 +927,8 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 		skippedObjects: receipt.actions.skippedObjects,
 	});
 	const storedId = await storeFinalReceipt(env, userId, source, receipt, summary);
-	if (pagePlan.page?.id && storedId) {
-		await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ?")
-			.bind(storedId, pagePlan.page.id, userId)
-			.run();
+	if (["created", "updated", "reinforced", "duplicate"].includes(pagePlan.action)) {
+		await bestEffortLinkReceipt(env, userId, pagePlan.page?.id, storedId);
 	}
 	return resultFromReceipt(mode, source, sourcePacket, receipt, summary, storedId);
 }

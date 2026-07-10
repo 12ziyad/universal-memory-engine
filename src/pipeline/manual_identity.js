@@ -135,7 +135,13 @@ export function manualIdentitySimilarity(left, right) {
 		coreIdentity(a) === coreIdentity(b) &&
 		(coreIdentity(a) !== a || coreIdentity(b) !== b) &&
 		coreIdentity(a)
-	) return 0.92;
+	) {
+		// Sharing a distinctive stem after stripping a generic type word is useful
+		// shortlist evidence, but it is not identity. "Atlas Database" and "Atlas
+		// Service", for example, may be separate durable objects. Keep this score in
+		// the resolver's conflict band instead of the automatic-merge band.
+		return 0.84;
+	}
 	const overlap = jaccard(a, b);
 	const edit = editRatio(a, b);
 	if (Math.min(a.length, b.length) >= 5 && edit >= 0.92) return edit * 0.96;
@@ -182,6 +188,14 @@ export function resolveManualIdentity(identity, nodes = []) {
 	const label = String(identity?.label ?? "").trim();
 	const key = canonicalIdentity(label);
 	if (!key) return { decision: "invalid", label, reason: "empty_identity" };
+	if (identity?._manual_conflict_reason) {
+		return {
+			decision: "ambiguous",
+			label,
+			reason: String(identity._manual_conflict_reason),
+			matches: [],
+		};
+	}
 
 	const requestedId = identity?.existing_node_id ?? identity?.matches_existing ?? null;
 	if (requestedId) {
@@ -255,9 +269,13 @@ export function resolveManualIdentity(identity, nodes = []) {
 
 export function candidateMatchesManualNode(candidate, node, observedLabels = []) {
 	if (!candidate || !node) return false;
-	if (candidate.possible_existing_node_id && candidate.possible_existing_node_id === node.id) return true;
 	const candidateNames = [candidate.label_guess, candidate.label, candidate.canonical_key].filter(Boolean);
 	const nodeNames = [...manualIdentityNames(node), ...observedLabels].filter(Boolean);
+	if (!candidateNames.length || !nodeNames.length) return false;
+	// possible_existing_node_id is a stale/heuristic hint, never proof. It may
+	// relax a small spelling-variation threshold, but compatible identity text is
+	// still required before a manual save resolves the pending review item.
+	const threshold = candidate.possible_existing_node_id === node.id ? 0.88 : 0.92;
 	return candidateNames.some((candidateName) =>
-		nodeNames.some((nodeName) => manualIdentitySimilarity(candidateName, nodeName) >= 0.92));
+		nodeNames.some((nodeName) => manualIdentitySimilarity(candidateName, nodeName) >= threshold));
 }

@@ -2,6 +2,12 @@ import { ACTIONS, EDGE_TYPES, IMPORTANCE, SLICE_KINDS } from "../config.js";
 import { extractJson, responseText } from "./llm.js";
 import { canonicalizeCategory } from "./gates.js";
 import { canonicalIdentity, manualNodeAliases } from "./manual_identity.js";
+import {
+	cleanManualEntityLabel,
+	parseManualRelationshipCorrection,
+	stripManualDirective,
+	unsafeManualEntityLabel,
+} from "./manual_language.js";
 import { classifyMessage } from "./trigger.js";
 import { titleCaseWords } from "./title.js";
 
@@ -26,6 +32,18 @@ Return exactly one JSON object:
       "confidence": 0.95
     }
   ],
+  "corrections": [
+    {
+      "subject": { "label": "Project Name", "category": "project", "existing_node_id": null },
+      "old_target": { "label": "Old Tool", "category": "tool", "existing_node_id": null },
+      "new_target": { "label": "New Tool", "category": "tool", "existing_node_id": null },
+      "type": "uses",
+      "text": "the exact submitted correction",
+      "current_text": "Project Name uses New Tool.",
+      "history_text": "Technology corrected from Old Tool to New Tool.",
+      "confidence": 0.95
+    }
+  ],
   "notes": ""
 }
 
@@ -36,8 +54,11 @@ Hard rules:
 - Never output candidates. Uncertain, hypothetical, assistant-only, unsafe, or unsupported material is omitted.
 - Every durable identity must have a slice or event. Never return a bare node.
 - Use an existing_node_id only when the submitted identity unambiguously denotes that exact listed node.
+- Resolve the actual canonical subject before proposing a new identity. Strip wrappers such as "Correction:", "remember that", "my project is", and descriptive type words.
+- Identity labels are concise entity noun phrases, preferably 2-6 meaningful words. Never use a command, sentence, predicate, or negated phrase as a label.
 - Keep distinct identities distinct. Similar wording or shared project vocabulary is not identity.
-- A correction or replacement sets supersedes=true.
+- Relationship corrections belong in corrections, not as ordinary positive relationships. The old_target is historical and must never be created from a phrase such as "not X".
+- A fact correction or replacement sets supersedes=true.
 - Slice kinds: ${SLICE_KINDS.join(", ")}.
 - Event actions: ${ACTIONS.join(", ")}.
 - Importance: ${IMPORTANCE.join(", ")}.
@@ -68,9 +89,11 @@ function normalizeAliases(value) {
 }
 
 function normalizeIdentity(raw, fallback = {}) {
-	const value = raw && typeof raw === "object" ? raw : {};
+	const value = raw && typeof raw === "object" ? raw : (raw ? { label: raw } : {});
+	const rawLabel = cleanText(value.label ?? value.name ?? fallback.label, 240);
 	return {
-		label: cleanLabel(value.label ?? value.name ?? fallback.label),
+		label: cleanManualEntityLabel(rawLabel) || cleanLabel(rawLabel),
+		_raw_label: rawLabel,
 		category: canonicalizeCategory(value.category ?? value.role ?? fallback.category) ?? "other",
 		existing_node_id:
 			value.existing_node_id ?? value.existingNodeId ?? value.matches_existing ?? fallback.existing_node_id ?? null,
@@ -143,6 +166,43 @@ function normalizeRelationship(raw, nodeMeta = new Map()) {
 	};
 }
 
+function normalizeCorrection(raw) {
+	const value = raw && typeof raw === "object" ? raw : {};
+	const subject = normalizeIdentity(value.subject ?? value.from, { category: "project" });
+	const oldTargetRaw = value.old_target ?? value.oldTarget ?? value.previous_target ?? value.previousTarget ?? value.remove;
+	const newTargetRaw = value.new_target ?? value.newTarget ?? value.replacement_target ?? value.replacementTarget ?? value.to;
+	const oldTarget = oldTargetRaw ? normalizeIdentity(oldTargetRaw, { category: "tool" }) : null;
+	const newTarget = newTargetRaw ? normalizeIdentity(newTargetRaw, { category: "tool" }) : null;
+	const type = EDGE_TYPES.includes(value.type) ? value.type : "uses";
+	const text = cleanText(value.text ?? value.source_text);
+	const historyText = cleanText(value.history_text ?? value.historyText ?? (
+		oldTarget?.label && newTarget?.label
+			? `Technology corrected from ${oldTarget.label} to ${newTarget.label}.`
+			: oldTarget?.label
+				? `Technology removed: ${oldTarget.label}.`
+				: newTarget?.label
+					? `Technology corrected to ${newTarget.label}.`
+					: ""
+	));
+	const currentText = cleanText(value.current_text ?? value.currentText ?? (
+		newTarget?.label
+			? `${subject.label} ${type === "depends_on" ? "depends on" : "uses"} ${newTarget.label}.`
+			: oldTarget?.label
+				? `${subject.label} no longer ${type === "depends_on" ? "depends on" : "uses"} ${oldTarget.label}.`
+				: ""
+	));
+	return {
+		subject,
+		old_target: oldTarget,
+		new_target: newTarget,
+		type,
+		text,
+		current_text: currentText,
+		history_text: historyText,
+		confidence: clampConfidence(value.confidence, 0.9),
+	};
+}
+
 function evidenceLineForLabel(source, label) {
 	const keyTokens = canonicalIdentity(label).split(" ").filter((token) => token.length > 1);
 	const lines = String(source ?? "")
@@ -208,9 +268,9 @@ function normalizeLegacyObjects(objects, submittedContent) {
 }
 
 function normalizeProposal(parsed, submittedContent) {
-	if (!parsed || typeof parsed !== "object") return { ok: false, facts: [], relationships: [], rejected: [] };
+	if (!parsed || typeof parsed !== "object") return { ok: false, facts: [], relationships: [], corrections: [], rejected: [] };
 	if (Array.isArray(parsed.objects)) {
-		return { ok: true, ...normalizeLegacyObjects(parsed.objects, submittedContent), notes: cleanText(parsed.notes, 500) };
+		return { ok: true, ...normalizeLegacyObjects(parsed.objects, submittedContent), corrections: [], notes: cleanText(parsed.notes, 500) };
 	}
 	const facts = Array.isArray(parsed.facts) ? parsed.facts.map(normalizeFact) : [];
 	const relationships = Array.isArray(parsed.relationships)
@@ -218,23 +278,108 @@ function normalizeProposal(parsed, submittedContent) {
 		: Array.isArray(parsed.edges)
 			? parsed.edges.map((item) => normalizeRelationship(item))
 			: [];
+	const corrections = Array.isArray(parsed.corrections)
+		? parsed.corrections.map(normalizeCorrection)
+		: Array.isArray(parsed.relationship_corrections)
+			? parsed.relationship_corrections.map(normalizeCorrection)
+			: [];
 	return {
-		ok: Array.isArray(parsed.facts) || Array.isArray(parsed.relationships) || Array.isArray(parsed.edges),
+		ok: Array.isArray(parsed.facts) || Array.isArray(parsed.relationships) || Array.isArray(parsed.edges) || corrections.length > 0,
 		facts,
 		relationships,
+		corrections,
 		rejected: [],
 		notes: cleanText(parsed.notes, 500),
 	};
 }
 
 function stripDirective(value) {
-	return cleanText(value)
-		.replace(/^(?:please\s+)?(?:remember|save|store|keep)(?:\s+this)?\s*[:,-]?\s*/i, "")
-		.trim();
+	return stripManualDirective(cleanText(value));
 }
 
 function fact(identity, memory, confidence = 0.9, supersedes = false) {
 	return normalizeFact({ identity, memory, confidence, supersedes });
+}
+
+function mergeManualProposals(deterministic, modelProposal) {
+	const facts = [];
+	const relationships = [];
+	const corrections = [];
+	const factKeys = new Set();
+	const relationshipKeys = new Set();
+	const correctionKeys = new Set();
+	// Prefer the model's more precise identity when both extractors describe the
+	// same grounded fact sentence. Identity is deliberately excluded from this
+	// dedupe key so "Violin" and a heuristic "Violin Practice" cannot both be
+	// created for one submitted event.
+	for (const item of [...(modelProposal?.facts ?? []), ...(deterministic?.facts ?? [])]) {
+		const key = [
+			item?.memory?.kind,
+			item?.memory?.action ?? item?.memory?.slice_kind,
+			canonicalIdentity(item?.memory?.text),
+		].join(":");
+		if (!item?.identity?.label || !item?.memory?.text || factKeys.has(key)) continue;
+		factKeys.add(key);
+		facts.push(item);
+	}
+	for (const item of [...(modelProposal?.relationships ?? []), ...(deterministic?.relationships ?? [])]) {
+		const key = [
+			canonicalIdentity(item?.from?.label),
+			canonicalIdentity(item?.to?.label),
+			item?.type,
+			canonicalIdentity(item?.text),
+		].join(":");
+		if (!item?.from?.label || !item?.to?.label || relationshipKeys.has(key)) continue;
+		relationshipKeys.add(key);
+		relationships.push(item);
+	}
+	for (const item of [...(modelProposal?.corrections ?? []), ...(deterministic?.corrections ?? [])]) {
+		const key = [
+			canonicalIdentity(item?.subject?.label),
+			canonicalIdentity(item?.old_target?.label),
+			canonicalIdentity(item?.new_target?.label),
+			item?.type,
+		].join(":");
+		if (!item?.subject?.label || (!item?.old_target?.label && !item?.new_target?.label) || correctionKeys.has(key)) continue;
+		correctionKeys.add(key);
+		corrections.push(item);
+	}
+	// A correction is the authoritative interpretation for its subject/type/new
+	// target. Drop an ordinary relationship for the same mutation so it cannot be
+	// planned twice.
+	const filteredRelationships = relationships.filter((relationship) => !corrections.some((correction) =>
+		canonicalIdentity(correction.subject?.label) === canonicalIdentity(relationship.from?.label) &&
+		correction.type === relationship.type &&
+		canonicalIdentity(correction.new_target?.label) === canonicalIdentity(relationship.to?.label)));
+	return {
+		ok: Boolean(deterministic?.ok || modelProposal?.ok),
+		facts,
+		relationships: filteredRelationships,
+		corrections,
+		rejected: [...(deterministic?.rejected ?? []), ...(modelProposal?.rejected ?? [])],
+		notes: modelProposal?.notes ?? deterministic?.notes ?? "",
+	};
+}
+
+function actionableManualLines(submittedContent) {
+	return String(submittedContent ?? "")
+		.split(/\n+|(?<=[.!?])\s+/)
+		.map(stripDirective)
+		.filter(Boolean)
+		.filter((line) => classifyMessage(line) !== "noise")
+		.filter((line) => !/\?$/.test(line))
+		.filter((line) => !/\b(?:maybe|might|perhaps|someday|not sure)\b/i.test(line));
+}
+
+function unhandledManualContent(submittedContent, deterministic) {
+	const handled = new Set([
+		...(deterministic?.facts ?? []).map((item) => canonicalIdentity(item?.memory?.text)),
+		...(deterministic?.relationships ?? []).map((item) => canonicalIdentity(item?.text)),
+		...(deterministic?.corrections ?? []).map((item) => canonicalIdentity(item?.text)),
+	].filter(Boolean));
+	return actionableManualLines(submittedContent)
+		.filter((line) => !handled.has(canonicalIdentity(line)))
+		.join("\n");
 }
 
 function trimIdentityTail(value) {
@@ -247,6 +392,7 @@ function trimIdentityTail(value) {
 function heuristicManualFacts(submittedContent) {
 	const facts = [];
 	const relationships = [];
+	const corrections = [];
 	const seen = new Set();
 	const addFact = (item) => {
 		const key = `${canonicalIdentity(item.identity.label)}:${item.memory.kind}:${item.memory.action ?? item.memory.slice_kind}:${canonicalIdentity(item.memory.text)}`;
@@ -262,6 +408,11 @@ function heuristicManualFacts(submittedContent) {
 	for (const line of lines) {
 		if (!line || classifyMessage(line) === "noise") continue;
 		if (/\?$/.test(line) || /\b(?:maybe|might|perhaps|someday|not sure)\b/i.test(line)) continue;
+		const correction = parseManualRelationshipCorrection(line);
+		if (correction) {
+			corrections.push(normalizeCorrection(correction));
+			continue;
+		}
 
 		let match = line.match(/\bmy\s+(grandmother|grandfather|mother|father|mom|mum|dad|sister|brother|wife|husband|partner|friend)\s+(?:died|passed away)\b/i);
 		if (match) {
@@ -284,6 +435,31 @@ function heuristicManualFacts(submittedContent) {
 			addFact(fact({ label: trimIdentityTail(match[1]), category: "place" }, {
 				kind: "event", action: "moved", text: line, importance: "important",
 			}, 0.95));
+			continue;
+		}
+
+		match = line.match(
+			/\b(?:i am|i['’]m|the user is|user is)\s+(?:currently\s+)?(?:building|developing|working on)\s+(?:an?\s+(?:app|project)\s+(?:called|named)\s+)?(.+?)\s+(?:with|using)\s+(.+?)(?:\s+for\s+.+)?$/i,
+		);
+		if (match) {
+			const project = trimIdentityTail(match[1]);
+			const targets = match[2]
+				.split(/\s*(?:,|\band\b)\s*/i)
+				.map(trimIdentityTail)
+				.filter(Boolean)
+				.slice(0, 6);
+			addFact(fact({ label: project, category: "project" }, {
+				kind: "slice", slice_kind: "progress", text: line,
+			}, 0.94));
+			for (const to of targets) {
+				relationships.push({
+					from: normalizeIdentity({ label: project, category: "project" }),
+					to: normalizeIdentity({ label: to, category: "tool" }),
+					type: "uses",
+					text: line,
+					confidence: 0.94,
+				});
+			}
 			continue;
 		}
 
@@ -348,8 +524,12 @@ function heuristicManualFacts(submittedContent) {
 				"is built with": "uses",
 				"is powered by": "depends_on",
 			};
-			const from = cleanLabel(match[1]);
-			const targets = match[3].split(/\s*(?:,|\band\b)\s*/i).map(trimIdentityTail).filter(Boolean).slice(0, 6);
+			const from = cleanManualEntityLabel(match[1]);
+			const targets = match[3]
+				.split(/\s*(?:,|\band\b)\s*/i)
+				.map(trimIdentityTail)
+				.filter((target) => target && !unsafeManualEntityLabel(target))
+				.slice(0, 6);
 			for (const to of targets) {
 				relationships.push({
 					from: normalizeIdentity({ label: from, category: "project" }),
@@ -378,10 +558,11 @@ function heuristicManualFacts(submittedContent) {
 		}
 	}
 
-	return { ok: true, facts, relationships, rejected: [], notes: "heuristic_fallback" };
+	return { ok: true, facts, relationships, corrections, rejected: [], notes: "heuristic_fallback" };
 }
 
-function modelPayload(submittedContent, recentContext, nodes) {
+function modelPayload(submittedContent, recentContext, nodes, graphState = {}) {
+	const byId = new Map((nodes ?? []).map((node) => [node.id, node]));
 	return JSON.stringify({
 		submitted_content: String(submittedContent ?? ""),
 		recent_context: String(recentContext ?? ""),
@@ -392,6 +573,18 @@ function modelPayload(submittedContent, recentContext, nodes) {
 			category: node.category,
 			role: node.role ?? null,
 			summary: node.summary ?? null,
+			current_details: (graphState.slices ?? [])
+				.filter((slice) => slice.node_id === node.id && Number(slice.is_current ?? 1) === 1)
+				.slice(0, 12)
+				.map((slice) => slice.text),
+			relationships: (graphState.edges ?? [])
+				.filter((edge) => edge.from_node === node.id || edge.to_node === node.id)
+				.slice(0, 12)
+				.map((edge) => ({
+					type: edge.type,
+					direction: edge.from_node === node.id ? "outgoing" : "incoming",
+					other_label: byId.get(edge.from_node === node.id ? edge.to_node : edge.from_node)?.label ?? null,
+				})),
 		})),
 	});
 }
@@ -404,7 +597,7 @@ async function callManualModel(env, config, input) {
 			{
 				messages: [
 					{ role: "system", content: MANUAL_SYSTEM_PROMPT },
-					{ role: "user", content: modelPayload(input.submittedContent, input.recentContext, input.nodes) },
+					{ role: "user", content: modelPayload(input.submittedContent, input.recentContext, input.nodes, input.graphState) },
 				],
 				temperature: 0,
 				max_tokens: config.llm.maxTokens,
@@ -421,31 +614,41 @@ async function callManualModel(env, config, input) {
 
 /** Isolated extraction entrypoint shared only by the MCP manual lane. */
 export async function extractManualFacts(env, config, input = {}) {
-	let proposal = null;
+	const deterministic = heuristicManualFacts(input.submittedContent);
+	let modelProposal = null;
 	if (input.extractionResponse !== undefined && input.extractionResponse !== null) {
 		const parsed = typeof input.extractionResponse === "string"
 			? extractJson(input.extractionResponse)
 			: input.extractionResponse;
-		proposal = normalizeProposal(parsed, input.submittedContent);
+		modelProposal = normalizeProposal(parsed, input.submittedContent);
 	} else {
-		// Common explicit manual facts have a deterministic path. Besides being
-		// faster, this keeps local/offline MCP calls deterministic; the model is
-		// reserved for language the conservative parser cannot structure.
-		const deterministic = heuristicManualFacts(input.submittedContent);
-		if (deterministic.facts.length || deterministic.relationships.length) {
-			return { ...deterministic, extractor: "heuristic" };
-		}
-		proposal = await callManualModel(env, config, input);
+		// The heuristic path provides deterministic high-confidence facts, while the
+		// model is still allowed to recover durable facts from unrecognized sentences
+		// in the same submission. Returning after the first heuristic match silently
+		// dropped the remainder of mixed manual saves.
+		const unhandledContent = unhandledManualContent(input.submittedContent, deterministic);
+		if (unhandledContent) modelProposal = await callManualModel(env, config, input);
 	}
 
-	if (proposal?.ok && (proposal.facts.length || proposal.relationships.length)) {
-		return { ...proposal, extractor: input.extractionResponse !== undefined ? "override" : "ai" };
+	const combined = mergeManualProposals(deterministic, modelProposal);
+	if (combined.facts.length || combined.relationships.length || combined.corrections.length) {
+		const usedHeuristic = deterministic.facts.length > 0 || deterministic.relationships.length > 0 || deterministic.corrections.length > 0;
+		const usedModel = (modelProposal?.facts?.length ?? 0) > 0 ||
+			(modelProposal?.relationships?.length ?? 0) > 0 ||
+			(modelProposal?.corrections?.length ?? 0) > 0;
+		return {
+			...combined,
+			extractor: usedHeuristic && usedModel
+				? (input.extractionResponse !== undefined ? "heuristic+override" : "heuristic+ai")
+				: usedHeuristic
+					? "heuristic"
+					: (input.extractionResponse !== undefined ? "override" : "ai"),
+		};
 	}
-	const fallback = heuristicManualFacts(input.submittedContent);
 	return {
-		...fallback,
-		rejected: [...(proposal?.rejected ?? []), ...(fallback.rejected ?? [])],
+		...deterministic,
+		rejected: [...(deterministic.rejected ?? []), ...(modelProposal?.rejected ?? [])],
 		extractor: "heuristic",
-		model_notes: proposal?.notes ?? null,
+		model_notes: modelProposal?.notes ?? null,
 	};
 }

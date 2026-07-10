@@ -16,6 +16,7 @@ import {
 	runMcpDirectSaveCommand,
 } from "../src/pipeline/manual_mcp.js";
 import { runRecallCommand } from "../src/pipeline/commands.js";
+import { archiveObject } from "../src/pipeline/cleanup.js";
 
 function userId(label) {
 	return `mcp-manual-${label}-${crypto.randomUUID()}`;
@@ -68,6 +69,60 @@ async function direct(id, input) {
 
 async function collect(id, input) {
 	return runMcpConversationCollectCommand(env, null, id, input);
+}
+
+function writeBarrier(expected = 2) {
+	let arrived = 0;
+	let release;
+	const ready = new Promise((resolve) => { release = resolve; });
+	return async () => {
+		arrived++;
+		if (arrived === expected) release();
+		await ready;
+	};
+}
+
+function envWithReceiptFailure() {
+	return {
+		...env,
+		DB: {
+			prepare(sql) {
+				if (/^\s*INSERT\s+INTO\s+receipts\b/i.test(String(sql))) {
+					return {
+						bind() {
+							return { run: async () => { throw new Error("forced receipt failure"); } };
+						},
+					};
+				}
+				return env.DB.prepare(sql);
+			},
+			batch(statements) {
+				return env.DB.batch(statements);
+			},
+		},
+	};
+}
+
+function envThatRejectsPostCommitSelects() {
+	let batches = 0;
+	let graphCommitted = false;
+	return {
+		...env,
+		DB: {
+			prepare(sql) {
+				if (graphCommitted && /^\s*SELECT\b/i.test(String(sql))) {
+					throw new Error("post-commit SELECT must not run");
+				}
+				return env.DB.prepare(sql);
+			},
+			async batch(statements) {
+				const result = await env.DB.batch(statements);
+				batches++;
+				if (batches >= 2) graphCommitted = true;
+				return result;
+			},
+		},
+	};
 }
 
 async function rows(table, id, suffix = "") {
@@ -660,6 +715,283 @@ describe("MCP manual direct engine", () => {
 		expect(recalled.context).toContain("Violin");
 		expect(recalled.context).toContain("started violin practice");
 	});
+
+	it("extracts a building-with sentence into the project and tool relationship without overcapturing the identity", async () => {
+		const id = userId("compound-building");
+		const result = await direct(id, { content: "I am building Atlas with D1 for storage." });
+
+		expect(result).toMatchObject({ status: "wrote", counts: { nodes: 2, edges: 1 } });
+		expect((await rows("nodes", id)).map((node) => node.label).sort()).toEqual(["Atlas", "D1"]);
+		expect((await one("edges", id))).toMatchObject({ type: "uses" });
+	});
+
+	it("corrects an existing relationship in place without creating sentence or negated nodes", async () => {
+		const id = userId("relationship-correction");
+		await direct(id, { content: "Blue Lantern uses Rust." });
+		const project = await one("nodes", id, "AND label = 'Blue Lantern'");
+		const rust = await one("nodes", id, "AND label = 'Rust'");
+		const oldEdge = await one("edges", id, "AND deleted_at IS NULL");
+
+		const corrected = await direct(id, {
+			content: "Correction: My test project Blue Lantern uses Go, not Rust.",
+		});
+
+		expect(corrected).toMatchObject({
+			status: "wrote",
+			counts: { nodes: 1, edges: 1, supersededEdges: 1 },
+			receipt: {
+				actions: {
+					corrections: [expect.objectContaining({
+						subject_node_id: project.id,
+						old_target_node_id: rust.id,
+						history_text: "Technology corrected from Rust to Go.",
+					})],
+				},
+			},
+		});
+		const nodes = await rows("nodes", id);
+		expect(nodes.map((node) => node.label).sort()).toEqual(["Blue Lantern", "Go", "Rust"]);
+		expect(nodes.some((node) => /^(?:correction|not\b)/i.test(node.label))).toBe(false);
+		const activeEdge = await one("edges", id, "AND deleted_at IS NULL");
+		const go = nodes.find((node) => node.label === "Go");
+		expect(activeEdge).toMatchObject({ from_node: project.id, to_node: go.id, type: "uses" });
+		expect(await one("edges", id, `AND id = '${oldEdge.id}'`)).toMatchObject({
+			from_node: project.id,
+			to_node: rust.id,
+		});
+		expect((await one("edges", id, `AND id = '${oldEdge.id}'`)).deleted_at).not.toBeNull();
+		expect(await one("events", id, "AND action = 'changed_plan'"))
+			.toMatchObject({ node_id: project.id, text: "Technology corrected from Rust to Go." });
+		expect(await rows("slices", id, `AND node_id = '${project.id}' AND is_current = 1`))
+			.toEqual([expect.objectContaining({ text: "Blue Lantern uses Go." })]);
+		expect((await one("nodes", id, "AND label = 'Blue Lantern'")).summary)
+			.toMatch(/^Blue Lantern: Blue Lantern uses Go\./);
+	});
+
+	it("reinforces a repeated correction and can later reverse it without duplicate identities", async () => {
+		const id = userId("correction-idempotency");
+		await direct(id, { content: "Blue Lantern uses Rust." });
+		const correction = "Correction: Blue Lantern uses Go, not Rust.";
+		await direct(id, { content: correction });
+		const repeated = await direct(id, { content: correction });
+
+		expect(await rows("nodes", id)).toHaveLength(3);
+		expect(await rows("edges", id)).toHaveLength(2);
+		expect(await rows("events", id, "AND action = 'changed_plan'")).toHaveLength(1);
+		expect(repeated.counts).toMatchObject({
+			nodes: 0,
+			edges: 0,
+			supersededEdges: 0,
+			reinforcedEvents: 1,
+			reinforcedEdges: 1,
+		});
+		expect(repeated.receipt.actions.corrections[0].replacement_edge_id).toBeTruthy();
+
+		const reversed = await direct(id, {
+			content: "Actually, Blue Lantern uses Rust instead of Go.",
+		});
+		expect(reversed.counts).toMatchObject({ nodes: 0, edges: 1, supersededEdges: 1 });
+		expect(await rows("nodes", id)).toHaveLength(3);
+		const project = await one("nodes", id, "AND label = 'Blue Lantern'");
+		const rust = await one("nodes", id, "AND label = 'Rust'");
+		expect(await one("edges", id, "AND deleted_at IS NULL")).toMatchObject({
+			from_node: project.id,
+			to_node: rust.id,
+			type: "uses",
+		});
+	});
+
+	it("fails closed on an ambiguous correction subject and creates no replacement identity", async () => {
+		const id = userId("ambiguous-correction");
+		await seedNode(id, "node-blue-one", "First Blue Project", { aliases: ["Blue Lantern"] });
+		await seedNode(id, "node-blue-two", "Second Blue Project", { aliases: ["Blue Lantern"] });
+		await seedNode(id, "node-rust", "Rust", { category: "tool" });
+
+		const result = await direct(id, {
+			content: "Correction: Blue Lantern uses Go, not Rust.",
+		});
+
+		expect(result).toMatchObject({ status: "identity_conflict", fired: false });
+		expect(result.identity_conflicts).toEqual([
+			expect.objectContaining({ label: "Blue Lantern", reason: "multiple_existing_nodes_match" }),
+		]);
+		expect((await rows("nodes", id)).map((node) => node.label).sort()).toEqual([
+			"First Blue Project",
+			"Rust",
+			"Second Blue Project",
+		]);
+		expect(await rows("edges", id)).toHaveLength(0);
+	});
+
+	it("uses a grounded AI noun phrase for a genuinely new sentence-shaped identity", async () => {
+		const id = userId("ai-manual-title");
+		let modelCalls = 0;
+		const titleEnv = {
+			...env,
+			AI: {
+				async run() {
+					modelCalls++;
+					return { response: JSON.stringify({ title: "Solar Finch" }) };
+				},
+			},
+		};
+		const content = "Remember that my project is called Solar Finch.";
+		const result = await runMcpDirectSaveCommand(titleEnv, null, id, {
+			content,
+			extractionResponse: proposal([
+				sliceFact({
+					label: "Remember that my project is called Solar Finch",
+					category: "project",
+					kind: "progress",
+					text: content,
+				}),
+			]),
+		});
+
+		expect(result).toMatchObject({ status: "wrote", counts: { nodes: 1, slices: 1 } });
+		expect(modelCalls).toBe(1);
+		expect(await one("nodes", id)).toMatchObject({ label: "Solar Finch", canonical_label: "solar finch" });
+	});
+
+	it("combines heuristic and model extraction for mixed recognized and unrecognized facts", async () => {
+		const id = userId("mixed-extraction");
+		let modelCalls = 0;
+		const mixedEnv = {
+			...env,
+			AI: {
+				async run() {
+					modelCalls++;
+					return { response: JSON.stringify(proposal([
+						sliceFact({ label: "Luna", category: "family", kind: "other", text: "My dog is named Luna." }),
+					])) };
+				},
+			},
+		};
+		const result = await runMcpDirectSaveCommand(mixedEnv, null, id, {
+			content: "I started boxing. My dog is named Luna.",
+		});
+
+		expect(modelCalls).toBe(1);
+		expect(result.status).toBe("wrote");
+		expect((await rows("nodes", id)).map((node) => node.label).sort()).toEqual(["Boxing", "Luna"]);
+	});
+
+	it("returns an identity conflict when a pronoun has multiple recent-context referents", async () => {
+		const id = userId("ambiguous-pronoun");
+		await seedNode(id, "node-atlas-context", "Atlas");
+		await seedNode(id, "node-beacon-context", "Beacon");
+		const content = "I stopped it.";
+		const result = await direct(id, {
+			content,
+			recentContext: "Atlas is one project. Beacon is another project.",
+			extractionResponse: proposal([
+				eventFact({ label: "Atlas", action: "stopped", text: content, existingNodeId: "node-atlas-context" }),
+			]),
+		});
+
+		expect(result).toMatchObject({ status: "identity_conflict", fired: false, counts: { savedTotal: 0 } });
+		expect(result.identity_conflicts[0]).toMatchObject({ reason: "ambiguous_reference_context" });
+		expect(await one("nodes", id, "AND id = 'node-atlas-context'")).toMatchObject({ state: "active" });
+	});
+
+	it("atomically dedupes concurrent identical facts on an existing node and reinforces the winner", async () => {
+		const id = userId("concurrent-existing-fact");
+		await seedNode(id, "node-atlas-existing", "Atlas");
+		const content = "Atlas storage is encrypted.";
+		const barrier = writeBarrier();
+		const input = {
+			content,
+			testBeforeWrite: barrier,
+			extractionResponse: proposal([
+				sliceFact({ label: "Atlas", kind: "other", text: content, existingNodeId: "node-atlas-existing" }),
+			]),
+		};
+		const results = await Promise.all([direct(id, input), direct(id, input)]);
+
+		expect(results.every((result) => result.status === "wrote")).toBe(true);
+		expect(results.map((result) => result.counts.slices).sort()).toEqual([0, 1]);
+		expect(results.map((result) => result.counts.reinforcedSlices).sort()).toEqual([0, 1]);
+		const slices = await rows("slices", id);
+		expect(slices).toHaveLength(1);
+		expect(slices[0].reinforcement_count).toBe(1);
+		expect(await rows("manual_fact_identities", id)).toHaveLength(1);
+	});
+
+	it("keeps the concurrent winner current when identical preference corrections race", async () => {
+		const id = userId("concurrent-preference");
+		await seedNode(id, "node-dark-mode", "Dark Mode", { category: "preference" });
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at, last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind("slice-old-theme", id, "node-dark-mode", "I preferred light mode.", "preference", 1, now, now).run();
+		const content = "I now prefer dark mode.";
+		const barrier = writeBarrier();
+		const input = {
+			content,
+			testBeforeWrite: barrier,
+			extractionResponse: proposal([
+				sliceFact({
+					label: "Dark Mode",
+					category: "preference",
+					kind: "preference",
+					text: content,
+					existingNodeId: "node-dark-mode",
+					supersedes: true,
+				}),
+			]),
+		};
+		await Promise.all([direct(id, input), direct(id, input)]);
+
+		const current = await rows("slices", id, "AND is_current = 1");
+		expect(current).toHaveLength(1);
+		expect(current[0]).toMatchObject({ text: content, reinforcement_count: 1 });
+	});
+
+	it("allows exactly one concurrent caller to own an explicit idempotency key", async () => {
+		const id = userId("concurrent-idempotency");
+		const content = "I started rowing.";
+		const input = {
+			content,
+			idempotencyKey: "rowing-once",
+			extractionResponse: proposal([eventFact({ label: "Rowing", action: "started", text: content })]),
+		};
+		const results = await Promise.all([direct(id, input), direct(id, input)]);
+
+		expect(results.map((result) => result.status).sort()).toEqual(["skipped_duplicate", "wrote"]);
+		expect(await rows("events", id)).toHaveLength(1);
+		expect(await one("source_packets", id)).toMatchObject({ seen_count: 2 });
+	});
+
+	it("does not perform a fallible reconciliation SELECT after a successful graph commit", async () => {
+		const id = userId("no-post-commit-probe");
+		const content = "I started fencing.";
+		const result = await runMcpDirectSaveCommand(envThatRejectsPostCommitSelects(), null, id, {
+			content,
+			extractionResponse: proposal([eventFact({ label: "Fencing", action: "started", text: content })]),
+		});
+
+		expect(result).toMatchObject({ ok: true, status: "wrote", receipt_persisted: true });
+		expect(await rows("events", id)).toHaveLength(1);
+	});
+
+	it("releases manual identity and fact claims when a node is archived", async () => {
+		const id = userId("archive-claim-release");
+		const content = "I started hiking.";
+		const input = {
+			content,
+			extractionResponse: proposal([eventFact({ label: "Hiking", action: "started", text: content })]),
+		};
+		await direct(id, input);
+		const first = await one("nodes", id);
+		await archiveObject(env, id, { kind: "node", id: first.id });
+		const second = await direct(id, input);
+
+		expect(second.status).toBe("wrote");
+		expect(await rows("nodes", id)).toHaveLength(2);
+		expect(await rows("nodes", id, "AND archived_at IS NULL")).toHaveLength(1);
+		expect(await rows("manual_node_identities", id)).toHaveLength(1);
+	});
 });
 
 describe("MCP manual conversation engine", () => {
@@ -739,6 +1071,43 @@ describe("MCP manual conversation engine", () => {
 		expect(detail.actions.createdEdges).toHaveLength(1);
 	});
 
+	it("updates the existing canonical page and graph when a conversation corrects a relationship", async () => {
+		const id = userId("conversation-correction");
+		const original = "Blue Lantern uses Rust.";
+		const first = await collect(id, {
+			messages: [{ role: "user", content: original }],
+			conversationId: "blue-lantern-original",
+			digestResponse: original,
+		});
+		expect(first).toMatchObject({ status: "wrote", counts: { pages: 1, nodes: 2, edges: 1 } });
+		const originalPage = await one("memory_pages", id);
+		expect(originalPage.title).toBe("Blue Lantern");
+
+		const correction = "Correction: My test project Blue Lantern uses Go, not Rust.";
+		const second = await collect(id, {
+			messages: [{ role: "user", content: correction }],
+			conversationId: "blue-lantern-correction",
+			digestResponse: correction,
+		});
+
+		expect(second).toMatchObject({
+			status: "wrote",
+			counts: { pages: 1, nodes: 1, edges: 1, supersededEdges: 1 },
+			receipt: { page_action: "updated" },
+		});
+		expect(await rows("memory_pages", id)).toHaveLength(1);
+		const page = await one("memory_pages", id);
+		expect(page.id).toBe(originalPage.id);
+		expect(page.title).toBe("Blue Lantern");
+		expect(JSON.parse(page.key_points_json)).toEqual(["Blue Lantern uses Go."]);
+		expect(JSON.parse(page.decisions_json)).toContain("Technology corrected from Rust to Go.");
+		expect(page.short_summary).toContain("Blue Lantern uses Go");
+		expect(page.short_summary).not.toContain("uses Rust");
+		expect(await rows("nodes", id, "AND label LIKE 'Correction%'")).toHaveLength(0);
+		expect(await rows("nodes", id, "AND label LIKE 'not %'")).toHaveLength(0);
+		expect(await rows("edges", id, "AND deleted_at IS NULL")).toHaveLength(1);
+	});
+
 	it("excludes assistant-only claims and digest hallucinations from both page and graph", async () => {
 		const id = userId("conversation-grounding");
 		const messages = [
@@ -746,7 +1115,7 @@ describe("MCP manual conversation engine", () => {
 			{ id: "ground-assistant", role: "assistant", content: "You use Redis for caching." },
 		];
 		const groundedLine = "The user is building Atlas.";
-		const hallucinatedLine = "The user uses Redis for caching.";
+		const hallucinatedLine = "The user is building Atlas with Redis.";
 		const result = await collect(id, {
 			messages,
 			conversationId: "conversation-grounding",
@@ -805,6 +1174,155 @@ describe("MCP manual conversation engine", () => {
 		expect(await rows("receipts", id)).toHaveLength(2);
 		const packet = await one("source_packets", id);
 		expect(packet.seen_count).toBe(2);
+	});
+
+	it("continues the graph lane for a duplicate page so missing facts and candidates can be repaired", async () => {
+		const id = userId("duplicate-page-repair");
+		const line = "My dog is named Luna.";
+		const base = {
+			messages: [{ id: "luna-user", role: "user", content: line }],
+			conversationId: "duplicate-page-repair",
+			digestResponse: line,
+		};
+		const first = await collect(id, { ...base, extractionResponse: proposal() });
+		expect(first).toMatchObject({ status: "wrote", counts: { pages: 1, nodes: 0 } });
+		await seedPendingCandidate(id, "candidate-luna-repair", "Luna");
+
+		const second = await collect(id, {
+			...base,
+			extractionResponse: proposal([
+				sliceFact({ label: "Luna", category: "family", kind: "other", text: line }),
+			]),
+		});
+
+		expect(second).toMatchObject({
+			status: "wrote",
+			counts: { pages: 0, nodes: 1, slices: 1, resolvedCandidates: 1 },
+			receipt: { page_action: "duplicate" },
+		});
+		expect(await rows("memory_pages", id)).toHaveLength(1);
+		expect((await rows("nodes", id)).map((node) => node.label)).toEqual(["Luna"]);
+		expect(await one("candidates", id)).toMatchObject({ status: "promoted" });
+	});
+
+	it("keeps graph extraction independent when the matching memory page is suppressed", async () => {
+		const id = userId("suppressed-page-graph");
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO memory_suppressions
+				(id, user_id, kind, canonical_key, label, reason, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).bind("suppress-car-page", id, "memory_page", "car", "car", "test_suppression", now).run();
+		const line = "Car service cost matters for purchase research.";
+		const result = await collect(id, {
+			topic: "car",
+			messages: [{ role: "user", content: line }],
+			digestResponse: line,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: line }),
+			]),
+		});
+
+		expect(result).toMatchObject({
+			status: "wrote",
+			counts: { pages: 0, nodes: 1, slices: 1 },
+			receipt: { page_action: "suppressed" },
+		});
+		expect(await rows("memory_pages", id)).toHaveLength(0);
+		expect((await rows("nodes", id)).map((node) => node.label)).toEqual(["Car Research"]);
+	});
+
+	it("returns a truthful non-persisted receipt and leaves no dangling page receipt id when receipt storage fails", async () => {
+		const id = userId("receipt-failure");
+		const line = "I am building Atlas with D1 for storage.";
+		const result = await runMcpConversationCollectCommand(envWithReceiptFailure(), null, id, {
+			messages: [{ role: "user", content: line }],
+			conversationId: "receipt-failure",
+			digestResponse: line,
+			extractionResponse: proposal(
+				[sliceFact({ label: "Atlas", kind: "progress", text: line })],
+				[{
+					from: { label: "Atlas", category: "project" },
+					to: { label: "D1", category: "tool" },
+					type: "uses",
+					text: line,
+					confidence: 0.98,
+				}],
+			),
+		});
+
+		expect(result).toMatchObject({
+			ok: true,
+			status: "wrote",
+			receipt_id: null,
+			receipt_persisted: false,
+			warnings: ["receipt_persistence_failed"],
+		});
+		expect(result.summary).toContain("Receipt persistence failed");
+		expect(await rows("receipts", id)).toHaveLength(0);
+		expect(await one("memory_pages", id)).toMatchObject({ receipt_id: null });
+	});
+
+	it("atomically claims one page during concurrent first saves", async () => {
+		const id = userId("concurrent-page-create");
+		const line = "I am building Atlas.";
+		const barrier = writeBarrier();
+		const input = {
+			messages: [{ role: "user", content: line }],
+			conversationId: "concurrent-page-create",
+			digestResponse: line,
+			testBeforeWrite: barrier,
+			extractionResponse: proposal([
+				sliceFact({ label: "Atlas", kind: "progress", text: line }),
+			]),
+		};
+		const results = await Promise.all([collect(id, input), collect(id, input)]);
+
+		expect(results.map((result) => result.counts.pages).sort()).toEqual([0, 1]);
+		expect(await rows("memory_pages", id)).toHaveLength(1);
+		expect(await rows("manual_page_identities", id)).toHaveLength(1);
+		expect(await rows("nodes", id)).toHaveLength(1);
+		expect(results.some((result) => result.receipt.skippedReasons.concurrent_page_claim === 1)).toBe(true);
+	});
+
+	it("reports a concurrent page reinforcement conflict instead of silently overwriting stale merged content", async () => {
+		const id = userId("concurrent-page-update");
+		const baseLine = "Car mileage matters for purchase research.";
+		await collect(id, {
+			topic: "car",
+			messages: [{ role: "user", content: baseLine }],
+			digestResponse: baseLine,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: baseLine }),
+			]),
+		});
+
+		const lines = [
+			"Car service cost matters for purchase research.",
+			"Car resale value matters for purchase research.",
+		];
+		const barrier = writeBarrier();
+		const inputs = lines.map((line) => ({
+			topic: "car",
+			messages: [{ role: "user", content: line }],
+			digestResponse: line,
+			testBeforeWrite: barrier,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: line }),
+			]),
+		}));
+		const results = await Promise.all(inputs.map((input) => collect(id, input)));
+
+		expect(results.map((result) => result.counts.pages).sort()).toEqual([0, 1]);
+		const losingIndex = results.findIndex((result) => result.counts.pages === 0);
+		expect(results[losingIndex]).toMatchObject({
+			status: "wrote_with_page_conflict",
+			receipt: { skippedReasons: { concurrent_page_update: 1 } },
+		});
+		await collect(id, { ...inputs[losingIndex], testBeforeWrite: undefined });
+		const page = await one("memory_pages", id);
+		expect(page.full_markdown).toContain(lines[0]);
+		expect(page.full_markdown).toContain(lines[1]);
 	});
 
 	it("reinforces one same-topic page while merging new graph detail", async () => {
