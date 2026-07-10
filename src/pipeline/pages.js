@@ -228,7 +228,7 @@ function markdownFor({ title, overview, keyPoints, decisions, technical, nextSte
 	return parts.join("\n");
 }
 
-export function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, sourcePacket }) {
+export function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, receiptId = null, sourcePacket }) {
 	const lines = String(digest ?? "")
 		.split(/\n+/)
 		.map((line) => line.trim())
@@ -239,7 +239,7 @@ export function buildPageDraft({ digest, messages, intent, conversationId, extra
 	const keyPoints = uniq(lines).slice(0, 30);
 	const overview = keyPoints.slice(0, 3).join(" ");
 	const related = relatedConcepts(lines, title, intent.topic);
-	const evidence = buildEvidence(lines, messages, extractionRunId, sourcePacket);
+	const evidence = buildEvidence(lines, messages, receiptId ?? extractionRunId, sourcePacket);
 	const sections = {
 		overview,
 		keyPoints,
@@ -278,6 +278,7 @@ export function buildPageDraft({ digest, messages, intent, conversationId, extra
 		input_hash: sourcePacket?.content_hash ?? null,
 		idempotency_key: sourcePacket?.idempotency_key ?? null,
 		extraction_run_id: extractionRunId,
+		receipt_id: receiptId,
 		confidence: evidence.some((e) => e.source_type === "user_message") ? 0.9 : 0.78,
 		health_state: "active",
 		importance_class: decisions.length ? "important" : "ordinary",

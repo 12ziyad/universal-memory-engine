@@ -65,6 +65,32 @@ export async function storeOptOutReceipt(env, userId, source = "ingest", meta = 
 	});
 	receipt.durable = false;
 	receipt.opt_out = true;
+	if (meta.manual) {
+		receipt.manual = true;
+		receipt.saved.resolvedCandidates = 0;
+		receipt.identity_decisions = [];
+		receipt.identity_conflicts = [];
+		receipt.actions = {
+			createdPages: [],
+			updatedPages: [],
+			reinforcedPages: [],
+			createdNodes: [],
+			mergedNodes: [],
+			createdSlices: [],
+			createdEvents: [],
+			createdEdges: [],
+			reinforcedNodes: [],
+			supersededSlices: [],
+			reinforcedSlices: [],
+			reinforcedEvents: [],
+			reinforcedEdges: [],
+			resolvedCandidates: [],
+			skippedObjects: [{ kind: "source", reason: "user_opt_out" }],
+			identityConflicts: [],
+		};
+	}
+	if (meta.final !== undefined) receipt.final = Boolean(meta.final);
+	if (meta.processing !== undefined) receipt.processing = Boolean(meta.processing);
 	receipt.opt_out_phrase = meta.opt_out_phrase ?? null;
 	receipt.skippedReasons = { user_opt_out: meta.skipped ?? 1 };
 	const summary = formatReceipt(receipt);

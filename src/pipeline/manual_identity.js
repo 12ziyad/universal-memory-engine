@@ -131,7 +131,11 @@ export function manualIdentitySimilarity(left, right) {
 	const aAcronym = acronym(a);
 	const bAcronym = acronym(b);
 	if ((aAcronym && aAcronym === compactIdentity(b)) || (bAcronym && bAcronym === compactIdentity(a))) return 0.94;
-	if (coreIdentity(a) === coreIdentity(b) && coreIdentity(a) !== a && coreIdentity(b)) return 0.92;
+	if (
+		coreIdentity(a) === coreIdentity(b) &&
+		(coreIdentity(a) !== a || coreIdentity(b) !== b) &&
+		coreIdentity(a)
+	) return 0.92;
 	const overlap = jaccard(a, b);
 	const edit = editRatio(a, b);
 	if (Math.min(a.length, b.length) >= 5 && edit >= 0.92) return edit * 0.96;
@@ -224,6 +228,13 @@ export function resolveManualIdentity(identity, nodes = []) {
 	const best = scored[0];
 	const second = scored[1];
 	if (second && second.score >= best.score - 0.06) {
+		const wantedCategory = canonicalizeCategory(identity?.category);
+		const categoryWinners = wantedCategory && wantedCategory !== "other"
+			? scored.filter((match) => canonicalizeCategory(match.node.category) === wantedCategory)
+			: [];
+		if (best.score >= 0.88 && categoryWinners.length === 1 && categoryWinners[0].node.id === best.node.id) {
+			return { decision: "existing", label, node: best.node, score: best.score, matched_name: best.matchedName };
+		}
 		return {
 			decision: "ambiguous",
 			label,

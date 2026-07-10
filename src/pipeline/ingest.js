@@ -1,8 +1,8 @@
 /**
- * The single ingest path, shared by the HTTP `/v1/ingest` route and the MCP
- * tools — so there is exactly ONE place that routes a user's messages through
- * their Durable Object (hold/trigger) and fires extraction. No engine logic is
- * duplicated in the MCP layer.
+ * The AutoMode ingest path used by HTTP `/v1/ingest` and the existing API lane.
+ * It is the one place that routes AutoMode messages through the user's Durable
+ * Object (hold/trigger) and fires extraction. MCP manual saves
+ * bypass this module so they cannot inspect or mutate held AutoMode state.
  *
  * Extraction ALWAYS runs in the background via ctx.waitUntil (Priority 3): the
  * Durable Object has already durably persisted the held chunk before we return,

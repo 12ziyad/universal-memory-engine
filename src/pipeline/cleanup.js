@@ -183,6 +183,7 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 	if (kind === "node") {
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
 		await env.DB.batch([
+			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE nodes SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?").bind(
 				now,
 				suppress ? now : null,
@@ -257,6 +258,7 @@ export async function deleteAllMemories(env, userId, confirm) {
 		"memory_jobs",
 		"memory_profiles",
 		"memory_suppressions",
+		"manual_node_identities",
 		"checkpoints",
 	];
 	const counts = {};

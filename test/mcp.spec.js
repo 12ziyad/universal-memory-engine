@@ -1,7 +1,7 @@
 /**
  * MCP server tests — the identity token (pure functions), the auth gate on the
  * /mcp route, and a smoke test that the Streamable HTTP handler builds the server
- * and lists the four tools. Tool *behavior* is covered by the engine tests
+ * and lists the three manual-door tools. Tool *behavior* is covered by the engine tests
  * (recall.spec / extraction.spec) since the tools just call those paths.
  */
 
@@ -156,14 +156,15 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(await res.text()).toContain("uml-memory");
 	});
 
-	it("lists the four memory tools", async () => {
+	it("lists exactly the three manual memory-door tools", async () => {
 		const res = await mcp(token, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(res.status).toBe(200);
-		const text = await res.text();
-		expect(text).toContain("save_memory");
-		expect(text).toContain("observe_messages");
-		expect(text).toContain("save_conversation");
-		expect(text).toContain("recall_memory");
+		const body = await mcpJson(res);
+		expect(body.result.tools.map((tool) => tool.name).sort()).toEqual([
+			"recall_memory",
+			"save_conversation",
+			"save_memory",
+		]);
 	});
 
 	it("save_memory returns structured status, receipt, and source ids", async () => {
@@ -189,31 +190,21 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(body.result.content[0].text).toContain("Saved: 0");
 	});
 
-	it("observe_messages returns structured ignored/held status without duplicating engine logic", async () => {
+	it("does not register observe_messages", async () => {
 		const res = await mcp(token, {
 			jsonrpc: "2.0",
 			id: 4,
 			method: "tools/call",
-			params: {
-				name: "observe_messages",
-				arguments: { messages: [{ id: "obs-1", role: "user", content: "hello" }], conversationId: "mcp-observe" },
-			},
+			params: { name: "observe_messages", arguments: {} },
 		});
 		expect(res.status).toBe(200);
 		const body = await mcpJson(res);
-		const result = body.result.structuredContent;
-		expect(result).toMatchObject({
-			ok: true,
-			mode: "observe_messages",
-			source: "observe_messages",
-			fired: false,
-			processing: false,
-			held: 0,
-			skipped: 0,
-			receipt: { outcome: "ignored", source: "observe_messages", source_mode: "auto_observe" },
-		});
-		expect(result.source_packet_id).toMatch(/^src_/);
-		expect(result.receipt_id).toMatch(/^receipt_/);
+		expect(body.result.isError).toBe(true);
+		expect(body.result.content).toHaveLength(1);
+		expect(body.result.content[0]).toMatchObject({ type: "text" });
+		expect(body.result.content[0].text).toContain("observe_messages");
+		expect(body.result.content[0].text).toContain("not found");
+		expect(body.error).toBeUndefined();
 	});
 
 	it("save_conversation returns structured status, receipt, and source ids", async () => {
