@@ -1,11 +1,10 @@
 /**
  * The MCP server — the door supported MCP clients and custom agents connect through.
  *
- * Four tools, each routed through the EXISTING engine (no duplicated logic):
- *   - save_memory       → ingest path (single durable statement)
- *   - observe_messages  → ingest path (auto-observed chat messages)
- *   - save_conversation → ingest path (a de-duplicated batch of chat messages)
- *   - recall_memory     → recall path (compact personal context)
+ * Three manual tools:
+ *   - save_memory       → isolated manual direct engine
+ *   - save_conversation → isolated manual conversation engine
+ *   - recall_memory     → existing recall engine
  *
  * Identity rides in the connector URL: /mcp/<token>, token = base64url("userId:key").
  * Both Claude and ChatGPT support no-auth (URL-only) remote MCP connectors, and
@@ -18,24 +17,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
-import {
-	runConversationCollectCommand,
-	runDirectSaveCommand,
-	runObserveMessagesCommand,
-	runRecallCommand,
-} from "../pipeline/commands.js";
+import { runRecallCommand } from "../pipeline/commands.js";
+import { runMcpConversationCollectCommand, runMcpDirectSaveCommand } from "../pipeline/manual_mcp.js";
 
 const SAVE_MEMORY_DESC =
-	"Call when the user shares something durable to remember long-term — starting/stopping/finishing/launching something, a health update, a family or life event, a project update, a decision, a goal, a preference, or a skill. Examples: 'I started boxing', 'my grandmother died', \"I'm building an app called Kaka\", 'I decided to use Supabase'. Do NOT call for jokes, thanks, casual chat, questions, translations, or calculations. Returns immediately with a receipt; the memory is processed in the background.";
+	"Manually save one durable fact from the user's submitted words — for example a life or health event, project update, decision, goal, preference, or skill. Do not use for jokes, thanks, casual chat, questions, translations, or calculations. Returns a final receipt after manual extraction and the atomic memory write complete.";
 
 const SAVE_CONVERSATION_DESC =
-	"Call when the conversation is wrapping up or going idle, periodically during a long chat, or when the user says 'save this chat / remember this'. Send the recent messages (mark each role 'user' or 'assistant'); they are digested into clean facts before saving, so a messy chat still captures correctly. Safe to re-send overlapping messages — already-saved ones are skipped. Use scope to limit what is saved.";
+	"Manually save a submitted conversation. Send recent messages in order and mark each role 'user' or 'assistant'; durable user facts are digested into one memory page and the memory graph. Assistant messages are context only. Safe to re-send overlapping messages. Returns a final combined page-and-graph receipt after writes complete; use scope to limit what is saved.";
 
 const RECALL_MEMORY_DESC =
 	"Call when the user asks what you know about them, or when answering needs their personal context (their projects, health, skills, goals, family, preferences). Returns a compact block of what is already known.";
-
-const OBSERVE_MESSAGES_DESC =
-	"Call when an MCP-capable client wants UML to observe recent user/assistant messages for automatic memory capture. This is the auto-observe door: it may hold, ignore, or asynchronously process the messages through the shared engine. Do not call for a single trivial greeting when no memory capture is desired.";
 
 /** base64url helpers (no '+', '/', or '=' so the token is URL-path-safe). */
 export function encodeMcpToken(userId, key) {
@@ -61,7 +53,7 @@ const looseScope = z.object({}).passthrough().optional();
 const messageSchema = z.object({
 	id: z.string().optional(),
 	role: z.enum(["user", "assistant"]).optional().describe("Defaults to 'user'."),
-	content: z.string(),
+	content: z.string().trim().min(1),
 	ts: z.number().optional(),
 });
 
@@ -105,13 +97,13 @@ function ensureScope(authz, mode, source, requiredScope) {
  * be reconnected to a new transport).
  */
 export function buildMemoryServer(env, ctx, userId, authz = {}) {
-	const server = new McpServer({ name: "uml-memory", version: "0.3.0" });
+	const server = new McpServer({ name: "uml-memory", version: "0.4.0" });
 
 	server.tool(
 		"save_memory",
 		SAVE_MEMORY_DESC,
 		{
-			content: z.string().describe("The durable fact, in the user's words. e.g. 'I started boxing'."),
+			content: z.string().trim().min(1).describe("The durable fact, in the user's words. e.g. 'I started boxing'."),
 			recentContext: z
 				.string()
 				.optional()
@@ -125,7 +117,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ content, recentContext, conversationId, threadId, sourceId, idempotencyKey, memoryScope }) => {
 			const forbidden = ensureScope(authz, "direct_save", "save_memory", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
-			const res = await runDirectSaveCommand(env, ctx, userId, {
+			const res = await runMcpDirectSaveCommand(env, ctx, userId, {
 				content,
 				recentContext,
 				conversationId,
@@ -139,42 +131,12 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	);
 
 	server.tool(
-		"observe_messages",
-		OBSERVE_MESSAGES_DESC,
-		{
-			messages: z
-				.array(messageSchema)
-				.describe("Recent chat messages, oldest first. User messages may become memory; assistant messages are context."),
-			flush: z.boolean().optional().describe("Force trigger evaluation now. Defaults to false."),
-			conversationId: z.string().optional().describe("Stable conversation id for de-duplication/source tracking."),
-			threadId: z.string().optional().describe("Host/client thread id for source tracking."),
-			sourceId: z.string().optional().describe("Optional caller source id for idempotency/source tracking."),
-			idempotencyKey: z.string().optional().describe("Optional idempotency key for safe retries."),
-			memoryScope: looseScope.describe("Optional memory scope metadata such as appId, workspaceId, agentId, or externalUserId."),
-		},
-		async ({ messages, flush, conversationId, threadId, sourceId, idempotencyKey, memoryScope }) => {
-			const forbidden = ensureScope(authz, "observe_messages", "observe_messages", MEMORY_WRITE_SCOPE);
-			if (forbidden) return forbidden;
-			const res = await runObserveMessagesCommand(env, ctx, userId, messages ?? [], {
-				flush: Boolean(flush),
-				conversationId,
-				threadId,
-				sourceId,
-				idempotencyKey,
-				memoryScope,
-				source: "observe_messages",
-				sourceMode: "auto_observe",
-			});
-			return mcpResult(res);
-		},
-	);
-
-	server.tool(
 		"save_conversation",
 		SAVE_CONVERSATION_DESC,
 		{
 			messages: z
 				.array(messageSchema)
+				.min(1)
 				.describe("Recent chat messages, oldest first. Include assistant turns for context; only user facts are saved."),
 			conversationId: z.string().optional().describe("Stable id for this chat, used to de-duplicate re-sends."),
 			threadId: z.string().optional().describe("Optional host/client thread id for source tracking."),
@@ -191,7 +153,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, memoryScope }) => {
 			const forbidden = ensureScope(authz, "conversation_collect", "save_conversation", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
-			const res = await runConversationCollectCommand(env, ctx, userId, {
+			const res = await runMcpConversationCollectCommand(env, ctx, userId, {
 				messages: messages ?? [],
 				conversationId,
 				threadId,

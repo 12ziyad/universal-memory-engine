@@ -228,7 +228,7 @@ function markdownFor({ title, overview, keyPoints, decisions, technical, nextSte
 	return parts.join("\n");
 }
 
-function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, sourcePacket }) {
+export function buildPageDraft({ digest, messages, intent, conversationId, extractionRunId, sourcePacket }) {
 	const lines = String(digest ?? "")
 		.split(/\n+/)
 		.map((line) => line.trim())
@@ -367,7 +367,7 @@ function scorePageMatch(page, draft, intent, conversationId) {
 	};
 }
 
-function findPageMatch(pages, draft, intent, conversationId) {
+export function findPageMatch(pages, draft, intent, conversationId) {
 	if (intent.explicitNew) return null;
 	const scored = (pages ?? [])
 		.filter((p) => p.source_mode === "manual_collect")
@@ -376,7 +376,7 @@ function findPageMatch(pages, draft, intent, conversationId) {
 	return scored.find((item) => item.strong)?.page ?? null;
 }
 
-function suppressedBy(rows, kind, key) {
+export function suppressedBy(rows, kind, key) {
 	return rows.find((s) => s.kind === kind && s.canonical_key === key);
 }
 
@@ -387,7 +387,7 @@ function pageArray(page, column, sectionKey) {
 	return safeJsonArray(sections[sectionKey]);
 }
 
-function mergePageDraft(existing, draft, { preferDraftTitle = false } = {}) {
+export function mergePageDraft(existing, draft, { preferDraftTitle = false } = {}) {
 	const keyPoints = uniq([...pageArray(existing, "key_points_json", "keyPoints"), ...(draft.keyPoints ?? [])]).slice(0, 30);
 	const decisions = uniq([...pageArray(existing, "decisions_json", "decisions"), ...(draft.decisions ?? [])]).slice(0, 20);
 	const nextSteps = uniq([...pageArray(existing, "next_steps_json", "nextSteps"), ...(draft.nextSteps ?? [])]).slice(0, 20);
@@ -431,7 +431,7 @@ function mergePageDraft(existing, draft, { preferDraftTitle = false } = {}) {
 	};
 }
 
-function isDuplicateCollect(match, draft, sourcePacket) {
+export function isDuplicateCollect(match, draft, sourcePacket) {
 	if (!match || !draft.input_hash) return false;
 	if (match.input_hash !== draft.input_hash) return false;
 	return Boolean(

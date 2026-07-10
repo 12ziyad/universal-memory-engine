@@ -12,6 +12,8 @@ import { upsertNodeVector } from "../lib/vectorize.js";
 
 export async function writeApproved(env, config, userId, plan) {
 	const stmts = [];
+	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
+	const nodeTouches = plan.nodeTouches ?? [];
 
 	// New nodes.
 	for (const n of plan.newNodes) {
@@ -47,18 +49,21 @@ export async function writeApproved(env, config, userId, plan) {
 	}
 
 	// Node state changes (lifecycle events) — also bumps updated_at.
-	for (const u of plan.nodeStateUpdates) {
+	for (const u of nodeStateUpdates) {
+		const incrementSession = u.increment_session ? 1 : 0;
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE nodes
 				 SET state = ?, updated_at = ?, last_seen_at = ?,
 					 mention_count = COALESCE(mention_count, 0) + 1,
+					 session_count = COALESCE(session_count, 0) + ?,
 					 heat_score = COALESCE(heat_score, 0) + 1
 				 WHERE id = ? AND user_id = ?`,
 			).bind(
 				u.state,
 				Date.now(),
 				Date.now(),
+				incrementSession,
 				u.id,
 				userId,
 			),
@@ -66,20 +71,38 @@ export async function writeApproved(env, config, userId, plan) {
 	}
 
 	// Canonical-match touches (no state change, just freshen updated_at).
-	for (const id of plan.nodeTouches) {
-		if (plan.nodeStateUpdates.some((u) => u.id === id)) continue;
+	for (const touch of nodeTouches) {
+		const id = typeof touch === "string" ? touch : touch?.id;
+		if (!id || nodeStateUpdates.some((u) => u.id === id)) continue;
+		const incrementSession = typeof touch === "object" && touch?.increment_session ? 1 : 0;
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE nodes
 				 SET updated_at = ?, last_seen_at = ?, mention_count = COALESCE(mention_count, 0) + 1,
+					 session_count = COALESCE(session_count, 0) + ?,
 					 heat_score = COALESCE(heat_score, 0) + 1
 				 WHERE id = ? AND user_id = ?`,
 			).bind(
 				Date.now(),
 				Date.now(),
+				incrementSession,
 				id,
 				userId,
 			),
+		);
+	}
+
+	// Manual identity merges may add newly observed labels as aliases. Accept a
+	// pre-serialized aliases_json string or an array for planner convenience.
+	for (const update of plan.nodeAliasUpdates ?? []) {
+		if (!update?.id) continue;
+		const aliasesJson = typeof update.aliases_json === "string"
+			? update.aliases_json
+			: JSON.stringify(update.aliases_json ?? []);
+		stmts.push(
+			env.DB.prepare(
+				"UPDATE nodes SET aliases_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+			).bind(aliasesJson, Date.now(), update.id, userId),
 		);
 	}
 
@@ -238,6 +261,132 @@ export async function writeApproved(env, config, userId, plan) {
 				b.id,
 				userId,
 			),
+		);
+	}
+
+	// A successful manual merge resolves matching pending candidates in the same
+	// transaction as the graph write, preventing stale review rows on retries.
+	for (const resolution of plan.candidateResolutions ?? []) {
+		if (!resolution?.id) continue;
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE candidates
+				 SET status = ?, reviewed_at = ?,
+					 promoted_object_id = COALESCE(?, promoted_object_id),
+					 promoted_object_kind = COALESCE(?, promoted_object_kind)
+				 WHERE id = ? AND user_id = ? AND COALESCE(status, 'pending') = 'pending'`,
+			).bind(
+				resolution.status ?? "resolved",
+				resolution.reviewed_at ?? Date.now(),
+				resolution.node_id ?? null,
+				resolution.node_kind ?? "node",
+				resolution.id,
+				userId,
+			),
+		);
+	}
+
+	// Optional MCP-manual page writes. These mirror the existing manual_collect
+	// INSERT/UPDATE statements, but participate in this graph transaction.
+	for (const page of plan.newPages ?? []) {
+		const now = page.created_at ?? Date.now();
+		stmts.push(
+			env.DB.prepare(
+				`INSERT INTO memory_pages
+					(id, user_id, node_id, node_kind, source_mode, title, canonical_title, topic_filter,
+					 short_summary, full_markdown, sections_json, key_points_json, decisions_json,
+					 next_steps_json, related_concepts_json, evidence_json, source_thread_id,
+					 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
+					 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
+					 cluster, role_type)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).bind(
+				page.id,
+				page.user_id ?? userId,
+				page.node_id ?? null,
+				page.node_kind ?? "memory_page",
+				page.source_mode ?? "manual_collect",
+				page.title,
+				page.canonical_title,
+				page.topic_filter ?? null,
+				page.short_summary ?? null,
+				page.full_markdown ?? null,
+				page.sections_json ?? null,
+				page.key_points_json ?? null,
+				page.decisions_json ?? null,
+				page.next_steps_json ?? null,
+				page.related_concepts_json ?? null,
+				page.evidence_json ?? null,
+				page.source_thread_id ?? null,
+				page.source_conversation_id ?? null,
+				page.source_packet_id ?? null,
+				page.input_hash ?? null,
+				page.idempotency_key ?? null,
+				page.extraction_run_id ?? null,
+				now,
+				page.updated_at ?? now,
+				page.last_seen_at ?? now,
+				page.heat_score ?? 1,
+				page.confidence ?? null,
+				page.health_state ?? "active",
+				page.importance_class ?? "ordinary",
+				page.cluster ?? null,
+				page.role_type ?? "container",
+			),
+		);
+	}
+
+	for (const update of plan.pageUpdates ?? []) {
+		const page = update?.page;
+		if (!page?.id) continue;
+		const now = update.now ?? Date.now();
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE memory_pages SET
+					title = ?, canonical_title = ?, topic_filter = ?, short_summary = ?, full_markdown = ?,
+					sections_json = ?, key_points_json = ?, decisions_json = ?, next_steps_json = ?,
+					related_concepts_json = ?, evidence_json = ?, source_conversation_id = COALESCE(?, source_conversation_id),
+					source_packet_id = ?, input_hash = ?, idempotency_key = ?,
+					extraction_run_id = ?, updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
+					confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
+				 WHERE id = ? AND user_id = ?`,
+			).bind(
+				page.title,
+				page.canonical_title,
+				page.topic_filter ?? null,
+				page.short_summary ?? null,
+				page.full_markdown ?? null,
+				page.sections_json ?? null,
+				page.key_points_json ?? null,
+				page.decisions_json ?? null,
+				page.next_steps_json ?? null,
+				page.related_concepts_json ?? null,
+				page.evidence_json ?? null,
+				update.conversationId ?? null,
+				page.source_packet_id ?? null,
+				page.input_hash ?? null,
+				page.idempotency_key ?? null,
+				update.runId ?? page.extraction_run_id ?? null,
+				now,
+				now,
+				page.confidence ?? 0,
+				page.importance_class ?? "ordinary",
+				page.cluster ?? null,
+				page.id,
+				userId,
+			),
+		);
+	}
+
+	// Deterministic summaries are supplied by the manual planner after it has
+	// simulated the post-merge fact set, then committed with those facts here.
+	for (const update of plan.nodeSummaryUpdates ?? []) {
+		if (!update?.id) continue;
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE nodes SET summary = ?, cluster = COALESCE(?, cluster), updated_at = ?
+				 WHERE id = ? AND user_id = ?`,
+			).bind(update.summary ?? null, update.cluster ?? null, Date.now(), update.id, userId),
 		);
 	}
 
