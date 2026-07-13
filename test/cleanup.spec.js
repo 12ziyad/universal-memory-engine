@@ -1,6 +1,7 @@
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import worker from "../src";
+import { archiveObject, deleteLastExtraction, deleteObject } from "../src/pipeline/cleanup.js";
 
 const headers = { "x-api-key": env.API_KEY, "content-type": "application/json" };
 
@@ -22,6 +23,59 @@ async function graph(userId) {
 	const response = await worker.fetch(request, env, ctx);
 	await waitOnExecutionContext(ctx);
 	return response.json();
+}
+
+async function seedManualPageState(userId, pageId, { extractionRunId = null } = {}) {
+	const now = Date.now();
+	const statements = [
+		env.DB.prepare(
+			`INSERT INTO memory_pages
+				(id, user_id, source_mode, title, canonical_title, created_at, updated_at)
+			 VALUES (?, ?, 'manual_collect', ?, ?, ?, ?)`,
+		).bind(pageId, userId, `Page ${pageId}`, `page ${pageId}`, now, now),
+		env.DB.prepare(
+			`INSERT INTO manual_page_identities
+				(user_id, canonical_key, page_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?)`,
+		).bind(userId, `page ${pageId}`, pageId, now, now),
+		env.DB.prepare(
+			`INSERT INTO manual_page_versions
+				(user_id, page_id, revision, write_token, updated_at)
+			 VALUES (?, ?, 3, ?, ?)`,
+		).bind(userId, pageId, `page_write_${pageId}`, now),
+		env.DB.prepare(
+			`INSERT INTO manual_page_write_epochs (user_id, epoch, updated_at)
+			 VALUES (?, 0, ?)`,
+		).bind(userId, now),
+	];
+	if (extractionRunId) {
+		statements.push(env.DB.prepare(
+			`INSERT INTO extraction_runs
+				(id, user_id, status, created_pages_json, created_at, updated_at)
+			 VALUES (?, ?, 'wrote', ?, ?, ?)`,
+		).bind(
+			extractionRunId,
+			userId,
+			JSON.stringify([{ id: pageId, title: `Page ${pageId}` }]),
+			now,
+			now,
+		));
+	}
+	await env.DB.batch(statements);
+}
+
+async function pageInternalCount(table, userId, pageId) {
+	const row = await env.DB.prepare(
+		`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ? AND page_id = ?`,
+	).bind(userId, pageId).first();
+	return Number(row?.count ?? 0);
+}
+
+async function pageWriteEpoch(userId) {
+	const row = await env.DB.prepare(
+		"SELECT epoch FROM manual_page_write_epochs WHERE user_id = ?",
+	).bind(userId).first();
+	return row == null ? null : Number(row.epoch);
 }
 
 describe("junk cleanup", () => {
@@ -88,6 +142,26 @@ describe("delete all reset", () => {
 				 (id, user_id, source_mode, title, canonical_title, short_summary, created_at, updated_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			).bind("reset-page", userId, "manual_collect", "UML Page", "uml page", "summary", now, now),
+			env.DB.prepare(
+				`INSERT INTO manual_page_identities
+					(user_id, canonical_key, page_id, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			).bind(userId, "uml page", "reset-page", now, now),
+			env.DB.prepare(
+				`INSERT INTO manual_page_versions
+					(user_id, page_id, revision, write_token, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			).bind(userId, "reset-page", 2, "page_write_reset", now),
+			env.DB.prepare(
+				`INSERT INTO manual_page_identities
+					(user_id, canonical_key, page_id, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			).bind(otherUserId, "other page", "other-reset-page", now, now),
+			env.DB.prepare(
+				`INSERT INTO manual_page_versions
+					(user_id, page_id, revision, write_token, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			).bind(otherUserId, "other-reset-page", 1, "page_write_other", now),
 			env.DB.prepare("INSERT INTO receipts (id, user_id, source, created_at) VALUES (?, ?, ?, ?)").bind(
 				"reset-receipt",
 				userId,
@@ -122,8 +196,115 @@ describe("delete all reset", () => {
 		expect(deleted.body.counts).toMatchObject({ nodes: 1, memory_pages: 1, receipts: 1, extraction_runs: 1 });
 		const after = await graph(userId);
 		expect(after.stats).toMatchObject({ pages: 0, nodes: 0, slices: 0, events: 0, edges: 0, candidates: 0 });
+		expect(await pageInternalCount("manual_page_identities", userId, "reset-page")).toBe(0);
+		expect(await pageInternalCount("manual_page_versions", userId, "reset-page")).toBe(0);
+		expect(await pageWriteEpoch(userId)).toBe(1);
 		const other = await graph(otherUserId);
 		expect(other.stats).toMatchObject({ pages: 1, nodes: 1 });
+		expect(await pageInternalCount("manual_page_identities", otherUserId, "other-reset-page")).toBe(1);
+		expect(await pageInternalCount("manual_page_versions", otherUserId, "other-reset-page")).toBe(1);
+	});
+});
+
+describe("manual page CAS cleanup", () => {
+	it("removes page claims and versions on archive", async () => {
+		const userId = `cleanup-page-archive-${crypto.randomUUID()}`;
+		const pageId = "archive-page";
+		await seedManualPageState(userId, pageId);
+
+		await archiveObject(env, userId, { kind: "memory_page", id: pageId });
+
+		expect(await pageInternalCount("manual_page_identities", userId, pageId)).toBe(0);
+		expect(await pageInternalCount("manual_page_versions", userId, pageId)).toBe(0);
+		expect(await pageWriteEpoch(userId)).toBe(1);
+	});
+
+	it("removes page claims and versions on selected delete", async () => {
+		const userId = `cleanup-page-delete-${crypto.randomUUID()}`;
+		const pageId = "delete-page";
+		await seedManualPageState(userId, pageId);
+
+		await deleteObject(env, userId, { kind: "memory_page", id: pageId, suppress: false });
+
+		expect(await pageInternalCount("manual_page_identities", userId, pageId)).toBe(0);
+		expect(await pageInternalCount("manual_page_versions", userId, pageId)).toBe(0);
+		expect(await pageWriteEpoch(userId)).toBe(1);
+	});
+
+	it("removes page claims and versions when deleting the last extraction", async () => {
+		const userId = `cleanup-page-last-${crypto.randomUUID()}`;
+		const pageId = "last-page";
+		await seedManualPageState(userId, pageId, { extractionRunId: "last-page-run" });
+
+		const result = await deleteLastExtraction(env, userId);
+
+		expect(result).toMatchObject({ deleted: true, extraction_run_id: "last-page-run" });
+		expect(await pageInternalCount("manual_page_identities", userId, pageId)).toBe(0);
+		expect(await pageInternalCount("manual_page_versions", userId, pageId)).toBe(0);
+		expect(await pageWriteEpoch(userId)).toBe(1);
+	});
+});
+
+describe("delete-last atomicity", () => {
+	it("rolls back suppressions, canonical rows, claims, profiles, and run status together", async () => {
+		const userId = `cleanup-last-rollback-${crypto.randomUUID()}`;
+		const now = Date.now();
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO nodes
+				 (id, user_id, label, canonical_label, category, state, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, 'project', 'active', ?, ?)`,
+			).bind("rollback-node", userId, "Rollback Atlas", "rollback atlas", now, now),
+			env.DB.prepare(
+				`INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at)
+				 VALUES (?, ?, ?, ?, 'technical_detail', 1, ?)`,
+			).bind("rollback-slice", userId, "rollback-node", "Rollback Atlas uses D1.", now),
+			env.DB.prepare(
+				`INSERT INTO manual_node_identities
+				 (user_id, canonical_key, node_id, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			).bind(userId, "rollback atlas", "rollback-node", now, now),
+			env.DB.prepare(
+				`INSERT INTO manual_search_profiles
+				 (user_id, object_kind, object_id, identity_text, semantic_text, context_text,
+				  profile_hash, source_updated_at, created_at, updated_at)
+				 VALUES (?, 'node', ?, ?, ?, '', ?, ?, ?, ?)`,
+			).bind(
+				userId, "rollback-node", "Rollback Atlas", "Rollback Atlas uses D1.",
+				"rollback-profile", now, now, now,
+			),
+			env.DB.prepare(
+				`INSERT INTO extraction_runs
+				 (id, user_id, status, created_nodes_json, created_slices_json, created_at, updated_at)
+				 VALUES (?, ?, 'wrote', ?, ?, ?, ?)`,
+			).bind(
+				"rollback-run", userId,
+				JSON.stringify([{ id: "rollback-node", label: "Rollback Atlas" }]),
+				JSON.stringify([{ id: "rollback-slice", node_id: "rollback-node" }]),
+				now, now,
+			),
+		]);
+		const runtime = {
+			...env,
+			DB: {
+				prepare(sql) { return env.DB.prepare(sql); },
+				async batch() { throw new Error("forced delete-last batch failure"); },
+			},
+		};
+
+		await expect(deleteLastExtraction(runtime, userId)).rejects.toThrow("forced delete-last batch failure");
+		expect(await env.DB.prepare("SELECT deleted_at FROM nodes WHERE id = ? AND user_id = ?")
+			.bind("rollback-node", userId).first()).toMatchObject({ deleted_at: null });
+		expect(await env.DB.prepare("SELECT deleted_at FROM slices WHERE id = ? AND user_id = ?")
+			.bind("rollback-slice", userId).first()).toMatchObject({ deleted_at: null });
+		expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM manual_node_identities WHERE user_id = ?")
+			.bind(userId).first()).toMatchObject({ count: 1 });
+		expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM manual_search_profiles WHERE user_id = ?")
+			.bind(userId).first()).toMatchObject({ count: 1 });
+		expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM memory_suppressions WHERE user_id = ?")
+			.bind(userId).first()).toMatchObject({ count: 0 });
+		expect(await env.DB.prepare("SELECT status FROM extraction_runs WHERE id = ? AND user_id = ?")
+			.bind("rollback-run", userId).first()).toMatchObject({ status: "wrote" });
 	});
 });
 
@@ -209,12 +390,13 @@ describe("graph repair", () => {
 			clustersRepaired: 1,
 			evidenceDeduped: 1,
 		});
-		const row = await env.DB.prepare("SELECT title, cluster, evidence_json FROM memory_pages WHERE id = ? AND user_id = ?")
+		const row = await env.DB.prepare("SELECT title, cluster, evidence_json, full_markdown FROM memory_pages WHERE id = ? AND user_id = ?")
 			.bind("repair-ms-page", userId)
 			.first();
 		expect(row.title).toBe("Microsoft SWE Application and Resume Review");
 		expect(row.cluster).toBe("career_applications");
 		const evidence = JSON.parse(row.evidence_json);
 		expect(evidence).toHaveLength(1);
+		expect(row.full_markdown).not.toMatch(/## Evidence/i);
 	});
 });

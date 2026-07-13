@@ -25,6 +25,7 @@ import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
 import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
+import { runManualActionRouter } from "./pipeline/manual_action_router.js";
 import {
 	runConversationCollectCommand,
 	runDirectSaveCommand,
@@ -273,6 +274,22 @@ const routes = {
 			overrides: body._test ?? {},
 		});
 		return json(result);
+	},
+
+	"POST /v1/mcp/choose": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			scopeInput: body.memoryScope ?? body.sourceScope,
+		});
+		if (auth.response) return auth.response;
+
+		// AutoChoose is a read-only host adapter. It selects and validates an
+		// action, but the selected MCP tool remains responsible for its own
+		// memory:read or memory:write authorization and all durable work.
+		return json(await runManualActionRouter(env, getConfig(env), {
+			...body,
+			memoryScope: auth.memoryScope,
+		}));
 	},
 
 	"GET /v1/graph": async (request, env) => {

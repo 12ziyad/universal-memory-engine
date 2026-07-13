@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	MANUAL_IDENTITY_MARGIN_MIN,
+	MANUAL_IDENTITY_MERGE_MIN,
 	candidateMatchesManualNode,
 	canonicalIdentity,
+	manualIdentityEvidence,
 	manualIdentitySimilarity,
+	rankManualIdentityCandidates,
 	resolveManualIdentity,
 } from "../src/pipeline/manual_identity.js";
 
@@ -96,6 +100,91 @@ describe("manual identity resolution", () => {
 		};
 
 		expect(candidateMatchesManualNode(candidate, atlas)).toBe(false);
+	});
+
+	it("converges safe Manchester United names without confusing Manchester entities", () => {
+		const united = node("node-manchester-united", "Manchester United", [], "organization");
+		const city = node("node-manchester-city", "Manchester City", [], "organization");
+		const place = node("node-manchester-place", "Manchester", [], "place");
+		const airport = node("node-manchester-airport", "Manchester Airport", [], "place");
+		const university = node("node-manchester-university", "Manchester University", [], "organization");
+		const pool = [university, airport, city, place, united];
+
+		for (const label of ["Man United", "MUFC", "Manchester United FC"]) {
+			const result = resolveManualIdentity({ label, category: "organization" }, pool);
+			expect(result).toMatchObject({
+				decision: "existing",
+				node: { id: united.id },
+			});
+			expect(result.score).toBeGreaterThanOrEqual(MANUAL_IDENTITY_MERGE_MIN);
+		}
+
+		expect(manualIdentityEvidence("MUFC", university.label)).toMatchObject({ score: 0, kind: "none" });
+		expect(manualIdentityEvidence("Man United", city.label).score).toBe(0);
+	});
+
+	it("keeps the Manchester place, airport, university, City, and United nodes distinct", () => {
+		const nodes = [
+			node("node-manchester-united", "Manchester United", [], "organization"),
+			node("node-manchester-city", "Manchester City", [], "organization"),
+			node("node-manchester-place", "Manchester", [], "place"),
+			node("node-manchester-airport", "Manchester Airport", [], "place"),
+			node("node-manchester-university", "Manchester University", [], "organization"),
+		];
+
+		for (const expected of nodes) {
+			const result = resolveManualIdentity({ label: expected.label, category: expected.category }, [...nodes].reverse());
+			expect(result).toMatchObject({ decision: "existing", node: { id: expected.id } });
+		}
+	});
+
+	it("requires a 0.94 deterministic score and a clear 0.08 lead", () => {
+		expect(MANUAL_IDENTITY_MERGE_MIN).toBe(0.94);
+		expect(MANUAL_IDENTITY_MARGIN_MIN).toBe(0.08);
+		expect(manualIdentityEvidence("Man United", "Manchester United")).toMatchObject({
+			score: 0.95,
+			kind: "token_abbreviation",
+		});
+
+		const clearWinner = resolveManualIdentity(
+			{ label: "Man United", category: "organization" },
+			[
+				node("node-club", "Manchester United", [], "organization"),
+				node("node-project", "Man United Project", [], "organization"),
+			],
+		);
+		expect(clearWinner).toMatchObject({ decision: "existing", node: { id: "node-club" } });
+
+		const tied = [
+			node("node-manchester", "Manchester United", [], "organization"),
+			node("node-manhattan", "Manhattan United", [], "organization"),
+		];
+		for (const ordered of [tied, [...tied].reverse()]) {
+			const result = resolveManualIdentity({ label: "Man United", category: "organization" }, ordered);
+			expect(result).toMatchObject({ decision: "ambiguous", reason: "multiple_existing_nodes_match" });
+			expect(result.matches.map((match) => match.id)).toEqual(["node-manchester", "node-manhattan"]);
+		}
+	});
+
+	it("keeps name evidence separate from hard category conflicts", () => {
+		const manchester = node("node-manchester-place", "Manchester", [], "place");
+		const ranked = rankManualIdentityCandidates(
+			{ label: "Manchester", category: "organization" },
+			[manchester],
+		);
+
+		expect(ranked[0]).toMatchObject({
+			score: 0,
+			nameScore: 1,
+			category: { hard_conflict: true, reason_code: "place_category_conflict" },
+		});
+		expect(resolveManualIdentity(
+			{ label: "Manchester", category: "organization" },
+			[manchester],
+		)).toMatchObject({
+			decision: "ambiguous",
+			reason: "identity_category_conflict",
+		});
 	});
 
 	it("keeps C, C#, and C++ as three distinct identities", () => {

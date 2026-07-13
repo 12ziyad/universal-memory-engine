@@ -74,6 +74,168 @@ const EDGE_TERMS = {
 	related_to: ["related to", "associated with", "connected to"],
 };
 
+const NON_PERSISTABLE_ROLES = new Set([
+	"comparison",
+	"example",
+	"option",
+	"incidental",
+	"incidental_mention",
+]);
+const ATTRIBUTIONS = new Set(["user_stated", "user_adopted"]);
+const POLARITIES = new Set(["positive", "negative"]);
+const MODALITIES = new Set(["asserted", "planned", "possible"]);
+const TEMPORAL_STATUSES = new Set(["current", "historical", "timeless"]);
+
+function sourceMessages(input = {}) {
+	const supplied = Array.isArray(input.sourceMessages) ? input.sourceMessages : [];
+	const messages = supplied.length
+		? supplied
+			.map((message) => ({
+				role: String(message?.role ?? "user").toLocaleLowerCase("en-US"),
+				content: String(message?.content ?? "").trim(),
+			}))
+			.filter((message) => message.content)
+		: String(input.submittedContent ?? "").trim()
+			? [{ role: "user", content: String(input.submittedContent).trim() }]
+			: [];
+	return messages.map((message, index) => ({ ...message, ref: `M${index}` }));
+}
+
+function sentenceSegments(value) {
+	return String(value ?? "")
+		.split(/\n+|(?<=[.!?])\s+/)
+		.map((segment) => segment.trim())
+		.filter(Boolean);
+}
+
+function operationFallbackText(operation) {
+	if (operation?.memory?.text) return operation.memory.text;
+	if (operation?.text) return operation.text;
+	if (operation?.current_text) return operation.current_text;
+	if (operation?.currentText) return operation.currentText;
+	return "";
+}
+
+function evidenceForOperation(operation, input) {
+	const messages = sourceMessages(input);
+	const byRef = new Map(messages.filter((message) => message.role === "user").map((message) => [message.ref, message]));
+	const rawIds = Array.isArray(operation?.evidence_ids)
+		? operation.evidence_ids
+		: Array.isArray(operation?.evidenceIds)
+			? operation.evidenceIds
+			: operation?.evidence_ids ?? operation?.evidenceIds
+				? [operation.evidence_ids ?? operation.evidenceIds]
+				: [];
+	const requestedIds = [...new Set(rawIds.map(String))];
+	let evidenceIds = requestedIds;
+	if (requestedIds.length) {
+		if (requestedIds.some((ref) => !byRef.has(ref))) {
+			return { ok: false, reason: "invalid_evidence_reference", evidenceIds: [], spans: [], segments: [] };
+		}
+	} else {
+		const fallback = operationFallbackText(operation);
+		const exact = messages.find((message) => message.role === "user" && fallback && message.content.includes(fallback));
+		const selected = exact ?? messages.find((message) => message.role === "user");
+		evidenceIds = selected ? [selected.ref] : [];
+	}
+	if (!evidenceIds.length) {
+		return { ok: false, reason: "missing_user_evidence", evidenceIds: [], spans: [], segments: [] };
+	}
+
+	const rawSpans = Array.isArray(operation?.evidence_spans)
+		? operation.evidence_spans
+		: Array.isArray(operation?.evidenceSpans)
+			? operation.evidenceSpans
+			: [];
+	const spans = [];
+	for (const raw of rawSpans) {
+		if (!raw || typeof raw !== "object") {
+			return { ok: false, reason: "invalid_evidence_span", evidenceIds, spans: [], segments: [] };
+		}
+		const messageRef = String(raw.message_ref ?? raw.messageRef ?? raw.message_id ?? raw.evidence_id ?? "");
+		const message = byRef.get(messageRef);
+		if (!message || !evidenceIds.includes(messageRef)) {
+			return { ok: false, reason: "evidence_span_reference_mismatch", evidenceIds, spans: [], segments: [] };
+		}
+		const requestedQuote = String(raw.quote ?? raw.text ?? "").trim();
+		const hasOffsets = raw.start !== undefined || raw.end !== undefined;
+		if (hasOffsets) {
+			const start = Number(raw.start);
+			const end = Number(raw.end);
+			if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > message.content.length) {
+				return { ok: false, reason: "invalid_evidence_span", evidenceIds, spans: [], segments: [] };
+			}
+			const quote = message.content.slice(start, end);
+			if (requestedQuote && requestedQuote !== quote) {
+				return { ok: false, reason: "evidence_quote_mismatch", evidenceIds, spans: [], segments: [] };
+			}
+			spans.push({ message_ref: messageRef, start, end, quote });
+			continue;
+		}
+		if (!requestedQuote) {
+			return { ok: false, reason: "invalid_evidence_span", evidenceIds, spans: [], segments: [] };
+		}
+		const start = message.content.indexOf(requestedQuote);
+		if (start < 0) {
+			return { ok: false, reason: "evidence_quote_mismatch", evidenceIds, spans: [], segments: [] };
+		}
+		spans.push({ message_ref: messageRef, start, end: start + requestedQuote.length, quote: requestedQuote });
+	}
+
+	if (!spans.length) {
+		const fallback = operationFallbackText(operation);
+		for (const ref of evidenceIds) {
+			const message = byRef.get(ref);
+			if (!message) continue;
+			const exactStart = fallback ? message.content.indexOf(fallback) : -1;
+			if (exactStart >= 0) {
+				spans.push({ message_ref: ref, start: exactStart, end: exactStart + fallback.length, quote: fallback });
+				break;
+			}
+		}
+		if (!spans.length) {
+			const message = byRef.get(evidenceIds[0]);
+			if (message?.content) spans.push({ message_ref: message.ref, start: 0, end: message.content.length, quote: message.content });
+		}
+	}
+
+	const segments = spans.flatMap((span) => sentenceSegments(span.quote));
+	return segments.length
+		? { ok: true, evidenceIds, spans, segments }
+		: { ok: false, reason: "missing_evidence_span", evidenceIds, spans, segments: [] };
+}
+
+function semanticMetadata(operation, support) {
+	const claimText = String(operationFallbackText(operation));
+	const evidenceText = String(support ?? "");
+	const semanticText = `${claimText}\n${evidenceText}`;
+	const possible = /\b(?:maybe|might|may|perhaps|possibly|considering|not sure)\b/i.test(semanticText);
+	const planned = /\b(?:plan(?:ning|ned)?|will|going to|intend(?:ing|ed)?|want to|hope to)\b/i.test(semanticText);
+	const negative = /\b(?:not|never|no longer|cannot|without)\b|\b(?:don['’]?t|doesn['’]?t|didn['’]?t|can['’]?t)\b/i.test(claimText);
+	const historical = /\b(?:used to|previously|formerly|in the past|yesterday|last (?:week|month|year|night)|had|was|were)\b/i.test(semanticText);
+	return {
+		attribution: ATTRIBUTIONS.has(operation?.attribution) ? operation.attribution : "user_stated",
+		polarity: negative ? "negative" : POLARITIES.has(operation?.polarity) ? operation.polarity : "positive",
+		modality: possible
+			? "possible"
+			: planned
+				? "planned"
+				: MODALITIES.has(operation?.modality) ? operation.modality : "asserted",
+		temporal_status: historical
+			? "historical"
+			: TEMPORAL_STATUSES.has(operation?.temporal_status) ? operation.temporal_status : "current",
+	};
+}
+
+function entityRole(identity, ref, entitiesByRef) {
+	return entitiesByRef.get(String(ref ?? ""))?.mention_role ?? identity?.mention_role ?? identity?.mentionRole ?? null;
+}
+
+function roleCanMaterialize(identity, ref, entitiesByRef) {
+	const role = entityRole(identity, ref, entitiesByRef);
+	return !role || !NON_PERSISTABLE_ROLES.has(String(role));
+}
+
 function words(value) {
 	return canonicalIdentity(value)
 		.split(" ")
@@ -159,11 +321,6 @@ function validIdentityLabel(label) {
 	return !isBadTitle(raw);
 }
 
-function sourceLooksUncertain(source, label) {
-	if (!/\b(?:maybe|might|perhaps|possibly|someday|not sure|considering)\b/i.test(source)) return false;
-	return includesPhrase(source, label) || overlap(source, label) > 0;
-}
-
 function predicateGrounded(fact, submittedContent) {
 	const memory = fact.memory ?? {};
 	if (includesPhrase(submittedContent, memory.text)) return true;
@@ -205,27 +362,103 @@ function identityGrounded(fact, submittedContent, recentContext) {
 	return { grounded: false, via: null };
 }
 
-function validateFact(fact, input) {
+function validateFact(fact, input, evidence) {
 	const label = fact?.identity?.label;
 	if (!validIdentityLabel(label)) return { ok: false, reason: "invalid_identity" };
 	if (!fact?.memory?.text) return { ok: false, reason: "missing_fact_text" };
 	if (Number(fact.confidence ?? 0) < 0.25) return { ok: false, reason: "low_confidence" };
-	if (sourceLooksUncertain(input.submittedContent, label)) return { ok: false, reason: "uncertain_not_durable" };
 	if (fact.memory.kind === "event" && !ACTIONS.includes(fact.memory.action)) {
 		return { ok: false, reason: "invalid_event_action" };
 	}
 	if (fact.memory.kind === "slice" && !SLICE_KINDS.includes(fact.memory.slice_kind)) {
 		return { ok: false, reason: "invalid_slice_kind" };
 	}
-	const identity = identityGrounded(fact, input.submittedContent, input.recentContext);
-	if (!identity.grounded) return { ok: false, reason: "identity_not_in_submitted_content" };
-	if (!predicateGrounded(fact, input.submittedContent)) {
-		return { ok: false, reason: "fact_not_in_submitted_content" };
+	if (!evidence.ok) return { ok: false, reason: evidence.reason };
+	let identityGrounding = null;
+	let polarityMismatch = false;
+	for (const segment of evidence.segments) {
+		const identity = identityGrounded(fact, segment, input.recentContext);
+		if (!identity.grounded) continue;
+		identityGrounding = identity;
+		if (!predicateGrounded(fact, segment)) continue;
+		if (factIsNegated(fact.memory.text, fact) !== factIsNegated(segment, fact)) {
+			polarityMismatch = true;
+			continue;
+		}
+		return {
+			ok: true,
+			grounding: identity.via,
+			conflictReason: identity.conflictReason ?? null,
+			support: segment,
+		};
 	}
-	return { ok: true, grounding: identity.via, conflictReason: identity.conflictReason ?? null };
+	return identityGrounding
+		? { ok: false, reason: polarityMismatch ? "fact_polarity_mismatch" : "fact_not_in_submitted_content" }
+		: { ok: false, reason: "identity_not_in_submitted_content" };
 }
 
-function validateRelationship(relationship, submittedContent) {
+function regexPhrase(value) {
+	return canonicalIdentity(value)
+		.split(/\s+/)
+		.filter(Boolean)
+		.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+		.join("\\s+");
+}
+
+function factPredicatePhrases(fact) {
+	const memory = fact?.memory ?? {};
+	const configured = memory.kind === "event"
+		? (ACTION_TERMS[memory.action] ?? [])
+		: (SLICE_TERMS[memory.slice_kind] ?? []);
+	return [...new Set([...configured, "is", "are", "has", "have"]
+		.map((phrase) => canonicalIdentity(phrase))
+		.filter(Boolean))]
+		.sort((left, right) => right.length - left.length);
+}
+
+function factTargetAfterPredicate(fact, predicates) {
+	const claim = canonicalIdentity(fact?.memory?.text);
+	for (const predicate of predicates) {
+		const index = ` ${claim} `.indexOf(` ${predicate} `);
+		if (index < 0) continue;
+		const start = index + predicate.length + 1;
+		const suffix = claim.slice(start).split(/\b(?:but|instead|not|rather)\b/)[0];
+		const target = suffix.split(/\s+/).filter((word) => word && !GROUNDING_STOPWORDS.has(word)).slice(0, 4).join(" ");
+		if (target) return target;
+	}
+	return canonicalIdentity(fact?.identity?.label);
+}
+
+function factIsNegated(text, fact) {
+	const source = canonicalIdentity(text);
+	const predicates = factPredicatePhrases(fact);
+	const target = regexPhrase(factTargetAfterPredicate(fact, predicates));
+	if (!source || !target || !predicates.length) return false;
+	const predicatePattern = predicates.map(regexPhrase).filter(Boolean).join("|");
+	const predicateTarget = `(?:${predicatePattern})\\s+(?:the\\s+)?${target}(?:\\b|$)`;
+	const negation = "(?:not|never|no\\s+longer|without|don\\s+t|doesn\\s+t|didn\\s+t|can\\s+t|cannot)";
+	const modifiers = "(?:(?:currently|now|still|actually|really)\\s+){0,2}";
+	return new RegExp(`\\b${negation}\\s+${modifiers}${predicateTarget}`, "i").test(source) ||
+		new RegExp(`\\b(?:${predicatePattern})\\s+(?:not|never|no|without)\\s+(?:the\\s+)?${target}(?:\\b|$)`, "i").test(source);
+}
+
+function relationshipIsNegated(text, relationship) {
+	const source = canonicalIdentity(text);
+	const target = regexPhrase(relationship?.to?.label);
+	const predicates = (EDGE_TERMS[relationship?.type] ?? [])
+		.map(regexPhrase)
+		.filter(Boolean)
+		.sort((left, right) => right.length - left.length);
+	if (!source || !target || !predicates.length) return false;
+	const predicateTarget = `(?:${predicates.join("|")})\\s+(?:the\\s+)?${target}(?:\\b|$)`;
+	const negation = "(?:not|never|no\\s+longer|without|avoid|avoids|avoiding|reject|rejects|rejecting|skip|skips|skipping|don\\s+t|doesn\\s+t|didn\\s+t|can\\s+t|cannot)";
+	const modifiers = "(?:(?:currently|now|still|actually|really)\\s+){0,2}";
+	const intent = "(?:(?:want|wants|plan|plans|intend|intends)\\s+to\\s+)?";
+	return new RegExp(`\\b${negation}\\s+${modifiers}${intent}${predicateTarget}`, "i").test(source) ||
+		new RegExp(`\\b(?:${predicates.join("|")})\\s+(?:not|no|without)\\s+(?:the\\s+)?${target}(?:\\b|$)`, "i").test(source);
+}
+
+function validateRelationship(relationship, evidence) {
 	if (!validIdentityLabel(relationship?.from?.label) || !validIdentityLabel(relationship?.to?.label)) {
 		return { ok: false, reason: "invalid_edge_identity" };
 	}
@@ -233,16 +466,76 @@ function validateRelationship(relationship, submittedContent) {
 	if (canonicalIdentity(relationship.from.label) === canonicalIdentity(relationship.to.label)) {
 		return { ok: false, reason: "edge_self_loop" };
 	}
-	const identitiesGrounded = includesPhrase(submittedContent, relationship.from.label) &&
-		includesPhrase(submittedContent, relationship.to.label);
-	const predicateSupported = hasAnyTerm(submittedContent, EDGE_TERMS[relationship.type] ?? []);
-	const sourceSupport = identitiesGrounded && predicateSupported &&
-		(includesPhrase(submittedContent, relationship.text) || overlap(relationship.text, submittedContent) >= 0.7);
-	if (!sourceSupport) return { ok: false, reason: "edge_not_in_submitted_content" };
-	return { ok: true };
+	if (!evidence.ok) return { ok: false, reason: evidence.reason };
+	for (const segment of evidence.segments) {
+		const identitiesGrounded = includesPhrase(segment, relationship.from.label) &&
+			includesPhrase(segment, relationship.to.label);
+		const predicateSupported = hasAnyTerm(segment, EDGE_TERMS[relationship.type] ?? []);
+		const sourceSupport = identitiesGrounded && predicateSupported &&
+			(includesPhrase(segment, relationship.text) || overlap(relationship.text, segment) >= 0.7);
+		if (!sourceSupport) continue;
+		// The edge table represents active positive relations. A negated relation
+		// must be handled as a typed correction or a grounded slice; materializing
+		// it as a positive edge would invert the user's statement.
+		if (relationshipIsNegated(segment, relationship) || relationshipIsNegated(relationship.text, relationship)) {
+			return { ok: false, reason: "negative_edge_requires_correction" };
+		}
+		return { ok: true, support: segment };
+	}
+	return { ok: false, reason: "edge_not_in_submitted_content" };
 }
 
-function validateCorrection(correction, submittedContent) {
+function correctionValue(value) {
+	if (typeof value === "string" || typeof value === "number") return String(value).trim();
+	if (!value || typeof value !== "object") return "";
+	return String(value.text ?? value.value ?? value.label ?? "").trim();
+}
+
+function factCorrectionValues(correction) {
+	return {
+		oldText: correctionValue(
+			correction?.old_text ?? correction?.oldText ?? correction?.old_value ?? correction?.oldValue,
+		),
+		newText: correctionValue(
+			correction?.new_text ?? correction?.newText ?? correction?.new_value ?? correction?.newValue ??
+			correction?.replacement_memory ?? correction?.replacementMemory ?? correction?.replacement,
+		),
+	};
+}
+
+function correctionCue(source) {
+	return /\b(?:correction|correct(?:ed|ion)?|actually|instead of|no longer|replace(?:s|d)?|switch(?:ed)?|chang(?:e|ed|ing)|not)\b/i.test(source);
+}
+
+function validateFactCorrection(correction, evidence) {
+	const subject = correction?.subject;
+	if (!validIdentityLabel(subject?.label)) return { ok: false, reason: "invalid_correction_subject" };
+	const predicate = String(
+		correction?.predicate ?? correction?.slice_kind ?? correction?.sliceKind ?? "",
+	).trim();
+	if (!predicate) return { ok: false, reason: "missing_correction_predicate" };
+	const { oldText, newText } = factCorrectionValues(correction);
+	if (!oldText || !newText) return { ok: false, reason: "missing_correction_value" };
+	if (!evidence.ok) return { ok: false, reason: evidence.reason };
+	// A correction commonly spans two adjacent sentences (the prior value, then
+	// its replacement). Validate the complete, already-verified evidence span as
+	// well as individual sentences so that structure is retained without joining
+	// unrelated or uncited source messages.
+	const supports = [...new Set([
+		...(evidence.spans ?? []).map((span) => String(span?.quote ?? "").trim()),
+		...(evidence.segments ?? []),
+	].filter(Boolean))];
+	for (const segment of supports) {
+		if (!correctionCue(segment)) continue;
+		if (!includesPhrase(segment, subject.label) && !distinctiveIdentityGrounded(subject.label, segment)) continue;
+		if (!includesPhrase(segment, oldText) || !includesPhrase(segment, newText)) continue;
+		if (!SLICE_KINDS.includes(predicate) && !includesPhrase(segment, predicate)) continue;
+		return { ok: true, support: segment, oldText, newText };
+	}
+	return { ok: false, reason: "fact_correction_not_in_evidence" };
+}
+
+function validateRelationshipCorrection(correction, evidence) {
 	const subject = correction?.subject;
 	const oldTarget = correction?.old_target;
 	const newTarget = correction?.new_target;
@@ -253,34 +546,45 @@ function validateCorrection(correction, submittedContent) {
 		return { ok: false, reason: "invalid_correction_target" };
 	}
 	if (!EDGE_TYPES.includes(correction.type)) return { ok: false, reason: "invalid_edge_type" };
-	if (!/\b(?:correction|actually|instead of|no longer|replace(?:s|d)?|not)\b/i.test(submittedContent)) {
-		return { ok: false, reason: "correction_not_in_submitted_content" };
-	}
-	if (!includesPhrase(submittedContent, subject.label) && !distinctiveIdentityGrounded(subject.label, submittedContent)) {
-		return { ok: false, reason: "correction_subject_not_grounded" };
-	}
-	for (const target of [oldTarget, newTarget].filter(Boolean)) {
-		if (!includesPhrase(submittedContent, target.label)) {
-			return { ok: false, reason: "correction_target_not_grounded" };
+	if (!evidence.ok) return { ok: false, reason: evidence.reason };
+	for (const segment of evidence.segments) {
+		if (!correctionCue(segment)) continue;
+		if (!includesPhrase(segment, subject.label) && !distinctiveIdentityGrounded(subject.label, segment)) continue;
+		let targetsGrounded = true;
+		for (const target of [oldTarget, newTarget].filter(Boolean)) {
+			if (!includesPhrase(segment, target.label)) targetsGrounded = false;
 		}
+		if (!targetsGrounded) continue;
+		if (!hasAnyTerm(segment, EDGE_TERMS[correction.type] ?? [])) continue;
+		return { ok: true, support: segment };
 	}
-	if (!hasAnyTerm(submittedContent, EDGE_TERMS[correction.type] ?? [])) {
-		return { ok: false, reason: "correction_predicate_not_grounded" };
-	}
-	return { ok: true };
+	return { ok: false, reason: "correction_not_in_submitted_content" };
+}
+
+function validateCorrection(correction, evidence) {
+	return correction?.kind === "fact"
+		? validateFactCorrection(correction, evidence)
+		: validateRelationshipCorrection(correction, evidence);
 }
 
 /** Backend grounding/integrity gate for the MCP manual lane only. */
 export function applyManualIntegrity(proposal, input = {}) {
 	const submittedContent = String(input.submittedContent ?? "").trim();
 	const recentContext = String(input.recentContext ?? "").trim();
+	const entities = [...(proposal?.entities ?? [])];
+	const entitiesByRef = new Map(entities.filter((entity) => entity?.ref).map((entity) => [String(entity.ref), entity]));
 	const facts = [];
 	const relationships = [];
 	const corrections = [];
 	const rejected = [...(proposal?.rejected ?? [])];
 
 	for (const fact of proposal?.facts ?? []) {
-		const decision = validateFact(fact, { submittedContent, recentContext });
+		if (!roleCanMaterialize(fact?.identity, fact?.subject_ref ?? fact?.entity_ref, entitiesByRef)) {
+			rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason: "ineligible_mention_role" });
+			continue;
+		}
+		const evidence = evidenceForOperation(fact, { ...input, submittedContent });
+		const decision = validateFact(fact, { submittedContent, recentContext }, evidence);
 		if (!decision.ok) {
 			rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason: decision.reason });
 			continue;
@@ -290,29 +594,103 @@ export function applyManualIntegrity(proposal, input = {}) {
 			identity: decision.conflictReason
 				? { ...fact.identity, _manual_conflict_reason: decision.conflictReason }
 				: fact.identity,
+			...semanticMetadata(fact, decision.support),
+			evidence_ids: evidence.evidenceIds,
+			evidence_spans: evidence.spans,
 			grounding: decision.grounding,
 		});
 	}
 
 	for (const relationship of proposal?.relationships ?? []) {
-		const decision = validateRelationship(relationship, submittedContent);
+		const fromEligible = roleCanMaterialize(relationship?.from, relationship?.from_ref, entitiesByRef);
+		const toEligible = roleCanMaterialize(relationship?.to, relationship?.to_ref, entitiesByRef);
+		if (!fromEligible || !toEligible) {
+			rejected.push({ kind: "edge", label: relationship?.from?.label ?? null, reason: "ineligible_mention_role" });
+			continue;
+		}
+		const evidence = evidenceForOperation(relationship, { ...input, submittedContent });
+		const decision = validateRelationship(relationship, evidence);
 		if (!decision.ok) {
 			rejected.push({ kind: "edge", label: relationship?.from?.label ?? null, reason: decision.reason });
 			continue;
 		}
-		relationships.push(relationship);
+		relationships.push({
+			...relationship,
+			...semanticMetadata(relationship, decision.support),
+			evidence_ids: evidence.evidenceIds,
+			evidence_spans: evidence.spans,
+		});
 	}
 
 	for (const correction of proposal?.corrections ?? []) {
-		const decision = validateCorrection(correction, submittedContent);
+		const subjectEligible = roleCanMaterialize(correction?.subject, correction?.subject_ref, entitiesByRef);
+		const oldEligible = !correction?.old_target || roleCanMaterialize(correction.old_target, correction?.old_target_ref, entitiesByRef);
+		const newEligible = !correction?.new_target || roleCanMaterialize(correction.new_target, correction?.new_target_ref, entitiesByRef);
+		if (!subjectEligible || !oldEligible || !newEligible) {
+			rejected.push({ kind: "correction", label: correction?.subject?.label ?? null, reason: "ineligible_mention_role" });
+			continue;
+		}
+		const evidence = evidenceForOperation(correction, { ...input, submittedContent });
+		const decision = validateCorrection(correction, evidence);
 		if (!decision.ok) {
 			rejected.push({ kind: "correction", label: correction?.subject?.label ?? null, reason: decision.reason });
 			continue;
 		}
-		corrections.push(correction);
+		corrections.push({
+			...correction,
+			...(correction?.kind === "fact" ? {
+				old_text: correction.old_text ?? correction.oldText ?? decision.oldText,
+				new_text: correction.new_text ?? correction.newText ?? decision.newText,
+			} : {}),
+			...semanticMetadata(correction, decision.support),
+			evidence_ids: evidence.evidenceIds,
+			evidence_spans: evidence.spans,
+		});
+	}
+
+	let primaryMemory = proposal?.primary_memory ?? null;
+	const primarySubjectRef = proposal?.primary_subject_ref ?? null;
+	if (primaryMemory?.text && primarySubjectRef) {
+		const acceptedPrimaryFact = facts.find((fact) =>
+			String(fact.subject_ref ?? fact.entity_ref ?? "") === String(primarySubjectRef) &&
+			canonicalIdentity(fact.memory?.text) === canonicalIdentity(primaryMemory.text));
+		if (acceptedPrimaryFact) {
+			primaryMemory = {
+				...primaryMemory,
+				...semanticMetadata(acceptedPrimaryFact, acceptedPrimaryFact.evidence_spans?.[0]?.quote),
+				evidence_ids: acceptedPrimaryFact.evidence_ids,
+				evidence_spans: acceptedPrimaryFact.evidence_spans,
+			};
+		} else {
+			const primaryEntity = entitiesByRef.get(String(primarySubjectRef));
+			const pseudoFact = primaryEntity ? {
+				identity: primaryEntity,
+				subject_ref: primarySubjectRef,
+				memory: primaryMemory,
+				confidence: primaryMemory.confidence ?? 0.9,
+				evidence_ids: primaryMemory.evidence_ids,
+				evidence_spans: primaryMemory.evidence_spans,
+			} : null;
+			const evidence = pseudoFact ? evidenceForOperation(pseudoFact, { ...input, submittedContent }) : { ok: false };
+			const decision = pseudoFact && roleCanMaterialize(primaryEntity, primarySubjectRef, entitiesByRef)
+				? validateFact(pseudoFact, { submittedContent, recentContext }, evidence)
+				: { ok: false };
+			primaryMemory = decision.ok
+				? {
+					...primaryMemory,
+					...semanticMetadata(primaryMemory, decision.support),
+					evidence_ids: evidence.evidenceIds,
+					evidence_spans: evidence.spans,
+				}
+				: null;
+		}
 	}
 
 	return {
+		...proposal,
+		primary_subject_ref: primarySubjectRef,
+		primary_memory: primaryMemory,
+		entities,
 		facts,
 		relationships,
 		corrections,

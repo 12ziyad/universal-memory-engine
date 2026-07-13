@@ -2885,9 +2885,11 @@ function renderPageDetail(p) {
 		<div class="page-md">${esc(p.full_markdown || "")}</div>
 		<div class="d-sec">Related concepts (${related.length})</div>
 		${related.length ? related.map(x=>`<span class="chip" style="margin:2px">${esc(x)}</span>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
-		<div class="d-sec">Evidence (${uniqueEv.length})</div>
-		${uniqueEv.length ? uniqueEv.slice(0,8).map(e=>`<div class="slice">${esc(e.snippet || "")}<span class="k">${esc(e.source_type || "source")} ${e.timestamp ? "· " + fmtDate(e.timestamp) : ""}</span></div>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
-		${hiddenEvidence > 0 ? `<div class="help" style="margin-top:6px">${hiddenEvidence} duplicate/extra evidence item(s) hidden.</div>` : ""}
+		<details style="margin-top:12px">
+			<summary class="d-sec" style="cursor:pointer">Evidence (${uniqueEv.length})</summary>
+			${uniqueEv.length ? uniqueEv.slice(0,8).map(e=>`<div class="slice">${esc(e.snippet || "")}<span class="k">${esc(e.source_type || "source")} ${e.timestamp ? "· " + fmtDate(e.timestamp) : ""}</span></div>`).join("") : `<div class="empty" style="padding:6px">None.</div>`}
+			${hiddenEvidence > 0 ? `<div class="help" style="margin-top:6px">${hiddenEvidence} duplicate/extra evidence item(s) hidden.</div>` : ""}
+		</details>
 		<div class="d-sec">Receipt</div>
 		<div class="kv">run <b>${esc(p.extraction_run_id || "")}</b></div>`;
 }

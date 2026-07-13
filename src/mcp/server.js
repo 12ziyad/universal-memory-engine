@@ -21,10 +21,10 @@ import { runRecallCommand } from "../pipeline/commands.js";
 import { runMcpConversationCollectCommand, runMcpDirectSaveCommand } from "../pipeline/manual_mcp.js";
 
 const SAVE_MEMORY_DESC =
-	"Manually save one durable fact from the user's submitted words — for example a life or health event, project update, decision, goal, preference, or skill. Do not use for jokes, thanks, casual chat, questions, translations, or calculations. Returns a final receipt after manual extraction and the atomic memory write complete.";
+	"Manually save exactly the grounded memory the user explicitly submitted. This includes durable facts, decisions, plans, preferences, events, and meaningful casual experiences; unresolved references require clarification. Returns a final receipt after source-only extraction and the atomic memory write complete.";
 
 const SAVE_CONVERSATION_DESC =
-	"Manually save a submitted conversation. Send recent messages in order and mark each role 'user' or 'assistant'; durable user facts are digested into one memory page and the memory graph. Assistant messages are context only. Safe to re-send overlapping messages. Returns a final combined page-and-graph receipt after writes complete; use scope to limit what is saved.";
+	"Manually save a submitted conversation. Send messages oldest first; only scoped user-stated facts and specifically accepted assistant proposals may enter one semantic memory page and the graph. Assistant text otherwise remains context only. Use contentScope.subject for strict subject filtering. Safe to re-send overlapping messages; returns a final page-and-graph receipt.";
 
 const RECALL_MEMORY_DESC =
 	"Call when the user asks what you know about them, or when answering needs their personal context (their projects, health, skills, goals, family, preferences). Returns a compact block of what is already known.";
@@ -56,6 +56,13 @@ const messageSchema = z.object({
 	content: z.string().trim().min(1),
 	ts: z.number().optional(),
 });
+const contentScopeSchema = z.object({
+	subject: z.string().trim().min(1).optional().describe("Optional strict primary subject, for example 'Ziyad'."),
+	speakerScope: z.literal("user_only").optional().describe("Only user_only is supported in this patch."),
+	includeAssistantFacts: z.boolean().optional().describe("Assistant facts stay excluded unless a later user explicitly adopts a specific proposal."),
+	excludeOtherPeople: z.boolean().optional().describe("Unrelated people are excluded; grounded relationship targets may remain supporting entities."),
+	includeContextForReferenceResolution: z.boolean().optional().describe("Assistant turns may resolve references but are not themselves memorized."),
+}).optional();
 
 function mcpResult(payload) {
 	const summary = payload.command_mode === "recall"
@@ -97,7 +104,12 @@ function ensureScope(authz, mode, source, requiredScope) {
  * be reconnected to a new transport).
  */
 export function buildMemoryServer(env, ctx, userId, authz = {}) {
-	const server = new McpServer({ name: "uml-memory", version: "0.4.0" });
+	const server = new McpServer(
+		{ name: "uml-memory", version: "0.5.0" },
+		{
+			instructions: "UML is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns, and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
+		},
+	);
 
 	server.tool(
 		"save_memory",
@@ -148,9 +160,10 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				.describe("full (default), lastN (last n), topic (filter by `topic`), or summary (payload is already condensed)."),
 			n: z.number().optional().describe("With scope=lastN: how many of the most recent messages to digest."),
 			topic: z.string().optional().describe("With scope=topic: keep only messages mentioning this."),
+			contentScope: contentScopeSchema.describe("Optional strict content selection, separate from tenancy metadata."),
 			memoryScope: looseScope.describe("Optional memory scope metadata such as appId, workspaceId, agentId, or externalUserId."),
 		},
-		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, memoryScope }) => {
+		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, contentScope, memoryScope }) => {
 			const forbidden = ensureScope(authz, "conversation_collect", "save_conversation", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
 			const res = await runMcpConversationCollectCommand(env, ctx, userId, {
@@ -162,6 +175,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				scope,
 				n,
 				topic,
+				contentScope,
 				memoryScope,
 			});
 			return mcpResult(res);

@@ -63,6 +63,50 @@ function proposal(facts = [], relationships = []) {
 	return { facts, relationships, notes: "" };
 }
 
+function validPageSynthesis({ title = "Atlas D1 Memory Notes", line = "Atlas uses D1." } = {}) {
+	return {
+		title_candidates: [title, "Atlas D1 Memory Notes"],
+		selected_title: title,
+		overview: line,
+		key_facts: [{ text: line, claim_ids: ["C0"] }],
+		decisions: [],
+		current_state: [],
+		next_steps: [],
+		open_questions: [],
+		historical_context: [],
+		related_entities: ["Atlas", "D1"],
+	};
+}
+
+function factCorrectionProposal(content, newText, oldText = "Editor Theme was light mode.") {
+	return {
+		primary_subject_ref: "E0",
+		entities: [{
+			ref: "E0",
+			label: "Editor Theme",
+			category: "preference",
+			mention_role: "primary_subject",
+			evidence_ids: ["M0"],
+			evidence_spans: [{ message_ref: "M0", quote: "Editor Theme" }],
+		}],
+		facts: [],
+		relationships: [],
+		corrections: [{
+			kind: "fact",
+			subject_ref: "E0",
+			predicate: "preference",
+			slice_kind: "preference",
+			old_value: oldText,
+			new_value: newText,
+			current_text: newText,
+			text: content,
+			evidence_ids: ["M0"],
+			evidence_spans: [{ message_ref: "M0", quote: content }],
+			confidence: 0.98,
+		}],
+	};
+}
+
 async function direct(id, input) {
 	return runMcpDirectSaveCommand(env, null, id, input);
 }
@@ -82,6 +126,18 @@ function writeBarrier(expected = 2) {
 	};
 }
 
+function boundedWriteBarrier(expected = 2, timeoutMs = 1000) {
+	let arrived = 0;
+	let release;
+	const ready = new Promise((resolve) => { release = resolve; });
+	const timeout = new Promise((resolve) => setTimeout(resolve, timeoutMs));
+	return async () => {
+		arrived++;
+		if (arrived === expected) release();
+		await Promise.race([ready, timeout]);
+	};
+}
+
 function envWithReceiptFailure() {
 	return {
 		...env,
@@ -90,13 +146,19 @@ function envWithReceiptFailure() {
 				if (/^\s*INSERT\s+INTO\s+receipts\b/i.test(String(sql))) {
 					return {
 						bind() {
-							return { run: async () => { throw new Error("forced receipt failure"); } };
+							return {
+								_forcedReceiptFailure: true,
+								run: async () => { throw new Error("forced receipt failure"); },
+							};
 						},
 					};
 				}
 				return env.DB.prepare(sql);
 			},
 			batch(statements) {
+				if (statements.some((statement) => statement?._forcedReceiptFailure)) {
+					throw new Error("forced receipt failure");
+				}
 				return env.DB.batch(statements);
 			},
 		},
@@ -228,6 +290,25 @@ describe("MCP manual direct engine", () => {
 		expect(await rows("slices", id)).toHaveLength(0);
 	});
 
+	it("treats an explicit save_memory call as the durability decision", async () => {
+		const id = userId("explicit-question");
+		const content = "What time is it?";
+		const result = await direct(id, {
+			content,
+			extractionResponse: {},
+		});
+
+		expect(result).toMatchObject({
+			status: "wrote",
+			fired: true,
+			counts: { savedTotal: 2, nodes: 1, slices: 1, candidates: 0 },
+		});
+		expect(await rows("nodes", id)).toHaveLength(1);
+		expect(await rows("slices", id)).toEqual([
+			expect.objectContaining({ text: content }),
+		]);
+	});
+
 	it("merges exact labels and aliases into the same existing node without duplication", async () => {
 		const id = userId("exact-alias");
 		await seedNode(id, "node-uml", "Universal Memory Layer", {
@@ -275,7 +356,7 @@ describe("MCP manual direct engine", () => {
 		expect(node.summary).toContain("UML completed its indexing milestone");
 	});
 
-	it("fails closed on a wrong existing-node hint and writes no graph objects", async () => {
+	it("discards structural node ids and overrides an unknown adjudication reference", async () => {
 		const id = userId("wrong-hint");
 		await seedNode(id, "node-alpha", "Project Alpha");
 		await seedNode(id, "node-beta", "Project Beta");
@@ -292,18 +373,24 @@ describe("MCP manual direct engine", () => {
 					existingNodeId: "node-beta",
 				}),
 			]),
+			adjudicationResponse: {
+				identity_operations: [{
+					entity_ref: "E0",
+					decision: "merge_existing",
+					selected_ref: "N9",
+					confidence: 1,
+				}],
+			},
 		});
 
 		expect(result).toMatchObject({
-			status: "identity_conflict",
-			fired: false,
-			counts: { savedTotal: 0, nodes: 0, events: 0, candidates: 0 },
+			status: "wrote",
+			fired: true,
+			counts: { nodes: 0, events: 1, candidates: 0 },
 		});
-		expect(result.identity_conflicts).toEqual([
-			expect.objectContaining({ label: "Project Alpha", reason: "existing_node_hint_mismatch" }),
-		]);
+		expect(result.receipt.graph.overridden_recommendations).toHaveLength(1);
 		expect(await rows("nodes", id)).toHaveLength(2);
-		expect(await rows("events", id)).toHaveLength(0);
+		expect(await rows("events", id)).toHaveLength(1);
 		expect(await rows("slices", id)).toHaveLength(0);
 		expect(await rows("edges", id)).toHaveLength(0);
 	});
@@ -335,7 +422,7 @@ describe("MCP manual direct engine", () => {
 		expect(await rows("slices", id)).toHaveLength(0);
 	});
 
-	it("rejects facts and relationships supplied only by recent context", async () => {
+	it("requires clarification and rejects facts supplied only by recent context", async () => {
 		const id = userId("context-only");
 		const content = "Remember this: it changed yesterday.";
 		const contextOnly = "Project Atlas uses D1 for its database.";
@@ -360,21 +447,17 @@ describe("MCP manual direct engine", () => {
 		});
 
 		expect(result).toMatchObject({
-			status: "ignored",
+			status: "clarification_required",
 			counts: { savedTotal: 0, nodes: 0, slices: 0, edges: 0 },
+			receipt: { reason: "the submitted reference has no resolvable content" },
 		});
-		expect(result.receipt.skipped).toBe(2);
-		expect(result.receipt.skippedReasons.edge_not_in_submitted_content).toBe(1);
-		expect(
-			(result.receipt.skippedReasons.fact_not_in_submitted_content ?? 0) +
-			(result.receipt.skippedReasons.identity_not_in_submitted_content ?? 0),
-		).toBe(1);
+		expect(result.receipt.skipped).toBe(0);
 		expect(await rows("nodes", id)).toHaveLength(0);
 		expect(await rows("slices", id)).toHaveLength(0);
 		expect(await rows("edges", id)).toHaveLength(0);
 	});
 
-	it("never creates a candidate when the manual extractor proposes one", async () => {
+	it("never creates a candidate and preserves the explicit possible memory instead", async () => {
 		const id = userId("candidate-prevention");
 		const result = await direct(id, {
 			content: "Maybe I should try piano someday.",
@@ -385,12 +468,12 @@ describe("MCP manual direct engine", () => {
 		});
 
 		expect(result).toMatchObject({
-			status: "ignored",
-			counts: { savedTotal: 0, candidates: 0 },
+			status: "wrote",
+			counts: { nodes: 1, slices: 1, candidates: 0 },
 		});
 		expect(result.receipt.skippedReasons).toMatchObject({ manual_candidate_disallowed: 1 });
 		expect(await rows("candidates", id)).toHaveLength(0);
-		expect(await rows("nodes", id)).toHaveLength(0);
+		expect(await rows("nodes", id)).toHaveLength(1);
 	});
 
 	it("atomically resolves a matching pending candidate when manual memory creates the node", async () => {
@@ -801,6 +884,38 @@ describe("MCP manual direct engine", () => {
 		});
 	});
 
+	it("serializes competing relationship corrections without orphan targets or false receipts", async () => {
+		const id = userId("competing-relationship-corrections");
+		await direct(id, { content: "Blue Lantern uses Rust." });
+		const barrier = boundedWriteBarrier();
+		const [goResult, d1Result] = await Promise.all([
+			direct(id, {
+				content: "Correction: Blue Lantern uses Go, not Rust.",
+				testBeforeWrite: barrier,
+			}),
+			direct(id, {
+				content: "Correction: Blue Lantern uses D1, not Rust.",
+				testBeforeWrite: barrier,
+			}),
+		]);
+
+		const activeEdges = await rows("edges", id, "AND deleted_at IS NULL");
+		expect(activeEdges).toHaveLength(1);
+		const nodes = await rows("nodes", id, "AND deleted_at IS NULL");
+		const activeTarget = nodes.find((node) => node.id === activeEdges[0].to_node);
+		expect(["Go", "D1"]).toContain(activeTarget.label);
+		const losingLabel = activeTarget.label === "Go" ? "D1" : "Go";
+		expect(nodes.some((node) => node.label === losingLabel)).toBe(false);
+		expect(await rows("events", id, "AND action = 'changed_plan'")).toHaveLength(1);
+		const project = nodes.find((node) => node.label === "Blue Lantern");
+		const current = await rows("slices", id, `AND node_id = '${project.id}' AND is_current = 1`);
+		expect(current.filter((slice) => /Blue Lantern uses (?:Go|D1)\./.test(slice.text))).toHaveLength(1);
+		expect([goResult, d1Result].filter((result) => result.receipt.actions.corrections.length === 1)).toHaveLength(1);
+		expect([goResult, d1Result].filter((result) =>
+			result.identity_conflicts.some((conflict) => conflict.reason === "concurrent_correction_conflict"),
+		)).toHaveLength(1);
+	});
+
 	it("fails closed on an ambiguous correction subject and creates no replacement identity", async () => {
 		const id = userId("ambiguous-correction");
 		await seedNode(id, "node-blue-one", "First Blue Project", { aliases: ["Blue Lantern"] });
@@ -917,6 +1032,34 @@ describe("MCP manual direct engine", () => {
 		expect(await rows("manual_fact_identities", id)).toHaveLength(1);
 	});
 
+	it("keeps the node summary complete when distinct facts commit concurrently", async () => {
+		const id = userId("concurrent-distinct-summary");
+		await seedNode(id, "node-atlas-summary", "Atlas");
+		const facts = [
+			{ kind: "technical_detail", text: "Atlas uses D1 for storage." },
+			{ kind: "progress", text: "Atlas deploys on Cloudflare Workers." },
+		];
+		const barrier = writeBarrier();
+		const results = await Promise.all(facts.map((fact) => direct(id, {
+			content: fact.text,
+			testBeforeWrite: barrier,
+			extractionResponse: proposal([
+				sliceFact({
+					label: "Atlas",
+					kind: fact.kind,
+					text: fact.text,
+					existingNodeId: "node-atlas-summary",
+				}),
+			]),
+		})));
+
+		expect(results.every((result) => result.status === "wrote")).toBe(true);
+		expect((await rows("slices", id, "AND is_current = 1")).length).toBeGreaterThanOrEqual(2);
+		const node = await one("nodes", id, "AND id = 'node-atlas-summary'");
+		expect(node.summary).toContain(facts[0].text);
+		expect(node.summary).toContain(facts[1].text);
+	});
+
 	it("keeps the concurrent winner current when identical preference corrections race", async () => {
 		const id = userId("concurrent-preference");
 		await seedNode(id, "node-dark-mode", "Dark Mode", { category: "preference" });
@@ -946,6 +1089,89 @@ describe("MCP manual direct engine", () => {
 		const current = await rows("slices", id, "AND is_current = 1");
 		expect(current).toHaveLength(1);
 		expect(current[0]).toMatchObject({ text: content, reinforcement_count: 1 });
+	});
+
+	it("serializes different fact corrections so exactly one replacement remains current", async () => {
+		const id = userId("concurrent-distinct-preference");
+		await seedNode(id, "node-editor-theme", "Editor Theme", { category: "preference" });
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at, last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind("slice-old-editor-theme", id, "node-editor-theme", "Editor Theme was light mode.", "preference", 1, now, now).run();
+		const barrier = boundedWriteBarrier();
+		const darkContent = "Correction: Editor Theme was light mode; Editor Theme is now dark mode.";
+		const solarizedContent = "Correction: Editor Theme was light mode; Editor Theme is now Solarized mode.";
+		const [dark, solarized] = await Promise.all([
+			direct(id, {
+				content: darkContent,
+				testBeforeWrite: barrier,
+				extractionResponse: factCorrectionProposal(darkContent, "Editor Theme is now dark mode."),
+			}),
+			direct(id, {
+				content: solarizedContent,
+				testBeforeWrite: barrier,
+				extractionResponse: factCorrectionProposal(solarizedContent, "Editor Theme is now Solarized mode."),
+			}),
+		]);
+
+		const current = await rows("slices", id, "AND node_id = 'node-editor-theme' AND is_current = 1");
+		expect(current).toHaveLength(1);
+		expect(["Editor Theme is now dark mode.", "Editor Theme is now Solarized mode."]).toContain(current[0].text);
+		expect([dark, solarized].filter((result) => result.receipt.actions.corrections.length === 1)).toHaveLength(1);
+		expect([dark, solarized].filter((result) =>
+			result.identity_conflicts.some((conflict) => conflict.reason === "concurrent_correction_conflict"),
+		)).toHaveLength(1);
+	});
+
+	it("reverses a typed fact correction by creating one new current slice", async () => {
+		const id = userId("typed-fact-reversal");
+		const light = "Editor Theme was light mode.";
+		const dark = "Editor Theme is now dark mode.";
+		await direct(id, {
+			content: light,
+			extractionResponse: proposal([
+				sliceFact({ label: "Editor Theme", category: "preference", kind: "preference", text: light }),
+			]),
+		});
+		const toDark = `Correction: ${light} ${dark}`;
+		let darkPlan = null;
+		const darkResult = await direct(id, {
+			content: toDark,
+			extractionResponse: factCorrectionProposal(toDark, dark, light),
+			testBeforeWrite({ plan }) { darkPlan = plan; },
+		});
+		expect(darkPlan).toMatchObject({
+			newSlices: [expect.objectContaining({ text: dark })],
+			sliceSupersede: [expect.objectContaining({ replacement_id: expect.any(String) })],
+			correctionGuards: [expect.objectContaining({ replacement_fact_key: expect.any(String) })],
+		});
+		expect(darkResult.receipt.actions.corrections).toHaveLength(1);
+		expect(await rows("slices", id, "AND kind = 'preference' AND is_current = 1")).toEqual([
+			expect.objectContaining({ text: dark }),
+		]);
+		const backToLight = `Correction: ${dark} ${light}`;
+		let reversalPlan = null;
+		const reversed = await direct(id, {
+			content: backToLight,
+			extractionResponse: factCorrectionProposal(backToLight, light, dark),
+			testBeforeWrite({ plan }) { reversalPlan = plan; },
+		});
+
+		expect(reversed.receipt.actions.corrections).toHaveLength(1);
+		expect(reversalPlan).toMatchObject({
+			newSlices: [expect.objectContaining({ text: light, is_current: 1 })],
+			sliceSupersede: [expect.objectContaining({ replacement_id: expect.any(String) })],
+		});
+		const allPreferenceSlices = await rows("slices", id, "AND kind = 'preference'");
+		expect(allPreferenceSlices).toEqual(expect.arrayContaining([
+			expect.objectContaining({ text: light, is_current: 1 }),
+		]));
+		const current = allPreferenceSlices.filter((slice) => Number(slice.is_current) === 1);
+		expect(current).toHaveLength(1);
+		expect(current[0].text).toBe(light);
+		const claims = await rows("manual_fact_identities", id, "AND object_kind = 'slice'");
+		expect(claims.some((claim) => claim.object_id === current[0].id)).toBe(true);
 	});
 
 	it("allows exactly one concurrent caller to own an explicit idempotency key", async () => {
@@ -995,7 +1221,7 @@ describe("MCP manual direct engine", () => {
 });
 
 describe("MCP manual conversation engine", () => {
-	it("returns a stored no-write receipt for a conversation with no durable user facts", async () => {
+	it("saves a grounded task-oriented question without requiring a durable graph fact", async () => {
 		const id = userId("conversation-no-durable");
 		const result = await collect(id, {
 			scope: "summary",
@@ -1005,13 +1231,101 @@ describe("MCP manual conversation engine", () => {
 			],
 		});
 		expect(result).toMatchObject({
-			status: "ignored",
-			fired: false,
-			counts: { savedTotal: 0, pages: 0, nodes: 0 },
+			status: "wrote",
+			fired: true,
+			counts: { savedTotal: 1, pages: 1, nodes: 0 },
 		});
-		expect(await rows("memory_pages", id)).toHaveLength(0);
+		expect(await rows("memory_pages", id)).toHaveLength(1);
 		expect(await rows("nodes", id)).toHaveLength(0);
 		expect(await rows("receipts", id)).toHaveLength(1);
+	});
+
+	it("saves the PDF-correction conversation through fallback without creating graph nodes", async () => {
+		const id = userId("pdf-correction-page-only");
+		const request = "Please correct the spelling and formatting in the attached PDF.";
+		const completion = "I corrected the spelling and formatting in the PDF and prepared the revised file.";
+		const saveCommand = "Save this conversation to memory.";
+		let capturedClaims = [];
+		const input = {
+			conversationId: "pdf-correction-conversation",
+			messages: [
+				{ id: "pdf-request", role: "user", content: request },
+				{ id: "pdf-complete", role: "assistant", content: completion },
+				{ id: "pdf-save", role: "user", content: saveCommand },
+			],
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			synthesisResponses: [
+				{ selected_title: "Research Session", overview: "The user loves PDFs." },
+				{ selected_title: "Chat Summary", overview: "The PDF was translated." },
+			],
+			testBeforeWrite({ graphPlan }) {
+				capturedClaims = graphPlan.conversationClaims;
+			},
+		};
+
+		const first = await collect(id, input);
+		expect(first).toMatchObject({
+			status: "wrote",
+			fired: true,
+			counts: {
+				savedTotal: 1,
+				pages: 1,
+				nodes: 0,
+				slices: 0,
+				events: 0,
+				edges: 0,
+			},
+			receipt: {
+				page: {
+					action: "create",
+					primary_subject_node_id: null,
+					synthesis_mode: "deterministic_fallback",
+					retry_count: 1,
+				},
+			},
+		});
+		expect(capturedClaims).toEqual([
+			expect.objectContaining({
+				claim_kind: "user_task_request",
+				attribution: "user_stated",
+				page_only: true,
+			}),
+			expect.objectContaining({
+				claim_kind: "assistant_completed_action",
+				attribution: "assistant_completed",
+				responds_to_source_message_id: "pdf-request",
+			}),
+		]);
+
+		const page = await one("memory_pages", id);
+		const evidence = JSON.parse(page.evidence_json);
+		expect(page.node_id).toBeNull();
+		expect(page.title).not.toMatch(/Research Session|Chat Summary/i);
+		expect(page.full_markdown).toContain("Assistant corrected the spelling and formatting in the PDF");
+		expect(page.full_markdown).not.toContain(request);
+		expect(page.full_markdown).not.toContain(completion);
+		expect(page.full_markdown).not.toContain(saveCommand);
+		expect(page.full_markdown).not.toMatch(/## Evidence|translated|loves PDFs/i);
+		expect(evidence).toEqual(expect.arrayContaining([
+			expect.objectContaining({ source_message_id: "pdf-request", source_role: "user" }),
+			expect.objectContaining({ source_message_id: "pdf-complete", source_role: "assistant" }),
+		]));
+		expect(evidence.some((item) => item.source_message_id === "pdf-save")).toBe(false);
+		expect(await rows("nodes", id)).toHaveLength(0);
+		expect(await rows("slices", id)).toHaveLength(0);
+		expect(await rows("events", id)).toHaveLength(0);
+		expect(await rows("edges", id)).toHaveLength(0);
+
+		const second = await collect(id, input);
+		expect(second).toMatchObject({
+			status: "skipped_duplicate",
+			fired: false,
+			counts: { savedTotal: 0, pages: 0, nodes: 0, slices: 0, events: 0, edges: 0 },
+			receipt: { page: { action: "duplicate", evidence_added_count: 0 } },
+		});
+		expect(await rows("memory_pages", id)).toHaveLength(1);
+		expect(await rows("nodes", id)).toHaveLength(0);
 	});
 
 	it("atomically creates one memory page plus grounded graph facts with one combined receipt", async () => {
@@ -1058,6 +1372,10 @@ describe("MCP manual conversation engine", () => {
 		expect(graphEdges).toHaveLength(1);
 		expect(receipts).toHaveLength(1);
 		expect(pages[0].receipt_id).toBe(receipts[0].id);
+		expect(pages[0].full_markdown).not.toMatch(/## Evidence/i);
+		const evidence = JSON.parse(pages[0].evidence_json);
+		expect(evidence).not.toHaveLength(0);
+		expect(evidence.every((item) => item.receipt_id === receipts[0].id)).toBe(true);
 		expect(receipts[0]).toMatchObject({
 			source: "save_conversation",
 			saved_pages: 1,
@@ -1069,6 +1387,19 @@ describe("MCP manual conversation engine", () => {
 		expect(detail.actions.createdPages).toHaveLength(1);
 		expect(detail.actions.createdNodes).toHaveLength(2);
 		expect(detail.actions.createdEdges).toHaveLength(1);
+		expect(detail.page).toMatchObject({
+			action: "create",
+			id: pages[0].id,
+			primary_subject_node_id: graphNodes.find((node) => node.label === "Atlas").id,
+			evidence_count: evidence.length,
+			evidence_added_count: evidence.length,
+		});
+		const run = await one("extraction_runs", id);
+		expect(run).toMatchObject({ status: "wrote", receipt_id: receipts[0].id });
+		expect(JSON.parse(run.created_pages_json)).toEqual([
+			expect.objectContaining({ id: pages[0].id }),
+		]);
+		expect(JSON.parse(run.created_nodes_json)).toHaveLength(2);
 	});
 
 	it("updates the existing canonical page and graph when a conversation corrects a relationship", async () => {
@@ -1081,7 +1412,7 @@ describe("MCP manual conversation engine", () => {
 		});
 		expect(first).toMatchObject({ status: "wrote", counts: { pages: 1, nodes: 2, edges: 1 } });
 		const originalPage = await one("memory_pages", id);
-		expect(originalPage.title).toBe("Blue Lantern");
+		expect(originalPage.title).toBe("Blue Lantern Memory Notes");
 
 		const correction = "Correction: My test project Blue Lantern uses Go, not Rust.";
 		const second = await collect(id, {
@@ -1098,7 +1429,8 @@ describe("MCP manual conversation engine", () => {
 		expect(await rows("memory_pages", id)).toHaveLength(1);
 		const page = await one("memory_pages", id);
 		expect(page.id).toBe(originalPage.id);
-		expect(page.title).toBe("Blue Lantern");
+		expect(page.title).toBe("Blue Lantern Memory Notes");
+		expect(page.full_markdown).not.toMatch(/## Evidence/i);
 		expect(JSON.parse(page.key_points_json)).toEqual(["Blue Lantern uses Go."]);
 		expect(JSON.parse(page.decisions_json)).toContain("Technology corrected from Rust to Go.");
 		expect(page.short_summary).toContain("Blue Lantern uses Go");
@@ -1134,6 +1466,190 @@ describe("MCP manual conversation engine", () => {
 		expect(page.full_markdown).toContain("building Atlas");
 		expect(page.full_markdown).not.toContain("Redis");
 		expect(page.short_summary).not.toContain("Redis");
+	});
+
+	it("applies an explicit primary-subject scope to both graph and page claims", async () => {
+		const id = userId("conversation-subject-scope");
+		const ziyadLine = "Ziyad uses D1 for Atlas.";
+		const omarLine = "Omar uses Redis for Nimbus.";
+		const result = await collect(id, {
+			messages: [
+				{ id: "scope-ziyad", role: "user", content: ziyadLine },
+				{ id: "scope-omar", role: "user", content: omarLine },
+			],
+			contentScope: {
+				subject: "Ziyad",
+				speakerScope: "user_only",
+				includeAssistantFacts: false,
+				excludeOtherPeople: true,
+				includeContextForReferenceResolution: true,
+			},
+			digestResponse: `${ziyadLine}\n${omarLine}`,
+			extractionResponse: proposal([
+				sliceFact({ label: "Ziyad", category: "person", kind: "other", text: ziyadLine }),
+				sliceFact({ label: "Omar", category: "person", kind: "other", text: omarLine }),
+			]),
+		});
+
+		expect(result).toMatchObject({
+			status: "wrote",
+			receipt: {
+				resolved_scope: {
+					subject: "Ziyad",
+					speakerScope: "user_only",
+					includeAssistantFacts: false,
+					excludeOtherPeople: true,
+				},
+			},
+		});
+		const labels = (await rows("nodes", id)).map((node) => node.label);
+		expect(labels).toContain("Ziyad");
+		expect(labels).not.toContain("Omar");
+		expect(labels).not.toContain("Redis");
+		expect(labels).not.toContain("Nimbus");
+		const page = await one("memory_pages", id);
+		expect(page.full_markdown).toContain("Ziyad");
+		expect(page.full_markdown).not.toContain("Omar");
+		expect(page.full_markdown).not.toContain("Redis");
+		expect(page.evidence_json).not.toContain("Omar");
+		expect(page.evidence_json).not.toContain("Redis");
+	});
+
+	it("stores a specifically accepted assistant proposal only as user-adopted memory", async () => {
+		const id = userId("conversation-user-adopted");
+		let capturedClaims = [];
+		const adoptedLine = "Use D1 for Atlas.";
+		const result = await collect(id, {
+			messages: [
+				{ id: "proposal-assistant", role: "assistant", content: "We could use D1 for Atlas." },
+				{ id: "proposal-user", role: "user", content: "Yes, let's use D1 for Atlas." },
+			],
+			contentScope: { subject: "Atlas" },
+			digestResponse: adoptedLine,
+			extractionResponse: proposal([], [{
+				from: { label: "Atlas", category: "project" },
+				to: { label: "D1", category: "tool" },
+				type: "uses",
+				text: adoptedLine,
+				confidence: 0.98,
+			}]),
+			testBeforeWrite({ graphPlan }) {
+				capturedClaims = graphPlan.conversationClaims;
+			},
+		});
+
+		expect(result.status).toBe("wrote");
+		expect(capturedClaims).toEqual([
+			expect.objectContaining({
+				claim_id: "C0",
+				text: adoptedLine,
+				attribution: "user_adopted",
+				source_message_ids: ["proposal-assistant", "proposal-user"],
+			}),
+		]);
+		expect((await rows("nodes", id)).map((node) => node.label).sort()).toEqual(["Atlas", "D1"]);
+		const page = await one("memory_pages", id);
+		expect(page.full_markdown).toContain("D1");
+		expect(page.full_markdown).not.toContain("We could");
+		const evidence = JSON.parse(page.evidence_json);
+		expect(evidence).toEqual(expect.arrayContaining([
+			expect.objectContaining({ source_message_id: "proposal-assistant", source_role: "assistant" }),
+			expect.objectContaining({ source_message_id: "proposal-user", source_role: "user" }),
+		]));
+	});
+
+	it("never turns a negated response into a positive adopted assistant proposal", async () => {
+		const id = userId("conversation-rejected-proposal");
+		let capturedClaims = [];
+		let plannedEdges = [];
+		const rejection = "Yes, let's not use D1 for Atlas.";
+		const result = await collect(id, {
+			messages: [
+				{ id: "rejected-assistant", role: "assistant", content: "We could use D1 for Atlas." },
+				{ id: "rejected-user", role: "user", content: rejection },
+			],
+			contentScope: { subject: "Atlas" },
+			digestResponse: rejection,
+			extractionResponse: proposal([], [{
+				from: { label: "Atlas", category: "project" },
+				to: { label: "D1", category: "tool" },
+				type: "uses",
+				text: "Use D1 for Atlas.",
+				confidence: 0.99,
+			}]),
+			testBeforeWrite({ graphPlan }) {
+				capturedClaims = graphPlan.conversationClaims;
+				plannedEdges = graphPlan.newEdges;
+			},
+		});
+
+		expect(result.status).toBe("wrote");
+		expect(capturedClaims).toEqual([
+			expect.objectContaining({
+				text: rejection,
+				attribution: "user_stated",
+				polarity: "negative",
+			}),
+		]);
+		expect(capturedClaims.some((claim) => claim.attribution === "user_adopted")).toBe(false);
+		expect(plannedEdges).toEqual([]);
+		expect(await rows("edges", id)).toHaveLength(0);
+		const page = await one("memory_pages", id);
+		expect(page.full_markdown).toContain("not use D1");
+		expect(page.full_markdown).not.toContain("We could use D1");
+	});
+
+	it("reports semantic page synthesis success, retry, and validated fallback", async () => {
+		const line = "Atlas uses D1.";
+		const base = {
+			messages: [{ id: "synthesis-user", role: "user", content: line }],
+			contentScope: { subject: "Atlas" },
+			digestResponse: line,
+			extractionResponse: proposal([
+				sliceFact({ label: "Atlas", category: "project", kind: "technical_detail", text: line }),
+			]),
+		};
+
+		const first = await collect(userId("synthesis-first"), {
+			...base,
+			synthesisResponses: [validPageSynthesis()],
+		});
+		expect(first.receipt.page).toMatchObject({
+			action: "create",
+			synthesis_mode: "ai",
+			retry_count: 0,
+			quality_score: 1,
+		});
+
+		const retry = await collect(userId("synthesis-retry"), {
+			...base,
+			synthesisResponses: [
+				validPageSynthesis({ title: "Research Session" }),
+				validPageSynthesis(),
+			],
+		});
+		expect(retry.receipt.page).toMatchObject({
+			action: "create",
+			synthesis_mode: "ai_retry",
+			retry_count: 1,
+			quality_score: 1,
+		});
+
+		const fallbackId = userId("synthesis-fallback");
+		const fallback = await collect(fallbackId, {
+			...base,
+			synthesisResponses: [
+				{ selected_title: "Chat Summary" },
+				{ selected_title: "Research Session" },
+			],
+		});
+		expect(fallback.receipt.page).toMatchObject({
+			action: "create",
+			synthesis_mode: "deterministic_fallback",
+			retry_count: 1,
+			quality_score: 1,
+		});
+		expect((await one("memory_pages", fallbackId)).full_markdown).not.toMatch(/## Evidence/i);
 	});
 
 	it("treats an exact conversation resend as a duplicate without duplicating page or graph", async () => {
@@ -1263,6 +1779,101 @@ describe("MCP manual conversation engine", () => {
 		expect(await one("memory_pages", id)).toMatchObject({ receipt_id: null });
 	});
 
+	it("persists a failed conversation receipt even though its planned page never committed", async () => {
+		const id = userId("conversation-write-failure-receipt");
+		const line = "Atlas uses D1 for durable storage.";
+		const result = await collect(id, {
+			messages: [{ role: "user", content: line }],
+			conversationId: "conversation-write-failure-receipt",
+			digestResponse: line,
+			testFailAtomicWrite: true,
+			extractionResponse: proposal(
+				[sliceFact({ label: "Atlas", kind: "technical_detail", text: line })],
+				[{
+					from: { label: "Atlas", category: "project" },
+					to: { label: "D1", category: "tool" },
+					type: "uses",
+					text: line,
+					confidence: 0.98,
+				}],
+			),
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			status: "db_write_failed",
+			receipt_persisted: true,
+			receipt_id: expect.any(String),
+			counts: { savedTotal: 0, pages: 0, nodes: 0, edges: 0 },
+		});
+		expect(await rows("memory_pages", id)).toHaveLength(0);
+		expect(await rows("nodes", id)).toHaveLength(0);
+		expect(await rows("receipts", id)).toEqual([
+			expect.objectContaining({ id: result.receipt_id, outcome: "db_write_failed" }),
+		]);
+		expect(await one("extraction_runs", id)).toMatchObject({
+			status: "failed",
+			receipt_id: result.receipt_id,
+		});
+	});
+
+	it("does not persist or relink a stale receipt after a newer page version wins", async () => {
+		const id = userId("stale-page-receipt");
+		const initial = "Car mileage matters for purchase research.";
+		await collect(id, {
+			topic: "car",
+			messages: [{ role: "user", content: initial }],
+			digestResponse: initial,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: initial }),
+			]),
+		});
+
+		let releaseFirst;
+		let markFirstReady;
+		const firstReady = new Promise((resolve) => { markFirstReady = resolve; });
+		const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
+		const firstLine = "Car service cost matters for purchase research.";
+		const firstPromise = collect(id, {
+			topic: "car",
+			messages: [{ role: "user", content: firstLine }],
+			digestResponse: firstLine,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: firstLine }),
+			]),
+			async testBeforeReceipt() {
+				markFirstReady();
+				await firstBlocked;
+			},
+		});
+		await firstReady;
+
+		const secondLine = "Car resale value matters for purchase research.";
+		const second = await collect(id, {
+			topic: "car",
+			messages: [{ role: "user", content: secondLine }],
+			digestResponse: secondLine,
+			extractionResponse: proposal([
+				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: secondLine }),
+			]),
+		});
+		releaseFirst();
+		const first = await firstPromise;
+
+		expect(second).toMatchObject({ receipt_persisted: true, status: "wrote" });
+		expect(first).toMatchObject({
+			receipt_id: null,
+			receipt_persisted: false,
+			warnings: expect.arrayContaining(["receipt_persistence_failed"]),
+		});
+		const page = await one("memory_pages", id);
+		expect(page.receipt_id).toBe(second.receipt_id);
+		expect(JSON.parse(page.evidence_json).every((item) => item.receipt_id === second.receipt_id)).toBe(true);
+		expect(await rows("receipts", id)).toHaveLength(2);
+		const staleRun = await one("extraction_runs", id, `AND id = '${first.receipt.extraction_run_id}'`);
+		expect(staleRun).toMatchObject({ status: "wrote", receipt_id: null });
+	});
+
 	it("atomically claims one page during concurrent first saves", async () => {
 		const id = userId("concurrent-page-create");
 		const line = "I am building Atlas.";
@@ -1281,6 +1892,9 @@ describe("MCP manual conversation engine", () => {
 		expect(results.map((result) => result.counts.pages).sort()).toEqual([0, 1]);
 		expect(await rows("memory_pages", id)).toHaveLength(1);
 		expect(await rows("manual_page_identities", id)).toHaveLength(1);
+		expect(await rows("manual_page_versions", id)).toEqual([
+			expect.objectContaining({ revision: 0, write_token: null }),
+		]);
 		expect(await rows("nodes", id)).toHaveLength(1);
 		expect(results.some((result) => result.receipt.skippedReasons.concurrent_page_claim === 1)).toBe(true);
 	});
@@ -1319,8 +1933,11 @@ describe("MCP manual conversation engine", () => {
 			status: "wrote_with_page_conflict",
 			receipt: { skippedReasons: { concurrent_page_update: 1 } },
 		});
+		const versionAfterRace = await one("manual_page_versions", id);
+		expect(versionAfterRace).toMatchObject({ revision: 1, write_token: null });
 		await collect(id, { ...inputs[losingIndex], testBeforeWrite: undefined });
 		const page = await one("memory_pages", id);
+		expect(await one("manual_page_versions", id)).toMatchObject({ revision: 2 });
 		expect(page.full_markdown).toContain(lines[0]);
 		expect(page.full_markdown).toContain(lines[1]);
 	});

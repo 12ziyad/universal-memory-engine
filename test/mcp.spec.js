@@ -181,13 +181,14 @@ describe("/mcp Streamable HTTP handler", () => {
 			ok: true,
 			mode: "direct_save",
 			source: "save_memory",
-			fired: false,
+			fired: true,
 			processing: false,
-			receipt: { outcome: "ignored", source: "save_memory" },
+			receipt: { outcome: "wrote", source: "save_memory" },
 		});
 		expect(result.source_packet_id).toMatch(/^src_/);
 		expect(result.receipt_id).toMatch(/^receipt_/);
-		expect(body.result.content[0].text).toContain("Saved: 0");
+		expect(result.receipt.savedTotal).toBeGreaterThan(0);
+		expect(body.result.content[0].text).not.toContain("Saved: 0");
 	});
 
 	it("does not register observe_messages", async () => {

@@ -86,38 +86,89 @@ export async function refineManualIdentityTitles(env, config, integrity, state, 
 	for (const identity of identityLists(integrity)) {
 		const rawLabel = String(identity._raw_label ?? identity.label ?? "").trim();
 		const cleaned = cleanManualEntityLabel(identity.label ?? rawLabel);
-		const cacheKey = `${canonicalIdentity(rawLabel)}:${identity.category ?? "other"}`;
+		const manualResolution = identity._manual_resolution ?? null;
+		const cacheKey = [
+			canonicalIdentity(rawLabel),
+			identity.category ?? "other",
+			manualResolution?.decision ?? "legacy",
+			identity.existing_node_id ?? manualResolution?.selected_ref ?? "",
+		].join(":");
 		if (cache.has(cacheKey)) {
-			Object.assign(identity, cache.get(cacheKey));
+			const cached = cache.get(cacheKey);
+			Object.assign(identity, cached);
+			const entityRef = identity.ref ?? identity.entity_ref ?? null;
+			const entity = entityRef ? (integrity?.entities ?? []).find((item) => item.ref === entityRef) : null;
+			if (entity && entity !== identity) Object.assign(entity, cached);
 			continue;
 		}
 
 		const proposed = { ...identity, label: cleaned || fallbackManualEntityTitle(rawLabel) };
-		const decision = resolveManualIdentity(proposed, state?.nodes ?? []);
 		let resolved;
-		if (decision.decision === "existing") {
+		if (manualResolution?.decision === "merge_existing") {
+			const selected = (state?.nodes ?? []).find((node) => node.id === identity.existing_node_id);
+			resolved = selected
+				? {
+					label: proposed.label,
+					existing_node_id: selected.id,
+					aliases: [...new Set(identity.aliases ?? [])],
+				}
+				: {
+					label: proposed.label,
+					existing_node_id: null,
+					_manual_conflict_reason: identity._manual_conflict_reason ?? "adjudication_reference_unavailable",
+				};
+		} else if (manualResolution?.decision === "identity_conflict") {
 			resolved = {
-				// Keep the grounded submitted name for the planner and receipt. The
-				// existing node itself retains its stable canonical label.
 				label: proposed.label,
-				existing_node_id: decision.node.id,
-				aliases: [...new Set(identity.aliases ?? [])],
-			};
-		} else if (decision.decision === "new" && needsManualTitleGeneration(rawLabel, proposed.label)) {
-			const generated = await generateManualTitle(env, config, identity, input);
-			const title = validGeneratedTitle(generated, rawLabel, input.submittedContent)
-				? cleanManualEntityLabel(generated)
-				: fallbackManualEntityTitle(proposed.label || rawLabel);
-			resolved = {
-				label: title || proposed.label,
 				existing_node_id: null,
-				aliases: [...new Set([...(identity.aliases ?? []), proposed.label].filter(Boolean))],
+				_manual_conflict_reason: identity._manual_conflict_reason ??
+					manualResolution.reason_codes?.[0] ?? "identity_conflict",
 			};
+		} else if (manualResolution?.decision === "create_new") {
+			if (needsManualTitleGeneration(rawLabel, proposed.label)) {
+				const generated = await generateManualTitle(env, config, identity, input);
+				const title = validGeneratedTitle(generated, rawLabel, input.submittedContent)
+					? cleanManualEntityLabel(generated)
+					: fallbackManualEntityTitle(proposed.label || rawLabel);
+				resolved = {
+					label: title || proposed.label,
+					existing_node_id: null,
+					aliases: [...new Set([...(identity.aliases ?? []), proposed.label].filter(Boolean))],
+				};
+			} else {
+				resolved = { label: proposed.label, existing_node_id: null };
+			}
 		} else {
-			resolved = { label: proposed.label, existing_node_id: identity.existing_node_id ?? null };
+			const decision = resolveManualIdentity(proposed, state?.nodes ?? []);
+			if (decision.decision === "existing") {
+				resolved = {
+					// Keep the grounded submitted name for the planner and receipt. The
+					// existing node itself retains its stable canonical label.
+					label: proposed.label,
+					existing_node_id: decision.node.id,
+					aliases: [...new Set(identity.aliases ?? [])],
+				};
+			} else if (decision.decision === "new" && needsManualTitleGeneration(rawLabel, proposed.label)) {
+				const generated = await generateManualTitle(env, config, identity, input);
+				const title = validGeneratedTitle(generated, rawLabel, input.submittedContent)
+					? cleanManualEntityLabel(generated)
+					: fallbackManualEntityTitle(proposed.label || rawLabel);
+				resolved = {
+					label: title || proposed.label,
+					existing_node_id: null,
+					aliases: [...new Set([...(identity.aliases ?? []), proposed.label].filter(Boolean))],
+				};
+			} else {
+				resolved = { label: proposed.label, existing_node_id: identity.existing_node_id ?? null };
+			}
 		}
 		cache.set(cacheKey, resolved);
 		Object.assign(identity, resolved);
+		const entityRef = identity.ref ?? identity.entity_ref ?? null;
+		if (entityRef) {
+			const entity = (integrity?.entities ?? []).find((item) => item.ref === entityRef);
+			if (entity && entity !== identity) Object.assign(entity, resolved);
+		}
 	}
 	return integrity;
 }

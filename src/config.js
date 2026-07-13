@@ -198,6 +198,10 @@ export function getConfig(env) {
 			summaryModel:
 				env.LLM_SUMMARY_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8",
 			summaryMaxTokens: Number(env.LLM_SUMMARY_MAX_TOKENS ?? 256),
+			// MCP-only semantic memory-page synthesis. This is intentionally just a
+			// token ceiling; it introduces no binding or secret and does not affect
+			// the legacy /v1/save page lane.
+			pageMaxTokens: Number(env.LLM_PAGE_MAX_TOKENS ?? 1536),
 			digestModel:
 				env.LLM_DIGEST_MODEL || env.LLM_SUMMARY_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8",
 			digestMaxTokens: Number(env.LLM_DIGEST_MAX_TOKENS ?? 768),

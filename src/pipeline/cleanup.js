@@ -1,11 +1,12 @@
 import { getConfig } from "../config.js";
 import { addSuppression } from "../lib/db.js";
-import { deleteNodeVectors } from "../lib/vectorize.js";
+import { newId } from "../lib/ids.js";
 import { normalizeLabel } from "../lib/text.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
 import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
+import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
 
 function parseJsonArray(value) {
 	try {
@@ -14,6 +15,16 @@ function parseJsonArray(value) {
 	} catch {
 		return [];
 	}
+}
+
+function advanceManualPageWriteEpoch(env, userId, now) {
+	return env.DB.prepare(
+		`INSERT INTO manual_page_write_epochs (user_id, epoch, updated_at)
+		 VALUES (?, 1, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET
+			epoch = manual_page_write_epochs.epoch + 1,
+			updated_at = excluded.updated_at`,
+	).bind(userId, now);
 }
 
 async function softDeleteByIds(env, userId, table, ids, now) {
@@ -48,6 +59,25 @@ async function suppressPage(env, userId, pageId, reason) {
 		.first();
 	if (!page) return;
 	await suppressPageKey(env, userId, page, reason);
+}
+
+function suppressionStatement(env, userId, {
+	kind,
+	label,
+	canonicalKey,
+	reason,
+	sourceObjectId,
+}, now) {
+	const key = String(canonicalKey ?? "").trim();
+	if (!kind || !key) return null;
+	return env.DB.prepare(
+		`INSERT INTO memory_suppressions
+		 (id, user_id, kind, canonical_key, label, reason, source_object_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	).bind(
+		newId("suppress"), userId, kind, key, label ?? key,
+		reason ?? null, sourceObjectId ?? null, now,
+	);
 }
 
 export function junkReasonForLabel(label, item = {}) {
@@ -133,7 +163,7 @@ export async function cleanJunkMemories(env, userId, { confirm } = {}) {
 			suppressed++;
 		}
 	}
-	await deleteNodeVectors(env, getConfig(env), nodeIds);
+	await deleteManualSearchObjects(env, getConfig(env), userId, { nodeIds });
 	return {
 		dryRun: false,
 		junkPreviewed: preview.junkPreviewed,
@@ -158,33 +188,121 @@ export async function deleteLastExtraction(env, userId) {
 	const events = parseJsonArray(run.created_events_json);
 	const edges = parseJsonArray(run.created_edges_json);
 
-	for (const p of pages) await suppressPage(env, userId, p.id, "delete_last_extraction");
-	for (const n of nodes) await suppressNode(env, userId, n.id, "delete_last_extraction");
-
+	const pageIds = pages.map((page) => page.id);
+	const nodeIds = nodes.map((node) => node.id);
+	const sliceIds = slices.map((slice) => slice.id);
+	const eventIds = events.map((event) => event.id);
+	const edgeIds = edges.map((edge) => edge.id);
 	const counts = {
-		pages: await softDeleteByIds(env, userId, "memory_pages", pages.map((p) => p.id), now),
-		nodes: await softDeleteByIds(env, userId, "nodes", nodes.map((n) => n.id), now),
-		slices: await softDeleteByIds(env, userId, "slices", slices.map((s) => s.id), now),
-		events: await softDeleteByIds(env, userId, "events", events.map((e) => e.id), now),
-		edges: await softDeleteByIds(env, userId, "edges", edges.map((e) => e.id), now),
+		pages: pageIds.length,
+		nodes: nodeIds.length,
+		slices: sliceIds.length,
+		events: eventIds.length,
+		edges: edgeIds.length,
 	};
-	const claimDeletes = [];
+	const canonicalDeletes = [];
+	// Suppressions belong to the same delete operation. Build them as prepared
+	// statements so a failed D1 batch cannot leave an active object paired with
+	// a stray suppression from a half-completed delete-last request.
+	for (const pageId of pageIds) {
+		const page = await env.DB.prepare(
+			"SELECT id, title, canonical_title, topic_filter FROM memory_pages WHERE id = ? AND user_id = ?",
+		).bind(pageId, userId).first();
+		if (!page) continue;
+		const titleSuppression = suppressionStatement(env, userId, {
+			kind: "memory_page",
+			label: page.title,
+			canonicalKey: page.canonical_title,
+			reason: "delete_last_extraction",
+			sourceObjectId: page.id,
+		}, now);
+		if (titleSuppression) canonicalDeletes.push(titleSuppression);
+		if (page.topic_filter) {
+			const topicSuppression = suppressionStatement(env, userId, {
+				kind: "memory_page",
+				label: page.topic_filter,
+				canonicalKey: page.topic_filter,
+				reason: "delete_last_extraction",
+				sourceObjectId: page.id,
+			}, now);
+			if (topicSuppression) canonicalDeletes.push(topicSuppression);
+		}
+	}
+	for (const nodeId of nodeIds) {
+		const node = await env.DB.prepare(
+			"SELECT id, label FROM nodes WHERE id = ? AND user_id = ?",
+		).bind(nodeId, userId).first();
+		if (!node) continue;
+		const nodeSuppression = suppressionStatement(env, userId, {
+			kind: "node",
+			label: node.label,
+			canonicalKey: normalizeLabel(node.label),
+			reason: "delete_last_extraction",
+			sourceObjectId: node.id,
+		}, now);
+		if (nodeSuppression) canonicalDeletes.push(nodeSuppression);
+	}
+	const queueSoftDeletes = (table, ids) => {
+		for (const id of ids) {
+			canonicalDeletes.push(env.DB.prepare(
+				`UPDATE ${table} SET deleted_at = ? WHERE id = ? AND user_id = ?`,
+			).bind(now, id, userId));
+		}
+	};
+	queueSoftDeletes("memory_pages", pageIds);
+	queueSoftDeletes("nodes", nodeIds);
+	queueSoftDeletes("slices", sliceIds);
+	queueSoftDeletes("events", eventIds);
+	queueSoftDeletes("edges", edgeIds);
+	if (pages.length) canonicalDeletes.push(advanceManualPageWriteEpoch(env, userId, now));
 	for (const page of pages) {
-		claimDeletes.push(env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, page.id));
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, page.id));
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, page.id));
+		canonicalDeletes.push(env.DB.prepare(
+			"DELETE FROM manual_search_profiles WHERE user_id = ? AND object_kind = 'page' AND object_id = ?",
+		).bind(userId, page.id));
 	}
 	for (const node of nodes) {
-		claimDeletes.push(env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, node.id));
-		claimDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, node.id));
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
 			.bind(userId, node.id, node.id));
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM node_topic_communities WHERE user_id = ? AND node_id = ?")
+			.bind(userId, node.id));
+		canonicalDeletes.push(env.DB.prepare(
+			"DELETE FROM manual_search_profiles WHERE user_id = ? AND object_kind = 'node' AND object_id = ?",
+		).bind(userId, node.id));
 	}
 	for (const item of [...slices, ...events, ...edges]) {
-		claimDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, item.id));
+		canonicalDeletes.push(env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, item.id));
 	}
-	if (claimDeletes.length) await env.DB.batch(claimDeletes);
-	await deleteNodeVectors(env, getConfig(env), nodes.map((n) => n.id));
-	await env.DB.prepare("UPDATE extraction_runs SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-		.bind("deleted", now, run.id, userId)
-		.run();
+	canonicalDeletes.push(env.DB.prepare(
+		`DELETE FROM topic_communities WHERE user_id = ? AND NOT EXISTS (
+		 SELECT 1 FROM node_topic_communities WHERE user_id = ? AND community_id = topic_communities.id
+		)`,
+	).bind(userId, userId));
+	canonicalDeletes.push(env.DB.prepare(
+		"UPDATE extraction_runs SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+	).bind("deleted", now, run.id, userId));
+	await env.DB.batch(canonicalDeletes);
+	if (env.VECTORIZE) {
+		const vectorIds = [...nodeIds, ...pageIds.map((id) => `page:${id}`)];
+		if (vectorIds.length) {
+			try {
+				await env.VECTORIZE.deleteByIds(vectorIds);
+			} catch (error) {
+				console.warn("delete-last vector cleanup failed:", error?.message ?? error);
+			}
+		}
+	}
+	const deletedNodeIds = new Set(nodes.map((node) => node.id));
+	const refreshNodeIds = [...new Set([
+		...slices.map((slice) => slice.node_id),
+		...events.map((event) => event.node_id),
+		...edges.flatMap((edge) => [edge.from_node, edge.to_node]),
+	].filter((id) => id && !deletedNodeIds.has(id)))];
+	if (refreshNodeIds.length) {
+		await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: refreshNodeIds });
+	}
 	return { deleted: true, extraction_run_id: run.id, counts };
 }
 
@@ -193,13 +311,19 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 	if (kind === "page" || kind === "memory_page") {
 		if (suppress) await suppressPage(env, userId, id, "delete_selected");
 		await env.DB.batch([
+			advanceManualPageWriteEpoch(env, userId, now),
 			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
+			env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
 				.bind(now, suppress ? now : null, id, userId),
 		]);
+		await deleteManualSearchObjects(env, getConfig(env), userId, { pageIds: [id] });
 		return { deleted: true, kind: "memory_page", id };
 	}
 	if (kind === "node") {
+		const { results: touchingEdges } = await env.DB.prepare(
+			"SELECT from_node, to_node FROM edges WHERE user_id = ? AND deleted_at IS NULL AND (from_node = ? OR to_node = ?)",
+		).bind(userId, id, id).all();
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
@@ -220,7 +344,10 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 				id,
 			),
 		]);
-		await deleteNodeVectors(env, getConfig(env), [id]);
+		await deleteManualSearchObjects(env, getConfig(env), userId, { nodeIds: [id] });
+		const neighbourIds = [...new Set((touchingEdges ?? []).flatMap((edge) => [edge.from_node, edge.to_node])
+			.filter((nodeId) => nodeId && nodeId !== id))];
+		if (neighbourIds.length) await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: neighbourIds });
 		return { deleted: true, kind: "node", id };
 	}
 	if (kind === "candidate") {
@@ -236,18 +363,28 @@ export async function archiveObject(env, userId, { kind, id }) {
 	const now = Date.now();
 	if (kind === "page" || kind === "memory_page") {
 		await env.DB.batch([
+			advanceManualPageWriteEpoch(env, userId, now),
 			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
+			env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE memory_pages SET archived_at = ? WHERE id = ? AND user_id = ?").bind(now, id, userId),
 		]);
+		await deleteManualSearchObjects(env, getConfig(env), userId, { pageIds: [id] });
 		return { archived: true, kind: "memory_page", id };
 	}
 	if (kind === "node") {
+		const { results: touchingEdges } = await env.DB.prepare(
+			"SELECT from_node, to_node FROM edges WHERE user_id = ? AND deleted_at IS NULL AND (from_node = ? OR to_node = ?)",
+		).bind(userId, id, id).all();
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
 			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
 				.bind(userId, id, id),
 			env.DB.prepare("UPDATE nodes SET archived_at = ? WHERE id = ? AND user_id = ?").bind(now, id, userId),
 		]);
+		await deleteManualSearchObjects(env, getConfig(env), userId, { nodeIds: [id] });
+		const neighbourIds = [...new Set((touchingEdges ?? []).flatMap((edge) => [edge.from_node, edge.to_node])
+			.filter((nodeId) => nodeId && nodeId !== id))];
+		if (neighbourIds.length) await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: neighbourIds });
 		return { archived: true, kind: "node", id };
 	}
 	if (kind === "candidate") {
@@ -267,9 +404,12 @@ export async function deleteAllMemories(env, userId, confirm) {
 			confirmationRequired: "DELETE ALL",
 		};
 	}
-	const { results: nodes } = await env.DB.prepare("SELECT id, label FROM nodes WHERE user_id = ?")
-		.bind(userId)
-		.all();
+	const [nodeResult, pageResult] = await env.DB.batch([
+		env.DB.prepare("SELECT id, label FROM nodes WHERE user_id = ?").bind(userId),
+		env.DB.prepare("SELECT id, title FROM memory_pages WHERE user_id = ?").bind(userId),
+	]);
+	const nodes = nodeResult.results ?? [];
+	const pages = pageResult.results ?? [];
 	const tables = [
 		"memory_pages",
 		"nodes",
@@ -286,15 +426,35 @@ export async function deleteAllMemories(env, userId, confirm) {
 		"manual_node_identities",
 		"checkpoints",
 	];
-	const internalManualTables = ["manual_fact_identities", "manual_page_identities"];
+	const internalManualTables = [
+		"node_topic_communities",
+		"topic_communities",
+		"manual_search_profiles",
+		"manual_fact_identities",
+		"manual_page_identities",
+		"manual_page_versions",
+	];
 	const counts = {};
 	for (const table of tables) {
 		const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`).bind(userId).first();
 		counts[table] = row?.count ?? 0;
 	}
-	await env.DB.batch([...tables, ...internalManualTables]
-		.map((table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)));
-	await deleteNodeVectors(env, getConfig(env), (nodes ?? []).map((n) => n.id));
+	await env.DB.batch([
+		advanceManualPageWriteEpoch(env, userId, Date.now()),
+		...[...tables, ...internalManualTables]
+			.map((table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)),
+	]);
+	const vectorIds = [
+		...(nodes ?? []).map((n) => n.id),
+		...(pages ?? []).map((p) => `page:${p.id}`),
+	];
+	if (env.VECTORIZE && vectorIds.length) {
+		try {
+			await env.VECTORIZE.deleteByIds(vectorIds);
+		} catch (error) {
+			console.warn("memory reset vector cleanup failed:", error?.message ?? error);
+		}
+	}
 	let durableObjectReset = false;
 	try {
 		if (env.USER_MEMORY) {
@@ -338,14 +498,11 @@ function pageRepairText(page) {
 	].filter(Boolean).join("\n");
 }
 
-function markdownWithTitleAndEvidence(markdown, title, evidence) {
+function markdownWithTitleWithoutEvidence(markdown, title) {
 	const body = String(markdown || "").replace(/^#\s+.+?(?:\n|$)/, "").trim();
 	const withoutEvidence = body.replace(/\n*## Evidence\n[\s\S]*$/i, "").trim();
 	const parts = [`# ${title}`];
 	if (withoutEvidence) parts.push("", withoutEvidence);
-	if (evidence?.length) {
-		parts.push("", "## Evidence", ...evidence.slice(0, 8).map((item) => `- ${item.snippet}`));
-	}
 	return parts.join("\n");
 }
 
@@ -414,7 +571,7 @@ async function repairMemoryPages(env, userId) {
 
 		const title = repairTitle ? nextTitle : page.title;
 		const cluster = repairCluster ? nextCluster : page.cluster;
-		const fullMarkdown = markdownWithTitleAndEvidence(page.full_markdown, title, repairEvidence ? dedupedEvidence : evidence);
+		const fullMarkdown = markdownWithTitleWithoutEvidence(page.full_markdown, title);
 		await env.DB.prepare(
 			`UPDATE memory_pages
 			 SET title = ?, canonical_title = ?, cluster = ?, evidence_json = ?, full_markdown = ?, updated_at = ?
