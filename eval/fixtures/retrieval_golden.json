@@ -1,0 +1,87 @@
+{
+  "description": "Golden retrieval set. Seed `corpus` into D1 for one tenant, run recall() for each query, score against expected/forbidden ids. Deterministic: no LLM, USE_VECTORS=false, so this measures the exact/alias + lexical half that carries the recall hot path today.",
+  "corpus": {
+    "nodes": [
+      { "id": "n-uml", "label": "Universal Memory Engine", "category": "project", "state": "active", "aliases": ["UML", "Universal Memory Layer"], "summary": "Ziyad's Cloudflare-based memory infrastructure project.",
+        "slices": [
+          { "id": "sl-uml-1", "text": "Universal Memory Engine runs on Cloudflare Workers", "kind": "technical_detail", "is_current": 1 },
+          { "id": "sl-uml-2", "text": "Universal Memory Engine stores canonical data in D1", "kind": "technical_detail", "is_current": 1 },
+          { "id": "sl-uml-3", "text": "Universal Memory Engine exposes three MCP tools", "kind": "feature_detail", "is_current": 1 }
+        ],
+        "events": [ { "id": "ev-uml-1", "action": "started", "text": "started building the Universal Memory Engine", "importance": "ordinary" } ] },
+
+      { "id": "n-uml-college", "label": "UML College Society", "category": "organization", "state": "active", "aliases": ["UML Society"], "summary": "A student club for undergraduates.",
+        "slices": [ { "id": "sl-umlc-1", "text": "UML College Society meets on Thursdays", "kind": "other", "is_current": 1 } ], "events": [] },
+
+      { "id": "n-qr", "label": "Unified Government QR Identity System", "category": "project", "state": "active", "aliases": ["QR Identity System"], "summary": "A future project idea for a government QR-based identity scheme.",
+        "slices": [ { "id": "sl-qr-1", "text": "Unified Government QR Identity System is a future project idea", "kind": "other", "is_current": 1 } ], "events": [] },
+
+      { "id": "n-rahul", "label": "Rahul", "category": "person", "state": "active", "aliases": [],
+        "summary": "Rahul: backend engineer on the team.",
+        "slices": [ { "id": "sl-rahul-1", "text": "Rahul prefers working in Go rather than Python", "kind": "preference", "is_current": 1 } ],
+        "events": [ { "id": "ev-rahul-1", "action": "joined", "text": "Rahul joined my team as the backend engineer", "importance": "ordinary" } ] },
+
+      { "id": "n-meera", "label": "Meera", "category": "person", "state": "active", "aliases": [], "summary": "Meera: Ziyad's sister.",
+        "slices": [ { "id": "sl-meera-1", "text": "Meera is visiting next week", "kind": "other", "is_current": 1 } ], "events": [] },
+
+      { "id": "n-boxing", "label": "Boxing", "category": "skill", "state": "stopped", "aliases": [], "summary": "Boxing training, currently stopped.",
+        "slices": [
+          { "id": "sl-box-cur", "text": "trains three days a week", "kind": "progress", "is_current": 1 },
+          { "id": "sl-box-old", "text": "trains twice a week", "kind": "progress", "is_current": 0 }
+        ],
+        "events": [
+          { "id": "ev-box-1", "action": "started", "text": "started boxing", "importance": "ordinary" },
+          { "id": "ev-box-2", "action": "stopped", "text": "stopped boxing", "importance": "ordinary" }
+        ] },
+
+      { "id": "n-football", "label": "Football", "category": "habit", "state": "active", "aliases": [], "summary": "Weekly football.",
+        "slices": [ { "id": "sl-fb-1", "text": "plays football every week", "kind": "progress", "is_current": 1 } ],
+        "events": [ { "id": "ev-fb-1", "action": "resumed", "text": "resumed playing football", "importance": "ordinary" } ] },
+
+      { "id": "n-atlas", "label": "Atlas", "category": "project", "state": "active", "aliases": [], "summary": "Atlas: invoicing product.",
+        "slices": [ { "id": "sl-atlas-1", "text": "Atlas uses D1 for durable storage", "kind": "technical_detail", "is_current": 1 } ], "events": [] },
+
+      { "id": "n-d1", "label": "D1", "category": "tool", "state": "active", "aliases": [], "summary": "Cloudflare D1 SQL database.", "slices": [], "events": [] },
+
+      { "id": "n-vectorize", "label": "Vectorize", "category": "tool", "state": "active", "aliases": [], "summary": "Cloudflare Vectorize semantic index.", "slices": [], "events": [] }
+    ],
+    "pages": [
+      { "id": "p-uml-fix", "title": "UML Manual MCP Fix and Rollback", "topic_filter": "uml", "short_summary": "Notes on the manual MCP save lane and the production rollback.", "node_id": "n-uml" },
+      { "id": "p-pdf", "title": "Pdf Export Memory Notes", "topic_filter": "pdf export", "short_summary": "Debugging the PDF export totals column on the invoicing app.", "node_id": null }
+    ]
+  },
+  "queries": [
+    { "id": "q01", "query": "Universal Memory Engine", "intent": "exact_canonical", "expect_nodes": ["n-uml"], "forbid_nodes": ["n-uml-college"] },
+    { "id": "q02", "query": "UML", "intent": "alias", "expect_nodes": ["n-uml"], "forbid_nodes": [] },
+    { "id": "q03", "query": "Universal Memory Layer", "intent": "alias", "expect_nodes": ["n-uml"], "forbid_nodes": ["n-uml-college"] },
+    { "id": "q04", "query": "What do you remember about Rahul?", "intent": "recall_phrasing", "expect_nodes": ["n-rahul"], "forbid_nodes": ["n-meera"] },
+    { "id": "q05", "query": "What do you remember about the Unified Government QR Identity System?", "intent": "recall_phrasing", "expect_nodes": ["n-qr"], "forbid_nodes": ["n-uml", "n-uml-college"] },
+    { "id": "q06", "query": "Do you remember Rahul?", "intent": "recall_phrasing", "expect_nodes": ["n-rahul"], "forbid_nodes": [] },
+    { "id": "q07", "query": "What do you know about Rahul?", "intent": "recall_phrasing", "expect_nodes": ["n-rahul"], "forbid_nodes": [] },
+    { "id": "q08", "query": "Rahul", "intent": "exact_canonical", "expect_nodes": ["n-rahul"], "forbid_nodes": ["n-meera"] },
+    { "id": "q09", "query": "who prefers Go", "intent": "semantic_paraphrase", "expect_nodes": ["n-rahul"], "forbid_nodes": [] },
+    { "id": "q10", "query": "which of my projects uses Cloudflare Workers", "intent": "bm25_technical", "expect_nodes": ["n-uml"], "forbid_nodes": ["n-uml-college"] },
+    { "id": "q11", "query": "what stores canonical data in D1", "intent": "bm25_technical", "expect_nodes": ["n-uml"], "forbid_nodes": [] },
+    { "id": "q12", "query": "three MCP tools", "intent": "bm25_technical", "expect_nodes": ["n-uml"], "forbid_nodes": [] },
+    { "id": "q13", "query": "boxing", "intent": "exact_canonical", "expect_nodes": ["n-boxing"], "forbid_nodes": [] },
+    { "id": "q14", "query": "what do I train", "intent": "semantic_paraphrase", "expect_nodes": ["n-boxing"], "forbid_nodes": [] },
+    { "id": "q15", "query": "am I still boxing", "intent": "current_state", "expect_nodes": ["n-boxing"], "forbid_nodes": [], "expect_state": "stopped" },
+    { "id": "q16", "query": "football", "intent": "exact_canonical", "expect_nodes": ["n-football"], "forbid_nodes": ["n-boxing"] },
+    { "id": "q17", "query": "Atlas", "intent": "exact_canonical", "expect_nodes": ["n-atlas"], "forbid_nodes": [] },
+    { "id": "q18", "query": "what does Atlas use for storage", "intent": "bm25_technical", "expect_nodes": ["n-atlas"], "forbid_nodes": [] },
+    { "id": "q19", "query": "UML College Society", "intent": "wrong_identity_same_acronym", "expect_nodes": ["n-uml-college"], "forbid_nodes": [] },
+    { "id": "q20", "query": "my sister", "intent": "semantic_paraphrase", "expect_nodes": ["n-meera"], "forbid_nodes": ["n-rahul"] },
+    { "id": "q21", "query": "Meera", "intent": "exact_canonical", "expect_nodes": ["n-meera"], "forbid_nodes": ["n-rahul"] },
+    { "id": "q22", "query": "QR Identity System", "intent": "alias", "expect_nodes": ["n-qr"], "forbid_nodes": [] },
+    { "id": "q23", "query": "what are my projects", "intent": "broad_profile", "expect_nodes": ["n-uml", "n-qr", "n-atlas"], "forbid_nodes": [] },
+    { "id": "q24", "query": "Vectorize", "intent": "exact_canonical", "expect_nodes": ["n-vectorize"], "forbid_nodes": [] },
+    { "id": "q25", "query": "D1", "intent": "exact_canonical", "expect_nodes": ["n-d1"], "forbid_nodes": [] },
+    { "id": "q26", "query": "backend engineer on my team", "intent": "semantic_paraphrase", "expect_nodes": ["n-rahul"], "forbid_nodes": [] },
+    { "id": "q27", "query": "PDF export", "intent": "page_lookup", "expect_pages": ["p-pdf"], "expect_nodes": [], "forbid_nodes": [] },
+    { "id": "q28", "query": "manual MCP fix", "intent": "page_lookup", "expect_pages": ["p-uml-fix"], "expect_nodes": [], "forbid_nodes": [] },
+    { "id": "q29", "query": "Tell me everything you remember about Atlas", "intent": "recall_phrasing", "expect_nodes": ["n-atlas"], "forbid_nodes": [] },
+    { "id": "q30", "query": "Can you recall what I said about football?", "intent": "recall_phrasing", "expect_nodes": ["n-football"], "forbid_nodes": [] },
+    { "id": "q31", "query": "cooking pasta tonight", "intent": "irrelevant_must_return_nothing", "expect_nodes": [], "forbid_nodes": ["n-uml", "n-rahul", "n-boxing", "n-atlas"] },
+    { "id": "q32", "query": "hi", "intent": "smalltalk_must_not_recall", "expect_nodes": [], "forbid_nodes": ["n-uml", "n-rahul"], "expect_no_recall": true }
+  ]
+}

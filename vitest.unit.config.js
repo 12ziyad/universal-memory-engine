@@ -7,6 +7,7 @@ export default defineConfig({
 		environment: "node",
 		include: [
 			"test/dashboard.spec.js",
+			"test/eval_extraction.spec.js",
 			"test/hulls.spec.js",
 			"test/layout.spec.js",
 			"test/manual_action_router.spec.js",

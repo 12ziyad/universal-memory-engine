@@ -1,0 +1,278 @@
+{
+  "description": "Golden extraction fixtures. `control_messages` and `forbid_claims` are checkable deterministically today (control/meta-noise classification + the grounding validator). `expect_claims` additionally requires a live model and is scored in the Phase 8 model bake-off. Every expected claim must be supported by a span in the listed source messages — no fixture asserts a fact the source does not state.",
+  "fixtures": [
+    {
+      "id": "f01-project-idea",
+      "category": "project_idea",
+      "messages": [{ "id": "M0", "role": "user", "content": "Remember that one of my future projects is a Unified Government QR Identity System." }],
+      "primary_subject": { "label": "Unified Government QR Identity System", "type": "project" },
+      "expect_claims": [{ "subject": "Unified Government QR Identity System", "claim_type": "note", "subtype": "plan", "temporal_status": "future" }],
+      "must_save": true,
+      "forbid_claims": ["User asked to remember something", "User requested a save"],
+      "control_messages": []
+    },
+    {
+      "id": "f02-casual-experience",
+      "category": "casual_experience",
+      "messages": [{ "id": "M0", "role": "user", "content": "Remember that I had a strange day at work." }],
+      "primary_subject": { "label": "Strange Workday", "type": "other" },
+      "expect_claims": [{ "subject": "Strange Workday", "claim_type": "event", "subtype": "other", "temporal_status": "historical" }],
+      "must_save": true,
+      "forbid_claims": ["The user had a bad day because of their manager", "The user was fired"],
+      "control_messages": []
+    },
+    {
+      "id": "f03-personal-fact",
+      "category": "personal_fact",
+      "messages": [{ "id": "M0", "role": "user", "content": "My sister Meera lives in Bangalore." }],
+      "primary_subject": { "label": "Meera", "type": "person" },
+      "expect_claims": [{ "subject": "Meera", "claim_type": "fact", "subtype": "location", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["Meera is older than the user", "The user lives in Bangalore"],
+      "control_messages": []
+    },
+    {
+      "id": "f04-preference",
+      "category": "preference",
+      "messages": [{ "id": "M0", "role": "user", "content": "I prefer dark mode in my editor." }],
+      "primary_subject": { "label": "Editor Theme", "type": "concept" },
+      "expect_claims": [{ "subject": "Editor Theme", "claim_type": "preference", "subtype": "ui", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["The user dislikes light mode in every application"],
+      "control_messages": []
+    },
+    {
+      "id": "f05-short-note",
+      "category": "short_note",
+      "messages": [{ "id": "M0", "role": "user", "content": "Gym at 6." }],
+      "primary_subject": { "label": "Gym", "type": "other" },
+      "expect_claims": [{ "subject": "Gym", "claim_type": "note", "subtype": "plan", "temporal_status": "future" }],
+      "must_save": true,
+      "forbid_claims": ["The user goes to the gym every day"],
+      "control_messages": []
+    },
+    {
+      "id": "f06-question-for-later",
+      "category": "question_saved_for_later",
+      "messages": [{ "id": "M0", "role": "user", "content": "Save this question for later: should UML use Queues for background vector refresh?" }],
+      "primary_subject": { "label": "UML Background Vector Refresh", "type": "concept" },
+      "expect_claims": [{ "subject": "UML Background Vector Refresh", "claim_type": "note", "subtype": "question_for_later", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["UML uses Queues", "The user decided to use Queues"],
+      "control_messages": []
+    },
+    {
+      "id": "f07-temporary-plan",
+      "category": "temporary_plan",
+      "messages": [{ "id": "M0", "role": "user", "content": "For now I am pausing the retrieval work until the extraction fix ships." }],
+      "primary_subject": { "label": "Retrieval Work", "type": "concept" },
+      "expect_claims": [{ "subject": "Retrieval Work", "claim_type": "state", "subtype": "project_status", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["The retrieval work was cancelled"],
+      "control_messages": []
+    },
+    {
+      "id": "f08-correction",
+      "category": "correction",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "I use light mode in my editor." },
+        { "id": "M1", "role": "user", "content": "Actually no, I switched to dark mode last week." }
+      ],
+      "primary_subject": { "label": "Editor Theme", "type": "concept" },
+      "expect_claims": [{ "subject": "Editor Theme", "claim_type": "preference", "subtype": "ui", "temporal_status": "current", "supersedes": true }],
+      "must_save": true,
+      "forbid_claims": ["The user currently uses light mode"],
+      "control_messages": []
+    },
+    {
+      "id": "f09-state-change",
+      "category": "state_change",
+      "messages": [{ "id": "M0", "role": "user", "content": "I stopped boxing in June." }],
+      "primary_subject": { "label": "Boxing", "type": "concept" },
+      "expect_claims": [{ "subject": "Boxing", "claim_type": "event", "subtype": "stopped", "temporal_status": "historical" }],
+      "must_save": true,
+      "forbid_claims": ["The user still boxes"],
+      "control_messages": []
+    },
+    {
+      "id": "f10-assistant-completed-work",
+      "category": "assistant_completed_work",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "Can you fix the pagination overflow in the invoice table renderer?" },
+        { "id": "M1", "role": "assistant", "content": "Done — I capped rows per page at fifteen and the totals column now renders." }
+      ],
+      "primary_subject": { "label": "Invoice Table Renderer", "type": "concept" },
+      "expect_claims": [{ "subject": "Invoice Table Renderer", "claim_type": "event", "subtype": "fixed", "speaker": "assistant", "temporal_status": "historical" }],
+      "must_save": true,
+      "forbid_claims": ["The user capped rows per page at fifteen"],
+      "control_messages": []
+    },
+    {
+      "id": "f11-assistant-suggestion-not-adopted",
+      "category": "assistant_suggestion_not_adopted",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "How should I store the embeddings?" },
+        { "id": "M1", "role": "assistant", "content": "You could use Pinecone for that." },
+        { "id": "M2", "role": "user", "content": "I will think about it." }
+      ],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": ["The user uses Pinecone", "The user decided to use Pinecone", "Embeddings are stored in Pinecone"],
+      "control_messages": []
+    },
+    {
+      "id": "f12-assistant-suggestion-adopted",
+      "category": "assistant_suggestion_adopted",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "How should I store the embeddings?" },
+        { "id": "M1", "role": "assistant", "content": "You could use Vectorize for that." },
+        { "id": "M2", "role": "user", "content": "Yes, let's go with Vectorize." }
+      ],
+      "primary_subject": { "label": "Vectorize", "type": "concept" },
+      "expect_claims": [{ "subject": "Vectorize", "claim_type": "state", "subtype": "decision", "speaker": "user", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["The assistant decided to use Vectorize"],
+      "control_messages": []
+    },
+    {
+      "id": "f13-control-commands",
+      "category": "control_commands",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "Send me the prompt again." },
+        { "id": "M1", "role": "user", "content": "Can you retry that?" },
+        { "id": "M2", "role": "user", "content": "Save this conversation." }
+      ],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": ["User asked to send the prompt", "User asked for code", "User requested a retry", "User asked to save the conversation"],
+      "control_messages": ["M0", "M1", "M2"]
+    },
+    {
+      "id": "f14-tool-chatter",
+      "category": "tool_chatter",
+      "messages": [
+        { "id": "M0", "role": "assistant", "content": "Calling save_memory now." },
+        { "id": "M1", "role": "assistant", "content": "Tool returned: Saved 1 node." }
+      ],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": ["The assistant called save_memory", "One node was saved"],
+      "control_messages": ["M0", "M1"]
+    },
+    {
+      "id": "f15-repeated-save-commands",
+      "category": "repeated_save_commands",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "Save that." },
+        { "id": "M1", "role": "user", "content": "Save that again." },
+        { "id": "M2", "role": "user", "content": "Did you save it?" }
+      ],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": ["User asked to save", "User asked whether it was saved"],
+      "control_messages": ["M0", "M1", "M2"]
+    },
+    {
+      "id": "f16-multiple-people",
+      "category": "multiple_people",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "Rahul joined my team as the backend engineer last month." },
+        { "id": "M1", "role": "user", "content": "Rahul prefers working in Go rather than Python." },
+        { "id": "M2", "role": "user", "content": "Also my sister Meera is visiting next week." }
+      ],
+      "scope": { "subject": "Rahul" },
+      "primary_subject": { "label": "Rahul", "type": "person" },
+      "expect_claims": [
+        { "subject": "Rahul", "claim_type": "event", "subtype": "joined", "temporal_status": "historical" },
+        { "subject": "Rahul", "claim_type": "preference", "subtype": "language", "temporal_status": "current" }
+      ],
+      "must_save": true,
+      "forbid_claims": ["Meera is visiting next week"],
+      "control_messages": []
+    },
+    {
+      "id": "f17-multiple-projects",
+      "category": "multiple_projects",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "UML runs on Cloudflare Workers and stores data in D1." },
+        { "id": "M1", "role": "user", "content": "Atlas is my invoicing product and it also uses D1." }
+      ],
+      "primary_subject": { "label": "Universal Memory Engine", "type": "project" },
+      "expect_claims": [
+        { "subject": "Universal Memory Engine", "claim_type": "relationship", "subtype": "uses", "object": "Cloudflare Workers" },
+        { "subject": "Universal Memory Engine", "claim_type": "relationship", "subtype": "uses", "object": "D1" },
+        { "subject": "Atlas", "claim_type": "relationship", "subtype": "uses", "object": "D1" }
+      ],
+      "must_save": true,
+      "forbid_claims": ["Atlas runs on Cloudflare Workers", "UML is an invoicing product"],
+      "control_messages": []
+    },
+    {
+      "id": "f18-unrelated-named-entities",
+      "category": "unrelated_named_entities",
+      "messages": [{ "id": "M0", "role": "user", "content": "I read an article comparing Postgres and MySQL on the train today." }],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": ["The user uses Postgres", "The user uses MySQL", "The user prefers Postgres"],
+      "control_messages": []
+    },
+    {
+      "id": "f19-comparison-not-adoption",
+      "category": "comparison_mention",
+      "messages": [{ "id": "M0", "role": "user", "content": "I use Bedrock rather than Sonnet." }],
+      "primary_subject": { "label": "Bedrock", "type": "concept" },
+      "expect_claims": [{ "subject": "Bedrock", "claim_type": "fact", "subtype": "technical_detail", "temporal_status": "current" }],
+      "must_save": true,
+      "forbid_claims": ["The user uses Sonnet"],
+      "control_messages": []
+    },
+    {
+      "id": "f20-conversation-zero-graph",
+      "category": "conversation_zero_graph_output",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "I have been debugging the PDF export on my invoicing app all evening." },
+        { "id": "M1", "role": "assistant", "content": "What is going wrong with it?" },
+        { "id": "M2", "role": "user", "content": "The totals column renders blank when the invoice has more than twenty line items." }
+      ],
+      "primary_subject": { "label": "PDF Export", "type": "concept" },
+      "expect_claims": [{ "subject": "PDF Export", "claim_type": "state", "subtype": "blocker", "temporal_status": "current" }],
+      "must_save": true,
+      "must_create_page": true,
+      "graph_optional": true,
+      "forbid_claims": ["The user fixed the PDF export"],
+      "control_messages": []
+    },
+    {
+      "id": "f21-real-bad-conversation",
+      "category": "meta_noise_regression",
+      "messages": [
+        { "id": "M0", "role": "user", "content": "Send me the prompt." },
+        { "id": "M1", "role": "assistant", "content": "Here is the prompt." },
+        { "id": "M2", "role": "user", "content": "Give me the code." },
+        { "id": "M3", "role": "assistant", "content": "Here is the code." },
+        { "id": "M4", "role": "user", "content": "Retry." },
+        { "id": "M5", "role": "user", "content": "I am building UML on Cloudflare Workers." }
+      ],
+      "primary_subject": { "label": "Universal Memory Engine", "type": "project" },
+      "expect_claims": [{ "subject": "Universal Memory Engine", "claim_type": "relationship", "subtype": "uses", "object": "Cloudflare Workers" }],
+      "must_save": true,
+      "forbid_claims": ["User asked to send the prompt", "User asked for code", "User requested a retry"],
+      "control_messages": ["M0", "M2", "M4"]
+    },
+    {
+      "id": "f22-empty-input",
+      "category": "empty_input",
+      "messages": [{ "id": "M0", "role": "user", "content": "   " }],
+      "primary_subject": null,
+      "expect_claims": [],
+      "must_save": false,
+      "forbid_claims": [],
+      "control_messages": []
+    }
+  ]
+}
