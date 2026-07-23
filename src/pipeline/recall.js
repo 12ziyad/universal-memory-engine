@@ -25,6 +25,17 @@ const UPDATE_RE =
 	/\b(latest|recent|current|updates?|what changed|changed lately|active now|actually|correction|no longer|from now on|replace|instead|forget that)\b/i;
 const BROAD_RE =
 	/\b(what do you know|remember about me|about me|my profile|everything|all memories|who am i|my projects|my health|my family|my goals|my preferences|my skills|my habits|my work|my tools|projects|health|family|goals|preferences|skills|habits|work|tools)\b/i;
+// Interrogative lookups aimed at a named subject: "what do you remember about
+// Rahul?", "do you remember Rahul?". Without this these fall through to
+// classifyMessage(), which calls any bare question with no first-person
+// statement "utility" and skips the memory lookup entirely — the single most
+// natural way to ask for a memory was the one phrasing that never recalled.
+const RECALL_INTENT_RE =
+	/\b(?:do|did|can|could|would|will)\s+(?:you\s+)?(?:still\s+)?(?:remember|recall)\b|\bwhat\s+(?:do|did)\s+you\s+(?:remember|recall|know)\b|\b(?:remember|recall)\s+(?:what|when|where|why|how|who|whether|anything|something)\b|\btell\s+me\s+(?:what|everything|anything)\s+you\s+(?:remember|recall|know)\b/i;
+// "Remember that …" / "note this" are save instructions, not lookups. They must
+// never be answered from memory instead of being written to it.
+const SAVE_IMPERATIVE_RE =
+	/^\s*(?:please\s+|also\s+|and\s+)*(?:remember|note|save|store|keep in mind)\s+(?:that|this|to|the following|my|i|we|he|she|they|it)\b/i;
 
 function emptyRecall(plan, extras = {}) {
 	return {
@@ -76,7 +87,8 @@ export function recallGate(query, opts = {}) {
 	}
 	const broad = BROAD_RE.test(lower);
 	const update = UPDATE_RE.test(lower);
-	if (!broad && !update && classifyMessage(q) === "utility") {
+	const recallIntent = RECALL_INTENT_RE.test(lower) && !SAVE_IMPERATIVE_RE.test(q);
+	if (!broad && !update && !recallIntent && classifyMessage(q) === "utility") {
 		return { ...base, mode: "no_recall", reason: "utility_query", topN: 0 };
 	}
 	if (update) {
@@ -104,6 +116,9 @@ export function recallGate(query, opts = {}) {
 			eventScanLimit: 800,
 			maxContextChars: 2800,
 		};
+	}
+	if (recallIntent) {
+		return { ...base, mode: "light_recall", reason: "recall_intent_query" };
 	}
 	return { ...base, mode: "light_recall", reason: opts.reason ?? "targeted_query" };
 }

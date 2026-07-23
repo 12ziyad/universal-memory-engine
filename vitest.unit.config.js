@@ -20,6 +20,7 @@ export default defineConfig({
 			"test/manual_plan.spec.js",
 			"test/manual_search_profiles.spec.js",
 			"test/manual_titles.spec.js",
+			"test/recall_gate.spec.js",
 			"test/title.spec.js",
 		],
 	},
