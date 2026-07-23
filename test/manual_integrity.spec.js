@@ -302,6 +302,73 @@ describe("MCP manual integrity gate", () => {
 		]);
 	});
 
+	// ACTION_TERMS.other is [] by definition, so the event branch used to call
+	// hasAnyTerm(source, []) -> [].some() -> false and drop every `other` event
+	// however well evidenced, making its own `detail.hasDetails` clause dead code.
+	// Live save_memory returned "Saved: 0" for any submission the model did not
+	// map onto a specific action verb.
+	describe("generic `other` events", () => {
+		function otherEvent(label, category, text) {
+			return {
+				identity: { label, category, existing_node_id: null, aliases: [] },
+				memory: { kind: "event", action: "other", text, importance: "ordinary" },
+				confidence: 0.95,
+				supersedes: false,
+			};
+		}
+
+		it("saves an explicitly submitted future project idea", () => {
+			const content = "Remember that one of my future projects is a Unified Government QR Identity System.";
+			const result = applyManualIntegrity({
+				facts: [otherEvent(
+					"Unified Government QR Identity System",
+					"project",
+					"One of the user future projects is a Unified Government QR Identity System.",
+				)],
+				relationships: [],
+			}, { submittedContent: content, recentContext: "" });
+
+			expect(result.rejected).toEqual([]);
+			expect(result.facts).toHaveLength(1);
+		});
+
+		it("saves a casual experience without inventing a reason for it", () => {
+			const content = "Remember that I had a strange day at work.";
+			const result = applyManualIntegrity({
+				facts: [otherEvent("Strange Workday", "life_event", "The user had a strange day at work.")],
+				relationships: [],
+			}, { submittedContent: content, recentContext: "" });
+
+			expect(result.rejected).toEqual([]);
+			expect(result.facts).toHaveLength(1);
+		});
+
+		it("still rejects an `other` event whose detail is absent from the submission", () => {
+			const result = applyManualIntegrity({
+				facts: [otherEvent("Atlas", "project", "Atlas raised ten million dollars.")],
+				relationships: [],
+			}, { submittedContent: "I started Atlas today.", recentContext: "" });
+
+			expect(result.facts).toHaveLength(0);
+			expect(result.rejected[0]).toMatchObject({ reason: "fact_not_in_submitted_content" });
+		});
+
+		it("keeps requiring a specific action's own vocabulary in the submission", () => {
+			const married = {
+				identity: { label: "Boxing", category: "habit", existing_node_id: null, aliases: [] },
+				memory: { kind: "event", action: "married", text: "The user married boxing.", importance: "ordinary" },
+				confidence: 0.95,
+				supersedes: false,
+			};
+			const result = applyManualIntegrity({ facts: [married], relationships: [] }, {
+				submittedContent: "I had a strange day at work.",
+				recentContext: "",
+			});
+
+			expect(result.facts).toHaveLength(0);
+		});
+	});
+
 	it("keeps a declared comparison role authoritative over an emitted fact", () => {
 		const content = "I use Bedrock rather than Sonnet.";
 		const comparison = { ref: "E1", label: "Sonnet", category: "tool", mention_role: "comparison" };

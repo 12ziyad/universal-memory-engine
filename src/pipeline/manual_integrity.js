@@ -327,9 +327,16 @@ function predicateGrounded(fact, submittedContent) {
 	const detail = factDetailEvidence(fact, submittedContent);
 	if (!detail.grounded) return false;
 	if (memory.kind === "event") {
-		return ACTIONS.includes(memory.action) &&
-			hasAnyTerm(submittedContent, ACTION_TERMS[memory.action]) &&
-			(detail.hasDetails || memory.action !== "other");
+		if (!ACTIONS.includes(memory.action)) return false;
+		// A specific action must be vouched for by its own vocabulary, so a
+		// "married" event still needs marriage words in the source. `other` has no
+		// vocabulary by definition, so it stands on grounded detail alone — the
+		// same fallback the slice branch below uses for an untermed slice_kind.
+		// Without this guard `hasAnyTerm(source, [])` is always false and every
+		// `other` event is dropped as ungrounded no matter how well evidenced.
+		const actionTerms = ACTION_TERMS[memory.action] ?? [];
+		if (actionTerms.length) return hasAnyTerm(submittedContent, actionTerms);
+		return detail.hasDetails;
 	}
 	if (!SLICE_KINDS.includes(memory.slice_kind)) return false;
 	const terms = SLICE_TERMS[memory.slice_kind] ?? [];
