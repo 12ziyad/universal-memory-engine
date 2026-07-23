@@ -28,6 +28,20 @@ const REFERENTIAL_CONFIRMATION_RE = /\b(?:that|this|it|the (?:plan|proposal|sugg
 const AMBIGUOUS_CONFIRMATION_ONLY_RE = /^(?:yes|yep|yeah|i (?:agree|accept|approve)|agreed|approved)[\s!.]*$/i;
 const REJECTING_CONFIRMATION_RE = /(?:^|[.!?]\s*)(?:no|nope|nah)\b|\b(?:avoid|decline|disagree with|drop|oppose|reject|rule out|skip)\b|\b(?:instead of|rather than)\b|\b(?:do\s+not|don['\u2019]?t|not)\s+(?:accept|approve|adopt|choose|do|go with|use)\b|\b(?:let['\u2019]s|we\s+(?:will|would|should|can|could)|i\s+(?:will|would|want to|choose to))\s+not\b|\b(?:will|would|should|can|could)\s+not\s+(?:adopt|choose|do|go with|use)\b|\b(?:won['\u2019]?t|wouldn['\u2019]?t|shouldn['\u2019]?t|can['\u2019]?t|cannot|never)\s+(?:adopt|choose|do|go with|use)\b/i;
 const SAVE_CONTROL_ONLY_RE = /^(?:please\s+)?(?:save|remember|memorize|store|collect|keep)\s+(?:(?:this|the|our)\s+)?(?:chat|conversation|thread|transcript|messages?|discussion|everything|all(?:\s+of\s+this)?|what\s+we\s+(?:discussed|said)|it)(?:\s+(?:to|in|as)\s+(?:the\s+)?memory)?[\s.!?]*$/i;
+// Orchestration aimed at the assistant, not memory about the user: "retry",
+// "send me the prompt", "save that", "did you save it?". These are the lines
+// that used to surface in pages and nodes as "User asked to send the prompt" /
+// "User requested a retry". Anchored end to end so a message that merely opens
+// with a control verb ("Save this question for later: ...") keeps its content.
+const CONTROL_COMMAND_RE = new RegExp(
+	"^(?:(?:can|could|would|will)\\s+you\\s+)?(?:please\\s+)?(?:" + [
+		"(?:retry|try\\s+again|regenerate|redo|repeat|resend)(?:\\s+(?:that|it|this))?",
+		"(?:save|remember|store|keep|memorize)\\s+(?:that|this|it|those|these)(?:\\s+(?:again|too|as\\s+well))?",
+		"did\\s+(?:you|it|that)\\s+(?:save|store|work|run|go\\s+through)(?:\\s+(?:it|that))?",
+		"(?:send|give|show|paste|share|resend|repost)\\s+(?:me\\s+)?(?:the\\s+|that\\s+|your\\s+|a\\s+)?(?:prompt|code|snippet|script|text|message|answer|response|output|instructions?)(?:\\s+again)?",
+	].join("|") + ")[\\s.!?]*$",
+	"i",
+);
 const USER_TASK_REQUEST_RE = /^(?:(?:please\s+)?(?:correct|fix|edit|update|revise|create|generate|convert|review|rewrite|remove|add|change|format|prepare|complete|finish)\b|(?:can|could|would|will)\s+you\b|(?:please\s+)?help\s+me\b|i\s+(?:need|want|would\s+like)\s+you\s+to\b)/i;
 const ASSISTANT_COMPLETION_RE = /^(?:(?:done|completed|finished|all\s+set)\b|(?:i|we)(?:['\u2019]?ve|\s+have|\s+had)?\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b|(?:the|your)\s+.{1,100}?\s+(?:has|have|is|are|was|were)\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b)/i;
 
@@ -179,6 +193,7 @@ function evidenceSpan(segment) {
 function userSegmentsAndDirectives(messages) {
 	const usable = [];
 	const directives = [];
+	const controls = [];
 	for (const message of messages) {
 		if (message.role !== "user") continue;
 		for (const segment of messageSegments(message)) {
@@ -206,10 +221,11 @@ function userSegmentsAndDirectives(messages) {
 			}
 			const directive = parseScopeDirective(segment);
 			if (directive) directives.push(directive);
+			else if (CONTROL_COMMAND_RE.test(segment.text)) controls.push(segment);
 			else usable.push(segment);
 		}
 	}
-	return { usable, directives };
+	return { usable, directives, controls };
 }
 
 export function inferManualConversationScope(messages = []) {
@@ -611,7 +627,7 @@ function assistantCompletionClaims(messages, claims, scope) {
 export function buildManualConversationClaims(messages = [], contentScope = {}) {
 	const resolution = resolveManualConversationScope(messages, contentScope);
 	const scope = resolution.scope;
-	const { usable, directives } = userSegmentsAndDirectives(resolution.messages);
+	const { usable, directives, controls } = userSegmentsAndDirectives(resolution.messages);
 	const proposals = proposalsFromMessages(resolution.messages);
 	const claims = [];
 	const ignored = directives.map((directive) => ({
@@ -621,6 +637,15 @@ export function buildManualConversationClaims(messages = [], contentScope = {}) 
 		reason: directive.kind === "save_control" ? "save_control_message" : "content_scope_directive",
 		text: directive.text,
 	}));
+	for (const control of controls) {
+		ignored.push({
+			kind: "message_segment",
+			message_ref: control.message_ref,
+			source_message_id: control.source_message_id,
+			reason: "control_command",
+			text: control.text,
+		});
+	}
 	if (!resolution.valid) {
 		return {
 			ok: false,
