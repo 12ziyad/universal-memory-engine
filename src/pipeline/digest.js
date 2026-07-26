@@ -114,8 +114,11 @@ export async function digestConversation(env, config, messages, opts = {}) {
 	}
 
 	// Fallback: if the model gave nothing, keep the cleaned user lines (drop
-	// questions too, since there's no model to judge them). Never lose real content.
-	if (!digest) {
+	// questions too, since there's no model to judge them). The manual_collect
+	// page/graph path opts OUT of this (allowRawFallback:false): when the digest
+	// legitimately yields nothing it must stay empty, never repopulate the page
+	// from the raw transcript. Direct callers keep the fallback.
+	if (!digest && opts.allowRawFallback !== false) {
 		digest = cleanUserTurns(userTurns, { dropUtility: true }).join("\n");
 	}
 
