@@ -88,6 +88,46 @@ function stripCollectSaveDirective(text) {
 	return { directive: true, control: remainder.length === 0, remainder };
 }
 
+// Content signal for the representation router (Commit 2). Deliberately a
+// positive-signal test, not a stop-word subtraction: a leftover of unrecognised
+// tokens ("everithing chst uml") must NOT count as content, while a short real
+// memory with no verb ("Rahul — CTO", "Dubai next month") must. So content is
+// asserted only on an explicit signal — temporal, action/state, a known entity,
+// or a proper-noun/acronym that is not merely sentence-initial.
+const META_CONTENT_TOKENS = new Set([
+	"memory", "memories", "uml", "graph", "note", "notes", "update", "updates", "save", "saved",
+	"stuff", "thing", "things", "chat", "cht", "chst", "conversation", "convo", "thread", "transcript",
+	"discussion", "message", "messages", "msg", "everything", "everithing", "everthing", "all", "entry",
+	"record", "here", "this", "that", "it", "them",
+]);
+const TEMPORAL_SIGNAL_RE = /\b(?:today|tomorrow|yesterday|tonight|tonite|this (?:morning|afternoon|evening|week|month|year|weekend)|next (?:week|month|year|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|last (?:week|month|year|night|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:mon|tues|wednes|thurs|fri|satur|sun)day|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\b\d{4}\b|again|already|no longer|still|now)\b/i;
+const ACTION_STATE_RE = /\b(?:start|started|starting|stop|stopped|stopping|pause|paused|resume|resumed|join|joined|leave|left|quit|launch|launched|finish|finished|complete|completed|fix|fixed|build|building|built|use|uses|using|prefer|prefers|preferred|decide|decided|plan|plans|planning|move|moved|moving|change|changed|switch|switched|pain|hurt|injured|sick|ill|diagnosed|married|engaged|born|died|passed away|hired|promoted|fired|works?|working|worked|love|loves|hate|hates|like|likes|owns?|bought|sold|named|matters?)\b/i;
+
+/**
+ * Cheap positive-signal check: does this text carry real memory content, as
+ * opposed to save chatter or filler? Used by the collect representation router.
+ */
+export function collectClaimHasContent(text, options = {}) {
+	const raw = String(text ?? "").trim();
+	if (!raw) return false;
+	if (TEMPORAL_SIGNAL_RE.test(raw) || ACTION_STATE_RE.test(raw)) return true;
+	const lower = raw.toLocaleLowerCase("en-US");
+	for (const label of options.knownLabels ?? []) {
+		const key = String(label ?? "").trim().toLocaleLowerCase("en-US");
+		if (key && lower.includes(key)) return true;
+	}
+	const tokens = raw.match(/[\p{L}\p{N}][\p{L}\p{N}+#.\-]*/gu) ?? [];
+	for (let i = 0; i < tokens.length; i++) {
+		const bare = tokens[i].replace(/[^\p{L}\p{N}]/gu, "");
+		if (!bare || META_CONTENT_TOKENS.has(bare.toLocaleLowerCase("en-US"))) continue;
+		const isAcronym = bare.length >= 2 && bare === bare.toLocaleUpperCase("en-US") && /\p{L}/u.test(bare);
+		if (isAcronym) return true;
+		const isCapitalised = /^\p{Lu}/u.test(tokens[i]) && /\p{Ll}/u.test(tokens[i]);
+		if (isCapitalised && i > 0) return true;
+	}
+	return false;
+}
+
 const USER_TASK_REQUEST_RE = /^(?:(?:please\s+)?(?:correct|fix|edit|update|revise|create|generate|convert|review|rewrite|remove|add|change|format|prepare|complete|finish)\b|(?:can|could|would|will)\s+you\b|(?:please\s+)?help\s+me\b|i\s+(?:need|want|would\s+like)\s+you\s+to\b)/i;
 const ASSISTANT_COMPLETION_RE = /^(?:(?:done|completed|finished|all\s+set)\b|(?:i|we)(?:['\u2019]?ve|\s+have|\s+had)?\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b|(?:the|your)\s+.{1,100}?\s+(?:has|have|is|are|was|were)\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b)/i;
 
