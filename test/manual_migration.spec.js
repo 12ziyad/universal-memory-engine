@@ -26,7 +26,9 @@ async function schemaObjects(names) {
 async function collect(userId, line, conversationId) {
 	return runMcpConversationCollectCommand(env, null, userId, {
 		topic: "atlas",
-		messages: [{ id: `${conversationId}-user`, role: "user", content: line }],
+		// A second content sentence keeps the page path exercised now that a single
+		// atomic claim routes to graph-only; the migration behaviour is unchanged.
+		messages: [{ id: `${conversationId}-user`, role: "user", content: `${line} Atlas progress continues this week.` }],
 		conversationId,
 		digestResponse: line,
 		extractionResponse: { facts: [], relationships: [], notes: "" },

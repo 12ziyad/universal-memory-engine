@@ -1221,7 +1221,10 @@ describe("MCP manual direct engine", () => {
 });
 
 describe("MCP manual conversation engine", () => {
-	it("saves a grounded task-oriented question without requiring a durable graph fact", async () => {
+	it("writes nothing for a thin conversation with no grounded content", async () => {
+		// Representation routing: a chat that is only chatter and a utility question
+		// has zero grounded semantic claims, so it must not manufacture a page. (The
+		// "page without a graph node" path is covered by the PDF-correction test.)
 		const id = userId("conversation-no-durable");
 		const result = await collect(id, {
 			scope: "summary",
@@ -1231,13 +1234,12 @@ describe("MCP manual conversation engine", () => {
 			],
 		});
 		expect(result).toMatchObject({
-			status: "wrote",
-			fired: true,
-			counts: { savedTotal: 1, pages: 1, nodes: 0 },
+			status: "ignored",
+			counts: { savedTotal: 0, pages: 0, nodes: 0 },
 		});
-		expect(await rows("memory_pages", id)).toHaveLength(1);
+		expect(result.summary).toContain("No semantic content remained after removing save instructions and filler");
+		expect(await rows("memory_pages", id)).toHaveLength(0);
 		expect(await rows("nodes", id)).toHaveLength(0);
-		expect(await rows("receipts", id)).toHaveLength(1);
 	});
 
 	it("saves the PDF-correction conversation through fallback without creating graph nodes", async () => {
@@ -1566,7 +1568,10 @@ describe("MCP manual conversation engine", () => {
 		const result = await collect(id, {
 			messages: [
 				{ id: "rejected-assistant", role: "assistant", content: "We could use D1 for Atlas." },
-				{ id: "rejected-user", role: "user", content: rejection },
+				// A second Atlas sentence makes the exchange page-worthy so the write
+				// path (and this hook) still runs; the rejection must remain a negative
+				// user claim and never a positive adopted edge.
+				{ id: "rejected-user", role: "user", content: `${rejection} Atlas is my main project.` },
 			],
 			contentScope: { subject: "Atlas" },
 			digestResponse: rejection,
@@ -1584,13 +1589,13 @@ describe("MCP manual conversation engine", () => {
 		});
 
 		expect(result.status).toBe("wrote");
-		expect(capturedClaims).toEqual([
+		expect(capturedClaims).toContainEqual(
 			expect.objectContaining({
 				text: rejection,
 				attribution: "user_stated",
 				polarity: "negative",
 			}),
-		]);
+		);
 		expect(capturedClaims.some((claim) => claim.attribution === "user_adopted")).toBe(false);
 		expect(plannedEdges).toEqual([]);
 		expect(await rows("edges", id)).toHaveLength(0);
@@ -1732,7 +1737,10 @@ describe("MCP manual conversation engine", () => {
 		const line = "Car service cost matters for purchase research.";
 		const result = await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: line }],
+			messages: [
+				{ role: "user", content: line },
+				{ role: "user", content: "Car resale value matters for purchase research." },
+			],
 			digestResponse: line,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: line }),
@@ -1820,9 +1828,12 @@ describe("MCP manual conversation engine", () => {
 	it("does not persist or relink a stale receipt after a newer page version wins", async () => {
 		const id = userId("stale-page-receipt");
 		const initial = "Car mileage matters for purchase research.";
+		// A second sentence makes each turn page-worthy (two claims) while staying
+		// one source message, so the page-receipt/version race is unchanged.
+		const carNote = " Car resale value also matters to me.";
 		await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: initial }],
+			messages: [{ role: "user", content: initial + carNote }],
 			digestResponse: initial,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: initial }),
@@ -1836,7 +1847,7 @@ describe("MCP manual conversation engine", () => {
 		const firstLine = "Car service cost matters for purchase research.";
 		const firstPromise = collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: firstLine }],
+			messages: [{ role: "user", content: firstLine + carNote }],
 			digestResponse: firstLine,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: firstLine }),
@@ -1851,7 +1862,7 @@ describe("MCP manual conversation engine", () => {
 		const secondLine = "Car resale value matters for purchase research.";
 		const second = await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: secondLine }],
+			messages: [{ role: "user", content: secondLine + carNote }],
 			digestResponse: secondLine,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: secondLine }),
@@ -1902,9 +1913,12 @@ describe("MCP manual conversation engine", () => {
 	it("reports a concurrent page reinforcement conflict instead of silently overwriting stale merged content", async () => {
 		const id = userId("concurrent-page-update");
 		const baseLine = "Car mileage matters for purchase research.";
+		// A second sentence keeps every turn page-worthy (two claims) as one source
+		// message, so the concurrent page-update race is unchanged.
+		const carNote = " Car fuel economy also matters to me.";
 		await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: baseLine }],
+			messages: [{ role: "user", content: baseLine + carNote }],
 			digestResponse: baseLine,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: baseLine }),
@@ -1918,7 +1932,7 @@ describe("MCP manual conversation engine", () => {
 		const barrier = writeBarrier();
 		const inputs = lines.map((line) => ({
 			topic: "car",
-			messages: [{ role: "user", content: line }],
+			messages: [{ role: "user", content: line + carNote }],
 			digestResponse: line,
 			testBeforeWrite: barrier,
 			extractionResponse: proposal([
@@ -1947,7 +1961,12 @@ describe("MCP manual conversation engine", () => {
 		const firstDigest = "Car mileage matters for the user's purchase research.";
 		const first = await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: "Car mileage matters for my purchase research." }],
+			// Two content-bearing car turns so the exchange is page-worthy; only the
+			// first is extracted, so the graph still holds one Car Research node.
+			messages: [
+				{ role: "user", content: "Car mileage matters for my purchase research." },
+				{ role: "user", content: "Car resale value matters for my purchase research." },
+			],
 			digestResponse: firstDigest,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: firstDigest }),
@@ -1958,7 +1977,10 @@ describe("MCP manual conversation engine", () => {
 		const secondDigest = "Car service cost matters for the user's purchase research.";
 		const second = await collect(id, {
 			topic: "car",
-			messages: [{ role: "user", content: "Car service cost also matters for my purchase research." }],
+			messages: [
+				{ role: "user", content: "Car service cost also matters for my purchase research." },
+				{ role: "user", content: "Car fuel economy matters for my purchase research." },
+			],
 			digestResponse: secondDigest,
 			extractionResponse: proposal([
 				sliceFact({ label: "Car Research", category: "interest", kind: "other", text: secondDigest }),
@@ -1985,7 +2007,9 @@ describe("MCP manual conversation engine", () => {
 			scope: "topic",
 			topic: "car",
 			messages: [
-				{ role: "user", content: carLine },
+				// Two car sentences so the topic-scoped slice is page-worthy; the bike
+				// turn is still filtered out of both the page and the graph.
+				{ role: "user", content: `${carLine} Car resale value also matters to me.` },
 				{ role: "user", content: bikeLine },
 			],
 			digestResponse: `${carLine}\n${bikeLine}`,
@@ -2007,7 +2031,9 @@ describe("MCP manual conversation engine", () => {
 			n: 1,
 			messages: [
 				{ role: "user", content: oldLine },
-				{ role: "user", content: latestLine },
+				// A second pottery sentence makes the last-N slice page-worthy; the
+				// earlier boxing turn stays out of both the page and the graph.
+				{ role: "user", content: `${latestLine} I plan to continue it next month.` },
 			],
 			digestResponse: `${oldLine}\n${latestLine}`,
 			extractionResponse: proposal([

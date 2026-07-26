@@ -187,7 +187,9 @@ describe("manual page write-token CAS", () => {
 		const mcpResult = await runMcpConversationCollectCommand(env, null, userId, {
 			topic: "atlas",
 			conversationId: "atlas-compatibility",
-			messages: [{ id: "mcp-user", role: "user", content: updateLine }],
+			// A second content sentence keeps this a page-worthy update now that a
+			// single atomic claim routes to graph-only.
+			messages: [{ id: "mcp-user", role: "user", content: `${updateLine} Launch is planned for next month.` }],
 			digestResponse: updateLine,
 			extractionResponse: {
 				facts: [{

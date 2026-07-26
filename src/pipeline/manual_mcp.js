@@ -7,7 +7,7 @@ import { extractManualFacts } from "./manual_extract.js";
 import { applyManualIntegrity } from "./manual_integrity.js";
 import { canonicalIdentity } from "./manual_identity.js";
 import { buildManualPagePlan } from "./manual_page.js";
-import { buildManualConversationClaims } from "./manual_conversation_scope.js";
+import { buildManualConversationClaims, collectClaimHasContent } from "./manual_conversation_scope.js";
 import { synthesizeManualPage } from "./manual_page_synthesis.js";
 import { buildManualGraphPlan, loadManualPlanningState } from "./manual_plan.js";
 import { refineManualIdentityTitles } from "./manual_titles.js";
@@ -815,6 +815,52 @@ function pageSynthesisClaims(conversation, integrity) {
 	return kept;
 }
 
+/**
+ * Route a save_conversation by STRUCTURE, not importance (Commit 4). The count
+ * of grounded semantic claims — and whether the exchange carries multi-turn
+ * substance (timeline / decision / correction / completed work) — decides the
+ * representation, so thin/instructional input never manufactures a page.
+ *
+ * @returns {{ shape: "none"|"graph_only"|"page", groundedClaimCount: number,
+ *   contentfulClaims: Array<object>, multiTurnSubstance: boolean }}
+ */
+function decideCollectRepresentation(integrity, semanticClaims, graphPlan) {
+	const claims = semanticClaims ?? [];
+	const knownLabels = [
+		...(integrity?.entities ?? []).map((entity) => entity?.label),
+		...(integrity?.facts ?? []).map((fact) => fact?.identity?.label),
+	].filter(Boolean);
+	const factEvidenceRefs = new Set(
+		(integrity?.facts ?? [])
+			.flatMap((fact) => fact.evidence_ids ?? fact.evidence_spans?.map((span) => span.message_ref) ?? []),
+	);
+	const substanceTypes = new Set(["decision", "current_state", "historical_state", "correction"]);
+	const contentfulClaims = claims.filter((claim) => {
+		if (claim?.claim_kind === "assistant_completed_action" || claim?.claim_kind === "user_adopted") return true;
+		if (claim?.page_only && claim?.claim_kind === "user_task_request") return true;
+		if (substanceTypes.has(claim?.type)) return true;
+		const refs = (claim?.evidence_spans ?? []).map((span) => span.message_ref);
+		if (refs.some((ref) => factEvidenceRefs.has(ref))) return true;
+		return collectClaimHasContent(claim?.text, { knownLabels });
+	});
+	// Multi-turn substance means the exchange is more than a bag of facts: a
+	// correction, an adopted proposal, completed assistant work, or an explicit
+	// timeline/decision/history claim. A lone event ("I started boxing") does NOT
+	// count — that is a single atomic claim and belongs in the graph only.
+	const multiTurnSubstance =
+		(integrity?.corrections?.length ?? 0) > 0 ||
+		claims.some((claim) => claim?.claim_kind === "assistant_completed_action" || claim?.claim_kind === "user_adopted") ||
+		claims.some((claim) => substanceTypes.has(claim?.type));
+	const groundedClaimCount = contentfulClaims.length;
+	const graphHasWrites = Boolean(graphPlan?.hasGraphWrites);
+
+	let shape;
+	if (groundedClaimCount === 0 && !graphHasWrites) shape = "none";
+	else if (groundedClaimCount >= 2 || multiTurnSubstance) shape = "page";
+	else shape = graphHasWrites ? "graph_only" : "none";
+	return { shape, groundedClaimCount, contentfulClaims, multiTurnSubstance };
+}
+
 function structureIdentityObjects(structure) {
 	return [
 		...(structure?.entities ?? []),
@@ -1315,6 +1361,9 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const digestResult = await digestConversation(env, config, claimMessages, {
 		scope: "full",
 		digestResponse: input.digestResponse,
+		// The page is built only from validated claims; never let an empty digest
+		// resurrect the raw transcript as graph query text.
+		allowRawFallback: false,
 	});
 	const groundedDigest = groundDigest(digestResult.digest, claimMessages);
 	const graphDigest = filterDigestByTopic(groundedDigest, intent);
@@ -1398,7 +1447,18 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const identityHints = pageIdentityHints(integrity);
 	const primaryNodeId = primaryPageNodeId(integrity, graphPlan);
 	const primaryNodeIsNew = Boolean(primaryNodeId && (graphPlan.newNodes ?? []).some((node) => node.id === primaryNodeId));
-	const pageSynthesis = digest && semanticClaims.length
+	// Representation routing (Commit 4): 0 grounded claims → no write; a single
+	// atomic claim → graph only, no page; multiple claims or multi-turn substance
+	// → page + graph. Replaces the old "any digest + any claim → page" rule that
+	// manufactured a page for thin/instructional input.
+	const representation = decideCollectRepresentation(integrity, semanticClaims, graphPlan);
+	graphPlan.representationShape = representation.shape;
+	const wantPage = representation.shape === "page" && Boolean(digest) && semanticClaims.length > 0;
+	const pageSkipReason = representation.shape === "graph_only"
+		? "single grounded claim stored as a graph fact without a page"
+		: "No semantic content remained after removing save instructions and filler";
+	const pageSkipCode = representation.shape === "graph_only" ? "single_atomic_claim_graph_only" : "no_semantic_content";
+	const pageSynthesis = wantPage
 		? await synthesizeManualPage(env, config, {
 			claims: semanticClaims,
 			subject: conversation.resolved_scope?.subject ?? primaryPageSubject(integrity)?.label ?? null,
@@ -1411,7 +1471,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			synthesisResponses: input.synthesisResponses ?? input.overrides?.synthesisResponses,
 		})
 		: null;
-	let pagePlan = digest && semanticClaims.length
+	let pagePlan = wantPage
 		? await buildManualPagePlan(env, userId, {
 			digest,
 			messages: pageMessages,
@@ -1437,11 +1497,11 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			action: "skipped",
 			page: null,
 			write: false,
-			reason: "no_eligible_conversation_claims",
+			reason: pageSkipReason,
 			newPages: [],
 			pageUpdates: [],
 			pageClaims: [],
-			skipped: [{ kind: "memory_page", label: null, reason: "no_eligible_conversation_claims" }],
+			skipped: [{ kind: "memory_page", label: null, reason: pageSkipCode }],
 		};
 	if (pagePlan.action === "duplicate") graphPlan = duplicateRepairGraphPlan(graphPlan);
 	const conflicts = graphPlan.conflicts;
