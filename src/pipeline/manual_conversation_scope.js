@@ -42,6 +42,52 @@ const CONTROL_COMMAND_RE = new RegExp(
 	].join("|") + ")[\\s.!?]*$",
 	"i",
 );
+// Per-message "save this to memory" instruction stripping. SAVE_CONTROL_ONLY_RE
+// is too strict: a leading vocative ("bro"), typos ("everithing", "chst"), and a
+// destination ("to uml") all make it miss, so the command leaked in as a claim
+// (the "Uml Memory Notes" whose Key Fact was the save instruction). These strip
+// the directive span and evaluate only the remainder, per message.
+const COLLECT_DIRECTIVE_VOCATIVE = "(?:(?:bro|dude|man|bruh|buddy|mate|hey|yo|ok|okay|please|hi|hello)\\b[\\s,]*)*";
+const COLLECT_DIRECTIVE_LEAD = "(?:(?:can|could|would|will)\\s+you\\s+)?(?:please\\s+)?";
+const COLLECT_DIRECTIVE_VERB = "(?:save|saves|saved|remember|memorize|memorise|store|collect|keep|record)\\b";
+const COLLECT_DIRECTIVE_OBJECT = "(?:this|that|the|our|it|of|from|to|into|in|as|here|now|please|what|we|i|said|discussed|down|up|entire|whole|full|everything|everithing|everthing|everythin|all|these|those|chat|cht|chst|conversation|convo|thread|transcript|discussion|message|messages|msg|msgs|memory|uml|graph|stuff|things|note|notes|update|updates)";
+// A "strong" referent means the object of "save" is the chat/memory itself, not
+// real content — so "store the data in Redis" is never mistaken for a directive.
+const COLLECT_DIRECTIVE_STRONG = "(?:everything|everithing|everthing|everythin|all|it|this|these|those|chat|cht|chst|conversation|convo|thread|transcript|discussion|message|messages|memory|uml|graph|stuff|note|notes|update)";
+const COLLECT_DIRECTIVE_WEAK = "(?:this|that|the|our|it|of|from|to|into|in|as|here|now|please|what|we|i)";
+const COLLECT_SAVE_CONTROL_RE = new RegExp(
+	"^\\s*" + COLLECT_DIRECTIVE_VOCATIVE + COLLECT_DIRECTIVE_LEAD + COLLECT_DIRECTIVE_VERB +
+		"(?:[\\s,]+" + COLLECT_DIRECTIVE_OBJECT + ")*[\\s,:;.!?\\-–—]*$",
+	"i",
+);
+const COLLECT_SAVE_PREFIX_RE = new RegExp(
+	"^\\s*" + COLLECT_DIRECTIVE_VOCATIVE + COLLECT_DIRECTIVE_LEAD + COLLECT_DIRECTIVE_VERB +
+		"(?:[\\s,]+" + COLLECT_DIRECTIVE_WEAK + ")*[\\s,]+" + COLLECT_DIRECTIVE_STRONG +
+		"(?:[\\s,]+" + COLLECT_DIRECTIVE_OBJECT + ")*[\\s,:;.\\-–—]+",
+	"i",
+);
+
+// A stripped remainder that opens with one of these is scope metadata
+// ("save everything about Rahul from this chat"), not a standalone fact — leave
+// it for the scope parser to read the subject from.
+const SCOPE_REMAINDER_RE = /^(?:about|regarding|concerning|of|on|only|for|from|excluding|except|ignoring|but|and)\b/i;
+
+/**
+ * Split a save-to-memory instruction off the front of a message.
+ * @returns {{ directive: boolean, control: boolean, remainder: string }}
+ *   control=true  → the whole message was the instruction (drop it).
+ *   directive=true, control=false → a real claim remains; use `remainder`.
+ *   directive=false → not a save instruction; keep the message unchanged.
+ */
+function stripCollectSaveDirective(text) {
+	const s = String(text ?? "");
+	if (COLLECT_SAVE_CONTROL_RE.test(s)) return { directive: true, control: true, remainder: "" };
+	const match = s.match(COLLECT_SAVE_PREFIX_RE);
+	if (!match || !match[0]) return { directive: false, control: false, remainder: s };
+	const remainder = s.slice(match[0].length).replace(/^(?:because|so|and|that)\s+/i, "").trim();
+	return { directive: true, control: remainder.length === 0, remainder };
+}
+
 const USER_TASK_REQUEST_RE = /^(?:(?:please\s+)?(?:correct|fix|edit|update|revise|create|generate|convert|review|rewrite|remove|add|change|format|prepare|complete|finish)\b|(?:can|could|would|will)\s+you\b|(?:please\s+)?help\s+me\b|i\s+(?:need|want|would\s+like)\s+you\s+to\b)/i;
 const ASSISTANT_COMPLETION_RE = /^(?:(?:done|completed|finished|all\s+set)\b|(?:i|we)(?:['\u2019]?ve|\s+have|\s+had)?\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b|(?:the|your)\s+.{1,100}?\s+(?:has|have|is|are|was|were)\s+(?:now\s+)?(?:corrected|fixed|edited|updated|revised|created|generated|converted|reviewed|rewritten|removed|added|changed|formatted|prepared|completed|finished)\b)/i;
 
@@ -218,6 +264,27 @@ function userSegmentsAndDirectives(messages) {
 					}
 					continue;
 				}
+			}
+			// Peel a "save this to memory" instruction off the front BEFORE the scope
+			// parser, which is greedy enough to swallow a trailing fact ("Save this
+			// conversation because Rahul joined" would otherwise vanish whole). A
+			// remainder that opens with a scope preposition ("save everything about
+			// Rahul") is left for parseScopeDirective so it can set the subject.
+			const stripped = stripCollectSaveDirective(segment.text);
+			if (stripped.control) {
+				// Let the scope parser keep classifying recognised save-controls (so
+				// "Save this conversation" stays reason=save_control_message); only the
+				// cases it misses (vocatives, typos, destinations) fall to control_command.
+				const controlDirective = parseScopeDirective(segment);
+				if (controlDirective) directives.push(controlDirective);
+				else controls.push(segment);
+				continue;
+			}
+			if (stripped.directive && stripped.remainder && !SCOPE_REMAINDER_RE.test(stripped.remainder)) {
+				const offset = segment.text.lastIndexOf(stripped.remainder);
+				const start = offset >= 0 ? segment.start + offset : segment.start;
+				usable.push({ ...segment, start, end: start + stripped.remainder.length, text: stripped.remainder });
+				continue;
 			}
 			const directive = parseScopeDirective(segment);
 			if (directive) directives.push(directive);
