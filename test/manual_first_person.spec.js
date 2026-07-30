@@ -157,6 +157,91 @@ describe("save_memory first-person subjects", () => {
 	});
 });
 
+describe("save_memory label hygiene and grounding", () => {
+	it("saves a plural identity against a singular source word", async () => {
+		const id = userId("plural");
+		const content = "I always like to eat apple";
+		const result = await runMcpDirectSaveCommand(env, null, id, {
+			content,
+			extractionResponse: {
+				primary_subject_ref: "E0",
+				entities: [{ ref: "E0", label: "Apples", category: "interest", mention_role: "primary_subject", evidence_ids: ["M0"], evidence_spans: [{ message_ref: "M0", quote: "apple" }] }],
+				facts: [{
+					subject_ref: "E0",
+					identity: { label: "Apples", category: "interest" },
+					memory: { kind: "slice", slice_kind: "preference", text: content },
+					evidence_ids: ["M0"],
+					evidence_spans: [{ message_ref: "M0", quote: content }],
+					confidence: 0.95,
+					attribution: "user_stated",
+					polarity: "positive",
+					modality: "asserted",
+					temporal_status: "current",
+				}],
+				relationships: [],
+				corrections: [],
+			},
+		});
+		expect(result.counts.savedTotal).toBeGreaterThan(0);
+		expect((await rows("nodes", id)).map((node) => node.label)).toContain("Apples");
+	});
+
+	it("collapses a sentence-shaped owner+value label to the real subject", async () => {
+		const id = userId("echo-label");
+		await seedUser(id, { name: "Ziyad" });
+		const content = "Ziyad's favorite programming language is Kotlin";
+		const sentenceLabel = "Ziyad Favorite Programming Language Kotlin";
+		const result = await runMcpDirectSaveCommand(env, null, id, {
+			content,
+			extractionResponse: {
+				primary_subject_ref: "E0",
+				entities: [
+					{ ref: "E0", label: sentenceLabel, category: "preference", mention_role: "primary_subject", evidence_ids: ["M0"], evidence_spans: [{ message_ref: "M0", quote: content }] },
+					{ ref: "E1", label: "Kotlin", category: "tool", mention_role: "relationship_target", evidence_ids: ["M0"], evidence_spans: [{ message_ref: "M0", quote: "Kotlin" }] },
+				],
+				facts: [{
+					subject_ref: "E0",
+					identity: { label: sentenceLabel, category: "preference" },
+					memory: { kind: "slice", slice_kind: "preference", text: content },
+					evidence_ids: ["M0"],
+					evidence_spans: [{ message_ref: "M0", quote: content }],
+					confidence: 0.95,
+					attribution: "user_stated",
+					polarity: "positive",
+					modality: "asserted",
+					temporal_status: "current",
+				}],
+				relationships: [],
+				corrections: [],
+			},
+		});
+
+		expect(result.counts.savedTotal).toBeGreaterThan(0);
+		const labels = (await rows("nodes", id)).map((node) => node.label);
+		// The owner echo and the trailing value echo are both stripped.
+		expect(labels).not.toContain(sentenceLabel);
+		expect(labels.some((label) => /^favorite programming language$/i.test(label))).toBe(true);
+	});
+
+	it("reuses an existing owner node instead of duplicating the owner", async () => {
+		const id = userId("owner-reuse");
+		await seedUser(id, { name: "Ziyad E J" });
+		const now = Date.now();
+		await env.DB.prepare(
+			"INSERT INTO nodes (id, user_id, label, category, state, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)",
+		).bind("node-ziyad", id, "Ziyad", "identity", now, now).run();
+
+		const content = "My preferred code editor is Zed";
+		await runMcpDirectSaveCommand(env, null, id, {
+			content,
+			extractionResponse: selfSubjectProposal(content, { label: "I" }),
+		});
+
+		const labels = (await rows("nodes", id)).map((node) => node.label);
+		expect(labels.filter((label) => /ziyad/i.test(label))).toEqual(["Ziyad"]);
+	});
+});
+
 describe("save_memory refusal reasons", () => {
 	it("names the gate that fired instead of a generic message", async () => {
 		const id = userId("reason");
