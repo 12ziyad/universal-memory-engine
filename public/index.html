@@ -355,6 +355,12 @@
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
 	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; z-index: 5; max-width: min(760px, calc(100% - 28px)); }
+	.cluster-handle { position: absolute; z-index: 6; display: none; transform: translate(-50%, -100%); padding: 5px 12px;
+		background: rgba(22,27,34,.94); border: 1px solid var(--accent); color: var(--text); border-radius: 999px;
+		font-size: 12px; font-weight: 600; cursor: grab; user-select: none; touch-action: none;
+		box-shadow: 0 4px 18px rgba(0,0,0,.45); white-space: nowrap; }
+	.cluster-handle:active { cursor: grabbing; }
+	.cluster-handle .ch-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 	.graph-tools input { width: 132px; background: rgba(22,27,34,.86); backdrop-filter: blur(8px); }
 	.graph-tools select { height: 28px; padding: 3px 8px; background: rgba(22,27,34,.86); backdrop-filter: blur(8px); font-size: 11.5px; }
 	.graph-tools .mini { background: rgba(22,27,34,.82); backdrop-filter: blur(8px); box-shadow: 0 10px 26px rgba(0,0,0,.22); }
@@ -2556,54 +2562,126 @@ function endClusterDrag(commit) {
 	if (!commit) {
 		const hull = (S.clusterHulls || []).find((h) => h.id === drag.id);
 		if (hull) shiftCluster(drag.id, drag.originX - hull.x, drag.originY - hull.y);
-		try { if (S.network) S.network.redraw(); } catch {}
 		toast("Cluster move cancelled.");
-		return;
+	} else {
+		toast("Cluster placed.");
 	}
-	toast("Cluster placed.");
+	try { if (S.network) S.network.redraw(); } catch {}
+	updateClusterHandle();
 }
 
 function abandonClusterDrag() {
 	const drag = S.clusterDrag;
-	if (!drag) return;
-	S.clusterDrag = null;
-	if (drag.detach) drag.detach();
+	if (drag) {
+		S.clusterDrag = null;
+		if (drag.detach) drag.detach();
+	}
+	hideClusterHandle();
 }
 
-function beginClusterDrag(hull, canvasPos, cont) {
-	if (!hull || !canvasPos || !cont) return;
+function clusterHandleEl() {
+	const wrap = $("#graphWrap");
+	if (!wrap) return null;
+	let handle = $("#clusterHandle");
+	if (!handle) {
+		handle = document.createElement("div");
+		handle.id = "clusterHandle";
+		handle.className = "cluster-handle";
+		handle.addEventListener("pointerdown", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const hull = (S.clusterHulls || []).find((h) => h.id === S.clusterPick);
+			const cont = $("#graph");
+			if (hull && cont) beginClusterDrag(hull, cont, e);
+		});
+		wrap.appendChild(handle);
+	}
+	return handle;
+}
+
+function hideClusterHandle() {
+	const handle = $("#clusterHandle");
+	if (handle) handle.style.display = "none";
+}
+
+function updateClusterHandle() {
+	const handle = clusterHandleEl();
+	if (!handle) return;
+	if (!S.network || !S.clusterPick || S.clusterDrag) { handle.style.display = "none"; return; }
+	const hull = (S.clusterHulls || []).find((h) => h.id === S.clusterPick);
+	if (!hull) { handle.style.display = "none"; S.clusterPick = null; return; }
+	let dom;
+	try { dom = S.network.canvasToDOM({ x: hull.labelX, y: hull.labelY }); } catch { return; }
+	handle.innerHTML = `<span class="ch-dot" style="background:${esc(hull.color)}"></span>✥ Drag ${esc(hull.label)}`;
+	handle.style.left = `${Math.round(dom.x)}px`;
+	handle.style.top = `${Math.round(dom.y - 22)}px`;
+	handle.style.display = "block";
+}
+
+function pickCluster(hull) {
+	const changed = (hull ? hull.id : null) !== S.clusterPick;
+	S.clusterPick = hull ? hull.id : null;
+	updateClusterHandle();
+	if (hull && changed) toast(`"${hull.label}" selected — press the Drag pill to move it.`);
+}
+
+function beginClusterDrag(hull, cont, downEvent) {
+	if (!hull || !cont || !downEvent) return;
 	if (S.clusterDrag) endClusterDrag(true);
 	materializeClusterPositions(hull.id);
+	hideClusterHandle();
+	const down = { x: downEvent.clientX, y: downEvent.clientY };
+	let buttonHeld = true;
+	let heldMoved = false;
 	const onMove = (e) => {
 		const drag = S.clusterDrag;
 		if (!drag) return;
+		if (buttonHeld && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) heldMoved = true;
 		const rect = cont.getBoundingClientRect();
 		drag.pending = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 		if (!drag.rafQueued) { drag.rafQueued = true; requestAnimationFrame(clusterDragFrame); }
 	};
-	const onClick = (e) => { e.stopPropagation(); e.preventDefault(); endClusterDrag(true); };
+	const onUp = () => {
+		if (!S.clusterDrag) return;
+		// Classic drag: pressed the pill, moved while holding, released → placed.
+		if (buttonHeld && heldMoved) return endClusterDrag(true);
+		// Quick tap on the pill → hands-free carry until a double-click places it.
+		buttonHeld = false;
+	};
+	const onDbl = (e) => { e.stopPropagation(); e.preventDefault(); endClusterDrag(true); };
+	const onClickCapture = (e) => { if (!buttonHeld) { e.stopPropagation(); e.preventDefault(); } };
 	const onKey = (e) => { if (e.key === "Escape") endClusterDrag(false); };
-	cont.addEventListener("pointermove", onMove);
-	cont.addEventListener("click", onClick, true);
+	window.addEventListener("pointermove", onMove);
+	window.addEventListener("pointerup", onUp);
+	cont.addEventListener("dblclick", onDbl, true);
+	cont.addEventListener("click", onClickCapture, true);
 	window.addEventListener("keydown", onKey);
 	const prevCursor = cont.style.cursor;
 	S.clusterDrag = {
 		id: hull.id,
-		grabDx: canvasPos.x - hull.x,
-		grabDy: canvasPos.y - hull.y,
+		grabDx: 0,
+		grabDy: 0,
 		originX: hull.x,
 		originY: hull.y,
 		pending: null,
 		rafQueued: false,
 		detach: () => {
-			cont.removeEventListener("pointermove", onMove);
-			cont.removeEventListener("click", onClick, true);
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
+			cont.removeEventListener("dblclick", onDbl, true);
+			cont.removeEventListener("click", onClickCapture, true);
 			window.removeEventListener("keydown", onKey);
 			cont.style.cursor = prevCursor || "";
 		},
 	};
+	try {
+		const rect = cont.getBoundingClientRect();
+		const canvas = S.network.DOMtoCanvas({ x: downEvent.clientX - rect.left, y: downEvent.clientY - rect.top });
+		S.clusterDrag.grabDx = canvas.x - hull.x;
+		S.clusterDrag.grabDy = canvas.y - hull.y;
+	} catch {}
 	cont.style.cursor = "grabbing";
-	toast(`Moving "${hull.label}" — click to place, Esc to cancel.`);
+	toast(`Carrying "${hull.label}" — drag and release, or double-click to place. Esc cancels.`);
 }
 // ---- end cluster drag-and-place ------------------------------------------
 
@@ -2672,29 +2750,20 @@ function drawGraph() {
 		});
 		S.graphDs = vn;
 		S.network.on("beforeDrawing", (ctx) => drawClusterHulls(ctx, S.clusterHulls));
-		S.network.on("afterDrawing", (ctx) => drawClusterLabels(ctx, S.clusterHulls));
+		S.network.on("afterDrawing", (ctx) => { drawClusterLabels(ctx, S.clusterHulls); updateClusterHandle(); });
 		S.network.on("click", (p) => {
 			if (S.clusterDrag) return;
-			if (!p.nodes || !p.nodes[0]) return;
-			const id = p.nodes[0];
-			if (String(id).startsWith("hull:")) return;
-			if (String(id).startsWith("candidate:")) return toast("Candidate nodes are preview-only. Open Candidate Review to promote or reject them.");
-			select(id);
-		});
-		S.network.on("doubleClick", (p) => {
-			const pointer = p?.pointer?.canvas;
-			let hull = null;
-			const first = p?.nodes?.[0];
-			if (first != null) {
-				const clusterId = String(first).startsWith("hull:")
-					? String(first).split(":")[1]
-					: vn.get(first)?.cluster;
-				hull = (S.clusterHulls || []).find((h) => h.id === clusterId) || null;
+			const id = p?.nodes?.[0];
+			if (id != null) {
+				if (String(id).startsWith("hull:")) return;
+				if (String(id).startsWith("candidate:")) return toast("Candidate nodes are preview-only. Open Candidate Review to promote or reject them.");
+				return select(id);
 			}
-			if (!hull && pointer) hull = clusterHullAt(pointer);
-			if (hull && pointer) return beginClusterDrag(hull, pointer, cont);
-			graphFit();
+			// Empty-space click: select the cluster under the cursor (shows the
+			// Drag pill), or clear the selection when outside every hull.
+			pickCluster(p?.pointer?.canvas ? clusterHullAt(p.pointer.canvas) : null);
 		});
+		S.network.on("doubleClick", () => { if (!S.clusterDrag) graphFit(); });
 		S.network.once("afterDrawing", () => setTimeout(() => graphFit(450), 20));
 		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
