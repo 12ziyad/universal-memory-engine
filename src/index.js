@@ -32,6 +32,7 @@ import {
 	runObserveMessagesCommand,
 	runRecallCommand,
 } from "./pipeline/commands.js";
+import { getMemoryRules, saveMemoryRules } from "./pipeline/rules.js";
 import {
 	clearSessionCookie,
 	createConnectionToken,
@@ -422,6 +423,89 @@ const routes = {
 			});
 		}
 		return json(res);
+	},
+
+	"GET /v1/rules": async (request, env) => {
+		const requestedUserId = new URL(request.url).searchParams.get("userId");
+		const auth = await requireMemoryUser(request, env, requestedUserId, {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		return json({ ok: true, rules: await getMemoryRules(env, auth.userId) });
+	},
+
+	"PUT /v1/rules": async (request, env) => {
+		const body = await request.json().catch(() => ({}));
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			requiredScope: MEMORY_WRITE_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const rules = await saveMemoryRules(env, auth.userId, body.rules ?? body);
+		return json({ ok: true, rules });
+	},
+
+	"POST /v1/rules": async (request, env) => {
+		// Alias for clients that cannot send PUT.
+		const body = await request.json().catch(() => ({}));
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			requiredScope: MEMORY_WRITE_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const rules = await saveMemoryRules(env, auth.userId, body.rules ?? body);
+		return json({ ok: true, rules });
+	},
+
+	"POST /v1/turn": async (request, env, ctx) => {
+		// One round trip for app builders: recall relevant memory for the newest
+		// user message, and (per rules.autoCollect) feed the turn into the
+		// auto-collect lane in the background. Auto-recall + auto-capture.
+		const body = await request.json().catch(() => ({}));
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			scopeInput: body.memoryScope ?? body.sourceScope,
+			requiredScope: MEMORY_WRITE_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const messages = Array.isArray(body.messages) ? body.messages : [];
+		if (!messages.length && !body.query) {
+			return json({ error: "messages[] or query is required" }, 400);
+		}
+		const lastUser = [...messages].reverse().find((m) => (m?.role ?? "user") === "user");
+		const query = String(body.query ?? lastUser?.content ?? "").trim();
+		const rules = await getMemoryRules(env, auth.userId);
+
+		const recall = query
+			? await runRecallCommand(env, auth.userId, query, {
+				conversationId: body.conversationId,
+				threadId: body.threadId,
+				memoryScope: auth.memoryScope,
+			})
+			: { count: 0, summary: "No query.", packet: null };
+
+		let collect = { enabled: false };
+		if (rules.autoCollect && messages.length) {
+			const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
+				conversationId: body.conversationId,
+				threadId: body.threadId,
+				sourceId: body.sourceId,
+				idempotencyKey: body.idempotencyKey,
+				memoryScope: auth.memoryScope,
+				source: "ingest",
+				sourceMode: "turn",
+				overrides: body._test ?? {},
+			});
+			collect = {
+				enabled: true,
+				fired: result.fired ?? false,
+				held: result.held ?? 0,
+				summary: result.summary ?? null,
+			};
+		}
+		return json({
+			ok: true,
+			recall,
+			collect,
+			rules: { autoCollect: rules.autoCollect, captureDefault: rules.captureDefault },
+		});
 	},
 
 	"GET /v1/receipts": async (request, env) => {

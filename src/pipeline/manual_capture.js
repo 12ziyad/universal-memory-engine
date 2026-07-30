@@ -12,6 +12,7 @@
  */
 
 import { responseText } from "./llm.js";
+import { rulesAllowText, rulesPromptLines } from "./rules.js";
 import { classifyMessage } from "./trigger.js";
 
 // An explicit whole-chat save: the object of the save verb is the chat itself
@@ -111,18 +112,20 @@ export function isChatReferentTopic(value) {
 	return CHAT_REFERENT_TOPIC_RE.test(String(value ?? "").trim());
 }
 
-async function llmNotes(env, config, turns) {
+async function llmNotes(env, config, turns, rules = null) {
 	if (!env.AI) return "";
 	const payload = turns
 		.slice(-40)
 		.map((turn) => `${turn.role === "assistant" ? "Assistant" : "User"}: ${cleanLine(turn.content).slice(0, 600)}`)
 		.join("\n");
+	const ruleLines = rulesPromptLines(rules);
+	const system = ruleLines.length ? `${NOTES_SYSTEM}\n${ruleLines.join("\n")}` : NOTES_SYSTEM;
 	try {
 		const res = await env.AI.run(
 			config.llm.digestModel,
 			{
 				messages: [
-					{ role: "system", content: NOTES_SYSTEM },
+					{ role: "system", content: system },
 					{ role: "user", content: payload },
 				],
 				temperature: 0,
@@ -164,7 +167,7 @@ export async function buildConversationCapture(env, config, messages, opts = {})
 	if (opts.notesResponse !== undefined && opts.notesResponse !== null) {
 		raw = String(opts.notesResponse);
 	} else {
-		raw = await llmNotes(env, config, turns);
+		raw = await llmNotes(env, config, turns, opts.rules ?? null);
 	}
 	let candidates = String(raw ?? "")
 		.split(/\n+/)
@@ -178,6 +181,7 @@ export async function buildConversationCapture(env, config, messages, opts = {})
 		if (isDirectiveLine(line)) continue;
 		if (["noise", "utility"].includes(classifyMessage(line))) continue;
 		if (!noteLineGrounded(line, sourceTokenSets)) continue;
+		if (!rulesAllowText(opts.rules ?? null, line)) continue;
 		if (lines.some((existing) => sameNoteLine(existing, line))) continue;
 		lines.push(line.slice(0, 300));
 	}

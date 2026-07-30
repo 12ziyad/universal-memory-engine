@@ -17,6 +17,7 @@
  */
 
 import { responseText } from "./llm.js";
+import { rulesPromptLines } from "./rules.js";
 import { classifyMessage } from "./trigger.js";
 
 const DIGEST_SYSTEM = `You compress a chat into clean MEMORY lines about the USER.
@@ -57,7 +58,7 @@ function cleanUserTurns(turns, { dropUtility = false } = {}) {
 	return out;
 }
 
-async function llmDigest(env, config, userLines, assistantLines) {
+async function llmDigest(env, config, userLines, assistantLines, rules = null) {
 	if (!env.AI) return "";
 	const payload = [
 		"USER MESSAGES:",
@@ -67,12 +68,14 @@ async function llmDigest(env, config, userLines, assistantLines) {
 		payload.push("", "ASSISTANT MESSAGES (context only, never memorize these):");
 		payload.push(...assistantLines.slice(-6).map((l) => `- ${l}`));
 	}
+	const ruleLines = rulesPromptLines(rules);
+	const system = ruleLines.length ? `${DIGEST_SYSTEM}\n${ruleLines.join("\n")}` : DIGEST_SYSTEM;
 	try {
 		const res = await env.AI.run(
 			config.llm.digestModel,
 			{
 				messages: [
-					{ role: "system", content: DIGEST_SYSTEM },
+					{ role: "system", content: system },
 					{ role: "user", content: payload.join("\n") },
 				],
 				temperature: 0,
@@ -111,7 +114,7 @@ export async function digestConversation(env, config, messages, opts = {}) {
 	if (opts.digestResponse !== undefined && opts.digestResponse !== null) {
 		digest = String(opts.digestResponse).trim(); // deterministic test hook
 	} else {
-		digest = await llmDigest(env, config, kept, assistantText);
+		digest = await llmDigest(env, config, kept, assistantText, opts.rules ?? null);
 	}
 
 	// Fallback: if the model gave nothing, keep the cleaned user lines (drop

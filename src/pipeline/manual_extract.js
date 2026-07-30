@@ -2,6 +2,7 @@ import { ACTIONS, EDGE_TYPES, IMPORTANCE, SLICE_KINDS } from "../config.js";
 import { extractJson, responseText } from "./llm.js";
 import { canonicalizeCategory } from "./gates.js";
 import { canonicalIdentity } from "./manual_identity.js";
+import { rulesPromptLines } from "./rules.js";
 import {
 	cleanManualEntityLabel,
 	parseManualRelationshipCorrection,
@@ -97,7 +98,8 @@ Hard rules:
 - Event actions: ${ACTIONS.join(", ")}.
 - Importance: ${IMPORTANCE.join(", ")}.
 - Relationship types: ${EDGE_TYPES.join(", ")}.
-- Do not turn questions, greetings, thanks, jokes, generic world facts, or tool instructions into asserted facts.`;
+- Do not turn questions, greetings, thanks, jokes, generic world facts, or tool instructions into asserted facts.
+- If the envelope carries user_memory_rules, obey them: never propose content those rules exclude, and prefer the categories and topics they call out.`;
 
 export const MANUAL_MENTION_ROLES = Object.freeze([
 	"primary_subject",
@@ -191,6 +193,7 @@ function referenceContextFromInput(input = {}) {
 
 /** Pure source-only envelope; graph-shaped input fields are ignored. */
 export function buildManualSourceEnvelope(input = {}) {
+	const ruleLines = rulesPromptLines(input.rules ?? null);
 	return {
 		source_messages: sourceMessagesFromInput(input).map(({ ref, role, content, attribution, claim_id }) => ({
 			ref,
@@ -201,6 +204,8 @@ export function buildManualSourceEnvelope(input = {}) {
 		})),
 		reference_context: referenceContextFromInput(input),
 		resolved_scope: plainScope(input.resolvedScope ?? input.scope),
+		// Guidance only — deterministic rule filters run after extraction.
+		...(ruleLines.length ? { user_memory_rules: ruleLines } : {}),
 	};
 }
 

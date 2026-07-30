@@ -29,6 +29,8 @@ const REASON_PHRASE = {
 	manual_collect_kept_inside_page: "kept inside page",
 	node_without_detail: "node without durable detail",
 	durable_signal_no_node: "durable signal without a subject",
+	excluded_by_rule: "blocked by your rules",
+	outside_include_rules: "outside your include rules",
 	unknown_kind: "unrecognized",
 };
 

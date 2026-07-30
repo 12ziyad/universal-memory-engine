@@ -14,6 +14,7 @@ import { refineManualIdentityTitles } from "./manual_titles.js";
 import { retrieveManualContext } from "./manual_retrieval.js";
 import { refreshManualSearchProfiles } from "./manual_search_profiles.js";
 import { buildConversationCapture, detectConversationCapture, isChatReferentTopic } from "./manual_capture.js";
+import { getMemoryRules, rulesAllowText, rulesRejection } from "./rules.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { filterDigestByTopic, parseCollectIntent } from "./pages.js";
 import {
@@ -868,6 +869,41 @@ function decideCollectRepresentation(integrity, semanticClaims, graphPlan, captu
 	return { shape, groundedClaimCount, contentfulClaims, multiTurnSubstance, captureMode };
 }
 
+/**
+ * Deterministic rules enforcement for the manual lanes. The extraction prompt
+ * receives the rules as guidance, but this filter is what guarantees excluded
+ * content never reaches planning, whatever the model did.
+ */
+function applyMemoryRulesToIntegrity(integrity, rules) {
+	if (!rules || (!rules.includes?.length && !rules.excludes?.length)) return integrity;
+	const rejected = [...(integrity.rejected ?? [])];
+	const facts = (integrity.facts ?? []).filter((fact) => {
+		const reason = rulesRejection(rules, fact?.memory?.text, fact?.identity?.label);
+		if (!reason) return true;
+		rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason });
+		return false;
+	});
+	const relationships = (integrity.relationships ?? []).filter((relationship) => {
+		const reason = rulesRejection(rules, relationship?.text, relationship?.from?.label, relationship?.to?.label);
+		if (!reason) return true;
+		rejected.push({ kind: "edge", label: relationship?.from?.label ?? null, reason });
+		return false;
+	});
+	// The planner can materialize a fact straight from primary_memory, so it
+	// must obey the same rules as ordinary facts.
+	let primaryMemory = integrity.primary_memory ?? null;
+	if (primaryMemory?.text) {
+		const primaryLabel = (integrity.entities ?? [])
+			.find((entity) => entity.ref === integrity.primary_subject_ref)?.label ?? null;
+		const reason = rulesRejection(rules, primaryMemory.text, primaryLabel);
+		if (reason) {
+			rejected.push({ kind: primaryMemory.kind ?? "fact", label: primaryLabel, reason });
+			primaryMemory = null;
+		}
+	}
+	return { ...integrity, facts, relationships, rejected, primary_memory: primaryMemory };
+}
+
 function structureIdentityObjects(structure) {
 	return [
 		...(structure?.entities ?? []),
@@ -1193,6 +1229,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 	}
 
 	const config = getConfig(env);
+	const rules = await getMemoryRules(env, userId);
 	const proposal = await extractManualFacts(env, config, {
 		submittedContent: content,
 		recentContext: input.recentContext,
@@ -1200,6 +1237,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		referenceContext: input.recentContext,
 		resolvedScope: input.memoryScope ?? {},
 		explicitManualSave: true,
+		rules,
 		extractionResponse: input.extractionResponse ?? input.overrides?.llmResponse,
 	});
 	let integrity = applyManualIntegrity(proposal, {
@@ -1209,6 +1247,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		referenceContext: input.recentContext,
 		explicitManualSave: true,
 	});
+	integrity = applyMemoryRulesToIntegrity(integrity, rules);
 	let retrieval;
 	try {
 		retrieval = await retrieveManualContext(env, config, userId, integrity);
@@ -1341,6 +1380,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	}
 
 	const config = getConfig(env);
+	const rules = await getMemoryRules(env, userId);
 	const intent = parseCollectIntent(normalized.messages, input);
 	const scopedMessages = messagesForCollectScope(normalized.messages, input);
 	const runId = await createManualRun(env, userId, source, sourceMode, sourcePacket, intent.topic ?? null);
@@ -1368,6 +1408,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const digestResult = await digestConversation(env, config, claimMessages, {
 		scope: "full",
 		digestResponse: input.digestResponse,
+		rules,
 		// The page is built only from validated claims; never let an empty digest
 		// resurrect the raw transcript as graph query text.
 		allowRawFallback: false,
@@ -1381,10 +1422,11 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	// condenses the full scoped conversation (assistant turns included) into
 	// grounded note lines for an organized notes page. Page-only — the graph
 	// below still learns exclusively from the strict fact lane.
-	const captureRequested = detectConversationCapture(scopedMessages);
+	const captureRequested = detectConversationCapture(scopedMessages) && rules.captureDefault !== "graph_only";
 	const capture = captureRequested
 		? await buildConversationCapture(env, config, scopedMessages, {
 			notesResponse: input.notesResponse ?? input.overrides?.notesResponse,
+			rules,
 		})
 		: { digest: "", lines: [] };
 	// A chat-referent "topic" ("save more about this chat") is part of the save
@@ -1405,6 +1447,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			referenceContext: conversation.reference_context,
 			resolvedScope: conversation.resolved_scope,
 			explicitManualSave: false,
+			rules,
 			extractionResponse: input.extractionResponse ?? input.overrides?.llmResponse,
 		});
 		integrity = applyManualIntegrity(proposal, {
@@ -1414,6 +1457,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			referenceContext: conversation.reference_context,
 			explicitManualSave: false,
 		});
+		integrity = applyMemoryRulesToIntegrity(integrity, rules);
 		try {
 			retrieval = await retrieveManualContext(env, config, userId, integrity);
 		} catch (error) {
@@ -1465,7 +1509,8 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	graphPlan.overriddenRecommendations = adjudication.overridden_recommendations ?? [];
 	graphPlan.primarySubject = (integrity.entities ?? []).find((entity) => entity.ref === integrity.primary_subject_ref) ?? null;
 	graphPlan.resolvedScope = conversation.resolved_scope;
-	const semanticClaims = pageSynthesisClaims(conversation, integrity);
+	const semanticClaims = pageSynthesisClaims(conversation, integrity)
+		.filter((claim) => rulesAllowText(rules, claim?.text, claim?.subject_label));
 	graphPlan.conversationClaims = semanticClaims;
 	graphPlan.manualDerivedRefresh = true;
 	const identityHints = pageIdentityHints(integrity);

@@ -135,8 +135,17 @@ describe("dashboard script", () => {
 		expect(script).toContain("Authorization: Bearer uml_live_xxxxx");
 		expect(script).toContain("API token usage");
 		expect(script).toContain("Receipts show what UML saved, updated, or ignored");
-		for (const mode of ["Important only", "Manual only", "Topic-based", "Keyword-based", "Schema-based", "Disabled"]) {
-			expect(script).toContain(mode);
+		// The Rules tab is a working form wired to /v1/rules.
+		for (const marker of [
+			"Custom instructions",
+			"Only collect (includes)",
+			"Never collect (excludes)",
+			"Custom categories",
+			"saveRulesForm()",
+			"/v1/rules",
+			"rule-autocollect",
+		]) {
+			expect(script).toContain(marker);
 		}
 		for (const section of ["Account", "Security", "Connections", "Memory Controls", "Data &amp; Privacy", "Support", "Legal / Terms", "Danger Zone"]) {
 			expect(script).toContain(section);

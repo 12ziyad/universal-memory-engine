@@ -33,6 +33,7 @@ import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, g
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
 import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
+import { getMemoryRules, rulesRejection } from "./rules.js";
 import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
@@ -234,6 +235,18 @@ export async function applyGates(
 				reason: durable.reason,
 			}], settings);
 		}
+	}
+
+	// Per-user memory rules (includes/excludes) — deterministic enforcement for
+	// every auto-lane save, whatever the model proposed.
+	const rules = opts.rules ?? await getMemoryRules(env, userId);
+	if (rules.includes?.length || rules.excludes?.length) {
+		objects = objects.filter((obj) => {
+			const reason = rulesRejection(rules, obj?.text, obj?.label, obj?.on, obj?.from, obj?.to);
+			if (!reason) return true;
+			plan.rejected.push({ kind: obj?.kind ?? "object", label: obj?.label ?? obj?.on ?? null, reason });
+			return false;
+		});
 	}
 	const companionRefs = new Set();
 	const edgeRefs = new Set();

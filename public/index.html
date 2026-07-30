@@ -1557,23 +1557,106 @@ function viewReceipts(v) {
 	v.appendChild(wrap);
 }
 
-function viewRules(v) {
-	const modes = [
-		["Important only", "Capture only high-signal facts and state changes."],
-		["Manual only", "Only write memory when a user or app explicitly asks."],
-		["Topic-based", "Capture by selected project, topic, or domain."],
-		["Keyword-based", "Capture when configured terms appear."],
-		["Schema-based", "Capture structured app events and custom schemas."],
-		["Disabled", "Pause capture while keeping recall and inspection available."],
-	];
-	const grid = el("div","panel-grid");
-	const intro = el("div");
-	intro.innerHTML = `<div class="box" style="max-width:920px"><h3>Rules</h3><div class="help">Rules will let you control what becomes memory by source, topic, keyword, schema, and importance.</div></div>`;
-	v.appendChild(intro);
-	for (const [title, text] of modes) {
-		grid.appendChild(el("div","action-box", `<h3>${esc(title)}</h3><div class="help">${esc(text)}</div><div style="margin-top:10px"><button class="ghost mini" disabled>Phase 1 preview</button></div>`));
+function rulesQuery() {
+	return S.devMode && S.userId ? `?userId=${encodeURIComponent(S.userId)}` : "";
+}
+
+async function loadRules() {
+	const res = await api(`/v1/rules${rulesQuery()}`);
+	return res.rules || {};
+}
+
+function parseTermList(value) {
+	return String(value || "").split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+}
+
+function parseCategoryLines(value) {
+	return String(value || "").split(/\n/).map((line) => {
+		const [name, ...rest] = line.split(":");
+		return { name: (name || "").trim(), description: rest.join(":").trim() };
+	}).filter((c) => c.name);
+}
+
+async function saveRulesForm() {
+	const status = $("#rules-status");
+	status.textContent = "Saving...";
+	try {
+		const rules = {
+			customInstructions: $("#rule-instructions").value.trim(),
+			includes: parseTermList($("#rule-includes").value),
+			excludes: parseTermList($("#rule-excludes").value),
+			customCategories: parseCategoryLines($("#rule-categories").value),
+			captureDefault: $("#rule-capture").value,
+			autoCollect: $("#rule-autocollect").checked,
+		};
+		const res = await api("/v1/rules", { method: "PUT", body: JSON.stringify(scopedPayload({ rules })) });
+		status.textContent = "Saved ✓";
+		renderRulesSummary(res.rules);
+	} catch (err) {
+		status.textContent = `Save failed: ${err.message}`;
 	}
-	v.appendChild(grid);
+}
+
+function renderRulesSummary(rules) {
+	const box = $("#rules-active");
+	if (!box) return;
+	const parts = [];
+	if (rules.customInstructions) parts.push("custom instructions");
+	if ((rules.includes || []).length) parts.push(`${rules.includes.length} include term${rules.includes.length === 1 ? "" : "s"}`);
+	if ((rules.excludes || []).length) parts.push(`${rules.excludes.length} exclude term${rules.excludes.length === 1 ? "" : "s"}`);
+	if ((rules.customCategories || []).length) parts.push(`${rules.customCategories.length} custom categor${rules.customCategories.length === 1 ? "y" : "ies"}`);
+	if (rules.captureDefault === "graph_only") parts.push("capture pages off");
+	if (rules.autoCollect === false) parts.push("auto-collect off");
+	box.textContent = parts.length ? `Active: ${parts.join(" · ")}.` : "No custom rules yet — everything durable is collected.";
+}
+
+function viewRules(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:920px"><h3>Rules</h3>
+		<div class="help">Control what becomes memory. Rules apply to every save door — MCP tools, /v1/save, /v1/ingest, and /v1/turn. Excludes always win over includes.</div>
+		<div id="rules-active" class="help" style="margin-top:6px;font-style:italic">Loading current rules…</div></div>`;
+	const form = el("div","action-box");
+	form.style.maxWidth = "920px";
+	form.innerHTML = `
+		<div class="form-row"><h3>Custom instructions</h3>
+			<div class="help">Plain-language guidance for the extractors, e.g. "Always save exam and study progress. Never save jokes or small talk."</div>
+			<textarea id="rule-instructions" placeholder="Always save… Never save…"></textarea></div>
+		<div class="form-row" style="margin-top:12px"><h3>Only collect (includes)</h3>
+			<div class="help">Comma-separated topics/keywords. When set, only content matching at least one term is saved.</div>
+			<input id="rule-includes" placeholder="e.g. exams, UML project, health" /></div>
+		<div class="form-row" style="margin-top:12px"><h3>Never collect (excludes)</h3>
+			<div class="help">Comma-separated. Matching content is always refused, even if it matches an include.</div>
+			<input id="rule-excludes" placeholder="e.g. passwords, politics, jokes" /></div>
+		<div class="form-row" style="margin-top:12px"><h3>Custom categories</h3>
+			<div class="help">One per line as name: description (description optional).</div>
+			<textarea id="rule-categories" style="min-height:70px" placeholder="study_progress: exam and unit completion&#10;startup_ideas"></textarea></div>
+		<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center">
+			<label>Whole-chat capture pages
+				<select id="rule-capture" style="margin-left:8px">
+					<option value="auto">Allowed (default)</option>
+					<option value="graph_only">Never build pages</option>
+				</select></label>
+			<label><input type="checkbox" id="rule-autocollect" checked style="margin-right:6px" />Auto-collect on /v1/turn</label>
+		</div>
+		<div style="display:flex;gap:10px;align-items:center;margin-top:14px">
+			<button onclick="saveRulesForm()">Save rules</button>
+			<span id="rules-status" class="help"></span>
+		</div>`;
+	wrap.appendChild(form);
+	v.appendChild(wrap);
+	loadRules().then((rules) => {
+		$("#rule-instructions").value = rules.customInstructions || "";
+		$("#rule-includes").value = (rules.includes || []).join(", ");
+		$("#rule-excludes").value = (rules.excludes || []).join(", ");
+		$("#rule-categories").value = (rules.customCategories || [])
+			.map((c) => c.description ? `${c.name}: ${c.description}` : c.name).join("\n");
+		$("#rule-capture").value = rules.captureDefault || "auto";
+		$("#rule-autocollect").checked = rules.autoCollect !== false;
+		renderRulesSummary(rules);
+	}).catch((err) => {
+		const box = $("#rules-active");
+		if (box) box.textContent = `Could not load rules: ${err.message}`;
+	});
 }
 
 function viewCandidates(v) {
