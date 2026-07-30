@@ -1,12 +1,51 @@
 import { ACTIONS, EDGE_TYPES, SLICE_KINDS } from "../config.js";
 import { canonicalIdentity } from "./manual_identity.js";
-import { unsafeManualEntityLabel } from "./manual_language.js";
+import { stripManualDirective, unsafeManualEntityLabel } from "./manual_language.js";
 import { isBadTitle } from "./title.js";
 
 const JUNK_IDENTITIES = new Set([
 	"i", "me", "my", "mine", "myself", "it", "its", "this", "that", "thing", "things",
 	"something", "anything", "everything", "user", "the user", "assistant", "the assistant",
 ]);
+
+// First-person subjects are junk for an OBSERVED conversation, but on an
+// explicit manual save they are the whole premise: the owner is submitting a
+// fact about themselves. These resolve to the account owner instead of being
+// dropped. Conversation collect keeps the stricter behaviour.
+const FIRST_PERSON_IDENTITIES = new Set([
+	"i", "me", "my", "mine", "myself", "user", "the user", "my self", "self",
+]);
+const FIRST_PERSON_SOURCE_RE = /\b(?:i|me|my|mine|myself|i'm|im|i've|ive|i'll|i'd)\b/i;
+
+export function isFirstPersonIdentityLabel(label) {
+	return FIRST_PERSON_IDENTITIES.has(canonicalIdentity(label));
+}
+
+export function sourceHasFirstPerson(text) {
+	return FIRST_PERSON_SOURCE_RE.test(String(text ?? ""));
+}
+
+/**
+ * Rewrite a first-person identity to the memory owner. Only ever called for
+ * explicit manual saves (save_memory), never for save_conversation.
+ */
+function resolveOwnerIdentity(identity, ownerLabel) {
+	if (!identity || !ownerLabel || !isFirstPersonIdentityLabel(identity.label)) return identity;
+	return { ...identity, label: ownerLabel, _owner_resolved: true };
+}
+
+/**
+ * "Remember this about me" carries no claim. Owner resolution must not let the
+ * instruction itself become a slice on the owner's node, so an owner-resolved
+ * claim has to say something beyond the directive and the pronouns.
+ */
+function claimIsDirectiveOnly(text) {
+	const stripped = stripManualDirective(String(text ?? ""));
+	const words = canonicalIdentity(stripped)
+		.split(" ")
+		.filter((word) => word && !FIRST_PERSON_IDENTITIES.has(word) && !GROUNDING_STOPWORDS.has(word) && word !== "about");
+	return words.length < 2;
+}
 
 const GROUNDING_STOPWORDS = new Set([
 	"a", "an", "and", "are", "as", "at", "be", "been", "by", "for", "from", "had", "has", "have",
@@ -310,10 +349,13 @@ function distinctiveIdentityGrounded(label, source) {
 	return shared >= Math.max(1, Math.ceil(labelWords.length * 0.5));
 }
 
-function validIdentityLabel(label) {
+function validIdentityLabel(label, { allowSelf = false } = {}) {
 	const raw = String(label ?? "").trim();
 	const key = canonicalIdentity(raw);
-	if (!key || JUNK_IDENTITIES.has(key)) return false;
+	if (!key) return false;
+	// An owner-resolved label is legitimate even when the account has no name and
+	// the fallback owner marker itself reads like a pronoun.
+	if (JUNK_IDENTITIES.has(key) && !allowSelf) return false;
 	if (raw.length > 160 || key.split(" ").length > 12) return false;
 	if (/^(?:c|c\+\+|c#)$/i.test(raw)) return true;
 	if (/^[A-Z][A-Za-z0-9+#./-]{1,15}$/.test(raw)) return true;
@@ -346,6 +388,11 @@ function predicateGrounded(fact, submittedContent) {
 
 function identityGrounded(fact, submittedContent, recentContext) {
 	const label = fact.identity?.label;
+	// The owner's own name rarely appears in "my favorite language is Kotlin".
+	// The first-person pronoun IS the grounding for an owner-resolved subject.
+	if (fact.identity?._owner_resolved && sourceHasFirstPerson(submittedContent)) {
+		return { grounded: true, via: "first_person_owner" };
+	}
 	if (includesPhrase(submittedContent, label) || distinctiveIdentityGrounded(label, submittedContent)) {
 		return { grounded: true, via: "source" };
 	}
@@ -371,7 +418,9 @@ function identityGrounded(fact, submittedContent, recentContext) {
 
 function validateFact(fact, input, evidence) {
 	const label = fact?.identity?.label;
-	if (!validIdentityLabel(label)) return { ok: false, reason: "invalid_identity" };
+	if (!validIdentityLabel(label, { allowSelf: fact?.identity?._owner_resolved === true })) {
+		return { ok: false, reason: "invalid_identity" };
+	}
 	if (!fact?.memory?.text) return { ok: false, reason: "missing_fact_text" };
 	if (Number(fact.confidence ?? 0) < 0.25) return { ok: false, reason: "low_confidence" };
 	if (fact.memory.kind === "event" && !ACTIONS.includes(fact.memory.action)) {
@@ -578,14 +627,26 @@ function validateCorrection(correction, evidence) {
 export function applyManualIntegrity(proposal, input = {}) {
 	const submittedContent = String(input.submittedContent ?? "").trim();
 	const recentContext = String(input.recentContext ?? "").trim();
-	const entities = [...(proposal?.entities ?? [])];
+	// save_memory only: "my/I/me" is the owner speaking about themselves.
+	// save_conversation passes explicitManualSave=false and keeps the old gate.
+	const ownerLabel = input.explicitManualSave === true
+		? String(input.ownerLabel ?? "").trim()
+		: "";
+	const entities = (proposal?.entities ?? []).map((entity) => resolveOwnerIdentity(entity, ownerLabel));
 	const entitiesByRef = new Map(entities.filter((entity) => entity?.ref).map((entity) => [String(entity.ref), entity]));
 	const facts = [];
 	const relationships = [];
 	const corrections = [];
 	const rejected = [...(proposal?.rejected ?? [])];
 
-	for (const fact of proposal?.facts ?? []) {
+	for (const rawFact of proposal?.facts ?? []) {
+		const fact = ownerLabel
+			? { ...rawFact, identity: resolveOwnerIdentity(rawFact?.identity, ownerLabel) }
+			: rawFact;
+		if (fact?.identity?._owner_resolved && claimIsDirectiveOnly(fact?.memory?.text)) {
+			rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason: "directive_only_claim" });
+			continue;
+		}
 		if (!roleCanMaterialize(fact?.identity, fact?.subject_ref ?? fact?.entity_ref, entitiesByRef)) {
 			rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason: "ineligible_mention_role" });
 			continue;
@@ -670,7 +731,14 @@ export function applyManualIntegrity(proposal, input = {}) {
 			};
 		} else {
 			const primaryEntity = entitiesByRef.get(String(primarySubjectRef));
-			const pseudoFact = primaryEntity ? {
+			// The planner can materialize a fact straight from primary_memory, so the
+			// owner-resolution guard has to cover this path too — otherwise a
+			// directive-only claim slips back in as the primary memory.
+			if (primaryEntity?._owner_resolved && claimIsDirectiveOnly(primaryMemory.text)) {
+				rejected.push({ kind: primaryMemory.kind ?? "fact", label: primaryEntity.label ?? null, reason: "directive_only_claim" });
+				primaryMemory = null;
+			}
+			const pseudoFact = primaryEntity && primaryMemory ? {
 				identity: primaryEntity,
 				subject_ref: primarySubjectRef,
 				memory: primaryMemory,
