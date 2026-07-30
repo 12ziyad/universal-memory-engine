@@ -2428,7 +2428,187 @@ function drawClusterLabels(ctx, hulls = []) {
 	}
 }
 
+// ---- Cluster drag-and-place ----------------------------------------------
+// Double-click a cluster (its hull or any node in it) to pick it up, move the
+// mouse to carry it, click to place, Esc to cancel. A collision guard keeps
+// every hull at least minClusterGap away from the others, so clusters can be
+// rearranged freely but never merge or touch. Placement lives for the session;
+// a reload recomputes the default layout.
+
+function clusterHullAt(canvasPos) {
+	for (const hull of S.clusterHulls || []) {
+		const dx = (canvasPos.x - hull.x) / (hull.radiusX || 1);
+		const dy = (canvasPos.y - hull.y) / (hull.radiusY || 1);
+		if (dx * dx + dy * dy <= 1.1) return hull;
+	}
+	return null;
+}
+
+function clusterVisMembers(clusterId) {
+	const nodes = ((S.data && S.data.nodes) || []).filter((n) => (n.cluster || "general_memory") === clusterId);
+	const pages = ((S.data && S.data.pages) || []).filter((p) => (p.cluster || "projects_systems") === clusterId);
+	const candidates = (candidateItems() || []).filter((c) => (c.cluster || "general_memory") === clusterId);
+	return { nodes, pages, candidates };
+}
+
+function visExists(id) {
+	try { return Boolean(S.graphDs && S.graphDs.get(id)); } catch { return false; }
+}
+
+/** Copy the currently rendered positions into the data objects so the whole
+ *  cluster moves rigidly (members without stored x/y would otherwise snap). */
+function materializeClusterPositions(clusterId) {
+	if (!S.network) return;
+	const { nodes, pages, candidates } = clusterVisMembers(clusterId);
+	const entries = [
+		...nodes.map((item) => ({ item, visId: nodeKey(item.id) })),
+		...pages.map((item) => ({ item, visId: pageKey(item.id) })),
+		...candidates.map((item) => ({ item, visId: `candidate:${item.id}` })),
+	].filter((entry) => visExists(entry.visId));
+	if (!entries.length) return;
+	const positions = S.network.getPositions(entries.map((entry) => entry.visId));
+	for (const { item, visId } of entries) {
+		const p = positions[visId];
+		if (p) { item.x = p.x; item.y = p.y; }
+	}
+}
+
+function shiftCluster(clusterId, dx, dy) {
+	if (!S.graphDs || (!dx && !dy)) return;
+	const hull = (S.clusterHulls || []).find((h) => h.id === clusterId);
+	if (!hull) return;
+	hull.x += dx; hull.y += dy;
+	hull.labelX += dx; hull.labelY += dy;
+	for (const key of ["bounds", "sourceBounds"]) {
+		if (hull[key]) { hull[key].left += dx; hull[key].right += dx; hull[key].top += dy; hull[key].bottom += dy; }
+	}
+	const { nodes, pages, candidates } = clusterVisMembers(clusterId);
+	const updates = [];
+	for (const n of nodes) {
+		if (Number.isFinite(Number(n.x))) { n.x = Number(n.x) + dx; n.y = Number(n.y) + dy; }
+		if (visExists(nodeKey(n.id))) updates.push({ id: nodeKey(n.id), x: n.x, y: n.y });
+	}
+	for (const p of pages) {
+		if (Number.isFinite(Number(p.x))) { p.x = Number(p.x) + dx; p.y = Number(p.y) + dy; }
+		if (visExists(pageKey(p.id))) updates.push({ id: pageKey(p.id), x: p.x, y: p.y });
+	}
+	for (const c of candidates) {
+		if (Number.isFinite(Number(c.x))) { c.x = Number(c.x) + dx; c.y = Number(c.y) + dy; }
+		if (visExists(`candidate:${c.id}`)) updates.push({ id: `candidate:${c.id}`, x: c.x, y: c.y });
+	}
+	for (const [suffix, x, y] of [
+		["nw", hull.bounds.left, hull.bounds.top],
+		["ne", hull.bounds.right, hull.bounds.top],
+		["sw", hull.bounds.left, hull.bounds.bottom],
+		["se", hull.bounds.right, hull.bounds.bottom],
+		["label", hull.labelX, hull.labelY - 18],
+	]) {
+		const id = `hull:${clusterId}:${suffix}`;
+		if (visExists(id)) updates.push({ id, x, y });
+	}
+	try { S.graphDs.update(updates); } catch {}
+}
+
+/** Never let the carried hull merge with or touch another: slide it to the
+ *  minimum allowed distance from any hull it would collide with. */
+function constrainedClusterCenter(clusterId, targetX, targetY) {
+	const me = (S.clusterHulls || []).find((h) => h.id === clusterId);
+	if (!me) return { x: targetX, y: targetY };
+	const myRadius = Math.max(me.radiusX, me.radiusY);
+	let x = targetX, y = targetY;
+	for (let iter = 0; iter < 4; iter++) {
+		let pushed = false;
+		for (const other of S.clusterHulls || []) {
+			if (other.id === clusterId) continue;
+			const minDist = myRadius + Math.max(other.radiusX, other.radiusY) + HULL_OPTIONS.minClusterGap;
+			let dx = x - other.x, dy = y - other.y;
+			let dist = Math.hypot(dx, dy);
+			if (dist < 1) { dx = 1; dy = 0; dist = 1; }
+			if (dist >= minDist) continue;
+			x = other.x + (dx / dist) * minDist;
+			y = other.y + (dy / dist) * minDist;
+			pushed = true;
+		}
+		if (!pushed) break;
+	}
+	return { x, y };
+}
+
+function clusterDragFrame() {
+	const drag = S.clusterDrag;
+	if (!drag || !S.network) return;
+	drag.rafQueued = false;
+	if (!drag.pending) return;
+	const canvas = S.network.DOMtoCanvas(drag.pending);
+	drag.pending = null;
+	const hull = (S.clusterHulls || []).find((h) => h.id === drag.id);
+	if (!hull) return;
+	const target = constrainedClusterCenter(drag.id, canvas.x - drag.grabDx, canvas.y - drag.grabDy);
+	shiftCluster(drag.id, target.x - hull.x, target.y - hull.y);
+	try { S.network.redraw(); } catch {}
+}
+
+function endClusterDrag(commit) {
+	const drag = S.clusterDrag;
+	if (!drag) return;
+	S.clusterDrag = null;
+	if (drag.detach) drag.detach();
+	if (!commit) {
+		const hull = (S.clusterHulls || []).find((h) => h.id === drag.id);
+		if (hull) shiftCluster(drag.id, drag.originX - hull.x, drag.originY - hull.y);
+		try { if (S.network) S.network.redraw(); } catch {}
+		toast("Cluster move cancelled.");
+		return;
+	}
+	toast("Cluster placed.");
+}
+
+function abandonClusterDrag() {
+	const drag = S.clusterDrag;
+	if (!drag) return;
+	S.clusterDrag = null;
+	if (drag.detach) drag.detach();
+}
+
+function beginClusterDrag(hull, canvasPos, cont) {
+	if (!hull || !canvasPos || !cont) return;
+	if (S.clusterDrag) endClusterDrag(true);
+	materializeClusterPositions(hull.id);
+	const onMove = (e) => {
+		const drag = S.clusterDrag;
+		if (!drag) return;
+		const rect = cont.getBoundingClientRect();
+		drag.pending = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		if (!drag.rafQueued) { drag.rafQueued = true; requestAnimationFrame(clusterDragFrame); }
+	};
+	const onClick = (e) => { e.stopPropagation(); e.preventDefault(); endClusterDrag(true); };
+	const onKey = (e) => { if (e.key === "Escape") endClusterDrag(false); };
+	cont.addEventListener("pointermove", onMove);
+	cont.addEventListener("click", onClick, true);
+	window.addEventListener("keydown", onKey);
+	const prevCursor = cont.style.cursor;
+	S.clusterDrag = {
+		id: hull.id,
+		grabDx: canvasPos.x - hull.x,
+		grabDy: canvasPos.y - hull.y,
+		originX: hull.x,
+		originY: hull.y,
+		pending: null,
+		rafQueued: false,
+		detach: () => {
+			cont.removeEventListener("pointermove", onMove);
+			cont.removeEventListener("click", onClick, true);
+			window.removeEventListener("keydown", onKey);
+			cont.style.cursor = prevCursor || "";
+		},
+	};
+	cont.style.cursor = "grabbing";
+	toast(`Moving "${hull.label}" — click to place, Esc to cancel.`);
+}
+// ---- end cluster drag-and-place ------------------------------------------
+
 function drawGraph() {
+	abandonClusterDrag();
 	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
 	stopHullPulse();
 	const visible = visibleGraphData();
@@ -2490,16 +2670,31 @@ function drawGraph() {
 			nodes: { borderWidth: 3 },
 			edges: { arrows: { to: { enabled: true, scaleFactor: .65 } } },
 		});
+		S.graphDs = vn;
 		S.network.on("beforeDrawing", (ctx) => drawClusterHulls(ctx, S.clusterHulls));
 		S.network.on("afterDrawing", (ctx) => drawClusterLabels(ctx, S.clusterHulls));
 		S.network.on("click", (p) => {
+			if (S.clusterDrag) return;
 			if (!p.nodes || !p.nodes[0]) return;
 			const id = p.nodes[0];
 			if (String(id).startsWith("hull:")) return;
 			if (String(id).startsWith("candidate:")) return toast("Candidate nodes are preview-only. Open Candidate Review to promote or reject them.");
 			select(id);
 		});
-		S.network.on("doubleClick", () => graphFit());
+		S.network.on("doubleClick", (p) => {
+			const pointer = p?.pointer?.canvas;
+			let hull = null;
+			const first = p?.nodes?.[0];
+			if (first != null) {
+				const clusterId = String(first).startsWith("hull:")
+					? String(first).split(":")[1]
+					: vn.get(first)?.cluster;
+				hull = (S.clusterHulls || []).find((h) => h.id === clusterId) || null;
+			}
+			if (!hull && pointer) hull = clusterHullAt(pointer);
+			if (hull && pointer) return beginClusterDrag(hull, pointer, cont);
+			graphFit();
+		});
 		S.network.once("afterDrawing", () => setTimeout(() => graphFit(450), 20));
 		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
