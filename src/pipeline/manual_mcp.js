@@ -1180,6 +1180,60 @@ async function sourcePacketForConversation(env, userId, input) {
 	return { normalized, sourcePacket: await storeSourcePacket(env, normalized.packet) };
 }
 
+// Human wording for the gate that actually refused the write, so a receipt says
+// which rule fired instead of one catch-all sentence for every cause.
+const NO_WRITE_GATE_PHRASES = {
+	invalid_identity: "the subject was not a usable memory identity",
+	identity_not_in_submitted_content: "the subject was not present in the submitted content",
+	fact_not_in_submitted_content: "the fact was not supported by the submitted content",
+	fact_polarity_mismatch: "the fact contradicted the submitted content",
+	missing_fact_text: "the proposed memory had no text",
+	low_confidence: "the extractor was not confident enough",
+	invalid_event_action: "the event action was not recognized",
+	invalid_slice_kind: "the detail kind was not recognized",
+	ineligible_mention_role: "the subject was only mentioned in passing",
+	directive_only_claim: "the submission was an instruction with no memory in it",
+	excluded_by_rule: "your memory rules exclude this content",
+	outside_include_rules: "this content is outside your include rules",
+	incomplete_fact: "the proposed memory was incomplete",
+};
+
+/** "nothing was written: <named gates>" — never a bare generic sentence. */
+function noWriteReason(plan) {
+	const counts = new Map();
+	for (const item of plan?.rejected ?? []) {
+		const reason = item?.reason ?? "unspecified";
+		counts.set(reason, (counts.get(reason) ?? 0) + 1);
+	}
+	if (!counts.size) return "the extractor proposed no durable memory from this content";
+	const parts = [...counts.entries()]
+		.sort((left, right) => right[1] - left[1])
+		.slice(0, 3)
+		.map(([reason, count]) => {
+			const phrase = NO_WRITE_GATE_PHRASES[reason] ?? reason.replace(/_/g, " ");
+			return count > 1 ? `${phrase} (${count})` : phrase;
+		});
+	return `nothing was written — ${parts.join("; ")} [${[...counts.keys()].slice(0, 3).join(", ")}]`;
+}
+
+/**
+ * Display name for the account, used to resolve first-person subjects on an
+ * explicit manual save. Falls back to the email local part, then to a neutral
+ * owner marker so the lane still works for API-only users with no profile row.
+ */
+async function ownerIdentityLabel(env, userId) {
+	try {
+		const row = await env.DB.prepare("SELECT name, email FROM users WHERE id = ?").bind(userId).first();
+		const name = String(row?.name ?? "").trim();
+		if (name) return name.slice(0, 80);
+		const local = String(row?.email ?? "").split("@")[0].replace(/[._-]+/g, " ").trim();
+		if (local) return local.replace(/\b\p{Ll}/gu, (ch) => ch.toLocaleUpperCase("en-US")).slice(0, 80);
+	} catch (error) {
+		console.warn(`owner label lookup failed user=${userId}:`, error?.message ?? error);
+	}
+	return "Me";
+}
+
 function unresolvedManualReference(value) {
 	const stripped = String(value ?? "").trim()
 		.replace(/^(?:please\s+)?(?:remember|save|store|keep)(?:\s+this|\s+that)?\s*[:,-]?\s*/i, "")
@@ -1230,6 +1284,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 
 	const config = getConfig(env);
 	const rules = await getMemoryRules(env, userId);
+	const ownerLabel = await ownerIdentityLabel(env, userId);
 	const proposal = await extractManualFacts(env, config, {
 		submittedContent: content,
 		recentContext: input.recentContext,
@@ -1246,6 +1301,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 		sourceMessages: normalized.messages,
 		referenceContext: input.recentContext,
 		explicitManualSave: true,
+		ownerLabel,
 	});
 	integrity = applyMemoryRulesToIntegrity(integrity, rules);
 	let retrieval;
@@ -1314,7 +1370,7 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 	if (!plan.hasGraphWrites) {
 		return finishNoWrite(env, userId, {
 			mode, source, sourceMode, sourcePacket, runId, receiptId, plan, received: 1,
-			outcome: "ignored", reason: "the submitted content could not be safely grounded into a manual memory",
+			outcome: "ignored", reason: noWriteReason(plan),
 		});
 	}
 	if (typeof input.testBeforeWrite === "function") await input.testBeforeWrite({ plan });
