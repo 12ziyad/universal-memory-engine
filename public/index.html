@@ -2182,14 +2182,25 @@ function parseJsonArray(value) {
 	try { const v = JSON.parse(value || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
+function dedupeById(items) {
+	const byId = new Map();
+	for (const item of items || []) byId.set(item.id, item);
+	return [...byId.values()];
+}
+
 function guideEdgesForPages(pages, nodes) {
 	const byNorm = new Map(nodes.map(n => [normalizeSearch(n.label), n]));
 	const edges = [];
 	for (const p of pages) {
 		const related = parseJsonArray(p.related_concepts_json);
+		// Two related-concept variants ("Digital Graveyard" / "digital graveyard")
+		// can normalize to the same node; a second identical guide id would crash
+		// the vis DataSet, so each page links a node at most once.
+		const linked = new Set();
 		for (const concept of related.slice(0, 10)) {
 			const node = byNorm.get(normalizeSearch(concept));
-			if (!node) continue;
+			if (!node || linked.has(node.id)) continue;
+			linked.add(node.id);
 			edges.push({
 				id: `guide:${p.id}:${node.id}`,
 				from: pageKey(p.id),
@@ -2738,8 +2749,8 @@ function drawGraph() {
 		for (const group of candidateGroups.values()) group.forEach((c, i) => candidateNodes.push(graphCandidate(c, i, group.length)));
 		const visualNodes = [...pageNodes, ...graphNodes, ...candidateNodes];
 		S.clusterHulls = computeClusterHulls(visualNodes, S.data?.clusters || []);
-		const vn = new vis.DataSet([...visualNodes, ...clusterHullAnchors(S.clusterHulls)]);
-		const ve = new vis.DataSet([...graphEdges.map((e, i) => edgeStyle(e, i)), ...guideEdges]);
+		const vn = new vis.DataSet(dedupeById([...visualNodes, ...clusterHullAnchors(S.clusterHulls)]));
+		const ve = new vis.DataSet(dedupeById([...graphEdges.map((e, i) => edgeStyle(e, i)), ...guideEdges]));
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
 			autoResize: true,
 			layout: { improvedLayout: false },
