@@ -1226,26 +1226,44 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		if (!update?.id) continue;
 		const guard = correctionGuard(update, { includeReplacement: true });
 		trackNext({ kind: "nodeSummaries", id: update.id });
+		// The summary is recomposed from the committed facts so concurrent saves
+		// stay complete. Formatting contract (mirrors the planner's simulation):
+		// "Label — clause. Clause." with the leading label echo stripped from each
+		// fact, newest current slices first, bookkeeping "updated" events excluded.
+		const label = String(update.label ?? "");
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE nodes SET summary = COALESCE((
-				  SELECT substr(nodes.label || ': ' || group_concat(fact_text, '; '), 1, 320)
+				  SELECT substr(nodes.label || ' — ' || group_concat(clause, ' '), 1, 320)
 				  FROM (
-				   SELECT fact_text
+				   SELECT trim(fact_clause, ' .;,!?') || '.' AS clause
 				   FROM (
-				    SELECT trim(text) AS fact_text, 0 AS source_rank, created_at AS fact_time, id
-				    FROM slices
-				    WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL
-				    UNION ALL
-				    SELECT trim(text) AS fact_text, 1 AS source_rank,
-				     COALESCE(happened_at, created_at) AS fact_time, id
-				    FROM events
-				    WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
-				   ) AS committed_facts
-				   WHERE fact_text <> ''
-				   GROUP BY lower(fact_text)
-				   ORDER BY MIN(source_rank), MAX(fact_time) DESC, MIN(id)
-				   LIMIT 3
+				    SELECT CASE
+				     WHEN ? <> '' AND lower(substr(fact_text, 1, length(?) + 4)) = lower(?) || ' is ' THEN substr(fact_text, length(?) + 5)
+				     WHEN ? <> '' AND lower(substr(fact_text, 1, length(?) + 2)) = lower(?) || ': ' THEN substr(fact_text, length(?) + 3)
+				     WHEN ? <> '' AND lower(substr(fact_text, 1, length(?) + 1)) = lower(?) || ' ' THEN substr(fact_text, length(?) + 2)
+				     ELSE fact_text
+				    END AS fact_clause
+				    FROM (
+				     SELECT fact_text
+				     FROM (
+				      SELECT trim(text) AS fact_text, 0 AS source_rank, created_at AS fact_time, id
+				      FROM slices
+				      WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL
+				      UNION ALL
+				      SELECT trim(text) AS fact_text, 1 AS source_rank,
+				       COALESCE(happened_at, created_at) AS fact_time, id
+				      FROM events
+				      WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
+				       AND COALESCE(action, '') <> 'updated'
+				     ) AS committed_facts
+				     WHERE fact_text <> ''
+				     GROUP BY lower(fact_text)
+				     ORDER BY MIN(source_rank), MAX(fact_time) DESC, MIN(id)
+				     LIMIT 2
+				    ) AS ordered_facts
+				   ) AS stripped_facts
+				   WHERE trim(fact_clause, ' .;,!?') <> ''
 				  ) AS summary_facts
 				 ), COALESCE(?, summary)), cluster = COALESCE(?, cluster), updated_at = ?
 				 WHERE id = ? AND user_id = ?
@@ -1255,6 +1273,9 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				   WHERE user_id = ? AND canonical_key = ? AND node_id = ?
 				  )) ${guard.sql}`,
 			).bind(
+				label, label, label, label,
+				label, label, label, label,
+				label, label, label, label,
 				userId, update.id, userId, update.id,
 				update.summary ?? null, update.cluster ?? null, Date.now(), update.id, userId,
 				update.manual_identity_key ?? null, userId, update.manual_identity_key ?? null, update.id,

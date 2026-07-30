@@ -353,7 +353,8 @@ describe("MCP manual direct engine", () => {
 		expect(await rows("events", id)).toHaveLength(1);
 		const node = await one("nodes", id);
 		expect(node.state).toBe("completed");
-		expect(node.summary).toContain("UML completed its indexing milestone");
+		// The summary strips the leading label echo ("UML completed…" → "completed…").
+		expect(node.summary).toContain("completed its indexing milestone");
 	});
 
 	it("discards structural node ids and overrides an unknown adjudication reference", async () => {
@@ -593,6 +594,68 @@ describe("MCP manual direct engine", () => {
 		const refreshed = await one("nodes", id);
 		expect(refreshed.summary).toContain("detailed responses");
 		expect(refreshed.summary).not.toContain("concise responses");
+	});
+
+	it("implicitly supersedes a refined fact and logs a timeline update event", async () => {
+		const id = userId("implicit-refinement");
+		const first = "I studied Unit 3.";
+		await direct(id, {
+			content: first,
+			extractionResponse: proposal([
+				sliceFact({ label: "Unit 3", category: "interest", kind: "progress", text: first }),
+			]),
+		});
+		const node = await one("nodes", id);
+		const refined = "Unit 3 is only partially completed, not fully studied.";
+		const result = await direct(id, {
+			content: refined,
+			extractionResponse: proposal([
+				sliceFact({ label: "Unit 3", category: "interest", kind: "progress", text: refined, existingNodeId: node.id }),
+			]),
+		});
+
+		expect(result.status).toBe("wrote");
+		expect(result.receipt.saved.supersededSlices).toBe(1);
+		const savedSlices = await rows("slices", id, "ORDER BY created_at ASC, id ASC");
+		expect(savedSlices.find((slice) => slice.text === first)?.is_current).toBe(0);
+		expect(savedSlices.find((slice) => slice.text === refined)?.is_current).toBe(1);
+		// The replaced fact becomes visible history, not silent deletion.
+		const audit = await one("events", id, "AND action = 'updated'");
+		expect(audit).not.toBeNull();
+		expect(audit.text).toContain("I studied Unit 3");
+		expect(audit.text).toContain("only partially completed");
+		// The summary reads as current truth only — no concatenated old fact, no
+		// bookkeeping noise.
+		const refreshed = await one("nodes", id);
+		expect(refreshed.summary).toContain("only partially completed, not fully studied");
+		expect(refreshed.summary).not.toContain("Updated:");
+		expect(refreshed.summary).not.toContain(";");
+	});
+
+	it("reinforces the richer existing fact when a weaker restatement arrives", async () => {
+		const id = userId("weaker-restatement");
+		const rich = "Unit 3 is only partially completed, not fully studied.";
+		await direct(id, {
+			content: rich,
+			extractionResponse: proposal([
+				sliceFact({ label: "Unit 3", category: "interest", kind: "progress", text: rich }),
+			]),
+		});
+		const node = await one("nodes", id);
+		const weaker = "Unit 3 partially completed.";
+		const result = await direct(id, {
+			content: weaker,
+			extractionResponse: proposal([
+				sliceFact({ label: "Unit 3", category: "interest", kind: "progress", text: weaker, existingNodeId: node.id }),
+			]),
+		});
+
+		expect(result.status).toBe("wrote");
+		const savedSlices = await rows("slices", id);
+		expect(savedSlices).toHaveLength(1);
+		expect(savedSlices[0].text).toBe(rich);
+		expect(Number(savedSlices[0].is_current)).toBe(1);
+		expect(Number(savedSlices[0].reinforcement_count ?? 0)).toBeGreaterThanOrEqual(1);
 	});
 
 	it("stores the source packet before honoring opt-out and returns a linked no-write receipt", async () => {
@@ -848,7 +911,7 @@ describe("MCP manual direct engine", () => {
 		expect(await rows("slices", id, `AND node_id = '${project.id}' AND is_current = 1`))
 			.toEqual([expect.objectContaining({ text: "Blue Lantern uses Go." })]);
 		expect((await one("nodes", id, "AND label = 'Blue Lantern'")).summary)
-			.toMatch(/^Blue Lantern: Blue Lantern uses Go\./);
+			.toMatch(/^Blue Lantern — uses Go\./);
 	});
 
 	it("reinforces a repeated correction and can later reverse it without duplicate identities", async () => {
@@ -1056,8 +1119,9 @@ describe("MCP manual direct engine", () => {
 		expect(results.every((result) => result.status === "wrote")).toBe(true);
 		expect((await rows("slices", id, "AND is_current = 1")).length).toBeGreaterThanOrEqual(2);
 		const node = await one("nodes", id, "AND id = 'node-atlas-summary'");
-		expect(node.summary).toContain(facts[0].text);
-		expect(node.summary).toContain(facts[1].text);
+		// Both concurrently committed facts must appear (label echo is stripped).
+		expect(node.summary).toContain("uses D1 for storage");
+		expect(node.summary).toContain("deploys on Cloudflare Workers");
 	});
 
 	it("keeps the concurrent winner current when identical preference corrections race", async () => {

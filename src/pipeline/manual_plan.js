@@ -233,6 +233,45 @@ function sameSlice(left, right) {
 	return score === 1 || (Math.min(factWords(left).length, factWords(right).length) >= 3 && score >= 0.72);
 }
 
+// Degree and negation modifiers: words that flip or qualify a fact without
+// introducing a new aspect ("completed" vs "only partially completed").
+const NEGATION_DEGREE_WORDS = new Set([
+	"almost", "barely", "completely", "entirely", "fully", "half", "halfway", "longer", "mostly",
+	"never", "no", "not", "only", "partially", "partly", "somewhat", "still", "yet",
+]);
+
+function setsEqual(left, right) {
+	if (left.size !== right.size) return false;
+	for (const item of left) if (!right.has(item)) return false;
+	return true;
+}
+
+function sliceCoreWords(text, labelWords) {
+	return new Set(factWords(text).filter((word) => !labelWords.has(word) && !NEGATION_DEGREE_WORDS.has(word)));
+}
+
+function sliceDegreeWords(text) {
+	return new Set(factWords(text).filter((word) => NEGATION_DEGREE_WORDS.has(word)));
+}
+
+/**
+ * Does `newText` refine or update `oldText` for the same node aspect?
+ * True when the old fact's core content (minus the node label and degree /
+ * negation modifiers) is fully restated by the new text AND the new text either
+ * adds information or flips the degree/negation ("I studied Unit 3" →
+ * "Unit 3 is only partially completed, not fully studied"). The newest
+ * statement then supersedes the old one instead of piling up beside it.
+ */
+function sliceRefines(oldText, newText, nodeLabel) {
+	const labelWords = new Set(factWords(nodeLabel));
+	const oldCore = sliceCoreWords(oldText, labelWords);
+	const newCore = sliceCoreWords(newText, labelWords);
+	if (!oldCore.size && !newCore.size) return false;
+	for (const word of oldCore) if (!newCore.has(word)) return false;
+	if (newCore.size > oldCore.size) return true;
+	return !setsEqual(sliceDegreeWords(oldText), sliceDegreeWords(newText));
+}
+
 function sameEvent(existing, memory) {
 	if (existing.action !== memory.action) return false;
 	if (ONE_OFF_EVENTS.has(memory.action)) return true;
@@ -456,6 +495,34 @@ function retrievalReceipt(integrity, input) {
 	};
 }
 
+// Bookkeeping actions the planner writes itself; they narrate memory changes
+// and must never be presented as facts about the thing.
+const AUDIT_EVENT_ACTIONS = new Set(["updated"]);
+
+function escapeRegExp(value) {
+	return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * One slice/event rendered as a clean summary clause: drop a leading
+ * restatement of the node label (plus copula), a leading "the user", and
+ * trailing punctuation, so "Unit 3 is only partially completed." becomes
+ * "only partially completed".
+ */
+function summaryClause(nodeLabel, text) {
+	let clause = String(text ?? "").replace(/\s+/g, " ").trim();
+	const label = String(nodeLabel ?? "").trim();
+	if (label) {
+		clause = clause.replace(
+			new RegExp(`^${escapeRegExp(label)}\\s*(?:is|are|was|were|has|have|:|,|\\u2014|\\u2013|-)?\\s+`, "iu"),
+			"",
+		);
+	}
+	clause = clause.replace(/^(?:the\s+user|user)\s+/iu, "");
+	clause = clause.replace(/[\s.;,!?]+$/u, "").trim();
+	return clause || null;
+}
+
 function deterministicSummary(node, slices, events, stateOverride = null) {
 	const currentSlices = [...(slices ?? [])]
 		.filter((slice) => Number(slice.is_current ?? 1) === 1)
@@ -464,18 +531,26 @@ function deterministicSummary(node, slices, events, stateOverride = null) {
 			Number(left.manual_order ?? Number.MAX_SAFE_INTEGER) - Number(right.manual_order ?? Number.MAX_SAFE_INTEGER) ||
 			String(left.id).localeCompare(String(right.id)));
 	const recentEvents = [...(events ?? [])]
+		.filter((event) => !AUDIT_EVENT_ACTIONS.has(String(event.action ?? "")))
 		.sort((left, right) =>
 			Number(right.happened_at ?? right.created_at ?? 0) - Number(left.happened_at ?? left.created_at ?? 0) ||
 			Number(left.manual_order ?? Number.MAX_SAFE_INTEGER) - Number(right.manual_order ?? Number.MAX_SAFE_INTEGER) ||
 			String(left.id).localeCompare(String(right.id)));
-	const details = [];
+	const clauses = [];
 	for (const item of [...currentSlices, ...recentEvents]) {
-		const text = String(item.text ?? "").replace(/\s+/g, " ").trim();
-		if (!text || details.some((existing) => canonicalIdentity(existing) === canonicalIdentity(text))) continue;
-		details.push(text);
-		if (details.length >= 3) break;
+		const clause = summaryClause(node.label, item.text);
+		if (!clause || clauses.some((existing) => canonicalIdentity(existing) === canonicalIdentity(clause))) continue;
+		clauses.push(clause);
+		if (clauses.length >= 2) break;
 	}
-	if (details.length) return `${node.label}: ${details.join("; ")}`.slice(0, 320);
+	if (clauses.length) {
+		const sentences = [
+			`${node.label} — ${clauses[0]}.`,
+			...clauses.slice(1).map((clause) =>
+				`${clause.charAt(0).toLocaleUpperCase("en-US")}${clause.slice(1)}.`),
+		];
+		return sentences.join(" ").replace(/\s+/g, " ").slice(0, 320);
+	}
 	const state = stateOverride ?? node.state ?? "active";
 	return `${node.label} is an active ${node.category ?? "memory"} (${state}).`.replace(/\s+/g, " ").slice(0, 320);
 }
@@ -1049,6 +1124,24 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			}
 			return duplicate;
 		}
+		// A strictly weaker restatement of an existing current fact reinforces it
+		// instead of piling up beside it as a second slice.
+		if (!(fact._target_slice_ids ?? []).length) {
+			const stronger = existingSlices.find((slice) =>
+				!sliceRefines(slice.text, memory.text, virtual.node.label) &&
+				sliceRefines(memory.text, slice.text, virtual.node.label));
+			if (stronger) {
+				if ((state.slices ?? []).some((slice) => slice.id === stronger.id)) {
+					uniquePush(plan.sliceTouches, {
+						id: stronger.id,
+						node_id: virtual.node.id,
+						kind: stronger.kind,
+						manual_identity_key: virtual.identityKey,
+					}, (item) => item.id);
+				}
+				return stronger;
+			}
+		}
 		const id = newId("slice");
 		for (const targetId of fact._target_slice_ids ?? []) {
 			const target = (state.slices ?? []).find((slice) => slice.id === targetId && slice.node_id === virtual.node.id);
@@ -1059,6 +1152,23 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 				kind: target.kind,
 				replacement_id: id,
 			}, (item) => item.id);
+		}
+		// Implicit update detection: without an explicit correction target, a new
+		// statement that restates and extends (or degree-flips) an existing current
+		// same-kind fact supersedes it — latest truth wins, the old fact becomes
+		// history via its change event.
+		if (!(fact._target_slice_ids ?? []).length) {
+			for (const slice of state.slices ?? []) {
+				if (slice.node_id !== virtual.node.id || slice.kind !== memory.slice_kind) continue;
+				if (Number(slice.is_current ?? 1) !== 1) continue;
+				if (!sliceRefines(slice.text, memory.text, virtual.node.label)) continue;
+				uniquePush(plan.sliceSupersede, {
+					id: slice.id,
+					node_id: slice.node_id,
+					kind: slice.kind,
+					replacement_id: id,
+				}, (item) => item.id);
+			}
 		}
 		const created = {
 			id,
@@ -1621,6 +1731,40 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 		}
 	}
 
+	// Change history (timeline): every supersede with a known old and new text
+	// becomes a visible "updated" event, so a replaced fact turns into history
+	// instead of silently disappearing from the node.
+	const replacementSliceById = new Map([
+		...(state.slices ?? []).map((slice) => [slice.id, slice]),
+		...plan.newSlices.map((slice) => [slice.id, slice]),
+	]);
+	for (const supersede of plan.sliceSupersede) {
+		const oldSlice = supersede.id
+			? (state.slices ?? []).find((slice) => slice.id === supersede.id)
+			: null;
+		const replacement = supersede.replacement_id ? replacementSliceById.get(supersede.replacement_id) : null;
+		if (!oldSlice || !replacement || oldSlice.id === replacement.id) continue;
+		const oldText = String(oldSlice.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+		const newText = String(replacement.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+		if (!oldText || !newText || canonicalIdentity(oldText) === canonicalIdentity(newText)) continue;
+		uniquePush(plan.newEvents, {
+			id: newId("event"),
+			user_id: userId,
+			node_id: supersede.node_id,
+			action: "updated",
+			text: `Updated: "${oldText}" → "${newText}"`,
+			importance: "ordinary",
+			happened_at: now,
+			created_at: now,
+			confidence: null,
+			manual_order: plan.newEvents.length,
+			manual_fact_key: manualFactKey("event", supersede.node_id, "updated", oldSlice.id, replacement.id),
+			manual_identity_key: replacement.manual_identity_key ?? null,
+		}, (item) => item.manual_fact_key);
+		plan.affectedNodeIds.add(supersede.node_id);
+		plan.derivedRefreshNodeIds.add(supersede.node_id);
+	}
+
 	// Simulate the post-write current facts and compute deterministic summaries.
 	for (const nodeId of plan.affectedNodeIds) {
 		const node = allNodes.find((item) => item.id === nodeId);
@@ -1647,6 +1791,7 @@ export function buildManualGraphPlan(userId, integrity, state, input = {}) {
 			guard.owner_node_id === nodeId || guard.related_node_id === nodeId);
 		plan.nodeSummaryUpdates.push({
 			id: nodeId,
+			label: node.label,
 			summary,
 			cluster,
 			manual_identity_key: canonicalIdentity(node.label),

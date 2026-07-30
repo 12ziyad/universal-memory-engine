@@ -24,7 +24,7 @@ const SAVE_MEMORY_DESC =
 	"Manually save exactly the grounded memory the user explicitly submitted. This includes durable facts, decisions, plans, preferences, events, and meaningful casual experiences; unresolved references require clarification. Returns a final receipt after source-only extraction and the atomic memory write complete.";
 
 const SAVE_CONVERSATION_DESC =
-	"Manually save a submitted conversation. Send messages oldest first; only scoped user-stated facts and specifically accepted assistant proposals may enter one semantic memory page and the graph. Assistant text otherwise remains context only. Use contentScope.subject for strict subject filtering. Safe to re-send overlapping messages; returns a final page-and-graph receipt.";
+	"Manually save a submitted conversation. Send messages oldest first; only scoped user-stated facts and specifically accepted assistant proposals enter the graph. When the user asks to save EVERYTHING (the whole chat), include all turns — user and assistant — and the conversation is additionally condensed into an organized notes page (assistant content included as notes, never as graph facts). Use contentScope.subject for strict subject filtering. Safe to re-send overlapping messages; returns a final page-and-graph receipt.";
 
 const RECALL_MEMORY_DESC =
 	"Call when the user asks what you know about them, or when answering needs their personal context (their projects, health, skills, goals, family, preferences). Returns a compact block of what is already known.";
@@ -107,7 +107,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	const server = new McpServer(
 		{ name: "uml-memory", version: "0.5.0" },
 		{
-			instructions: "UML is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns, and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
+			instructions: "UML is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns (or, when the user asks to save everything, a whole-chat notes capture — send all turns), and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
 		},
 	);
 

@@ -13,6 +13,7 @@ import { buildManualGraphPlan, loadManualPlanningState } from "./manual_plan.js"
 import { refineManualIdentityTitles } from "./manual_titles.js";
 import { retrieveManualContext } from "./manual_retrieval.js";
 import { refreshManualSearchProfiles } from "./manual_search_profiles.js";
+import { buildConversationCapture, detectConversationCapture, isChatReferentTopic } from "./manual_capture.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { filterDigestByTopic, parseCollectIntent } from "./pages.js";
 import {
@@ -822,9 +823,9 @@ function pageSynthesisClaims(conversation, integrity) {
  * representation, so thin/instructional input never manufactures a page.
  *
  * @returns {{ shape: "none"|"graph_only"|"page", groundedClaimCount: number,
- *   contentfulClaims: Array<object>, multiTurnSubstance: boolean }}
+ *   contentfulClaims: Array<object>, multiTurnSubstance: boolean, captureMode: boolean }}
  */
-function decideCollectRepresentation(integrity, semanticClaims, graphPlan) {
+function decideCollectRepresentation(integrity, semanticClaims, graphPlan, capture = { requested: false, lineCount: 0 }) {
 	const claims = semanticClaims ?? [];
 	const knownLabels = [
 		...(integrity?.entities ?? []).map((entity) => entity?.label),
@@ -858,7 +859,13 @@ function decideCollectRepresentation(integrity, semanticClaims, graphPlan) {
 	if (groundedClaimCount === 0 && !graphHasWrites) shape = "none";
 	else if (groundedClaimCount >= 2 || multiTurnSubstance) shape = "page";
 	else shape = graphHasWrites ? "graph_only" : "none";
-	return { shape, groundedClaimCount, contentfulClaims, multiTurnSubstance };
+	// Whole-chat capture: an explicit "save everything / save this chat" with
+	// real grounded note content always earns a notes page, even when the strict
+	// fact lane found nothing durable. A bare directive with no content has no
+	// surviving note lines and still routes to "none".
+	const captureMode = capture.requested === true && Number(capture.lineCount ?? 0) >= 2;
+	if (captureMode) shape = "page";
+	return { shape, groundedClaimCount, contentfulClaims, multiTurnSubstance, captureMode };
 }
 
 function structureIdentityObjects(structure) {
@@ -1370,6 +1377,23 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const groundedPageDigest = basePageClaims.map((claim) => String(claim?.text ?? "").trim()).filter(Boolean).join("\n");
 	const digest = filterDigestByTopic(groundedPageDigest, intent);
 	const keptLines = digest ? digest.split(/\n+/).filter((line) => line.trim()).length : 0;
+	// Whole-chat capture lane: an explicit "save everything / save this chat"
+	// condenses the full scoped conversation (assistant turns included) into
+	// grounded note lines for an organized notes page. Page-only — the graph
+	// below still learns exclusively from the strict fact lane.
+	const captureRequested = detectConversationCapture(scopedMessages);
+	const capture = captureRequested
+		? await buildConversationCapture(env, config, scopedMessages, {
+			notesResponse: input.notesResponse ?? input.overrides?.notesResponse,
+		})
+		: { digest: "", lines: [] };
+	// A chat-referent "topic" ("save more about this chat") is part of the save
+	// instruction, not a content filter — it must never empty the capture notes.
+	const captureIntent = intent.topic && isChatReferentTopic(intent.topic)
+		? { ...intent, topic: null }
+		: intent;
+	const captureDigest = captureRequested ? filterDigestByTopic(capture.digest, captureIntent) : "";
+	const captureLines = captureDigest ? captureDigest.split(/\n+/).filter((line) => line.trim()) : [];
 	const submittedContent = scopedUserMessages(claimMessages).join("\n");
 	let integrity = emptyConversationGraphIntegrity();
 	let retrieval = emptyConversationRetrieval();
@@ -1451,14 +1475,22 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	// atomic claim → graph only, no page; multiple claims or multi-turn substance
 	// → page + graph. Replaces the old "any digest + any claim → page" rule that
 	// manufactured a page for thin/instructional input.
-	const representation = decideCollectRepresentation(integrity, semanticClaims, graphPlan);
+	const representation = decideCollectRepresentation(integrity, semanticClaims, graphPlan, {
+		requested: captureRequested,
+		lineCount: captureLines.length,
+	});
 	graphPlan.representationShape = representation.shape;
-	const wantPage = representation.shape === "page" && Boolean(digest) && semanticClaims.length > 0;
+	const captureMode = representation.captureMode === true;
+	const pageDigest = captureMode ? captureDigest : digest;
+	const digestedLines = captureMode ? Math.max(keptLines, captureLines.length) : keptLines;
+	const wantPage = representation.shape === "page" && Boolean(pageDigest) && (captureMode || semanticClaims.length > 0);
 	const pageSkipReason = representation.shape === "graph_only"
 		? "single grounded claim stored as a graph fact without a page"
 		: "No semantic content remained after removing save instructions and filler";
 	const pageSkipCode = representation.shape === "graph_only" ? "single_atomic_claim_graph_only" : "no_semantic_content";
-	const pageSynthesis = wantPage
+	// Capture pages render through the deterministic notes renderer, not the
+	// strict semantic synthesis lane (whose claim validators are fact-only).
+	const pageSynthesis = wantPage && !captureMode
 		? await synthesizeManualPage(env, config, {
 			claims: semanticClaims,
 			subject: conversation.resolved_scope?.subject ?? primaryPageSubject(integrity)?.label ?? null,
@@ -1473,14 +1505,14 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 		: null;
 	let pagePlan = wantPage
 		? await buildManualPagePlan(env, userId, {
-			digest,
-			messages: pageMessages,
+			digest: pageDigest,
+			messages: captureMode ? scopedMessages : pageMessages,
 			claims: semanticClaims,
 			semanticSynthesis: pageSynthesis,
 			resolvedScope: conversation.resolved_scope,
-			intent,
+			intent: captureMode ? captureIntent : intent,
 			received,
-			keptLines,
+			keptLines: digestedLines,
 			conversationId: input.conversationId,
 			sourcePacket,
 			runId,
@@ -1489,8 +1521,9 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			primaryNodeId,
 			primaryNodeIsNew,
 			config,
-			queryText: [digest, graphDigest].filter(Boolean).join("\n"),
-			preferredTitle: primaryPageSubject(integrity)?.label ?? identityHints[0]?.label ?? null,
+			queryText: [pageDigest, captureMode ? digest : null, graphDigest].filter(Boolean).join("\n"),
+			preferredTitle: primaryPageSubject(integrity)?.label ?? identityHints[0]?.label ??
+				(captureMode ? captureIntent : intent).topic ?? null,
 			corrections: integrity.corrections,
 		})
 		: {
@@ -1530,7 +1563,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 			plan: graphPlan,
 			pagePlan,
 			received,
-			digested: keptLines,
+			digested: digestedLines,
 			outcome,
 			reason: conflict ? "ambiguous existing memory identity" : pagePlan.reason ?? "no eligible grounded conversation content",
 		});
@@ -1547,7 +1580,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	} catch (error) {
 		const failure = buildManualReceipt({
 			id: receiptId, source, sourceMode, sourcePacket, runId, plan: graphPlan, pagePlan,
-			received, digested: keptLines, outcome: "db_write_failed", reason: "atomic page and graph write failed", forceZero: true,
+			received, digested: digestedLines, outcome: "db_write_failed", reason: "atomic page and graph write failed", forceZero: true,
 		});
 		failure.error = String(error?.message ?? error);
 		const summary = receiptSummary(failure, null);
@@ -1574,7 +1607,7 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 				: null;
 	const receipt = buildManualReceipt({
 		id: receiptId, source, sourceMode, sourcePacket, runId, plan: graphPlan, pagePlan,
-		received, digested: keptLines, outcome,
+		received, digested: digestedLines, outcome,
 		reason,
 	});
 	const summary = receiptSummary(receipt, pagePlan);

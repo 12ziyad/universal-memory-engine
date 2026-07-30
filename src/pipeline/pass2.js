@@ -10,6 +10,15 @@
 
 import { getCurrentSlices, getNodeEvents } from "../lib/db.js";
 import { clusterForMemory } from "./clusters.js";
+import { responseText } from "./llm.js";
+
+// Planner-written bookkeeping events ("updated: was X → now Y"). They belong in
+// the node's timeline, never in its summary.
+const AUDIT_EVENT_ACTIONS = new Set(["updated"]);
+
+function withoutAuditEvents(events) {
+	return (events ?? []).filter((event) => !AUDIT_EVENT_ACTIONS.has(String(event?.action ?? "")));
+}
 
 async function summarizeNode(env, config, node, slices, events) {
 	if (!env.AI) return null;
@@ -34,23 +43,51 @@ async function summarizeNode(env, config, node, slices, events) {
 		},
 		config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
 	);
-	const text = (res?.response ?? "").trim();
+	const text = responseText(res).trim();
 	return text || null;
 }
 
+function escapeRegExp(value) {
+	return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Strip a leading node-label restatement (plus copula) and trailing punctuation. */
+function summaryClause(nodeLabel, text) {
+	let clause = String(text ?? "").replace(/\s+/g, " ").trim();
+	const label = String(nodeLabel ?? "").trim();
+	if (label) {
+		clause = clause.replace(
+			new RegExp(`^${escapeRegExp(label)}\\s*(?:is|are|was|were|has|have|:|,|\\u2014|\\u2013|-)?\\s+`, "iu"),
+			"",
+		);
+	}
+	clause = clause.replace(/^(?:the\s+user|user)\s+/iu, "");
+	clause = clause.replace(/[\s.;,!?]+$/u, "").trim();
+	return clause || null;
+}
+
 function fallbackSummary(node, slices, events) {
-	const facts = [
-		...slices.map((s) => s.text),
-		...events.map((e) => e.text),
-	].filter(Boolean);
-	if (facts.length) return `${node.label}: ${facts.slice(0, 2).join("; ")}`.slice(0, 240);
+	const clauses = [];
+	for (const item of [...slices, ...withoutAuditEvents(events)]) {
+		const clause = summaryClause(node.label, item?.text);
+		if (!clause || clauses.some((existing) => existing.toLocaleLowerCase("en-US") === clause.toLocaleLowerCase("en-US"))) continue;
+		clauses.push(clause);
+		if (clauses.length >= 2) break;
+	}
+	if (clauses.length) {
+		const sentences = [
+			`${node.label} — ${clauses[0]}.`,
+			...clauses.slice(1).map((clause) => `${clause.charAt(0).toLocaleUpperCase("en-US")}${clause.slice(1)}.`),
+		];
+		return sentences.join(" ").replace(/\s+/g, " ").slice(0, 240);
+	}
 	return `${node.label} is ${node.state ?? "active"} ${node.category ?? "memory"}`.replace(/\s+/g, " ").trim();
 }
 
 async function summarizeNodeBestEffort(env, config, node, slices, events) {
 	if (config.enablePass2 && config.pass2UseAi && env.AI) {
 		try {
-			const summary = await summarizeNode(env, config, node, slices, events);
+			const summary = await summarizeNode(env, config, node, slices, withoutAuditEvents(events));
 			if (summary) return summary;
 		} catch (err) {
 			console.warn(`pass2 summary AI failed node=${node.id}:`, err?.message ?? err);

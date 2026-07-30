@@ -202,3 +202,99 @@ describe("save_conversation representation routing", () => {
 		expect((await rows("nodes", id)).map((node) => node.label)).toContain("Retrieval Work");
 	});
 });
+
+describe("save_conversation whole-chat capture", () => {
+	const lessonMessages = [
+		{ id: "m0", role: "user", content: "Explain Unit 3 for my exam" },
+		{ id: "m1", role: "assistant", content: "Unit 3 covers photosynthesis and cellular respiration in detail." },
+		{ id: "m2", role: "assistant", content: "Photosynthesis converts sunlight into glucose inside chloroplasts." },
+		{ id: "m3", role: "user", content: "hey save everything from this chat to uml" },
+	];
+	const lessonNotes =
+		"Unit 3 covers photosynthesis and cellular respiration.\n" +
+		"Photosynthesis converts sunlight into glucose inside chloroplasts.";
+
+	it("captures a lesson chat into a notes page on 'save everything'", async () => {
+		const id = userId("capture-notes");
+		const result = await collect(id, {
+			conversationId: "capture-notes",
+			messages: lessonMessages,
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			notesResponse: lessonNotes,
+		});
+
+		expect(result.status).toBe("wrote");
+		expect(result.counts.pages).toBe(1);
+		const pages = await rows("memory_pages", id);
+		expect(pages).toHaveLength(1);
+		expect(pages[0].full_markdown).toMatch(/photosynthesis/i);
+		expect(pages[0].full_markdown).not.toMatch(/save everything/i);
+		// Notes are page-only: assistant lesson content never becomes graph facts.
+		expect(await rows("nodes", id)).toHaveLength(0);
+	});
+
+	it("drops fabricated note lines that no conversation turn supports", async () => {
+		const id = userId("capture-grounding");
+		const result = await collect(id, {
+			conversationId: "capture-grounding",
+			messages: lessonMessages,
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			notesResponse:
+				`${lessonNotes}\n` +
+				"The mitochondria synthesize dopamine using quantum tunneling in Redis.",
+		});
+
+		expect(result.counts.pages).toBe(1);
+		const pages = await rows("memory_pages", id);
+		expect(pages[0].full_markdown).not.toMatch(/quantum tunneling|Redis/i);
+	});
+
+	it("still writes nothing when a capture directive has no real content", async () => {
+		const id = userId("capture-thin");
+		const result = await collect(id, {
+			conversationId: "capture-thin",
+			messages: [
+				{ id: "m0", role: "user", content: "hey save everything from this chat to uml" },
+			],
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			notesResponse: "",
+		});
+
+		expect(result.counts).toMatchObject({ savedTotal: 0, pages: 0, nodes: 0 });
+		expect(await rows("memory_pages", id)).toHaveLength(0);
+	});
+
+	it("routes a repeat capture of the same topic into the same page", async () => {
+		const id = userId("capture-repeat");
+		const first = await collect(id, {
+			conversationId: "capture-repeat",
+			messages: lessonMessages,
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			notesResponse: lessonNotes,
+		});
+		expect(first.counts.pages).toBe(1);
+
+		const second = await collect(id, {
+			conversationId: "capture-repeat",
+			messages: [
+				...lessonMessages,
+				{ id: "m4", role: "assistant", content: "Cellular respiration breaks glucose down to release ATP energy." },
+				{ id: "m5", role: "user", content: "save more about this chat please" },
+			],
+			digestResponse: "",
+			extractionResponse: proposal([]),
+			notesResponse:
+				`${lessonNotes}\n` +
+				"Cellular respiration breaks glucose down to release ATP energy.",
+		});
+
+		expect(second.status).toBe("wrote");
+		expect(await rows("memory_pages", id)).toHaveLength(1);
+		const page = (await rows("memory_pages", id))[0];
+		expect(page.full_markdown).toMatch(/ATP energy/i);
+	});
+});

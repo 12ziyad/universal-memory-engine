@@ -16,6 +16,7 @@
  * would have returned; "" forces the heuristic fallback).
  */
 
+import { responseText } from "./llm.js";
 import { classifyMessage } from "./trigger.js";
 
 const DIGEST_SYSTEM = `You compress a chat into clean MEMORY lines about the USER.
@@ -79,7 +80,7 @@ async function llmDigest(env, config, userLines, assistantLines) {
 			},
 			config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
 		);
-		return String(res?.response ?? "").trim();
+		return responseText(res).trim();
 	} catch (err) {
 		console.warn("digest llm failed:", err?.message ?? err);
 		return "";
