@@ -1222,16 +1222,37 @@ function noWriteReason(plan) {
  * owner marker so the lane still works for API-only users with no profile row.
  */
 async function ownerIdentityLabel(env, userId) {
+	let base = "Me";
 	try {
 		const row = await env.DB.prepare("SELECT name, email FROM users WHERE id = ?").bind(userId).first();
 		const name = String(row?.name ?? "").trim();
-		if (name) return name.slice(0, 80);
 		const local = String(row?.email ?? "").split("@")[0].replace(/[._-]+/g, " ").trim();
-		if (local) return local.replace(/\b\p{Ll}/gu, (ch) => ch.toLocaleUpperCase("en-US")).slice(0, 80);
+		if (name) base = name.slice(0, 80);
+		else if (local) base = local.replace(/\b\p{Ll}/gu, (ch) => ch.toLocaleUpperCase("en-US")).slice(0, 80);
 	} catch (error) {
 		console.warn(`owner label lookup failed user=${userId}:`, error?.message ?? error);
 	}
-	return "Me";
+	// Prefer an existing owner node's exact label ("Ziyad") over a fresh variant
+	// ("Ziyad E J"), so repeat saves reinforce one node instead of duplicating.
+	try {
+		const baseTokens = new Set(canonicalIdentity(base).split(" ").filter(Boolean));
+		if (baseTokens.size) {
+			const { results } = await env.DB.prepare(
+				`SELECT label FROM nodes WHERE user_id = ?
+				 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL LIMIT 400`,
+			).bind(userId).all();
+			for (const node of results ?? []) {
+				const key = canonicalIdentity(node.label);
+				if (!key) continue;
+				if (key === canonicalIdentity(base)) return node.label;
+				const nodeTokens = key.split(" ").filter(Boolean);
+				if (nodeTokens.length <= 3 && nodeTokens.every((token) => baseTokens.has(token))) return node.label;
+			}
+		}
+	} catch (error) {
+		console.warn(`owner node lookup failed user=${userId}:`, error?.message ?? error);
+	}
+	return base;
 }
 
 function unresolvedManualReference(value) {

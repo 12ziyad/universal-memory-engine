@@ -35,6 +35,40 @@ function resolveOwnerIdentity(identity, ownerLabel) {
 }
 
 /**
+ * Sentence-shaped labels bake the owner and the value into the identity
+ * ("Ziyad Favorite Programming Language Kotlin"), which then duplicates
+ * alongside the real "Ziyad" and "Kotlin" nodes. Strip a leading owner /
+ * first-person echo, and a trailing echo of another proposed entity, so the
+ * label collapses to the actual subject ("Favorite Programming Language").
+ */
+function cleanOwnerEchoLabel(label, ownerLabel, otherLabels = []) {
+	const text = String(label ?? "").trim();
+	let parts = text.split(/\s+/);
+	if (parts.length < 3) return text;
+	const ownerKeys = new Set(
+		[canonicalIdentity(ownerLabel), ...String(ownerLabel ?? "").split(/\s+/).map(canonicalIdentity)]
+			.filter((key) => key && key.length > 1),
+	);
+	let start = 0;
+	while (start < parts.length - 2) {
+		const word = canonicalIdentity(parts[start].replace(/['’]s$/i, ""));
+		if (word && (ownerKeys.has(word) || FIRST_PERSON_IDENTITIES.has(word))) start++;
+		else break;
+	}
+	parts = parts.slice(start);
+	for (const other of otherLabels) {
+		const otherWords = String(other ?? "").trim().split(/\s+/).map(canonicalIdentity).filter(Boolean);
+		if (!otherWords.length || otherWords.length >= parts.length - 1) continue;
+		const tail = parts.slice(-otherWords.length).map((word) => canonicalIdentity(word));
+		if (otherWords.every((word, index) => word === tail[index]) && parts.length - otherWords.length >= 2) {
+			parts = parts.slice(0, parts.length - otherWords.length);
+		}
+	}
+	const cleaned = parts.join(" ").trim();
+	return cleaned && parts.length >= 2 ? cleaned : text;
+}
+
+/**
  * "Remember this about me" carries no claim. Owner resolution must not let the
  * instruction itself become a slice on the owner's node, so an owner-resolved
  * claim has to say something beyond the directive and the pronouns.
@@ -342,9 +376,11 @@ function contextHasMultipleNamedReferences(recentContext, label) {
 }
 
 function distinctiveIdentityGrounded(label, source) {
-	const labelWords = words(label).filter((word) => !GENERIC_IDENTITY_TOKENS.has(word));
+	// Stem both sides so "Apples" grounds against "apple" — the model routinely
+	// normalizes a singular source word into a plural identity label.
+	const labelWords = words(label).map(evidenceWord).filter((word) => !GENERIC_IDENTITY_TOKENS.has(word));
 	if (!labelWords.length) return false;
-	const sourceWords = new Set(words(source));
+	const sourceWords = new Set(words(source).map(evidenceWord));
 	const shared = labelWords.filter((word) => sourceWords.has(word)).length;
 	return shared >= Math.max(1, Math.ceil(labelWords.length * 0.5));
 }
@@ -632,7 +668,17 @@ export function applyManualIntegrity(proposal, input = {}) {
 	const ownerLabel = input.explicitManualSave === true
 		? String(input.ownerLabel ?? "").trim()
 		: "";
-	const entities = (proposal?.entities ?? []).map((entity) => resolveOwnerIdentity(entity, ownerLabel));
+	const rawLabels = (proposal?.entities ?? []).map((entity) => entity?.label).filter(Boolean);
+	const entities = (proposal?.entities ?? []).map((entity) => {
+		if (!entity) return entity;
+		const cleanedLabel = ownerLabel
+			? cleanOwnerEchoLabel(entity.label, ownerLabel, rawLabels.filter((label) => label !== entity.label))
+			: entity.label;
+		return resolveOwnerIdentity(
+			cleanedLabel === entity.label ? entity : { ...entity, label: cleanedLabel },
+			ownerLabel,
+		);
+	});
 	const entitiesByRef = new Map(entities.filter((entity) => entity?.ref).map((entity) => [String(entity.ref), entity]));
 	const facts = [];
 	const relationships = [];
@@ -641,7 +687,22 @@ export function applyManualIntegrity(proposal, input = {}) {
 
 	for (const rawFact of proposal?.facts ?? []) {
 		const fact = ownerLabel
-			? { ...rawFact, identity: resolveOwnerIdentity(rawFact?.identity, ownerLabel) }
+			? {
+				...rawFact,
+				identity: resolveOwnerIdentity(
+					rawFact?.identity
+						? {
+							...rawFact.identity,
+							label: cleanOwnerEchoLabel(
+								rawFact.identity.label,
+								ownerLabel,
+								rawLabels.filter((label) => label !== rawFact.identity.label),
+							),
+						}
+						: rawFact?.identity,
+					ownerLabel,
+				),
+			}
 			: rawFact;
 		if (fact?.identity?._owner_resolved && claimIsDirectiveOnly(fact?.memory?.text)) {
 			rejected.push({ kind: fact?.memory?.kind ?? "fact", label: fact?.identity?.label ?? null, reason: "directive_only_claim" });
