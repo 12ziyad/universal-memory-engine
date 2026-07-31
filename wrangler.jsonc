@@ -69,10 +69,10 @@
 		"LLM_DIGEST_MAX_TOKENS": "768",
 		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
 		// OAuth client id is public by design; the secret lives in a Worker secret.
-		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com",
-		// TEMPORARY (benchmark run only): enables the API-key-gated /eval/llm
-		// pass-through. REMOVE and redeploy as soon as the LoCoMo run finishes.
-		"EVAL_MODE": "1"
+		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com"
+		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
+		// duration of a benchmark run (it enables the /eval/llm pass-through in
+		// src/index.js), then remove it and redeploy.
 	},
 	// Workers rate limiting (fails open in code when a binding is absent).
 	// AUTH_LIMITER: per-IP on login/signup/OAuth. SAVE_LIMITER: per-user on saves.
