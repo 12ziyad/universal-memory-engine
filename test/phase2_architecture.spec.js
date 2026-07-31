@@ -134,10 +134,10 @@ describe("Auto Mode Phase 2 architecture ledger", () => {
 			memoryScope: { app: "claude", workspaceId: "personal" },
 			messages: [
 				{ role: "assistant", content: "What should I save?" },
-				{ role: "user", content: "UML runs on D1 and Vectorize for my memory project." },
+				{ role: "user", content: "Itsuki runs on D1 and Vectorize for my memory project." },
 			],
 			_test: {
-				digestResponse: "UML runs on D1 and Vectorize for the user's memory project.",
+				digestResponse: "Itsuki runs on D1 and Vectorize for the user's memory project.",
 			},
 		});
 		expect(result.status).toBe(200);
@@ -169,7 +169,7 @@ describe("Auto Mode Phase 2 architecture ledger", () => {
 		await env.DB.prepare(
 			"INSERT INTO nodes (id, user_id, label, category, role, state, summary, created_at, updated_at, heat_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		)
-			.bind("phase2-node", userId, "UML", "project", null, "active", "Universal Memory Layer project.", now, now, 3)
+			.bind("phase2-node", userId, "Itsuki", "project", null, "active", "Universal Memory Layer project.", now, now, 3)
 			.run();
 
 		const recalled = await call("/v1/recall", {
@@ -179,7 +179,7 @@ describe("Auto Mode Phase 2 architecture ledger", () => {
 		});
 		expect(recalled.status).toBe(200);
 		expect(recalled.body.nodes).toHaveLength(1);
-		expect(recalled.body.context).toContain("UML (project, state: active)");
+		expect(recalled.body.context).toContain("Itsuki (project, state: active)");
 	});
 
 	it("reports recall gate modes and expands locally through graph edges", async () => {

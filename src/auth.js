@@ -1,7 +1,10 @@
 import { newId } from "./lib/ids.js";
 
 export const SESSION_COOKIE = "uml_session";
-export const CONNECTION_TOKEN_PREFIX = "uml_live_";
+// New tokens mint with the Itsuki prefix; tokens minted before the rebrand
+// keep working forever — a rename must never break a user's integrations.
+export const CONNECTION_TOKEN_PREFIX = "itsuki_live_";
+export const ACCEPTED_TOKEN_PREFIXES = [CONNECTION_TOKEN_PREFIX, "uml_live_"];
 
 const ENCODER = new TextEncoder();
 const PASSWORD_ITERATIONS = 100000;
@@ -487,7 +490,7 @@ export async function revokeConnectionToken(env, userId, tokenId) {
 }
 
 export async function resolveConnectionToken(env, token, { allowedTypes = ["api", "mcp"] } = {}) {
-	if (!String(token || "").startsWith(CONNECTION_TOKEN_PREFIX)) return null;
+	if (!ACCEPTED_TOKEN_PREFIXES.some((prefix) => String(token || "").startsWith(prefix))) return null;
 	const tokenHash = await sha256Hex(token);
 	const row = await env.DB.prepare(
 		`SELECT

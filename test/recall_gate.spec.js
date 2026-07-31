@@ -15,7 +15,7 @@ import { recallGate } from "../src/pipeline/recall.js";
 
 const RECALL_PHRASINGS = [
 	"What do you remember about Rahul?",
-	"What do you remember about UML?",
+	"What do you remember about Itsuki?",
 	"what do you remember about the Unified Government QR Identity System?",
 	"Do you remember Rahul?",
 	"do you remember what I said about the QR project?",

@@ -85,9 +85,10 @@ const STOPWORDS = new Set([
 const TITLE_PROFILES = [
 	{
 		id: "uml",
-		title: "UML Architecture Decisions",
+		title: "Itsuki Architecture Decisions",
 		terms: [
 			["uml", 8],
+			["itsuki", 8],
 			["universal memory", 8],
 			["memory engine", 7],
 			["memory page", 7],
@@ -236,13 +237,13 @@ function titleForProfile(profile, text) {
 	const hasGraph = /\b(graph|layout|cluster|zoom|focus)\b/.test(norm);
 	const hasReset = /\b(reset|delete all|danger zone)\b/.test(norm);
 	if (/\bgpmai\b/.test(norm) && /\b(cluster|rules|graph)\b/.test(norm)) return "GPMai Memory Graph Cluster Rules";
-	if (hasGraph && hasReset) return "UML Graph Layout and Reset UX";
+	if (hasGraph && hasReset) return "Itsuki Graph Layout and Reset UX";
 	if (runHits.length && hasPages && hasGraph) {
 		const run = runHits.length > 1 ? `Run ${runHits.join("/")}` : `Run ${runHits[0]}`;
-		return `UML ${run} Memory Pages and Graph UX`;
+		return `Itsuki ${run} Memory Pages and Graph UX`;
 	}
-	if (hasPages && hasGraph) return "UML Memory Pages and Graph UX";
-	if (hasGraph) return "UML Graph Layout and Repair";
+	if (hasPages && hasGraph) return "Itsuki Memory Pages and Graph UX";
+	if (hasGraph) return "Itsuki Graph Layout and Repair";
 	return profile.title;
 }
 

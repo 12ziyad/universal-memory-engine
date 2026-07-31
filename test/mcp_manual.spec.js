@@ -313,7 +313,7 @@ describe("MCP manual direct engine", () => {
 		const id = userId("exact-alias");
 		await seedNode(id, "node-uml", "Universal Memory Layer", {
 			category: "project",
-			aliases: ["UML"],
+			aliases: ["Itsuki"],
 		});
 
 		const exactText = "Universal Memory Layer is making steady progress.";
@@ -332,12 +332,12 @@ describe("MCP manual direct engine", () => {
 			expect.objectContaining({ decision: "existing", node_id: "node-uml" }),
 		]);
 
-		const aliasText = "UML completed its indexing milestone.";
+		const aliasText = "Itsuki completed its indexing milestone.";
 		const alias = await direct(id, {
 			content: aliasText,
 			extractionResponse: proposal([
 				eventFact({
-					label: "UML",
+					label: "Itsuki",
 					category: "project",
 					action: "completed",
 					text: aliasText,
@@ -346,14 +346,14 @@ describe("MCP manual direct engine", () => {
 		});
 
 		expect(alias.receipt.identity_decisions).toEqual([
-			expect.objectContaining({ decision: "existing", node_id: "node-uml", matched_by: "UML" }),
+			expect.objectContaining({ decision: "existing", node_id: "node-uml", matched_by: "Itsuki" }),
 		]);
 		expect(await rows("nodes", id)).toHaveLength(1);
 		expect(await rows("slices", id)).toHaveLength(1);
 		expect(await rows("events", id)).toHaveLength(1);
 		const node = await one("nodes", id);
 		expect(node.state).toBe("completed");
-		// The summary strips the leading label echo ("UML completed…" → "completed…").
+		// The summary strips the leading label echo ("Itsuki completed…" → "completed…").
 		expect(node.summary).toContain("completed its indexing milestone");
 	});
 

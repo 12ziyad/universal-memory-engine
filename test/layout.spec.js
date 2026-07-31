@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { buildGraphLayout, clusterClearance, filterGraphForMode, itemClearance } from "../src/pipeline/layout.js";
 
 const nodes = [
-	{ id: "n-uml", label: "UML", category: "project", cluster: "projects_systems", slices: [{ text: "uses D1" }], events: [] },
+	{ id: "n-uml", label: "Itsuki", category: "project", cluster: "projects_systems", slices: [{ text: "uses D1" }], events: [] },
 	{ id: "n-d1", label: "D1", category: "tool", cluster: "skills_tech", slices: [], events: [] },
 	{ id: "n-graph", label: "Graph UX", category: "system", cluster: "projects_systems", slices: [], events: [{ text: "improved" }] },
 ];
 const pages = [
 	{
 		id: "p-run",
-		title: "UML Run 3.2 Memory Pages and Graph UX",
+		title: "Itsuki Run 3.2 Memory Pages and Graph UX",
 		topic_filter: "uml",
 		short_summary: "Graph UX and memory pages.",
 		cluster: "projects_systems",
@@ -58,14 +58,14 @@ describe("deterministic graph layout", () => {
 	it("keeps cluster regions and same-cluster items visually separated", () => {
 		const manyNodes = Array.from({ length: 9 }, (_, i) => ({
 			id: `n-${i}`,
-			label: `UML Graph Topic ${i}`,
+			label: `Itsuki Graph Topic ${i}`,
 			category: "project",
 			cluster: i < 5 ? "projects_systems" : "skills_tech",
 			slices: [],
 			events: [],
 		}));
 		const manyPages = [
-			{ ...pages[0], id: "p-a", title: "UML Graph Layout and Reset UX", cluster: "projects_systems" },
+			{ ...pages[0], id: "p-a", title: "Itsuki Graph Layout and Reset UX", cluster: "projects_systems" },
 			{ ...pages[0], id: "p-b", title: "Cloudflare D1 Vectorize Notes", cluster: "skills_tech" },
 		];
 		const layout = buildGraphLayout(manyNodes, manyPages, []);

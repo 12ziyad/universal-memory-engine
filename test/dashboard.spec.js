@@ -33,12 +33,12 @@ describe("dashboard script", () => {
 		expect(html).toContain("clusterHullAnchors");
 	});
 
-	it("renders the public UML platform landing shell", () => {
+	it("renders the public Itsuki platform landing shell", () => {
 		expect((html.match(/<section class="landing-section/g) || []).length).toBeGreaterThanOrEqual(8);
 		expect(html).toContain("Universal Memory Layer");
 		expect(html).toContain("Tell it once. Every AI remembers.");
 		expect(html).toContain("one private memory graph shared by Claude, your agents, and your apps");
-		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
+		expect(html).toContain("Itsuki turns useful context from chats, events, documents, tools, and workflows into structured memory");
 		expect(html).toContain("Start free");
 		expect(html).toContain("See how it works");
 		expect(html).toContain("Works with API, SDK, dashboard, and MCP-linked clients.");
@@ -47,7 +47,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hero-video");
 		// How-it-works flow, written for a first-time visitor.
 		expect(html).toContain("Four steps. Simple enough to explain to anyone.");
-		expect(html).toContain("UML organizes it");
+		expect(html).toContain("Itsuki organizes it");
 		expect(html).toContain("Every tool remembers");
 		// Connect terminal with per-client tabs; URLs are built from
 		// location.origin at runtime so no deploy domain leaks into the shell.
@@ -63,10 +63,10 @@ describe("dashboard script", () => {
 		expect(html).toContain("Latest truth wins");
 		expect(html).toContain("Receipts for every save");
 		expect(html).toContain("Your rules");
-		expect(html).toContain("When UML is connected through an MCP-capable AI client");
+		expect(html).toContain("When Itsuki is connected through an MCP-capable AI client");
 		expect(html).toContain("The client or host model decides when to call them.");
-		expect(html).toContain("If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.");
-		expect(html).toContain("UML does not sell user data");
+		expect(html).toContain("If you need guaranteed per-turn capture or recall, use the Itsuki API or SDK inside your app or agent runtime.");
+		expect(html).toContain("Itsuki does not sell user data");
 		expect(html).toContain("or use user memory for unrelated purposes");
 		expect(html).toContain("User memory belongs to the account that created it.");
 		expect(html).toContain("private links or tokens you create");
@@ -83,13 +83,13 @@ describe("dashboard script", () => {
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",
 			"Every AI starts from zero",
-			"UML remembers everything",
+			"Itsuki remembers everything",
 			"Never lose context again",
 			"The future of AI memory",
 			"Game-changer",
 			"Just works",
 			"Seamlessly",
-			"UML saves every message",
+			"Itsuki saves every message",
 		]) {
 			expect(html).not.toContain(forbidden);
 		}
@@ -131,11 +131,11 @@ describe("dashboard script", () => {
 		expect(script).toContain("Suggestions to review");
 		expect(script).toContain("Promote to Node");
 		expect(script).toContain("Ignore Similar");
-		expect(script).toContain("Everything UML remembers about you, in one place.");
+		expect(script).toContain("Everything Itsuki remembers about you, in one place.");
 		expect(script).toContain("Save a memory");
 		expect(script).toContain("Save from a chat or notes");
 		expect(script).toContain("Search your memories");
-		expect(script).toContain("Connect UML");
+		expect(script).toContain("Connect Itsuki");
 		expect(script).toContain("Create a named private connection for each tool or app.");
 		expect(script).toContain("Connection name");
 		expect(script).toContain("Generate MCP URL");
@@ -147,9 +147,9 @@ describe("dashboard script", () => {
 		expect(script).toContain("clearOneTimeLink()");
 		expect(script).toContain("cancelConnectFlow()");
 		expect(script).toContain("Full secret was shown only once");
-		expect(script).toContain("Authorization: Bearer uml_live_xxxxx");
+		expect(script).toContain("Authorization: Bearer itsuki_live_xxxxx");
 		expect(script).toContain("API token usage");
-		expect(script).toContain("A plain record of everything UML saved, updated, or skipped");
+		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [
 			"Custom instructions",
@@ -195,7 +195,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("You can revoke tokens from Connect.");
 		expect(script).toContain("Reset memory currently deletes saved memory rows");
 		expect(script).toContain("Avoid sensitive, regulated, or high-risk data");
-		expect(script).toContain("Do not use UML for abuse, unsafe automation");
+		expect(script).toContain("Do not use Itsuki for abuse, unsafe automation");
 		expect(script).toContain("function openPolicyModal(");
 		expect(script).toContain("function closePolicyModal()");
 		expect(script).toContain("Support / report issue");

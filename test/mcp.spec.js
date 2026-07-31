@@ -153,7 +153,7 @@ describe("/mcp Streamable HTTP handler", () => {
 			params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "vitest", version: "1" } },
 		});
 		expect(res.status).toBe(200);
-		expect(await res.text()).toContain("uml-memory");
+		expect(await res.text()).toContain("itsuki-memory");
 	});
 
 	it("lists exactly the three manual memory-door tools", async () => {
@@ -219,7 +219,7 @@ describe("/mcp Streamable HTTP handler", () => {
 					scope: "summary",
 					conversationId: "mcp-save-conversation-contract",
 					messages: [
-						{ id: "conv-1", role: "user", content: "I decided to use D1 for UML storage." },
+						{ id: "conv-1", role: "user", content: "I decided to use D1 for Itsuki storage." },
 						{ id: "conv-2", role: "assistant", content: "Good call." },
 					],
 				},

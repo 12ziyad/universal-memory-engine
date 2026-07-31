@@ -58,8 +58,8 @@ describe("manual MCP action router", () => {
 		const result = await routeManualAction({
 			request: "Save only what this chat says about Ziyad.",
 			messages: [
-				{ id: "u1", role: "user", content: "Ziyad is building UML.", ts: 10 },
-				{ id: "a1", role: "assistant", content: "UML can use D1.", ts: 11 },
+				{ id: "u1", role: "user", content: "Ziyad is building Itsuki.", ts: 10 },
+				{ id: "a1", role: "assistant", content: "Itsuki can use D1.", ts: 11 },
 			],
 			conversationId: "conversation-2",
 			memoryScope: { appId: "host-app" },
@@ -73,8 +73,8 @@ describe("manual MCP action router", () => {
 		expect(result.scope).toEqual({ ...SAFE_SCOPE, subject: "Ziyad" });
 		expect(result.tool_arguments).toEqual({
 			messages: [
-				{ id: "u1", role: "user", content: "Ziyad is building UML.", ts: 10 },
-				{ id: "a1", role: "assistant", content: "UML can use D1.", ts: 11 },
+				{ id: "u1", role: "user", content: "Ziyad is building Itsuki.", ts: 10 },
+				{ id: "a1", role: "assistant", content: "Itsuki can use D1.", ts: 11 },
 			],
 			contentScope: { ...SAFE_SCOPE, subject: "Ziyad" },
 			conversationId: "conversation-2",

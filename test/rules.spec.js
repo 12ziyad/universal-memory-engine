@@ -64,14 +64,14 @@ describe("memory rules module", () => {
 		const id = userId("roundtrip");
 		const saved = await saveMemoryRules(env, id, {
 			customInstructions: "  Always save study progress.  ",
-			includes: ["Exams", "exams", "", "UML project"],
+			includes: ["Exams", "exams", "", "Itsuki project"],
 			excludes: ["passwords"],
 			customCategories: [{ name: "Study Progress!", description: "exam and unit completion" }],
 			captureDefault: "graph_only",
 			autoCollect: false,
 		});
 		expect(saved.customInstructions).toBe("Always save study progress.");
-		expect(saved.includes).toEqual(["Exams", "UML project"]);
+		expect(saved.includes).toEqual(["Exams", "Itsuki project"]);
 		expect(saved.excludes).toEqual(["passwords"]);
 		expect(saved.customCategories).toEqual([{ name: "study_progress", description: "exam and unit completion" }]);
 		expect(saved.captureDefault).toBe("graph_only");

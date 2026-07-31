@@ -117,9 +117,9 @@ function ensureScope(authz, mode, source, requiredScope) {
  */
 export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	const server = new McpServer(
-		{ name: "uml-memory", version: "0.5.0" },
+		{ name: "itsuki-memory", version: "0.6.0" },
 		{
-			instructions: "UML is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns (or, when the user asks to save everything, a whole-chat notes capture — send all turns), and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
+			instructions: "Itsuki is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns (or, when the user asks to save everything, a whole-chat notes capture — send all turns), and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
 		},
 	);
 

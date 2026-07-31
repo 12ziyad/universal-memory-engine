@@ -127,12 +127,12 @@ describe("/v1/recall - memory pages", () => {
 				"page-recall",
 				pageUserId,
 				"manual_collect",
-				"UML Run 3.2 Memory Pages and Graph UX",
+				"Itsuki Run 3.2 Memory Pages and Graph UX",
 				"uml run 3 2 memory pages and graph ux",
 				"uml",
-				"UML added manual_collect memory pages and improved graph UX.",
+				"Itsuki added manual_collect memory pages and improved graph UX.",
 				JSON.stringify(["Memory pages stay as pages", "Graph UX uses clean cluster layout"]),
-				JSON.stringify(["UML", "Graph UX", "Cloudflare"]),
+				JSON.stringify(["Itsuki", "Graph UX", "Cloudflare"]),
 				now,
 				now,
 			)
@@ -146,12 +146,12 @@ describe("/v1/recall - memory pages", () => {
 		expect(body.pages).toHaveLength(1);
 		expect(body.pages[0]).toMatchObject({
 			id: "page-recall",
-			title: "UML Run 3.2 Memory Pages and Graph UX",
+			title: "Itsuki Run 3.2 Memory Pages and Graph UX",
 			source_mode: "manual_collect",
 		});
-		expect(body.context).toContain("Memory page: UML Run 3.2 Memory Pages and Graph UX");
+		expect(body.context).toContain("Memory page: Itsuki Run 3.2 Memory Pages and Graph UX");
 		expect(body.context).toContain("Memory pages stay as pages");
-		expect(body.context).not.toContain("# UML");
+		expect(body.context).not.toContain("# Itsuki");
 	});
 });
 

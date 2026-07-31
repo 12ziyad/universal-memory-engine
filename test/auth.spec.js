@@ -208,7 +208,7 @@ describe("connection tokens", () => {
 		const created = await jsonRequest("/auth/tokens", { type: "api", label: "Custom Agent" }, a.cookie);
 		expect(created.status).toBe(201);
 		const body = await created.json();
-		expect(body.token).toMatch(/^uml_live_/);
+		expect(body.token).toMatch(/^itsuki_live_/);
 		expect(body.tokenRecord.masked_token).not.toContain(body.token);
 
 		const row = await env.DB.prepare("SELECT token_hash, token_prefix, token_tail FROM connection_tokens WHERE id = ?")
@@ -282,7 +282,7 @@ describe("connection tokens", () => {
 				scope: "summary",
 				conversationId: `token-safe-collect-${crypto.randomUUID()}`,
 				messages: [
-					{ id: "collect-1", role: "user", content: "I decided to keep UML on Cloudflare D1." },
+					{ id: "collect-1", role: "user", content: "I decided to keep Itsuki on Cloudflare D1." },
 					{ id: "collect-2", role: "assistant", content: "Noted." },
 				],
 			},
@@ -381,7 +381,7 @@ describe("connection tokens", () => {
 			}),
 		});
 		expect(res.status).toBe(200);
-		expect(await res.text()).toContain("uml-memory");
+		expect(await res.text()).toContain("itsuki-memory");
 	});
 });
 
@@ -390,11 +390,11 @@ describe("product shell routes", () => {
 		expect(html).toContain("Universal Memory Layer");
 		expect(html).toContain("Tell it once. Every AI remembers.");
 		expect(html).toContain("one private memory graph shared by Claude, your agents, and your apps");
-		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
+		expect(html).toContain("Itsuki turns useful context from chats, events, documents, tools, and workflows into structured memory");
 		expect(html).toContain("Chat history is not memory.");
 		expect(html).toContain("Memory is structured meaning.");
 		expect(html).toContain("Backend is the authority, not the LLM.");
-		expect(html).toContain("When UML is connected through an MCP-capable AI client");
+		expect(html).toContain("When Itsuki is connected through an MCP-capable AI client");
 		expect(html).toContain("Privacy Policy");
 		expect(html).toContain("Terms of Service");
 		expect(html).toContain("Open source &middot; Apache 2.0");

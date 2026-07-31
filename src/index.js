@@ -37,6 +37,7 @@ import {
 import { getMemoryRules, saveMemoryRules } from "./pipeline/rules.js";
 import {
 	changePassword,
+	ACCEPTED_TOKEN_PREFIXES,
 	clearSessionCookie,
 	createConnectionToken,
 	getSessionUser,
@@ -1166,7 +1167,7 @@ async function handleRequest(request, env, ctx) {
 /** Authenticate the path token, then serve the MCP Streamable HTTP endpoint. */
 async function handleMcp(request, env, ctx, url) {
 	const token = url.pathname.slice("/mcp/".length).split("/")[0];
-	if (token?.startsWith("uml_live_")) {
+	if (ACCEPTED_TOKEN_PREFIXES.some((prefix) => token?.startsWith(prefix))) {
 		const auth = await resolveConnectionToken(env, token, { allowedTypes: ["mcp"] });
 		if (!auth) return json({ error: "unauthorized mcp token" }, 401);
 		const server = buildMemoryServer(env, ctx, auth.userId, {

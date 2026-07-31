@@ -3,15 +3,15 @@ import { clusterForMemory } from "../src/pipeline/clusters.js";
 import { generateTitle, isBadTitle } from "../src/pipeline/title.js";
 
 describe("title dominance", () => {
-	it("keeps UML graph work dominant over car/bike examples", () => {
+	it("keeps Itsuki graph work dominant over car/bike examples", () => {
 		const text = `
-			UML Run 3.2 added manual_collect memory pages.
-			UML Run 3.3 improved graph UX, cluster labels, Cloudflare credits, D1, Vectorize, and MCP dashboard behavior.
+			Itsuki Run 3.2 added manual_collect memory pages.
+			Itsuki Run 3.3 improved graph UX, cluster labels, Cloudflare credits, D1, Vectorize, and MCP dashboard behavior.
 			The next patch should repair graph layout and memory page title quality.
 			Use car and bike as examples only, e.g. skip car/bike example topics and do not title this as vehicle research.
 		`;
 		const title = generateTitle(text, { topic: "car and bike examples" });
-		expect(title).toMatch(/^UML Run 3\.2\/3\.3 Memory Pages and Graph UX$/);
+		expect(title).toMatch(/^Itsuki Run 3\.2\/3\.3 Memory Pages and Graph UX$/);
 		expect(title).not.toBe("Car Research");
 	});
 
@@ -28,8 +28,8 @@ describe("title dominance", () => {
 		expect(generateTitle("GPMai memory graph cluster rules need dynamic semantic clusters and hull spacing.")).toBe(
 			"GPMai Memory Graph Cluster Rules",
 		);
-		expect(generateTitle("UML graph layout needs procedural cluster hulls plus Reset UX and DELETE ALL danger-zone confirmation.")).toBe(
-			"UML Graph Layout and Reset UX",
+		expect(generateTitle("Itsuki graph layout needs procedural cluster hulls plus Reset UX and DELETE ALL danger-zone confirmation.")).toBe(
+			"Itsuki Graph Layout and Reset UX",
 		);
 		expect(generateTitle("Boxing shoulder pain needs a return plan before training hard again.")).toBe(
 			"Boxing Shoulder Pain and Return Plan",

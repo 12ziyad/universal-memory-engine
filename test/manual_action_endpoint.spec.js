@@ -84,8 +84,8 @@ describe("POST /v1/mcp/choose", () => {
 				userId: "host-user",
 				request: "Save only what this chat says about Ziyad.",
 				messages: [
-					{ id: "u1", role: "user", content: "Ziyad is building UML.", ts: 10 },
-					{ id: "a1", role: "assistant", content: "UML can use D1.", ts: 11 },
+					{ id: "u1", role: "user", content: "Ziyad is building Itsuki.", ts: 10 },
+					{ id: "a1", role: "assistant", content: "Itsuki can use D1.", ts: 11 },
 				],
 				conversationId: "conversation-2",
 				memoryScope: {

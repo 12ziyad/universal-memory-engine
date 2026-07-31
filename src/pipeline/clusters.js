@@ -34,7 +34,7 @@ export const CLUSTERS = [
 		color: "#8b5cf6",
 		x: 0,
 		y: -40,
-		keywords: ["project", "uml", "memory", "engine", "gpm", "app", "mcp", "dashboard", "graph"],
+		keywords: ["project", "uml", "itsuki", "memory", "engine", "gpm", "app", "mcp", "dashboard", "graph"],
 		categories: ["project", "system"],
 	},
 	{
@@ -115,7 +115,7 @@ const BY_ID = new Map(CLUSTERS.map((cluster) => [cluster.id, cluster]));
 
 const SPECIAL_CLUSTER_PATTERNS = [
 	{ id: "career_applications", re: /\b(microsoft|resume|recruiting|job application|swe|software engineer|interview prep|dsa)\b/ },
-	{ id: "projects_systems", re: /\b(uml|universal memory|memory engine|gpmai|memory layer)\b/ },
+	{ id: "projects_systems", re: /\b(uml|itsuki|universal memory|memory engine|gpmai|memory layer)\b/ },
 	{ id: "business_product", re: /\b(landing page|login plan|business app|publishing|pricing|startup)\b/ },
 	{ id: "software_product", re: /\b(software product|product architecture|frontend|backend|ux plan)\b/ },
 	{ id: "health_fitness", re: /\b(shoulder pain|injury|recovery|return plan|doctor|diagnosed)\b/ },

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>UML - Universal Memory Layer</title>
+<title>Itsuki — personal memory for every AI</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
@@ -635,8 +635,8 @@
 <div id="landing" class="public-shell">
 	<nav class="public-nav">
 		<a class="brand-lockup" href="/" onclick="showPublic(event)">
-			<img src="/assets/uml-icon.png?v=2" alt="UML logo" />
-			<span><b>UML</b><span>Universal Memory Layer</span></span>
+			<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+			<span><b>Itsuki</b><span>Personal memory layer</span></span>
 		</a>
 		<div class="nav-right">
 			<div class="nav-links" aria-label="Public navigation">
@@ -656,7 +656,7 @@
 		<div class="hero-copy">
 			<div class="product-kicker"><img src="/assets/uml-icon.png?v=2" alt="" /> Universal Memory Layer</div>
 			<h1>Tell it once. Every AI remembers.</h1>
-			<p>UML is one private memory graph shared by Claude, your agents, and your apps — you can see it, edit it, and own it.</p>
+			<p>Itsuki is one private memory graph shared by Claude, your agents, and your apps — you can see it, edit it, and own it.</p>
 			<div class="hero-actions">
 				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
 				<a class="cta-secondary" href="#how-it-works">See how it works</a>
@@ -666,7 +666,7 @@
 		<div class="hero-video">
 			<div class="video-frame">
 				<video id="heroReel" muted loop playsinline webkit-playsinline preload="none"
-					poster="/assets/uml-reel-poster.svg" aria-label="UML memory graph in motion">
+					poster="/assets/uml-reel-poster.svg" aria-label="Itsuki memory graph in motion">
 					<source src="/assets/uml-reel.mp4" type="video/mp4" />
 				</video>
 			</div>
@@ -687,7 +687,7 @@
 			<div class="flow-step">
 				<div class="flow-num">2</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2M5.6 18.4l2.2-2.2m8.4-8.4 2.2-2.2"/><circle cx="12" cy="12" r="3.2"/></svg></div>
-				<h3>UML organizes it</h3>
+				<h3>Itsuki organizes it</h3>
 				<p>AI extracts the durable facts. The backend verifies them and writes real structure — never a raw chat dump.</p>
 			</div>
 			<div class="flow-step">
@@ -719,20 +719,20 @@
 				<button class="term-tab" onclick="connectTab(this,'api')">Your app</button>
 			</div>
 			<div class="terminal-body">
-				<div class="terminal-chrome"><span></span><span></span><span></span><em>uml &middot; connect</em></div>
+				<div class="terminal-chrome"><span></span><span></span><span></span><em>itsuki &middot; connect</em></div>
 				<div class="term-pane active" data-pane="claude">
 					<div class="term-step"><b>1</b><span>Sign up free &rarr; open <i>Connect</i> &rarr; <i>Create MCP link</i></span></div>
 					<div class="term-step"><b>2</b><span>On a computer, open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (that link opens it directly)</span></div>
-					<div class="term-step"><b>3</b><span>Name it <i>uml</i>, paste your private link, click Add:</span></div>
+					<div class="term-step"><b>3</b><span>Name it <i>itsuki</i>, paste your private link, click Add:</span></div>
 					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
-					<div class="term-step"><b>4</b><span>In a chat, tap the <b>+</b> (bottom-left) &rarr; <i>Connectors</i> &rarr; switch on <i>uml</i></span></div>
+					<div class="term-step"><b>4</b><span>In a chat, tap the <b>+</b> (bottom-left) &rarr; <i>Connectors</i> &rarr; switch on <i>itsuki</i></span></div>
 					<div class="term-note">Works on the free plan. On mobile after setup: it syncs automatically. Then just say <i>"save this to uml"</i> or <i>"what do you know about me?"</i></div>
 				</div>
 				<div class="term-pane" data-pane="chatgpt">
 					<div class="term-step"><b>1</b><span>On a computer: ChatGPT &rarr; Settings &rarr; <i>Connectors</i> (called <i>Plugins</i> in some builds) &rarr; <i>Advanced</i> &rarr; turn on <b>Developer mode</b>. Nothing MCP-related appears until this is on.</span></div>
-					<div class="term-step"><b>2</b><span>Back in Connectors &rarr; <i>Create</i>. Name: <i>uml</i>. Description: <i>Personal memory &mdash; save and recall facts about me across chats.</i> URL:</span></div>
+					<div class="term-step"><b>2</b><span>Back in Connectors &rarr; <i>Create</i>. Name: <i>itsuki</i>. Description: <i>Personal memory &mdash; save and recall facts about me across chats.</i> URL:</span></div>
 					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
-					<div class="term-step"><b>3</b><span>In a new chat, enable Developer mode / <i>Add sources</i> and pick <i>uml</i> &mdash; a saved connector stays off until you switch it on in the chat</span></div>
+					<div class="term-step"><b>3</b><span>In a new chat, enable Developer mode / <i>Add sources</i> and pick <i>itsuki</i> &mdash; a saved connector stays off until you switch it on in the chat</span></div>
 					<div class="term-note">Needs a paid ChatGPT plan (Plus/Pro/Business) &mdash; Free can't add custom connectors. Mobile can use it after setup, with some limits.</div>
 				</div>
 				<div class="term-pane" data-pane="claude-code">
@@ -741,7 +741,7 @@
 					<div class="term-note">Claude Code gets three tools: <i>save_memory</i>, <i>save_conversation</i>, <i>recall_memory</i>.</div>
 				</div>
 				<div class="term-pane" data-pane="cursor">
-					<div class="term-step"><b>1</b><span>Add UML to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
+					<div class="term-step"><b>1</b><span>Add Itsuki to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
 					<div class="term-code"><code data-connect="cursor"></code><button class="copy-btn" data-copy-key="cursor">Copy</button></div>
 					<div class="term-note">Works the same in any MCP-capable editor or agent host.</div>
 				</div>
@@ -754,25 +754,25 @@
 		</div>
 		<div class="product-card contact-card" style="margin-top:16px" id="api-sdk-mcp">
 			<h3>Honest MCP note</h3>
-			<p>When UML is connected through an MCP-capable AI client, UML provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.</p>
+			<p>When Itsuki is connected through an MCP-capable AI client, Itsuki provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn capture or recall, use the Itsuki API or SDK inside your app or agent runtime.</p>
 		</div>
 	</section>
 
 	<section class="landing-section reveal" id="structured-memory">
 		<div class="section-kicker">Why a graph</div>
 		<h2 class="section-title">Structured memory, not transcript replay.</h2>
-		<p class="public-note">UML turns useful context from chats, events, documents, tools, and workflows into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
+		<p class="public-note">Itsuki turns useful context from chats, events, documents, tools, and workflows into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
 		<div class="how-grid" style="margin-top:18px">
-			<div class="product-card"><h3>Chat history is not memory.</h3><p>Messages are source material. UML keeps the durable meaning that should survive beyond a single exchange.</p></div>
-			<div class="product-card"><h3>Memory is structured meaning.</h3><p>UML stores verified entities, facts, events, relationships, rollups, and receipts so systems can reason over them later.</p></div>
-			<div class="product-card"><h3>Backend is the authority, not the LLM.</h3><p>The LLM proposes; UML verifies; UML writes. Recall and extraction stay separate.</p></div>
+			<div class="product-card"><h3>Chat history is not memory.</h3><p>Messages are source material. Itsuki keeps the durable meaning that should survive beyond a single exchange.</p></div>
+			<div class="product-card"><h3>Memory is structured meaning.</h3><p>Itsuki stores verified entities, facts, events, relationships, rollups, and receipts so systems can reason over them later.</p></div>
+			<div class="product-card"><h3>Backend is the authority, not the LLM.</h3><p>The LLM proposes; Itsuki verifies; Itsuki writes. Recall and extraction stay separate.</p></div>
 		</div>
 	</section>
 
 	<section class="landing-section reveal" id="living-graph">
 		<div class="section-kicker">What makes it different</div>
 		<h2 class="section-title">A graph that can update, not just append.</h2>
-		<p class="public-note">New evidence can create, update, promote, invalidate, or supersede memory. UML is not an append-only chat log.</p>
+		<p class="public-note">New evidence can create, update, promote, invalidate, or supersede memory. Itsuki is not an append-only chat log.</p>
 		<div class="feature-grid">
 			<div class="feature-card">
 				<div class="feature-icon" style="--fc:#84e9ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"/><circle cx="18" cy="5" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17.5" cy="17" r="2.2"/><circle cx="12" cy="11.5" r="2.6"/><path d="m7.4 7.4 2.7 2.4m4.3-.5 2.2-2.1m-6.2 6 -1.7 2.6m5.5-2.4 2.3 2.2"/></svg></div>
@@ -800,7 +800,7 @@
 	<section class="landing-section reveal" id="inputs">
 		<div class="section-kicker">One graph, many inputs</div>
 		<h2 class="section-title">Chat is one input. Not the whole product.</h2>
-		<p class="public-note">UML can ingest useful context from tools, apps, agents, docs, events, workflows, and custom schemas.</p>
+		<p class="public-note">Itsuki can ingest useful context from tools, apps, agents, docs, events, workflows, and custom schemas.</p>
 		<div class="input-chip-grid" style="margin-top:18px">
 			<span>Chat turns</span><span>Manual saves</span><span>Documents</span><span>Tool outputs</span><span>App events</span>
 			<span>Support tickets</span><span>Meeting notes</span><span>Project rules</span><span>Workflow state</span><span>Custom schemas</span>
@@ -814,12 +814,12 @@
 		<div class="policy-grid" style="margin-top:18px">
 			<div class="product-card">
 				<h3>Privacy Policy</h3>
-				<p>UML does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access UML only through private links or tokens you create.</p>
+				<p>Itsuki does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access Itsuki only through private links or tokens you create.</p>
 				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/privacy" onclick="showLegal('privacy', event)">Read the full policy</a></div>
 			</div>
 			<div class="product-card" id="terms">
 				<h3>Terms of Service</h3>
-				<p>UML is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless UML is appropriate for that use.</p>
+				<p>Itsuki is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless Itsuki is appropriate for that use.</p>
 				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/terms" onclick="showLegal('terms', event)">Read the full terms</a></div>
 			</div>
 		</div>
@@ -836,23 +836,23 @@
 
 	<section class="landing-section reveal" id="support">
 		<h2 class="section-title">Support</h2>
-		<p class="public-note">Need help connecting UML or shaping an integration?</p>
+		<p class="public-note">Need help connecting Itsuki or shaping an integration?</p>
 		<div class="contact-grid" style="margin-top:18px">
 			<div class="product-card contact-card"><h3>Contact support</h3><p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
-			<div class="product-card"><h3>Open source</h3><p>UML's engine is open source under Apache 2.0 — read the code, open issues, or star the repo on <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>.</p></div>
+			<div class="product-card"><h3>Open source</h3><p>Itsuki's engine is open source under Apache 2.0 — read the code, open issues, or star the repo on <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>.</p></div>
 		</div>
 	</section>
 	<footer class="site-footer">
 		<a class="brand-lockup" href="/" onclick="showPublic(event)">
-			<img src="/assets/uml-icon.png?v=2" alt="UML logo" />
-			<span><b>UML</b><span>Universal Memory Layer</span></span>
+			<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+			<span><b>Itsuki</b><span>Personal memory layer</span></span>
 		</a>
 		<div class="footer-links">
 			<a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>
 			<a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a>
 			<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Open source &middot; Apache 2.0</a>
 			<a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>
-			<span>&copy; 2026 UML</span>
+			<span>&copy; 2026 Itsuki</span>
 		</div>
 	</footer>
 </div>
@@ -875,7 +875,7 @@
 <main id="main">
 	<aside id="rail">
 		<a class="rail-brand" href="/app" onclick="setView('overview'); return false;">
-			<img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="" /> <span>UML</span>
+			<img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="" /> <span>Itsuki</span>
 		</a>
 		<nav class="tabs" id="tabs">
 			<button class="tab active" data-view="overview"><span class="ti">⌂</span>Home</button>
@@ -923,6 +923,8 @@
 <div id="legalView" class="legal-shell" hidden></div>
 
 <script>
+const PRODUCT = { name: "Itsuki", tokenPrefix: "itsuki_live_", repo: "https://github.com/12ziyad/universal-memory-engine" };
+
 const $ = (s, r=document) => r.querySelector(s);
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[m]));
@@ -1092,10 +1094,10 @@ function renderAuth(mode = "login") {
 	view.innerHTML = `
 		<form class="auth-card" id="authForm">
 			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/uml-icon.png?v=2" alt="UML logo" />
-				<span><b>UML</b><span>Universal Memory Layer</span></span>
+				<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+				<span><b>Itsuki</b><span>Personal memory layer</span></span>
 			</a>
-			<h2>${isSignup ? "Create your UML account" : "Log in to UML"}</h2>
+			<h2>${isSignup ? "Create your Itsuki account" : "Log in to Itsuki"}</h2>
 			<p>${isSignup ? "Start one private memory layer for supported AI tools and your own agents." : "Open your private memory dashboard."}</p>
 			<div class="auth-error" id="authError"></div>
 			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
@@ -1132,13 +1134,13 @@ function showForgotPassword(event) {
 	view.innerHTML = `
 		<div class="auth-card">
 			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/uml-icon.png?v=2" alt="UML logo" />
-				<span><b>UML</b><span>Universal Memory Layer</span></span>
+				<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+				<span><b>Itsuki</b><span>Personal memory layer</span></span>
 			</a>
 			<h2>Forgot your password?</h2>
 			<p>No reset email needed — your Google account is the recovery key.</p>
 			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
-			<div class="auth-agree">Use the <b>same email</b> as your UML account and you'll land right back in it — same memory, no password required. You can keep using Google from then on.</div>
+			<div class="auth-agree">Use the <b>same email</b> as your Itsuki account and you'll land right back in it — same memory, no password required. You can keep using Google from then on.</div>
 			<div class="auth-divider">no Google account with that email?</div>
 			<p class="help">Email <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> from your account email and we'll verify you and reset it manually — usually within a day. Automatic email reset links are coming once email sending launches.</p>
 			<div class="auth-actions" style="margin-top:16px">
@@ -1216,7 +1218,7 @@ function mcpUrlForToken(token) { return `${location.origin}/mcp/${token || "{tok
 // ---- Error hygiene ---------------------------------------------------------
 // One rule everywhere: users see calm, human messages; the real details are
 // reported automatically and appear only in the admin Health tab.
-const FRIENDLY_NETWORK = "Can't reach UML — check your internet connection and try again.";
+const FRIENDLY_NETWORK = "Can't reach Itsuki — check your internet connection and try again.";
 const FRIENDLY_FAIL = "Something went wrong on our side. It's been reported — please try again in a moment.";
 // Benign browser noise that is NOT a broken page: blocked autoplay (a user
 // preference, not a fault), ResizeObserver's self-resolving loop notice, and
@@ -1518,7 +1520,7 @@ function setView(v, { updateHash = true } = {}) {
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
-	if (title) title.textContent = VIEW_TITLES[v] || "UML";
+	if (title) title.textContent = VIEW_TITLES[v] || "Itsuki";
 	// The memory browser belongs to Memories only — everywhere else it is noise.
 	const browser = $("#memoryBrowser");
 	if (browser) browser.hidden = !(v === "memory" && !S.showSuggestions);
@@ -1589,7 +1591,7 @@ function viewOverview(v) {
 	wrap.innerHTML = onboarding + `
 		<div class="box" style="max-width:980px">
 			<h3>Home</h3>
-			<div class="help">Welcome, ${esc(name)}. UML is your private structured memory graph for AI tools, agents, apps, docs, events, workflows, and SDK integrations.</div>
+			<div class="help">Welcome, ${esc(name)}. Itsuki is your private structured memory graph for AI tools, agents, apps, docs, events, workflows, and SDK integrations.</div>
 			<div class="help" style="margin-top:7px">${empty ? "Your graph is empty. Connect a tool or save a memory to begin." : "Your memory graph has active structured context ready for bounded recall."}</div>
 			<div class="stats" style="margin-top:12px">
 				${[["pages",s.pages||0],["nodes",s.nodes||0],["edges",s.edges||0],["receipts",S.receipts.length||0],["tools",S.tokens.length||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
@@ -1668,7 +1670,7 @@ function viewMemory(v) {
 		strip.style.maxWidth = "980px";
 		strip.style.borderColor = "rgba(242,204,96,.35)";
 		strip.innerHTML = `<h3>${pending} suggestion${pending === 1 ? "" : "s"} waiting for you</h3>
-			<div class="help">Things UML noticed but isn't sure about. Keep the good ones, drop the rest.</div>
+			<div class="help">Things Itsuki noticed but isn't sure about. Keep the good ones, drop the rest.</div>
 			<div style="margin-top:10px"><button onclick="openSuggestions()">Review ${pending === 1 ? "it" : "them"}</button></div>`;
 		v.appendChild(strip);
 	}
@@ -1700,7 +1702,7 @@ function viewMemoryMain(v) {
 	wrap.innerHTML = `
 		<div class="box" style="max-width:980px">
 			<h3>Your memories</h3>
-			<div class="help">Everything UML remembers about you, in one place.</div>
+			<div class="help">Everything Itsuki remembers about you, in one place.</div>
 			<div class="stats" style="margin-top:12px">
 				${[["pages",s.pages||0],["nodes",s.nodes||0],["slices",s.slices||0],["events",s.events||0],["edges",s.edges||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
 			</div>
@@ -1721,7 +1723,7 @@ function viewMemoryMain(v) {
 			</div>
 			<div class="action-box">
 				<h3>Search your memories</h3>
-				<div class="help" style="margin-bottom:10px">Find what UML already knows.</div>
+				<div class="help" style="margin-bottom:10px">Find what Itsuki already knows.</div>
 				<input id="recallQuery" placeholder="Search or ask your memory..." onkeydown="if(event.key==='Enter') recallFromForm()" />
 				<div style="margin-top:10px"><button onclick="recallFromForm()">Recall</button></div>
 				<div id="recallResults" style="margin-top:10px"></div>
@@ -1968,14 +1970,14 @@ function oneTimeSecretPanel(latest) {
 	const display = S.oneTimeVisible ? esc(secret) : "Hidden. Use Reveal to inspect or Copy to copy it.";
 	return `<div class="token-secret" id="oneTimeSecretPanel">
 		<b>${title}</b><br>
-		<span class="help">Connection name: ${esc(latest.connectionName || latest.tokenRecord.label || "UML connection")}</span>
+		<span class="help">Connection name: ${esc(latest.connectionName || latest.tokenRecord.label || "Itsuki connection")}</span>
 		<div class="mcp-url" id="generatedSecret" style="margin-top:10px">${display}</div>
 		<div class="secret-toolbar">
 			<button class="mini" onclick="copyText('${esc(secret)}','${isMcp ? "MCP URL copied" : "API token copied"}')">${copyLabel}</button>
 			<button class="mini ghost" onclick="toggleOneTimeSecret()">${S.oneTimeVisible ? "Hide" : "Reveal"}</button>
 			<button class="mini ghost" onclick="clearOneTimeLink()">Close</button>
 		</div>
-		<div class="help" style="margin-top:9px">${help} UML will only list the masked token later. If you lose the secret, rotate or create a new connection.</div>
+		<div class="help" style="margin-top:9px">${help} Itsuki will only list the masked token later. If you lose the secret, rotate or create a new connection.</div>
 	</div>`;
 }
 
@@ -1984,7 +1986,7 @@ function viewConnect(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="box" style="max-width:980px">
-			<h3>Connect UML</h3>
+			<h3>Connect Itsuki</h3>
 			<div class="help">Create a named private connection for each tool or app. MCP clients use a generated MCP URL. Custom apps use a generated API token/key.</div>
 		</div>
 		<div class="panel-grid">
@@ -2006,18 +2008,18 @@ function viewConnect(v) {
 		<div class="panel-grid">
 			<div class="action-box"><h3>Claude setup</h3>
 				<div class="help" style="margin-bottom:8px"><b style="color:#f2cc60">Use a computer browser</b> — the phone apps can't add connectors (it syncs to your phone after).</div>
-				<ol class="steps"><li>Generate a named MCP URL above and copy it.</li><li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (direct link).</li><li>Name it <i>uml</i>, paste the URL, click Add.</li><li>In a chat: tap <b>+</b> &rarr; Connectors &rarr; switch on <i>uml</i>.</li></ol></div>
+				<ol class="steps"><li>Generate a named MCP URL above and copy it.</li><li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (direct link).</li><li>Name it <i>itsuki</i>, paste the URL, click Add.</li><li>In a chat: tap <b>+</b> &rarr; Connectors &rarr; switch on <i>itsuki</i>.</li></ol></div>
 			<div class="action-box"><h3>ChatGPT setup</h3>
 				<div class="help" style="margin-bottom:8px">Needs a paid plan. On a computer:</div>
-				<ol class="steps"><li>Settings &rarr; Connectors (or Plugins) &rarr; Advanced &rarr; turn on <b>Developer mode</b> — nothing appears until this is on.</li><li>Connectors &rarr; Create. Name: <i>uml</i>. Description: <i>Personal memory — save and recall facts about me across chats.</i> Paste your MCP URL.</li><li>In a new chat, enable Developer mode / Add sources and pick <i>uml</i>.</li></ol></div>
-			<div class="action-box"><h3>API token usage</h3><div class="help">Send the token as a bearer credential. Never paste it into public logs, prompts, or client-side code.</div><div class="mcp-url" style="margin-top:10px">Authorization: Bearer uml_live_xxxxx<br><br>POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
+				<ol class="steps"><li>Settings &rarr; Connectors (or Plugins) &rarr; Advanced &rarr; turn on <b>Developer mode</b> — nothing appears until this is on.</li><li>Connectors &rarr; Create. Name: <i>itsuki</i>. Description: <i>Personal memory — save and recall facts about me across chats.</i> Paste your MCP URL.</li><li>In a new chat, enable Developer mode / Add sources and pick <i>itsuki</i>.</li></ol></div>
+			<div class="action-box"><h3>API token usage</h3><div class="help">Send the token as a bearer credential. Never paste it into public logs, prompts, or client-side code.</div><div class="mcp-url" style="margin-top:10px">Authorization: Bearer itsuki_live_xxxxx<br><br>POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
 			<div class="action-box"><h3>Security notes</h3><ul class="policy-list"><li>Full secrets are shown only once.</li><li>Revoke a token if a device, workspace, or private link may be exposed.</li><li>Use one connection per tool so you can revoke access cleanly.</li></ul></div>
 		</div>`;
 	v.appendChild(wrap);
 	renderTokenList();
 }
 
-const CONNECTION_TOKEN_PLACEHOLDER = "uml_live_...";
+const CONNECTION_TOKEN_PLACEHOLDER = "itsuki_live_...";
 
 function renderTokenList() {
 	const list = $("#tokenList");
@@ -2051,10 +2053,10 @@ function viewReceipts(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box" style="max-width:920px">
 		<h3>History</h3>
-		<div class="help">A plain record of everything UML saved, updated, or skipped — and when.</div>
+		<div class="help">A plain record of everything Itsuki saved, updated, or skipped — and when.</div>
 	</div>`;
 	if (!S.receipts.length) {
-		wrap.appendChild(el("div","empty","Receipts will show what UML saved, updated, or ignored — with source and timestamp."));
+		wrap.appendChild(el("div","empty","Receipts will show what Itsuki saved, updated, or ignored — with source and timestamp."));
 		v.appendChild(wrap);
 		return;
 	}
@@ -2128,7 +2130,7 @@ function renderRulesSummary(rules) {
 function viewRules(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box" style="max-width:920px"><h3>What to remember</h3>
-		<div class="help">Decide what UML should and shouldn’t remember. This applies everywhere — every connected AI tool and app. “Never save” always wins.</div>
+		<div class="help">Decide what Itsuki should and shouldn’t remember. This applies everywhere — every connected AI tool and app. “Never save” always wins.</div>
 		<div id="rules-active" class="help" style="margin-top:6px;font-style:italic">Loading current rules…</div></div>`;
 	const form = el("div","action-box");
 	form.style.maxWidth = "920px";
@@ -2138,7 +2140,7 @@ function viewRules(v) {
 			<textarea id="rule-instructions" placeholder="Always save… Never save…"></textarea></div>
 		<div class="form-row" style="margin-top:12px"><h3>Only collect (includes)</h3>
 			<div class="help">Comma-separated topics/keywords. When set, only content matching at least one term is saved.</div>
-			<input id="rule-includes" placeholder="e.g. exams, UML project, health" /></div>
+			<input id="rule-includes" placeholder="e.g. exams, Itsuki project, health" /></div>
 		<div class="form-row" style="margin-top:12px"><h3>Never collect (excludes)</h3>
 			<div class="help">Comma-separated. Matching content is always refused, even if it matches an include.</div>
 			<input id="rule-excludes" placeholder="e.g. passwords, politics, jokes" /></div>
@@ -2177,7 +2179,7 @@ function viewRules(v) {
 function viewCandidates(v) {
 	const cands = S.candidates || [];
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Suggestions to review</h3><div class="help">Things UML noticed but isn’t sure about yet. Keep the ones worth remembering, drop the rest.</div></div>`;
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Suggestions to review</h3><div class="help">Things Itsuki noticed but isn’t sure about yet. Keep the ones worth remembering, drop the rest.</div></div>`;
 	if (!cands.length) {
 		wrap.appendChild(el("div","empty","Nothing waiting for you."));
 		v.appendChild(wrap);
@@ -2213,7 +2215,7 @@ function viewCandidates(v) {
 
 function viewHelp(v) {
 	const topics = [
-		["How UML works", "Connected tools save durable context into pages, nodes, slices, events, edges, and clusters. Recall asks that memory for compact context."],
+		["How Itsuki works", "Connected tools save durable context into pages, nodes, slices, events, edges, and clusters. Recall asks that memory for compact context."],
 		["Connect Claude/MCP clients", "Generate an MCP token, copy the MCP URL, then add it in the client's connector or MCP server settings."],
 		["Connect Cursor/Codex", "Use the Connect tab's MCP setup if your coding assistant supports MCP or tool servers."],
 		["ChatGPT-style/custom assistants", "Use connectors, MCP, tools, or API actions when available. If not, connect through your own app or agent."],
@@ -2233,7 +2235,7 @@ function viewProfile(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box">
 		<h3>Profile</h3>
-		<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "UML user")}</span></div>
+		<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "Itsuki user")}</span></div>
 		<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
 		<div class="kv">Account id: <b>${esc(u.id || S.userId || "")}</b></div>
 		<div class="kv">Role / plan: <b>${esc(u.role || "user")}</b></div>
@@ -2249,11 +2251,11 @@ const LEGAL_PAGES = {
 	terms: {
 		title: "Terms of Service",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
-			<p>Welcome to UML. These Terms of Service ("Terms") are a binding agreement between you and the operator of UML ("UML", "we", "us") governing your use of the UML hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p>Welcome to Itsuki. These Terms of Service ("Terms") are a binding agreement between you and the operator of Itsuki ("Itsuki", "we", "us") governing your use of the Itsuki hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
 			<h2>1. What the Service is</h2>
-			<p>UML is a personal memory layer. Tools and applications you connect can save durable context to your account and recall it later. Memory is stored as a structured graph (nodes, details, events, connections), organized pages, and receipts, all controlled from your dashboard. The Service is currently offered in free early access.</p>
+			<p>Itsuki is a personal memory layer. Tools and applications you connect can save durable context to your account and recall it later. Memory is stored as a structured graph (nodes, details, events, connections), organized pages, and receipts, all controlled from your dashboard. The Service is currently offered in free early access.</p>
 
 			<h2>2. Eligibility</h2>
 			<p>You must be at least 13 years old (or the minimum age of digital consent in your country, if higher) and able to form a binding contract to use the Service. If you use the Service on behalf of an organization, you represent that you are authorized to bind that organization to these Terms.</p>
@@ -2288,8 +2290,8 @@ const LEGAL_PAGES = {
 
 			<h2>6. Your content and ownership</h2>
 			<ul>
-				<li><b>Your memory belongs to you.</b> As between you and UML, you retain all rights to the content you or your connected tools store in the Service ("Your Content").</li>
-				<li>You grant UML only the limited, non-exclusive license necessary to operate the Service for you: hosting, storing, processing, indexing, backing up, and returning Your Content to you and to the tools you connect. This license ends when you delete the content or your account, except for short-lived infrastructure backups.</li>
+				<li><b>Your memory belongs to you.</b> As between you and Itsuki, you retain all rights to the content you or your connected tools store in the Service ("Your Content").</li>
+				<li>You grant Itsuki only the limited, non-exclusive license necessary to operate the Service for you: hosting, storing, processing, indexing, backing up, and returning Your Content to you and to the tools you connect. This license ends when you delete the content or your account, except for short-lived infrastructure backups.</li>
 				<li>We do not sell Your Content, do not use it for advertising, and do not use it to train AI models.</li>
 				<li>You are responsible for Your Content and must have the necessary rights to store it. Avoid storing sensitive or regulated data (for example medical records or payment card data) unless you have confirmed the Service is appropriate for that use.</li>
 				<li>You can export Your Content as JSON and delete all of it, at any time, from Settings.</li>
@@ -2299,19 +2301,19 @@ const LEGAL_PAGES = {
 			<p>The Service uses AI models to extract, organize, summarize, and recall memory. AI output can be inaccurate, incomplete, or outdated. The Service shows a receipt for every write so you can verify what was stored. Do not rely on stored memory or recalled context for medical, legal, financial, or other consequential decisions without independently verifying it. The Service is not a system of record for regulated data.</p>
 
 			<h2>8. Third-party tools and services</h2>
-			<p>Tools you connect (for example Claude, MCP-capable editors, or your own applications) are third-party services governed by their own terms and privacy policies. What a connected tool sends to UML, and what it does with recalled context, is between you and that tool. UML is not responsible for third-party services.</p>
+			<p>Tools you connect (for example Claude, MCP-capable editors, or your own applications) are third-party services governed by their own terms and privacy policies. What a connected tool sends to Itsuki, and what it does with recalled context, is between you and that tool. Itsuki is not responsible for third-party services.</p>
 
 			<h2>9. Open source</h2>
-			<p>UML's source code is available under the Apache License 2.0 at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>. The Apache 2.0 license governs the code; these Terms govern the hosted Service. Self-hosting the code does not create any obligation for us to support your deployment.</p>
+			<p>Itsuki's source code is available under the Apache License 2.0 at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>. The Apache 2.0 license governs the code; these Terms govern the hosted Service. Self-hosting the code does not create any obligation for us to support your deployment.</p>
 
 			<h2>10. Fees</h2>
 			<p>The Service is currently free during early access. We may introduce paid plans in the future; if we do, we will announce pricing in advance, and no paid feature will be charged to you without your explicit signup for a paid plan. Any future paid plans will include their own refund terms.</p>
 
 			<h2>11. Availability; beta status; backups</h2>
-			<p>UML is an early product provided "as is" and "as available". Features may change, be added, or be removed. We take reliability seriously but do not guarantee uninterrupted service, error-free operation, or zero data loss. Keep exports of anything critical. We may perform maintenance, and we may set or adjust usage limits to protect the Service.</p>
+			<p>Itsuki is an early product provided "as is" and "as available". Features may change, be added, or be removed. We take reliability seriously but do not guarantee uninterrupted service, error-free operation, or zero data loss. Keep exports of anything critical. We may perform maintenance, and we may set or adjust usage limits to protect the Service.</p>
 
 			<h2>12. Disclaimers and limitation of liability</h2>
-			<p>TO THE MAXIMUM EXTENT PERMITTED BY LAW: (a) THE SERVICE IS PROVIDED WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT; (b) UML AND ITS OPERATOR WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, PROFITS, GOODWILL, OR BUSINESS, ARISING FROM OR RELATED TO THE SERVICE; AND (c) OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATING TO THE SERVICE IS LIMITED TO THE GREATER OF THE AMOUNT YOU PAID US IN THE 12 MONTHS BEFORE THE CLAIM OR INR 2,000. Some jurisdictions do not allow certain exclusions, so parts of this section may not apply to you.</p>
+			<p>TO THE MAXIMUM EXTENT PERMITTED BY LAW: (a) THE SERVICE IS PROVIDED WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT; (b) Itsuki AND ITS OPERATOR WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, PROFITS, GOODWILL, OR BUSINESS, ARISING FROM OR RELATED TO THE SERVICE; AND (c) OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATING TO THE SERVICE IS LIMITED TO THE GREATER OF THE AMOUNT YOU PAID US IN THE 12 MONTHS BEFORE THE CLAIM OR INR 2,000. Some jurisdictions do not allow certain exclusions, so parts of this section may not apply to you.</p>
 
 			<h2>13. Suspension and termination</h2>
 			<ul>
@@ -2321,7 +2323,7 @@ const LEGAL_PAGES = {
 			</ul>
 
 			<h2>14. Indemnity</h2>
-			<p>You will defend and hold harmless UML and its operator from claims, damages, and reasonable costs arising from Your Content, your violation of these Terms, or your violation of any law or third-party right, except to the extent caused by our own breach of these Terms.</p>
+			<p>You will defend and hold harmless Itsuki and its operator from claims, damages, and reasonable costs arising from Your Content, your violation of these Terms, or your violation of any law or third-party right, except to the extent caused by our own breach of these Terms.</p>
 
 			<h2>15. Governing law and disputes</h2>
 			<p>These Terms are governed by the laws of India. Courts located in Kerala, India have exclusive jurisdiction, except that either party may seek injunctive relief in any competent court. Before filing a claim, please contact us — most issues can be resolved quickly and informally.</p>
@@ -2335,12 +2337,12 @@ const LEGAL_PAGES = {
 	privacy: {
 		title: "Privacy Policy",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
-			<p>UML exists to store personal memory, so this policy is written to be read. It describes what we collect through the UML website, dashboard, API, and MCP endpoints (the "Service"), how we use it, who processes it, and the rights and controls you have. The short version we hold ourselves to: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p>Itsuki exists to store personal memory, so this policy is written to be read. It describes what we collect through the Itsuki website, dashboard, API, and MCP endpoints (the "Service"), how we use it, who processes it, and the rights and controls you have. The short version we hold ourselves to: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
 
 			<h2>Summary at a glance</h2>
 			<ul>
-				<li><b>Who is responsible?</b> UML, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</li>
+				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</li>
 				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write. Operational account activity — sign-ins, save/recall counts, and errors your browser reports — is visible to the operator for support and abuse prevention; the content of your memories is not.</li>
 				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
 				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
@@ -2426,7 +2428,7 @@ const LEGAL_PAGES = {
 			<p>We keep this policy under review. For material changes we will give notice in the app before they take effect, and update the date above. Earlier versions are available on request.</p>
 
 			<h2>15. Grievances and contact</h2>
-			<p>Privacy questions, rights requests, and grievances: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: UML (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
+			<p>Privacy questions, rights requests, and grievances: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
 	},
 };
 
@@ -2898,24 +2900,24 @@ function renderAdminBody() {
 const POLICY_CONTENT = {
 	terms: {
 		title: "Terms and Responsible Use",
-		body: `<p><b>Early product.</b> UML is an early product and may change as the memory engine, dashboard, API, and MCP support mature.</p>
+		body: `<p><b>Early product.</b> Itsuki is an early product and may change as the memory engine, dashboard, API, and MCP support mature.</p>
 			<ul class="policy-list">
 				<li>You own your account and the memory you intentionally store in it.</li>
-				<li>Connected tools are third-party services. Their apps, models, connector settings, and data handling are outside UML control.</li>
+				<li>Connected tools are third-party services. Their apps, models, connector settings, and data handling are outside Itsuki control.</li>
 				<li>You are responsible for keeping tokens, API keys, and private MCP URLs safe. Treat them like passwords.</li>
 				<li>You can revoke tokens from Connect. Revoked tokens stop future access for that connection.</li>
-				<li>Do not use UML for abuse, unsafe automation, credential theft, surveillance, harassment, malware, or illegal activity.</li>
-				<li>Avoid sensitive, regulated, or high-risk data unless you have confirmed UML is appropriate for that use.</li>
+				<li>Do not use Itsuki for abuse, unsafe automation, credential theft, surveillance, harassment, malware, or illegal activity.</li>
+				<li>Avoid sensitive, regulated, or high-risk data unless you have confirmed Itsuki is appropriate for that use.</li>
 			</ul>
 			<p><a href="/terms" onclick="closePolicyModal(); showLegal('terms', event)">Read the full Terms of Service &rarr;</a></p>`,
 	},
 	privacy: {
 		title: "Privacy and Memory Controls",
-		body: `<p>UML stores memory for your account so connected tools can save and recall useful context through the shared backend.</p>
+		body: `<p>Itsuki stores memory for your account so connected tools can save and recall useful context through the shared backend.</p>
 			<ul class="policy-list">
-				<li>UML does not sell user data or use user memory for unrelated purposes.</li>
+				<li>Itsuki does not sell user data or use user memory for unrelated purposes.</li>
 				<li>Memory belongs to your account. Connected tools access it only through private links or tokens you create.</li>
-				<li>Third-party tools may send UML messages or receive recalled context when you connect them. Review those tools' own policies.</li>
+				<li>Third-party tools may send Itsuki messages or receive recalled context when you connect them. Review those tools' own policies.</li>
 				<li>Reset memory currently deletes saved memory rows for the selected account/scope, including pages, nodes, slices, events, edges, candidates, receipts, source packets, jobs, profiles, suppressions, checkpoints, and related vectors where available. It does not delete your account.</li>
 				<li>Token secrets and full MCP URLs are shown only once where supported. Token rows later show masked identifiers and revoke status.</li>
 			</ul>
@@ -2939,7 +2941,7 @@ function openPolicyModal(kind = "terms") {
 	modal.hidden = false;
 	modal.onclick = closePolicyModal;
 	modal.innerHTML = `<section class="policy-modal" role="dialog" aria-modal="true" aria-labelledby="policyTitle" onclick="event.stopPropagation()">
-		<header><div><h2 id="policyTitle">${esc(item.title)}</h2><div class="help">Production-grade account, privacy, and support guidance for the current early UML product.</div></div><button class="ghost mini" onclick="closePolicyModal()">Close</button></header>
+		<header><div><h2 id="policyTitle">${esc(item.title)}</h2><div class="help">Production-grade account, privacy, and support guidance for the current early Itsuki product.</div></div><button class="ghost mini" onclick="closePolicyModal()">Close</button></header>
 		${item.body}
 	</section>`;
 }
@@ -2969,7 +2971,7 @@ function viewSettingsMain(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="settings-grid">
 		<div class="action-box settings-section"><h3>Account</h3>
-			<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "UML user")}</span></div>
+			<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "Itsuki user")}</span></div>
 			<div class="kv">Name: <b>${esc(u.name || "")}</b></div>
 			<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
 			<div class="kv">Account ID: <b>${esc(u.id || S.userId || "")}</b></div>
@@ -2997,7 +2999,7 @@ function viewSettingsMain(v) {
 			<div class="section-actions"><button class="ghost mini" onclick="setView('rules')">Capture Rules</button>${candidateCount() ? `<button class="ghost mini" onclick="setView('candidates')">Open Review Queue</button>` : `<button class="ghost mini" disabled>No pending candidates</button>`}</div>
 		</div>
 		<div class="action-box settings-section"><h3>Data &amp; Privacy</h3>
-			<div class="help">You own your account memory. UML does not sell user data, does not train on it, and does not use it for unrelated purposes. Export everything as JSON any time.</div>
+			<div class="help">You own your account memory. Itsuki does not sell user data, does not train on it, and does not use it for unrelated purposes. Export everything as JSON any time.</div>
 			<div class="section-actions"><button class="ghost mini" onclick="downloadExport()">Export my data</button><button class="ghost mini" onclick="showLegal('privacy', event)">Privacy Policy</button><button class="ghost mini" onclick="showLegal('terms', event)">Terms</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Support</h3>
@@ -4096,7 +4098,7 @@ function viewReset(v) {
 	wrap.innerHTML = `
 		<div class="box danger-zone">
 			<h3>Danger Zone</h3>
-			<div class="help">Reset memory permanently deletes your saved UML memory. It does not delete your account.</div>
+			<div class="help">Reset memory permanently deletes your saved Itsuki memory. It does not delete your account.</div>
 			<div class="kv" style="margin-top:10px">
 				<b>${stats.pages || 0}</b> page(s),
 				<b>${stats.nodes || 0}</b> node(s),
@@ -4147,7 +4149,7 @@ function viewTest(v) {
 const SAMPLE_CHAT = [
 	{ role:"user", content:"yo whats up" },
 	{ role:"assistant", content:"Not much! How can I help today?" },
-	{ role:"user", content:"I'm building a memory engine called UML, it runs on Cloudflare Workers" },
+	{ role:"user", content:"I'm building a memory engine called Itsuki, it runs on Cloudflare Workers" },
 	{ role:"user", content:"it uses D1 for storage and Vectorize for search" },
 	{ role:"user", content:"haha nice" },
 	{ role:"user", content:"I connect it to ChatGPT and Claude over MCP" },
@@ -4300,7 +4302,7 @@ function viewSetup(v) {
 		</div>
 		<div class="box"><h3>Connect ChatGPT-style assistants</h3>
 			<ol class="steps">
-				<li>If your workspace or custom assistant supports connectors, MCP, tools, or API actions, add UML there.</li>
+				<li>If your workspace or custom assistant supports connectors, MCP, tools, or API actions, add Itsuki there.</li>
 				<li>Paste the URL above only for legacy dev testing.</li>
 				<li>Enable the <code>save_memory</code>, <code>save_conversation</code>, and <code>recall_memory</code> tools.</li>
 			</ol>

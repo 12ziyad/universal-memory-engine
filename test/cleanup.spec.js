@@ -88,7 +88,7 @@ describe("junk cleanup", () => {
 			).bind("junk-node", userId, "want to see a detailed and interactive prototype", "project", "active", now, now),
 			env.DB.prepare(
 				"INSERT INTO nodes (id, user_id, label, category, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind("good-node", userId, "UML Graph Repair", "project", "active", now, now),
+			).bind("good-node", userId, "Itsuki Graph Repair", "project", "active", now, now),
 			env.DB.prepare(
 				"INSERT INTO candidates (id, user_id, label, strength, mentions, created_at) VALUES (?, ?, ?, ?, ?, ?)",
 			).bind("junk-candidate", userId, "assistant said the user asked for this chat", "weak", 1, now),
@@ -116,7 +116,7 @@ describe("delete all reset", () => {
 		await env.DB.batch([
 			env.DB.prepare(
 				"INSERT INTO nodes (id, user_id, label, category, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind("other-reset-node", otherUserId, "Other UML", "project", "active", now, now),
+			).bind("other-reset-node", otherUserId, "Other Itsuki", "project", "active", now, now),
 			env.DB.prepare(
 				`INSERT INTO memory_pages
 				 (id, user_id, source_mode, title, canonical_title, short_summary, created_at, updated_at)
@@ -124,13 +124,13 @@ describe("delete all reset", () => {
 			).bind("other-reset-page", otherUserId, "manual_collect", "Other Page", "other page", "summary", now, now),
 			env.DB.prepare(
 				"INSERT INTO nodes (id, user_id, label, category, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind("reset-node", userId, "UML", "project", "active", now, now),
+			).bind("reset-node", userId, "Itsuki", "project", "active", now, now),
 			env.DB.prepare(
 				"INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			).bind("reset-slice", userId, "reset-node", "Uses D1", "technical_detail", 1, now),
 			env.DB.prepare(
 				"INSERT INTO events (id, user_id, node_id, action, text, importance, happened_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			).bind("reset-event", userId, "reset-node", "started", "Started UML", "ordinary", now, now),
+			).bind("reset-event", userId, "reset-node", "started", "Started Itsuki", "ordinary", now, now),
 			env.DB.prepare(
 				"INSERT INTO edges (id, user_id, from_node, to_node, type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
 			).bind("reset-edge", userId, "reset-node", "reset-node", "related_to", now),
@@ -141,7 +141,7 @@ describe("delete all reset", () => {
 				`INSERT INTO memory_pages
 				 (id, user_id, source_mode, title, canonical_title, short_summary, created_at, updated_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			).bind("reset-page", userId, "manual_collect", "UML Page", "uml page", "summary", now, now),
+			).bind("reset-page", userId, "manual_collect", "Itsuki Page", "uml page", "summary", now, now),
 			env.DB.prepare(
 				`INSERT INTO manual_page_identities
 					(user_id, canonical_key, page_id, created_at, updated_at)
@@ -177,7 +177,7 @@ describe("delete all reset", () => {
 			),
 			env.DB.prepare(
 				"INSERT INTO memory_suppressions (id, user_id, kind, canonical_key, label, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).bind("reset-suppression", userId, "node", "uml", "UML", "test", now),
+			).bind("reset-suppression", userId, "node", "uml", "Itsuki", "test", now),
 			env.DB.prepare("INSERT INTO checkpoints (user_id, last_processed_msg_id, updated_at) VALUES (?, ?, ?)").bind(
 				userId,
 				"m1",
@@ -325,10 +325,10 @@ describe("graph repair", () => {
 				"Car Research",
 				"car",
 				"car examples",
-				"UML memory pages and graph UX work.",
-				"UML Run 3.2 added memory pages. UML Run 3.3 improved graph UX, Cloudflare, D1, Vectorize and MCP. Car/bike were examples only.",
-				JSON.stringify(["UML Run 3.2 memory pages", "Graph UX"]),
-				JSON.stringify(["UML", "D1"]),
+				"Itsuki memory pages and graph UX work.",
+				"Itsuki Run 3.2 added memory pages. Itsuki Run 3.3 improved graph UX, Cloudflare, D1, Vectorize and MCP. Car/bike were examples only.",
+				JSON.stringify(["Itsuki Run 3.2 memory pages", "Graph UX"]),
+				JSON.stringify(["Itsuki", "D1"]),
 				now,
 				now,
 				"preferences_research",
@@ -342,7 +342,7 @@ describe("graph repair", () => {
 		const row = await env.DB.prepare("SELECT title, cluster FROM memory_pages WHERE id = ? AND user_id = ?")
 			.bind("repair-page", userId)
 			.first();
-		expect(row.title).toBe("UML Run 3.2/3.3 Memory Pages and Graph UX");
+		expect(row.title).toBe("Itsuki Run 3.2/3.3 Memory Pages and Graph UX");
 		expect(row.cluster).toBe("projects_systems");
 	});
 
@@ -365,10 +365,10 @@ describe("graph repair", () => {
 				"repair-ms-page",
 				userId,
 				"manual_collect",
-				"UML Architecture Decisions",
+				"Itsuki Architecture Decisions",
 				"uml architecture decisions",
 				"Microsoft Recruiting acknowledged the SWE application for Bangalore.",
-				"# UML Architecture Decisions\nMicrosoft Recruiting acknowledged the SWE application for Bangalore.\nThe resume has strong projects, but DSA/interview prep is a risk.\n\n## Evidence\n- repeated\n- repeated",
+				"# Itsuki Architecture Decisions\nMicrosoft Recruiting acknowledged the SWE application for Bangalore.\nThe resume has strong projects, but DSA/interview prep is a risk.\n\n## Evidence\n- repeated\n- repeated",
 				JSON.stringify([
 					"Microsoft Recruiting acknowledged the SWE application for Bangalore.",
 					"Resume projects are strong.",

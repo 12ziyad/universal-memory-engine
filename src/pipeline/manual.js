@@ -100,7 +100,7 @@ function summaryLabelFor(digest, opts = {}) {
 		return "GTA 6 / PS5 Research";
 	}
 	if (/\b(uml|universal memory|memory engine|mcp|cloudflare|vectorize|d1)\b/.test(lower)) {
-		return "UML Project Discussion";
+		return "Itsuki Project Discussion";
 	}
 	const words = tokens(digest)
 		.filter((w) => w.length > 2)

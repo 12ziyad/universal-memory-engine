@@ -23,15 +23,15 @@ function node(id, label, aliases = [], category = "project") {
 
 describe("manual identity resolution", () => {
 	it("resolves an exact alias to the existing node", () => {
-		const uml = node("node-uml", "Universal Memory Layer", ["UML"]);
+		const uml = node("node-uml", "Universal Memory Layer", ["Itsuki"]);
 
-		const result = resolveManualIdentity({ label: "UML", category: "project" }, [uml]);
+		const result = resolveManualIdentity({ label: "Itsuki", category: "project" }, [uml]);
 
 		expect(result).toMatchObject({
 			decision: "existing",
-			label: "UML",
+			label: "Itsuki",
 			node: { id: "node-uml" },
-			matched_name: "UML",
+			matched_name: "Itsuki",
 		});
 	});
 
@@ -52,10 +52,10 @@ describe("manual identity resolution", () => {
 	});
 
 	it("fails closed when the same alias belongs to multiple nodes", () => {
-		const first = node("node-first", "Universal Memory Layer", ["UML"]);
-		const second = node("node-second", "Unified Modeling Language", ["UML"]);
+		const first = node("node-first", "Universal Memory Layer", ["Itsuki"]);
+		const second = node("node-second", "Unified Modeling Language", ["Itsuki"]);
 
-		const result = resolveManualIdentity({ label: "UML" }, [first, second]);
+		const result = resolveManualIdentity({ label: "Itsuki" }, [first, second]);
 
 		expect(result).toMatchObject({
 			decision: "ambiguous",

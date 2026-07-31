@@ -28,7 +28,7 @@ describe("manual conversation scope", () => {
 
 	it("infers an explicit subject directive and never turns the directive into a claim", () => {
 		const messages = [
-			{ id: "u1", role: "user", content: "Ziyad is building UML." },
+			{ id: "u1", role: "user", content: "Ziyad is building Itsuki." },
 			{ id: "u2", role: "user", content: "Omar is learning Rust." },
 			{ id: "u3", role: "user", content: "Save only what this chat says about Ziyad." },
 		];
@@ -42,13 +42,13 @@ describe("manual conversation scope", () => {
 			expect.objectContaining({
 				claim_id: "C0",
 				subject_ref: "E0",
-				text: "Ziyad is building UML.",
+				text: "Ziyad is building Itsuki.",
 				attribution: "user_stated",
 				source_message_ids: ["u1"],
 			}),
 		]);
 		expect(result.source_messages).toEqual([
-			expect.objectContaining({ id: "u1", role: "user", content: "Ziyad is building UML." }),
+			expect.objectContaining({ id: "u1", role: "user", content: "Ziyad is building Itsuki." }),
 		]);
 		expect(result.ignored).toEqual(expect.arrayContaining([
 			expect.objectContaining({ source_message_id: "u2", reason: "outside_subject_scope" }),
@@ -86,8 +86,8 @@ describe("manual conversation scope", () => {
 	});
 
 	it("uses a conservative primary-subject test instead of substring inclusion", () => {
-		expect(claimMatchesManualConversationSubject("Ziyad works on UML.", "Ziyad")).toBe(true);
-		expect(claimMatchesManualConversationSubject("Today Ziyad works on UML.", "Ziyad")).toBe(true);
+		expect(claimMatchesManualConversationSubject("Ziyad works on Itsuki.", "Ziyad")).toBe(true);
+		expect(claimMatchesManualConversationSubject("Today Ziyad works on Itsuki.", "Ziyad")).toBe(true);
 		expect(claimMatchesManualConversationSubject("Omar spoke with Ziyad.", "Ziyad")).toBe(false);
 		expect(claimMatchesManualConversationSubject("Omar met Ziyad.", "Ziyad")).toBe(false);
 		expect(claimMatchesManualConversationSubject("I think Ziyad prefers D1.", "Ziyad")).toBe(true);
@@ -381,7 +381,7 @@ describe("manual conversation scope", () => {
 
 	it("projects only bounded structured claim fields into the model envelope", () => {
 		const result = buildManualConversationClaims([
-			{ id: "u1", role: "user", content: "I am Ziyad. I plan to ship UML next week." },
+			{ id: "u1", role: "user", content: "I am Ziyad. I plan to ship Itsuki next week." },
 		], { subject: "Ziyad" });
 		const envelope = manualConversationClaimEnvelope(result);
 
@@ -390,7 +390,7 @@ describe("manual conversation scope", () => {
 		expect(envelope.claims[1]).toMatchObject({
 			claim_id: "C1",
 			subject_ref: "E0",
-			text: "I plan to ship UML next week.",
+			text: "I plan to ship Itsuki next week.",
 			attribution: "user_stated",
 			modality: "planned",
 		});

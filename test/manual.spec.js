@@ -175,14 +175,14 @@ describe("Path A - save_memory (manual, immediate)", () => {
 		const userId = "m-edge-reinforce";
 		const llmResponse = {
 			objects: [
-				{ kind: "node", label: "UML", category: "project", matches_existing: null, confidence: 0.95 },
+				{ kind: "node", label: "Itsuki", category: "project", matches_existing: null, confidence: 0.95 },
 				{ kind: "node", label: "D1", category: "tool", matches_existing: null, confidence: 0.95 },
-				{ kind: "edge", from: "UML", to: "D1", type: "uses", confidence: 0.95 },
+				{ kind: "edge", from: "Itsuki", to: "D1", type: "uses", confidence: 0.95 },
 			],
 			notes: "",
 		};
-		await save({ userId, mode: "memory", content: "UML uses D1", _test: { llmResponse } });
-		await save({ userId, mode: "memory", content: "UML also uses D1", _test: { llmResponse } });
+		await save({ userId, mode: "memory", content: "Itsuki uses D1", _test: { llmResponse } });
+		await save({ userId, mode: "memory", content: "Itsuki also uses D1", _test: { llmResponse } });
 		const ed = await edges(userId);
 		expect(ed).toHaveLength(1);
 		expect(ed[0].reinforcement_count).toBeGreaterThan(0);
@@ -199,13 +199,13 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 			messages: [
 				{ role: "user", content: "yo" },
 				{ role: "assistant", content: "Hi! How can I help?" },
-				{ role: "user", content: "I'm building UML, it runs on Cloudflare" },
+				{ role: "user", content: "I'm building Itsuki, it runs on Cloudflare" },
 				{ role: "user", content: "it uses D1 and Vectorize" },
 				{ role: "user", content: "lol thanks" },
 				{ role: "user", content: "what's the weather?" },
 			],
 			_test: {
-				digestResponse: "User is building UML.\nUML runs on Cloudflare.\nUML uses D1 and Vectorize.",
+				digestResponse: "User is building Itsuki.\nItsuki runs on Cloudflare.\nItsuki uses D1 and Vectorize.",
 			},
 		});
 		expect(body.fired).toBe(true);
@@ -213,9 +213,9 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(body.summary).toContain("memory page");
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
-		expect(p[0].title).toBe("UML Architecture Decisions");
+		expect(p[0].title).toBe("Itsuki Architecture Decisions");
 		expect(p[0].cluster).toBe("projects_systems");
-		expect(p[0].full_markdown).toContain("UML uses D1 and Vectorize");
+		expect(p[0].full_markdown).toContain("Itsuki uses D1 and Vectorize");
 		expect(await nodes(userId)).toHaveLength(0);
 		expect(await candidates(userId)).toHaveLength(0);
 	});
@@ -227,12 +227,12 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 			mode: "conversation",
 			conversationId: "dup-chat",
 			messages: [
-				{ role: "user", content: "UML pages should dedupe repeated conversation saves." },
+				{ role: "user", content: "Itsuki pages should dedupe repeated conversation saves." },
 				{ role: "user", content: "The memory page should keep one clear digest." },
 			],
 			_test: {
 				digestResponse:
-					"UML pages should dedupe repeated conversation saves.\nThe memory page should keep one clear digest.",
+					"Itsuki pages should dedupe repeated conversation saves.\nThe memory page should keep one clear digest.",
 			},
 		};
 		const first = await save(payload);
@@ -257,7 +257,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(p[0].receipt_id).toBe(duplicateReceipt.id);
 	});
 
-	it("does not update an unrelated UML page for a Microsoft SWE resume discussion", async () => {
+	it("does not update an unrelated Itsuki page for a Microsoft SWE resume discussion", async () => {
 		const userId = "m-microsoft-page-identity";
 		const now = Date.now() - 10_000;
 		await env.DB.prepare(
@@ -270,10 +270,10 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 				"uml-old-page",
 				userId,
 				"manual_collect",
-				"UML Architecture Decisions",
+				"Itsuki Architecture Decisions",
 				"uml architecture decisions",
-				"UML uses Cloudflare Workers, D1, Vectorize, and MCP.",
-				"# UML Architecture Decisions\nUML uses D1 and Vectorize.",
+				"Itsuki uses Cloudflare Workers, D1, Vectorize, and MCP.",
+				"# Itsuki Architecture Decisions\nItsuki uses D1 and Vectorize.",
 				now,
 				now,
 				"projects_systems",
@@ -314,7 +314,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(p).toHaveLength(2);
 		const oldPage = p.find((page) => page.id === "uml-old-page");
 		const careerPage = p.find((page) => page.id !== "uml-old-page");
-		expect(oldPage.title).toBe("UML Architecture Decisions");
+		expect(oldPage.title).toBe("Itsuki Architecture Decisions");
 		expect(oldPage.cluster).toBe("projects_systems");
 		expect(careerPage.title).toBe("Microsoft SWE Application and Resume Review");
 		expect(careerPage.cluster).toBe("career_applications");
@@ -509,9 +509,9 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 				"old-page",
 				userId,
 				"manual_collect",
-				"UML Architecture Decisions",
+				"Itsuki Architecture Decisions",
 				"uml architecture decisions",
-				"UML uses D1 and Vectorize.",
+				"Itsuki uses D1 and Vectorize.",
 				Date.now(),
 				Date.now(),
 			)
