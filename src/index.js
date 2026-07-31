@@ -10,6 +10,7 @@
 import { createMcpHandler } from "agents/mcp";
 
 import { getConfig } from "./config.js";
+import { responseText } from "./pipeline/llm.js";
 import { getUserReceipts } from "./lib/db.js";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
 import {
@@ -295,6 +296,27 @@ const routes = {
 		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
 		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
 		return new Response(null, { status: 302, headers });
+	},
+
+	// Benchmark-only LLM pass-through (answerer/judge for evals/locomo). Exists
+	// ONLY when EVAL_MODE=1 is set in local .dev.vars — never in production, and
+	// deliberately not part of the product: UML's recall path has no generative
+	// model; the benchmark answerer lives outside UML and this endpoint is how
+	// the harness reaches Workers AI without separate REST credentials.
+	"POST /eval/llm": async (request, env) => {
+		if (env.EVAL_MODE !== "1") return json({ error: "not_found" }, 404);
+		if (request.headers.get("x-api-key") !== env.API_KEY) return json({ error: "unauthorized" }, 401);
+		const body = await request.json().catch(() => ({}));
+		if (!Array.isArray(body.messages) || body.messages.length === 0) {
+			return json({ error: "messages_required" }, 400);
+		}
+		const model = body.model || env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
+		const res = await env.AI.run(model, {
+			messages: body.messages,
+			temperature: body.temperature ?? 0,
+			max_tokens: body.max_tokens ?? 512,
+		});
+		return json({ text: responseText(res), model });
 	},
 
 	"POST /v1/ingest": async (request, env, ctx) => {
