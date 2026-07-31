@@ -436,6 +436,7 @@
 		.how-flow, .feature-grid { grid-template-columns: 1fr; }
 		.term-code { flex-direction: column; align-items: stretch; }
 	}
+	.admin-tab-active { border-color: var(--accent) !important; color: var(--accent) !important; }
 	.google-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
 		background: #fff; color: #1f1f1f; border: 1px solid #dadce0; border-radius: 9px; padding: 10px 14px;
 		font-size: 14px; font-weight: 600; }
@@ -584,8 +585,8 @@
 	<section class="landing-section hero reveal">
 		<div class="hero-copy">
 			<div class="product-kicker"><img src="/assets/uml-logo.svg" alt="" /> Universal Memory Layer</div>
-			<h1>One private memory graph for AI tools, agents, and apps.</h1>
-			<p>UML turns useful context from chats, events, documents, tools, and workflows into structured memory — so your AI systems can save once, recall selectively, and stay aligned wherever work continues.</p>
+			<h1>Tell it once. Every AI remembers.</h1>
+			<p>UML is one private memory graph shared by Claude, your agents, and your apps — you can see it, edit it, and own it.</p>
 			<div class="hero-actions">
 				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
 				<a class="cta-secondary" href="#how-it-works">See how it works</a>
@@ -1742,7 +1743,7 @@ function viewReceipts(v) {
 		const runId = r.extraction_run_id || detail.extraction_run_id || "";
 		const row = el("div","receipt" + (zero ? " zero" : ""));
 		row.innerHTML = `<div class="r-top"><span class="r-src">${esc(r.source || "memory")}</span><span class="r-when">${fmtDate(r.created_at)}</span></div>
-			<div class="r-sum">${esc(r.summary || "")}</div>
+			<div class="r-sum">${esc(receiptDisplaySummary(r))}</div>
 			${runId ? `<div class="kv" style="font-size:11px;margin-top:4px">run <b>${esc(runId)}</b></div>` : ""}`;
 		wrap.appendChild(row);
 	}
@@ -2132,6 +2133,45 @@ function closeLegal() {
 	}
 }
 
+// ---- Visit beacon: aggregate counters only, no cookies, no identifiers -----
+let visitBeaconSent = false;
+function sendVisitBeacon(kind) {
+	// One count per real page load; SPA re-routes (popstate) never double-count.
+	if (visitBeaconSent) return;
+	visitBeaconSent = true;
+	try {
+		const payload = new Blob([JSON.stringify({ kind })], { type: "application/json" });
+		if (!navigator.sendBeacon || !navigator.sendBeacon("/v1/beacon", payload)) {
+			fetch("/v1/beacon", { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }) }).catch(() => {});
+		}
+	} catch {}
+}
+
+// ---- Change password (Settings → Security) ---------------------------------
+async function changePasswordNow() {
+	const status = $("#pwStatus");
+	const currentPassword = $("#pwCurrent")?.value || "";
+	const newPassword = $("#pwNew")?.value || "";
+	if (newPassword.length < 8) { if (status) status.textContent = "New password must be at least 8 characters."; return; }
+	if (status) status.textContent = "Updating…";
+	try {
+		const res = await fetch("/auth/password", {
+			method: "POST",
+			credentials: "include",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ currentPassword, newPassword }),
+		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+		if (status) status.textContent = "Password updated ✓";
+		const currentInput = $("#pwCurrent"); if (currentInput) currentInput.value = "";
+		const newInput = $("#pwNew"); if (newInput) newInput.value = "";
+		toast("Password updated.");
+	} catch (err) {
+		if (status) status.textContent = err.message;
+	}
+}
+
 // ---- Landing connect widget ------------------------------------------------
 // Snippets are built from location.origin at runtime so the static shell never
 // hardcodes a deploy domain (and survives the future custom-domain move).
@@ -2188,11 +2228,22 @@ async function downloadExport() {
 }
 
 // ---- Receipts unseen badge -------------------------------------------------
+// Recalls are lookups, not saves: old stored summaries said "Saved: 0" which
+// read like failures. Rewrite them for display and keep them out of the badge.
+function receiptDisplaySummary(r) {
+	if ((r.source || "") !== "recall") return r.summary || "";
+	if (/no_recall|gate skipped/i.test(`${r.summary || ""} ${r.reason || ""}`)) {
+		return "Memory lookup skipped — the question didn't need personal context.";
+	}
+	return "Memory lookup — recalled context was returned to the caller.";
+}
+
 function updateReceiptsBadge() {
 	const badge = $("#receiptsBadge");
 	if (!badge) return;
 	const seenAt = Number(localStorage.getItem("uml_receipts_seen_at") || 0);
-	const unseen = (S.receipts || []).filter((r) => Number(r.created_at || 0) > seenAt).length;
+	const unseen = (S.receipts || []).filter((r) =>
+		Number(r.created_at || 0) > seenAt && (r.source || "") !== "recall").length;
 	badge.hidden = unseen === 0;
 	badge.textContent = unseen > 99 ? "99+" : String(unseen);
 }
@@ -2211,41 +2262,205 @@ function updateAdminTabVisibility() {
 
 function viewAdmin(v) {
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Admin</h3>
-		<div class="help">Operator stats, read straight from the database. Visible only to admin accounts; the API route is role-gated server-side.</div></div>
-		<div id="adminBody" class="empty">Loading stats…</div>`;
+	const tab = S.adminTab || "overview";
+	wrap.innerHTML = `<div class="box" style="max-width:1100px"><h3>Admin</h3>
+		<div class="help">Operator console — accounts, visits, activity, and system health. Visible only to admin accounts; every route is role-gated server-side.</div>
+		<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+			${["overview", "users", "activity", "health"].map((name) =>
+				`<button class="ghost mini${name === tab ? " admin-tab-active" : ""}" data-atab="${name}" onclick="adminTab('${name}')">${name[0].toUpperCase()}${name.slice(1)}</button>`).join("")}
+		</div></div>
+		<div id="adminBody" class="empty" style="margin-top:12px">Loading…</div>`;
 	v.appendChild(wrap);
-	fetch("/v1/admin/stats", { credentials: "include" })
-		.then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
-		.then((stats) => {
-			const body = $("#adminBody");
-			if (!body) return;
-			const dayRows = (rows, label) => rows.length
-				? rows.map((r) => `<div class="kv">${esc(r.day)}: <b>${r.n}</b></div>`).join("")
-				: `<div class="help">No ${label} in the last 14 days.</div>`;
-			const t = stats.totals || {};
-			body.classList.remove("empty");
-			body.innerHTML = `<div class="panel-grid">
-				<div class="action-box"><h3>Users</h3>
-					<div class="kv">Total accounts: <b>${stats.users}</b></div>
-					<div class="kv">Accepted terms: <b>${stats.consented_users}</b></div>
-					<div class="kv">Active sessions (users): <b>${stats.active_sessions_users}</b></div></div>
-				<div class="action-box"><h3>Memory totals</h3>
-					<div class="kv">Nodes: <b>${t.nodes ?? 0}</b> · Pages: <b>${t.pages ?? 0}</b></div>
-					<div class="kv">Slices: <b>${t.slices ?? 0}</b> · Events: <b>${t.events ?? 0}</b></div>
-					<div class="kv">Receipts: <b>${t.receipts ?? 0}</b> · Active tokens: <b>${t.active_tokens ?? 0}</b></div></div>
-				<div class="action-box"><h3>Signups (14 days)</h3>${dayRows(stats.signups_by_day || [], "signups")}</div>
-				<div class="action-box"><h3>Logins (14 days)</h3>${dayRows(stats.logins_by_day || [], "logins")}</div>
-			</div>
-			<div class="box" style="margin-top:14px"><h3>Top users by activity</h3>
-				${(stats.top_users || []).map((u) => `<div class="kv"><b>${esc(u.name || u.email || u.id)}</b> — ${u.nodes} node(s), ${u.receipts} receipt(s), last seen ${u.last_seen_at ? ago(u.last_seen_at) : "never"}</div>`).join("") || `<div class="help">No users yet.</div>`}
-			</div>
-			<div class="help" style="margin-top:10px">Page-visit analytics: enable Cloudflare Web Analytics on this site (free, cookie-less) and its dashboard covers visits; this page covers accounts and usage.</div>`;
-		})
-		.catch((err) => {
-			const body = $("#adminBody");
-			if (body) body.textContent = `Could not load admin stats: ${err.message}`;
+	refreshAdminData();
+}
+
+function adminTab(name) {
+	S.adminTab = name;
+	document.querySelectorAll("[data-atab]").forEach((button) =>
+		button.classList.toggle("admin-tab-active", button.dataset.atab === name));
+	renderAdminBody();
+	if (name === "users" && !S.adminUsers) refreshAdminUsers();
+}
+
+async function refreshAdminData() {
+	try {
+		const res = await fetch("/v1/admin/stats", { credentials: "include" });
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		S.adminStats = await res.json();
+	} catch (err) {
+		const body = $("#adminBody");
+		if (body) body.textContent = `Could not load admin stats: ${err.message}`;
+		return;
+	}
+	renderAdminBody();
+	if ((S.adminTab || "overview") === "users") refreshAdminUsers();
+}
+
+async function refreshAdminUsers(query = S.adminUserQuery || "") {
+	S.adminUserQuery = query;
+	try {
+		const res = await fetch(`/v1/admin/users?query=${encodeURIComponent(query)}`, { credentials: "include" });
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		S.adminUsers = (await res.json()).users || [];
+	} catch (err) {
+		S.adminUsers = [];
+		toast(`Could not load users: ${err.message}`);
+	}
+	if ((S.adminTab || "overview") === "users") renderAdminBody();
+}
+
+async function adminUserAction(userId, action) {
+	const labels = {
+		disable: "Disable this account? The user is logged out everywhere and cannot log in.",
+		delete: "PERMANENTLY delete this account and ALL of its memory? This cannot be undone.",
+		revoke_sessions: "Log this user out of all devices?",
+		promote: "Give this account full admin access?",
+		demote: "Remove admin access from this account?",
+	};
+	if (labels[action] && !confirm(labels[action])) return;
+	try {
+		const res = await fetch("/v1/admin/users/action", {
+			method: "POST",
+			credentials: "include",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ userId, action }),
 		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+		toast(`Done: ${action.replace(/_/g, " ")}.`);
+		await refreshAdminUsers();
+		refreshAdminData();
+	} catch (err) {
+		toast(`Action failed: ${err.message}`);
+	}
+}
+
+function adminDayRows(rows, valueOf, label) {
+	if (!rows?.length) return `<div class="help">No ${label} in the last 14 days.</div>`;
+	return rows.map((row) => `<div class="kv">${esc(row.day)}: <b>${valueOf(row)}</b></div>`).join("");
+}
+
+function renderAdminBody() {
+	const body = $("#adminBody");
+	const stats = S.adminStats;
+	if (!body) return;
+	if (!stats) { body.textContent = "Loading…"; return; }
+	body.classList.remove("empty");
+	const tab = S.adminTab || "overview";
+
+	if (tab === "overview") {
+		const t = stats.totals || {};
+		const visits = stats.visits_by_day || [];
+		const totalVisits = visits.reduce((sum, row) => sum + Number(row.count || 0), 0);
+		const today = new Date().toISOString().slice(0, 10);
+		const todayVisits = visits.filter((row) => row.day === today).reduce((sum, row) => sum + Number(row.count || 0), 0);
+		const visitDays = new Map();
+		for (const row of visits) {
+			const entry = visitDays.get(row.day) || { landing: 0, app: 0, legal: 0, other: 0 };
+			entry[row.kind] = (entry[row.kind] || 0) + Number(row.count || 0);
+			visitDays.set(row.day, entry);
+		}
+		const saveDays = new Map();
+		for (const row of stats.receipts_by_day || []) {
+			const entry = saveDays.get(row.day) || {};
+			entry[row.source || "other"] = Number(row.n || 0);
+			saveDays.set(row.day, entry);
+		}
+		body.innerHTML = `<div class="panel-grid">
+			<div class="action-box"><h3>Visits</h3>
+				<div class="kv">Today: <b>${todayVisits}</b> · 14 days: <b>${totalVisits}</b></div>
+				${[...visitDays.entries()].map(([day, entry]) =>
+					`<div class="kv">${esc(day)}: <b>${entry.landing + entry.app + entry.legal + entry.other}</b> <span class="help">(${entry.landing} landing · ${entry.app} app)</span></div>`).join("") || `<div class="help">No visits recorded yet — counting starts with this deploy.</div>`}
+			</div>
+			<div class="action-box"><h3>Users</h3>
+				<div class="kv">Total accounts: <b>${stats.users}</b></div>
+				<div class="kv">Accepted terms: <b>${stats.consented_users}</b></div>
+				<div class="kv">Active sessions (users): <b>${stats.active_sessions_users}</b></div></div>
+			<div class="action-box"><h3>Memory totals</h3>
+				<div class="kv">Nodes: <b>${t.nodes ?? 0}</b> · Pages: <b>${t.pages ?? 0}</b></div>
+				<div class="kv">Slices: <b>${t.slices ?? 0}</b> · Events: <b>${t.events ?? 0}</b></div>
+				<div class="kv">Receipts: <b>${t.receipts ?? 0}</b> · Active tokens: <b>${t.active_tokens ?? 0}</b></div></div>
+			<div class="action-box"><h3>Saves (14 days)</h3>
+				${[...saveDays.entries()].map(([day, entry]) =>
+					`<div class="kv">${esc(day)}: <b>${Object.values(entry).reduce((a, b) => a + b, 0)}</b> <span class="help">(${Object.entries(entry).map(([source, n]) => `${n} ${esc(source)}`).join(" · ")})</span></div>`).join("") || `<div class="help">No saves in the last 14 days.</div>`}
+			</div>
+			<div class="action-box"><h3>Signups (14 days)</h3>${adminDayRows(stats.signups_by_day, (row) => row.n, "signups")}</div>
+			<div class="action-box"><h3>Logins (14 days)</h3>${adminDayRows(stats.logins_by_day, (row) => row.n, "logins")}</div>
+		</div>`;
+		return;
+	}
+
+	if (tab === "users") {
+		const users = S.adminUsers;
+		body.innerHTML = `<div class="box" style="max-width:1100px">
+			<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+				<input id="adminUserSearch" placeholder="Search email or name…" value="${esc(S.adminUserQuery || "")}" style="min-width:240px" />
+				<button class="ghost mini" onclick="refreshAdminUsers($('#adminUserSearch').value)">Search</button>
+			</div>
+			<div style="margin-top:12px">
+			${users === undefined || users === null ? `<div class="help">Loading users…</div>` : users.map((u) => {
+				const isSelf = u.id === S.me?.user?.id;
+				const badges = [
+					u.role === "admin" ? `<span class="badge state-active">admin</span>` : "",
+					u.status === "disabled" ? `<span class="badge state-inactive">disabled</span>` : "",
+					u.google_linked ? `<span class="badge state-active" style="opacity:.75">google</span>` : "",
+					u.terms_accepted_at ? "" : `<span class="badge state-paused">no consent</span>`,
+				].join(" ");
+				return `<div class="action-box" style="margin-bottom:10px">
+					<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+						<div><b>${esc(u.name || u.email)}</b> <span class="help">${esc(u.email)}</span> ${badges}${isSelf ? ` <span class="help">(you)</span>` : ""}</div>
+						<span class="help">last seen ${u.last_seen_at ? ago(u.last_seen_at) : "never"}</span>
+					</div>
+					<div class="kv" style="margin-top:6px">${u.nodes} node(s) · ${u.pages} page(s) · ${u.receipts} receipt(s) · ${u.tokens} active token(s) · joined ${fmtDate(u.created_at)}</div>
+					<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+						${u.status === "disabled"
+							? `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','enable')">Enable</button>`
+							: `<button class="ghost mini" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','disable')">Disable</button>`}
+						<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','revoke_sessions')">Revoke sessions</button>
+						${u.role === "admin"
+							? `<button class="ghost mini" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','demote')">Remove admin</button>`
+							: `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','promote')">Make admin</button>`}
+						<button class="ghost mini danger" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','delete')">Delete account</button>
+					</div>
+				</div>`;
+			}).join("") || `<div class="help">No users match.</div>`}
+			</div></div>`;
+		const search = $("#adminUserSearch");
+		if (search) search.addEventListener("keydown", (event) => { if (event.key === "Enter") refreshAdminUsers(search.value); });
+		return;
+	}
+
+	if (tab === "activity") {
+		body.innerHTML = `<div class="box" style="max-width:1100px"><h3>Latest saves (all users)</h3>
+			${(stats.activity || []).map((row) => `<div class="receipt-row" style="padding:9px 0;border-bottom:1px solid var(--border)">
+				<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+					<span><b>${esc(row.email || "unknown")}</b> <span class="badge state-active" style="opacity:.7">${esc(row.source || "save")}</span></span>
+					<span class="help">${ago(row.created_at)}</span>
+				</div>
+				<div class="help" style="margin-top:3px">${esc(String(row.summary || "").slice(0, 220))}</div>
+			</div>`).join("") || `<div class="help">No activity yet.</div>`}
+		</div>`;
+		return;
+	}
+
+	body.innerHTML = `<div class="panel-grid">
+		<div class="action-box"><h3>Extraction runs (14 days)</h3>
+			${(stats.run_statuses || []).map((row) => `<div class="kv">${esc(row.status || "unknown")}: <b>${row.n}</b></div>`).join("") || `<div class="help">No runs recorded.</div>`}
+		</div>
+		<div class="action-box"><h3>System</h3>
+			<div class="kv">Rate limits: <b>auth 10/min per IP · saves 60/min per user</b></div>
+			<div class="kv">Visit counting: <b>first-party, aggregate only</b></div>
+		</div>
+	</div>
+	<div class="box" style="margin-top:14px"><h3>Recent failures</h3>
+		${(stats.recent_failures || []).map((row) => `<div class="action-box" style="margin-bottom:8px">
+			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+				<b>${esc(row.tool_name || "run")}</b>
+				<span class="help">${esc(row.email || "")} · ${ago(row.created_at)}</span>
+			</div>
+			<div class="help" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px">${esc(String(row.error || "").slice(0, 300))}</div>
+		</div>`).join("") || `<div class="help">No failed runs — healthy.</div>`}
+	</div>`;
 }
 
 const POLICY_CONTENT = {
@@ -2324,6 +2539,12 @@ function viewSettings(v) {
 			<div class="kv" style="margin-top:8px">Active connections: <b>${activeTokens}</b></div>
 			<div class="kv">Revoked connections: <b>${revokedTokens}</b></div>
 			<div class="section-actions"><button class="ghost mini" onclick="logoutAllNow()">Logout all sessions</button><button class="ghost mini" onclick="setView('connect')">Manage tokens</button></div>
+			<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+				<h3 style="font-size:14px">Change password</h3>
+				<div class="form-row" style="margin-top:8px"><input id="pwCurrent" type="password" autocomplete="current-password" placeholder="Current password (empty if you signed up with Google)" /></div>
+				<div class="form-row" style="margin-top:8px"><input id="pwNew" type="password" autocomplete="new-password" minlength="8" placeholder="New password (min 8 characters)" /></div>
+				<div class="section-actions" style="margin-top:10px"><button class="ghost mini" onclick="changePasswordNow()">Update password</button><span id="pwStatus" class="help"></span></div>
+			</div>
 		</div>
 		<div class="action-box settings-section"><h3>Connections</h3>
 			<div class="help">${S.tokens.length} total connection(s). Create one MCP URL or API token/key per tool so access can be revoked cleanly.</div>
@@ -3417,7 +3638,7 @@ function viewSaves(v) {
 		const runId = r.extraction_run_id || detail.extraction_run_id || "";
 		const row = el("div","receipt" + (zero?" zero":""));
 		row.innerHTML = `<div class="r-top"><span class="r-src">${esc(r.source)}</span><span class="r-when">${fmtDate(r.created_at)}</span></div>
-			<div class="r-sum">${esc(r.summary || "")}</div>
+			<div class="r-sum">${esc(receiptDisplaySummary(r))}</div>
 			${runId ? `<div class="kv" style="font-size:11px;margin-top:4px">run <b>${esc(runId)}</b></div>` : ""}`;
 		wrap.appendChild(row);
 	}
@@ -3799,6 +4020,7 @@ async function initShell() {
 	if (mode === "terms" || mode === "privacy") {
 		setMode("public");
 		showLegal(mode, { push: false });
+		sendVisitBeacon("legal");
 		refreshMe();
 		return;
 	}
@@ -3811,27 +4033,32 @@ async function initShell() {
 		if (S.me) {
 			pushUrl("/app");
 			setMode("app");
+			sendVisitBeacon("app");
 			await refreshTokens();
 			await load();
 			return;
 		}
 		renderAuth(mode);
 		setMode(mode);
+		sendVisitBeacon("landing");
 		return;
 	}
 	if (mode === "app" || S.me) {
 		if (!S.me && !S.devMode) {
 			renderAuth("login");
 			setMode("login");
+			sendVisitBeacon("landing");
 			return;
 		}
 		S.view = hashView() || S.view || "overview";
 		setMode("app");
+		sendVisitBeacon("app");
 		await refreshTokens();
 		await load();
 		return;
 	}
 	setMode("public");
+	sendVisitBeacon("landing");
 }
 
 /* ---------------- wire up ---------------- */

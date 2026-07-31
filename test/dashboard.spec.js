@@ -36,7 +36,8 @@ describe("dashboard script", () => {
 	it("renders the public UML platform landing shell", () => {
 		expect((html.match(/<section class="landing-section/g) || []).length).toBeGreaterThanOrEqual(8);
 		expect(html).toContain("Universal Memory Layer");
-		expect(html).toContain("One private memory graph for AI tools, agents, and apps.");
+		expect(html).toContain("Tell it once. Every AI remembers.");
+		expect(html).toContain("one private memory graph shared by Claude, your agents, and your apps");
 		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
 		expect(html).toContain("Start free");
 		expect(html).toContain("See how it works");

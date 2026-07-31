@@ -388,7 +388,8 @@ describe("connection tokens", () => {
 describe("product shell routes", () => {
 	it("public landing page is present in the static shell", () => {
 		expect(html).toContain("Universal Memory Layer");
-		expect(html).toContain("One private memory graph for AI tools, agents, and apps.");
+		expect(html).toContain("Tell it once. Every AI remembers.");
+		expect(html).toContain("one private memory graph shared by Claude, your agents, and your apps");
 		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
 		expect(html).toContain("Chat history is not memory.");
 		expect(html).toContain("Memory is structured meaning.");
