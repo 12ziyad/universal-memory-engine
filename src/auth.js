@@ -218,6 +218,7 @@ export async function signup(env, request, body) {
 		.run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
 	const session = await createSession(env, request, id);
+	await recordLoginEvent(env, request, id, "signup");
 	return { user: publicUser(user), session, status: 201 };
 }
 
@@ -227,11 +228,149 @@ export async function login(env, request, body) {
 	const row = await env.DB.prepare("SELECT * FROM users WHERE email_normalized = ? LIMIT 1")
 		.bind(valid.email)
 		.first();
+	if (row && !row.password_hash && row.google_sub) {
+		return { error: "This account uses Google sign-in. Use the Continue with Google button.", status: 400 };
+	}
 	if (!row || row.status === "disabled" || !(await verifyPassword(valid.password, row.password_hash))) {
+		await recordLoginEvent(env, request, row?.id ?? null, "password_failed", valid.email);
 		return { error: "Invalid email or password", status: 401 };
 	}
 	const session = await createSession(env, request, row.id);
+	await recordLoginEvent(env, request, row.id, "password_login");
 	return { user: publicUser(row), session, status: 200 };
+}
+
+// ---- Google sign-in --------------------------------------------------------
+// Server-side OAuth code flow. The Google click doubles as password recovery:
+// a Google account whose email matches an existing UML account logs into THAT
+// account (linked by google_sub for stability). New emails create a Google-only
+// account (password_hash NULL) with consent + verified email recorded.
+
+const OAUTH_STATE_COOKIE = "uml_oauth_state";
+
+function oauthStateCookie(request, value, maxAgeSeconds) {
+	return `${OAUTH_STATE_COOKIE}=${encodeURIComponent(value)}; ${cookieBase(request)}; Max-Age=${maxAgeSeconds}`;
+}
+
+export function googleAuthStart(env, request) {
+	if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+		return { redirect: "/login?error=google_not_configured", cookie: null };
+	}
+	const state = base64Url(randomBytes(24));
+	const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+	url.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+	url.searchParams.set("redirect_uri", new URL("/auth/google/callback", request.url).toString());
+	url.searchParams.set("response_type", "code");
+	url.searchParams.set("scope", "openid email profile");
+	url.searchParams.set("state", state);
+	url.searchParams.set("prompt", "select_account");
+	return { redirect: url.toString(), cookie: oauthStateCookie(request, state, 600) };
+}
+
+function decodeIdTokenPayload(idToken) {
+	try {
+		const payload = String(idToken).split(".")[1] ?? "";
+		const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+		return JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "=")));
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Find-or-create the UML account for a Google profile. Priority: stable
+ * google_sub match, then email link (records the sub + verified email), then a
+ * fresh Google-only account with consent recorded (the sign-in button carries
+ * the agreement notice).
+ */
+export async function resolveGoogleUser(env, profile) {
+	const sub = String(profile?.sub ?? "").trim();
+	const email = normalizeEmail(profile?.email);
+	if (!sub || !isValidEmail(email)) return { error: "google_profile_invalid" };
+	const verifiedAt = profile.email_verified ? now() : null;
+
+	const bySub = await env.DB.prepare("SELECT * FROM users WHERE google_sub = ? LIMIT 1").bind(sub).first();
+	if (bySub) {
+		if (bySub.status === "disabled") return { error: "account_disabled" };
+		return { user: bySub, created: false };
+	}
+
+	const byEmail = await env.DB.prepare("SELECT * FROM users WHERE email_normalized = ? LIMIT 1").bind(email).first();
+	if (byEmail) {
+		if (byEmail.status === "disabled") return { error: "account_disabled" };
+		await env.DB.prepare(
+			`UPDATE users SET google_sub = ?, updated_at = ?,
+				email_verified_at = COALESCE(email_verified_at, ?),
+				name = CASE WHEN COALESCE(name, '') = '' THEN ? ELSE name END
+			 WHERE id = ?`,
+		).bind(sub, now(), verifiedAt, String(profile.name ?? "").slice(0, 120) || null, byEmail.id).run();
+		const linked = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(byEmail.id).first();
+		return { user: linked, created: false };
+	}
+
+	const id = newId("user");
+	const createdAt = now();
+	await env.DB.prepare(
+		`INSERT INTO users
+			(id, email, email_normalized, password_hash, password_salt, name, created_at, updated_at,
+			 status, role, terms_accepted_at, email_verified_at, google_sub)
+		 VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, 'active', 'user', ?, ?, ?)`,
+	).bind(id, email, email, String(profile.name ?? "").slice(0, 120) || null, createdAt, createdAt, createdAt, verifiedAt, sub).run();
+	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
+	return { user, created: true };
+}
+
+export async function googleAuthCallback(env, request) {
+	const url = new URL(request.url);
+	const clearState = oauthStateCookie(request, "", 0);
+	if (url.searchParams.get("error")) return { redirect: "/login?error=google_denied", cookies: [clearState] };
+	const code = url.searchParams.get("code");
+	const state = url.searchParams.get("state");
+	const expectedState = parseCookies(request).get(OAUTH_STATE_COOKIE);
+	if (!code || !state || !expectedState || !(await timingSafeEqualString(state, expectedState))) {
+		return { redirect: "/login?error=google_state", cookies: [clearState] };
+	}
+	let payload = null;
+	try {
+		const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+			method: "POST",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				client_id: env.GOOGLE_CLIENT_ID,
+				client_secret: env.GOOGLE_CLIENT_SECRET,
+				code,
+				grant_type: "authorization_code",
+				redirect_uri: new URL("/auth/google/callback", request.url).toString(),
+			}),
+		});
+		const token = await tokenRes.json().catch(() => ({}));
+		if (!tokenRes.ok || !token.id_token) throw new Error(token.error ?? `token exchange failed (${tokenRes.status})`);
+		// The id_token arrives directly from Google's token endpoint over TLS, so
+		// its claims are trusted without a second signature verification step.
+		payload = decodeIdTokenPayload(token.id_token);
+	} catch (error) {
+		console.warn("google token exchange failed:", error?.message ?? error);
+		return { redirect: "/login?error=google_failed", cookies: [clearState] };
+	}
+	const resolved = await resolveGoogleUser(env, payload ?? {});
+	if (resolved.error) {
+		const reason = resolved.error === "account_disabled" ? "account_disabled" : "google_failed";
+		return { redirect: `/login?error=${reason}`, cookies: [clearState] };
+	}
+	const session = await createSession(env, request, resolved.user.id);
+	await recordLoginEvent(env, request, resolved.user.id, resolved.created ? "google_signup" : "google_login");
+	return { redirect: "/?app=1", cookies: [clearState, session.cookie] };
+}
+
+async function recordLoginEvent(env, request, userId, outcome, email = null) {
+	try {
+		const ip = request.headers.get("cf-connecting-ip") ?? "";
+		await env.DB.prepare(
+			"INSERT INTO login_events (id, user_id, email_normalized, outcome, created_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?)",
+		).bind(newId("login"), userId, email, outcome, now(), ip ? await sha256Hex(ip) : null).run();
+	} catch (error) {
+		console.warn("login event record failed:", error?.message ?? error);
+	}
 }
 
 export async function logout(env, request) {

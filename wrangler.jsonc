@@ -67,7 +67,17 @@
 		"LLM_SUMMARY_MAX_TOKENS": "256",
 		"LLM_DIGEST_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
 		"LLM_DIGEST_MAX_TOKENS": "768",
-		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5"
+		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
+		// OAuth client id is public by design; the secret lives in a Worker secret.
+		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com"
+	},
+	// Workers rate limiting (fails open in code when a binding is absent).
+	// AUTH_LIMITER: per-IP on login/signup/OAuth. SAVE_LIMITER: per-user on saves.
+	"unsafe": {
+		"bindings": [
+			{ "name": "AUTH_LIMITER", "type": "ratelimit", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+			{ "name": "SAVE_LIMITER", "type": "ratelimit", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }
+		]
 	}
 	/**
 	 * Smart Placement

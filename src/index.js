@@ -37,6 +37,8 @@ import {
 	clearSessionCookie,
 	createConnectionToken,
 	getSessionUser,
+	googleAuthCallback,
+	googleAuthStart,
 	listConnectionTokens,
 	login,
 	logout,
@@ -47,6 +49,30 @@ import {
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
+
+/**
+ * Workers rate limiting. No-ops when the binding is absent (tests, local dev
+ * without unsafe bindings), fails open on errors — protection, not a gate.
+ */
+async function allowRate(binding, key) {
+	if (!binding?.limit) return true;
+	try {
+		const { success } = await binding.limit({ key: String(key ?? "anon") });
+		return success !== false;
+	} catch (error) {
+		// Fail open — rate limiting is protection, not a gate — but never silently.
+		console.warn("rate limiter unavailable:", error?.message ?? error);
+		return true;
+	}
+}
+
+function clientIp(request) {
+	return request.headers.get("cf-connecting-ip") ?? "local";
+}
+
+function tooMany() {
+	return json({ error: "too_many_requests", message: "Slow down a little — try again in a minute." }, 429);
+}
 
 export { UserMemory } from "./durable/user-memory.js";
 
@@ -196,6 +222,7 @@ const routes = {
 	},
 
 	"POST /auth/signup": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
 		try {
 			const body = await request.json().catch(() => ({}));
 			const result = await signup(env, request, body);
@@ -211,6 +238,7 @@ const routes = {
 	},
 
 	"POST /auth/login": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
 		try {
 			const body = await request.json().catch(() => ({}));
 			const result = await login(env, request, body);
@@ -251,6 +279,22 @@ const routes = {
 		return json(result, 201);
 	},
 
+	"GET /auth/google/start": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		const result = googleAuthStart(env, request);
+		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
+		if (result.cookie) headers.append("set-cookie", result.cookie);
+		return new Response(null, { status: 302, headers });
+	},
+
+	"GET /auth/google/callback": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		const result = await googleAuthCallback(env, request);
+		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
+		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
+		return new Response(null, { status: 302, headers });
+	},
+
 	"POST /v1/ingest": async (request, env, ctx) => {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireMemoryUser(request, env, body.userId, {
@@ -258,6 +302,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
+		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
 
@@ -383,6 +428,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
+		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
 		const t = body._test ?? {};
@@ -541,6 +587,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
+		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
 		const messages = Array.isArray(body.messages) ? body.messages : [];
 		if (!messages.length && !body.query) {
 			return json({ error: "messages[] or query is required" }, 400);
