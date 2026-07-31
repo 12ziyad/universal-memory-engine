@@ -35,6 +35,7 @@ async function signupAccount(prefix) {
 			email: `${prefix}-${crypto.randomUUID()}@example.com`,
 			password: "correct-horse",
 			name: prefix,
+			acceptTerms: true,
 		}),
 	});
 	expect(result.status).toBe(201);

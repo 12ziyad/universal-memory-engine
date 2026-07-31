@@ -59,7 +59,7 @@ function cookieFrom(res) {
 
 async function signupAccount(prefix = "mcp-user") {
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`;
-	const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: prefix });
+	const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: prefix, acceptTerms: true });
 	expect(res.status).toBe(201);
 	const body = await res.json();
 	return { user: body.user, cookie: cookieFrom(res) };

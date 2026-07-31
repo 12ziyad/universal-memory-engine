@@ -355,6 +355,17 @@
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
 	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; z-index: 5; max-width: min(760px, calc(100% - 28px)); }
+	.legal-shell { position: fixed; inset: 0; z-index: 60; overflow-y: auto; background: rgba(5,10,16,.97); backdrop-filter: blur(6px); }
+	.legal-doc { width: min(860px, calc(100% - 32px)); margin: 40px auto 80px; background: var(--panel); border: 1px solid var(--border);
+		border-radius: 14px; padding: 34px 38px; line-height: 1.62; }
+	.legal-doc h1 { margin: 0 0 4px; font-size: 26px; }
+	.legal-doc h2 { margin: 26px 0 8px; font-size: 17px; color: var(--accent); }
+	.legal-doc p, .legal-doc li { color: var(--text-soft, #b8c7d4); font-size: 14px; }
+	.legal-doc ul { padding-left: 20px; }
+	.legal-doc .legal-meta { color: #8ab0c0; font-size: 12.5px; margin-bottom: 14px; }
+	.legal-close { position: sticky; top: 14px; float: right; margin: -6px -8px 0 0; }
+	.tab-badge { display: inline-block; min-width: 17px; padding: 1px 5px; margin-left: 6px; border-radius: 999px;
+		background: var(--accent); color: #04121f; font-size: 10.5px; font-weight: 700; text-align: center; vertical-align: 1px; }
 	.cluster-handle { position: absolute; z-index: 6; display: none; transform: translate(-50%, -100%); padding: 5px 12px;
 		background: rgba(22,27,34,.94); border: 1px solid var(--accent); color: var(--text); border-radius: 999px;
 		font-size: 12px; font-weight: 600; cursor: grab; user-select: none; touch-action: none;
@@ -640,11 +651,10 @@
 			<span><b>UML</b><span>Universal Memory Layer</span></span>
 		</a>
 		<div class="footer-links">
-			<a href="#privacy-policy">Privacy Policy</a>
-			<a href="#terms">Terms &amp; Conditions</a>
-			<a href="#support">Support</a>
+			<a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>
+			<a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a>
+			<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Open source &middot; Apache 2.0</a>
 			<a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>
-			<a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>
 			<span>&copy; 2026 UML</span>
 		</div>
 	</footer>
@@ -684,9 +694,10 @@
 			<button class="tab" data-view="graph">Graph</button>
 			<button class="tab review-tab" data-view="candidates" data-review-tab>Review <span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="connect">Connect</button>
-			<button class="tab" data-view="receipts">Receipts</button>
+			<button class="tab" data-view="receipts">Receipts<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<button class="tab" data-view="rules">Rules</button>
 			<button class="tab" data-view="settings">Settings</button>
+			<button class="tab" data-view="admin" hidden>Admin</button>
 			<button class="tab dev-only" data-view="saves">Saves</button>
 			<button class="tab dev-only" data-view="test">Test</button>
 			<button class="tab dev-only" data-view="setup">Legacy Setup</button>
@@ -700,6 +711,7 @@
 
 <div id="toast"></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
+<div id="legalView" class="legal-shell" hidden></div>
 
 <script>
 const $ = (s, r=document) => r.querySelector(s);
@@ -747,7 +759,7 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -792,6 +804,8 @@ function routeMode() {
 	const q = new URLSearchParams(location.search);
 	if (q.get("view") === "login" || location.pathname === "/login") return "login";
 	if (q.get("view") === "signup" || location.pathname === "/signup") return "signup";
+	if (location.pathname === "/terms") return "terms";
+	if (location.pathname === "/privacy") return "privacy";
 	if (q.has("app") || location.pathname === "/app") return "app";
 	return "public";
 }
@@ -841,6 +855,7 @@ async function refreshMe() {
 function renderAppUser() {
 	const wrap = $("#appUser");
 	if (!wrap) return;
+	updateAdminTabVisibility();
 	const user = S.me?.user;
 	if (!user) { wrap.innerHTML = ""; return; }
 	wrap.innerHTML = `<span class="avatar">${esc(initials(user))}</span><span>${esc(user.name || user.email)}</span>`;
@@ -861,6 +876,10 @@ function renderAuth(mode = "login") {
 			${isSignup ? `<div class="form-row"><label for="authName">Name</label><input id="authName" autocomplete="name" placeholder="Your name" /></div>` : ""}
 			<div class="form-row"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div>
 			<div class="form-row"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="8" placeholder="At least 8 characters" /></div>
+			${isSignup ? `<label class="help" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer">
+				<input id="authConsent" type="checkbox" required style="margin-top:2px" />
+				<span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+			</label>` : ""}
 			<div class="auth-actions" style="margin-top:16px">
 				<button type="submit">${isSignup ? "Sign up" : "Login"}</button>
 				<a class="cta-secondary" href="${isSignup ? "/login" : "/signup"}" onclick="showAuth('${isSignup ? "login" : "signup"}', event)">${isSignup ? "I have an account" : "Create account"}</a>
@@ -880,7 +899,10 @@ async function submitAuth(mode) {
 		email: $("#authEmail")?.value || "",
 		password: $("#authPassword")?.value || "",
 	};
-	if (mode === "signup") payload.name = $("#authName")?.value || "";
+	if (mode === "signup") {
+		payload.name = $("#authName")?.value || "";
+		payload.acceptTerms = Boolean($("#authConsent")?.checked);
+	}
 	try {
 		const res = await fetch(`/auth/${mode}`, {
 			method: "POST",
@@ -963,6 +985,7 @@ async function load() {
 			api(candidatesPath).catch(() => ({ candidates: [] })),
 		]);
 		S.data = graph; S.receipts = receipts.receipts || []; S.candidates = candidates.candidates || graph.candidates || [];
+		updateReceiptsBadge();
 		if (S.selected && !graph.nodes.find((n) => nodeKey(n.id) === S.selected) && !(graph.pages || []).find((p) => pageKey(p.id) === S.selected)) {
 			S.selected = null;
 		}
@@ -1142,6 +1165,7 @@ function renderView() {
 		connect: viewConnect,
 		receipts: viewReceipts,
 		rules: viewRules,
+		admin: viewAdmin,
 		settings: viewSettings,
 		home: viewOverview,
 		memories: viewMemories,
@@ -1539,6 +1563,7 @@ function renderTokenList() {
 }
 
 function viewReceipts(v) {
+	markReceiptsSeen();
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box" style="max-width:920px">
 		<h3>Receipts</h3>
@@ -1734,6 +1759,192 @@ function viewProfile(v) {
 	v.appendChild(wrap);
 }
 
+// ---- Full legal pages (/terms, /privacy) ----------------------------------
+const LEGAL_EFFECTIVE_DATE = "July 31, 2026";
+const LEGAL_PAGES = {
+	terms: {
+		title: "Terms of Service",
+		body: `
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p>These terms govern your use of the UML hosted service on this website (the "Service"). By creating an account you agree to them. If you do not agree, do not use the Service.</p>
+			<h2>1. What UML is</h2>
+			<p>UML is a personal memory layer: connected AI tools and applications can save durable context to your account and recall it later. Memory is stored as a graph (nodes, details, events, connections), organized pages, and receipts, controlled from your dashboard.</p>
+			<h2>2. Your account</h2>
+			<ul>
+				<li>You must provide a valid email and keep your password secure. You are responsible for activity under your account.</li>
+				<li>Connection tokens and private MCP URLs act like passwords. Keep them secret; revoke them from Connect if exposed.</li>
+				<li>You must be at least 13 years old (or the minimum age of digital consent in your country) to use the Service.</li>
+			</ul>
+			<h2>3. Your content and ownership</h2>
+			<ul>
+				<li><b>Your memory belongs to you.</b> You retain all rights to the content you store in UML.</li>
+				<li>You grant UML only the limited license needed to operate the Service for you: storing, processing, indexing, and returning your content to you and to the tools you connect.</li>
+				<li>We do not sell your content, do not use it for advertising, and do not use it to train AI models.</li>
+				<li>You can export your data and delete all of it, at any time, from Settings.</li>
+			</ul>
+			<h2>4. Acceptable use</h2>
+			<p>Do not use the Service for anything unlawful, to store or distribute malware, to harass or surveil others, to store content that violates another person's privacy or intellectual property, or to probe, overload, or disrupt the Service. We may suspend accounts that do.</p>
+			<h2>5. AI-generated content</h2>
+			<p>UML uses AI models to extract, organize, and summarize memory. AI output can be wrong or incomplete. The Service shows receipts for every change so you can verify what was stored, and you should not rely on stored memory for medical, legal, or financial decisions without checking it.</p>
+			<h2>6. Third-party tools</h2>
+			<p>Tools you connect (Claude, other MCP clients, your own applications) are third-party services under their own terms. What they send to UML and what they do with recalled context is between you and them.</p>
+			<h2>7. Early product; availability</h2>
+			<p>UML is an early product provided "as is" and "as available", without warranties of any kind. Features may change. We take backups and reliability seriously but do not guarantee uninterrupted service or zero data loss — keep exports of anything critical.</p>
+			<h2>8. Limitation of liability</h2>
+			<p>To the maximum extent permitted by law, UML and its operator are not liable for indirect, incidental, special, consequential, or punitive damages, or loss of data, profits, or goodwill. Total liability for any claim is limited to the amount you paid for the Service in the 12 months before the claim (currently zero during free early access).</p>
+			<h2>9. Termination</h2>
+			<p>You can stop using the Service and delete your memory at any time. We may suspend or terminate accounts that violate these terms, with notice where practical. On account deletion, your data is removed as described in the Privacy Policy.</p>
+			<h2>10. Open source</h2>
+			<p>UML's source code is open source under the Apache License 2.0 at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>. That license covers the code; these terms cover the hosted Service.</p>
+			<h2>11. Changes and contact</h2>
+			<p>Material changes to these terms will be announced in the app before they take effect. Governing law: India. Questions: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</p>`,
+	},
+	privacy: {
+		title: "Privacy Policy",
+		body: `
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p>UML exists to store personal memory, so we are direct about what we collect and blunt about what we never do with it: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
+			<h2>1. What we collect</h2>
+			<ul>
+				<li><b>Account data:</b> your email, optional name, and a salted hash of your password (we never store the password itself).</li>
+				<li><b>Memory content:</b> what you or your connected tools deliberately save — the entire point of the Service. This can be deeply personal; it is stored only to serve it back to you.</li>
+				<li><b>Security logs:</b> login events with a hashed IP address and browser type, and session records. We deliberately store IPs only as hashes.</li>
+				<li><b>Receipts:</b> a record of every memory write, kept so you can audit exactly what was stored and when.</li>
+			</ul>
+			<h2>2. What we do with it</h2>
+			<p>One purpose: operating your memory. Extraction and organization run on Cloudflare Workers AI models; your content passes through them solely to build your graph and pages, and is not retained by us for any other purpose or used for model training.</p>
+			<h2>3. Who processes it (subprocessors)</h2>
+			<p>UML runs entirely on <b>Cloudflare</b> infrastructure (Workers, D1 database, Vectorize, Workers AI inference). Cloudflare processes data on our behalf under their enterprise privacy commitments. We add no analytics SDKs, ad networks, or social pixels.</p>
+			<h2>4. Cookies</h2>
+			<p>Exactly one cookie: your session (HttpOnly, Secure), so you stay logged in for up to 30 days. No tracking cookies, no fingerprinting.</p>
+			<h2>5. Sharing</h2>
+			<p>Your memory is returned only to you and to tools you explicitly connect via tokens you create and can revoke. We disclose data to authorities only if legally compelled, and will tell you unless prohibited.</p>
+			<h2>6. Your rights and controls</h2>
+			<ul>
+				<li><b>Access &amp; portability:</b> Settings &rarr; Export downloads everything as JSON.</li>
+				<li><b>Correction:</b> edit or supersede any memory from the dashboard or connected tools.</li>
+				<li><b>Erasure:</b> Settings &rarr; Danger Zone deletes all memory immediately (type DELETE ALL). Account removal: email us and it is completed within 7 days.</li>
+				<li><b>Consent:</b> recorded at signup; withdraw any time by deleting your data and account.</li>
+			</ul>
+			<h2>7. Retention</h2>
+			<p>Memory: until you delete it. Sessions: 30 days. Security logs: up to 12 months. Deleted data is removed from the live database immediately and leaves short-lived infrastructure backups on Cloudflare's standard cycle.</p>
+			<h2>8. Security</h2>
+			<p>Transport encryption everywhere (TLS), salted PBKDF2 password hashing, hashed session tokens, hashed IPs, per-user data isolation, and scoped revocable connection tokens.</p>
+			<h2>9. Breach notification</h2>
+			<p>If a breach affects your personal data, we will notify you and the relevant authority (including India's Data Protection Board where applicable) within 72 hours of confirming it, with what happened and what we are doing.</p>
+			<h2>10. Children</h2>
+			<p>The Service is not directed at children under 13 and we do not knowingly store their data.</p>
+			<h2>11. Grievances, changes, contact</h2>
+			<p>Grievance and privacy contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (responses within 7 days). Material changes to this policy are announced in the app before taking effect.</p>`,
+	},
+};
+
+function showLegal(kind, eventOrOptions) {
+	if (eventOrOptions?.preventDefault) eventOrOptions.preventDefault();
+	const push = eventOrOptions?.push !== false;
+	const page = LEGAL_PAGES[kind] || LEGAL_PAGES.terms;
+	const view = $("#legalView");
+	if (!view) return;
+	if (push) pushUrl(`/${kind}`);
+	view.innerHTML = `<div class="legal-doc">
+		<button class="ghost mini legal-close" onclick="closeLegal()">✕ Close</button>
+		<h1>${page.title}</h1>
+		${page.body}
+	</div>`;
+	view.hidden = false;
+	view.scrollTop = 0;
+}
+
+function closeLegal() {
+	const view = $("#legalView");
+	if (view) view.hidden = true;
+	if (location.pathname === "/terms" || location.pathname === "/privacy") {
+		pushUrl(document.body.classList.contains("app-mode") ? "/app" : "/");
+		if (!document.body.classList.contains("app-mode")) setMode("public");
+	}
+}
+
+// ---- Data export -----------------------------------------------------------
+async function downloadExport() {
+	try {
+		toast("Preparing your export…");
+		const path = S.devMode ? `/v1/export?userId=${encodeURIComponent(S.userId)}` : "/v1/export";
+		const headers = S.devMode && S.key ? { "x-api-key": S.key } : {};
+		const res = await fetch(path, { credentials: "include", headers });
+		if (!res.ok) throw new Error(`export failed (${res.status})`);
+		const blob = await res.blob();
+		const link = document.createElement("a");
+		link.href = URL.createObjectURL(blob);
+		link.download = `uml-export-${new Date().toISOString().slice(0, 10)}.json`;
+		link.click();
+		URL.revokeObjectURL(link.href);
+		toast("Export downloaded.");
+	} catch (err) {
+		toast(`Export failed: ${err.message}`);
+	}
+}
+
+// ---- Receipts unseen badge -------------------------------------------------
+function updateReceiptsBadge() {
+	const badge = $("#receiptsBadge");
+	if (!badge) return;
+	const seenAt = Number(localStorage.getItem("uml_receipts_seen_at") || 0);
+	const unseen = (S.receipts || []).filter((r) => Number(r.created_at || 0) > seenAt).length;
+	badge.hidden = unseen === 0;
+	badge.textContent = unseen > 99 ? "99+" : String(unseen);
+}
+
+function markReceiptsSeen() {
+	const newest = Math.max(0, ...(S.receipts || []).map((r) => Number(r.created_at || 0)));
+	localStorage.setItem("uml_receipts_seen_at", String(newest || Date.now()));
+	updateReceiptsBadge();
+}
+
+// ---- Admin dashboard (role-gated server-side; tab shown only to admins) ----
+function updateAdminTabVisibility() {
+	const tab = document.querySelector('[data-view="admin"]');
+	if (tab) tab.hidden = S.me?.user?.role !== "admin";
+}
+
+function viewAdmin(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Admin</h3>
+		<div class="help">Operator stats, read straight from the database. Visible only to admin accounts; the API route is role-gated server-side.</div></div>
+		<div id="adminBody" class="empty">Loading stats…</div>`;
+	v.appendChild(wrap);
+	fetch("/v1/admin/stats", { credentials: "include" })
+		.then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+		.then((stats) => {
+			const body = $("#adminBody");
+			if (!body) return;
+			const dayRows = (rows, label) => rows.length
+				? rows.map((r) => `<div class="kv">${esc(r.day)}: <b>${r.n}</b></div>`).join("")
+				: `<div class="help">No ${label} in the last 14 days.</div>`;
+			const t = stats.totals || {};
+			body.classList.remove("empty");
+			body.innerHTML = `<div class="panel-grid">
+				<div class="action-box"><h3>Users</h3>
+					<div class="kv">Total accounts: <b>${stats.users}</b></div>
+					<div class="kv">Accepted terms: <b>${stats.consented_users}</b></div>
+					<div class="kv">Active sessions (users): <b>${stats.active_sessions_users}</b></div></div>
+				<div class="action-box"><h3>Memory totals</h3>
+					<div class="kv">Nodes: <b>${t.nodes ?? 0}</b> · Pages: <b>${t.pages ?? 0}</b></div>
+					<div class="kv">Slices: <b>${t.slices ?? 0}</b> · Events: <b>${t.events ?? 0}</b></div>
+					<div class="kv">Receipts: <b>${t.receipts ?? 0}</b> · Active tokens: <b>${t.active_tokens ?? 0}</b></div></div>
+				<div class="action-box"><h3>Signups (14 days)</h3>${dayRows(stats.signups_by_day || [], "signups")}</div>
+				<div class="action-box"><h3>Logins (14 days)</h3>${dayRows(stats.logins_by_day || [], "logins")}</div>
+			</div>
+			<div class="box" style="margin-top:14px"><h3>Top users by activity</h3>
+				${(stats.top_users || []).map((u) => `<div class="kv"><b>${esc(u.name || u.email || u.id)}</b> — ${u.nodes} node(s), ${u.receipts} receipt(s), last seen ${u.last_seen_at ? ago(u.last_seen_at) : "never"}</div>`).join("") || `<div class="help">No users yet.</div>`}
+			</div>
+			<div class="help" style="margin-top:10px">Page-visit analytics: enable Cloudflare Web Analytics on this site (free, cookie-less) and its dashboard covers visits; this page covers accounts and usage.</div>`;
+		})
+		.catch((err) => {
+			const body = $("#adminBody");
+			if (body) body.textContent = `Could not load admin stats: ${err.message}`;
+		});
+}
+
 const POLICY_CONTENT = {
 	terms: {
 		title: "Terms and Responsible Use",
@@ -1745,7 +1956,8 @@ const POLICY_CONTENT = {
 				<li>You can revoke tokens from Connect. Revoked tokens stop future access for that connection.</li>
 				<li>Do not use UML for abuse, unsafe automation, credential theft, surveillance, harassment, malware, or illegal activity.</li>
 				<li>Avoid sensitive, regulated, or high-risk data unless you have confirmed UML is appropriate for that use.</li>
-			</ul>`,
+			</ul>
+			<p><a href="/terms" onclick="closePolicyModal(); showLegal('terms', event)">Read the full Terms of Service &rarr;</a></p>`,
 	},
 	privacy: {
 		title: "Privacy and Memory Controls",
@@ -1756,7 +1968,8 @@ const POLICY_CONTENT = {
 				<li>Third-party tools may send UML messages or receive recalled context when you connect them. Review those tools' own policies.</li>
 				<li>Reset memory currently deletes saved memory rows for the selected account/scope, including pages, nodes, slices, events, edges, candidates, receipts, source packets, jobs, profiles, suppressions, checkpoints, and related vectors where available. It does not delete your account.</li>
 				<li>Token secrets and full MCP URLs are shown only once where supported. Token rows later show masked identifiers and revoke status.</li>
-			</ul>`,
+			</ul>
+			<p><a href="/privacy" onclick="closePolicyModal(); showLegal('privacy', event)">Read the full Privacy Policy &rarr;</a></p>`,
 	},
 	support: {
 		title: "Support and Reports",
@@ -1818,8 +2031,8 @@ function viewSettings(v) {
 			<div class="section-actions"><button class="ghost mini" onclick="setView('rules')">Capture Rules</button>${candidateCount() ? `<button class="ghost mini" onclick="setView('candidates')">Open Review Queue</button>` : `<button class="ghost mini" disabled>No pending candidates</button>`}</div>
 		</div>
 		<div class="action-box settings-section"><h3>Data &amp; Privacy</h3>
-			<div class="help">You own your account memory. UML does not sell user data or use memory for unrelated purposes. Connected tools are third-party services and may send or receive context through tokens you create.</div>
-			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy details</button></div>
+			<div class="help">You own your account memory. UML does not sell user data, does not train on it, and does not use it for unrelated purposes. Export everything as JSON any time.</div>
+			<div class="section-actions"><button class="ghost mini" onclick="downloadExport()">Export my data</button><button class="ghost mini" onclick="showLegal('privacy', event)">Privacy Policy</button><button class="ghost mini" onclick="showLegal('terms', event)">Terms</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Support</h3>
 			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
@@ -3280,6 +3493,12 @@ async function logoutAllNow() {
 
 async function initShell() {
 	const mode = routeMode();
+	if (mode === "terms" || mode === "privacy") {
+		setMode("public");
+		showLegal(mode, { push: false });
+		refreshMe();
+		return;
+	}
 	await refreshMe();
 	if (S.me?.user?.id) {
 		S.userId = S.me.user.id;

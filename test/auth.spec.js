@@ -39,7 +39,7 @@ function cookieFrom(res) {
 
 async function signupAccount(prefix = "user") {
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`;
-	const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: prefix });
+	const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: prefix, acceptTerms: true });
 	expect(res.status).toBe(201);
 	const body = await res.json();
 	return { email, user: body.user, cookie: cookieFrom(res), body };
@@ -72,9 +72,52 @@ describe("email/password auth", () => {
 
 	it("duplicate signup fails with safe account creation copy", async () => {
 		const { email } = await signupAccount("duplicate");
-		const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: "duplicate" });
+		const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: "duplicate", acceptTerms: true });
 		expect(res.status).toBe(409);
 		expect(await res.json()).toEqual({ error: "Could not create account. Please try again." });
+	});
+
+	it("signup without affirmative consent is refused and records nothing", async () => {
+		const email = `consent-${crypto.randomUUID()}@example.com`;
+		const res = await jsonRequest("/auth/signup", { email, password: "correct-horse", name: "consent" });
+		expect(res.status).toBe(400);
+		expect((await res.json()).error).toMatch(/accept the Terms/i);
+		const row = await env.DB.prepare("SELECT id FROM users WHERE email_normalized = ?").bind(email.toLowerCase()).first();
+		expect(row).toBeNull();
+	});
+
+	it("signup records the consent timestamp", async () => {
+		const { user } = await signupAccount("consent-recorded");
+		const row = await env.DB.prepare("SELECT terms_accepted_at FROM users WHERE id = ?").bind(user.id).first();
+		expect(Number(row.terms_accepted_at)).toBeGreaterThan(0);
+	});
+
+	it("exports the account's data as a JSON attachment", async () => {
+		const { user, cookie } = await signupAccount("export");
+		await insertNode(user.id, `node-export-${user.id.slice(-6)}`, "Export Probe");
+		const res = await request("/v1/export", { headers: { cookie } });
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-disposition")).toContain("uml-export-");
+		const body = await res.json();
+		expect(body.format).toBe("uml-export");
+		expect(body.nodes.map((n) => n.label)).toContain("Export Probe");
+		expect(body.memory_rules).toBeDefined();
+	});
+
+	it("admin stats route is role-gated", async () => {
+		const { user, cookie } = await signupAccount("admin-gate");
+		const denied = await request("/v1/admin/stats", { headers: { cookie } });
+		expect(denied.status).toBe(403);
+		const anon = await request("/v1/admin/stats");
+		expect(anon.status).toBe(401);
+
+		await env.DB.prepare("UPDATE users SET role = 'admin' WHERE id = ?").bind(user.id).run();
+		const allowed = await request("/v1/admin/stats", { headers: { cookie } });
+		expect(allowed.status).toBe(200);
+		const stats = await allowed.json();
+		expect(stats.users).toBeGreaterThanOrEqual(1);
+		expect(stats.totals).toBeDefined();
+		expect(Array.isArray(stats.top_users)).toBe(true);
 	});
 
 	it("login succeeds with the correct password and fails generically with the wrong password", async () => {
@@ -352,8 +395,8 @@ describe("product shell routes", () => {
 		expect(html).toContain("Backend is the authority, not the LLM.");
 		expect(html).toContain("When UML is connected through an MCP-capable AI client");
 		expect(html).toContain("Privacy Policy");
-		expect(html).toContain("Terms &amp; Conditions");
-		expect(html).toContain("Support");
+		expect(html).toContain("Terms of Service");
+		expect(html).toContain("Open source &middot; Apache 2.0");
 		expect(html).toContain("User memory belongs to the account that created it.");
 		expect(html).toContain("you can revoke them from Connect");
 		expect(html).toContain("Avoid sensitive or regulated data");

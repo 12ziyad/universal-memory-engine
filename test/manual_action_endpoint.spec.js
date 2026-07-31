@@ -28,6 +28,7 @@ async function signup(prefix) {
 		email: `${prefix}-${crypto.randomUUID()}@example.com`,
 		password: "correct-horse",
 		name: prefix,
+		acceptTerms: true,
 	});
 	expect(response.status).toBe(201);
 	const body = await response.json();
