@@ -205,6 +205,10 @@
 	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 	.action-box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
 	.stat-big { font-size: 26px; font-weight: 700; margin: 4px 0 8px; }
+	.spark { display: flex; align-items: flex-end; gap: 6px; height: 110px; }
+	.spark-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 6px; }
+	.spark-bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #58a6ff, #2b6cb0); min-height: 2px; }
+	.spark-col span { font-size: 11px; color: var(--muted); }
 	.onboard-card { border-color: rgba(132,233,255,.35); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
@@ -828,13 +832,11 @@
 
 	<div class="content">
 		<div class="tabs" id="tabs">
-			<button class="tab active" data-view="overview">Overview</button>
-			<button class="tab" data-view="memory">Memory</button>
+			<button class="tab active" data-view="overview">Home</button>
+			<button class="tab" data-view="memory">Memories<span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="graph">Graph</button>
-			<button class="tab review-tab" data-view="candidates" data-review-tab>Review <span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="connect">Connect</button>
-			<button class="tab" data-view="receipts">Receipts<span id="receiptsBadge" class="tab-badge" hidden></span></button>
-			<button class="tab" data-view="rules">Rules</button>
+			<button class="tab" data-view="receipts">History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<button class="tab" data-view="settings">Settings</button>
 			<button class="tab" data-view="admin" hidden>Admin</button>
 			<button class="tab dev-only" data-view="saves">Saves</button>
@@ -1295,13 +1297,11 @@ function candidateCount() {
 function updateReviewVisibility() {
 	const count = candidateCount();
 	const hidden = count === 0;
-	const tab = document.querySelector("[data-review-tab]");
-	if (tab) {
-		tab.hidden = hidden;
-		tab.classList.toggle("review-hidden", hidden);
-		const countEl = $("#reviewTabCount");
-		if (countEl) countEl.textContent = count ? `(${count})` : "";
-	}
+	// Review is no longer its own tab — the pending count rides on Memories,
+	// where the suggestions are reviewed inline.
+	const countEl = $("#reviewTabCount");
+	if (countEl) countEl.textContent = count ? ` (${count})` : "";
+	if (hidden && S.showSuggestions) S.showSuggestions = false;
 	const side = $("#candidateSidebarSection");
 	if (side) {
 		side.hidden = hidden;
@@ -1428,11 +1428,15 @@ function renderCandidates() {
 }
 
 /* ---------------- views ---------------- */
+// Tabs people actually navigate. "candidates" and "rules" stopped being
+// top-level ideas — they now live inside Memories and Settings — but old links
+// and bookmarks must keep working, so they resolve to their new home.
+const VIEW_ALIASES = { candidates: "memory", rules: "settings" };
+
 function setView(v, { updateHash = true } = {}) {
 	let redirected = false;
-	if (v === "candidates" && candidateCount() === 0) {
-		toast("No pending candidates to review.");
-		v = "overview";
+	if (VIEW_ALIASES[v]) {
+		v = VIEW_ALIASES[v];
 		redirected = true;
 	}
 	S.view = v;
@@ -1445,7 +1449,7 @@ function setView(v, { updateHash = true } = {}) {
 
 function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
-	if (!S.data && !["memory","connect","settings","rules","receipts"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your UML memory...</div>`; return; }
+	if (!S.data && !["memory","connect","settings","rules","receipts"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -1502,7 +1506,7 @@ function viewOverview(v) {
 	const recalls30 = recent.filter((r) => r.source === "recall").length;
 	wrap.innerHTML = onboarding + `
 		<div class="box" style="max-width:980px">
-			<h3>Overview</h3>
+			<h3>Home</h3>
 			<div class="help">Welcome, ${esc(name)}. UML is your private structured memory graph for AI tools, agents, apps, docs, events, workflows, and SDK integrations.</div>
 			<div class="help" style="margin-top:7px">${empty ? "Your graph is empty. Connect a tool or save a memory to begin." : "Your memory graph has active structured context ready for bounded recall."}</div>
 			<div class="stats" style="margin-top:12px">
@@ -1520,8 +1524,39 @@ function viewOverview(v) {
 			<div class="action-box"><h3>Recalls (30 days)</h3><div class="stat-big">${recalls30}</div><div class="help">Times a tool looked something up from your memory.</div></div>
 			<div class="action-box"><h3>Connections</h3><div class="stat-big">${S.tokens.length}</div><div class="help">Active private links. Create, rotate, or revoke them in Connect.</div></div>
 			<div class="action-box"><h3>Latest activity</h3><div class="help">${S.receipts[0] ? `${esc(S.receipts[0].source || "save")} · ${fmtDate(S.receipts[0].created_at)}<br/>${esc(String(S.receipts[0].summary || "").slice(0, 140))}` : "No activity yet — save your first memory to start."}</div></div>
+		</div>
+		<div class="box" style="max-width:980px"><h3>Last 14 days</h3>
+			<div class="help">Days you saved something, from your own history.</div>
+			${sparkline14(S.receipts || [])}
 		</div>`;
 	v.appendChild(wrap);
+}
+
+/** Tiny dependency-free bar chart of saves per day over the last 14 days. */
+function sparkline14(receipts) {
+	const days = [];
+	for (let i = 13; i >= 0; i--) {
+		const d = new Date(Date.now() - i * 86400000);
+		days.push(d.toISOString().slice(0, 10));
+	}
+	const counts = new Map(days.map((d) => [d, 0]));
+	for (const r of receipts) {
+		if (r.source === "recall") continue;
+		const day = new Date(Number(r.created_at)).toISOString().slice(0, 10);
+		if (counts.has(day)) counts.set(day, counts.get(day) + 1);
+	}
+	const max = Math.max(1, ...counts.values());
+	const total = [...counts.values()].reduce((a, b) => a + b, 0);
+	if (!total) return `<div class="help" style="margin-top:10px">Nothing saved in the last 14 days.</div>`;
+	const bars = days.map((day) => {
+		const n = counts.get(day);
+		const pct = Math.round((n / max) * 100);
+		return `<div class="spark-col" title="${day}: ${n} saved">
+			<div class="spark-bar" style="height:${Math.max(n ? 8 : 2, pct)}%"></div>
+			<span>${day.slice(8)}</span></div>`;
+	}).join("");
+	return `<div class="spark" style="margin-top:12px">${bars}</div>
+		<div class="help" style="margin-top:8px"><b>${total}</b> saved in the last 14 days · busiest day <b>${max}</b></div>`;
 }
 
 async function onboardCreateLink() {
@@ -1543,14 +1578,47 @@ function dismissOnboarding(event) {
 }
 
 function viewMemory(v) {
+	// "Review" is no longer a tab of its own — pending suggestions surface here,
+	// where the memories they would join already live.
+	const pending = candidateCount();
+	if (pending > 0) {
+		const strip = el("div", "box");
+		strip.style.maxWidth = "980px";
+		strip.style.borderColor = "rgba(242,204,96,.35)";
+		strip.innerHTML = `<h3>${pending} suggestion${pending === 1 ? "" : "s"} waiting for you</h3>
+			<div class="help">Things UML noticed but isn't sure about. Keep the good ones, drop the rest.</div>
+			<div style="margin-top:10px"><button onclick="openSuggestions()">Review ${pending === 1 ? "it" : "them"}</button></div>`;
+		v.appendChild(strip);
+	}
+	viewMemoryMain(v);
+}
+
+function openSuggestions() {
+	S.showSuggestions = true;
+	renderView();
+}
+
+function closeSuggestions() {
+	S.showSuggestions = false;
+	renderView();
+}
+
+function viewMemoryMain(v) {
+	if (S.showSuggestions) {
+		const back = el("div");
+		back.innerHTML = `<div style="margin-bottom:12px"><button class="ghost mini" onclick="closeSuggestions()">← Back to memories</button></div>`;
+		v.appendChild(back);
+		viewCandidates(v);
+		return;
+	}
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
 	const pages = filteredPages();
 	const nodes = filteredNodes();
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="box" style="max-width:980px">
-			<h3>Memory</h3>
-			<div class="help">Search, save, and recall structured UML memory from one place.</div>
+			<h3>Your memories</h3>
+			<div class="help">Everything UML remembers about you, in one place.</div>
 			<div class="stats" style="margin-top:12px">
 				${[["pages",s.pages||0],["nodes",s.nodes||0],["slices",s.slices||0],["events",s.events||0],["edges",s.edges||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
 			</div>
@@ -1558,20 +1626,20 @@ function viewMemory(v) {
 		</div>
 		<div class="panel-grid">
 			<div class="action-box">
-				<h3>Save memory</h3>
-				<div class="help" style="margin-bottom:10px">Save a durable fact, rule, event, or project note.</div>
+				<h3>Save a memory</h3>
+				<div class="help" style="margin-bottom:10px">Something worth remembering — a fact, a plan, a preference.</div>
 				<textarea id="factText" placeholder="Example: The release checklist requires a receipt for every write path."></textarea>
 				<div style="margin-top:10px"><button onclick="saveFactFromForm()">Save memory</button></div>
 			</div>
 			<div class="action-box">
-				<h3>Collect context</h3>
-				<div class="help" style="margin-bottom:10px">Paste notes, a document excerpt, a tool output, or a short transcript.</div>
+				<h3>Save from a chat or notes</h3>
+				<div class="help" style="margin-bottom:10px">Paste a conversation, notes, or anything you want remembered.</div>
 				<textarea id="conversationText" placeholder="Paste useful context. One line per item is fine."></textarea>
 				<div style="margin-top:10px"><button onclick="saveConversationFromForm()">Collect context</button></div>
 			</div>
 			<div class="action-box">
-				<h3>Recall / search</h3>
-				<div class="help" style="margin-bottom:10px">Ask UML for bounded, prompt-ready context.</div>
+				<h3>Search your memories</h3>
+				<div class="help" style="margin-bottom:10px">Find what UML already knows.</div>
 				<input id="recallQuery" placeholder="Search or ask your memory..." onkeydown="if(event.key==='Enter') recallFromForm()" />
 				<div style="margin-top:10px"><button onclick="recallFromForm()">Recall</button></div>
 				<div id="recallResults" style="margin-top:10px"></div>
@@ -1900,8 +1968,8 @@ function viewReceipts(v) {
 	markReceiptsSeen();
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box" style="max-width:920px">
-		<h3>Receipts</h3>
-		<div class="help">Receipts show what UML saved, updated, or ignored with source and timestamp.</div>
+		<h3>History</h3>
+		<div class="help">A plain record of everything UML saved, updated, or skipped — and when.</div>
 	</div>`;
 	if (!S.receipts.length) {
 		wrap.appendChild(el("div","empty","Receipts will show what UML saved, updated, or ignored — with source and timestamp."));
@@ -1977,8 +2045,8 @@ function renderRulesSummary(rules) {
 
 function viewRules(v) {
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:920px"><h3>Rules</h3>
-		<div class="help">Control what becomes memory. Rules apply to every save door — MCP tools, /v1/save, /v1/ingest, and /v1/turn. Excludes always win over includes.</div>
+	wrap.innerHTML = `<div class="box" style="max-width:920px"><h3>What to remember</h3>
+		<div class="help">Decide what UML should and shouldn’t remember. This applies everywhere — every connected AI tool and app. “Never save” always wins.</div>
 		<div id="rules-active" class="help" style="margin-top:6px;font-style:italic">Loading current rules…</div></div>`;
 	const form = el("div","action-box");
 	form.style.maxWidth = "920px";
@@ -2027,9 +2095,9 @@ function viewRules(v) {
 function viewCandidates(v) {
 	const cands = S.candidates || [];
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Candidate Review</h3><div class="help">Candidates are only weak or unclear memory signals. Promote clear ones into durable graph-visible memory, or reject/suppress noise.</div></div>`;
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Suggestions to review</h3><div class="help">Things UML noticed but isn’t sure about yet. Keep the ones worth remembering, drop the rest.</div></div>`;
 	if (!cands.length) {
-		wrap.appendChild(el("div","empty","No pending candidates."));
+		wrap.appendChild(el("div","empty","Nothing waiting for you."));
 		v.appendChild(wrap);
 		return;
 	}
@@ -2802,6 +2870,16 @@ function closePolicyModal() {
 }
 
 function viewSettings(v) {
+	// "What to remember" (formerly the Rules tab) now lives in Settings: it is a
+	// preference, not a place people visit.
+	viewSettingsMain(v);
+	const rulesWrap = el("div");
+	rulesWrap.innerHTML = `<h3 style="margin:22px 0 10px">What to remember</h3>`;
+	v.appendChild(rulesWrap);
+	viewRules(v);
+}
+
+function viewSettingsMain(v) {
 	const u = S.me?.user || {};
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
 	const activeTokens = S.tokens.filter(t => !t.revoked_at && t.status !== "revoked").length;
@@ -3786,7 +3864,7 @@ function drawGraph() {
 			const id = p?.nodes?.[0];
 			if (id != null) {
 				if (String(id).startsWith("hull:")) return;
-				if (String(id).startsWith("candidate:")) return toast("Candidate nodes are preview-only. Open Candidate Review to promote or reject them.");
+				if (String(id).startsWith("candidate:")) return toast("This is a suggestion, not a saved memory yet. Open Memories to keep or drop it.");
 				return select(id);
 			}
 			// Empty-space click: select the cluster under the cursor (shows the

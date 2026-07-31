@@ -106,10 +106,16 @@ describe("dashboard script", () => {
 	});
 
 	it("has one normal dashboard nav with required tabs and hidden dev credentials", () => {
-		for (const view of ["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings"]) {
+		for (const view of ["overview", "memory", "graph", "connect", "receipts", "settings"]) {
 			expect(html.match(new RegExp(`data-view="${view}"`, "g")) || []).toHaveLength(1);
 		}
-		for (const oldView of ["home", "memories", "save", "recall", "help", "profile"]) {
+		// Candidates and Rules stopped being top-level tabs; they live inside
+		// Memories and Settings, but old deep links must still resolve.
+		for (const merged of ["candidates", "rules"]) {
+			expect(html).not.toContain(`class="tab" data-view="${merged}"`);
+		}
+		expect(html).toContain("const VIEW_ALIASES = { candidates: \"memory\", rules: \"settings\" }");
+		for (const oldView of ["save", "recall", "help", "profile"]) {
 			expect(html).not.toContain(`data-view="${oldView}"`);
 		}
 		expect(html).toContain('id="userId" class="dev-only"');
@@ -118,17 +124,17 @@ describe("dashboard script", () => {
 		expect(html).not.toContain('id="logoutBtn"');
 	});
 
-	it("keeps Memory, Review, Connect, Receipts, Rules, and Settings in the new IA", () => {
+	it("keeps Memories, suggestions, Connect, History, and Settings in the simplified IA", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(script).toContain("function viewOverview(");
 		expect(script).toContain("function viewMemory(");
-		expect(script).toContain("Candidate Review");
+		expect(script).toContain("Suggestions to review");
 		expect(script).toContain("Promote to Node");
 		expect(script).toContain("Ignore Similar");
-		expect(script).toContain("Search, save, and recall structured UML memory from one place.");
-		expect(script).toContain("Save memory");
-		expect(script).toContain("Collect context");
-		expect(script).toContain("Recall / search");
+		expect(script).toContain("Everything UML remembers about you, in one place.");
+		expect(script).toContain("Save a memory");
+		expect(script).toContain("Save from a chat or notes");
+		expect(script).toContain("Search your memories");
 		expect(script).toContain("Connect UML");
 		expect(script).toContain("Create a named private connection for each tool or app.");
 		expect(script).toContain("Connection name");
@@ -143,7 +149,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("Full secret was shown only once");
 		expect(script).toContain("Authorization: Bearer uml_live_xxxxx");
 		expect(script).toContain("API token usage");
-		expect(script).toContain("Receipts show what UML saved, updated, or ignored");
+		expect(script).toContain("A plain record of everything UML saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [
 			"Custom instructions",
@@ -163,17 +169,19 @@ describe("dashboard script", () => {
 
 	it("renders review mode only when candidates exist", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		expect(html).toContain('data-review-tab');
+		expect(html).toContain('id="reviewTabCount"');
 		expect(html).toContain('id="candidateSidebarSection"');
+		expect(script).toContain("function openSuggestions()");
+		expect(script).toContain("suggestion${pending === 1 ? \"\" : \"s\"} waiting for you");
 		expect(script).toContain("function candidateItems()");
 		expect(script).toContain("function updateReviewVisibility()");
-		expect(script).toContain('tab.hidden = hidden');
+		expect(script).toContain("if (hidden && S.showSuggestions) S.showSuggestions = false;");
 		expect(script).toContain('if (hidden && S.view === "candidates")');
 		expect(script).toContain('history.replaceState(null, "", "/app#overview")');
 		expect(script).toContain("let redirected = false;");
 		expect(script).toContain("redirected = true;");
 		expect(script).toContain("(updateHash || redirected)");
-		expect(script).toContain('No pending candidates to review.');
+		expect(script).toContain('Nothing waiting for you.');
 	});
 
 	it("has production legal, privacy, and support modal content", () => {
