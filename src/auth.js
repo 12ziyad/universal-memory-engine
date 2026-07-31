@@ -373,6 +373,27 @@ async function recordLoginEvent(env, request, userId, outcome, email = null) {
 	}
 }
 
+/**
+ * Change (or, for Google-only accounts, set) the password while logged in.
+ * The active session proves identity; existing passwords must be re-entered.
+ */
+export async function changePassword(env, request, body) {
+	const auth = await getSessionUser(env, request);
+	if (!auth) return { error: "unauthorized", status: 401 };
+	const newPassword = String(body?.newPassword ?? "");
+	if (newPassword.length < 8) return { error: "New password must be at least 8 characters", status: 400 };
+	const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.userId).first();
+	if (!row) return { error: "unauthorized", status: 401 };
+	if (row.password_hash && !(await verifyPassword(String(body?.currentPassword ?? ""), row.password_hash))) {
+		return { error: "Current password is incorrect", status: 400 };
+	}
+	const password = await hashPassword(newPassword);
+	await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?")
+		.bind(password.passwordHash, password.passwordSalt, now(), row.id).run();
+	await recordLoginEvent(env, request, row.id, row.password_hash ? "password_changed" : "password_set");
+	return { ok: true, status: 200 };
+}
+
 export async function logout(env, request) {
 	const token = parseCookies(request).get(SESSION_COOKIE);
 	if (token) {

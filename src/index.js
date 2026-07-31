@@ -16,6 +16,7 @@ import {
 	archiveObject,
 	cleanJunkMemories,
 	clearFailedReceipts,
+	deleteAccountCompletely,
 	deleteAllMemories,
 	deleteLastExtraction,
 	deleteObject,
@@ -34,6 +35,7 @@ import {
 } from "./pipeline/commands.js";
 import { getMemoryRules, saveMemoryRules } from "./pipeline/rules.js";
 import {
+	changePassword,
 	clearSessionCookie,
 	createConnectionToken,
 	getSessionUser,
@@ -471,6 +473,96 @@ const routes = {
 		return json(res);
 	},
 
+	"POST /v1/beacon": async (request, env) => {
+		// First-party visit counting: aggregate counters only — no cookies, no
+		// IPs, no identifiers stored. Public by design; lightly rate limited.
+		if (!(await allowRate(env.AUTH_LIMITER, `beacon:${clientIp(request)}`))) return json({ ok: true });
+		const body = await request.json().catch(() => ({}));
+		const kind = ["landing", "app", "legal"].includes(body.kind) ? body.kind : "other";
+		const day = new Date().toISOString().slice(0, 10);
+		try {
+			await env.DB.prepare(
+				`INSERT INTO site_visits (day, kind, count) VALUES (?, ?, 1)
+				 ON CONFLICT(day, kind) DO UPDATE SET count = count + 1`,
+			).bind(day, kind).run();
+		} catch (error) {
+			console.warn("beacon write failed:", error?.message ?? error);
+		}
+		return json({ ok: true });
+	},
+
+	"POST /auth/password": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		const body = await request.json().catch(() => ({}));
+		const result = await changePassword(env, request, body);
+		if (result.error) return json({ error: result.error }, result.status);
+		return json({ ok: true });
+	},
+
+	"GET /v1/admin/users": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const query = String(new URL(request.url).searchParams.get("query") ?? "").trim().toLocaleLowerCase("en-US");
+		const like = `%${query.replace(/[%_]/g, "")}%`;
+		const { results } = await env.DB.prepare(
+			`SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, u.terms_accepted_at,
+				u.email_verified_at, (u.google_sub IS NOT NULL) AS google_linked,
+				(SELECT COUNT(*) FROM nodes n WHERE n.user_id = u.id AND n.deleted_at IS NULL) AS nodes,
+				(SELECT COUNT(*) FROM memory_pages p WHERE p.user_id = u.id AND p.deleted_at IS NULL) AS pages,
+				(SELECT COUNT(*) FROM receipts r WHERE r.user_id = u.id) AS receipts,
+				(SELECT COUNT(*) FROM connection_tokens t WHERE t.user_id = u.id AND t.revoked_at IS NULL) AS tokens,
+				(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
+			 FROM users u
+			 WHERE (? = '' OR lower(u.email) LIKE ? OR lower(COALESCE(u.name,'')) LIKE ?)
+			 ORDER BY u.created_at DESC LIMIT 100`,
+		).bind(query, like, like).all();
+		return json({ ok: true, users: results ?? [] });
+	},
+
+	"POST /v1/admin/users/action": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const body = await request.json().catch(() => ({}));
+		const targetId = String(body.userId ?? "").trim();
+		const action = String(body.action ?? "").trim();
+		if (!targetId) return json({ error: "userId is required" }, 400);
+		const target = await env.DB.prepare("SELECT id, email, role, status FROM users WHERE id = ?").bind(targetId).first();
+		if (!target) return json({ error: "user not found" }, 404);
+		// Lockout protection: the admin cannot delete or demote their own account.
+		if (target.id === auth.userId && ["delete", "demote", "disable"].includes(action)) {
+			return json({ error: "You cannot do that to your own admin account." }, 400);
+		}
+		const now = Date.now();
+		switch (action) {
+			case "disable":
+				await env.DB.batch([
+					env.DB.prepare("UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ?").bind(now, target.id),
+					env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id),
+				]);
+				return json({ ok: true, action, status: "disabled" });
+			case "enable":
+				await env.DB.prepare("UPDATE users SET status = 'active', updated_at = ? WHERE id = ?").bind(now, target.id).run();
+				return json({ ok: true, action, status: "active" });
+			case "revoke_sessions":
+				await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id).run();
+				return json({ ok: true, action });
+			case "promote":
+				await env.DB.prepare("UPDATE users SET role = 'admin', updated_at = ? WHERE id = ?").bind(now, target.id).run();
+				return json({ ok: true, action, role: "admin" });
+			case "demote":
+				await env.DB.prepare("UPDATE users SET role = 'user', updated_at = ? WHERE id = ?").bind(now, target.id).run();
+				return json({ ok: true, action, role: "user" });
+			case "delete": {
+				const result = await deleteAccountCompletely(env, target.id);
+				return json({ ok: true, action, deleted: result.deleted });
+			}
+			default:
+				return json({ error: "unknown action" }, 400);
+		}
+	},
+
 	"GET /v1/export": async (request, env) => {
 		// Data portability: everything the user owns, one JSON download.
 		const requestedUserId = new URL(request.url).searchParams.get("userId");
@@ -505,7 +597,7 @@ const routes = {
 		const now = Date.now();
 		const dayMs = 24 * 60 * 60 * 1000;
 		const since14 = now - 14 * dayMs;
-		const [users, verifiedUsers, sessionsActive, logins14, signups14, totals, topUsers] = await env.DB.batch([
+		const [users, verifiedUsers, sessionsActive, logins14, signups14, totals, topUsers, visits14, receipts14, failures, activity] = await env.DB.batch([
 			env.DB.prepare("SELECT COUNT(*) AS n FROM users"),
 			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE terms_accepted_at IS NOT NULL"),
 			env.DB.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE revoked_at IS NULL AND expires_at > ?").bind(now),
@@ -533,7 +625,26 @@ const routes = {
 					(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 				 FROM users u ORDER BY receipts DESC LIMIT 20`,
 			),
+			env.DB.prepare("SELECT day, kind, count FROM site_visits WHERE day >= date('now', '-14 days') ORDER BY day"),
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day, source, COUNT(*) AS n
+				 FROM receipts WHERE created_at > ? GROUP BY day, source ORDER BY day`,
+			).bind(since14),
+			env.DB.prepare(
+				`SELECT er.id, er.tool_name, er.status, er.error, er.created_at, u.email
+				 FROM extraction_runs er LEFT JOIN users u ON u.id = er.user_id
+				 WHERE er.status = 'failed' ORDER BY er.created_at DESC LIMIT 12`,
+			),
+			env.DB.prepare(
+				`SELECT r.created_at, r.source, r.summary, u.email
+				 FROM receipts r LEFT JOIN users u ON u.id = r.user_id
+				 WHERE COALESCE(r.source, '') != 'recall'
+				 ORDER BY r.created_at DESC LIMIT 30`,
+			),
 		]);
+		const runStatuses = await env.DB.prepare(
+			"SELECT status, COUNT(*) AS n FROM extraction_runs WHERE created_at > ? GROUP BY status",
+		).bind(since14).all().catch(() => ({ results: [] }));
 		return json({
 			ok: true,
 			generated_at: now,
@@ -542,6 +653,11 @@ const routes = {
 			active_sessions_users: Number(sessionsActive.results?.[0]?.n ?? 0),
 			logins_by_day: logins14.results ?? [],
 			signups_by_day: signups14.results ?? [],
+			visits_by_day: visits14.results ?? [],
+			receipts_by_day: receipts14.results ?? [],
+			run_statuses: runStatuses.results ?? [],
+			recent_failures: failures.results ?? [],
+			activity: activity.results ?? [],
 			totals: totals.results?.[0] ?? {},
 			top_users: topUsers.results ?? [],
 		});

@@ -161,6 +161,13 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 /** The one-line human string a save tool returns. */
 export function formatReceipt(receipt) {
 	if (!receipt) return "Captured.";
+	// Recall receipts are lookups, not saves — never phrase them as "Saved: 0".
+	if (receipt.outcome === "recalled") {
+		return "Memory lookup completed — recalled context was returned to the caller.";
+	}
+	if (receipt.outcome === "no_recall") {
+		return "Memory lookup skipped — the question didn't need personal context.";
+	}
 	if (receipt.outcome === "accepted") {
 		return `Accepted: ${receipt.reason || "memory extraction is processing"}.`;
 	}

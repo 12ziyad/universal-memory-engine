@@ -396,6 +396,23 @@ export async function archiveObject(env, userId, { kind, id }) {
 	return { archived: false, reason: "unsupported kind" };
 }
 
+/**
+ * Full account teardown for the admin console and account-deletion requests:
+ * all memory rows (via deleteAllMemories), then auth rows, then the user row.
+ */
+export async function deleteAccountCompletely(env, userId) {
+	const memory = await deleteAllMemories(env, userId, "DELETE ALL");
+	for (const table of ["sessions", "connection_tokens", "login_events"]) {
+		try {
+			await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId).run();
+		} catch (error) {
+			console.warn(`account teardown: ${table} delete failed:`, error?.message ?? error);
+		}
+	}
+	await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
+	return { deleted: true, memory };
+}
+
 export async function deleteAllMemories(env, userId, confirm) {
 	if (confirm !== "DELETE ALL") {
 		return {
