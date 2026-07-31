@@ -2573,8 +2573,12 @@ function renderAdminBody() {
 			<div class="help" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px">${esc(String(row.error || "").slice(0, 300))}</div>
 		</div>`).join("") || `<div class="help">No failed runs — healthy.</div>`}
 	</div>
+	<div class="box" style="margin-top:14px"><h3>Benign browser noise (14 days)</h3>
+		<div class="help">Understood, harmless, and handled — listed separately so it never buries a real failure. Also a useful signal: a high autoplay count means many visitors see the poster instead of the reel.</div>
+		${(stats.noise_summary || []).map((row) => `<div class="kv">${esc(row.kind)}: <b>${row.n}</b> <span class="help">· last ${ago(row.last_at)}</span></div>`).join("") || `<div class="help">None recorded.</div>`}
+	</div>
 	<div class="box" style="margin-top:14px"><h3>Reported errors</h3>
-		<div class="help">Auto-captured from users' browsers and the server. Users only saw a friendly message.</div>
+		<div class="help">Real failures only — benign browser noise is excluded above. Users only ever saw a friendly message.</div>
 		${(stats.error_reports || []).map((row) => `<div class="action-box" style="margin-bottom:8px">
 			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
 				<b>${esc(row.side || "client")} · ${esc(row.scope || "")}</b>

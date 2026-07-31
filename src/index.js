@@ -666,11 +666,26 @@ const routes = {
 		const runStatuses = await env.DB.prepare(
 			"SELECT status, COUNT(*) AS n FROM extraction_runs WHERE created_at > ? GROUP BY status",
 		).bind(since14).all().catch(() => ({ results: [] }));
+		// Real failures only. Benign browser noise (blocked autoplay, extension
+		// "Script error.", ResizeObserver) is aggregated separately so it can
+		// never bury an actual problem during a traffic spike.
 		const errorReports = await env.DB.prepare(
 			`SELECT er.side, er.scope, er.message, er.created_at, u.email
 			 FROM error_reports er LEFT JOIN users u ON u.id = er.user_id
+			 WHERE COALESCE(er.scope, '') NOT LIKE 'noise:%'
 			 ORDER BY er.created_at DESC LIMIT 20`,
 		).all().catch(() => ({ results: [] }));
+		const noiseSummary = await env.DB.prepare(
+			`SELECT CASE
+				WHEN message LIKE '%play method is not allowed%' OR message LIKE '%play()%' THEN 'autoplay blocked (browser preference)'
+				WHEN message LIKE 'Script error.%' THEN 'cross-origin script (usually a browser extension)'
+				WHEN message LIKE '%ResizeObserver loop%' THEN 'ResizeObserver loop notice'
+				ELSE 'other benign' END AS kind,
+				COUNT(*) AS n, MAX(created_at) AS last_at
+			 FROM error_reports
+			 WHERE scope LIKE 'noise:%' AND created_at > ?
+			 GROUP BY kind ORDER BY n DESC`,
+		).bind(since14).all().catch(() => ({ results: [] }));
 		return json({
 			ok: true,
 			generated_at: now,
@@ -683,6 +698,7 @@ const routes = {
 			receipts_by_day: receipts14.results ?? [],
 			run_statuses: runStatuses.results ?? [],
 			error_reports: errorReports.results ?? [],
+			noise_summary: noiseSummary.results ?? [],
 			recent_failures: failures.results ?? [],
 			activity: activity.results ?? [],
 			totals: totals.results?.[0] ?? {},
