@@ -9,7 +9,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("function initReveal()");
 		expect(script).toContain("function renderAuth(");
 		expect(script).toContain("function hashView()");
-		expect(script).toContain('APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin"])');
+		expect(script).toContain('APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys"])');
 		expect(script).toContain("function viewCandidates(");
 		expect(script).toContain("/v1/candidates");
 		expect(script).toContain("function visibleGraphData()");
@@ -106,7 +106,7 @@ describe("dashboard script", () => {
 	});
 
 	it("has one normal dashboard nav with required tabs and hidden dev credentials", () => {
-		for (const view of ["overview", "memory", "graph", "connect", "receipts", "settings"]) {
+		for (const view of ["overview", "memory", "graph", "install", "playground", "keys", "receipts", "settings"]) {
 			expect(html.match(new RegExp(`data-view="${view}"`, "g")) || []).toHaveLength(1);
 		}
 		// Candidates and Rules stopped being top-level tabs; they live inside
@@ -114,7 +114,12 @@ describe("dashboard script", () => {
 		for (const merged of ["candidates", "rules"]) {
 			expect(html).not.toContain(`class="tab" data-view="${merged}"`);
 		}
-		expect(html).toContain("const VIEW_ALIASES = { candidates: \"memory\", rules: \"settings\" }");
+		expect(html).toContain("const VIEW_ALIASES = { candidates: \"memory\", rules: \"settings\", connect: \"install\" }");
+		// Connect stopped being a tab; the alias keeps old deep links working.
+		expect(html).not.toContain('class="tab" data-view="connect"');
+		// Setup/Activity rail sections and the external Docs link.
+		expect(html).toContain('class="rail-label"');
+		expect(html).toContain('href="/docs/"');
 		for (const oldView of ["save", "recall", "help", "profile"]) {
 			expect(html).not.toContain(`data-view="${oldView}"`);
 		}

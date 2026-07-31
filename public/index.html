@@ -297,6 +297,11 @@
 		text-decoration: none; font-weight: 700; font-size: 15px; letter-spacing: .01em; }
 	.rail-brand .logo-mark { width: 24px; height: 24px; border-radius: 6px; }
 	.rail-sep { height: 1px; background: var(--border); margin: 10px 8px; }
+	.rail-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+		color: var(--faint); padding: 12px 10px 4px; }
+	.rail-label:first-child { padding-top: 2px; }
+	a.tab { text-decoration: none; }
+	.rail-doclink .ext { margin-left: auto; font-size: 11px; opacity: .6; }
 	.rail-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
 	.rail-toggle { display: none; background: transparent; color: var(--text); border: 1px solid var(--border); font-size: 15px; }
 	.detail { border-left: 1px solid var(--border); padding: 16px; }
@@ -878,12 +883,17 @@
 			<img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="" /> <span>Itsuki</span>
 		</a>
 		<nav class="tabs" id="tabs">
-			<button class="tab active" data-view="overview"><span class="ti">⌂</span>Home</button>
+			<div class="rail-label">Setup</div>
+			<button class="tab" data-view="install"><span class="ti">⚑</span>Get started</button>
+			<button class="tab" data-view="playground"><span class="ti">▷</span>Playground</button>
+			<button class="tab" data-view="keys"><span class="ti">⚿</span>API Keys</button>
+			<div class="rail-label">Activity</div>
+			<button class="tab active" data-view="overview"><span class="ti">◔</span>Dashboard</button>
 			<button class="tab" data-view="memory"><span class="ti">◈</span>Memories<span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="graph"><span class="ti">⁂</span>Graph</button>
-			<button class="tab" data-view="connect"><span class="ti">⚯</span>Connect</button>
 			<button class="tab" data-view="receipts"><span class="ti">≡</span>History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<div class="rail-sep"></div>
+			<a class="tab rail-doclink" href="/docs/" target="_blank" rel="noopener"><span class="ti">✧</span>Docs<span class="ext">↗</span></a>
 			<button class="tab" data-view="settings"><span class="ti">⚙</span>Settings</button>
 			<button class="tab" data-view="admin" hidden><span class="ti">◉</span>Admin</button>
 			<button class="tab dev-only" data-view="saves">Saves</button>
@@ -970,7 +980,7 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -1501,9 +1511,10 @@ function renderCandidates() {
 // Tabs people actually navigate. "candidates" and "rules" stopped being
 // top-level ideas — they now live inside Memories and Settings — but old links
 // and bookmarks must keep working, so they resolve to their new home.
-const VIEW_ALIASES = { candidates: "memory", rules: "settings" };
+const VIEW_ALIASES = { candidates: "memory", rules: "settings", connect: "install" };
 const VIEW_TITLES = {
-	overview: "Home", memory: "Memories", graph: "Graph", connect: "Connect",
+	overview: "Dashboard", memory: "Memories", graph: "Graph",
+	install: "Get started", playground: "Playground", keys: "API Keys",
 	receipts: "History", settings: "Settings", admin: "Admin",
 };
 
@@ -1541,6 +1552,9 @@ function renderView() {
 		graph: viewGraph,
 		candidates: viewCandidates,
 		connect: viewConnect,
+		install: viewInstall,
+		playground: viewPlayground,
+		keys: viewKeys,
 		receipts: viewReceipts,
 		rules: viewRules,
 		admin: viewAdmin,
@@ -2046,6 +2060,32 @@ function renderTokenList() {
 		if (action === "rotate") rotateConnection(id, button.dataset.tokenLabel || "", button.dataset.tokenType || "mcp");
 		if (action === "revoke") revokeToken(id);
 	};
+}
+
+// Placeholder platform views — replaced by the real Get started, Playground,
+// and API Keys screens in the next commits. They render, route, and deep-link
+// correctly so the IA ships whole.
+function viewInstall(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Get started</h3>
+		<div class="help">Connect ${PRODUCT.name} to your tools — SDK, MCP, or plugin. This screen is being upgraded; your existing setup guides live here.</div></div>`;
+	v.appendChild(wrap);
+	viewConnect(v);
+}
+
+function viewPlayground(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Playground</h3>
+		<div class="help">Try ${PRODUCT.name} live — add a memory, then search for it. Coming in the next update.</div></div>`;
+	v.appendChild(wrap);
+}
+
+function viewKeys(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>API Keys</h3>
+		<div class="help">Create and manage the keys your tools use to reach your memory.</div></div>`;
+	v.appendChild(wrap);
+	viewConnect(v);
 }
 
 function viewReceipts(v) {
@@ -4513,7 +4553,7 @@ $("#load").onclick = load;
 $("#copyMcp").onclick = () => { if (!S.userId||!S.key) return toast("Enter userId + key first", true); copyText(mcpUrl(), "MCP URL copied"); };
 $("#userId").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
-$("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t) setView(t.dataset.view); });
+$("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t && t.dataset.view) setView(t.dataset.view); });
 window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
 window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
