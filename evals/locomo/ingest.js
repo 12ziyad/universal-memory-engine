@@ -12,7 +12,7 @@
  */
 
 const path = require("node:path");
-const { post, sleep, loadDataset, sessionsOf, renderTurn, appendJsonl } = require("./lib.js");
+const { post, sleep, loadDataset, sessionsOf, renderTurn, appendJsonl, PACE_MS } = require("./lib.js");
 
 async function main() {
 	const convIndex = Number(process.argv[2]);
@@ -54,6 +54,9 @@ async function main() {
 				});
 			}
 			sent++;
+			// Pace ingest: stays under SAVE_LIMITER (60/min/user) and spreads
+			// background extraction so Workers AI never sees a burst.
+			await sleep(PACE_MS);
 			if (sent % 25 === 0) {
 				const rate = sent / ((Date.now() - startedAt) / 1000);
 				console.log(`[ingest] ${sent}/${totalTurns} turns (${rate.toFixed(1)}/s, ${failures} failures)`);

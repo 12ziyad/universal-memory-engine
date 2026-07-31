@@ -9,14 +9,14 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
-const { post, tokenF1, readJsonl, CATEGORY_NAMES } = require("./lib.js");
+const { postEval, tokenF1, readJsonl, CATEGORY_NAMES } = require("./lib.js");
 
 const JUDGE_SYSTEM = [
 	"You grade question-answering. Given a question, the gold answer, and a",
 	"model's answer, reply with exactly one word: CORRECT if the model's answer",
 	"conveys the same fact as the gold answer (wording may differ; partial dates",
 	"count if the stated part matches), otherwise WRONG. Reply 'I don't know' is",
-	"always WRONG.",
+	"always WRONG. /no_think",
 ].join(" ");
 
 async function main() {
@@ -39,7 +39,7 @@ async function main() {
 		const f1 = tokenF1(row.answer, row.gold);
 		let judge = null;
 		try {
-			const res = await post("/eval/llm", {
+			const res = await postEval("/eval/llm", {
 				messages: [
 					{ role: "system", content: JUDGE_SYSTEM },
 					{
@@ -47,7 +47,7 @@ async function main() {
 						content: `Question: ${row.question}\nGold answer: ${row.gold}\nModel answer: ${row.answer || "(empty)"}\nVerdict:`,
 					},
 				],
-				max_tokens: 8,
+				max_tokens: 200,
 				temperature: 0,
 			});
 			const verdict = String(res?.text ?? "").trim().toUpperCase();

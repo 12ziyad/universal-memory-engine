@@ -11,7 +11,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+// UML memory operations (/v1/turn, /v1/recall) can target production — local
+// wrangler dev has no working Vectorize binding, so recall only behaves like
+// the real product against a deployed worker. The answerer/judge door
+// (/eval/llm) stays on the local EVAL_MODE worker and never exists in prod.
 const BASE = process.env.UML_BASE || "http://127.0.0.1:8799";
+const EVAL_BASE = process.env.EVAL_BASE || "http://127.0.0.1:8799";
+const PACE_MS = Number(process.env.PACE_MS ?? 350);
 
 function apiKey() {
 	const devVars = fs.readFileSync(path.join(__dirname, "..", "..", ".dev.vars"), "utf8");
@@ -23,11 +29,11 @@ function apiKey() {
 const KEY = apiKey();
 
 /** POST with 429/5xx backoff. Returns parsed JSON; throws after 8 attempts. */
-async function post(route, body, { attempts = 8 } = {}) {
+async function post(route, body, { attempts = 8, base = BASE } = {}) {
 	let lastError;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
-			const res = await fetch(`${BASE}${route}`, {
+			const res = await fetch(`${base}${route}`, {
 				method: "POST",
 				headers: { "content-type": "application/json", "x-api-key": KEY },
 				body: JSON.stringify(body),
@@ -43,12 +49,17 @@ async function post(route, body, { attempts = 8 } = {}) {
 		} catch (error) {
 			lastError = error;
 			if (String(error?.cause?.code || error?.message).includes("ECONNREFUSED")) {
-				throw new Error(`UML worker not reachable at ${BASE} — start it with: npx wrangler dev --port 8799`);
+				throw new Error(`worker not reachable at ${base} — for /eval/llm start: npx wrangler dev --port 8799`);
 			}
 			await sleep(1500 * attempt);
 		}
 	}
 	throw lastError;
+}
+
+/** LLM calls go to the local EVAL_MODE worker, never production. */
+function postEval(route, body, options = {}) {
+	return post(route, body, { ...options, base: EVAL_BASE });
 }
 
 function sleep(ms) {
@@ -137,7 +148,10 @@ const CATEGORY_NAMES = { 1: "multi-hop", 2: "temporal", 3: "open-domain", 4: "si
 
 module.exports = {
 	BASE,
+	EVAL_BASE,
+	PACE_MS,
 	post,
+	postEval,
 	sleep,
 	loadDataset,
 	sessionsOf,

@@ -15,14 +15,14 @@
  */
 
 const path = require("node:path");
-const { post, loadDataset, appendJsonl, readJsonl } = require("./lib.js");
+const { post, postEval, loadDataset, appendJsonl, readJsonl } = require("./lib.js");
 
 const ANSWERER_SYSTEM = [
 	"You answer questions about a person using ONLY the memory context provided.",
 	"The context comes from a personal memory system. Be concise: answer with the",
 	"shortest phrase that fully answers the question (a name, a date, a short",
 	"phrase). Do not explain. If the context does not contain the answer, reply",
-	"exactly: I don't know.",
+	"exactly: I don't know. /no_think",
 ].join(" ");
 
 async function main() {
@@ -71,7 +71,7 @@ async function main() {
 		let answer = "";
 		let answerError = null;
 		try {
-			const llm = await post("/eval/llm", {
+			const llm = await postEval("/eval/llm", {
 				messages: [
 					{ role: "system", content: ANSWERER_SYSTEM },
 					{
@@ -81,7 +81,7 @@ async function main() {
 							: `Memory context: (no memory found)\n\nQuestion: ${qa.question}`,
 					},
 				],
-				max_tokens: 120,
+				max_tokens: 400,
 				temperature: 0,
 			});
 			answer = String(llm?.text ?? "").trim();

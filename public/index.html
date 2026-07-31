@@ -1009,6 +1009,7 @@ function startGoogle(event) {
 
 function renderAuth(mode = "login") {
 	const isSignup = mode === "signup";
+	if (isSignup) sendFunnelStep("signup_view");
 	const view = $("#authView");
 	view.innerHTML = `
 		<form class="auth-card" id="authForm">
@@ -1094,6 +1095,7 @@ async function submitAuth(mode) {
 		}
 		const body = await res.json().catch(() => ({}));
 		if (!res.ok) throw new Error(typeof body.error === "string" && body.error ? body.error : friendlyHttpError(res.status, body) || fallback);
+		if (mode === "signup") sendFunnelStep("signup_done");
 		S.me = body;
 		S.userId = body.user.id;
 		localStorage.setItem("uml_user", S.userId);
@@ -2137,7 +2139,7 @@ const LEGAL_PAGES = {
 			<h2>Summary at a glance</h2>
 			<ul>
 				<li><b>Who is responsible?</b> UML, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</li>
-				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write.</li>
+				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write. Operational account activity — sign-ins, save/recall counts, and errors your browser reports — is visible to the operator for support and abuse prevention; the content of your memories is not.</li>
 				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
 				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
 				<li><b>How long?</b> Until you delete it. Deletion is self-serve and immediate for memory; account deletion completes within 7 days of request.</li>
@@ -2255,13 +2257,27 @@ function closeLegal() {
 let visitBeaconSent = false;
 function sendVisitBeacon(kind) {
 	// One count per real page load; SPA re-routes (popstate) never double-count.
+	// Referrer is sent for aggregate source counting (domain only, dropped
+	// server-side after counting); webdriver flags automation for the bot filter.
 	if (visitBeaconSent) return;
 	visitBeaconSent = true;
 	try {
-		const payload = new Blob([JSON.stringify({ kind })], { type: "application/json" });
+		const body = JSON.stringify({
+			kind,
+			ref: document.referrer || "",
+			webdriver: navigator.webdriver === true,
+		});
+		const payload = new Blob([body], { type: "application/json" });
 		if (!navigator.sendBeacon || !navigator.sendBeacon("/v1/beacon", payload)) {
-			fetch("/v1/beacon", { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }) }).catch(() => {});
+			fetch("/v1/beacon", { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body }).catch(() => {});
 		}
+	} catch {}
+}
+
+function sendFunnelStep(step) {
+	// Aggregate funnel counter (signup_view / signup_done). Fire-and-forget.
+	try {
+		fetch("/v1/funnel", { method: "POST", keepalive: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ step }) }).catch(() => {});
 	} catch {}
 }
 
@@ -2438,6 +2454,39 @@ async function refreshAdminUsers(query = S.adminUserQuery || "") {
 	if ((S.adminTab || "overview") === "users") renderAdminBody();
 }
 
+async function toggleUserJourney(userId) {
+	// Operational timeline for one account: logins, usage counts, errors,
+	// tokens. Events and metadata only — memory content is never shown here.
+	const panel = $(`#journey-${userId}`);
+	if (!panel) return;
+	if (panel.style.display !== "none") { panel.style.display = "none"; return; }
+	panel.style.display = "block";
+	panel.innerHTML = `<div class="help">Loading journey…</div>`;
+	try {
+		let res;
+		try { res = await fetch(`/v1/admin/user-journey?id=${encodeURIComponent(userId)}`, { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		const journey = await res.json();
+		const loginRow = (row) => `<div class="kv">${ago(row.at)} — <b>${esc(row.detail || "login")}</b>${row.reason ? ` <span class="help">(${esc(row.reason)})</span>` : ""}</div>`;
+		const usageRow = (row) => `<div class="kv">${esc(row.day)} — <b>${row.n}</b> ${esc(row.source || "event")}${row.outcome ? ` <span class="help">(${esc(row.outcome)})</span>` : ""}</div>`;
+		const errorRow = (row) => `<div class="kv">${ago(row.at)} — <span class="help">${esc(row.side)}/${esc(row.scope || "")}</span> ${esc(String(row.message || "").slice(0, 120))}</div>`;
+		const tokenRow = (row) => `<div class="kv"><b>${esc(row.label || row.type || "token")}</b> · created ${ago(row.created_at)}${row.revoked_at ? " · <span class='help'>revoked</span>" : row.last_used_at ? ` · last used ${ago(row.last_used_at)}` : " · never used"}</div>`;
+		panel.innerHTML = `<div class="panel-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+			<div class="action-box"><h3>Sessions</h3>
+				<div class="kv">Active: <b>${journey.sessions?.active ?? 0}</b>${journey.sessions?.last_seen ? ` · last seen ${ago(journey.sessions.last_seen)}` : ""}</div>
+				<div class="kv">Sign-in: <b>${journey.user?.has_google ? "Google linked" : "password"}</b></div></div>
+			<div class="action-box"><h3>Logins</h3>${(journey.logins || []).slice(0, 8).map(loginRow).join("") || `<div class="help">None recorded.</div>`}</div>
+			<div class="action-box"><h3>Usage by day</h3>${(journey.usage_by_day || []).slice(0, 10).map(usageRow).join("") || `<div class="help">No saves or recalls yet.</div>`}</div>
+			<div class="action-box"><h3>Errors they hit</h3>${(journey.errors || []).slice(0, 8).map(errorRow).join("") || `<div class="help">None — clean.</div>`}</div>
+			<div class="action-box"><h3>Connection tokens</h3>${(journey.tokens || []).map(tokenRow).join("") || `<div class="help">No tokens created.</div>`}</div>
+		</div>
+		<div class="help" style="margin-top:6px">Events and metadata only — memory content is never shown to the operator.</div>`;
+	} catch (e) {
+		panel.innerHTML = `<div class="help">${esc(e.message || "Could not load journey.")}</div>`;
+	}
+}
+
 async function adminUserAction(userId, action) {
 	const labels = {
 		disable: "Disable this account? The user is logged out everywhere and cannot log in.",
@@ -2500,11 +2549,35 @@ function renderAdminBody() {
 			entry[row.source || "other"] = Number(row.n || 0);
 			saveDays.set(row.day, entry);
 		}
+		const uniqueDays = new Map();
+		for (const row of stats.uniques_by_day || []) {
+			uniqueDays.set(row.day, (uniqueDays.get(row.day) || 0) + Number(row.count || 0));
+		}
+		const dimRows = (dim, limit = 6) => {
+			const grouped = new Map();
+			for (const row of (stats.dims || []).filter((r) => r.dim === dim)) {
+				grouped.set(row.value, (grouped.get(row.value) || 0) + Number(row.count || 0));
+			}
+			return [...grouped.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+		};
+		const funnel = Object.fromEntries(dimRows("funnel", 10));
+		const activation = stats.activation || {};
+		const failedByDay = stats.failed_logins_by_day || [];
+		const failedTotal = failedByDay.reduce((sum, row) => sum + Number(row.n || 0), 0);
 		body.innerHTML = `<div class="panel-grid">
-			<div class="action-box"><h3>Visits</h3>
-				<div class="kv">Today: <b>${todayVisits}</b> · 14 days: <b>${totalVisits}</b></div>
+			<div class="action-box"><h3>Visitors</h3>
+				<div class="kv">Today: <b>~${uniqueDays.get(today) ?? 0} people</b> <span class="help">· ${todayVisits} page loads</span></div>
 				${[...visitDays.entries()].map(([day, entry]) =>
-					`<div class="kv">${esc(day)}: <b>${entry.landing + entry.app + entry.legal + entry.other}</b> <span class="help">(${entry.landing} landing · ${entry.app} app)</span></div>`).join("") || `<div class="help">No visits recorded yet — counting starts with this deploy.</div>`}
+					`<div class="kv">${esc(day)}: <b>~${uniqueDays.get(day) ?? "?"} people</b> <span class="help">(${entry.landing + entry.app + entry.legal + entry.other} loads · ${entry.landing} landing · ${entry.app} app)</span></div>`).join("") || `<div class="help">No visits recorded yet.</div>`}
+				<div class="help" style="margin-top:6px">People ≈ distinct visitors (daily-rotating hash, nothing stored). Known bots and admin app-loads are excluded from this deploy on.</div>
+			</div>
+			<div class="action-box"><h3>Where from</h3>
+				${dimRows("ref").map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("") || `<div class="help">Referrer counting starts with this deploy.</div>`}
+			</div>
+			<div class="action-box"><h3>Funnel (14 days)</h3>
+				<div class="kv">Signup screen viewed: <b>${funnel.signup_view ?? 0}</b></div>
+				<div class="kv">Signed up: <b>${funnel.signup_done ?? 0}</b></div>
+				<div class="kv">Accounts with ≥1 memory: <b>${activation.with_memories ?? 0}</b> / ${activation.accounts ?? "?"}</div>
 			</div>
 			<div class="action-box"><h3>Users</h3>
 				<div class="kv">Total accounts: <b>${stats.users}</b></div>
@@ -2519,7 +2592,14 @@ function renderAdminBody() {
 					`<div class="kv">${esc(day)}: <b>${Object.values(entry).reduce((a, b) => a + b, 0)}</b> <span class="help">(${Object.entries(entry).map(([source, n]) => `${n} ${esc(source)}`).join(" · ")})</span></div>`).join("") || `<div class="help">No saves in the last 14 days.</div>`}
 			</div>
 			<div class="action-box"><h3>Signups (14 days)</h3>${adminDayRows(stats.signups_by_day, (row) => row.n, "signups")}</div>
-			<div class="action-box"><h3>Logins (14 days)</h3>${adminDayRows(stats.logins_by_day, (row) => row.n, "logins")}</div>
+			<div class="action-box"><h3>Logins (successful)</h3>
+				${adminDayRows(stats.logins_by_day, (row) => row.n, "successful logins")}
+				${failedTotal ? `<div class="kv" style="margin-top:6px">Failed attempts: <b>${failedTotal}</b> <span class="help">· security signal, not logins</span></div>` : ""}
+			</div>
+			<div class="action-box"><h3>Audience</h3>
+				${dimRows("country", 5).map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("") || `<div class="help">Country counting starts with this deploy.</div>`}
+				<div style="margin-top:6px">${dimRows("device", 2).map(([value, n]) => `<span class="badge state-active" style="margin-right:6px">${esc(value)}: ${n}</span>`).join("")}</div>
+			</div>
 		</div>`;
 		return;
 	}
@@ -2555,7 +2635,9 @@ function renderAdminBody() {
 							? `<button class="ghost mini" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','demote')">Remove admin</button>`
 							: `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','promote')">Make admin</button>`}
 						<button class="ghost mini danger" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','delete')">Delete account</button>
+						<button class="ghost mini" onclick="toggleUserJourney('${esc(u.id)}')">Journey</button>
 					</div>
+					<div id="journey-${esc(u.id)}" style="display:none;margin-top:10px"></div>
 				</div>`;
 			}).join("") || `<div class="help">No users match.</div>`}
 			</div></div>`;

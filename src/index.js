@@ -215,6 +215,10 @@ function authFailureResponse(mode, error) {
 	return json({ error: message }, 500);
 }
 
+// Known crawlers/automation. Checked against the visit beacon's user-agent and
+// then discarded — the UA itself is never stored anywhere.
+const BOT_UA_PATTERN = /bot|crawl|spider|slurp|headless|phantom|selenium|playwright|puppeteer|lighthouse|pingdom|uptime|monitor|scrap|curl|wget|python-requests|httpx|axios|go-http|okhttp|java\/|libwww|facebookexternalhit|preview|prerender|embedly|vkshare|qwantify|bitlybot|telegrambot|whatsapp|discordbot|slackbot|twitterbot|linkedinbot|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot|amazonbot|applebot|yandex|baidu|duckduck/i;
+
 const routes = {
 	"GET /health": () => json({ ok: true, service: "memory-engine", version: "0.1.0" }),
 
@@ -502,13 +506,92 @@ const routes = {
 		const body = await request.json().catch(() => ({}));
 		const kind = ["landing", "app", "legal"].includes(body.kind) ? body.kind : "other";
 		const day = new Date().toISOString().slice(0, 10);
+
+		// Bot filter: obvious crawler user-agents and automation flags are
+		// counted nowhere. The UA is inspected here and discarded — never stored.
+		const userAgent = request.headers.get("user-agent") ?? "";
+		if (BOT_UA_PATTERN.test(userAgent) || body.webdriver === true) return json({ ok: true });
+
+		// Admin accounts don't count as product usage: "app" visits should mean
+		// real users, not the operator refreshing the console.
+		if (kind === "app") {
+			const viewer = await getSessionUser(env, request).catch(() => null);
+			if (viewer?.user?.role === "admin") return json({ ok: true });
+		}
+
 		try {
-			await env.DB.prepare(
-				`INSERT INTO site_visits (day, kind, count) VALUES (?, ?, 1)
-				 ON CONFLICT(day, kind) DO UPDATE SET count = count + 1`,
-			).bind(day, kind).run();
+			const statements = [
+				env.DB.prepare(
+					`INSERT INTO site_visits (day, kind, count) VALUES (?, ?, 1)
+					 ON CONFLICT(day, kind) DO UPDATE SET count = count + 1`,
+				).bind(day, kind),
+			];
+
+			// Approximate uniques: hash(ip + ua + daily salt), truncated, held in a
+			// bounded per-day sketch. Raw ip/ua are never written; the salt dies
+			// with the day, so the hash is meaningless tomorrow.
+			const dailySalt = `${env.API_KEY}:${day}`;
+			const digest = await crypto.subtle.digest(
+				"SHA-256",
+				new TextEncoder().encode(`${clientIp(request)}|${userAgent}|${dailySalt}`),
+			);
+			const visitorHash = [...new Uint8Array(digest).slice(0, 6)]
+				.map((b) => b.toString(16).padStart(2, "0")).join("");
+			const row = await env.DB.prepare(
+				"SELECT sketch FROM visit_uniques WHERE day = ? AND kind = ?",
+			).bind(day, kind).first();
+			const seen = new Set((row?.sketch ?? "").split(",").filter(Boolean));
+			if (!seen.has(visitorHash) && seen.size < 5000) {
+				seen.add(visitorHash);
+				statements.push(env.DB.prepare(
+					`INSERT INTO visit_uniques (day, kind, sketch, count) VALUES (?, ?, ?, ?)
+					 ON CONFLICT(day, kind) DO UPDATE SET sketch = excluded.sketch, count = excluded.count`,
+				).bind(day, kind, [...seen].join(","), seen.size));
+			}
+
+			// Aggregate dimensions: referrer domain, country, device class.
+			const dims = [];
+			const referrer = String(body.ref ?? "").slice(0, 200);
+			if (referrer) {
+				try {
+					const domain = new URL(referrer).hostname.replace(/^www\./, "");
+					if (domain && !domain.endsWith("workers.dev")) dims.push(["ref", domain]);
+				} catch {}
+			} else if (kind === "landing") {
+				dims.push(["ref", "direct"]);
+			}
+			const country = request.cf?.country;
+			if (country) dims.push(["country", String(country)]);
+			dims.push(["device", /mobile|android|iphone|ipad/i.test(userAgent) ? "mobile" : "desktop"]);
+			for (const [dim, value] of dims) {
+				statements.push(env.DB.prepare(
+					`INSERT INTO visit_dims (day, dim, value, count) VALUES (?, ?, ?, 1)
+					 ON CONFLICT(day, dim, value) DO UPDATE SET count = count + 1`,
+				).bind(day, dim, value.slice(0, 80)));
+			}
+
+			await env.DB.batch(statements);
 		} catch (error) {
 			console.warn("beacon write failed:", error?.message ?? error);
+		}
+		return json({ ok: true });
+	},
+
+	"POST /v1/funnel": async (request, env) => {
+		// Funnel step counters (aggregate only): signup_view, signup_done,
+		// first_memory. Same privacy shape as the beacon.
+		if (!(await allowRate(env.AUTH_LIMITER, `funnel:${clientIp(request)}`))) return json({ ok: true });
+		const body = await request.json().catch(() => ({}));
+		const step = ["signup_view", "signup_done", "first_memory"].includes(body.step) ? body.step : null;
+		if (!step) return json({ ok: true });
+		const day = new Date().toISOString().slice(0, 10);
+		try {
+			await env.DB.prepare(
+				`INSERT INTO visit_dims (day, dim, value, count) VALUES (?, 'funnel', ?, 1)
+				 ON CONFLICT(day, dim, value) DO UPDATE SET count = count + 1`,
+			).bind(day, step).run();
+		} catch (error) {
+			console.warn("funnel write failed:", error?.message ?? error);
 		}
 		return json({ ok: true });
 	},
@@ -644,9 +727,13 @@ const routes = {
 			env.DB.prepare("SELECT COUNT(*) AS n FROM users"),
 			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE terms_accepted_at IS NOT NULL"),
 			env.DB.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE revoked_at IS NULL AND expires_at > ?").bind(now),
+			// Logins = successes only. Failures are a security signal, not logins,
+			// and are reported separately below.
 			env.DB.prepare(
 				`SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
-				 FROM login_events WHERE created_at > ? GROUP BY day ORDER BY day`,
+				 FROM login_events
+				 WHERE created_at > ? AND outcome IN ('password_login', 'google_login', 'google_signup', 'signup')
+				 GROUP BY day ORDER BY day`,
 			).bind(since14),
 			env.DB.prepare(
 				`SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
@@ -708,6 +795,23 @@ const routes = {
 			 WHERE scope LIKE 'noise:%' AND created_at > ?
 			 GROUP BY kind ORDER BY n DESC`,
 		).bind(since14).all().catch(() => ({ results: [] }));
+		const uniques = await env.DB.prepare(
+			"SELECT day, kind, count FROM visit_uniques WHERE day >= date('now', '-14 days') ORDER BY day",
+		).all().catch(() => ({ results: [] }));
+		const dims = await env.DB.prepare(
+			`SELECT day, dim, value, count FROM visit_dims
+			 WHERE day >= date('now', '-14 days') ORDER BY dim, count DESC`,
+		).all().catch(() => ({ results: [] }));
+		const failedLogins = await env.DB.prepare(
+			`SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+			 FROM login_events WHERE created_at > ? AND outcome = 'password_failed'
+			 GROUP BY day ORDER BY day`,
+		).bind(since14).all().catch(() => ({ results: [] }));
+		const activation = await env.DB.prepare(
+			`SELECT
+				(SELECT COUNT(*) FROM users) AS accounts,
+				(SELECT COUNT(DISTINCT user_id) FROM nodes WHERE deleted_at IS NULL) AS with_memories`,
+		).all().catch(() => ({ results: [{}] }));
 		return json({
 			ok: true,
 			generated_at: now,
@@ -725,6 +829,54 @@ const routes = {
 			activity: activity.results ?? [],
 			totals: totals.results?.[0] ?? {},
 			top_users: topUsers.results ?? [],
+			uniques_by_day: uniques.results ?? [],
+			dims: dims.results ?? [],
+			failed_logins_by_day: failedLogins.results ?? [],
+			activation: activation.results?.[0] ?? {},
+		});
+	},
+
+	"GET /v1/admin/user-journey": async (request, env) => {
+		// Per-user operational timeline: events and metadata ONLY — never memory
+		// content. The operator sees what an account did and what broke for it,
+		// not what it stored.
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const targetId = new URL(request.url).searchParams.get("id");
+		if (!targetId) return json({ error: "id_required" }, 400);
+		const target = await env.DB.prepare(
+			"SELECT id, email, name, role, status, created_at, terms_accepted_at, google_sub IS NOT NULL AS has_google FROM users WHERE id = ?",
+		).bind(targetId).first();
+		if (!target) return json({ error: "not_found" }, 404);
+		const [logins, receipts, errors, tokens, sessions] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT created_at AS at, 'login' AS type, outcome AS detail, reason
+				 FROM login_events
+				 WHERE user_id = ?1 OR email_normalized = (SELECT lower(email) FROM users WHERE id = ?1)
+				 ORDER BY created_at DESC LIMIT 40`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day, source, outcome, COUNT(*) AS n
+				 FROM receipts WHERE user_id = ? GROUP BY day, source, outcome ORDER BY day DESC LIMIT 60`,
+			).bind(targetId),
+			env.DB.prepare(
+				"SELECT created_at AS at, side, scope, substr(message, 1, 200) AS message FROM error_reports WHERE user_id = ? ORDER BY created_at DESC LIMIT 25",
+			).bind(targetId),
+			env.DB.prepare(
+				"SELECT label, type, created_at, last_used_at, revoked_at FROM connection_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 20",
+			).bind(targetId),
+			env.DB.prepare(
+				"SELECT COUNT(*) AS active, MAX(last_seen_at) AS last_seen FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?",
+			).bind(targetId, Date.now()),
+		]);
+		return json({
+			user: target,
+			logins: logins.results ?? [],
+			usage_by_day: receipts.results ?? [],
+			errors: errors.results ?? [],
+			tokens: tokens.results ?? [],
+			sessions: sessions.results?.[0] ?? {},
 		});
 	},
 
