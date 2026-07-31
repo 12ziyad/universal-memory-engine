@@ -355,6 +355,84 @@
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
 	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; z-index: 5; max-width: min(760px, calc(100% - 28px)); }
+	/* ---- landing v2 ---- */
+	.section-kicker { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+		color: var(--accent); background: rgba(132,233,255,.08); border: 1px solid rgba(132,233,255,.22);
+		padding: 4px 12px; border-radius: 999px; margin-bottom: 12px; }
+	.hero-video { position: relative; min-width: 0; }
+	.video-frame { position: relative; border-radius: 18px; overflow: hidden; border: 1px solid rgba(132,233,255,.28);
+		box-shadow: 0 0 60px rgba(76,201,240,.16), 0 24px 60px rgba(0,0,0,.5); animation: heroFloat 7s ease-in-out infinite;
+		background: #060b12; }
+	.video-frame::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+		background: linear-gradient(160deg, rgba(132,233,255,.08), transparent 34%); }
+	.video-frame video { display: block; width: 100%; height: auto; }
+	.video-caption { margin-top: 10px; text-align: center; color: #8ab0c0; font-size: 12.5px; }
+	@keyframes heroFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+	.how-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 22px; }
+	.flow-step { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+		padding: 20px 18px 18px; transition: transform .25s ease, border-color .25s ease; }
+	.flow-step:hover { transform: translateY(-4px); border-color: rgba(132,233,255,.4); }
+	.flow-step:not(:last-child)::after { content: "→"; position: absolute; right: -14px; top: 42%; color: rgba(132,233,255,.55);
+		font-size: 18px; z-index: 2; }
+	.flow-num { position: absolute; top: -12px; left: 16px; width: 24px; height: 24px; border-radius: 50%;
+		background: var(--accent); color: #04121f; font-weight: 800; font-size: 12.5px; display: grid; place-items: center; }
+	.flow-icon { width: 40px; height: 40px; color: var(--accent); margin-bottom: 10px; }
+	.flow-icon svg { width: 100%; height: 100%; }
+	.flow-step h3 { margin: 0 0 6px; font-size: 15.5px; }
+	.flow-step p { margin: 0; color: #a9c4d2; font-size: 13.5px; line-height: 1.55; }
+	.connect-terminal { margin-top: 20px; border: 1px solid rgba(132,233,255,.24); border-radius: 16px; overflow: hidden;
+		background: #070c13; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+	.terminal-tabs { display: flex; gap: 4px; padding: 10px 12px 0; background: rgba(132,233,255,.04); flex-wrap: wrap; }
+	.term-tab { background: transparent; color: #8ab0c0; border: 1px solid transparent; border-bottom: 0; padding: 8px 16px;
+		border-radius: 9px 9px 0 0; font-size: 13px; font-weight: 600; }
+	.term-tab:hover { color: var(--text); filter: none; }
+	.term-tab.active { background: #070c13; color: var(--accent); border-color: rgba(132,233,255,.24); border-bottom: 1px solid #070c13; margin-bottom: -1px; }
+	.terminal-body { border-top: 1px solid rgba(132,233,255,.18); }
+	.terminal-chrome { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid rgba(132,233,255,.1); }
+	.terminal-chrome span { width: 11px; height: 11px; border-radius: 50%; background: #2c3a49; }
+	.terminal-chrome span:nth-child(1) { background: #ff5f57; } .terminal-chrome span:nth-child(2) { background: #febc2e; }
+	.terminal-chrome span:nth-child(3) { background: #28c840; }
+	.terminal-chrome em { margin-left: auto; color: #5d7688; font-size: 11.5px; font-style: normal; letter-spacing: .06em; }
+	.term-pane { display: none; padding: 18px 18px 16px; }
+	.term-pane.active { display: block; animation: paneIn .28s ease; }
+	@keyframes paneIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+	.term-step { display: flex; gap: 10px; align-items: baseline; color: #b8c7d4; font-size: 13.5px; margin-bottom: 9px; }
+	.term-step b { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: rgba(132,233,255,.12);
+		color: var(--accent); font-size: 11.5px; display: grid; place-items: center; }
+	.term-step i { color: var(--text); font-style: normal; font-weight: 600; }
+	.term-code { display: flex; align-items: center; gap: 10px; background: #0b141d; border: 1px solid rgba(132,233,255,.16);
+		border-radius: 10px; padding: 11px 12px; margin: 10px 0 8px; }
+	.term-code code { flex: 1; overflow-x: auto; white-space: pre; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+		font-size: 12.5px; color: #9fe3ff; scrollbar-width: thin; }
+	.copy-btn { flex-shrink: 0; background: rgba(132,233,255,.12); color: var(--accent); border: 1px solid rgba(132,233,255,.3);
+		padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 700; }
+	.copy-btn:hover { background: rgba(132,233,255,.2); filter: none; }
+	.term-note { color: #7f9aab; font-size: 12.5px; }
+	.feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 22px; }
+	.feature-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px 18px;
+		transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+	.feature-card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--fc, #84e9ff) 45%, transparent);
+		box-shadow: 0 14px 34px rgba(0,0,0,.35); }
+	.feature-icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; margin-bottom: 12px;
+		color: var(--fc, #84e9ff); background: color-mix(in srgb, var(--fc, #84e9ff) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--fc, #84e9ff) 30%, transparent); }
+	.feature-icon svg { width: 24px; height: 24px; }
+	.feature-card h3 { margin: 0 0 6px; font-size: 15.5px; }
+	.feature-card p { margin: 0; color: #a9c4d2; font-size: 13.5px; line-height: 1.55; }
+	.final-cta-band { text-align: center; background: linear-gradient(180deg, rgba(132,233,255,.05), transparent);
+		border: 1px solid rgba(132,233,255,.16); border-radius: 18px; padding: 44px 24px; }
+	.reveal.visible .input-chip-grid span { animation: chipIn .5s ease backwards; }
+	.reveal.visible .input-chip-grid span:nth-child(2n) { animation-delay: .08s; }
+	.reveal.visible .input-chip-grid span:nth-child(3n) { animation-delay: .16s; }
+	@keyframes chipIn { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+	@media (max-width: 980px) {
+		.how-flow, .feature-grid { grid-template-columns: repeat(2, 1fr); }
+		.flow-step:not(:last-child)::after { display: none; }
+	}
+	@media (max-width: 620px) {
+		.how-flow, .feature-grid { grid-template-columns: 1fr; }
+		.term-code { flex-direction: column; align-items: stretch; }
+	}
 	.legal-shell { position: fixed; inset: 0; z-index: 60; overflow-y: auto; background: rgba(5,10,16,.97); backdrop-filter: blur(6px); }
 	.legal-doc { width: min(860px, calc(100% - 32px)); margin: 40px auto 80px; background: var(--panel); border: 1px solid var(--border);
 		border-radius: 14px; padding: 34px 38px; line-height: 1.62; }
@@ -477,9 +555,9 @@
 		</a>
 		<div class="nav-right">
 			<div class="nav-links" aria-label="Public navigation">
+				<a href="#how-it-works">How it works</a>
+				<a href="#connect">Connect</a>
 				<a href="#structured-memory">Memory</a>
-				<a href="#inputs">Inputs</a>
-				<a href="#api-sdk-mcp">API / SDK / MCP</a>
 				<a href="#privacy-policy">Privacy</a>
 				<a href="#support">Support</a>
 			</div>
@@ -495,154 +573,177 @@
 			<h1>One private memory graph for AI tools, agents, and apps.</h1>
 			<p>UML turns useful context from chats, events, documents, tools, and workflows into structured memory — so your AI systems can save once, recall selectively, and stay aligned wherever work continues.</p>
 			<div class="hero-actions">
-				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start building</a>
-				<a class="cta-secondary" href="#api-sdk-mcp">View docs</a>
+				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
+				<a class="cta-secondary" href="#how-it-works">See how it works</a>
 			</div>
-			<div class="trust-line">Works with API, SDK, dashboard, and MCP-linked clients.</div>
+			<div class="trust-line">Free early access &middot; Open source &middot; You own your memory &middot; Works with API, SDK, dashboard, and MCP-linked clients.</div>
 		</div>
-		<div class="three-door-demo" aria-label="Three Doors, One Graph animation">
-			<div class="demo-grid-bg"></div>
-			<div class="door-stack">
-				<div class="door-card"><span>Input</span><b>Chat Turn</b></div>
-				<div class="door-card"><span>Input</span><b>Event</b></div>
-				<div class="door-card"><span>Input</span><b>Document</b></div>
+		<div class="hero-video">
+			<div class="video-frame">
+				<video autoplay muted loop playsinline preload="metadata" aria-label="UML memory graph in motion">
+					<source src="/assets/uml-reel.mp4" type="video/mp4" />
+				</video>
 			</div>
-			<div class="pipeline-rail" aria-hidden="true">
-				<span>Extract</span><i></i><span>Verify</span><i></i><span>Graph</span>
+			<div class="video-caption">Your memory, as a living graph — real product footage.</div>
+		</div>
+	</section>
+
+	<section class="landing-section reveal" id="how-it-works">
+		<div class="section-kicker">How it works</div>
+		<h2 class="section-title">Four steps. Simple enough to explain to anyone.</h2>
+		<div class="how-flow">
+			<div class="flow-step">
+				<div class="flow-num">1</div>
+				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+				<h3>You talk</h3>
+				<p>Tell your AI: <i>"save this to uml — I finished Unit 3."</i> Or let your app send it automatically.</p>
 			</div>
-			<div class="uml-graph-core">
-				<img src="/assets/uml-logo.svg" alt="" />
-				<b>UML</b>
-				<span>structured memory graph</span>
-				<div class="mini-graph" aria-hidden="true">
-					<i style="--x:34%;--y:28%;--c:#58a6ff"></i>
-					<i style="--x:62%;--y:32%;--c:#d29922"></i>
-					<i style="--x:48%;--y:58%;--c:#3fb950"></i>
-					<i style="--x:70%;--y:64%;--c:#bc8cff"></i>
-				</div>
+			<div class="flow-step">
+				<div class="flow-num">2</div>
+				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2M5.6 18.4l2.2-2.2m8.4-8.4 2.2-2.2"/><circle cx="12" cy="12" r="3.2"/></svg></div>
+				<h3>UML organizes it</h3>
+				<p>AI extracts the durable facts. The backend verifies them and writes real structure — never a raw chat dump.</p>
 			</div>
-			<div class="output-stack">
-				<div class="output-card"><span>Output</span><b>Recall</b></div>
-				<div class="output-card"><span>Output</span><b>Profile</b></div>
-				<div class="output-card"><span>Output</span><b>Receipt</b></div>
+			<div class="flow-step">
+				<div class="flow-num">3</div>
+				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="17" r="2.4"/><circle cx="18.5" cy="17.5" r="2.4"/><path d="M8 7.2 15.7 8m-8.9 8.2L7 8.3m4.3 9.6 4.8-.3"/></svg></div>
+				<h3>You can see it</h3>
+				<p>Open the dashboard: a living graph, timelines, organized pages — and a receipt for every single save.</p>
+			</div>
+			<div class="flow-step">
+				<div class="flow-num">4</div>
+				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.2-2.6 5.5-.9.9-1.4 1.6-1.4 2.5v1H9v-1c0-.9-.5-1.6-1.4-2.5C6.2 13.2 5 11.4 5 9a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg></div>
+				<h3>Every tool remembers</h3>
+				<p>Claude, Cursor, your own agent — all connect to the same private memory. Save once, recall everywhere.</p>
 			</div>
 		</div>
 	</section>
+
+	<section class="landing-section reveal" id="connect">
+		<div class="section-kicker">Connect in 2 minutes</div>
+		<h2 class="section-title">Pick your tool. Paste one link. Done.</h2>
+		<p class="public-note">Sign up, create your private memory link in the Connect tab, then paste it into any MCP-capable client — or call the API from your own app.</p>
+		<div class="connect-terminal">
+			<div class="terminal-tabs" role="tablist">
+				<button class="term-tab active" onclick="connectTab(this,'claude')">Claude</button>
+				<button class="term-tab" onclick="connectTab(this,'claude-code')">Claude Code</button>
+				<button class="term-tab" onclick="connectTab(this,'cursor')">Cursor</button>
+				<button class="term-tab" onclick="connectTab(this,'api')">Your app</button>
+			</div>
+			<div class="terminal-body">
+				<div class="terminal-chrome"><span></span><span></span><span></span><em>uml &middot; connect</em></div>
+				<div class="term-pane active" data-pane="claude">
+					<div class="term-step"><b>1</b><span>Sign up free &rarr; open <i>Connect</i> &rarr; <i>Create MCP link</i></span></div>
+					<div class="term-step"><b>2</b><span>Claude &rarr; Settings &rarr; Connectors &rarr; <i>Add custom connector</i></span></div>
+					<div class="term-step"><b>3</b><span>Paste your private link and start chatting:</span></div>
+					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
+					<div class="term-note">Custom connectors need a paid Claude plan. Then just say: <i>"save this to uml"</i> or <i>"what do you know about me?"</i></div>
+				</div>
+				<div class="term-pane" data-pane="claude-code">
+					<div class="term-step"><b>1</b><span>Create your MCP link in the Connect tab, then run:</span></div>
+					<div class="term-code"><code data-connect="claude-code"></code><button class="copy-btn" data-copy-key="claude-code">Copy</button></div>
+					<div class="term-note">Claude Code gets three tools: <i>save_memory</i>, <i>save_conversation</i>, <i>recall_memory</i>.</div>
+				</div>
+				<div class="term-pane" data-pane="cursor">
+					<div class="term-step"><b>1</b><span>Add UML to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
+					<div class="term-code"><code data-connect="cursor"></code><button class="copy-btn" data-copy-key="cursor">Copy</button></div>
+					<div class="term-note">Works the same in any MCP-capable editor or agent host.</div>
+				</div>
+				<div class="term-pane" data-pane="api">
+					<div class="term-step"><b>1</b><span>One call: recall relevant memory <i>and</i> auto-save the turn:</span></div>
+					<div class="term-code"><code data-connect="api"></code><button class="copy-btn" data-copy-key="api">Copy</button></div>
+					<div class="term-note">Plus <i>/v1/save</i>, <i>/v1/recall</i>, <i>/v1/graph</i>, <i>/v1/rules</i>, <i>/v1/export</i> — same private graph.</div>
+				</div>
+			</div>
+		</div>
+		<div class="product-card contact-card" style="margin-top:16px" id="api-sdk-mcp">
+			<h3>Honest MCP note</h3>
+			<p>When UML is connected through an MCP-capable AI client, UML provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.</p>
+		</div>
+	</section>
+
 	<section class="landing-section reveal" id="structured-memory">
+		<div class="section-kicker">Why a graph</div>
 		<h2 class="section-title">Structured memory, not transcript replay.</h2>
-		<p class="public-note">Raw messages, documents, events, and tool outputs are input. UML turns useful context into structured memory objects like memory items, entities, events, edges, profiles, receipts, and indexes.</p>
+		<p class="public-note">UML turns useful context from chats, events, documents, tools, and workflows into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
 		<div class="how-grid" style="margin-top:18px">
 			<div class="product-card"><h3>Chat history is not memory.</h3><p>Messages are source material. UML keeps the durable meaning that should survive beyond a single exchange.</p></div>
 			<div class="product-card"><h3>Memory is structured meaning.</h3><p>UML stores verified entities, facts, events, relationships, rollups, and receipts so systems can reason over them later.</p></div>
 			<div class="product-card"><h3>Backend is the authority, not the LLM.</h3><p>The LLM proposes; UML verifies; UML writes. Recall and extraction stay separate.</p></div>
 		</div>
 	</section>
+
+	<section class="landing-section reveal" id="living-graph">
+		<div class="section-kicker">What makes it different</div>
+		<h2 class="section-title">A graph that can update, not just append.</h2>
+		<p class="public-note">New evidence can create, update, promote, invalidate, or supersede memory. UML is not an append-only chat log.</p>
+		<div class="feature-grid">
+			<div class="feature-card">
+				<div class="feature-icon" style="--fc:#84e9ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"/><circle cx="18" cy="5" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17.5" cy="17" r="2.2"/><circle cx="12" cy="11.5" r="2.6"/><path d="m7.4 7.4 2.7 2.4m4.3-.5 2.2-2.1m-6.2 6 -1.7 2.6m5.5-2.4 2.3 2.2"/></svg></div>
+				<h3>A memory you can see</h3>
+				<p>Your facts live in a visual graph with clusters you can open, search, drag, and edit — not a hidden blob.</p>
+			</div>
+			<div class="feature-card">
+				<div class="feature-icon" style="--fc:#3fb950"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg></div>
+				<h3>Latest truth wins</h3>
+				<p>Say "actually, that changed" — the old fact is superseded and kept as visible history on a timeline, not deleted, not duplicated.</p>
+			</div>
+			<div class="feature-card">
+				<div class="feature-icon" style="--fc:#f2cc60"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22z"/><path d="M9.5 8h5M9.5 12h5"/></svg></div>
+				<h3>Receipts for every save</h3>
+				<p>Each write returns proof: what was saved, updated, or refused — with source and timestamp. No silent writes, ever.</p>
+			</div>
+			<div class="feature-card">
+				<div class="feature-icon" style="--fc:#bc8cff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5.5v5.7c0 4.6 3.2 8.6 8 9.8 4.8-1.2 8-5.2 8-9.8V5.5z"/><path d="M8.5 11.5h7M8.5 15h4"/></svg></div>
+				<h3>Your rules</h3>
+				<p>Decide what gets collected and what must never be saved — plain-language rules the backend actually enforces.</p>
+			</div>
+		</div>
+	</section>
+
 	<section class="landing-section reveal" id="inputs">
-		<h2 class="section-title">One graph, many inputs.</h2>
-		<p class="public-note">Chat is one input type. Not the whole product. UML can ingest useful context from tools, apps, agents, docs, events, workflows, and custom schemas.</p>
+		<div class="section-kicker">One graph, many inputs</div>
+		<h2 class="section-title">Chat is one input. Not the whole product.</h2>
+		<p class="public-note">UML can ingest useful context from tools, apps, agents, docs, events, workflows, and custom schemas.</p>
 		<div class="input-chip-grid" style="margin-top:18px">
 			<span>Chat turns</span><span>Manual saves</span><span>Documents</span><span>Tool outputs</span><span>App events</span>
 			<span>Support tickets</span><span>Meeting notes</span><span>Project rules</span><span>Workflow state</span><span>Custom schemas</span>
 		</div>
 	</section>
-	<section class="landing-section reveal" id="bounded-recall">
-		<h2 class="section-title">Recall selectively. Not by dumping the graph into the prompt.</h2>
-		<p class="public-note">UML assembles bounded recall for the current turn, task, or workflow using scopes, filters, recency, topic and entity relevance, and memory confidence.</p>
-		<div class="how-grid" style="margin-top:18px">
-			<div class="product-card"><h3>Prompt-ready context</h3><p>Connected systems receive compact context shaped for the work at hand.</p></div>
-			<div class="product-card"><h3>Not raw graph JSON</h3><p>Recall is bounded and selective, not a dump of every node and edge.</p></div>
-			<div class="product-card"><h3>Separate write and read paths</h3><p>Extraction decides what becomes memory. Recall decides what is relevant now.</p></div>
-		</div>
-	</section>
-	<section class="landing-section reveal" id="api-sdk-mcp">
-		<h2 class="section-title">Use UML the way your stack works.</h2>
-		<p class="public-note">API, SDK, MCP, and dashboard workflows all point at the same private structured memory graph.</p>
-		<div class="how-grid" style="margin-top:18px">
-			<div class="product-card"><h3>API</h3><p>Your app sends turns, events, documents, tool outputs, and workflow state directly to UML.</p></div>
-			<div class="product-card"><h3>SDK</h3><p>Use lifecycle helpers like <code>beforeReply()</code> and <code>afterReply()</code> to automate recall and write paths inside your app.</p></div>
-			<div class="product-card"><h3>MCP</h3><p>UML exposes memory tools to compatible clients, but the client or host model decides when to call them.</p></div>
-			<div class="product-card"><h3>Dashboard</h3><p>View, search, manage, and control your memory graph.</p></div>
-		</div>
-		<div class="product-card contact-card" style="margin-top:14px">
-			<h3>Honest MCP note</h3>
-			<p>When UML is connected through an MCP-capable AI client, UML provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.</p>
-		</div>
-	</section>
-	<section class="landing-section reveal" id="living-graph">
-		<h2 class="section-title">A graph that can update, not just append.</h2>
-		<p class="public-note">New evidence can create, update, promote, invalidate, or supersede memory. UML is not an append-only chat log.</p>
-		<div class="sample-graph-showcase" aria-label="Sample UML living graph with sample data only">
-			<div class="graph-shot">
-				<div class="graph-grid-bg"></div>
-				<div class="graph-shot-head"><strong>Living graph preview</strong><span>sample data only</span></div>
-				<div class="graph-canvas">
-					<div class="graph-cluster" style="--c:#8b5cf6;--r:-6deg;left:40%;top:28%;width:40%;height:38%"><span>Projects &amp; Systems</span></div>
-					<div class="graph-cluster" style="--c:#2dd4bf;--r:5deg;left:10%;top:15%;width:35%;height:30%"><span>Profiles</span></div>
-					<div class="graph-cluster" style="--c:#22c55e;--r:-4deg;left:16%;top:62%;width:32%;height:24%"><span>Rules &amp; Workflows</span></div>
-					<div class="graph-cluster" style="--c:#f2cc60;--r:4deg;left:62%;top:65%;width:28%;height:22%"><span>Receipts</span></div>
-					<div class="graph-edge" style="--x:35%;--y:45%;--w:28%;--r:8deg;--c:#84e9ff"></div>
-					<div class="graph-edge" style="--x:49%;--y:52%;--w:25%;--r:34deg;--c:#d29922"></div>
-					<div class="graph-edge" style="--x:33%;--y:70%;--w:28%;--r:-35deg;--c:#22c55e"></div>
-					<div class="graph-page">MEMORY<br>Release Plan</div>
-					<div class="graph-node" style="--x:22%;--y:30%;--c:#2dd4bf"><span>Team Profile</span></div>
-					<div class="graph-node" style="--x:36%;--y:25%;--c:#2dd4bf"><span>Preference</span></div>
-					<div class="graph-node" style="--x:52%;--y:41%;--c:#8b5cf6"><span>API</span></div>
-					<div class="graph-node" style="--x:66%;--y:44%;--c:#8b5cf6"><span>Agent</span></div>
-					<div class="graph-node" style="--x:73%;--y:55%;--c:#8b5cf6"><span>Workflow</span></div>
-					<div class="graph-node" style="--x:27%;--y:72%;--c:#22c55e"><span>Capture Rule</span></div>
-					<div class="graph-node" style="--x:41%;--y:78%;--c:#22c55e"><span>Schema</span></div>
-					<div class="graph-node" style="--x:69%;--y:75%;--c:#f2cc60"><span>Saved</span></div>
-					<div class="graph-node" style="--x:82%;--y:72%;--c:#f2cc60"><span>Superseded</span></div>
-					<div class="graph-legend">
-						<span><i class="legend-dot" style="--c:#2dd4bf"></i>Profile rollups</span>
-						<span><i class="legend-dot" style="--c:#8b5cf6"></i>Memory objects</span>
-						<span><i class="legend-dot" style="--c:#22c55e"></i>Rules</span>
-						<span><i class="legend-dot" style="--c:#f2cc60"></i>Receipts</span>
-					</div>
-				</div>
-			</div>
-			<div class="graph-detail-shot">
-				<div class="detail-title"><span class="dot"></span><div><h3>Living memory</h3><div class="detail-meta">Updates · Profile rollups · Receipts</div></div></div>
-				<div class="detail-page">
-					<b>Update behavior</b><br><br>
-					UML can update, promote, invalidate, or supersede memory when new evidence arrives.<br><br>
-					<b>Receipts</b><br>
-					Each write path can explain what was saved, updated, or ignored with source and timestamp.<br><br>
-					<b>Change handling</b><br>
-					Contradictions and changed facts can become new events instead of noisy duplicates.
-				</div>
-				<div class="detail-chip-row"><span>updates</span><span>profile rollups</span><span>receipts</span><span>contradiction handling</span><span>living graph</span></div>
-			</div>
-		</div>
-	</section>
+
 	<section class="landing-section reveal" id="privacy-policy">
-		<h2 class="section-title">Private by default. Inspectable by design.</h2>
-		<p class="public-note">Your memory graph belongs to your account. Each connected tool gets scoped access. You can inspect, search, revoke, reset, and control what gets saved.</p>
+		<div class="section-kicker">Private by default</div>
+		<h2 class="section-title">Your memory belongs to you. Provably.</h2>
+		<p class="public-note">No ads. No trackers. No selling data. No training on your memory. Export everything as JSON or delete it all — any time, one click.</p>
 		<div class="policy-grid" style="margin-top:18px">
 			<div class="product-card">
 				<h3>Privacy Policy</h3>
-				<p>UML does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access UML only through private links or tokens you create. Reset memory deletes saved memory rows for the selected account/scope; it does not delete the account. Token secrets and full MCP URLs are shown only once where supported.</p>
+				<p>UML does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access UML only through private links or tokens you create.</p>
+				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/privacy" onclick="showLegal('privacy', event)">Read the full policy</a></div>
 			</div>
 			<div class="product-card" id="terms">
-				<h3>Terms &amp; Conditions</h3>
-				<p>UML is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless UML is appropriate for that use. Do not use UML for unsafe, abusive, illegal, or harmful activity.</p>
+				<h3>Terms of Service</h3>
+				<p>UML is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless UML is appropriate for that use.</p>
+				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/terms" onclick="showLegal('terms', event)">Read the full terms</a></div>
 			</div>
 		</div>
 	</section>
-	<section class="landing-section reveal" id="final-cta">
+
+	<section class="landing-section reveal final-cta-band" id="final-cta">
 		<h2 class="section-title">Build memory once. Use it everywhere work continues.</h2>
-		<p class="public-note">Start with the dashboard, connect a tool, or wire UML into your app runtime with API and SDK-oriented workflows.</p>
-		<div class="hero-actions">
-			<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start building</a>
-			<a class="cta-secondary" href="#api-sdk-mcp">View docs</a>
+		<p class="public-note">Free early access — founding users keep the Pro tier free when paid plans launch.</p>
+		<div class="hero-actions" style="justify-content:center">
+			<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
+			<a class="cta-secondary" href="#connect">Connect a tool</a>
 		</div>
 	</section>
+
 	<section class="landing-section reveal" id="support">
 		<h2 class="section-title">Support</h2>
 		<p class="public-note">Need help connecting UML or shaping an integration?</p>
 		<div class="contact-grid" style="margin-top:18px">
 			<div class="product-card contact-card"><h3>Contact support</h3><p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
-			<div class="product-card"><h3>Docs preview</h3><p>The API / SDK / MCP section is a Phase 1 docs shell. Full SDK packages and deeper API backend expansion are planned later.</p></div>
+			<div class="product-card"><h3>Open source</h3><p>UML's engine is open source under Apache 2.0 — read the code, open issues, or star the repo on <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>.</p></div>
 		</div>
 	</section>
 	<footer class="site-footer">
@@ -1766,76 +1867,183 @@ const LEGAL_PAGES = {
 		title: "Terms of Service",
 		body: `
 			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
-			<p>These terms govern your use of the UML hosted service on this website (the "Service"). By creating an account you agree to them. If you do not agree, do not use the Service.</p>
-			<h2>1. What UML is</h2>
-			<p>UML is a personal memory layer: connected AI tools and applications can save durable context to your account and recall it later. Memory is stored as a graph (nodes, details, events, connections), organized pages, and receipts, controlled from your dashboard.</p>
-			<h2>2. Your account</h2>
+			<p>Welcome to UML. These Terms of Service ("Terms") are a binding agreement between you and the operator of UML ("UML", "we", "us") governing your use of the UML hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
+
+			<h2>1. What the Service is</h2>
+			<p>UML is a personal memory layer. Tools and applications you connect can save durable context to your account and recall it later. Memory is stored as a structured graph (nodes, details, events, connections), organized pages, and receipts, all controlled from your dashboard. The Service is currently offered in free early access.</p>
+
+			<h2>2. Eligibility</h2>
+			<p>You must be at least 13 years old (or the minimum age of digital consent in your country, if higher) and able to form a binding contract to use the Service. If you use the Service on behalf of an organization, you represent that you are authorized to bind that organization to these Terms.</p>
+
+			<h2>3. Your account</h2>
 			<ul>
-				<li>You must provide a valid email and keep your password secure. You are responsible for activity under your account.</li>
-				<li>Connection tokens and private MCP URLs act like passwords. Keep them secret; revoke them from Connect if exposed.</li>
-				<li>You must be at least 13 years old (or the minimum age of digital consent in your country) to use the Service.</li>
+				<li>You must provide accurate information at signup and keep your login credentials secure. You are responsible for all activity under your account.</li>
+				<li>Notify us promptly at <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> if you suspect unauthorized access to your account.</li>
+				<li>We may require email verification or additional sign-in protections as the Service evolves.</li>
 			</ul>
-			<h2>3. Your content and ownership</h2>
+
+			<h2>4. Connection tokens and private links</h2>
 			<ul>
-				<li><b>Your memory belongs to you.</b> You retain all rights to the content you store in UML.</li>
-				<li>You grant UML only the limited license needed to operate the Service for you: storing, processing, indexing, and returning your content to you and to the tools you connect.</li>
-				<li>We do not sell your content, do not use it for advertising, and do not use it to train AI models.</li>
-				<li>You can export your data and delete all of it, at any time, from Settings.</li>
+				<li>Connection tokens and private MCP URLs grant access to your memory and act like passwords. Keep them secret.</li>
+				<li>Create one connection per tool so access can be revoked cleanly. You can revoke any token at any time from the Connect tab; revocation stops future access for that connection.</li>
+				<li>If a token or private link may be exposed, revoke it immediately and create a new one.</li>
 			</ul>
-			<h2>4. Acceptable use</h2>
-			<p>Do not use the Service for anything unlawful, to store or distribute malware, to harass or surveil others, to store content that violates another person's privacy or intellectual property, or to probe, overload, or disrupt the Service. We may suspend accounts that do.</p>
-			<h2>5. AI-generated content</h2>
-			<p>UML uses AI models to extract, organize, and summarize memory. AI output can be wrong or incomplete. The Service shows receipts for every change so you can verify what was stored, and you should not rely on stored memory for medical, legal, or financial decisions without checking it.</p>
-			<h2>6. Third-party tools</h2>
-			<p>Tools you connect (Claude, other MCP clients, your own applications) are third-party services under their own terms. What they send to UML and what they do with recalled context is between you and them.</p>
-			<h2>7. Early product; availability</h2>
-			<p>UML is an early product provided "as is" and "as available", without warranties of any kind. Features may change. We take backups and reliability seriously but do not guarantee uninterrupted service or zero data loss — keep exports of anything critical.</p>
-			<h2>8. Limitation of liability</h2>
-			<p>To the maximum extent permitted by law, UML and its operator are not liable for indirect, incidental, special, consequential, or punitive damages, or loss of data, profits, or goodwill. Total liability for any claim is limited to the amount you paid for the Service in the 12 months before the claim (currently zero during free early access).</p>
-			<h2>9. Termination</h2>
-			<p>You can stop using the Service and delete your memory at any time. We may suspend or terminate accounts that violate these terms, with notice where practical. On account deletion, your data is removed as described in the Privacy Policy.</p>
-			<h2>10. Open source</h2>
-			<p>UML's source code is open source under the Apache License 2.0 at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>. That license covers the code; these terms cover the hosted Service.</p>
-			<h2>11. Changes and contact</h2>
-			<p>Material changes to these terms will be announced in the app before they take effect. Governing law: India. Questions: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</p>`,
+
+			<h2>5. Acceptable use</h2>
+			<p>You agree not to use the Service to:</p>
+			<ul>
+				<li>violate any law, or store or distribute content that is unlawful where you or we operate;</li>
+				<li>store or transmit malware, or use the Service to phish, defraud, or steal credentials;</li>
+				<li>harass, stalk, surveil, or intimidate any person, or store another person's personal data without a lawful basis;</li>
+				<li>infringe intellectual-property, privacy, or publicity rights;</li>
+				<li>probe, scan, overload, disrupt, or attempt to gain unauthorized access to the Service or other users' accounts;</li>
+				<li>resell or provide the Service to third parties as your own service without our written agreement;</li>
+				<li>use the Service to develop a directly competing memory service by systematic extraction of its behavior; or</li>
+				<li>evade rate limits, abuse free-tier resources, or interfere with other users' use of the Service.</li>
+			</ul>
+			<p>We may suspend or terminate accounts that violate this section (see Section 13).</p>
+
+			<h2>6. Your content and ownership</h2>
+			<ul>
+				<li><b>Your memory belongs to you.</b> As between you and UML, you retain all rights to the content you or your connected tools store in the Service ("Your Content").</li>
+				<li>You grant UML only the limited, non-exclusive license necessary to operate the Service for you: hosting, storing, processing, indexing, backing up, and returning Your Content to you and to the tools you connect. This license ends when you delete the content or your account, except for short-lived infrastructure backups.</li>
+				<li>We do not sell Your Content, do not use it for advertising, and do not use it to train AI models.</li>
+				<li>You are responsible for Your Content and must have the necessary rights to store it. Avoid storing sensitive or regulated data (for example medical records or payment card data) unless you have confirmed the Service is appropriate for that use.</li>
+				<li>You can export Your Content as JSON and delete all of it, at any time, from Settings.</li>
+			</ul>
+
+			<h2>7. AI-generated output</h2>
+			<p>The Service uses AI models to extract, organize, summarize, and recall memory. AI output can be inaccurate, incomplete, or outdated. The Service shows a receipt for every write so you can verify what was stored. Do not rely on stored memory or recalled context for medical, legal, financial, or other consequential decisions without independently verifying it. The Service is not a system of record for regulated data.</p>
+
+			<h2>8. Third-party tools and services</h2>
+			<p>Tools you connect (for example Claude, MCP-capable editors, or your own applications) are third-party services governed by their own terms and privacy policies. What a connected tool sends to UML, and what it does with recalled context, is between you and that tool. UML is not responsible for third-party services.</p>
+
+			<h2>9. Open source</h2>
+			<p>UML's source code is available under the Apache License 2.0 at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>. The Apache 2.0 license governs the code; these Terms govern the hosted Service. Self-hosting the code does not create any obligation for us to support your deployment.</p>
+
+			<h2>10. Fees</h2>
+			<p>The Service is currently free during early access. We may introduce paid plans in the future; if we do, we will announce pricing in advance, and no paid feature will be charged to you without your explicit signup for a paid plan. Any future paid plans will include their own refund terms.</p>
+
+			<h2>11. Availability; beta status; backups</h2>
+			<p>UML is an early product provided "as is" and "as available". Features may change, be added, or be removed. We take reliability seriously but do not guarantee uninterrupted service, error-free operation, or zero data loss. Keep exports of anything critical. We may perform maintenance, and we may set or adjust usage limits to protect the Service.</p>
+
+			<h2>12. Disclaimers and limitation of liability</h2>
+			<p>TO THE MAXIMUM EXTENT PERMITTED BY LAW: (a) THE SERVICE IS PROVIDED WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT; (b) UML AND ITS OPERATOR WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, PROFITS, GOODWILL, OR BUSINESS, ARISING FROM OR RELATED TO THE SERVICE; AND (c) OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATING TO THE SERVICE IS LIMITED TO THE GREATER OF THE AMOUNT YOU PAID US IN THE 12 MONTHS BEFORE THE CLAIM OR INR 2,000. Some jurisdictions do not allow certain exclusions, so parts of this section may not apply to you.</p>
+
+			<h2>13. Suspension and termination</h2>
+			<ul>
+				<li>You may stop using the Service at any time, and may delete your memory (Settings &rarr; Danger Zone) and request account deletion (see the Privacy Policy).</li>
+				<li>We may suspend or terminate your access if you materially violate these Terms, create risk or legal exposure for us or other users, or where required by law. Where practical, we will give notice and an opportunity to export Your Content.</li>
+				<li>Sections that by their nature should survive termination (including 6 (license end and ownership), 12, 14, and 15) survive.</li>
+			</ul>
+
+			<h2>14. Indemnity</h2>
+			<p>You will defend and hold harmless UML and its operator from claims, damages, and reasonable costs arising from Your Content, your violation of these Terms, or your violation of any law or third-party right, except to the extent caused by our own breach of these Terms.</p>
+
+			<h2>15. Governing law and disputes</h2>
+			<p>These Terms are governed by the laws of India. Courts located in Kerala, India have exclusive jurisdiction, except that either party may seek injunctive relief in any competent court. Before filing a claim, please contact us — most issues can be resolved quickly and informally.</p>
+
+			<h2>16. Changes to these Terms</h2>
+			<p>We may update these Terms as the Service evolves. For material changes we will give notice in the app (and by email where appropriate) before the changes take effect. Continued use of the Service after the effective date constitutes acceptance. The "Effective" date above always reflects the current version.</p>
+
+			<h2>17. Contact</h2>
+			<p>Questions about these Terms: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</p>`,
 	},
 	privacy: {
 		title: "Privacy Policy",
 		body: `
 			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; UML (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
-			<p>UML exists to store personal memory, so we are direct about what we collect and blunt about what we never do with it: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
-			<h2>1. What we collect</h2>
+			<p>UML exists to store personal memory, so this policy is written to be read. It describes what we collect through the UML website, dashboard, API, and MCP endpoints (the "Service"), how we use it, who processes it, and the rights and controls you have. The short version we hold ourselves to: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
+
+			<h2>Summary at a glance</h2>
 			<ul>
-				<li><b>Account data:</b> your email, optional name, and a salted hash of your password (we never store the password itself).</li>
-				<li><b>Memory content:</b> what you or your connected tools deliberately save — the entire point of the Service. This can be deeply personal; it is stored only to serve it back to you.</li>
-				<li><b>Security logs:</b> login events with a hashed IP address and browser type, and session records. We deliberately store IPs only as hashes.</li>
-				<li><b>Receipts:</b> a record of every memory write, kept so you can audit exactly what was stored and when.</li>
+				<li><b>Who is responsible?</b> UML, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</li>
+				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write.</li>
+				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
+				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
+				<li><b>How long?</b> Until you delete it. Deletion is self-serve and immediate for memory; account deletion completes within 7 days of request.</li>
+				<li><b>Your rights?</b> Access, export, correction, deletion, consent withdrawal, complaint — detailed below.</li>
 			</ul>
-			<h2>2. What we do with it</h2>
-			<p>One purpose: operating your memory. Extraction and organization run on Cloudflare Workers AI models; your content passes through them solely to build your graph and pages, and is not retained by us for any other purpose or used for model training.</p>
-			<h2>3. Who processes it (subprocessors)</h2>
-			<p>UML runs entirely on <b>Cloudflare</b> infrastructure (Workers, D1 database, Vectorize, Workers AI inference). Cloudflare processes data on our behalf under their enterprise privacy commitments. We add no analytics SDKs, ad networks, or social pixels.</p>
-			<h2>4. Cookies</h2>
-			<p>Exactly one cookie: your session (HttpOnly, Secure), so you stay logged in for up to 30 days. No tracking cookies, no fingerprinting.</p>
-			<h2>5. Sharing</h2>
-			<p>Your memory is returned only to you and to tools you explicitly connect via tokens you create and can revoke. We disclose data to authorities only if legally compelled, and will tell you unless prohibited.</p>
-			<h2>6. Your rights and controls</h2>
+
+			<h2>1. Information you provide</h2>
 			<ul>
-				<li><b>Access &amp; portability:</b> Settings &rarr; Export downloads everything as JSON.</li>
-				<li><b>Correction:</b> edit or supersede any memory from the dashboard or connected tools.</li>
-				<li><b>Erasure:</b> Settings &rarr; Danger Zone deletes all memory immediately (type DELETE ALL). Account removal: email us and it is completed within 7 days.</li>
-				<li><b>Consent:</b> recorded at signup; withdraw any time by deleting your data and account.</li>
+				<li><b>Account data:</b> your email address, an optional display name, and your password stored only as a salted PBKDF2 hash — we never store or see the password itself. If you sign in with a third-party identity provider (such as Google), we receive your email, name, and a stable account identifier from that provider; we never receive your password.</li>
+				<li><b>Memory content:</b> the messages, facts, documents, and context that you or your connected tools deliberately submit to be remembered. This is the entire point of the Service and can be deeply personal. It is stored solely to be organized and served back to you and the tools you authorize.</li>
+				<li><b>Communications:</b> if you email us for support, we keep the correspondence to help you and improve the Service.</li>
+				<li><b>Consent record:</b> the timestamp of your acceptance of the Terms and this policy at signup.</li>
 			</ul>
-			<h2>7. Retention</h2>
-			<p>Memory: until you delete it. Sessions: 30 days. Security logs: up to 12 months. Deleted data is removed from the live database immediately and leaves short-lived infrastructure backups on Cloudflare's standard cycle.</p>
-			<h2>8. Security</h2>
-			<p>Transport encryption everywhere (TLS), salted PBKDF2 password hashing, hashed session tokens, hashed IPs, per-user data isolation, and scoped revocable connection tokens.</p>
-			<h2>9. Breach notification</h2>
-			<p>If a breach affects your personal data, we will notify you and the relevant authority (including India's Data Protection Board where applicable) within 72 hours of confirming it, with what happened and what we are doing.</p>
-			<h2>10. Children</h2>
-			<p>The Service is not directed at children under 13 and we do not knowingly store their data.</p>
-			<h2>11. Grievances, changes, contact</h2>
-			<p>Grievance and privacy contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (responses within 7 days). Material changes to this policy are announced in the app before taking effect.</p>`,
+
+			<h2>2. Information collected automatically</h2>
+			<ul>
+				<li><b>Security logs:</b> login events with a one-way <i>hashed</i> IP address and browser user-agent, and session records. We deliberately store IPs only as hashes — enough to detect abuse, not to track you.</li>
+				<li><b>Receipts:</b> a record of every memory write (what was saved, updated, or refused, from which connection, and when), kept so you can audit your own memory.</li>
+				<li><b>What we deliberately do not collect:</b> no advertising identifiers, no cross-site trackers, no fingerprinting, no precise location, no contact-list uploads, no email-open pixels.</li>
+			</ul>
+
+			<h2>3. How we use your information</h2>
+			<ul>
+				<li><b>Operating the Service:</b> storing, organizing, and recalling your memory; maintaining your account and sessions; showing you your own data and receipts.</li>
+				<li><b>AI processing:</b> extraction and organization run on AI models hosted on our infrastructure provider (Cloudflare Workers AI). Your content passes through these models solely to build your graph and pages. It is not retained by us for other purposes and is not used to train models — neither by us nor, per their inference terms, by our provider.</li>
+				<li><b>Security and abuse prevention:</b> rate limiting, detecting unauthorized access, protecting the Service and other users.</li>
+				<li><b>Service communications:</b> messages about your account or important changes (security alerts, policy updates). We do not send marketing email.</li>
+				<li><b>Legal compliance:</b> where processing is required by applicable law.</li>
+			</ul>
+
+			<h2>4. Legal bases (GDPR) and consent (DPDP)</h2>
+			<p>Where the EU/UK GDPR applies, we process your data on these bases: <b>performance of a contract</b> (operating the Service you signed up for); <b>legitimate interests</b> (securing the Service and preventing abuse, balanced against your rights); <b>consent</b> (recorded at signup, withdrawable at any time); and <b>legal obligation</b> where applicable. Where India's Digital Personal Data Protection Act, 2023 applies, we process your personal data on the basis of the consent you give at signup for the specified purpose of operating your memory service, and for legitimate uses permitted by that Act.</p>
+
+			<h2>5. Who we share data with</h2>
+			<ul>
+				<li><b>Infrastructure processor:</b> the Service runs entirely on <b>Cloudflare</b> (Workers compute, D1 database, Vectorize index, Workers AI inference). Cloudflare processes data on our behalf under its enterprise data-protection commitments.</li>
+				<li><b>Tools you connect:</b> your memory is returned to the tools you explicitly authorize via tokens you create and can revoke. Those tools are third-party services under their own policies.</li>
+				<li><b>Authorities:</b> only if legally compelled, and we will tell you unless legally prohibited from doing so.</li>
+				<li><b>Business transfer:</b> if the Service is ever acquired or merged, your data remains protected under this policy or a successor policy with equivalent protections, and you will be notified.</li>
+				<li>We do <b>not</b> share data with advertisers, data brokers, or "business partners".</li>
+			</ul>
+
+			<h2>6. Cookies</h2>
+			<p>We use exactly one cookie: your session cookie (HttpOnly, Secure), which keeps you logged in for up to 30 days. It is strictly necessary for the Service to function. We use no analytics cookies, no advertising cookies, and no third-party cookies — which is why the Service has no cookie banner.</p>
+
+			<h2>7. Your rights and controls</h2>
+			<ul>
+				<li><b>Access &amp; portability:</b> Settings &rarr; <i>Export my data</i> downloads everything as machine-readable JSON, any time.</li>
+				<li><b>Correction:</b> edit, supersede, or archive any memory from the dashboard or your connected tools.</li>
+				<li><b>Erasure:</b> Settings &rarr; Danger Zone deletes all memory immediately (type DELETE ALL). For full account deletion, email us — completed within <b>7 days</b>.</li>
+				<li><b>Withdraw consent:</b> at any time, by deleting your data and account.</li>
+				<li><b>Complain:</b> EU/UK users may complain to their local supervisory authority; users in India may approach the Data Protection Board of India. We would appreciate the chance to resolve concerns first — most are fixed in a day.</li>
+				<li><b>Nominate (DPDP):</b> users in India may nominate another person to exercise these rights in case of death or incapacity, by emailing us.</li>
+			</ul>
+			<p>We do not discriminate against you for exercising any right, and exercising them is free.</p>
+
+			<h2>8. Data retention</h2>
+			<ul>
+				<li><b>Memory content:</b> kept until you delete it. Deleted memory is removed from the live database immediately.</li>
+				<li><b>Account data:</b> kept for the life of the account; removed within 7 days of account-deletion request.</li>
+				<li><b>Sessions:</b> expire after 30 days; session rows are pruned thereafter.</li>
+				<li><b>Security logs and receipts:</b> retained up to 12 months, then deleted.</li>
+				<li><b>Backups:</b> deleted data may persist briefly in our infrastructure provider's standard short-lived backups before aging out.</li>
+			</ul>
+
+			<h2>9. Security</h2>
+			<p>Measures include: TLS encryption for all data in transit; encryption at rest on our infrastructure provider; salted PBKDF2 password hashing; session tokens and connection tokens stored only as SHA-256 hashes; IP addresses stored only as hashes; strict per-account data isolation (every query is scoped to your account, with per-account compute isolation and per-account vector namespaces); scoped, revocable connection tokens shown only once; and role-restricted operator access. No internet service can guarantee absolute security, but we designed the Service so that a minimum of sensitive material exists to lose.</p>
+
+			<h2>10. Breach notification</h2>
+			<p>If a personal data breach affects you, we will notify you and the relevant authority (including the Data Protection Board of India where applicable, and EU/UK authorities where GDPR applies) within <b>72 hours</b> of confirming the breach, describing what happened, what data was involved, and what we are doing about it.</p>
+
+			<h2>11. International data transfers</h2>
+			<p>The Service is operated from India and runs on Cloudflare's global network, which stores and processes data in data centers in multiple countries. Wherever your data is processed, it remains protected by this policy and by our processor's data-protection commitments.</p>
+
+			<h2>12. Children</h2>
+			<p>The Service is not directed at children under 13, and we do not knowingly collect their data. If you believe a child has created an account, contact us and we will delete it.</p>
+
+			<h2>13. Do Not Track</h2>
+			<p>Because we do not track you across sites in the first place, there is nothing for a "Do Not Track" signal to turn off.</p>
+
+			<h2>14. Changes to this policy</h2>
+			<p>We keep this policy under review. For material changes we will give notice in the app before they take effect, and update the date above. Earlier versions are available on request.</p>
+
+			<h2>15. Grievances and contact</h2>
+			<p>Privacy questions, rights requests, and grievances: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: UML (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
 	},
 };
 
@@ -1862,6 +2070,41 @@ function closeLegal() {
 		pushUrl(document.body.classList.contains("app-mode") ? "/app" : "/");
 		if (!document.body.classList.contains("app-mode")) setMode("public");
 	}
+}
+
+// ---- Landing connect widget ------------------------------------------------
+// Snippets are built from location.origin at runtime so the static shell never
+// hardcodes a deploy domain (and survives the future custom-domain move).
+function connectSnippets() {
+	const base = location.origin;
+	return {
+		"mcp-url": `${base}/mcp/YOUR_PRIVATE_TOKEN`,
+		"claude-code": `claude mcp add --transport http uml ${base}/mcp/YOUR_PRIVATE_TOKEN`,
+		cursor: `{ "mcpServers": { "uml": { "url": "${base}/mcp/YOUR_PRIVATE_TOKEN" } } }`,
+		api: `curl -X POST ${base}/v1/turn \\
+  -H "authorization: Bearer YOUR_API_TOKEN" \\
+  -H "content-type: application/json" \\
+  -d '{"messages":[{"role":"user","content":"I finished Unit 3"}]}'`,
+	};
+}
+
+function initConnectWidget() {
+	const snippets = connectSnippets();
+	document.querySelectorAll("[data-connect]").forEach((code) => {
+		const text = snippets[code.dataset.connect];
+		if (text) code.textContent = text;
+	});
+	document.querySelectorAll(".copy-btn[data-copy-key]").forEach((button) => {
+		button.onclick = () => copyText(
+			snippets[button.dataset.copyKey] ?? "",
+			"Copied — replace YOUR_PRIVATE_TOKEN with your link from the Connect tab",
+		);
+	});
+}
+
+function connectTab(button, name) {
+	document.querySelectorAll(".term-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
+	document.querySelectorAll(".term-pane").forEach((pane) => pane.classList.toggle("active", pane.dataset.pane === name));
 }
 
 // ---- Data export -----------------------------------------------------------
@@ -3540,6 +3783,7 @@ $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (
 window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
 window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
+initConnectWidget();
 initShell();
 </script>
 </body>

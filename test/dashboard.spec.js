@@ -38,22 +38,30 @@ describe("dashboard script", () => {
 		expect(html).toContain("Universal Memory Layer");
 		expect(html).toContain("One private memory graph for AI tools, agents, and apps.");
 		expect(html).toContain("UML turns useful context from chats, events, documents, tools, and workflows into structured memory");
-		expect(html).toContain("Start building");
-		expect(html).toContain("View docs");
+		expect(html).toContain("Start free");
+		expect(html).toContain("See how it works");
 		expect(html).toContain("Works with API, SDK, dashboard, and MCP-linked clients.");
-		expect(html).toContain("Chat Turn");
-		expect(html).toContain("Extract");
-		expect(html).toContain("Graph");
-		expect(html).toContain("Recall");
+		// Hero product footage replaces the old CSS mock graph.
+		expect(html).toContain("/assets/uml-reel.mp4");
+		expect(html).toContain("hero-video");
+		// How-it-works flow, written for a first-time visitor.
+		expect(html).toContain("Four steps. Simple enough to explain to anyone.");
+		expect(html).toContain("UML organizes it");
+		expect(html).toContain("Every tool remembers");
+		// Connect terminal with per-client tabs; URLs are built from
+		// location.origin at runtime so no deploy domain leaks into the shell.
+		expect(html).toContain("Pick your tool. Paste one link. Done.");
+		expect(html).toContain("data-connect");
+		expect(html).toContain("YOUR_PRIVATE_TOKEN");
+		expect(html).toContain("connectSnippets");
 		expect(html).toContain("Chat history is not memory.");
 		expect(html).toContain("Memory is structured meaning.");
 		expect(html).toContain("Backend is the authority, not the LLM.");
-		expect(html).toContain("bounded recall");
-		expect(html).toContain("Prompt-ready context");
-		expect(html).toContain("Not raw graph JSON");
-		expect(html).toContain("API, SDK, MCP, and dashboard workflows");
-		expect(html).toContain("beforeReply()");
-		expect(html).toContain("afterReply()");
+		expect(html).toContain("A graph that can update, not just append.");
+		expect(html).toContain("A memory you can see");
+		expect(html).toContain("Latest truth wins");
+		expect(html).toContain("Receipts for every save");
+		expect(html).toContain("Your rules");
 		expect(html).toContain("When UML is connected through an MCP-capable AI client");
 		expect(html).toContain("The client or host model decides when to call them.");
 		expect(html).toContain("If you need guaranteed per-turn capture or recall, use the UML API or SDK inside your app or agent runtime.");
@@ -62,10 +70,10 @@ describe("dashboard script", () => {
 		expect(html).toContain("User memory belongs to the account that created it.");
 		expect(html).toContain("private links or tokens you create");
 		expect(html).toContain("you can revoke them from Connect");
-		expect(html).toContain("Reset memory deletes saved memory rows");
 		expect(html).toContain("Token secrets and full MCP URLs are shown only once");
+		expect(html).toContain("Free early access");
 		expect(html).toContain("Privacy Policy");
-		expect(html).toContain("Terms &amp; Conditions");
+		expect(html).toContain("Terms of Service");
 		expect(html).toContain("Support");
 		expect(html).toContain("founder@gpmai.dev");
 		expect(html).toContain("ejziyad@gmail.com");
