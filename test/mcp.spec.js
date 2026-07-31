@@ -281,7 +281,7 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(body.result.content[0].text).not.toContain('"nodes"');
 	});
 
-	it("recall_memory text stays short when structuredContent has full context", async () => {
+	it("recall_memory returns the memory in the content block without leaking internals", async () => {
 		const userId = "mcp-rich-recall";
 		const richToken = encodeMcpToken(userId, env.API_KEY);
 		const now = Date.now();
@@ -316,10 +316,13 @@ describe("/mcp Streamable HTTP handler", () => {
 		});
 		expect(result.context).toContain("trains five days a week");
 		expect(body.result.content).toHaveLength(1);
-		expect(body.result.content[0].text).toBe("Found relevant memory.");
-		expect(body.result.content[0].text).not.toContain("trains five days a week");
+		// The model reads `content`, not `structuredContent`: the recalled memory
+		// must be IN the text or recall is useless to the caller. Internals still
+		// must not leak — that was the real point of the original contract.
+		expect(body.result.content[0].text).toContain("trains five days a week");
 		expect(body.result.content[0].text).not.toContain("source_packet_id");
 		expect(body.result.content[0].text).not.toContain("receipt_id");
 		expect(body.result.content[0].text).not.toContain('"nodes"');
+		expect(body.result.content[0].text).not.toContain("structured_result");
 	});
 });

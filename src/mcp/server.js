@@ -65,12 +65,24 @@ const contentScopeSchema = z.object({
 }).optional();
 
 function mcpResult(payload) {
-	const summary = payload.command_mode === "recall"
-		? (payload.summary || (payload.count ? "Found relevant memory." : "No relevant memory found."))
-		: (payload.summary || "Done.");
+	// Recall must return the memory ITSELF in the content block. The recalled
+	// text lives in payload.context; most MCP clients surface only `content` to
+	// the model, so returning just a summary ("Found relevant memory.") handed
+	// the caller a receipt with nothing to read — recall looked broken even when
+	// the lookup succeeded. structuredContent still carries the full payload.
+	if (payload.command_mode === "recall") {
+		const context = String(payload.context ?? "").trim();
+		const text = context
+			? `Relevant memory for this user:\n\n${context}`
+			: (payload.summary || "No relevant memory found.");
+		return {
+			structuredContent: payload,
+			content: [{ type: "text", text }],
+		};
+	}
 	return {
 		structuredContent: payload,
-		content: [{ type: "text", text: summary }],
+		content: [{ type: "text", text: payload.summary || "Done." }],
 	};
 }
 
