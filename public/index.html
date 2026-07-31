@@ -219,6 +219,14 @@
 	.spark-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 6px; }
 	.spark-bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #58a6ff, #2b6cb0); min-height: 2px; }
 	.spark-col span { font-size: 11px; color: var(--muted); }
+	.keys-table-wrap { overflow-x: auto; }
+	.keys-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+	.keys-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+		color: var(--faint); font-weight: 650; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+	.keys-table td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+	.keys-table tr:last-child td { border-bottom: 0; }
+	.key-mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+	.key-revoked td { opacity: .55; }
 	.onboard-card { border-color: rgba(132,233,255,.35); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
@@ -2081,11 +2089,95 @@ function viewPlayground(v) {
 }
 
 function viewKeys(v) {
+	const latest = S.oneTimeToken;
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>API Keys</h3>
-		<div class="help">Create and manage the keys your tools use to reach your memory.</div></div>`;
+	wrap.innerHTML = `
+		<div class="box" style="max-width:1080px">
+			<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+				<div><h3 style="margin-bottom:4px">API Keys</h3>
+					<div class="help">Keys let tools and apps reach your memory. MCP keys become connector URLs; API keys are Bearer tokens for the HTTP API and SDK.</div></div>
+				<div style="display:flex;gap:8px;flex-wrap:wrap">
+					<button onclick="createKeyFlow('api')">Create API key</button>
+					<button class="ghost" onclick="createKeyFlow('mcp')">Create MCP link</button>
+				</div>
+			</div>
+			<div class="form-row" style="margin-top:12px;max-width:360px"><label for="keyLabel">Key name</label>
+				<input id="keyLabel" placeholder="e.g. Production agent, Claude desktop" /></div>
+		</div>
+		${oneTimeSecretPanel(latest)}
+		<div class="box" style="max-width:1080px">
+			<h3>Your keys</h3>
+			<div class="keys-table-wrap"><table class="keys-table">
+				<thead><tr><th>Name</th><th>Key</th><th>Type</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+				<tbody id="keysTableBody"></tbody>
+			</table></div>
+			<div class="help" style="margin-top:10px">Full secrets are shown only once at creation. Revoked keys stay listed for audit and can never be used again. Use one key per tool so you can revoke access cleanly.</div>
+		</div>`;
 	v.appendChild(wrap);
-	viewConnect(v);
+	renderKeysTable();
+}
+
+function createKeyFlow(type) {
+	const label = ($("#keyLabel")?.value || "").trim();
+	if (type === "mcp") {
+		const input = $("#mcpConnectionName");
+		if (input) input.value = label;
+		generateMcpLinkNamed(label || "MCP client");
+	} else {
+		generateTokenNamed("api", label || "API client");
+	}
+}
+
+async function generateMcpLinkNamed(label) {
+	try {
+		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type: "mcp", label }) });
+		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
+		await refreshTokens();
+		renderView();
+	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
+}
+
+async function generateTokenNamed(type, label) {
+	try {
+		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type, label }) });
+		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
+		await refreshTokens();
+		renderView();
+	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
+}
+
+function renderKeysTable() {
+	const body = $("#keysTableBody");
+	if (!body) return;
+	if (!S.tokens.length) {
+		body.innerHTML = `<tr><td colspan="6" class="help" style="padding:16px 10px">No keys yet — create one above to connect your first tool.</td></tr>`;
+		return;
+	}
+	body.innerHTML = S.tokens.map((t) => {
+		const active = !t.revoked_at && t.status !== "revoked";
+		return `<tr class="${active ? "" : "key-revoked"}">
+			<td><b>${esc(t.label || "Unnamed")}</b></td>
+			<td class="key-mono">${esc(t.masked_token || "")}</td>
+			<td>${t.type === "mcp" ? "MCP" : "API"}</td>
+			<td>${fmtDate(t.created_at)}</td>
+			<td>${t.last_used_at ? ago(t.last_used_at) : "never"}</td>
+			<td style="text-align:right;white-space:nowrap">
+				${active
+					? `<button class="ghost mini" data-key-action="rotate" data-key-id="${esc(t.id)}" data-key-label="${esc(t.label || "")}" data-key-type="${esc(t.type || "mcp")}">Rotate</button>
+					   <button class="ghost danger mini" data-key-action="revoke" data-key-id="${esc(t.id)}">Revoke</button>`
+					: `<span class="badge state-inactive">Revoked</span>`}
+			</td>
+		</tr>`;
+	}).join("");
+	body.onclick = (event) => {
+		const button = event.target.closest("[data-key-action]");
+		if (!button) return;
+		const id = button.dataset.keyId;
+		if (button.dataset.keyAction === "rotate") rotateConnection(id, button.dataset.keyLabel || "", button.dataset.keyType || "mcp");
+		if (button.dataset.keyAction === "revoke") revokeToken(id);
+	};
 }
 
 function viewReceipts(v) {
