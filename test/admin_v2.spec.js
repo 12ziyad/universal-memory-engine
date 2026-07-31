@@ -113,6 +113,31 @@ describe("change password", () => {
 	});
 });
 
+describe("error reporting", () => {
+	it("stores truncated client reports and never errors back", async () => {
+		const res = await request("/v1/error-report", jsonInit({
+			scope: "graph-render",
+			message: "x".repeat(1000),
+		}));
+		expect(res.status).toBe(200);
+		const row = await env.DB.prepare(
+			"SELECT side, scope, length(message) AS len FROM error_reports ORDER BY created_at DESC LIMIT 1",
+		).first();
+		expect(row.side).toBe("client");
+		expect(row.scope).toBe("graph-render");
+		expect(Number(row.len)).toBeLessThanOrEqual(400);
+	});
+
+	it("surfaces reports to admins in stats", async () => {
+		const admin = await signupAccount("errsee");
+		await makeAdmin(admin.user.id);
+		const res = await request("/v1/admin/stats", { headers: { cookie: admin.cookie } });
+		expect(res.status).toBe(200);
+		const stats = await res.json();
+		expect(Array.isArray(stats.error_reports)).toBe(true);
+	});
+});
+
 describe("recall receipt copy", () => {
 	it("never phrases lookups as failed saves", () => {
 		expect(formatReceipt({ outcome: "recalled" })).toMatch(/lookup completed/i);

@@ -491,6 +491,27 @@ const routes = {
 		return json({ ok: true });
 	},
 
+	"POST /v1/error-report": async (request, env) => {
+		// Automatic client-side error reporting. Public, rate limited, minimal.
+		if (!(await allowRate(env.AUTH_LIMITER, `errrep:${clientIp(request)}`))) return json({ ok: true });
+		const body = await request.json().catch(() => ({}));
+		const auth = await getSessionUser(env, request).catch(() => null);
+		try {
+			await env.DB.prepare(
+				"INSERT INTO error_reports (id, user_id, side, scope, message, created_at) VALUES (?, ?, 'client', ?, ?, ?)",
+			).bind(
+				`err_${crypto.randomUUID()}`,
+				auth?.userId ?? null,
+				String(body.scope ?? "client").slice(0, 120),
+				String(body.message ?? "").slice(0, 400),
+				Date.now(),
+			).run();
+		} catch (error) {
+			console.warn("client error report failed:", error?.message ?? error);
+		}
+		return json({ ok: true });
+	},
+
 	"POST /auth/password": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
 		const body = await request.json().catch(() => ({}));
@@ -645,6 +666,11 @@ const routes = {
 		const runStatuses = await env.DB.prepare(
 			"SELECT status, COUNT(*) AS n FROM extraction_runs WHERE created_at > ? GROUP BY status",
 		).bind(since14).all().catch(() => ({ results: [] }));
+		const errorReports = await env.DB.prepare(
+			`SELECT er.side, er.scope, er.message, er.created_at, u.email
+			 FROM error_reports er LEFT JOIN users u ON u.id = er.user_id
+			 ORDER BY er.created_at DESC LIMIT 20`,
+		).all().catch(() => ({ results: [] }));
 		return json({
 			ok: true,
 			generated_at: now,
@@ -656,6 +682,7 @@ const routes = {
 			visits_by_day: visits14.results ?? [],
 			receipts_by_day: receipts14.results ?? [],
 			run_statuses: runStatuses.results ?? [],
+			error_reports: errorReports.results ?? [],
 			recent_failures: failures.results ?? [],
 			activity: activity.results ?? [],
 			totals: totals.results?.[0] ?? {},
@@ -870,8 +897,42 @@ const routes = {
 	},
 };
 
+const FRIENDLY_FAILURE = "Something went wrong on our side. It has been reported automatically — please try again in a moment.";
+
+/** Best-effort server error capture for the admin Health tab. Never throws. */
+async function reportServerError(env, scope, error, userId = null) {
+	console.error(`unhandled error scope=${scope}:`, error?.stack ?? error?.message ?? error);
+	try {
+		await env.DB.prepare(
+			"INSERT INTO error_reports (id, user_id, side, scope, message, created_at) VALUES (?, ?, 'server', ?, ?, ?)",
+		).bind(
+			`err_${crypto.randomUUID()}`,
+			userId,
+			String(scope ?? "unknown").slice(0, 120),
+			String(error?.message ?? error ?? "unknown").slice(0, 400),
+			Date.now(),
+		).run();
+	} catch (writeError) {
+		console.warn("error report write failed:", writeError?.message ?? writeError);
+	}
+}
+
 export default {
 	async fetch(request, env, ctx) {
+		// Users must never see a raw exception or an infrastructure error page:
+		// every unhandled failure is reported for the admin and answered with one
+		// calm, generic message.
+		try {
+			return await handleRequest(request, env, ctx);
+		} catch (error) {
+			const scope = (() => { try { return new URL(request.url).pathname; } catch { return "unknown"; } })();
+			ctx.waitUntil(reportServerError(env, scope, error));
+			return json({ error: "something_went_wrong", message: FRIENDLY_FAILURE }, 500);
+		}
+	},
+};
+
+async function handleRequest(request, env, ctx) {
 		const url = new URL(request.url);
 
 		if ((request.method === "GET" || request.method === "HEAD") && ["/terms", "/privacy"].includes(url.pathname)) {
@@ -910,8 +971,7 @@ export default {
 		}
 
 		return handler(request, env, ctx);
-	},
-};
+}
 
 /** Authenticate the path token, then serve the MCP Streamable HTTP endpoint. */
 async function handleMcp(request, env, ctx, url) {

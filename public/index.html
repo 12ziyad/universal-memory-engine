@@ -1066,14 +1066,19 @@ async function submitAuth(mode) {
 		payload.acceptTerms = Boolean($("#authConsent")?.checked);
 	}
 	try {
-		const res = await fetch(`/auth/${mode}`, {
-			method: "POST",
-			credentials: "include",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(payload),
-		});
+		let res;
+		try {
+			res = await fetch(`/auth/${mode}`, {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+		} catch {
+			throw new Error(FRIENDLY_NETWORK);
+		}
 		const body = await res.json().catch(() => ({}));
-		if (!res.ok) throw new Error(typeof body.error === "string" && body.error ? body.error : fallback);
+		if (!res.ok) throw new Error(typeof body.error === "string" && body.error ? body.error : friendlyHttpError(res.status, body) || fallback);
 		S.me = body;
 		S.userId = body.user.id;
 		localStorage.setItem("uml_user", S.userId);
@@ -1113,11 +1118,59 @@ function mcpToken() {
 function mcpUrl() { return `${location.origin}/mcp/${mcpToken()}`; }
 function mcpUrlForToken(token) { return `${location.origin}/mcp/${token || "{token}"}`; }
 
+// ---- Error hygiene ---------------------------------------------------------
+// One rule everywhere: users see calm, human messages; the real details are
+// reported automatically and appear only in the admin Health tab.
+const FRIENDLY_NETWORK = "Can't reach UML — check your internet connection and try again.";
+const FRIENDLY_FAIL = "Something went wrong on our side. It's been reported — please try again in a moment.";
+let clientErrorBudget = 3;
+
+function reportClientError(scope, message) {
+	if (clientErrorBudget <= 0) return;
+	clientErrorBudget--;
+	try {
+		fetch("/v1/error-report", {
+			method: "POST",
+			credentials: "include",
+			keepalive: true,
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ scope: String(scope).slice(0, 120), message: String(message ?? "").slice(0, 400) }),
+		}).catch(() => {});
+	} catch {}
+}
+
+/** Map an HTTP failure to what a user should read. Intentional server messages
+ *  (validation copy, admin guardrails) pass through; internals never do. */
+function friendlyHttpError(status, body) {
+	const serverText = body && typeof body.message === "string" && body.message ? body.message
+		: body && typeof body.error === "string" && /[a-z] [a-z]/i.test(body.error) ? body.error
+		: null;
+	if (serverText) return serverText;
+	if (status === 429) return "Slow down a little — try again in a minute.";
+	if (status === 401) return "Please log in again.";
+	if (status === 403) return "You don't have access to that.";
+	if (status >= 500) return FRIENDLY_FAIL;
+	return "That didn't work — please try again.";
+}
+
+window.addEventListener("error", (event) => reportClientError("window", event?.message));
+window.addEventListener("unhandledrejection", (event) =>
+	reportClientError("promise", event?.reason?.message ?? event?.reason));
+
 async function api(path, opts={}) {
 	const headers = { "content-type": "application/json", ...(opts.headers||{}) };
 	if (S.devMode && S.key) headers["x-api-key"] = S.key;
-	const res = await fetch(path, { ...opts, credentials: "include", headers });
-	if (!res.ok) { const t = await res.text().catch(()=> ""); throw new Error(`${res.status} ${t.slice(0,120)}`); }
+	let res;
+	try {
+		res = await fetch(path, { ...opts, credentials: "include", headers });
+	} catch {
+		throw new Error(FRIENDLY_NETWORK);
+	}
+	if (!res.ok) {
+		const body = await res.json().catch(() => null);
+		if (res.status >= 500) reportClientError(path, `HTTP ${res.status}`);
+		throw new Error(friendlyHttpError(res.status, body));
+	}
 	return res.json();
 }
 
@@ -2155,14 +2208,19 @@ async function changePasswordNow() {
 	if (newPassword.length < 8) { if (status) status.textContent = "New password must be at least 8 characters."; return; }
 	if (status) status.textContent = "Updating…";
 	try {
-		const res = await fetch("/auth/password", {
-			method: "POST",
-			credentials: "include",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ currentPassword, newPassword }),
-		});
+		let res;
+		try {
+			res = await fetch("/auth/password", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ currentPassword, newPassword }),
+			});
+		} catch {
+			throw new Error(FRIENDLY_NETWORK);
+		}
 		const body = await res.json().catch(() => ({}));
-		if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
 		if (status) status.textContent = "Password updated ✓";
 		const currentInput = $("#pwCurrent"); if (currentInput) currentInput.value = "";
 		const newInput = $("#pwNew"); if (newInput) newInput.value = "";
@@ -2213,8 +2271,10 @@ async function downloadExport() {
 		toast("Preparing your export…");
 		const path = S.devMode ? `/v1/export?userId=${encodeURIComponent(S.userId)}` : "/v1/export";
 		const headers = S.devMode && S.key ? { "x-api-key": S.key } : {};
-		const res = await fetch(path, { credentials: "include", headers });
-		if (!res.ok) throw new Error(`export failed (${res.status})`);
+		let res;
+		try { res = await fetch(path, { credentials: "include", headers }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
 		const blob = await res.blob();
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(blob);
@@ -2284,12 +2344,14 @@ function adminTab(name) {
 
 async function refreshAdminData() {
 	try {
-		const res = await fetch("/v1/admin/stats", { credentials: "include" });
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		let res;
+		try { res = await fetch("/v1/admin/stats", { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
 		S.adminStats = await res.json();
 	} catch (err) {
 		const body = $("#adminBody");
-		if (body) body.textContent = `Could not load admin stats: ${err.message}`;
+		if (body) body.textContent = err.message;
 		return;
 	}
 	renderAdminBody();
@@ -2299,12 +2361,14 @@ async function refreshAdminData() {
 async function refreshAdminUsers(query = S.adminUserQuery || "") {
 	S.adminUserQuery = query;
 	try {
-		const res = await fetch(`/v1/admin/users?query=${encodeURIComponent(query)}`, { credentials: "include" });
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		let res;
+		try { res = await fetch(`/v1/admin/users?query=${encodeURIComponent(query)}`, { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
 		S.adminUsers = (await res.json()).users || [];
 	} catch (err) {
 		S.adminUsers = [];
-		toast(`Could not load users: ${err.message}`);
+		toast(err.message, true);
 	}
 	if ((S.adminTab || "overview") === "users") renderAdminBody();
 }
@@ -2319,14 +2383,19 @@ async function adminUserAction(userId, action) {
 	};
 	if (labels[action] && !confirm(labels[action])) return;
 	try {
-		const res = await fetch("/v1/admin/users/action", {
-			method: "POST",
-			credentials: "include",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ userId, action }),
-		});
+		let res;
+		try {
+			res = await fetch("/v1/admin/users/action", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ userId, action }),
+			});
+		} catch {
+			throw new Error(FRIENDLY_NETWORK);
+		}
 		const body = await res.json().catch(() => ({}));
-		if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
 		toast(`Done: ${action.replace(/_/g, " ")}.`);
 		await refreshAdminUsers();
 		refreshAdminData();
@@ -2460,6 +2529,16 @@ function renderAdminBody() {
 			</div>
 			<div class="help" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px">${esc(String(row.error || "").slice(0, 300))}</div>
 		</div>`).join("") || `<div class="help">No failed runs — healthy.</div>`}
+	</div>
+	<div class="box" style="margin-top:14px"><h3>Reported errors</h3>
+		<div class="help">Auto-captured from users' browsers and the server. Users only saw a friendly message.</div>
+		${(stats.error_reports || []).map((row) => `<div class="action-box" style="margin-bottom:8px">
+			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+				<b>${esc(row.side || "client")} · ${esc(row.scope || "")}</b>
+				<span class="help">${esc(row.email || "anonymous")} · ${ago(row.created_at)}</span>
+			</div>
+			<div class="help" style="margin-top:4px;font-family:ui-monospace,monospace;font-size:12px">${esc(String(row.message || "").slice(0, 300))}</div>
+		</div>`).join("") || `<div class="help">No reported errors — clean.</div>`}
 	</div>`;
 }
 
@@ -3516,7 +3595,10 @@ function drawGraph() {
 		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
 		startHullPulse();
-	} catch (e) { showErr(`<div>Graph failed to render: ${esc(e.message)}<br><span class="help">Use the Table tab to see your memories.</span></div>`); }
+	} catch (e) {
+		reportClientError("graph-render", e.message);
+		showErr(`<div>The graph couldn't be drawn right now — it's been reported.<br><span class="help">Your memories are safe; use the Memory tab to see them.</span></div>`);
+	}
 }
 function graphReset() {
 	if (!S.network) return;
