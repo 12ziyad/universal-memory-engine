@@ -9,10 +9,20 @@
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <style>
 	:root {
+		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
 		--border: #2b333f; --border2: #3a4452;
 		--text: #e6edf3; --muted: #8b949e; --faint: #6e7681; --accent: #58a6ff;
 		--green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #bc8cff;
+	}
+	/* The signed-in product is light: calm, high-contrast, closer to a tool than
+	   a console. Only the app shell flips — the landing page keeps its own art. */
+	body.app-mode {
+		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7; --panel3: #f8fafc;
+		--border: #e4e7ec; --border2: #d0d5dd;
+		--text: #101828; --muted: #5a6472; --faint: #98a2b3; --accent: #4f46b8;
+		--green: #12b76a; --amber: #dc6803; --red: #d92d20; --purple: #7a5af8;
+		color-scheme: light;
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; }
@@ -238,15 +248,31 @@
 
 	/* ---- top bar ---- */
 	header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
-		padding: 9px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
-	h1 { font-size: 15px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+		padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--border); }
+	h1 { font-size: 20px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; white-space: nowrap; letter-spacing: -.01em; }
 	h1 .brain { font-size: 18px; }
 	input, select { background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
 		padding: 6px 9px; border-radius: 7px; font-size: 13px; outline: none; }
 	input:focus, select:focus { border-color: var(--accent); }
 	input#userId { width: 130px; } input#key { width: 120px; }
-	button { background: var(--accent); color: #04121f; border: 0; padding: 6px 12px; border-radius: 7px;
-		font-weight: 600; cursor: pointer; font-size: 12.5px; }
+	button { background: var(--accent); color: #04121f; border: 0; padding: 7px 13px; border-radius: 8px;
+		font-weight: 600; cursor: pointer; font-size: 13px; }
+	/* Light shell: solid accent needs white text, panels need shadow instead of
+	   the borders that carried structure on dark. */
+	/* Scoped away from .tab and .ghost: a bare `button` rule here outranks
+	   .tab's own color and would paint the whole nav white-on-white. */
+	body.app-mode button:not(.tab):not(.ghost):not(.rail-toggle) { color: #fff; }
+	body.app-mode button.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border2); }
+	body.app-mode button.danger { background: #fef3f2; color: var(--red); border: 1px solid #fda29b; }
+	body.app-mode .box, body.app-mode .action-box, body.app-mode .browser-col {
+		box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+	body.app-mode header { box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+	body.app-mode input, body.app-mode select, body.app-mode textarea { background: var(--panel); }
+	body.app-mode .badge { background: var(--panel2); }
+	/* The graph keeps its dark canvas: the 18 category colors are tuned for it,
+	   and a framed dark viewport reads as deliberate rather than washed out. */
+	body.app-mode #graphWrap, body.app-mode #graph { background: #0b1017; }
+	body.app-mode #graphWrap { border-radius: 12px; overflow: hidden; }
 	button:hover { filter: brightness(1.08); }
 	button:disabled { opacity: .42; cursor: not-allowed; filter: grayscale(.35); }
 	button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border2); }
@@ -262,21 +288,47 @@
 	.stat b { color: var(--text); font-size: 14px; font-weight: 650; }
 	.stat.err b { color: var(--red); }
 
-	/* ---- layout ---- */
-	main { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: hidden; transition: grid-template-columns .15s; }
-	main.detail-open { grid-template-columns: 248px minmax(0, 1fr) 340px; }
+	/* ---- layout: nav rail | workspace | detail ---- */
+	main { flex: 1; display: grid; grid-template-columns: 232px minmax(0, 1fr) 0px; min-height: 0; overflow: hidden; transition: grid-template-columns .15s; }
+	main.detail-open { grid-template-columns: 232px minmax(0, 1fr) 340px; }
 	aside, .detail { background: var(--panel); overflow-y: auto; min-height: 0; }
-	aside { border-right: 1px solid var(--border); padding: 12px; }
-	.detail { border-left: 1px solid var(--border); padding: 14px; }
+	#rail { border-right: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 4px; }
+	.rail-brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 14px; color: var(--text);
+		text-decoration: none; font-weight: 700; font-size: 15px; letter-spacing: .01em; }
+	.rail-brand .logo-mark { width: 24px; height: 24px; border-radius: 6px; }
+	.rail-sep { height: 1px; background: var(--border); margin: 10px 8px; }
+	.rail-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+	.rail-toggle { display: none; background: transparent; color: var(--text); border: 1px solid var(--border); font-size: 15px; }
+	.detail { border-left: 1px solid var(--border); padding: 16px; }
 	.content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-	/* ---- view tabs ---- */
-	.tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
-	.tab { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 5px 11px; border-radius: 7px; font-weight: 600; }
-	.tab:hover { color: var(--text); background: var(--panel2); }
-	.tab.active { color: var(--text); background: var(--panel2); border-color: var(--border2); }
-	.view { flex: 1; overflow: auto; padding: 14px; min-height: 0; }
+	/* ---- nav items ---- */
+	.tabs { display: flex; flex-direction: column; gap: 2px; }
+	.tab { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+		background: transparent; color: var(--muted); border: 0; padding: 9px 10px; border-radius: 8px;
+		font-weight: 550; font-size: 13.5px; }
+	.tab .ti { width: 18px; display: inline-grid; place-items: center; font-size: 14px; opacity: .9; }
+	.tab:hover { color: var(--text); background: var(--panel2); filter: none; }
+	.tab.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 650; }
+	.view { flex: 1; overflow: auto; padding: 20px 22px; min-height: 0; }
 	.view.pad0 { padding: 0; }
+
+	/* ---- memory browser (content, shown on Memories) ---- */
+	#memoryBrowser { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;
+		padding: 20px 22px 0; }
+	#memoryBrowser[hidden] { display: none; }
+	.browser-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+		max-height: 320px; overflow-y: auto; }
+
+	@media (max-width: 900px) {
+		main, main.detail-open { grid-template-columns: minmax(0, 1fr); }
+		#rail { position: fixed; inset: 0 auto 0 0; width: 232px; z-index: 40; transform: translateX(-100%);
+			transition: transform .18s ease; box-shadow: 0 0 40px rgba(16,24,40,.18); }
+		body.rail-open #rail { transform: none; }
+		.rail-toggle { display: inline-grid; place-items: center; }
+		.view { padding: 16px; }
+		#memoryBrowser { padding: 16px 16px 0; }
+	}
 
 	/* ---- sidebar ---- */
 	.side-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint);
@@ -531,7 +583,9 @@
 		.sample-graph-showcase { grid-template-columns: 1fr; }
 		.graph-shot { min-height: 500px; }
 		.graph-canvas { min-height: 420px; }
-		main, main.detail-open { grid-template-columns: 210px minmax(0, 1fr); }
+		/* The rail is position:fixed below 900px, so the workspace takes the full
+		   width — this must stay single-column or content is squeezed to 210px. */
+		main, main.detail-open { grid-template-columns: minmax(0, 1fr); }
 		.detail { position: fixed; inset: auto 0 0 0; max-height: 46vh; z-index: 20; border-left: 0; border-top: 1px solid var(--border); box-shadow: 0 -18px 40px rgba(0,0,0,.35); }
 		main:not(.detail-open) .detail { display: none; }
 		.legend { left: 14px; right: 14px; justify-content: flex-start; }
@@ -806,43 +860,57 @@
 <div id="authView" class="auth-shell"></div>
 
 <header id="appHeader">
-	<h1><img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="UML logo" /> UML</h1>
+	<button class="rail-toggle" id="railToggle" aria-label="Menu" onclick="toggleRail()">☰</button>
+	<h1 id="pageTitle">Home</h1>
 	<input id="userId" class="dev-only" placeholder="userId" autocomplete="off" />
 	<input id="key" class="dev-only" type="password" placeholder="API key" autocomplete="off" />
 	<button id="load" class="dev-only">Load</button>
 	<button class="ghost dev-only" id="copyMcp">Copy legacy MCP URL</button>
 	<div class="spacer"></div>
-	<div class="app-user" id="appUser"></div>
-	<div class="stats" id="stats"></div>
+	<div class="stats dev-only" id="stats"></div>
 </header>
 
 <div class="banner" id="banner"></div>
 
 <main id="main">
-	<aside>
-		<div class="side-h"><span>Memory Pages</span><span id="pageCount" class="kv"></span></div>
-		<div id="pageList"></div>
-		<div class="side-h"><span>Nodes</span><span id="nlCount" class="kv"></span></div>
-		<div id="nodeList"></div>
-		<div id="candidateSidebarSection">
-			<div class="side-h" style="margin-top:18px"><span>Review Queue</span><span id="candCount" class="kv"></span></div>
-			<div id="candList"></div>
-		</div>
-	</aside>
-
-	<div class="content">
-		<div class="tabs" id="tabs">
-			<button class="tab active" data-view="overview">Home</button>
-			<button class="tab" data-view="memory">Memories<span id="reviewTabCount" class="tab-count"></span></button>
-			<button class="tab" data-view="graph">Graph</button>
-			<button class="tab" data-view="connect">Connect</button>
-			<button class="tab" data-view="receipts">History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
-			<button class="tab" data-view="settings">Settings</button>
-			<button class="tab" data-view="admin" hidden>Admin</button>
+	<aside id="rail">
+		<a class="rail-brand" href="/app" onclick="setView('overview'); return false;">
+			<img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="" /> <span>UML</span>
+		</a>
+		<nav class="tabs" id="tabs">
+			<button class="tab active" data-view="overview"><span class="ti">⌂</span>Home</button>
+			<button class="tab" data-view="memory"><span class="ti">◈</span>Memories<span id="reviewTabCount" class="tab-count"></span></button>
+			<button class="tab" data-view="graph"><span class="ti">⁂</span>Graph</button>
+			<button class="tab" data-view="connect"><span class="ti">⚯</span>Connect</button>
+			<button class="tab" data-view="receipts"><span class="ti">≡</span>History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
+			<div class="rail-sep"></div>
+			<button class="tab" data-view="settings"><span class="ti">⚙</span>Settings</button>
+			<button class="tab" data-view="admin" hidden><span class="ti">◉</span>Admin</button>
 			<button class="tab dev-only" data-view="saves">Saves</button>
 			<button class="tab dev-only" data-view="test">Test</button>
 			<button class="tab dev-only" data-view="setup">Legacy Setup</button>
 			<button class="tab dev-only" data-view="dev">Model</button>
+		</nav>
+		<div class="rail-foot"><div class="app-user" id="appUser"></div></div>
+	</aside>
+
+	<div class="content">
+		<!-- The memory browser is content, not chrome: it belongs to Memories and
+		     Graph, not to every screen. Kept in the DOM so render targets never
+		     disappear; shown only where it makes sense. -->
+		<div id="memoryBrowser" hidden>
+			<div class="browser-col">
+				<div class="side-h"><span>Notes</span><span id="pageCount" class="kv"></span></div>
+				<div id="pageList"></div>
+			</div>
+			<div class="browser-col">
+				<div class="side-h"><span>Memories</span><span id="nlCount" class="kv"></span></div>
+				<div id="nodeList"></div>
+			</div>
+			<div class="browser-col" id="candidateSidebarSection">
+				<div class="side-h"><span>Suggestions</span><span id="candCount" class="kv"></span></div>
+				<div id="candList"></div>
+			</div>
 		</div>
 		<div class="view pad0" id="view"></div>
 	</div>
@@ -1432,6 +1500,14 @@ function renderCandidates() {
 // top-level ideas — they now live inside Memories and Settings — but old links
 // and bookmarks must keep working, so they resolve to their new home.
 const VIEW_ALIASES = { candidates: "memory", rules: "settings" };
+const VIEW_TITLES = {
+	overview: "Home", memory: "Memories", graph: "Graph", connect: "Connect",
+	receipts: "History", settings: "Settings", admin: "Admin",
+};
+
+function toggleRail() {
+	document.body.classList.toggle("rail-open");
+}
 
 function setView(v, { updateHash = true } = {}) {
 	let redirected = false;
@@ -1441,6 +1517,12 @@ function setView(v, { updateHash = true } = {}) {
 	}
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
+	const title = $("#pageTitle");
+	if (title) title.textContent = VIEW_TITLES[v] || "UML";
+	// The memory browser belongs to Memories only — everywhere else it is noise.
+	const browser = $("#memoryBrowser");
+	if (browser) browser.hidden = !(v === "memory" && !S.showSuggestions);
+	document.body.classList.remove("rail-open");
 	if ((updateHash || redirected) && APP_VIEWS.has(v) && document.body.classList.contains("app-mode")) {
 		history.replaceState(null, "", `/app#${v}`);
 	}
