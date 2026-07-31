@@ -6,7 +6,7 @@
 <title>UML - Universal Memory Layer</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
-<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <style>
 	:root {
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
@@ -596,7 +596,8 @@
 		</div>
 		<div class="hero-video">
 			<div class="video-frame">
-				<video autoplay muted loop playsinline preload="metadata" aria-label="UML memory graph in motion">
+				<video id="heroReel" autoplay muted loop playsinline webkit-playsinline preload="metadata"
+					poster="/assets/uml-reel-poster.svg" aria-label="UML memory graph in motion">
 					<source src="/assets/uml-reel.mp4" type="video/mp4" />
 				</video>
 			</div>
@@ -1124,11 +1125,34 @@ function mcpUrlForToken(token) { return `${location.origin}/mcp/${token || "{tok
 // reported automatically and appear only in the admin Health tab.
 const FRIENDLY_NETWORK = "Can't reach UML — check your internet connection and try again.";
 const FRIENDLY_FAIL = "Something went wrong on our side. It's been reported — please try again in a moment.";
+// Benign browser noise that is NOT a broken page: blocked autoplay (a user
+// preference, not a fault), ResizeObserver's self-resolving loop notice, and
+// bare cross-origin "Script error." with no detail. These are still logged —
+// under their own budget — so they can never crowd out a real failure.
+const NOISE_ERROR_PATTERNS = [
+	/play\(\) (?:request|method)|not allowed by the user agent|NotAllowedError|AbortError.*play|The play method is not allowed/i,
+	/ResizeObserver loop/i,
+	/^script error\.?$/i,
+];
+
+function isNoiseError(message) {
+	const text = String(message ?? "").trim();
+	return NOISE_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 let clientErrorBudget = 3;
+let noiseErrorBudget = 2;
 
 function reportClientError(scope, message) {
-	if (clientErrorBudget <= 0) return;
-	clientErrorBudget--;
+	const noise = isNoiseError(message);
+	if (noise) {
+		if (noiseErrorBudget <= 0) return;
+		noiseErrorBudget--;
+		scope = `noise:${scope}`;
+	} else {
+		if (clientErrorBudget <= 0) return;
+		clientErrorBudget--;
+	}
 	try {
 		fetch("/v1/error-report", {
 			method: "POST",
@@ -1157,6 +1181,24 @@ function friendlyHttpError(status, body) {
 window.addEventListener("error", (event) => reportClientError("window", event?.message));
 window.addEventListener("unhandledrejection", (event) =>
 	reportClientError("promise", event?.reason?.message ?? event?.reason));
+
+// Autoplay is a user/platform preference, not a failure. Own the play promise
+// so a blocked autoplay can never surface as an unhandled rejection, and give
+// blocked viewers real controls over the poster frame instead of a dead box.
+function initHeroReel() {
+	const video = document.getElementById("heroReel");
+	if (!video || typeof video.play !== "function") return;
+	const offerManualPlay = () => {
+		video.setAttribute("controls", "");
+		video.style.cursor = "pointer";
+	};
+	try {
+		const attempt = video.play();
+		if (attempt && typeof attempt.catch === "function") attempt.catch(offerManualPlay);
+	} catch {
+		offerManualPlay();
+	}
+}
 
 async function api(path, opts={}) {
 	const headers = { "content-type": "application/json", ...(opts.headers||{}) };
@@ -4154,6 +4196,7 @@ window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
 window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
 initConnectWidget();
+initHeroReel();
 initShell();
 </script>
 </body>

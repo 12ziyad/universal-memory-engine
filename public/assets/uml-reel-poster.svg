@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 640" width="360" height="640" role="img" aria-label="UML memory graph preview">
+	<defs>
+		<radialGradient id="glow" cx="50%" cy="42%" r="55%">
+			<stop offset="0%" stop-color="#84e9ff" stop-opacity=".18"/>
+			<stop offset="100%" stop-color="#84e9ff" stop-opacity="0"/>
+		</radialGradient>
+		<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0%" stop-color="#0b1017"/>
+			<stop offset="100%" stop-color="#070b11"/>
+		</linearGradient>
+	</defs>
+	<rect width="360" height="640" fill="url(#bg)"/>
+	<rect width="360" height="640" fill="url(#glow)"/>
+
+	<g stroke="#2b3d52" stroke-width="1.6" opacity=".85">
+		<line x1="180" y1="300" x2="96" y2="196"/>
+		<line x1="180" y1="300" x2="268" y2="212"/>
+		<line x1="180" y1="300" x2="112" y2="418"/>
+		<line x1="180" y1="300" x2="258" y2="404"/>
+		<line x1="96" y1="196" x2="268" y2="212"/>
+		<line x1="112" y1="418" x2="258" y2="404"/>
+	</g>
+
+	<circle cx="180" cy="300" r="30" fill="#141d2b" stroke="#8b5cf6" stroke-width="3"/>
+	<circle cx="96" cy="196" r="17" fill="#111827" stroke="#2dd4bf" stroke-width="3"/>
+	<circle cx="268" cy="212" r="17" fill="#111827" stroke="#84e9ff" stroke-width="3"/>
+	<circle cx="112" cy="418" r="17" fill="#111827" stroke="#22c55e" stroke-width="3"/>
+	<circle cx="258" cy="404" r="17" fill="#111827" stroke="#f2cc60" stroke-width="3"/>
+
+	<g font-family="ui-sans-serif, system-ui, Segoe UI, sans-serif" fill="#8ab0c0" font-size="13" text-anchor="middle">
+		<text x="180" y="358">memory graph</text>
+		<text x="96" y="230">people</text>
+		<text x="268" y="246">projects</text>
+		<text x="112" y="452">habits</text>
+		<text x="258" y="438">goals</text>
+	</g>
+
+	<g transform="translate(180 520)" text-anchor="middle" font-family="ui-sans-serif, system-ui, Segoe UI, sans-serif">
+		<text y="0" fill="#f8fafc" font-size="17" font-weight="600">Your memory, as a living graph</text>
+		<text y="26" fill="#5d7688" font-size="13">tap to play</text>
+	</g>
+</svg>
