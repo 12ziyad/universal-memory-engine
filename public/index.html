@@ -359,13 +359,16 @@
 	.section-kicker { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
 		color: var(--accent); background: rgba(132,233,255,.08); border: 1px solid rgba(132,233,255,.22);
 		padding: 4px 12px; border-radius: 999px; margin-bottom: 12px; }
-	.hero-video { position: relative; min-width: 0; }
-	.video-frame { position: relative; border-radius: 18px; overflow: hidden; border: 1px solid rgba(132,233,255,.28);
+	.hero-video { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+	.video-frame { position: relative; display: inline-block; border-radius: 18px; overflow: hidden; border: 1px solid rgba(132,233,255,.28);
 		box-shadow: 0 0 60px rgba(76,201,240,.16), 0 24px 60px rgba(0,0,0,.5); animation: heroFloat 7s ease-in-out infinite;
 		background: #060b12; }
 	.video-frame::after { content: ""; position: absolute; inset: 0; pointer-events: none;
 		background: linear-gradient(160deg, rgba(132,233,255,.08), transparent 34%); }
-	.video-frame video { display: block; width: 100%; height: auto; }
+	/* The reel keeps its aspect ratio but must fit one screen: cap the height so
+	   the whole video is visible in the hero with no scrolling. */
+	.video-frame video { display: block; width: auto; height: auto; max-width: 100%; max-height: min(64vh, 520px); }
+	@media (max-width: 980px) { .video-frame video { max-height: 46vh; } }
 	.video-caption { margin-top: 10px; text-align: center; color: #8ab0c0; font-size: 12.5px; }
 	@keyframes heroFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
 	.how-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 22px; }
