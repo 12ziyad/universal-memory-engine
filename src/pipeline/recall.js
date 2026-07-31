@@ -180,7 +180,7 @@ function dedupeEntries(entries) {
 	return out;
 }
 
-function buildContext(entries, plan = recallGate("memory")) {
+export function buildContext(entries, plan = recallGate("memory")) {
 	const lines = [];
 	let nodeCount = 0;
 	let pageCount = 0;
@@ -207,9 +207,16 @@ function buildContext(entries, plan = recallGate("memory")) {
 	const out = [];
 	let chars = 0;
 	for (const line of lines) {
-		if (chars + line.length + 1 > plan.maxContextChars) break;
-		out.push(line);
-		chars += line.length + 1;
+		if (chars >= plan.maxContextChars) break;
+		// Clip an oversized line to the remaining budget instead of dropping it.
+		// Digest-heavy nodes can produce single lines longer than the whole
+		// budget; breaking on the first one returned an EMPTY context even when
+		// recall had strong matches — the caller saw "found memory" with nothing
+		// attached.
+		const remaining = plan.maxContextChars - chars;
+		const clipped = line.length > remaining ? `${line.slice(0, Math.max(0, remaining - 1))}…` : line;
+		out.push(clipped);
+		chars += clipped.length + 1;
 	}
 	return out.join("\n");
 }

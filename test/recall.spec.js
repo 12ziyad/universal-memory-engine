@@ -154,3 +154,19 @@ describe("/v1/recall - memory pages", () => {
 		expect(body.context).not.toContain("# UML");
 	});
 });
+
+describe("buildContext budget", () => {
+	it("clips an oversized first line instead of returning an empty context", async () => {
+		const { buildContext, recallGate } = await import("../src/pipeline/recall.js");
+		const plan = recallGate("what do you know about my counseling course");
+		const giant = "x".repeat(plan.maxContextChars * 3);
+		const entries = [
+			{ type: "node", item: { label: "Mental Health Counseling", category: "skill", state: "active", slices: [{ text: giant }], events: [] } },
+			{ type: "node", item: { label: "Painting", category: "hobby", state: "active", slices: [{ text: "painted a sunrise" }], events: [] } },
+		];
+		const context = buildContext(entries, plan);
+		expect(context.length).toBeGreaterThan(0);
+		expect(context).toContain("Mental Health Counseling");
+		expect(context.length).toBeLessThanOrEqual(plan.maxContextChars + 2);
+	});
+});
