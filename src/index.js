@@ -425,6 +425,82 @@ const routes = {
 		return json(res);
 	},
 
+	"GET /v1/export": async (request, env) => {
+		// Data portability: everything the user owns, one JSON download.
+		const requestedUserId = new URL(request.url).searchParams.get("userId");
+		const auth = await requireMemoryUser(request, env, requestedUserId, {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
+		const tables = ["nodes", "slices", "events", "edges", "memory_pages", "candidates", "receipts", "memory_rules"];
+		const results = await env.DB.batch(tables.map((table) =>
+			env.DB.prepare(`SELECT * FROM ${table} WHERE user_id = ?`).bind(userId)));
+		const payload = {
+			format: "uml-export",
+			version: 1,
+			exported_at: new Date().toISOString(),
+			user_id: userId,
+		};
+		tables.forEach((table, index) => { payload[table] = results[index].results ?? []; });
+		return new Response(JSON.stringify(payload, null, 2), {
+			headers: {
+				"content-type": "application/json; charset=utf-8",
+				"content-disposition": `attachment; filename="uml-export-${new Date().toISOString().slice(0, 10)}.json"`,
+			},
+		});
+	},
+
+	"GET /v1/admin/stats": async (request, env) => {
+		// Operator dashboard. Session-only (no token auth) and role-gated.
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const now = Date.now();
+		const dayMs = 24 * 60 * 60 * 1000;
+		const since14 = now - 14 * dayMs;
+		const [users, verifiedUsers, sessionsActive, logins14, signups14, totals, topUsers] = await env.DB.batch([
+			env.DB.prepare("SELECT COUNT(*) AS n FROM users"),
+			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE terms_accepted_at IS NOT NULL"),
+			env.DB.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE revoked_at IS NULL AND expires_at > ?").bind(now),
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+				 FROM login_events WHERE created_at > ? GROUP BY day ORDER BY day`,
+			).bind(since14),
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+				 FROM users WHERE created_at > ? GROUP BY day ORDER BY day`,
+			).bind(since14),
+			env.DB.prepare(
+				`SELECT
+					(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL) AS nodes,
+					(SELECT COUNT(*) FROM memory_pages WHERE deleted_at IS NULL) AS pages,
+					(SELECT COUNT(*) FROM slices WHERE deleted_at IS NULL) AS slices,
+					(SELECT COUNT(*) FROM events WHERE deleted_at IS NULL) AS events,
+					(SELECT COUNT(*) FROM receipts) AS receipts,
+					(SELECT COUNT(*) FROM connection_tokens WHERE revoked_at IS NULL) AS active_tokens`,
+			),
+			env.DB.prepare(
+				`SELECT u.id, u.email, u.name, u.created_at,
+					(SELECT COUNT(*) FROM nodes n WHERE n.user_id = u.id AND n.deleted_at IS NULL) AS nodes,
+					(SELECT COUNT(*) FROM receipts r WHERE r.user_id = u.id) AS receipts,
+					(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
+				 FROM users u ORDER BY receipts DESC LIMIT 20`,
+			),
+		]);
+		return json({
+			ok: true,
+			generated_at: now,
+			users: Number(users.results?.[0]?.n ?? 0),
+			consented_users: Number(verifiedUsers.results?.[0]?.n ?? 0),
+			active_sessions_users: Number(sessionsActive.results?.[0]?.n ?? 0),
+			logins_by_day: logins14.results ?? [],
+			signups_by_day: signups14.results ?? [],
+			totals: totals.results?.[0] ?? {},
+			top_users: topUsers.results ?? [],
+		});
+	},
+
 	"GET /v1/rules": async (request, env) => {
 		const requestedUserId = new URL(request.url).searchParams.get("userId");
 		const auth = await requireMemoryUser(request, env, requestedUserId, {

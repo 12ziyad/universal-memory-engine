@@ -195,6 +195,11 @@ function authValidation(body, { signup = false } = {}) {
 export async function signup(env, request, body) {
 	const valid = authValidation(body, { signup: true });
 	if (valid.error) return { error: valid.error, status: 400 };
+	// Affirmative consent is required (a pre-ticked box is non-compliant); the
+	// acceptance moment is recorded on the account.
+	if (body.acceptTerms !== true) {
+		return { error: "Please accept the Terms of Service and Privacy Policy to create an account.", status: 400 };
+	}
 
 	const existing = await env.DB.prepare("SELECT id FROM users WHERE email_normalized = ? LIMIT 1")
 		.bind(valid.email)
@@ -206,10 +211,10 @@ export async function signup(env, request, body) {
 	const password = await hashPassword(valid.password);
 	await env.DB.prepare(
 		`INSERT INTO users
-			(id, email, email_normalized, password_hash, password_salt, name, created_at, updated_at, status, role)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 'user')`,
+			(id, email, email_normalized, password_hash, password_salt, name, created_at, updated_at, status, role, terms_accepted_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 'user', ?)`,
 	)
-		.bind(id, valid.email, valid.email, password.passwordHash, password.passwordSalt, valid.name || null, createdAt, createdAt)
+		.bind(id, valid.email, valid.email, password.passwordHash, password.passwordSalt, valid.name || null, createdAt, createdAt, createdAt)
 		.run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
 	const session = await createSession(env, request, id);
