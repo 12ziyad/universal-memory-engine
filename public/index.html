@@ -16,7 +16,7 @@
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; }
-	body { margin: 0; font: 13.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	body { margin: 0; font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	code { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace; }
@@ -201,9 +201,16 @@
 	.auth-error { display: none; color: #ffb4ad; border: 1px solid rgba(248,81,73,.4); background: rgba(58,29,27,.6); padding: 9px 11px; border-radius: 8px; margin: 10px 0; }
 	.app-user { display: flex; gap: 8px; align-items: center; color: var(--muted); }
 	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #58a6ff, #ffc65b); color: #04121f; font-weight: 800; }
-	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-	.action-box h3 { margin: 0 0 8px; }
+	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 16px; }
+	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+	.action-box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
+	.stat-big { font-size: 26px; font-weight: 700; margin: 4px 0 8px; }
+	.onboard-card { border-color: rgba(132,233,255,.35); }
+	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+	.onboard-step:last-of-type { border-bottom: 0; }
+	.onboard-step > b { flex: 0 0 26px; height: 26px; border-radius: 50%; background: rgba(132,233,255,.14); color: #84e9ff; display: inline-flex; align-items: center; justify-content: center; }
+	.onboard-step > div { flex: 1; min-width: 180px; }
+	.onboard-step button { flex: 0 0 auto; }
 	.action-box textarea { width: 100%; min-height: 120px; resize: vertical; background: var(--panel2); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 9px; }
 	.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--panel2); }
 	.token-row.revoked { opacity: .78; }
@@ -482,9 +489,10 @@
 
 	/* ---- misc ---- */
 	.empty { color: var(--faint); font-style: italic; padding: 18px; text-align: center; }
-	.help { color: var(--muted); font-size: 12.5px; }
-	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 16px; margin-bottom: 14px; max-width: 720px; }
-	.box h3 { margin: 0 0 10px; font-size: 14px; }
+	.help { color: var(--muted); font-size: 13px; line-height: 1.55; }
+	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; max-width: 720px; }
+	.box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
+	.kv { line-height: 1.7; }
 	.danger-zone { border-color: rgba(248,81,73,.52); box-shadow: inset 0 0 0 1px rgba(248,81,73,.08); }
 	.danger-zone input { width: min(100%, 280px); border-color: rgba(248,81,73,.42); }
 	.danger-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
@@ -1471,7 +1479,28 @@ function viewOverview(v) {
 	const empty = !s.pages && !s.nodes;
 	const name = S.me?.user?.name || S.me?.user?.email || "there";
 	const wrap = el("div");
-	wrap.innerHTML = `
+
+	// First-run onboarding: shown until the account has a connection or a
+	// memory, or the user dismisses it. One decision per step, nothing to read.
+	const needsOnboarding = empty && !S.tokens.length && !localStorage.getItem("uml_onboarded");
+	const onboarding = needsOnboarding ? `
+		<div class="box onboard-card" style="max-width:980px;margin-bottom:14px">
+			<h3>Welcome — set up in 3 steps</h3>
+			<div class="onboard-step"><b>1</b><div><b>Create your private memory link</b><div class="help">One click. This is the key AI tools use to reach your memory.</div></div>
+				<button onclick="onboardCreateLink()">Create link</button></div>
+			<div class="onboard-step"><b>2</b><div><b>Connect Claude or ChatGPT</b><div class="help">Paste the link into your AI tool — the Connect tab shows exactly where (on a computer, not the phone app).</div></div>
+				<button class="ghost" onclick="setView('connect')">Show me</button></div>
+			<div class="onboard-step"><b>3</b><div><b>Save your first memory</b><div class="help">Tell it something worth remembering — "I'm learning Kotlin" — and watch your graph grow.</div></div>
+				<button class="ghost" onclick="setView('memory')">Save one</button></div>
+			<div style="margin-top:10px"><a class="help" href="#" onclick="dismissOnboarding(event)">I'll do this later</a></div>
+		</div>` : "";
+
+	// Real usage, counted from this account's own receipts (recent window).
+	const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+	const recent = (S.receipts || []).filter((r) => Number(r.created_at) > monthAgo);
+	const saves30 = recent.filter((r) => r.source !== "recall").length;
+	const recalls30 = recent.filter((r) => r.source === "recall").length;
+	wrap.innerHTML = onboarding + `
 		<div class="box" style="max-width:980px">
 			<h3>Overview</h3>
 			<div class="help">Welcome, ${esc(name)}. UML is your private structured memory graph for AI tools, agents, apps, docs, events, workflows, and SDK integrations.</div>
@@ -1487,12 +1516,30 @@ function viewOverview(v) {
 			</div>
 		</div>
 		<div class="panel-grid">
-			<div class="action-box"><h3>Memory graph status</h3><div class="help">Pages, nodes, events, edges, and receipts are loaded from the backend graph authority.</div></div>
-			<div class="action-box"><h3>Recent memory activity</h3><div class="help">${S.receipts[0] ? esc(S.receipts[0].summary || "Latest receipt is ready.") : "Receipts will show what UML saved, updated, or ignored."}</div></div>
-			<div class="action-box"><h3>Connected tools count</h3><div class="help">${S.tokens.length} connection(s). Open Connect to create, rotate, or revoke private links.</div></div>
-			<div class="action-box"><h3>Receipt preview</h3><div class="help">${S.receipts[0] ? `${esc(S.receipts[0].source || "save")} · ${fmtDate(S.receipts[0].created_at)}` : "No receipts yet."}</div></div>
+			<div class="action-box"><h3>Saves (30 days)</h3><div class="stat-big">${saves30}</div><div class="help">Memories and conversations written by you or your connected tools.</div></div>
+			<div class="action-box"><h3>Recalls (30 days)</h3><div class="stat-big">${recalls30}</div><div class="help">Times a tool looked something up from your memory.</div></div>
+			<div class="action-box"><h3>Connections</h3><div class="stat-big">${S.tokens.length}</div><div class="help">Active private links. Create, rotate, or revoke them in Connect.</div></div>
+			<div class="action-box"><h3>Latest activity</h3><div class="help">${S.receipts[0] ? `${esc(S.receipts[0].source || "save")} · ${fmtDate(S.receipts[0].created_at)}<br/>${esc(String(S.receipts[0].summary || "").slice(0, 140))}` : "No activity yet — save your first memory to start."}</div></div>
 		</div>`;
 	v.appendChild(wrap);
+}
+
+async function onboardCreateLink() {
+	// One-click first connection: create the MCP link, then land the user in
+	// Connect where the one-time link and paste-instructions are shown.
+	try {
+		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type: "mcp", label: "My first connection" }) });
+		S.oneTimeToken = { ...result, connectionName: "My first connection" };
+		S.oneTimeVisible = true;
+		await refreshTokens();
+		setView("connect");
+	} catch (e) { toast(e.message || "Could not create the link. Please try again.", true); }
+}
+
+function dismissOnboarding(event) {
+	if (event) event.preventDefault();
+	localStorage.setItem("uml_onboarded", "1");
+	renderView();
 }
 
 function viewMemory(v) {
@@ -1807,7 +1854,12 @@ function viewConnect(v) {
 		${oneTimeSecretPanel(latest)}
 		<div class="box" style="max-width:980px"><h3>Connections and tokens</h3><div class="help">Active rows can be revoked. Revoked rows remain visible for audit and are not usable.</div><div id="tokenList"></div></div>
 		<div class="panel-grid">
-			<div class="action-box"><h3>MCP setup instructions</h3><ol class="steps"><li>Generate a named MCP URL.</li><li>Copy it while the one-time panel is open.</li><li>Open the client's MCP, connector, tools, or custom server settings.</li><li>Paste the full URL exactly once and save.</li><li>Test the available save and recall tools.</li></ol></div>
+			<div class="action-box"><h3>Claude setup</h3>
+				<div class="help" style="margin-bottom:8px"><b style="color:#f2cc60">Use a computer browser</b> — the phone apps can't add connectors (it syncs to your phone after).</div>
+				<ol class="steps"><li>Generate a named MCP URL above and copy it.</li><li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (direct link).</li><li>Name it <i>uml</i>, paste the URL, click Add.</li><li>In a chat: tap <b>+</b> &rarr; Connectors &rarr; switch on <i>uml</i>.</li></ol></div>
+			<div class="action-box"><h3>ChatGPT setup</h3>
+				<div class="help" style="margin-bottom:8px">Needs a paid plan. On a computer:</div>
+				<ol class="steps"><li>Settings &rarr; Connectors (or Plugins) &rarr; Advanced &rarr; turn on <b>Developer mode</b> — nothing appears until this is on.</li><li>Connectors &rarr; Create. Name: <i>uml</i>. Description: <i>Personal memory — save and recall facts about me across chats.</i> Paste your MCP URL.</li><li>In a new chat, enable Developer mode / Add sources and pick <i>uml</i>.</li></ol></div>
 			<div class="action-box"><h3>API token usage</h3><div class="help">Send the token as a bearer credential. Never paste it into public logs, prompts, or client-side code.</div><div class="mcp-url" style="margin-top:10px">Authorization: Bearer uml_live_xxxxx<br><br>POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
 			<div class="action-box"><h3>Security notes</h3><ul class="policy-list"><li>Full secrets are shown only once.</li><li>Revoke a token if a device, workspace, or private link may be exposed.</li><li>Use one connection per tool so you can revoke access cleanly.</li></ul></div>
 		</div>`;
