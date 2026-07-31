@@ -436,6 +436,17 @@
 		.how-flow, .feature-grid { grid-template-columns: 1fr; }
 		.term-code { flex-direction: column; align-items: stretch; }
 	}
+	.google-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+		background: #fff; color: #1f1f1f; border: 1px solid #dadce0; border-radius: 9px; padding: 10px 14px;
+		font-size: 14px; font-weight: 600; }
+	.google-btn:hover { filter: none; background: #f3f6fc; }
+	.google-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+	.auth-agree { color: #7f9aab; font-size: 11.5px; text-align: center; margin-top: 8px; }
+	.auth-agree a { color: #a9c4d2; }
+	.auth-divider { display: flex; align-items: center; gap: 12px; color: #5d7688; font-size: 12px; margin: 16px 0 14px; }
+	.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+	.forgot-link { display: block; text-align: right; margin-top: 6px; font-size: 12.5px; color: #8ab0c0; text-decoration: none; }
+	.forgot-link:hover { color: var(--accent); }
 	.legal-shell { position: fixed; inset: 0; z-index: 60; overflow-y: auto; background: rgba(5,10,16,.97); backdrop-filter: blur(6px); }
 	.legal-doc { width: min(860px, calc(100% - 32px)); margin: 40px auto 80px; background: var(--panel); border: 1px solid var(--border);
 		border-radius: 14px; padding: 34px 38px; line-height: 1.62; }
@@ -965,6 +976,21 @@ function renderAppUser() {
 	wrap.innerHTML = `<span class="avatar">${esc(initials(user))}</span><span>${esc(user.name || user.email)}</span>`;
 }
 
+const GOOGLE_BTN_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+
+const AUTH_ERROR_MESSAGES = {
+	google_denied: "Google sign-in was cancelled. You can try again any time.",
+	google_state: "That sign-in attempt expired — please try again.",
+	google_failed: "Google sign-in failed. Please try again, or log in with your email and password.",
+	google_not_configured: "Google sign-in is not available right now.",
+	account_disabled: "This account is disabled. Contact support if you think this is a mistake.",
+};
+
+function startGoogle(event) {
+	if (event) event.preventDefault();
+	location.href = "/auth/google/start";
+}
+
 function renderAuth(mode = "login") {
 	const isSignup = mode === "signup";
 	const view = $("#authView");
@@ -977,9 +1003,13 @@ function renderAuth(mode = "login") {
 			<h2>${isSignup ? "Create your UML account" : "Log in to UML"}</h2>
 			<p>${isSignup ? "Start one private memory layer for supported AI tools and your own agents." : "Open your private memory dashboard."}</p>
 			<div class="auth-error" id="authError"></div>
+			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
+			<div class="auth-agree">By continuing with Google you agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
+			<div class="auth-divider">or continue with email</div>
 			${isSignup ? `<div class="form-row"><label for="authName">Name</label><input id="authName" autocomplete="name" placeholder="Your name" /></div>` : ""}
 			<div class="form-row"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div>
-			<div class="form-row"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="8" placeholder="At least 8 characters" /></div>
+			<div class="form-row"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="8" placeholder="At least 8 characters" />
+			${isSignup ? "" : `<a class="forgot-link" href="#" onclick="showForgotPassword(event)">Forgot password?</a>`}</div>
 			${isSignup ? `<label class="help" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer">
 				<input id="authConsent" type="checkbox" required style="margin-top:2px" />
 				<span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
@@ -993,6 +1023,33 @@ function renderAuth(mode = "login") {
 		event.preventDefault();
 		await submitAuth(isSignup ? "signup" : "login");
 	};
+	const oauthError = AUTH_ERROR_MESSAGES[new URLSearchParams(location.search).get("error")];
+	if (oauthError) {
+		const err = $("#authError");
+		err.textContent = oauthError;
+		err.style.display = "block";
+	}
+}
+
+function showForgotPassword(event) {
+	if (event) event.preventDefault();
+	const view = $("#authView");
+	view.innerHTML = `
+		<div class="auth-card">
+			<a class="brand-lockup" href="/" onclick="showPublic(event)">
+				<img src="/assets/uml-logo.svg" alt="UML logo" />
+				<span><b>UML</b><span>Universal Memory Layer</span></span>
+			</a>
+			<h2>Forgot your password?</h2>
+			<p>No reset email needed — your Google account is the recovery key.</p>
+			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
+			<div class="auth-agree">Use the <b>same email</b> as your UML account and you'll land right back in it — same memory, no password required. You can keep using Google from then on.</div>
+			<div class="auth-divider">no Google account with that email?</div>
+			<p class="help">Email <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> from your account email and we'll verify you and reset it manually — usually within a day. Automatic email reset links are coming once email sending launches.</p>
+			<div class="auth-actions" style="margin-top:16px">
+				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">&larr; Back to login</a>
+			</div>
+		</div>`;
 }
 
 async function submitAuth(mode) {
