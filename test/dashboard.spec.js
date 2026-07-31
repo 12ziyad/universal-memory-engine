@@ -78,7 +78,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("Support");
 		expect(html).toContain("founder@gpmai.dev");
 		expect(html).toContain("ejziyad@gmail.com");
-		expect(html).toContain("/assets/uml-logo.svg");
+		expect(html).toContain("/assets/uml-icon.png");
 		for (const forbidden of [
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",

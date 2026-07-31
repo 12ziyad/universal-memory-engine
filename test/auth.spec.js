@@ -405,7 +405,7 @@ describe("product shell routes", () => {
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("founder@gpmai.dev");
 		expect(html).toContain("ejziyad@gmail.com");
-		expect(html).toContain("/assets/uml-logo.svg");
+		expect(html).toContain("/assets/uml-icon.png");
 		const withoutContactEmail = html.replace(/mailto:founder@gpmai\.dev|founder@gpmai\.dev/g, "");
 		expect(withoutContactEmail).not.toMatch(/gpmai/i);
 	});
