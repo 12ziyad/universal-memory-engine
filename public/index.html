@@ -804,8 +804,8 @@ function routeMode() {
 	const q = new URLSearchParams(location.search);
 	if (q.get("view") === "login" || location.pathname === "/login") return "login";
 	if (q.get("view") === "signup" || location.pathname === "/signup") return "signup";
-	if (location.pathname === "/terms") return "terms";
-	if (location.pathname === "/privacy") return "privacy";
+	if (q.get("view") === "terms" || location.pathname === "/terms") return "terms";
+	if (q.get("view") === "privacy" || location.pathname === "/privacy") return "privacy";
 	if (q.has("app") || location.pathname === "/app") return "app";
 	return "public";
 }

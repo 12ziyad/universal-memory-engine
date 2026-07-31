@@ -711,6 +711,12 @@ export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 
+		if ((request.method === "GET" || request.method === "HEAD") && ["/terms", "/privacy"].includes(url.pathname)) {
+			// Legal pages must resolve on a direct visit (directory listings,
+			// payment-provider reviews) — serve the shell; the client routes it.
+			return redirectTo(request, `/?view=${url.pathname.slice(1)}`);
+		}
+
 		if ((request.method === "GET" || request.method === "HEAD") && ["/app", "/login", "/signup"].includes(url.pathname)) {
 			const auth = await getSessionUser(env, request);
 			if (url.pathname === "/app") return redirectTo(request, auth ? "/?app=1" : "/?view=login");
