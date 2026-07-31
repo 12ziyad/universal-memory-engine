@@ -68,3 +68,37 @@ describe("recall gate phrasing", () => {
 		expect(recallGate("")).toMatchObject({ mode: "no_recall", reason: "empty_query", topN: 0 });
 	});
 });
+
+describe("third-person questions reach memory", () => {
+	// Regression: classifyMessage() is an INGEST classifier and called every
+	// question without "I"/"my" utility. Gating retrieval on it silently
+	// skipped 87.5% of LoCoMo questions whose answers were in the graph.
+	const mustRecall = [
+		"When did Melanie paint a sunrise?",
+		"What did Caroline research?",
+		"When is Sarah's birthday?",
+		"Who is my manager's boss?",
+		"What fields would Caroline pursue in her education?",
+		"Where did we go camping last year?",
+	];
+	for (const query of mustRecall) {
+		it("recalls for: " + query, () => {
+			const plan = recallGate(query);
+			expect(plan.mode).not.toBe("no_recall");
+			expect(plan.topN).toBeGreaterThan(0);
+		});
+	}
+
+	const mustNotRecall = [
+		"translate this paragraph to French",
+		"write me a python function that sorts a list",
+		"calculate 15% of 2400",
+		"hi",
+		"thanks",
+	];
+	for (const query of mustNotRecall) {
+		it("skips recall for: " + query, () => {
+			expect(recallGate(query).mode).toBe("no_recall");
+		});
+	}
+});

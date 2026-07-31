@@ -36,6 +36,20 @@ const RECALL_INTENT_RE =
 // never be answered from memory instead of being written to it.
 const SAVE_IMPERATIVE_RE =
 	/^\s*(?:please\s+|also\s+|and\s+)*(?:remember|note|save|store|keep in mind)\s+(?:that|this|to|the following|my|i|we|he|she|they|it)\b/i;
+// Pure task requests: generation, translation, arithmetic, formatting. These are
+// answerable with no personal context at all, so they stay out of recall. Note
+// this deliberately does NOT include bare interrogatives ("who is …", "when is
+// …") — those are exactly how people ask about their own people and plans.
+const IMPERSONAL_TASK_RE =
+	/^\s*(?:please\s+|can you\s+|could you\s+|hey\s+)*(?:translate|calculate|compute|convert|spell|write|generate|draft|code|implement|refactor|debug|rewrite|paraphrase|summarize|summarise)\b/i;
+
+/** Anything phrased as a question — the clearest possible request for memory. */
+function isQuestion(text) {
+	const q = String(text ?? "").trim();
+	if (!q) return false;
+	return /\?\s*$/.test(q)
+		|| /^(?:who|what|when|where|why|which|how|did|do|does|is|are|was|were|can|could|will|would|has|have|had|tell me)\b/i.test(q);
+}
 
 function emptyRecall(plan, extras = {}) {
 	return {
@@ -88,7 +102,18 @@ export function recallGate(query, opts = {}) {
 	const broad = BROAD_RE.test(lower);
 	const update = UPDATE_RE.test(lower);
 	const recallIntent = RECALL_INTENT_RE.test(lower) && !SAVE_IMPERATIVE_RE.test(q);
-	if (!broad && !update && !recallIntent && classifyMessage(q) === "utility") {
+	if (IMPERSONAL_TASK_RE.test(q)) {
+		return { ...base, mode: "no_recall", reason: "impersonal_task", topN: 0 };
+	}
+	// A question is the STRONGEST signal that memory should be consulted, so it
+	// must never be gated by classifyMessage(): that classifier answers a
+	// different question ("is this a durable fact worth SAVING?", for which a
+	// question is correctly never a fact) and calls every question lacking
+	// "I"/"my" utility. Reusing it here meant "When is Sarah's birthday?" or
+	// "What did Melanie research?" never looked in memory even when the answer
+	// was stored — measured at 87.5% of LoCoMo questions silently skipped.
+	// Attempting a lookup that finds nothing is cheap; refusing to look is not.
+	if (!broad && !update && !recallIntent && !isQuestion(q) && classifyMessage(q) === "utility") {
 		return { ...base, mode: "no_recall", reason: "utility_query", topN: 0 };
 	}
 	if (update) {
