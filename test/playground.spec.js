@@ -62,7 +62,11 @@ async function send(cookie, message, extra = {}) {
 }
 
 describe("playground config", () => {
-	it("uses a chat model separate from the extraction model", () => {
+	it("uses the smallest instruct model, and never the extraction one", () => {
+		// The reply is scenery; the capture is the product. Small is correct here,
+		// and it must stay a different model from LLM_MODEL — swapping that one
+		// would quietly change what gets captured.
+		expect(chatModel({})).toBe("@cf/meta/llama-3.2-1b-instruct");
 		expect(chatModel({})).not.toBe(env.LLM_MODEL);
 		expect(chatModel({ CHAT_MODEL: "@cf/x/y" })).toBe("@cf/x/y");
 	});
@@ -256,6 +260,21 @@ describe("the playground screen", () => {
 		expect(script).toContain('class="pg-col pg-conversation"');
 		expect(script).toContain('class="pg-col pg-memories"');
 		expect(html).toContain(".pg-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px;");
+	});
+
+	it("has two states, and they switch on whether the thread has messages", async () => {
+		const { script, html } = await page();
+		expect(script).toContain("const empty = !PG.messages.length;");
+		expect(script).toContain("const bare = empty && !PG.threads.length");
+		expect(script).toContain('${empty ? " is-empty" : ""}${bare ? " is-bare" : ""}');
+		// Empty: a greeting and the composer, centred, and nothing else.
+		expect(script).toContain('class="pg-greeting"');
+		expect(html).toContain(".pg-shell.is-empty .pg-conversation { justify-content: center; }");
+		expect(html).toContain(".pg-shell.is-bare .pg-chats, .pg-shell.is-bare .pg-memories { display: none; }");
+		// No header block on this view at all, and no example prompts.
+		expect(script).not.toMatch(/viewPlayground[\s\S]{0,400}class="page-head"/);
+		expect(script).not.toContain("Say something you'd want an AI to remember next week");
+		expect(script).toContain("// Empty means empty: the greeting and the composer are the whole screen.");
 	});
 
 	it("shows the chat cap on the New chat button and the extraction inline", async () => {

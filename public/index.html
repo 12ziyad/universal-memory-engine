@@ -427,8 +427,10 @@
 		.explore-card, .explore-card:hover { transition: none; transform: none; }
 	}
 	/* ---- playground: chats | conversation | memories ---- */
+	/* No page header on this view — the rail and the top bar already name it,
+	   and a header block would push the conversation down the screen. */
 	.pg-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px; gap: 16px;
-		height: calc(100vh - 132px); min-height: 520px; }
+		height: calc(100vh - 104px); min-height: 520px; }
 	.pg-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
 		display: flex; flex-direction: column; min-height: 0; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
 	.pg-col-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
@@ -451,10 +453,23 @@
 	.pg-capture { margin-top: 6px; border-left: 2px solid var(--green); padding: 4px 0 4px 10px;
 		font-size: 12px; color: var(--muted); line-height: 1.55; }
 	.pg-capture b { color: var(--green); font-weight: 600; }
-	.pg-composer { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
+	.pg-composer { border-top: 1px solid var(--border); padding: 12px; }
+	.pg-composer-row { display: flex; gap: 8px; align-items: flex-end; }
 	.pg-composer textarea { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px;
 		border-radius: 10px; border: 1px solid var(--border2); background: var(--panel); color: var(--text);
 		font: 400 14px/1.6 var(--font-ui); }
+	/* Empty state: a greeting and the input, centred, and nothing else. The
+	   message list collapses rather than showing prompts nobody asked for. */
+	.pg-greeting { font-size: 32px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;
+		text-align: center; margin: 0 auto 20px; max-width: 620px; }
+	.pg-shell.is-empty .pg-conversation { justify-content: center; }
+	.pg-shell.is-empty .pg-col-body { flex: 0 0 auto; padding: 0; overflow: visible; }
+	.pg-shell.is-empty .pg-composer { border-top: 0; padding: 0 clamp(14px, 7%, 64px) 8vh; }
+	/* Nothing has ever been said here, so the chat list and the memory panel are
+	   both empty too. Show one thing instead of three empty ones. */
+	.pg-shell.is-bare { grid-template-columns: minmax(0, 1fr); }
+	.pg-shell.is-bare .pg-chats, .pg-shell.is-bare .pg-memories { display: none; }
+	.pg-shell.is-bare .pg-conversation { border: 0; background: transparent; box-shadow: none; }
 	.pg-memory { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
 	.pg-memory .pg-memory-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
 		font-size: 12px; margin-bottom: 4px; }
@@ -2726,13 +2741,17 @@ const PG = {
 };
 
 function viewPlayground(v) {
+	// Two states, one view. Empty: a greeting and the composer, centred, and
+	// nothing else — on a genuinely fresh account the side columns have nothing
+	// in them either, so they stay out of the way until there is something to
+	// show. Once the conversation starts, messages fill from the top and the
+	// composer sits at the bottom.
+	const empty = !PG.messages.length;
+	const bare = empty && !PG.threads.length && PG.tab === "chats";
+	const first = String(S.me?.user?.name || S.me?.user?.email || "").trim().split(/[\s@]/)[0];
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="page-head">
-			<h2 class="page-title">Playground</h2>
-			<p class="page-sub">Talk to an AI that can see your memory, and watch what it keeps. Everything captured here is real — same pipeline, same receipts, same graph.</p>
-		</div>
-		<div class="pg-shell${PG.tab === "settings" ? " settings-open" : ""}">
+		<div class="pg-shell${PG.tab === "settings" ? " settings-open" : ""}${empty ? " is-empty" : ""}${bare ? " is-bare" : ""}">
 			<div class="pg-col pg-chats">
 				<div class="pg-col-head">
 					<div class="client-tabs" style="margin-bottom:10px">
@@ -2749,10 +2768,13 @@ function viewPlayground(v) {
 			<div class="pg-col pg-conversation">
 				<div class="pg-col-body" id="pgMessages"></div>
 				<div class="pg-composer">
-					<textarea id="pgInput" rows="1" placeholder="Tell it something worth remembering…"
-						oninput="PG.draft=this.value;playgroundGrow(this)"
-						onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();playgroundSend();}"></textarea>
-					<button id="pgSendBtn" onclick="playgroundSend()">Send</button>
+					${empty ? `<div class="pg-greeting">${first ? `Hi ${esc(first)} — tell` : "Tell"} me something worth remembering.</div>` : ""}
+					<div class="pg-composer-row">
+						<textarea id="pgInput" rows="1" placeholder="Tell it something worth remembering…"
+							oninput="PG.draft=this.value;playgroundGrow(this)"
+							onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();playgroundSend();}"></textarea>
+						<button id="pgSendBtn" onclick="playgroundSend()">Send</button>
+					</div>
 				</div>
 			</div>
 			<div class="pg-col pg-memories">
@@ -2919,13 +2941,8 @@ function renderPlaygroundMessages() {
 		box.innerHTML = `<div class="pg-empty">${esc(PG.notice)}</div>`;
 		return;
 	}
-	if (!PG.messages.length) {
-		box.innerHTML = `<div class="pg-empty">
-			Say something you'd want an AI to remember next week — <i>"I started learning Kotlin"</i>, <i>"my sister's wedding is in March"</i>, <i>"I prefer short answers"</i>.<br><br>
-			The reply comes from a small chat model. The capture on the right is the real product.
-		</div>`;
-		return;
-	}
+	// Empty means empty: the greeting and the composer are the whole screen.
+	if (!PG.messages.length) { box.innerHTML = ""; return; }
 	box.innerHTML = PG.messages.map((m) => {
 		const items = m.extraction?.items ?? [];
 		// Extraction can outrun the poll window. When it does, say what is

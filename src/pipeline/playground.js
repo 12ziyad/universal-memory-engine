@@ -34,10 +34,16 @@ export function playgroundLimits(env) {
 	};
 }
 
-/** Chat model. Deliberately NOT config.llm.model: that one is tuned for
- *  extraction, and swapping it would change what the product captures. */
+/**
+ * Chat model. Deliberately NOT config.llm.model: that one is tuned for
+ * extraction, and swapping it would change what the product captures.
+ *
+ * The smallest instruct model in the catalogue is the right default. This
+ * model's only job is to reply conversationally so the extractor has something
+ * to work with — the capture is the product, the reply is scenery.
+ */
 export function chatModel(env) {
-	return env.CHAT_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
+	return env.CHAT_MODEL || "@cf/meta/llama-3.2-1b-instruct";
 }
 
 function startOfUtcDay(now = Date.now()) {

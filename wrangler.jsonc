@@ -74,9 +74,10 @@
 		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
 		// The Playground's conversational model. Deliberately SEPARATE from
 		// LLM_MODEL: that one is tuned for extraction and swapping it would
-		// change what the product captures. Small and fast is right here — the
-		// reply is a demonstration, the capture is the product.
-		"CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+		// change what the product captures. This is the smallest instruct model
+		// in the Workers AI catalogue, which is exactly right — its only job is
+		// to reply conversationally so the extractor has something to work with.
+		"CHAT_MODEL": "@cf/meta/llama-3.2-1b-instruct",
 		// A public playground with a free model call per turn is a free LLM for
 		// anyone who signs up. Per user, per UTC day.
 		"PLAYGROUND_DAILY_MESSAGES": "30",
