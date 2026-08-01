@@ -348,29 +348,39 @@
 	/* Get started: the steps sit directly on the page. They used to live inside a
 	   panel, which put a frame inside a frame inside the rail — that single box
 	   was the biggest source of the crowded feeling, so it is gone. */
+	/* Get started spacing scale: gaps between groups are visibly larger than
+	   gaps inside a group (roughly 4:1). Inside a group: title→subtitle 4px,
+	   step title→description 6px, tabs→note 12px. Between groups: 28–32px.
+	   The earlier pass over-tightened everything to the inside-a-group scale,
+	   which is why the page read cramped. */
 	.install-intro { max-width: 1080px; }
+	body.app-mode .install-intro.page-head { margin-bottom: 28px; }
 	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-		gap: 10px; max-width: 1080px; margin-bottom: 20px; }
+		gap: 10px; max-width: 1080px; margin-bottom: 32px; }
 	.method-card { display: flex; align-items: center; gap: 11px; text-align: left; color: var(--text);
 		background: var(--panel); border: 1px solid var(--border);
 		border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 	.method-card .mc-icon { flex: 0 0 auto; width: 18px; height: 18px; color: var(--faint); }
 	.method-card .mc-icon svg { width: 100%; height: 100%; display: block; }
 	.method-card .mc-text { min-width: 0; }
-	.method-card b { display: block; color: var(--text); }
+	.method-card b { display: block; color: var(--text); margin-bottom: 4px; }
 	.method-card span.mc-text > span { display: block; color: var(--muted); }
 	.method-card:hover { border-color: var(--border2); filter: none; }
 	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 	.method-card.active b, .method-card.active .mc-icon { color: var(--accent); }
-	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 10px; }
+	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 12px; }
+	/* Without a plan note between them, tabs → steps still lands on the 32px
+	   between-groups gap (12 + 20). */
+	.client-tabs + .steps { margin-top: 20px; }
+	.variant-tabs + .steps { margin-top: 20px; }
 	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 7px; }
 	.client-tabs .term-tab svg { width: 15px; height: 15px; flex: 0 0 auto; opacity: .85; }
 	/* One muted line, no coloured box. A banner for a plan requirement was
 	   louder than the requirement deserves. */
-	.install-hint { max-width: 1080px; margin: 0 0 18px; }
+	.install-hint { max-width: 1080px; margin: 0 0 32px; }
 	.steps { max-width: 1080px; }
 	.step-row { position: relative; display: grid; grid-template-columns: minmax(170px, 280px) minmax(0, 1fr);
-		gap: 32px; padding: 0 0 22px; align-items: start; }
+		gap: 32px; padding: 0 0 32px; align-items: start; }
 	.step-row:last-child { padding-bottom: 0; }
 	.step-left { display: flex; gap: 12px; }
 	/* A hairline joining the badges, instead of a divider under every step. */
@@ -379,12 +389,15 @@
 	.step-num { position: relative; z-index: 1; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%;
 		background: var(--text); color: var(--panel); display: grid; place-items: center;
 		font-size: 11px; font-weight: 600; margin-top: 1px; }
-	.step-title { margin-bottom: 3px; }
+	.step-title { margin-bottom: 6px; }
 	.step-title-link { display: inline-block; width: 13px; height: 13px; margin-left: 5px;
 		color: var(--faint); vertical-align: -1px; }
 	.step-title-link:hover { color: var(--accent); }
 	.step-title-link svg { width: 100%; height: 100%; display: block; }
 	.step-desc { color: var(--muted); }
+	/* Right-column items top-align with the step title, not the row box. An
+	   action button's padding pushed its text 3px below the title's top edge. */
+	.step-right > button.mini:first-child { margin-top: -3px; }
 	.step-right .install-code + .install-code { margin-top: 8px; }
 	.step-note { color: var(--faint); margin-top: 8px; }
 	.step-done { border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
@@ -411,7 +424,8 @@
 	.code-create { background: transparent; border: 0; color: var(--accent); font-size: 12px;
 		font-weight: 600; padding: 3px 7px; border-radius: 6px; }
 	.code-create:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); filter: none; }
-	.install-code pre { margin: 0; padding: 11px 12px; background: transparent; color: var(--text);
+	/* 12px internal padding; 8px from the label header strip to the code line. */
+	.install-code pre { margin: 0; padding: 8px 12px 12px; background: transparent; color: var(--text);
 		overflow-x: auto; }
 	/* No key yet: the block previews a string that cannot work, so it reads as
 	   inactive and the header offers the link instead of a copy. */
@@ -569,7 +583,12 @@
 	input:focus, select:focus { border-color: var(--accent); }
 	input#userId { width: 130px; } input#key { width: 120px; }
 	button { background: var(--accent); color: #04121f; border: 0; padding: 7px 13px; border-radius: 8px;
-		font-weight: 600; cursor: pointer; font-size: 13px; }
+		font-weight: 600; cursor: pointer; font-size: 13px;
+		/* Hover/state changes ease over 150ms. Color-ish properties only — a
+		   transition that moves layout would make the whole shell feel loose. */
+		transition: filter .15s ease, background-color .15s ease, border-color .15s ease,
+			color .15s ease, box-shadow .15s ease, opacity .15s ease; }
+	a { transition: color .15s ease; }
 	/* Light shell: solid accent needs white text, panels need shadow instead of
 	   the borders that carried structure on dark. */
 	/* Filled buttons need white text — but this must NEVER outrank a component's
@@ -868,6 +887,10 @@
 	.empty { color: var(--faint); font-style: italic; padding: 18px; text-align: center; }
 	.help { color: var(--muted); font-size: 13px; line-height: 1.7; }
 	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; max-width: 720px; }
+	/* Section → section rhythm inside the app: 40px, everywhere. The landing
+	   page keeps its own tighter 20px stacking. */
+	body.app-mode .box { margin-bottom: 40px; }
+	body.app-mode .box:last-child { margin-bottom: 0; }
 	.box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
 	.kv { line-height: 1.7; }
 	.danger-zone { border-color: rgba(248,81,73,.52); box-shadow: inset 0 0 0 1px rgba(248,81,73,.08); }
@@ -2450,7 +2473,7 @@ function installMethods() {
 			},
 		},
 		sdk: {
-			label: "SDK Integration",
+			label: "SDK integration",
 			blurb: "Your own app",
 			icon: ICON.code,
 			clients: {
@@ -4365,13 +4388,13 @@ function viewSettingsMain(v) {
 			<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
 			<div class="kv">Account ID: <b>${esc(u.id || S.userId || "")}</b></div>
 			<div class="kv">Created: <b>${fmtDate(u.created_at)}</b></div>
-			<div class="section-actions"><button class="ghost" onclick="logoutNow()">Logout</button></div>
+			<div class="section-actions"><button class="ghost" onclick="logoutNow()">Log out</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Security</h3>
 			<div class="help">Browser sessions use HttpOnly cookies. Tokens and private MCP URLs should be treated like passwords.</div>
 			<div class="kv" style="margin-top:8px">Active connections: <b>${activeTokens}</b></div>
 			<div class="kv">Revoked connections: <b>${revokedTokens}</b></div>
-			<div class="section-actions"><button class="ghost mini" onclick="logoutAllNow()">Logout all sessions</button><button class="ghost mini" onclick="setView('connect')">Manage tokens</button></div>
+			<div class="section-actions"><button class="ghost mini" onclick="logoutAllNow()">Log out all sessions</button><button class="ghost mini" onclick="setView('keys')">Open API keys</button></div>
 			<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
 				<h3 style="font-size:14px">Change password</h3>
 				<div class="form-row" style="margin-top:8px"><input id="pwCurrent" type="password" autocomplete="current-password" placeholder="Current password (empty if you signed up with Google)" /></div>
@@ -4381,11 +4404,11 @@ function viewSettingsMain(v) {
 		</div>
 		<div class="action-box settings-section"><h3>Connections</h3>
 			<div class="help">${S.tokens.length} total connection(s). Create one MCP URL or API token/key per tool so access can be revoked cleanly.</div>
-			<div class="section-actions"><button class="ghost mini" onclick="setView('connect')">Open Connect</button></div>
+			<div class="section-actions"><button class="ghost mini" onclick="setView('install')">Open Get started</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Memory Controls</h3>
 			<div class="help">Current memory: <b>${s.pages || 0}</b> page(s), <b>${s.nodes || 0}</b> node(s), <b>${s.candidates || 0}</b> review candidate(s).</div>
-			<div class="section-actions"><button class="ghost mini" onclick="setView('rules')">Capture Rules</button>${candidateCount() ? `<button class="ghost mini" onclick="setView('candidates')">Open Review Queue</button>` : `<button class="ghost mini" disabled>No pending candidates</button>`}</div>
+			<div class="section-actions"><button class="ghost mini" onclick="setView('rules')">Capture rules</button>${candidateCount() ? `<button class="ghost mini" onclick="setView('candidates')">Open review queue</button>` : `<button class="ghost mini" disabled>No pending candidates</button>`}</div>
 		</div>
 		<div class="action-box settings-section"><h3>Data &amp; Privacy</h3>
 			<div class="help">You own your account memory. Itsuki does not sell user data, does not train on it, and does not use it for unrelated purposes. Export everything as JSON any time.</div>
@@ -4433,7 +4456,13 @@ function viewGraph(v) {
 			<button class="ghost mini" onclick="graphReset()">Reset view</button>
 		</div>
 		<div id="graph"></div>
-		<div class="graph-err" id="graphErr" style="display:flex"><div class="graph-empty"><b>Preparing graph</b><br><span class="help">Mapping memories...</span></div></div>
+		<div class="graph-err" id="graphErr" style="display:flex">${
+		S.data && !(S.data.nodes?.length) && !(S.data.pages?.length) && !(S.candidates?.length)
+			// A known-empty account gets the invitation immediately — the
+			// "Preparing" placeholder only makes sense when a draw is coming.
+			? `<div class="graph-empty"><b>No memories yet</b><br><span class="help">Save your first from the <a href="#" onclick="setView('playground');return false">Playground</a> or a connected app — it appears here as a living graph.</span></div>`
+			: `<div class="graph-empty"><b>Preparing graph</b><br><span class="help">Mapping memories...</span></div>`
+	}</div>
 		<div class="legend" id="legend"></div>`;
 	v.appendChild(wrap);
 	requestAnimationFrame(drawGraph);
