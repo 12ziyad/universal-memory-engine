@@ -10,7 +10,7 @@
  */
 
 const DEFAULT_BASE_URL = "https://itsuki.app";
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 export class MemoryAPIError extends Error {
 	constructor(message, { status = 0, code = null, body = null } = {}) {
