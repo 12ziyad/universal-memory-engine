@@ -7,6 +7,12 @@
 	"name": "uml",
 	"main": "src/index.js",
 	"compatibility_date": "2026-06-23",
+	// The canonical home. workers.dev stays enabled deliberately: MCP links on
+	// the old host are pasted into people's clients and must keep resolving.
+	"routes": [
+		{ "pattern": "itsuki.app", "custom_domain": true }
+	],
+	"workers_dev": true,
 	"assets": {
 		"directory": "./public"
 	},
