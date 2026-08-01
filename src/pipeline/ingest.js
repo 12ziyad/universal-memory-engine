@@ -16,9 +16,17 @@
 
 import { hashText, normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
+import { scrubMessages } from "./scrub.js";
 
-export async function ingestMessages(env, ctx, userId, messages, opts = {}) {
+export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	const { flush = false, overrides = {}, waitBudgetMs = 0 } = opts;
+	// Secrets are stripped BEFORE anything durable sees the text: the source
+	// packet row, the Durable Object's held chunk, the model, the vectors.
+	const scrubbed = scrubMessages(rawMessages);
+	const messages = scrubbed.messages;
+	if (scrubbed.redacted) {
+		overrides.meta = { ...(overrides.meta ?? {}), redactions: scrubbed.redactions };
+	}
 	const optOut = messagesContainMemoryOptOut(messages);
 	if (optOut.optedOut) {
 		const source = overrides.source ?? opts.source ?? "ingest";

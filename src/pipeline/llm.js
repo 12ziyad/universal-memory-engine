@@ -195,14 +195,31 @@ export function responseText(res) {
 
 const DENSE_ADDENDUM = "\n\nDENSE CAPTURE MODE for this request: enumerate EVERY distinct durable fact as its own object — activities, plans, dates, quantities, names, relationships, preferences, outcomes. Do not summarize several facts into one object. Medium-confidence facts are wanted: propose them with honest confidence rather than dropping them.";
 
-async function callModel(env, config, packet, shortlist, { dense = false, rules = null } = {}) {
+// Engine v2 stance: the deterministic gates downstream are what make it safe
+// to be generous here. A missed fact is unrecoverable; an over-proposal is one
+// named rejection on a receipt.
+const GENEROUS_ADDENDUM = "\n\nSTANCE: when in doubt, EXTRACT — a backend gate reviews every proposal, so err on the side of proposing. Density target: a typical multi-fact message batch should yield 5-15 objects; one or two objects from a rich batch means you are summarizing, not extracting. Propose medium-confidence facts with honest confidence values instead of dropping them.";
+
+// One extractor, three lenses. The lens tunes what counts as durable — it
+// never changes the output contract, and the gates enforce the hard rules
+// (the plugin lens's path/trace/diff bans are enforced deterministically in
+// gates.js whatever the model does with this guidance).
+const PROFILE_ADDENDA = {
+	mcp: "\n\nLENS: personal memory. Focus on people, preferences, plans, decisions, and life events. Discard phatic turns (greetings, acknowledgements, banter) entirely.",
+	sdk: "\n\nLENS: application memory. The caller's own rules (below, if any) take priority over these defaults — extract what THEY define as durable for their users.",
+	plugin: "\n\nLENS: coding session. Durable memory here is: decisions and their reasons, conventions and preferences, error→fix pairs (what broke and what resolved it), architecture and component relationships, repeated commands/workflows. File paths are only ever an attribute inside a decision or component fact, never their own object. Raw stack traces are only durable as part of an error→fix pair. Diffs and tool output are never memory.",
+};
+
+async function callModel(env, config, packet, shortlist, { dense = false, rules = null, profile = null } = {}) {
 	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false };
 	// The user's own rules, as guidance. The digest and manual lanes already did
 	// this; the auto lane did not, so custom instructions never reached the
 	// extractor at all. Enforcement still happens in the gates — a model that
 	// ignores these lines still cannot write excluded content.
 	const ruleLines = rulesPromptLines(rules);
-	const base = dense ? SYSTEM_PROMPT + DENSE_ADDENDUM : SYSTEM_PROMPT;
+	let base = SYSTEM_PROMPT + GENEROUS_ADDENDUM;
+	if (dense) base += DENSE_ADDENDUM;
+	if (PROFILE_ADDENDA[profile]) base += PROFILE_ADDENDA[profile];
 	const messages = [
 		{ role: "system", content: ruleLines.length ? `${base}\n\n${ruleLines.join("\n")}` : base },
 		{ role: "user", content: buildUserPrompt(packet, shortlist) },
@@ -242,5 +259,6 @@ export async function proposeMemory(env, config, { packet, shortlist }, override
 	return callModel(env, config, packet, shortlist, {
 		dense: overrides?.settings?.captureDensity === "dense",
 		rules: overrides?.rules ?? null,
+		profile: overrides?.profile ?? null,
 	});
 }

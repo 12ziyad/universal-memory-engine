@@ -16,6 +16,7 @@ import { refreshManualSearchProfiles } from "./manual_search_profiles.js";
 import { buildConversationCapture, detectConversationCapture, isChatReferentTopic } from "./manual_capture.js";
 import { getMemoryRules, rulesAllowText, rulesRejection } from "./rules.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
+import { scrubMessages, scrubText } from "./scrub.js";
 import { filterDigestByTopic, parseCollectIntent } from "./pages.js";
 import {
 	normalizeSourcePacket,
@@ -1267,7 +1268,10 @@ export async function runMcpDirectSaveCommand(env, _ctx, userId, input = {}) {
 	const mode = "direct_save";
 	const source = "save_memory";
 	const sourceMode = "manual_direct";
-	const content = String(input.content ?? "").trim();
+	// Scrub before the packet is stored or any model reads it. recentContext is
+	// reference-only but it still reaches the model, so it gets the same wash.
+	const content = scrubText(String(input.content ?? "").trim()).text;
+	if (input.recentContext) input = { ...input, recentContext: scrubText(String(input.recentContext)).text };
 	const { normalized, sourcePacket } = await sourcePacketForDirect(env, userId, { ...input, content });
 
 	const optOut = messagesContainMemoryOptOut(normalized.messages);
@@ -1437,6 +1441,8 @@ export async function runMcpConversationCollectCommand(env, _ctx, userId, input 
 	const mode = "conversation_collect";
 	const source = "save_conversation";
 	const sourceMode = "manual_collect";
+	// Scrub the whole submitted conversation before the packet is stored.
+	if (Array.isArray(input.messages)) input = { ...input, messages: scrubMessages(input.messages).messages };
 	const { normalized, sourcePacket } = await sourcePacketForConversation(env, userId, input);
 	const received = normalized.messages.length;
 

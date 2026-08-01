@@ -25,6 +25,7 @@ import { getConfig } from "../config.js";
 import { buildPacket, chunkText } from "./packet.js";
 import { shortlistNodes } from "./shortlist.js";
 import { proposeMemory } from "./llm.js";
+import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
 import { applyGates } from "./gates.js";
 import { writeApproved } from "./write.js";
 import { runPass2 } from "./pass2.js";
@@ -105,6 +106,49 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 			_ok: true,
 		},
 		stats,
+	};
+}
+
+// A chunk this big cannot be extracted in one call: the model's output runs
+// past the token budget and truncates mid-JSON — the exact failure the conv-0
+// smoke measured on end-of-session flushes. Pre-splitting into sub-chunks
+// BEFORE the primary call is the fix; the rescue stays as the parse-failure
+// fallback within each sub-chunk.
+const PRIMARY_SUBCHUNK = 8;
+const PRIMARY_SUBCHUNK_THRESHOLD = 10;
+
+async function proposePrimary(env, config, userId, chunk, recent, packet, shortlist, overrides) {
+	if (chunk.length <= PRIMARY_SUBCHUNK_THRESHOLD) {
+		return proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides);
+	}
+	console.warn(`chunk of ${chunk.length} messages pre-split for extraction user=${userId}`);
+	const objects = [];
+	const notes = [];
+	let rescuedAny = false;
+	let stats = null;
+	for (let i = 0; i < chunk.length; i += PRIMARY_SUBCHUNK) {
+		const sub = chunk.slice(i, i + PRIMARY_SUBCHUNK);
+		const subPacket = buildPacket(sub, recent);
+		const subShortlist = i === 0 ? shortlist : await shortlistNodes(env, config, userId, chunkText(sub));
+		const part = await proposeWithSplitRescue(env, config, userId, sub, recent, subPacket, subShortlist, overrides);
+		if (part.rescueStats) {
+			rescuedAny = rescuedAny || part.rescued;
+			stats = stats
+				? { calls: stats.calls + part.rescueStats.calls, failures: stats.failures + part.rescueStats.failures, aborted: part.rescueStats.aborted ?? stats.aborted }
+				: { ...part.rescueStats };
+		}
+		if (!part.proposal._ok) {
+			// One unreadable sub-chunk fails the fire (chunk is retained) — but
+			// only after bounded spend, and the receipt says which guard fired.
+			return { proposal: part.proposal, rescued: rescuedAny, rescueStats: stats };
+		}
+		objects.push(...(part.proposal.objects ?? []));
+		if (part.proposal.notes) notes.push(part.proposal.notes);
+	}
+	return {
+		proposal: { objects, notes: notes.join("; "), _ok: true },
+		rescued: rescuedAny,
+		rescueStats: stats,
 	};
 }
 
@@ -233,12 +277,19 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 
 	// The user's memory rules, resolved ONCE: the prompt gets them as guidance
 	// and the gates get the same object for enforcement. A caller may hand in a
-	// pre-merged set (the Playground layers thread settings over the account's).
+	// pre-merged set (the Playground layers thread settings over the account's,
+	// and an SDK caller's per-request rules arrive the same way).
 	const rules = overrides.rules ?? await getMemoryRules(env, userId);
-	const withRules = { ...overrides, rules };
+	// One extractor, three lenses: which door this save came through decides
+	// the extraction stance and which deterministic gate filters apply.
+	const profile = overrides.profile
+		?? ({ plugin: "plugin", sdk: "sdk" }[overrides.source] ?? null);
+	if (profile) meta.profile = profile;
+	const withRules = { ...overrides, rules, profile };
 
-	// F — LLM proposes (deterministic in tests via overrides.llmResponse).
-	const { proposal, rescued, rescueStats } = await proposeWithSplitRescue(
+	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
+	// Oversized chunks are pre-split by code before the model sees them.
+	const { proposal, rescued, rescueStats } = await proposePrimary(
 		env,
 		config,
 		userId,
@@ -269,6 +320,46 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		};
 	}
 
+	// F2 — calls 2 and 3 (engine v2): a dedicated relation pass against a
+	// CODE-numbered entity list, then a reflexion pass that may only add what
+	// was missed. Both are gated hard — an edge citing an id not on the list
+	// is rejected, never repaired.
+	let objects = proposal.objects ?? [];
+	const preRejected = [];
+	if (config.engineV2) {
+		const entities = numberEntities(objects, shortlist);
+		meta.engine = "v2";
+
+		const edgePass = await proposeEdges(env, config, packet, entities, withRules);
+		preRejected.push(...edgePass.rejected);
+		if (edgePass.raw_ok === false) {
+			// The edge model returned something unreadable. The save still lands
+			// with call 1's facts; the refusal is named on the receipt.
+			preRejected.push({ kind: "edge", label: "edge pass", reason: "edge_pass_unparseable" });
+		}
+
+		const foundSummary = [
+			...entities.map((e) => `entity ${e.n}: ${e.label}`),
+			...objects.filter((o) => o.kind === "slice" || o.kind === "event").map((o) => `fact: ${o.text}`),
+			...edgePass.edges.map((e) => `relation: ${e.fact ?? `${e.from} ${e.type} ${e.to}`}`),
+		].join("\n");
+		const reflexion = await proposeReflexion(env, config, packet, entities, foundSummary, withRules);
+		preRejected.push(...reflexion.rejected);
+		if (reflexion.raw_ok === false) {
+			preRejected.push({ kind: "node", label: "reflexion pass", reason: "reflexion_pass_unparseable" });
+		}
+
+		objects = [
+			...objects,
+			...reflexion.entities.map((e) => ({ kind: "node", label: e.label, category: e.category, matches_existing: e.existingId, confidence: 0.85 })),
+			...reflexion.facts.map((f) => ({ kind: "slice", on: f.on, text: f.text, kind_detail: f.kind, confidence: 0.85 })),
+			...edgePass.edges,
+			...reflexion.edges,
+		];
+		meta.edge_pass_edges = edgePass.edges.length;
+		meta.reflexion_added = reflexion.entities.length + reflexion.facts.length + reflexion.edges.length;
+	}
+
 	// G — gates (the backend judge). manual=true → lenient Path A gate.
 	// The newest message timestamp anchors undated events: "yesterday I ran the
 	// race" said on May 8 lands on/near May 8, not on extraction day.
@@ -276,13 +367,21 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		const ts = Number(m?.ts);
 		return Number.isFinite(ts) && ts > max ? ts : max;
 	}, 0) || null;
-	const plan = await applyGates(env, config, userId, proposal, shortlist, overrides.settings, {
+	const plan = await applyGates(env, config, userId, { ...proposal, objects }, shortlist, overrides.settings, {
 		manual: Boolean(overrides.manual),
 		updateMode,
 		sourceText: text,
 		lastTs,
 		rules,
+		profile,
 	});
+	// Rejections from the v2 passes (unknown entity ids, malformed relation
+	// types) surface on the receipt with everything the gates refused.
+	plan.rejected.push(...preRejected);
+
+	// Provenance: a capped, scrubbed excerpt of the message that produced each
+	// object — enough to answer "why do you think that?".
+	attachProvenance(plan, chunk);
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.
 	if (!plan.hasWrites) {

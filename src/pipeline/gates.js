@@ -51,6 +51,44 @@ const UPDATE_MODE_SUPERSEDE_KINDS = new Set([
 // Window for treating a same-action event as a duplicate of an ongoing incident.
 const EVENT_DEDUPE_MS = 24 * 60 * 60 * 1000;
 
+// Structural caps on string attributes (engine v2). Oversized values are
+// clipped; absurd ones are rejected outright — a 10KB "slice" is tool output,
+// not a memory.
+const LABEL_CAP = 120;
+const TEXT_CAP = 600;
+const TEXT_REJECT = 5000;
+
+// v2 relation types where one source holds ONE current target (you work at one
+// place, live in one city). A new edge of the same type from the same source
+// to a DIFFERENT target closes the old one's validity window — never deletes.
+const FUNCTIONAL_RELATIONS = new Set([
+	"WORKS_AT", "EMPLOYED_BY", "LIVES_IN", "BASED_IN", "MARRIED_TO",
+	"DATING", "ENGAGED_TO", "REPORTS_TO", "MANAGED_BY", "HOSTED_ON",
+]);
+
+// SCREAMING_SNAKE_CASE — the v2 edge vocabulary is open but shaped.
+const V2_RELATION_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+/** The plugin lens: coding sessions must not memorize paths and tool chatter. */
+function looksLikeFilePath(label) {
+	const s = String(label ?? "").trim();
+	return /^(?:[A-Za-z]:)?[\w.@-]*[\\/][\w.@\\/-]+\.\w{1,8}$/.test(s) || /^(?:src|test|lib|dist|node_modules)[\\/]/.test(s);
+}
+
+function looksLikeStackTrace(text) {
+	const lines = String(text ?? "").split("\n");
+	if (lines.length < 2) return /\bat\s+[\w.$<>]+\s+\(.+:\d+:\d+\)/.test(text) && String(text).length > 120;
+	const tracey = lines.filter((l) => /^\s*(at\s+[\w.$<>[\]]+\s*\(?|File "[^"]+", line \d+|Traceback \(most recent)/.test(l)).length;
+	return tracey / lines.length >= 0.4;
+}
+
+function looksLikeDiff(text) {
+	const lines = String(text ?? "").split("\n");
+	if (lines.length < 4) return false;
+	const diffy = lines.filter((l) => /^[+-][^+-]/.test(l) || /^@@ /.test(l) || /^(diff --git|index [0-9a-f]+\.\.)/.test(l)).length;
+	return diffy / lines.length >= 0.3;
+}
+
 // When the model emits a life event but forgets its subject node, infer the
 // auto-created subject's category from the action (best default, model node wins
 // if it also proposed one). "my grandmother passed away" → subject is family.
@@ -231,6 +269,9 @@ export async function applyGates(
 		eventTouches: [],
 		newEdges: [],
 		edgeTouches: [],
+		// Bi-temporal supersede: existing edge ids whose validity window closes
+		// in this write. Rows are never deleted — old truth stays queryable.
+		edgeClosures: [],
 		newCandidates: [],
 		candidateBumps: [],
 		affectedNodeIds: new Set(),
@@ -490,8 +531,43 @@ export async function applyGates(
 	const order = { node: 0, event: 1, slice: 2, edge: 3, candidate: 4 };
 	const sorted = [...objects].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
 
+	const profile = opts.profile ?? null;
+
 	for (const obj of sorted) {
 		const conf = Number(obj.confidence ?? 0);
+
+		// ---- STRUCTURAL CAPS (engine v2) ------------------------------------
+		// Absurd attribute sizes are tool output, not memory; merely long ones
+		// are clipped so a chatty model cannot bloat a row.
+		if (typeof obj.text === "string" && obj.text.length > TEXT_REJECT) {
+			reject(obj, "attr_too_long");
+			continue;
+		}
+		if (typeof obj.label === "string" && obj.label.length > LABEL_CAP) obj.label = obj.label.slice(0, LABEL_CAP);
+		if (typeof obj.text === "string" && obj.text.length > TEXT_CAP) obj.text = `${obj.text.slice(0, TEXT_CAP - 1)}…`;
+
+		// ---- PLUGIN LENS -----------------------------------------------------
+		// Coding sessions memorize decisions, conventions and error→fix pairs —
+		// never paths as standalone memories, stack traces, or diffs.
+		if (profile === "plugin") {
+			if (obj.kind === "node" && looksLikeFilePath(obj.label)) {
+				reject(obj, "file_path_node");
+				continue;
+			}
+			if ((obj.kind === "slice" || obj.kind === "event") && looksLikeDiff(obj.text)) {
+				reject(obj, "tool_chatter");
+				continue;
+			}
+			if (
+				(obj.kind === "slice" || obj.kind === "event") &&
+				looksLikeStackTrace(obj.text) &&
+				!["fix", "blocker"].includes(obj.kind_detail ?? obj.kind)
+			) {
+				// A trace is only memory when it resolved into an error→fix pair.
+				reject(obj, "stack_trace_discarded");
+				continue;
+			}
+		}
 
 		// ---- NODE GATE -------------------------------------------------------
 		if (obj.kind === "node") {
@@ -646,7 +722,10 @@ export async function applyGates(
 				reject(obj, "edge_self_loop");
 				continue;
 			}
-			if (!EDGE_TYPES.includes(obj.type)) {
+			// v2 edges carry an open SCREAMING_SNAKE vocabulary; legacy edges keep
+			// the closed list. Both are validated — neither is trusted.
+			const isV2 = obj._v2 === true;
+			if (isV2 ? !V2_RELATION_RE.test(String(obj.type ?? "")) : !EDGE_TYPES.includes(obj.type)) {
 				reject(obj, "invalid_edge_type");
 				continue;
 			}
@@ -656,6 +735,10 @@ export async function applyGates(
 			);
 			if (existingEdge) {
 				plan.edgeTouches.push({ id: existingEdge.id, from_node: from.id, to_node: to.id, type });
+				// The model may have learned the relation ENDED — close, never delete.
+				if (isV2 && obj.invalid_at && !existingEdge.invalid_at) {
+					plan.edgeClosures.push({ id: existingEdge.id, invalid_at: obj.invalid_at });
+				}
 				plan.affectedNodeIds.add(from.id);
 				plan.affectedNodeIds.add(to.id);
 				continue;
@@ -668,6 +751,21 @@ export async function applyGates(
 				reject(obj, "duplicate_edge");
 				continue;
 			}
+			// Functional relation: one open target per source. A new WORKS_AT
+			// closes the old employer's validity window (bi-temporal supersede);
+			// the old row stays queryable as history.
+			if (isV2 && FUNCTIONAL_RELATIONS.has(type)) {
+				for (const e of existingEdges) {
+					if (e.from_node === from.id && e.type === type && e.to_node !== to.id && !e.invalid_at && !e.deleted_at) {
+						plan.edgeClosures.push({ id: e.id, invalid_at: obj.valid_at ?? now });
+					}
+				}
+				for (const e of plan.newEdges) {
+					if (e.from_node === from.id && e.type === type && e.to_node !== to.id && !e.invalid_at) {
+						e.invalid_at = obj.valid_at ?? now;
+					}
+				}
+			}
 			plan.newEdges.push({
 				id: newId("edge"),
 				user_id: userId,
@@ -675,6 +773,10 @@ export async function applyGates(
 				to_node: to.id,
 				type,
 				created_at: now,
+				fact: isV2 ? (obj.fact ?? null) : null,
+				valid_at: isV2 ? (obj.valid_at ?? null) : null,
+				invalid_at: isV2 ? (obj.invalid_at ?? null) : null,
+				confidence: Number.isFinite(conf) ? conf : null,
 			});
 			plan.affectedNodeIds.add(from.id);
 			plan.affectedNodeIds.add(to.id);
@@ -711,6 +813,7 @@ export async function applyGates(
 		plan.eventTouches.length > 0 ||
 		plan.newEdges.length > 0 ||
 		plan.edgeTouches.length > 0 ||
+		plan.edgeClosures.length > 0 ||
 		plan.newCandidates.length > 0 ||
 		plan.nodeStateUpdates.length > 0 ||
 		plan.nodeTouches.size > 0 ||

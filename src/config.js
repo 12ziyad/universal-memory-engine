@@ -194,6 +194,9 @@ export function getConfig(env) {
 		useVectors: flag(env.USE_VECTORS, true),
 		enablePass2: flag(env.ENABLE_PASS2, true),
 		pass2UseAi: flag(env.PASS2_USE_AI, false),
+		// Engine v2: the edge and reflexion passes after extraction. ON by
+		// default; ENGINE_V2="false" is the kill switch back to one-call saves.
+		engineV2: flag(env.ENGINE_V2, true),
 
 		// LLM (the proposer). Provider + model are configurable; route through an
 		// AI Gateway by setting AI_GATEWAY_ID.

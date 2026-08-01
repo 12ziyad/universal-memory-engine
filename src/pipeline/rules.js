@@ -122,6 +122,26 @@ export async function getMemoryRules(env, userId) {
 	}
 }
 
+/**
+ * Layer rule overrides over a base set, field by field: account rules < the
+ * API key's own rules < the per-request body. The caller's rules take
+ * priority over Itsuki defaults — that IS the SDK profile. Replacement, not
+ * union: a caller that says `excludes: ["health"]` means exactly that list.
+ */
+export function mergeRuleOverride(base, override) {
+	if (!override || typeof override !== "object") return base;
+	return normalizeMemoryRules({
+		customInstructions: override.customInstructions ?? base.customInstructions,
+		includes: override.includes ?? base.includes,
+		excludes: override.excludes ?? base.excludes,
+		customCategories: override.customCategories ?? base.customCategories,
+		captureDefault: override.captureDefault ?? base.captureDefault,
+		captureDensity: override.captureDensity ?? base.captureDensity,
+		autoCollect: override.autoCollect ?? base.autoCollect,
+		retentionDays: override.retentionDays ?? base.retentionDays,
+	});
+}
+
 export async function saveMemoryRules(env, userId, patch = {}) {
 	const current = await getMemoryRules(env, userId);
 	const merged = normalizeMemoryRules({

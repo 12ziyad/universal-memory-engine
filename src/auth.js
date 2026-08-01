@@ -456,13 +456,16 @@ export async function createConnectionToken(env, userId, body = {}) {
 		token_prefix: token.slice(0, 18),
 		token_tail: token.slice(-4),
 		scopes_json: JSON.stringify(Array.isArray(body.scopes) ? body.scopes : ["memory:read", "memory:write"]),
+		// SDK keys may carry their own memory rules; they sit between the
+		// account's rules and any per-request override.
+		rules_json: body.rules && typeof body.rules === "object" ? JSON.stringify(body.rules) : null,
 		created_at: createdAt,
 		status: "active",
 	};
 	await env.DB.prepare(
 		`INSERT INTO connection_tokens
-			(id, user_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, user_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status, rules_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			row.id,
@@ -475,6 +478,7 @@ export async function createConnectionToken(env, userId, body = {}) {
 			row.created_at,
 			row.scopes_json,
 			row.status,
+			row.rules_json,
 		)
 		.run();
 	return { token, tokenRecord: publicToken(row) };
@@ -509,7 +513,7 @@ export async function resolveConnectionToken(env, token, { allowedTypes = ["api"
 	const tokenHash = await sha256Hex(token);
 	const row = await env.DB.prepare(
 		`SELECT
-			t.id AS token_id, t.user_id, t.label, t.type, t.scopes_json, t.status, t.revoked_at,
+			t.id AS token_id, t.user_id, t.label, t.type, t.scopes_json, t.status, t.revoked_at, t.rules_json,
 			u.id, u.email, u.name, u.role, u.status AS user_status, u.created_at, u.updated_at, u.email_verified_at
 		 FROM connection_tokens t
 		 JOIN users u ON u.id = t.user_id
@@ -532,6 +536,7 @@ export async function resolveConnectionToken(env, token, { allowedTypes = ["api"
 			label: row.label,
 			type: row.type,
 			scopes: JSON.parse(row.scopes_json || "[]"),
+			rules: (() => { try { return row.rules_json ? JSON.parse(row.rules_json) : null; } catch { return null; } })(),
 		},
 	};
 }

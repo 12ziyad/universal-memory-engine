@@ -492,23 +492,23 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	for (const s of newSlices) {
 		const factGuarded = manualFactGuards.get(s.id) === true;
 		const guarded = factGuarded || identityClaims.length > 0;
-		const values = [s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current, s.created_at, s.created_at];
+		const values = [s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current, s.created_at, s.created_at, s.source_snippet ?? null];
 		if (factGuarded) values.push(userId, s.manual_fact_key, "slice", s.id);
 		else if (guarded) values.push(s.node_id, userId);
 		if (guarded) trackNext({ kind: "slices", id: s.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO slices
-					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at)
+					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at, source_snippet)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
+					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -553,6 +553,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		const values = [
 			e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
 			e.created_at, e.confidence ?? null,
+			e.valid_at ?? e.happened_at ?? null, e.invalid_at ?? null, e.source_snippet ?? null,
 		];
 		if (factGuarded) values.push(userId, e.manual_fact_key, "event", e.id);
 		else if (guarded) values.push(e.node_id, userId);
@@ -560,16 +561,17 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO events
-					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence)
+					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence,
+					 valid_at, invalid_at, source_snippet)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
+					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -648,6 +650,17 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		);
 	}
 
+	// Bi-temporal closes FIRST: a superseding edge's insert must not race the
+	// closure of the truth it replaces. UPDATE only — a closed edge is history,
+	// never a deletion.
+	for (const closure of plan.edgeClosures ?? []) {
+		stmts.push(
+			env.DB.prepare(
+				"UPDATE edges SET invalid_at = ? WHERE id = ? AND user_id = ? AND invalid_at IS NULL",
+			).bind(closure.invalid_at, closure.id, userId),
+		);
+	}
+
 	// New edges.
 	for (const ed of newEdges) {
 		const factGuarded = manualFactGuards.get(ed.id) === true;
@@ -655,6 +668,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		const values = [
 			ed.id, ed.user_id, ed.from_node, ed.to_node, ed.type, ed.created_at, ed.created_at,
 			ed.weight ?? 1, ed.confidence ?? null, ed.evidence_count ?? 1,
+			ed.fact ?? null, ed.valid_at ?? null, ed.invalid_at ?? null, ed.source_snippet ?? null,
 		];
 		if (factGuarded) values.push(userId, ed.manual_fact_key, "edge", ed.id);
 		else if (guarded) values.push(ed.from_node, userId, ed.to_node, userId);
@@ -662,18 +676,19 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO edges
-					(id, user_id, from_node, to_node, type, created_at, last_seen_at, weight, confidence, evidence_count)
+					(id, user_id, from_node, to_node, type, created_at, last_seen_at, weight, confidence, evidence_count,
+					 fact, valid_at, invalid_at, source_snippet)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)
 						 AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)`
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {

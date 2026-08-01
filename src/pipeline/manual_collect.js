@@ -6,6 +6,7 @@ import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { filterDigestByTopic, parseCollectIntent, saveMemoryPage } from "./pages.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
+import { scrubMessages } from "./scrub.js";
 
 /**
  * Path A2: manual_collect.
@@ -14,8 +15,10 @@ import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
  * normal graph extraction, so weak related concepts stay inside the page instead
  * of becoming nodes/candidates.
  */
-export async function saveConversation(env, ctx, userId, messages, opts = {}) {
+export async function saveConversation(env, ctx, userId, rawMessages, opts = {}) {
 	const config = getConfig(env);
+	// The digest model reads these messages directly — scrub before it can.
+	const messages = scrubMessages(rawMessages).messages;
 	const optOut = messagesContainMemoryOptOut(messages);
 	if (optOut.optedOut) {
 		const received = (messages ?? []).filter((m) => (m?.role ?? "user") === "user").length;

@@ -249,6 +249,33 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 }
 
 export async function runRecallCommand(env, userId, query, input = {}) {
+	// Per-user recall limit (fails open when the binding is absent). One
+	// scripted user must not burn a year of inference credit — and the refusal
+	// is a friendly message, never an error.
+	try {
+		if (env.RECALL_LIMITER?.limit) {
+			const { success } = await env.RECALL_LIMITER.limit({ key: String(userId ?? "anon") });
+			if (success === false) {
+				return safeCommandResult({
+					mode: "recall",
+					source: "recall",
+					summary: "You're looking things up very quickly — give it a few seconds and try again.",
+					counts: { received: 1 },
+					extra: {
+						recall_mode: "rate_limited",
+						recall_status: "rate_limited",
+						context: "",
+						items: [],
+						count: 0,
+						nodes: [],
+						pages: [],
+					},
+				});
+			}
+		}
+	} catch (error) {
+		console.warn("recall limiter unavailable:", error?.message ?? error);
+	}
 	const normalized = await normalizeSourcePacket(userId, {
 		type: "query",
 		sourceMode: "recall",

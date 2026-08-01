@@ -34,7 +34,7 @@ import {
 	runObserveMessagesCommand,
 	runRecallCommand,
 } from "./pipeline/commands.js";
-import { getMemoryRules, saveMemoryRules } from "./pipeline/rules.js";
+import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
 import {
 	createThread,
 	deleteThread,
@@ -86,6 +86,26 @@ async function allowRate(binding, key) {
 
 function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
+}
+
+/**
+ * The door decides the lens. Bearer-key callers are the SDK profile (their own
+ * rules take priority); a caller declaring source:"plugin" gets the coding
+ * lens. Effective rules layer account < API key < request body — resolved
+ * here once so the engine and the gates enforce the same object.
+ */
+async function doorOverrides(env, auth, body = {}) {
+	const out = {};
+	const isToken = auth.auth?.type === "token";
+	if (body.source === "plugin") out.profile = "plugin";
+	else if (isToken) out.profile = "sdk";
+	const keyRules = isToken ? auth.auth.token?.rules : null;
+	const bodyRules = body.rules && typeof body.rules === "object" ? body.rules : null;
+	if (keyRules || bodyRules) {
+		const account = await getMemoryRules(env, auth.userId);
+		out.rules = mergeRuleOverride(mergeRuleOverride(account, keyRules), bodyRules);
+	}
+	return out;
 }
 
 function tooMany() {
@@ -366,6 +386,7 @@ const routes = {
 
 		// Route through the shared command facade. Extraction runs in the
 		// background, so fired async requests return an accepted/processing receipt.
+		const door = await doorOverrides(env, auth, body);
 		const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
 			conversationId: body.conversationId,
@@ -373,9 +394,10 @@ const routes = {
 			sourceId: body.sourceId,
 			idempotencyKey: body.idempotencyKey,
 			memoryScope: auth.memoryScope,
-			source: "ingest",
+			source: body.source === "plugin" ? "plugin" : "ingest",
 			sourceMode: "ingest",
 			overrides: {
+				...door,
 				...(body._test ?? {}),
 				...(["dense", "standard"].includes(body.captureDensity)
 					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
@@ -495,7 +517,7 @@ const routes = {
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
 		const t = body._test ?? {};
-		const overrides = {};
+		const overrides = await doorOverrides(env, auth, body);
 		if (t.llmResponse !== undefined) overrides.llmResponse = t.llmResponse;
 		if (t.settings !== undefined) overrides.settings = t.settings;
 
@@ -962,7 +984,10 @@ const routes = {
 		}
 		const lastUser = [...messages].reverse().find((m) => (m?.role ?? "user") === "user");
 		const query = String(body.query ?? lastUser?.content ?? "").trim();
-		const rules = await getMemoryRules(env, auth.userId);
+		const door = await doorOverrides(env, auth, body);
+		// The SDK profile's layered rules govern this door end to end — the
+		// autoCollect decision included, so a key's rules can turn capture off.
+		const rules = door.rules ?? await getMemoryRules(env, auth.userId);
 
 		const recall = query
 			? await runRecallCommand(env, auth.userId, query, {
@@ -980,9 +1005,11 @@ const routes = {
 				sourceId: body.sourceId,
 				idempotencyKey: body.idempotencyKey,
 				memoryScope: auth.memoryScope,
-				source: "ingest",
+				source: body.source === "plugin" ? "plugin" : "ingest",
 				sourceMode: "turn",
 				overrides: {
+				...door,
+				rules,
 				...(body._test ?? {}),
 				...(["dense", "standard"].includes(body.captureDensity)
 					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
