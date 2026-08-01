@@ -43,6 +43,12 @@ const SAVE_IMPERATIVE_RE =
 const IMPERSONAL_TASK_RE =
 	/^\s*(?:please\s+|can you\s+|could you\s+|hey\s+)*(?:translate|calculate|compute|convert|spell|write|generate|draft|code|implement|refactor|debug|rewrite|paraphrase|summarize|summarise)\b/i;
 
+// Questions about the past re-open closed validity windows: "where did I use
+// to live" should surface the superseded LIVES_IN edge; "where do I live" must
+// not. Everything bi-temporal filtering hides is behind this one gate.
+const PAST_INTENT_RE =
+	/\b(used to|before|previous(?:ly)?|back then|formerly|history|in the past|no longer|any ?more|earlier|old (?:job|home|place|city|team|employer)|last (?:year|job|place))\b|\bdid\b.*\b(?:live|work|use|train|study)\b/i;
+
 /** Anything phrased as a question — the clearest possible request for memory. */
 function isQuestion(text) {
 	const q = String(text ?? "").trim();
@@ -214,7 +220,10 @@ export function buildContext(entries, plan = recallGate("memory")) {
 			const n = entry.item;
 			const sliceTexts = n.slices.map((s) => s.text);
 			const eventTexts = [...n.events].reverse().map((e) => e.text);
-			const items = [...sliceTexts, ...eventTexts].filter(Boolean).slice(0, plan.maxLineItems);
+			// Relations lead: an edge fact ("Amara works at Nova Systems") is
+			// usually the direct answer, and it is what the edge pass paid for.
+			const relationTexts = n.relations ?? [];
+			const items = [...relationTexts, ...sliceTexts, ...eventTexts].filter(Boolean).slice(0, plan.maxLineItems);
 			const tail = items.length ? ` - ${items.join("; ")}` : "";
 			lines.push(`${n.label} (${n.category}, state: ${n.state})${tail}`);
 			nodeCount++;
@@ -271,7 +280,55 @@ function profileClusterMatches(profile, queryTokens) {
 		.filter(([, score]) => score > 0));
 }
 
-function nodeItem(node, slicesByNode, eventsByNode) {
+/**
+ * Greedy MMR over fused entries: relevance minus similarity to what is
+ * already selected, so five phrasings of one fact return once. Similarity is
+ * token Jaccard over label/title + summary — cheap and deterministic.
+ */
+function mmrSelect(entries, topN, lambda = 0.75) {
+	const tokensOf = (entry) => {
+		const item = entry.item ?? {};
+		return new Set(tokens([item.label ?? item.title ?? "", item.summary ?? item.short_summary ?? ""].join(" ")));
+	};
+	const pool = entries.map((entry) => ({ entry, toks: tokensOf(entry) }));
+	const chosen = [];
+	while (chosen.length < topN && pool.length) {
+		let bestIdx = 0;
+		let bestVal = -Infinity;
+		for (let i = 0; i < pool.length; i++) {
+			let maxSim = 0;
+			for (const c of chosen) {
+				const inter = [...pool[i].toks].filter((t) => c.toks.has(t)).length;
+				const union = new Set([...pool[i].toks, ...c.toks]).size || 1;
+				maxSim = Math.max(maxSim, inter / union);
+			}
+			const val = lambda * pool[i].entry.score - (1 - lambda) * maxSim * 0.02;
+			if (val > bestVal) { bestVal = val; bestIdx = i; }
+		}
+		chosen.push(pool.splice(bestIdx, 1)[0]);
+	}
+	return chosen.map((c) => c.entry);
+}
+
+function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
+	// The node's relations, validity-filtered: open windows always; closed ones
+	// only when the question asked about the past — rendered with their end
+	// date so "until mid-2026" is part of the answer, not a surprise.
+	let relations = [];
+	if (graph?.edgeRows) {
+		for (const edge of graph.edgeRows) {
+			if (edge.from_node !== node.id && edge.to_node !== node.id) continue;
+			const closed = edge.invalid_at != null;
+			if (closed && !graph.pastIntent) continue;
+			const otherId = edge.from_node === node.id ? edge.to_node : edge.from_node;
+			const other = graph.byId?.get(otherId);
+			const base = edge.fact
+				?? (other ? `${node.label} ${String(edge.type).toLowerCase().replace(/_/g, " ")} ${other.label}` : null);
+			if (!base) continue;
+			relations.push(closed ? `${base} (until ${new Date(edge.invalid_at).toISOString().slice(0, 10)})` : base);
+			if (relations.length >= 3) break;
+		}
+	}
 	return {
 		id: node.id,
 		label: node.label,
@@ -281,6 +338,7 @@ function nodeItem(node, slicesByNode, eventsByNode) {
 		cluster: node.cluster,
 		slices: slicesByNode.get(node.id) ?? [],
 		events: eventsByNode.get(node.id) ?? [],
+		relations,
 	};
 }
 
@@ -343,7 +401,8 @@ export async function recall(env, config, userId, query, opts = {}) {
 			"SELECT id, node_id, action, text, importance, happened_at, created_at FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
 		).bind(userId, plan.eventScanLimit),
 		env.DB.prepare(
-			"SELECT id, from_node, to_node, type, weight, reinforcement_count FROM edges WHERE user_id = ? AND deleted_at IS NULL",
+			`SELECT id, from_node, to_node, type, weight, reinforcement_count, fact, valid_at, invalid_at
+			 FROM edges WHERE user_id = ? AND deleted_at IS NULL`,
 		).bind(userId),
 		env.DB.prepare("SELECT * FROM memory_profiles WHERE user_id = ?").bind(userId),
 	]);
@@ -371,116 +430,157 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const queryNorm = normalizeLabel(q);
 	const byId = new Map(nodes.map((n) => [n.id, n]));
 	const pageById = new Map(pages.map((p) => [p.id, p]));
-	const scores = new Map();
-	const pageScores = new Map();
-	let lexicalUsed = false;
+	const edgeRows = edgesRes.results ?? [];
 
+	// The stack: one query embedding, four independently RANKED signals fused
+	// with reciprocal-rank fusion, a validity-time filter, MMR de-duplication,
+	// and a per-item context budget. ZERO generative calls anywhere in here —
+	// the embedding is the only model touch.
+	const pastIntent = PAST_INTENT_RE.test(q);
+
+	// ---- signal 1: exact / alias lookup --------------------------------------
+	// "what's my deploy command" must hit a node named "deploy command" exactly,
+	// not approximately. Longer matched labels outrank shorter ones.
+	const exactRank = [];
+	for (const node of nodes) {
+		const aliases = parseJsonArray(node.aliases_json);
+		let w = 0;
+		if (wordContains(queryNorm, normalizeLabel(node.label))) w = tokens(node.label).length + 1;
+		else if (aliases.some((alias) => wordContains(queryNorm, normalizeLabel(alias)))) w = 1;
+		if (w > 0) exactRank.push({ key: `node:${node.id}`, w: w + Number(node.heat_score ?? 1) * 0.01 });
+	}
+	for (const page of pages) {
+		if (wordContains(queryNorm, normalizeLabel(page.title))) {
+			exactRank.push({ key: `page:${page.id}`, w: tokens(page.title).length + 1 });
+		}
+	}
+	exactRank.sort((a, b) => b.w - a.w);
+
+	// ---- signal 2: BM25 (D1 FTS5), keyword overlap as its tail ---------------
+	// FTS catches the rare terms vectors blur; the keyword scan keeps objects
+	// that predate their search profile reachable.
+	let bm25Rank = [];
+	try {
+		const ftsMatch = queryTokens
+			.filter((t) => t.length > 1)
+			.slice(0, 12)
+			.map((t) => `"${t.replace(/"/g, "")}"`)
+			.join(" OR ");
+		if (ftsMatch) {
+			const { results } = await env.DB.prepare(
+				`SELECT p.object_kind, p.object_id
+				 FROM manual_search_fts f
+				 JOIN manual_search_profiles p ON p.rowid = f.rowid
+				 WHERE manual_search_fts MATCH ? AND p.user_id = ?
+				 ORDER BY bm25(manual_search_fts, 4.0, 1.5, 0.5)
+				 LIMIT 24`,
+			).bind(ftsMatch, userId).all();
+			bm25Rank = (results ?? [])
+				.filter((r) => (r.object_kind === "node" ? byId.has(r.object_id) : pageById.has(r.object_id)))
+				.map((r) => ({ key: `${r.object_kind}:${r.object_id}` }));
+		}
+	} catch (err) {
+		console.warn("bm25 recall signal failed:", err?.message ?? err);
+	}
+	const inBm25 = new Set(bm25Rank.map((e) => e.key));
+	const keywordRank = [];
 	for (const node of nodes) {
 		const slices = slicesByNode.get(node.id) ?? [];
 		const events = eventsByNode.get(node.id) ?? [];
-		const aliases = parseJsonArray(node.aliases_json);
-		const corpus = [node.label, node.summary, ...aliases, ...slices.map((s) => s.text), ...events.map((e) => e.text)]
-			.filter(Boolean)
-			.join(" ");
-		let score = keywordScore(tokens(corpus), queryTokens);
-		if (wordContains(queryNorm, normalizeLabel(node.label))) score += 2;
-		if (aliases.some((alias) => wordContains(queryNorm, normalizeLabel(alias)))) score += 1.5;
-		if (score > 0) {
-			lexicalUsed = true;
-			scores.set(node.id, score);
-		}
+		const corpus = [node.label, node.summary, ...parseJsonArray(node.aliases_json), ...slices.map((s) => s.text), ...events.map((e) => e.text)]
+			.filter(Boolean).join(" ");
+		const w = keywordScore(tokens(corpus), queryTokens);
+		if (w > 0 && !inBm25.has(`node:${node.id}`)) keywordRank.push({ key: `node:${node.id}`, w });
 	}
-
 	for (const page of pages) {
-		const keyPoints = parseJsonArray(page.key_points_json);
-		const decisions = parseJsonArray(page.decisions_json);
-		const nextSteps = parseJsonArray(page.next_steps_json);
-		const related = parseJsonArray(page.related_concepts_json);
 		const corpus = [
-			page.title,
-			page.topic_filter,
-			page.short_summary,
-			...keyPoints,
-			...decisions,
-			...nextSteps,
-			...related,
+			page.title, page.topic_filter, page.short_summary,
+			...parseJsonArray(page.key_points_json), ...parseJsonArray(page.decisions_json),
+			...parseJsonArray(page.next_steps_json), ...parseJsonArray(page.related_concepts_json),
 		].filter(Boolean).join(" ");
-		let score = keywordScore(tokens(corpus), queryTokens);
-		if (wordContains(queryNorm, normalizeLabel(page.title))) score += 3;
-		if (related.some((r) => wordContains(queryNorm, normalizeLabel(r)))) score += 1.5;
-		if (score > 0) {
-			lexicalUsed = true;
-			pageScores.set(page.id, score + Number(page.heat_score ?? 1) * 0.1);
-		}
+		const w = keywordScore(tokens(corpus), queryTokens);
+		if (w > 0 && !inBm25.has(`page:${page.id}`)) keywordRank.push({ key: `page:${page.id}`, w });
 	}
+	keywordRank.sort((a, b) => b.w - a.w);
+	const lexicalRank = [...bm25Rank, ...keywordRank];
 
-	const profileClusters = profileClusterMatches(profile, queryTokens);
-	for (const node of nodes) {
-		if (node.cluster && profileClusters.has(node.cluster)) {
-			scores.set(node.id, (scores.get(node.id) ?? 0) + profileClusters.get(node.cluster) * 0.35);
-		}
-	}
-	for (const page of pages) {
-		const cluster = page.cluster ?? page.topic_filter;
-		if (cluster && profileClusters.has(cluster)) {
-			pageScores.set(page.id, (pageScores.get(page.id) ?? 0) + profileClusters.get(cluster) * 0.25);
-		}
-	}
-
-	let vectorUsed = false;
+	// ---- signal 3: vector (paraphrase) ---------------------------------------
 	const vector = await embed(env, config, q);
-	const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 4 });
-	for (const m of matches) {
-		if (byId.has(m.id)) {
-			vectorUsed = true;
-			scores.set(m.id, (scores.get(m.id) ?? 0) + (m.score ?? 0));
+	const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 6 });
+	const vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
+
+	// ---- signal 4: graph expansion -------------------------------------------
+	// Walk edges out from the seeds the other signals matched — the only way a
+	// multi-hop question ("who works at the company I mentioned?") reaches an
+	// answer whose own text shares nothing with the query. Closed validity
+	// windows stay invisible here unless the question is about the past.
+	const seedIds = new Set();
+	for (const list of [exactRank, lexicalRank, vectorRank]) {
+		for (const entry of list.slice(0, 6)) {
+			if (entry.key.startsWith("node:")) seedIds.add(entry.key.slice(5));
 		}
 	}
-
-	if (scores.size === 0 && pageScores.size === 0 && (plan.mode === "deep_recall" || plan.mode === "update_mode")) {
-		for (const node of [...nodes].sort((a, b) => recentScore(b) - recentScore(a)).slice(0, plan.maxContextNodes)) {
-			scores.set(node.id, Math.max(0.1, recentScore(node)));
-		}
-		for (const page of [...pages].sort((a, b) => Number(b.updated_at ?? 0) - Number(a.updated_at ?? 0)).slice(0, plan.maxContextPages)) {
-			pageScores.set(page.id, Math.max(0.1, Number(page.heat_score ?? 1) * 0.1));
-		}
-	}
-
-	const candidateNodeIds = [...scores.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, plan.topN)
-		.map(([id]) => id);
-	let graphExpansionUsed = false;
-	const edgeRows = edgesRes.results ?? [];
+	const graphRank = [];
+	const expanded = new Set();
 	for (const edge of edgeRows) {
-		const fromActive = candidateNodeIds.includes(edge.from_node);
-		const toActive = candidateNodeIds.includes(edge.to_node);
-		if (!fromActive && !toActive) continue;
-		const other = fromActive ? edge.to_node : edge.from_node;
-		if (!byId.has(other)) continue;
-		const boost = Math.max(0.15, Number(edge.weight ?? 1) * 0.25 + Number(edge.reinforcement_count ?? 0) * 0.05);
-		if (!scores.has(other)) graphExpansionUsed = true;
-		scores.set(other, (scores.get(other) ?? 0) + boost);
+		if (edge.invalid_at != null && !pastIntent) continue;
+		const fromSeed = seedIds.has(edge.from_node);
+		const toSeed = seedIds.has(edge.to_node);
+		if (!fromSeed && !toSeed) continue;
+		const other = fromSeed ? edge.to_node : edge.from_node;
+		if (!byId.has(other) || seedIds.has(other) || expanded.has(other)) continue;
+		expanded.add(other);
+		graphRank.push({ key: `node:${other}`, w: Number(edge.weight ?? 1) + Number(edge.reinforcement_count ?? 0) * 0.1 });
 	}
+	graphRank.sort((a, b) => b.w - a.w);
 
-	if (scores.size === 0 && pageScores.size === 0) return emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+	const lexicalUsed = exactRank.length > 0 || lexicalRank.length > 0;
+	const vectorUsed = vectorRank.length > 0;
+	const graphExpansionUsed = graphRank.length > 0;
 
-	let entries = [
-		...[...scores.entries()].map(([id, score]) => ({ type: "node", id, score, item: nodeItem(byId.get(id), slicesByNode, eventsByNode) })),
-		...[...pageScores.entries()].map(([id, score]) => ({ type: "page", id, score, item: pageItem(pageById.get(id)) })),
-	].filter((entry) => entry.item);
-
-	const activatedClusters = activateClusters(entries);
-	if (activatedClusters.length) {
-		entries = entries.filter((entry) => {
-			const cluster = entryCluster(entry);
-			return !cluster || activatedClusters.includes(cluster);
+	// ---- RRF fusion ----------------------------------------------------------
+	const RRF_K = 60;
+	const fused = new Map();
+	for (const list of [exactRank, lexicalRank, vectorRank, graphRank]) {
+		list.forEach((entry, i) => {
+			fused.set(entry.key, (fused.get(entry.key) ?? 0) + 1 / (RRF_K + i + 1));
 		});
 	}
 
-	entries = dedupeEntries(entries)
-		.sort((a, b) => b.score - a.score)
-		.slice(0, plan.topN);
+	// Profile-cluster affinity nudges ties; it can no longer FILTER results the
+	// signals earned (the old top-2-clusters filter could drop a correct
+	// multi-hop answer that lived in another cluster).
+	const profileClusters = profileClusterMatches(profile, queryTokens);
+	for (const [key, score] of fused) {
+		if (!key.startsWith("node:")) continue;
+		const node = byId.get(key.slice(5));
+		if (node?.cluster && profileClusters.has(node.cluster)) {
+			fused.set(key, score + Math.min(profileClusters.get(node.cluster) * 0.002, 0.008));
+		}
+	}
+
+	if (fused.size === 0 && (plan.mode === "deep_recall" || plan.mode === "update_mode")) {
+		for (const node of [...nodes].sort((a, b) => recentScore(b) - recentScore(a)).slice(0, plan.maxContextNodes)) {
+			fused.set(`node:${node.id}`, 0.001 + Math.max(0, recentScore(node)) * 0.001);
+		}
+		for (const page of [...pages].sort((a, b) => Number(b.updated_at ?? 0) - Number(a.updated_at ?? 0)).slice(0, plan.maxContextPages)) {
+			fused.set(`page:${page.id}`, 0.001);
+		}
+	}
+
+	if (fused.size === 0) return emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+
+	let entries = [...fused.entries()].map(([key, score]) => {
+		const [type, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+		return type === "node"
+			? { type, id, score, item: nodeItem(byId.get(id), slicesByNode, eventsByNode, { edgeRows, byId, pastIntent }) }
+			: { type, id, score, item: pageItem(pageById.get(id)) };
+	}).filter((entry) => entry.item);
+
+	const activatedClusters = activateClusters(entries);
+
+	// ---- MMR: five phrasings of one fact return once -------------------------
+	entries = mmrSelect(dedupeEntries(entries).sort((a, b) => b.score - a.score), plan.topN);
 
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
