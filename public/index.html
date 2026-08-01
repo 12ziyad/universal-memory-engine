@@ -2359,7 +2359,7 @@ console.log(context);`,
   "interface": { "displayName": "${PRODUCT.name}" },
   "plugins": [{
     "name": "${PRODUCT.name.toLowerCase()}",
-    "source": { "source": "local", "path": "./plugins/${PRODUCT.name.toLowerCase()}" },
+    "source": { "source": "git", "url": "https://github.com/12ziyad/universal-memory-engine" },
     "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
     "category": "Productivity"
   }]
@@ -2485,8 +2485,7 @@ function installMethods() {
 					steps: [
 						{ title: "Install the SDK", body: "One package, one dependency.", codeLabel: "bash", code: () => "pip install itsuki" },
 						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "python", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", codeLabel: "python", code: (key) => installSnippets(key).python },
-						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", codeLabel: "python", code: (key) => installSnippets(key).pythonTurn },
+						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "python", code: (key) => installSnippets(key).python },
 					],
 				},
 				node: {
@@ -2495,8 +2494,7 @@ function installMethods() {
 					steps: [
 						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", codeLabel: "bash", code: () => "npm install itsuki" },
 						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "js", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", codeLabel: "js", code: (key) => installSnippets(key).node },
-						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", codeLabel: "js", code: (key) => installSnippets(key).nodeTurn },
+						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "js", code: (key) => installSnippets(key).node },
 					],
 				},
 				curl: {
@@ -2514,55 +2512,28 @@ function installMethods() {
 			label: "Plugin",
 			blurb: "Your coding agent",
 			icon: ICON.plug,
-			footnote: "Looking for Claude or ChatGPT? Those are chat apps — use <b>App Connect</b> above.",
+			footnote: "Looking for Claude or ChatGPT? Those are chat apps — use <b>App Connect</b> above. Prefer a plain MCP connection for another agent? The <b>Cursor</b> tab's config works in any MCP-capable editor.",
 			clients: {
+				// One copy block per tab, no stepper: installing a plugin is one
+				// action, and dressing it as a journey made it look harder.
 				"claude-code": {
 					label: "Claude Code",
 					icon: ICON.terminal,
-					variants: {
-						mcp: {
-							label: "MCP",
-							steps: [
-								{ title: "Create your link", body: "One key for this machine's agent.", action: mcpKey },
-								{ title: "Add the MCP server", body: "One native command — no npx, nothing to download.", codeLabel: "bash", code: (key) => installSnippets(key).claudeCode },
-								{ title: "Use it while you work", body: "Ask it to save decisions, or to check what it already knows about the project.",
-									done: `save_memory · save_conversation · recall_memory` },
-							],
-						},
-						plugin: {
-							label: "Plugin",
-							steps: [
-								{ title: "Add the marketplace", body: "Points Claude Code at this repository's plugin manifest.", codeLabel: "bash", code: (key) => installSnippets(key).pluginMarketplace },
-								{ title: "Install the plugin", body: "Bundles the MCP server so there is no URL to paste.", codeLabel: "bash", code: (key) => installSnippets(key).pluginInstall },
-								{ title: "Not published yet", body: "Plugins install from a public repository. These commands go live the moment the repo is public.",
-									note: "Until then the <b>MCP</b> tab gives you the same three tools today." },
-							],
-						},
+					copyOnly: {
+						body: "Two commands (they work as /slash commands inside a session too). The plugin loads project memory when a session starts and saves what it learned when it ends.",
+						codeLabel: "terminal",
+						code: () => `${installSnippets().pluginMarketplace}\nclaude plugin install itsuki@itsuki-plugins`,
+						note: `Set <b>ITSUKI_API_KEY</b> once in your shell profile (create one in <a href="#" onclick="setView('keys');return false">API keys</a>) so the plugin can reach your memory.`,
 					},
 				},
 				codex: {
 					label: "Codex",
 					icon: ICON.chevron,
-					variants: {
-						mcp: {
-							label: "MCP",
-							steps: [
-								{ title: "Create your link", body: "The same private URL, used by Codex's MCP config.", action: mcpKey },
-								{ title: "Add the server", body: "Point Codex's MCP configuration at your link.", codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor },
-								{ title: "Restart the agent", body: "It connects over HTTP and the memory tools appear.",
-									done: `save_memory · save_conversation · recall_memory` },
-							],
-						},
-						plugin: {
-							label: "Plugin",
-							steps: [
-								{ title: "Register the marketplace", body: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", codeLabel: "json", code: (key) => installSnippets(key).codexMarketplace },
-								{ title: "Install from the Codex UI", body: "The plugin appears in Codex's plugin list and bundles the MCP server, so there is no URL to paste.",
-									note: "Codex plugins package skills and MCP servers together — one install instead of a config edit." },
-								{ title: "Not published yet", body: "This needs the repository to be public before Codex can fetch it.",
-									note: "Until then the <b>MCP</b> tab connects Codex today." },
-							],
-						},
+					copyOnly: {
+						body: "Paste this into .agents/plugins/marketplace.json in your repo (or ~/.agents/plugins/ for every project), then install from Codex's plugin list.",
+						codeLabel: ".agents/plugins/marketplace.json",
+						code: (key) => installSnippets(key).codexMarketplace,
+						note: "Honestly: the Codex path is rougher than the Claude Code one — a hand-pasted manifest, and Codex's plugin surface is still settling. It works, with more ceremony.",
 					},
 				},
 			},
@@ -2622,7 +2593,10 @@ function viewInstall(v) {
 	if (variants) state.variant = variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0];
 	const active = variants ? variants[state.variant] : client;
 
-	const steps = active.steps.map((step, i) => {
+	// A copy-only client is one action, not a journey: a line of context, one
+	// code block, one note. No stepper.
+	const copyOnly = active.copyOnly ?? null;
+	const steps = copyOnly ? "" : active.steps.map((step, i) => {
 		const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;
 		// A locked code block already carries the create-link button. Showing the
 		// step's own one above it would offer the same action twice.
@@ -2677,7 +2651,12 @@ function viewInstall(v) {
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		<div class="steps">${steps}</div>
+		${copyOnly ? `
+			<div class="copy-only">
+				${copyOnly.body ? `<div class="step-desc" style="max-width:640px;margin-bottom:14px">${esc(copyOnly.body)}</div>` : ""}
+				${installCodeBlock(copyOnly.code(state.key ?? MCP_KEY_PLACEHOLDER), copyOnly.codeLabel)}
+				${copyOnly.note ? `<div class="step-note" style="max-width:640px">${copyOnly.note}</div>` : ""}
+			</div>` : `<div class="steps">${steps}</div>`}
 		${door.footnote ? `<div class="install-foot" style="margin-top:14px">${door.footnote}</div>` : ""}
 		<div class="install-foot">
 			Full reference, concepts, and troubleshooting live in the
