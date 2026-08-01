@@ -111,9 +111,24 @@ function bearerToken(request) {
 	return match?.[1]?.trim() || request.headers.get("x-uml-token") || "";
 }
 
+/** True when the request carries an Origin from a different site. */
+function isCrossOrigin(request) {
+	const origin = request.headers.get("origin");
+	if (!origin) return false;
+	try { return new URL(origin).origin !== new URL(request.url).origin; }
+	catch { return true; }
+}
+
 async function resolveMemoryUser(request, env, explicitUserId, { allowLegacy = true, allowedTokenTypes = ["api", "mcp"] } = {}) {
-	const session = await getSessionUser(env, request);
-	if (session) return session;
+	// Cross-origin browser calls (possible only when CORS is enabled) may
+	// authenticate ONLY with a Bearer token: sessions are skipped so a cookie
+	// can never act cross-site, and the legacy admin key is refused outright.
+	const crossOrigin = env.ENABLE_CORS === "true" && isCrossOrigin(request);
+
+	if (!crossOrigin) {
+		const session = await getSessionUser(env, request);
+		if (session) return session;
+	}
 
 	const token = bearerToken(request);
 	if (token) {
@@ -122,7 +137,7 @@ async function resolveMemoryUser(request, env, explicitUserId, { allowLegacy = t
 		return null;
 	}
 
-	if (allowLegacy && explicitUserId && await isAuthorized(request, env)) {
+	if (!crossOrigin && allowLegacy && explicitUserId && await isAuthorized(request, env)) {
 		return { type: "legacy", userId: explicitUserId, user: null };
 	}
 	return null;
@@ -1212,9 +1227,40 @@ export default {
 	},
 };
 
+// CORS is opt-in (ENABLE_CORS="true") and applies ONLY to /v1/*: browser apps
+// authenticate with Bearer tokens, never cookies (allow-credentials is never
+// sent, and resolveMemoryUser skips sessions cross-origin). /auth, /mcp,
+// admin, and control routes stay same-origin.
+const CORS_HEADERS = {
+	"access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+	"access-control-allow-headers": "authorization, content-type, x-uml-token",
+	"access-control-max-age": "86400",
+};
+
+function withCors(response, origin) {
+	const headers = new Headers(response.headers);
+	headers.set("access-control-allow-origin", origin);
+	headers.append("vary", "origin");
+	for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
+	return new Response(response.body, { status: response.status, headers });
+}
+
 async function handleRequest(request, env, ctx) {
 		const url = new URL(request.url);
 
+		const corsOrigin = env.ENABLE_CORS === "true" && url.pathname.startsWith("/v1/")
+			? request.headers.get("origin") : null;
+		if (corsOrigin && request.method === "OPTIONS") {
+			return withCors(new Response(null, { status: 204 }), corsOrigin);
+		}
+		if (corsOrigin) {
+			const response = await handleRequestInner(request, env, ctx, url);
+			return withCors(response, corsOrigin);
+		}
+		return handleRequestInner(request, env, ctx, url);
+}
+
+async function handleRequestInner(request, env, ctx, url) {
 		if ((request.method === "GET" || request.method === "HEAD") && ["/terms", "/privacy"].includes(url.pathname)) {
 			// Legal pages must resolve on a direct visit (directory listings,
 			// payment-provider reviews) — serve the shell; the client routes it.
