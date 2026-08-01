@@ -1057,6 +1057,95 @@ const routes = {
 		return json(result);
 	},
 
+	"GET /v1/usage": async (request, env) => {
+		// Per-user activity rollups for the dashboard and SDK. Read scope; the
+		// caller sees only their own (or their sub-tenant's) numbers. Computed
+		// live from receipts + content tables — nothing new is tracked.
+		const url = new URL(request.url);
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const userId = auth.userId;
+
+		const dayMs = 24 * 60 * 60 * 1000;
+		const rangeParam = String(url.searchParams.get("range") ?? "30d");
+		const rangeDays = { "1d": 1, "7d": 7, "30d": 30, all: 366 }[rangeParam] ?? 30;
+		let fromMs = Date.now() - rangeDays * dayMs;
+		let toMs = Date.now();
+		const fromParam = url.searchParams.get("from");
+		const toParam = url.searchParams.get("to");
+		if (!url.searchParams.get("range") && fromParam && toParam) {
+			const from = Date.parse(`${fromParam}T00:00:00Z`);
+			const to = Date.parse(`${toParam}T23:59:59Z`);
+			if (Number.isFinite(from) && Number.isFinite(to) && to > from && to - from <= 366 * dayMs) {
+				fromMs = from;
+				toMs = to;
+			}
+		}
+
+		const [byDay, bySource, memoriesByDay, totals, lastActivity] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day,
+					SUM(source = 'recall') AS recalls,
+					SUM(source != 'recall') AS saves,
+					SUM(CASE WHEN source != 'recall' THEN COALESCE(saved_total, 0) ELSE 0 END) AS saved,
+					SUM(COALESCE(skipped, 0)) AS skipped
+				 FROM receipts WHERE user_id = ? AND created_at BETWEEN ? AND ?
+				 GROUP BY day ORDER BY day`,
+			).bind(userId, fromMs, toMs),
+			env.DB.prepare(
+				`SELECT source, COUNT(*) AS count, SUM(COALESCE(saved_total, 0)) AS saved_total
+				 FROM receipts WHERE user_id = ? AND created_at BETWEEN ? AND ?
+				 GROUP BY source ORDER BY count DESC`,
+			).bind(userId, fromMs, toMs),
+			env.DB.prepare(
+				`SELECT day, SUM(n) AS memories_added FROM (
+					SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+					 FROM nodes WHERE user_id = ? AND created_at BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY day
+					UNION ALL
+					SELECT date(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+					 FROM memory_pages WHERE user_id = ? AND created_at BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY day
+				 ) GROUP BY day ORDER BY day`,
+			).bind(userId, fromMs, toMs, userId, fromMs, toMs),
+			env.DB.prepare(
+				`SELECT
+					(SELECT COUNT(*) FROM nodes WHERE user_id = ?1 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL) AS nodes,
+					(SELECT COUNT(*) FROM memory_pages WHERE user_id = ?1 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL) AS pages,
+					(SELECT COUNT(*) FROM slices WHERE user_id = ?1 AND deleted_at IS NULL) AS slices,
+					(SELECT COUNT(*) FROM events WHERE user_id = ?1 AND deleted_at IS NULL) AS events,
+					(SELECT COUNT(*) FROM receipts WHERE user_id = ?1 AND source = 'recall' AND created_at BETWEEN ?2 AND ?3) AS recalls,
+					(SELECT COUNT(*) FROM receipts WHERE user_id = ?1 AND source != 'recall' AND created_at BETWEEN ?2 AND ?3) AS saves`,
+			).bind(userId, fromMs, toMs),
+			env.DB.prepare("SELECT MAX(created_at) AS at FROM receipts WHERE user_id = ?").bind(userId),
+		]);
+
+		const memoriesMap = new Map((memoriesByDay.results ?? []).map((row) => [row.day, row.memories_added]));
+		const days = (byDay.results ?? []).map((row) => ({ ...row, memories_added: memoriesMap.get(row.day) ?? 0 }));
+		for (const [day, added] of memoriesMap) {
+			if (!days.some((row) => row.day === day)) days.push({ day, saves: 0, recalls: 0, saved: 0, skipped: 0, memories_added: added });
+		}
+		days.sort((a, b) => a.day.localeCompare(b.day));
+		const t = totals.results?.[0] ?? {};
+		return json({
+			ok: true,
+			range: {
+				from: new Date(fromMs).toISOString().slice(0, 10),
+				to: new Date(toMs).toISOString().slice(0, 10),
+				days: Math.round((toMs - fromMs) / dayMs),
+			},
+			totals: {
+				memories: (t.nodes ?? 0) + (t.pages ?? 0),
+				nodes: t.nodes ?? 0, pages: t.pages ?? 0, slices: t.slices ?? 0, events: t.events ?? 0,
+				saves: t.saves ?? 0, recalls: t.recalls ?? 0,
+				requests: (t.saves ?? 0) + (t.recalls ?? 0),
+			},
+			by_day: days,
+			by_source: bySource.results ?? [],
+			last_activity_at: lastActivity.results?.[0]?.at ?? null,
+		});
+	},
+
 	"GET /v1/status": async (request, env) => {
 		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"), {
 			requiredScope: MEMORY_READ_SCOPE,
