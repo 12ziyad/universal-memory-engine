@@ -36,49 +36,105 @@ import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 
-async function proposeSplit(env, config, userId, chunk, recent, overrides) {
+// Rescue batches run a few messages at a time so an abort decision happens
+// BEFORE the next batch spends anything — the old Promise.all over the whole
+// chunk had already spent everything by the time it learned it failed.
+const SPLIT_RESCUE_BATCH = 4;
+
+/**
+ * Per-message re-extraction with a spending contract:
+ *   - never starts if the chunk alone would blow `maxCalls` (over_ceiling)
+ *   - abandons as soon as `failFast` messages have failed to parse (fail_fast)
+ *   - tolerates fewer failures than that, keeping what parsed — a 46/47 parse
+ *     is a save with one dropped message, not 5,000 wasted neurons
+ * Always returns { split, stats }: stats reports calls actually made, failures,
+ * and why it stopped, so the receipt can say what this rescue really cost.
+ */
+async function proposeSplit(env, config, userId, chunk, recent, overrides, limits = {}) {
+	const maxCalls = Number.isFinite(limits.maxCalls) ? limits.maxCalls : Infinity;
+	const failFast = Number.isFinite(limits.failFast) ? limits.failFast : 3;
+	const stats = { calls: 0, failures: 0, aborted: null };
+
+	if (chunk.length > maxCalls) {
+		console.warn(`split rescue refused user=${userId}: ${chunk.length} messages > ceiling ${maxCalls}`);
+		stats.aborted = "over_ceiling";
+		return { split: null, stats };
+	}
+
 	const objects = [];
 	const notes = [];
-	const parts = await Promise.all(chunk.map(async (msg) => {
-		const singlePacket = buildPacket([msg], recent);
-		const singleText = chunkText([msg]);
-		const singleShortlist = await shortlistNodes(env, config, userId, singleText);
-		const single = await proposeMemory(env, config, { packet: singlePacket, shortlist: singleShortlist }, overrides);
-		if (!single._ok) {
-			console.warn(`llm split rescue failed user=${userId} msg=${msg.id} notes=${single.notes}`);
-			return null;
+	for (let i = 0; i < chunk.length; i += SPLIT_RESCUE_BATCH) {
+		const batch = chunk.slice(i, i + SPLIT_RESCUE_BATCH);
+		const parts = await Promise.all(batch.map(async (msg) => {
+			const singlePacket = buildPacket([msg], recent);
+			const singleText = chunkText([msg]);
+			const singleShortlist = await shortlistNodes(env, config, userId, singleText);
+			stats.calls += 1;
+			const single = await proposeMemory(env, config, { packet: singlePacket, shortlist: singleShortlist }, overrides);
+			if (!single._ok) {
+				console.warn(`llm split rescue failed user=${userId} msg=${msg.id} notes=${single.notes}`);
+				return null;
+			}
+			return single;
+		}));
+		for (const single of parts) {
+			if (!single) {
+				stats.failures += 1;
+				continue;
+			}
+			objects.push(...(single.objects ?? []));
+			if (single.notes) notes.push(single.notes);
 		}
-		return single;
-	}));
-	if (parts.some((part) => !part)) return null;
-	for (const single of parts) {
-		objects.push(...(single.objects ?? []));
-		if (single.notes) notes.push(single.notes);
+		if (stats.failures >= failFast) {
+			stats.aborted = "fail_fast";
+			return { split: null, stats };
+		}
 	}
+
+	if (objects.length === 0 && stats.failures > 0) {
+		// Everything that failed stayed under the fail-fast line, but nothing
+		// parsed either — there is no partial result to keep.
+		stats.aborted = "all_failed";
+		return { split: null, stats };
+	}
+
 	return {
-		objects,
-		notes: `split_rescue${notes.length ? `: ${notes.join("; ")}` : ""}`,
-		_ok: true,
+		split: {
+			objects,
+			notes: `split_rescue${notes.length ? `: ${notes.join("; ")}` : ""}`,
+			_ok: true,
+		},
+		stats,
 	};
 }
 
 async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides) {
+	const limits = config.splitRescue ?? {};
 	if (overrides.manual && chunk.length > 1) {
 		console.warn(`manual chunk has ${chunk.length} retained message(s); splitting before LLM`);
-		const split = await proposeSplit(env, config, userId, chunk, recent, overrides);
-		if (split) return { proposal: split, rescued: true };
-		return { proposal: { objects: [], notes: "split_rescue_failed", _ok: false }, rescued: false };
+		// The manual path splits deliberately (it is not rescuing a failed
+		// parse), so the ceiling does not apply — but fail-fast still does: a
+		// systematically unparseable conversation is abandoned, not walked.
+		const { split, stats } = await proposeSplit(env, config, userId, chunk, recent, overrides, {
+			failFast: limits.failFast,
+		});
+		if (split) return { proposal: split, rescued: true, rescueStats: stats };
+		return {
+			proposal: { objects: [], notes: `split_rescue_failed${stats.aborted ? ` (${stats.aborted})` : ""}`, _ok: false },
+			rescued: false,
+			rescueStats: stats,
+		};
 	}
 
 	const proposal = await proposeMemory(env, config, { packet, shortlist }, overrides);
 	if (proposal._ok || chunk.length <= 1) {
-		return { proposal, rescued: false };
+		return { proposal, rescued: false, rescueStats: null };
 	}
 
 	console.warn(`llm primary parse failed user=${userId}; retrying ${chunk.length} message(s) individually`);
-	const split = await proposeSplit(env, config, userId, chunk, recent, overrides);
-	if (split) return { proposal: split, rescued: true };
-	return { proposal, rescued: false };
+	const { split, stats } = await proposeSplit(env, config, userId, chunk, recent, overrides, limits);
+	if (split) return { proposal: split, rescued: true, rescueStats: stats };
+	return { proposal, rescued: false, rescueStats: stats };
 }
 
 function runListsFromPlan(plan) {
@@ -182,7 +238,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const withRules = { ...overrides, rules };
 
 	// F — LLM proposes (deterministic in tests via overrides.llmResponse).
-	const { proposal, rescued } = await proposeWithSplitRescue(
+	const { proposal, rescued, rescueStats } = await proposeWithSplitRescue(
 		env,
 		config,
 		userId,
@@ -192,7 +248,15 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		shortlist,
 		withRules,
 	);
-	if (rescued) meta.splitRescue = true;
+	if (rescueStats) {
+		// The rescue happened (or was refused) — the receipt must say so even
+		// when the fire ends llm_failed, or this spend is invisible again.
+		meta.split_rescue = true;
+		meta.split_rescue_calls = rescueStats.calls;
+		meta.split_rescue_dropped = rescueStats.failures;
+		meta.split_rescue_aborted = rescueStats.aborted;
+		meta.split_rescue_recovered = rescued;
+	}
 	if (!proposal._ok) {
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
 		await updateExtractionRun(env, userId, extractionRunId, {

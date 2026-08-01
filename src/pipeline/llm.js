@@ -230,9 +230,14 @@ async function callModel(env, config, packet, shortlist, { dense = false, rules 
 }
 
 export async function proposeMemory(env, config, { packet, shortlist }, overrides = {}) {
-	// Deterministic test hook: caller supplies the canned proposal JSON.
+	// Deterministic test hook: caller supplies the canned proposal JSON, or a
+	// function of ({ packet, shortlist }) when a test needs the response to
+	// differ per call (how the split-rescue specs simulate a poisoned chunk).
 	if (overrides && overrides.llmResponse !== undefined && overrides.llmResponse !== null) {
-		return normalize(overrides.llmResponse);
+		const canned = typeof overrides.llmResponse === "function"
+			? await overrides.llmResponse({ packet, shortlist })
+			: overrides.llmResponse;
+		return normalize(canned);
 	}
 	return callModel(env, config, packet, shortlist, {
 		dense: overrides?.settings?.captureDensity === "dense",

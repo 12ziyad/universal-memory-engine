@@ -68,8 +68,12 @@ describe("GET /v1/requests", () => {
 			expect(row.detail).toBeUndefined();
 			expect(Object.keys(row).sort()).toEqual([
 				"created_at", "extraction_run_id", "id", "latency_ms", "matched", "outcome",
-				"saved_nodes", "saved_pages", "saved_total", "skipped", "source", "source_mode", "updated_nodes",
+				"saved_nodes", "saved_pages", "saved_total", "skipped", "source", "source_mode",
+				"split_rescue_calls", "updated_nodes",
 			]);
+			// The one field that comes out of `detail` must only ever be a number
+			// (rescue call count) or null — never text.
+			expect(row.split_rescue_calls === null || typeof row.split_rescue_calls === "number").toBe(true);
 		}
 	});
 

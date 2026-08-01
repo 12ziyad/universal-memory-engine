@@ -222,6 +222,17 @@ export function getConfig(env) {
 		// Embeddings (for the semantic half of the shortlist + node vectors).
 		embedModel: env.EMBED_MODEL || "@cf/baai/bge-base-en-v1.5",
 
+		// Split-rescue guardrails. When a multi-message chunk fails the primary
+		// parse, the rescue re-extracts per message — which once meant a 107-call
+		// fan-out that still wrote nothing. maxCalls is a hard ceiling on rescue
+		// model calls per fire (past it the fire fails cleanly instead of
+		// spending); failFast abandons the rescue once this many messages have
+		// failed to parse (a systematically poisoned chunk will not be walked).
+		splitRescue: {
+			maxCalls: Number(env.SPLIT_RESCUE_MAX_CALLS ?? 8),
+			failFast: Number(env.SPLIT_RESCUE_FAIL_FAST ?? 3),
+		},
+
 		// Gate tuning.
 		confidenceMin: Number(env.CONFIDENCE_MIN ?? 0.5),
 		// Lenient floor used by the user-commanded manual path (Path A): keep

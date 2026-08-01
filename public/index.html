@@ -3170,10 +3170,15 @@ function requestEvent(row) {
 		return n ? `Recalled ${n} memor${n === 1 ? "y" : "ies"}` : "Recalled nothing";
 	}
 	const saved = Number(row.saved_total ?? 0);
+	// A fire that needed per-message rescue says so — this spend used to be
+	// completely invisible, which is how 47-call failures went unnoticed.
+	const rescue = Number(row.split_rescue_calls ?? 0) > 0
+		? ` — after ${row.split_rescue_calls} rescue call${Number(row.split_rescue_calls) === 1 ? "" : "s"}`
+		: "";
 	if (row.outcome === "accepted" || row.outcome === "accumulating") return "Accepted, processing";
-	if (saved > 0) return `Wrote ${saved} object${saved === 1 ? "" : "s"}`;
-	if (Number(row.skipped ?? 0) > 0) return `Skipped ${row.skipped}, nothing durable`;
-	return "Nothing durable found";
+	if (saved > 0) return `Wrote ${saved} object${saved === 1 ? "" : "s"}${rescue}`;
+	if (Number(row.skipped ?? 0) > 0) return `Skipped ${row.skipped}, nothing durable${rescue}`;
+	return `Nothing durable found${rescue}`;
 }
 
 function requestStatus(row) {

@@ -38,6 +38,26 @@ function phraseFor(reason) {
 	return REASON_PHRASE[reason] ?? reason ?? "skipped";
 }
 
+/**
+ * Split-rescue accounting, present on every receipt whose fire attempted (or
+ * refused) a per-message rescue. This is the fix for the invisible failure
+ * mode where a fire burned dozens of model calls and the receipt said nothing:
+ * calls = model calls the rescue actually made, dropped = messages whose
+ * content failed to parse and was left behind, aborted = why it stopped early
+ * (over_ceiling | fail_fast | all_failed), recovered = whether the rescue
+ * produced a usable proposal at all.
+ */
+function splitRescueFields(meta = {}) {
+	if (!meta.split_rescue) return {};
+	return {
+		split_rescue: true,
+		split_rescue_calls: meta.split_rescue_calls ?? 0,
+		split_rescue_dropped: meta.split_rescue_dropped ?? 0,
+		split_rescue_aborted: meta.split_rescue_aborted ?? null,
+		split_rescue_recovered: meta.split_rescue_recovered ?? false,
+	};
+}
+
 function plural(n, one, many = `${one}s`) {
 	return `${n} ${n === 1 ? one : many}`;
 }
@@ -106,6 +126,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		// How long the memory work took. Metadata for the Requests page; null
 		// when the caller did not measure it.
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
+		...splitRescueFields(meta),
 		saved,
 		savedTotal,
 		skipped: rejected.length,
@@ -140,6 +161,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		digested: meta.digested ?? null,
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
+		...splitRescueFields(meta),
 		// Workers AI rollups, when the caller metered this scope (recall does).
 		ai_calls: meta.ai?.calls ?? null,
 		ai_input_tokens: meta.ai?.input_tokens ?? null,

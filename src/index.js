@@ -1116,8 +1116,10 @@ const routes = {
 
 	"GET /v1/requests": async (request, env) => {
 		// The Requests page. METADATA ONLY — this query deliberately never
-		// selects `summary` or `detail`, because both can contain the person's
-		// own words. What went through, how long it took, whether it worked.
+		// selects `summary` or `detail` wholesale, because both can contain the
+		// person's own words. The single json_extract below pulls one NUMBER
+		// out of detail (rescue call count) — never text. What went through,
+		// how long it took, whether it worked, what it cost.
 		const url = new URL(request.url);
 		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
 			requiredScope: MEMORY_READ_SCOPE,
@@ -1131,7 +1133,8 @@ const routes = {
 
 		const { results } = await env.DB.prepare(
 			`SELECT id, source, source_mode, outcome, saved_total, saved_nodes, saved_pages,
-				updated_nodes, skipped, latency_ms, matched, created_at, extraction_run_id
+				updated_nodes, skipped, latency_ms, matched, created_at, extraction_run_id,
+				json_extract(detail, '$.split_rescue_calls') AS split_rescue_calls
 			 FROM receipts WHERE user_id = ? AND created_at >= ?
 			 ORDER BY created_at DESC LIMIT ?`,
 		).bind(auth.userId, fromMs, limit).all();

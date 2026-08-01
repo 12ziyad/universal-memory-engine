@@ -90,6 +90,12 @@
 		// in the Workers AI catalogue, which is exactly right — its only job is
 		// to reply conversationally so the extractor has something to work with.
 		"CHAT_MODEL": "@cf/meta/llama-3.2-1b-instruct",
+		// Split-rescue guardrails: a failed primary parse may re-extract at most
+		// this many messages individually (past it the fire fails cleanly), and
+		// abandons after this many per-message parse failures. The 107-call,
+		// zero-write fires these dials exist for are in the conv-0 smoke notes.
+		"SPLIT_RESCUE_MAX_CALLS": "8",
+		"SPLIT_RESCUE_FAIL_FAST": "3",
 		// A public playground with a free model call per turn is a free LLM for
 		// anyone who signs up. Per user, per UTC day.
 		"PLAYGROUND_DAILY_MESSAGES": "30",
