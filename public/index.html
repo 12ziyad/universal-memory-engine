@@ -8,7 +8,19 @@
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <style>
+	/* Inter, self-hosted and Latin-subset (62 KB). Deliberately NOT Google
+	   Fonts: that would send every visitor's IP to a third party and make the
+	   "no third-party trackers" line in our privacy policy untrue. */
+	@font-face {
+		font-family: "Inter";
+		src: url("/assets/inter-latin.woff2") format("woff2");
+		font-weight: 100 900;
+		font-style: normal;
+		font-display: swap;
+	}
 	:root {
+		--font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
 		--border: #2b333f; --border2: #3a4452;
@@ -26,10 +38,11 @@
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; }
-	body { margin: 0; font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	body { margin: 0; font: 13.5px/1.7 var(--font-ui);
+		-webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
-	code { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace; }
+	code { font-family: var(--font-mono); }
 
 	/* ---- product shell ---- */
 	body.public-mode header, body.public-mode main, body.public-mode #banner,
@@ -211,8 +224,8 @@
 	.auth-error { display: none; color: #ffb4ad; border: 1px solid rgba(248,81,73,.4); background: rgba(58,29,27,.6); padding: 9px 11px; border-radius: 8px; margin: 10px 0; }
 	.app-user { display: flex; gap: 8px; align-items: center; color: var(--muted); }
 	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #58a6ff, #ffc65b); color: #04121f; font-weight: 800; }
-	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 16px; }
-	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-bottom: 20px; }
+	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
 	.action-box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
 	.stat-big { font-size: 26px; font-weight: 700; margin: 4px 0 8px; }
 	.spark { display: flex; align-items: flex-end; gap: 6px; height: 110px; }
@@ -225,14 +238,14 @@
 		color: var(--faint); font-weight: 650; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 	.keys-table td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 	.keys-table tr:last-child td { border-bottom: 0; }
-	.key-mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+	.key-mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 	.key-revoked td { opacity: .55; }
 	/* Get started: generous stepper — instruction left, thing-to-copy right. */
-	.install-intro { max-width: 1080px; margin-bottom: 22px; }
+	.install-intro { max-width: 1080px; margin-bottom: 26px; }
 	.install-intro h2 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.015em; }
 	.install-intro p { margin: 0; color: var(--muted); font-size: 15px; }
 	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 12px; max-width: 1080px; margin-bottom: 22px; }
+		gap: 14px; max-width: 1080px; margin-bottom: 32px; }
 	.method-card { display: block; text-align: left; background: var(--panel); border: 1px solid var(--border);
 		border-radius: 12px; padding: 16px 18px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 	.method-card b { display: block; font-size: 15px; color: var(--text); margin-bottom: 3px; font-weight: 650; }
@@ -240,17 +253,17 @@
 	.method-card:hover { border-color: var(--border2); filter: none; }
 	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 	.method-card.active b { color: var(--accent); }
-	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 4px; }
+	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 14px; }
 	.steps-panel { max-width: 1080px; background: var(--panel); border: 1px solid var(--border);
 		border-radius: 14px; padding: 6px 26px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
-	.step-row { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); gap: 32px;
-		padding: 28px 0; border-bottom: 1px solid var(--border); align-items: start; }
+	.step-row { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); gap: 36px;
+		padding: 36px 0; border-bottom: 1px solid var(--border); align-items: start; }
 	.step-row:last-child { border-bottom: 0; }
 	.step-left { display: flex; gap: 14px; }
 	.step-num { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
 		color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; margin-top: 1px; }
 	.step-title { font-weight: 650; font-size: 15px; margin-bottom: 5px; }
-	.step-desc { color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+	.step-desc { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 62ch; }
 	.step-right .install-code { margin: 0 0 10px; }
 	.step-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
 	.step-done { border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
@@ -264,8 +277,8 @@
 	}
 	.install-card .install-head { margin-bottom: 4px; }
 	.install-code { position: relative; margin: 10px 0; }
-	.install-code pre { margin: 0; padding: 14px; background: #0d1117; color: #dbe7ee; border-radius: 10px;
-		overflow-x: auto; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.6; }
+	.install-code pre { margin: 0; padding: 16px 18px; background: #0d1117; color: #dbe7ee; border-radius: 11px;
+		overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.75; }
 	.install-code .copy-btn { position: absolute; top: 8px; right: 8px; }
 	.connect-inline-note { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(220,104,3,.35);
 		background: rgba(220,104,3,.06); border-radius: 10px; font-size: 13px; }
@@ -302,8 +315,8 @@
 	.pg-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13.5px; }
 	.pg-result.ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 	.pg-result.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
-	.pg-context { margin: 0; padding: 10px; background: var(--panel2); border-radius: 8px; white-space: pre-wrap;
-		font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.55; overflow-x: auto; max-height: 260px; overflow-y: auto; }
+	.pg-context { margin: 0; padding: 14px; background: var(--panel2); border-radius: 10px; white-space: pre-wrap;
+		font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 260px; overflow-y: auto; }
 	.onboard-card { border-color: rgba(132,233,255,.35); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
@@ -635,8 +648,8 @@
 
 	/* ---- misc ---- */
 	.empty { color: var(--faint); font-style: italic; padding: 18px; text-align: center; }
-	.help { color: var(--muted); font-size: 13px; line-height: 1.55; }
-	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; max-width: 720px; }
+	.help { color: var(--muted); font-size: 13px; line-height: 1.7; }
+	.box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; max-width: 720px; }
 	.box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
 	.kv { line-height: 1.7; }
 	.danger-zone { border-color: rgba(248,81,73,.52); box-shadow: inset 0 0 0 1px rgba(248,81,73,.08); }
@@ -2128,8 +2141,18 @@ console.log(context);`,
     "${PRODUCT.name.toLowerCase()}": { "url": "${origin}/mcp/${mcpToken}" }
   }
 }`,
-		plugin: `claude plugin marketplace add ${PRODUCT.repo}
-/plugin install ${PRODUCT.name.toLowerCase()}`,
+		pluginMarketplace: `claude plugin marketplace add 12ziyad/universal-memory-engine`,
+		pluginInstall: `/plugin install ${PRODUCT.name.toLowerCase()}`,
+		pythonTurn: `# one call per agent turn: recall + capture together
+result = memory.turn([
+    {"role": "user", "content": "We picked Postgres for the new service."}
+])
+print(result["recall"]["context"])`,
+		nodeTurn: `// one call per agent turn: recall + capture together
+const result = await memory.turn([
+  { role: "user", content: "We picked Postgres for the new service." },
+]);
+console.log(result.recall.context);`,
 	};
 }
 
@@ -2140,80 +2163,113 @@ console.log(context);`,
 function installMethods() {
 	const s = installSnippets();
 	const name = PRODUCT.name.toLowerCase();
-	const key = () => `<button class="mini" onclick="createKeyFor('${S.installMethod === "api" ? "api" : "mcp"}')">Create ${S.installMethod === "api" ? "an API key" : "a link"}</button>`;
+	const mcpKey = `<button class="mini" onclick="createKeyFor('mcp')">Create a link</button>`;
+	const apiKey = `<button class="mini" onclick="createKeyFor('api')">Create an API key</button>`;
 	return {
-		chat: {
-			label: "Chat apps",
-			blurb: "Claude, ChatGPT, Cursor",
+		// App Connect leads: connecting the chat apps people already use is the
+		// thing this product does that developer-only memory tools do not.
+		connect: {
+			label: "App Connect",
+			blurb: "One link — Claude and ChatGPT remember you",
 			clients: {
 				claude: {
 					label: "Claude",
 					steps: [
-						{ t: "Create your link", d: "One click. It contains your private key, so it's shown only once.", html: key() },
-						{ t: "Add it to Claude", d: "On a computer — the phone apps can't add connectors. It syncs to your phone after.", code: s.mcpUrl,
-							note: `Paste into <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">Settings → Connectors → Add custom connector</a>. Name it <b>${name}</b>.` },
-						{ t: "Switch it on in a chat", d: "Tap + at the bottom-left → Connectors → turn on " + name + ". Saved connectors stay off until you do this.", html: `<div class="step-done">Then just say: <i>"remember this"</i> or <i>"what do you know about me?"</i></div>` },
+						{ t: "Create your link", d: "One click. It carries your private key, so it is shown only once.", html: mcpKey },
+						{ t: "Add it to Claude", d: "Use a computer — the phone apps cannot add connectors. It syncs to your phone afterwards.", code: s.mcpUrl,
+							note: `Paste into <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">Settings → Connectors → Add custom connector</a> and name it <b>${name}</b>.` },
+						{ t: "Switch it on in a chat", d: "Tap + at the bottom left, choose Connectors, turn on " + name + ". Saved connectors stay off until you do this.",
+							html: `<div class="step-done">Then simply say <i>"remember this"</i> or ask <i>"what do you know about me?"</i></div>` },
 					],
 				},
 				chatgpt: {
 					label: "ChatGPT",
 					steps: [
-						{ t: "Turn on Developer mode", d: "Settings → Connectors → Advanced. Nothing MCP-related appears until this is on.", html: `<div class="step-note">Needs a paid plan. Free accounts can't add connectors.</div>` },
-						{ t: "Create the connector", d: "Connectors → Create. Name it " + name + ", then paste your link.", code: s.mcpUrl, before: key(),
-							note: `Description field: <i>Personal memory — save and recall facts about me.</i> The model reads it to decide when to use ${PRODUCT.name}.` },
-						{ t: "Pick it in a chat", d: "New chat → enable Developer mode → Add sources → " + name + ".", html: `<div class="step-done">Ready. Ask it what it remembers.</div>` },
+						{ t: "Turn on Developer mode", d: "Settings → Connectors → Advanced. Nothing MCP-related appears until this is on.",
+							html: `<div class="step-note">Needs a paid plan. Free ChatGPT accounts cannot add custom connectors.</div>` },
+						{ t: "Create the connector", d: "Connectors → Create. Name it " + name + ", then paste your link.", before: mcpKey, code: s.mcpUrl,
+							note: `In the description field write <i>Personal memory — save and recall facts about me.</i> The model reads it when deciding to use ${PRODUCT.name}.` },
+						{ t: "Pick it in a chat", d: "Start a new chat, enable Developer mode or Add sources, then choose " + name + ".",
+							html: `<div class="step-done">Ready. Ask it what it remembers about you.</div>` },
 					],
 				},
 				cursor: {
 					label: "Cursor",
 					steps: [
-						{ t: "Create your link", d: "Same private URL works in any MCP-capable editor.", html: key() },
+						{ t: "Create your link", d: "The same private URL works in any MCP-capable editor.", html: mcpKey },
 						{ t: "Add it to your MCP config", d: "Project .cursor/mcp.json, or the global one in your home folder.", code: s.cursor },
-						{ t: "Reload the editor", d: "Cursor picks up the server and the three memory tools appear.", html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+						{ t: "Reload the editor", d: "Cursor connects on start and the three memory tools appear.",
+							html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
 					],
 				},
 			},
 		},
-		api: {
-			label: "Your own app",
-			blurb: "SDK or REST from your code",
+		sdk: {
+			label: "SDK Integration",
+			blurb: "Memory inside your own app or agent",
 			clients: {
 				python: {
 					label: "Python",
 					steps: [
 						{ t: "Install the SDK", d: "One package, one dependency.", code: "pip install itsuki" },
-						{ t: "Create an API key", d: "Bearer key for server-side use. Keep it out of browsers.", html: key() },
+						{ t: "Create an API key", d: "A Bearer key for server-side use. Keep it out of browsers.", html: apiKey },
 						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.python },
+						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.pythonTurn },
 					],
 				},
 				node: {
 					label: "Node.js",
 					steps: [
 						{ t: "Install the SDK", d: "Zero dependencies, Node 18 or newer.", code: "npm install itsuki" },
-						{ t: "Create an API key", d: "Bearer key for server-side use. Keep it out of browsers.", html: key() },
+						{ t: "Create an API key", d: "A Bearer key for server-side use. Keep it out of browsers.", html: apiKey },
 						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.node },
+						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.nodeTurn },
 					],
 				},
 				curl: {
 					label: "cURL",
 					steps: [
-						{ t: "Create an API key", d: "Send it as a Bearer token on every request.", html: key() },
+						{ t: "Create an API key", d: "Send it as a Bearer token on every request.", html: apiKey },
 						{ t: "Save a memory", d: "Returns a receipt: what was stored, what was skipped, and why.", code: s.curlSave },
-						{ t: "Recall it", d: "The context field is the block you put in your prompt.", code: s.curlRecall },
+						{ t: "Recall it", d: "The context field is the block you drop into your prompt.", code: s.curlRecall },
 					],
 				},
 			},
 		},
 		plugin: {
-			label: "Coding agents",
-			blurb: "Claude Code, Codex",
+			label: "Plugin",
+			blurb: "Memory inside your coding agent",
 			clients: {
 				"claude-code": {
 					label: "Claude Code",
+					variants: {
+						mcp: {
+							label: "MCP",
+							steps: [
+								{ t: "Create your link", d: "One key for this machine's agent.", html: mcpKey },
+								{ t: "Add the MCP server", d: "One native command — no npx, nothing to download.", code: s.claudeCode },
+								{ t: "Use it while you work", d: "Ask it to save decisions, or to check what it already knows about the project.",
+									html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+							],
+						},
+						plugin: {
+							label: "Plugin",
+							steps: [
+								{ t: "Add the marketplace", d: "Points Claude Code at this repository's plugin manifest.", code: s.pluginMarketplace },
+								{ t: "Install the plugin", d: "Bundles the MCP server so there is no URL to paste.", code: s.pluginInstall },
+								{ t: "Not published yet", d: "Plugins install from a public repository. These commands go live the moment the repo is public.",
+									html: `<div class="step-note">Until then the <b>MCP</b> tab gives you the same three tools today.</div>` },
+							],
+						},
+					},
+				},
+				codex: {
+					label: "Codex",
 					steps: [
-						{ t: "Create your link", d: "One key for this machine's agent.", html: key() },
-						{ t: "Add the MCP server", d: "One command in your terminal.", code: s.claudeCode },
-						{ t: "Use it while you work", d: "Ask it to save decisions, or to check what it already knows about the project.", html: `<div class="step-done">Plugin install with lifecycle hooks is coming next.</div>` },
+						{ t: "Create your link", d: "The same private URL, used by Codex's MCP config.", html: mcpKey },
+						{ t: "Add the server", d: "Point Codex's MCP configuration at your link.", code: s.cursor },
+						{ t: "Restart the agent", d: "It connects over HTTP and the memory tools appear.",
+							html: `<div class="step-done">Any MCP-capable agent works the same way.</div>` },
 					],
 				},
 			},
@@ -2229,6 +2285,12 @@ function setInstallMethod(method) {
 
 function setInstallClient(client) {
 	S.installClient = client;
+	S.installVariant = null;
+	renderView();
+}
+
+function setInstallVariant(variant) {
+	S.installVariant = variant;
 	renderView();
 }
 
@@ -2245,15 +2307,20 @@ async function createKeyFor(type) {
 
 function viewInstall(v) {
 	const methods = installMethods();
-	const methodId = methods[S.installMethod] ? S.installMethod : "chat";
+	const methodId = methods[S.installMethod] ? S.installMethod : "connect";
 	const method = methods[methodId];
 	const clientId = method.clients[S.installClient] ? S.installClient : Object.keys(method.clients)[0];
 	const client = method.clients[clientId];
+	// Some clients offer two install routes (plugin bundle vs raw MCP): a second
+	// tab row appears only for those, exactly where the choice actually exists.
+	const variants = client.variants ?? null;
+	const variantId = variants ? (variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0]) : null;
+	const active = variants ? variants[variantId] : client;
 
 	const codeBlock = (text) =>
 		`<div class="install-code"><pre>${esc(text)}</pre><button class="copy-btn mini" onclick="copyText(${JSON.stringify(text).replace(/"/g, "&quot;")}, 'Copied')">Copy</button></div>`;
 
-	const steps = client.steps.map((step, i) => `
+	const steps = active.steps.map((step, i) => `
 		<div class="step-row">
 			<div class="step-left">
 				<div class="step-num">${i + 1}</div>
@@ -2286,6 +2353,11 @@ function viewInstall(v) {
 			<div class="client-tabs">
 				${Object.entries(method.clients).map(([id, c]) => `
 					<button class="term-tab ${id === clientId ? "active" : ""}" onclick="setInstallClient('${id}')">${esc(c.label)}</button>`).join("")}
+			</div>` : ""}
+		${variants ? `
+			<div class="client-tabs variant-tabs">
+				${Object.entries(variants).map(([id, variant]) => `
+					<button class="term-tab ${id === variantId ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${oneTimeSecretPanel(S.oneTimeToken)}
 		<div class="steps-panel">${steps}</div>
