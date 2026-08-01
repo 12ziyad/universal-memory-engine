@@ -20,6 +20,7 @@ import { responseText } from "./llm.js";
 import { runObserveMessagesCommand, runRecallCommand } from "./commands.js";
 import { getMemoryRules } from "./rules.js";
 import { threadRulesFrom } from "./playground_settings.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_TURNS = 12;
@@ -235,11 +236,11 @@ const REPLY_FALLBACK = "I could not think of a reply just then. Your message was
 async function chatReply(env, messages) {
 	if (!env.AI) return REPLY_FALLBACK;
 	try {
-		const res = await env.AI.run(chatModel(env), {
+		const res = await runAi(env, chatModel(env), {
 			messages,
 			temperature: Number(env.CHAT_TEMPERATURE ?? 0.4),
 			max_tokens: Number(env.CHAT_MAX_TOKENS ?? 512),
-		});
+		}, undefined, { task: "playground_chat" });
 		const text = String(responseText(res) ?? "").trim();
 		return text || REPLY_FALLBACK;
 	} catch (error) {

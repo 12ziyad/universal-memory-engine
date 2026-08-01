@@ -8,6 +8,7 @@
  */
 
 import { extractJson, responseText } from "./llm.js";
+import { runAi } from "../lib/ai_meter.js";
 import {
 	normalizeManualConversationMessages,
 	normalizeManualConversationScope,
@@ -440,7 +441,8 @@ async function callRouterModel(options, payload) {
 		? Math.max(64, Math.min(configuredMaxTokens, 384))
 		: 256;
 	try {
-		const response = await env.AI.run(
+		const response = await runAi(
+			env,
 			model,
 			{
 				messages: [

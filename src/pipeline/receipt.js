@@ -140,6 +140,11 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		digested: meta.digested ?? null,
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
+		// Workers AI rollups, when the caller metered this scope (recall does).
+		ai_calls: meta.ai?.calls ?? null,
+		ai_input_tokens: meta.ai?.input_tokens ?? null,
+		ai_output_tokens: meta.ai?.output_tokens ?? null,
+		ai_neurons: meta.ai?.neurons ?? null,
 		saved: {
 			pages: 0,
 			nodes: 0,

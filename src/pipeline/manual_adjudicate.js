@@ -1,5 +1,6 @@
 import { canonicalizeCategory } from "./gates.js";
 import { extractJson, responseText } from "./llm.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const EXACT_IDENTITY_REASONS = new Set([
 	"exact_claim",
@@ -340,7 +341,8 @@ export function decideManualIdentity(entity, rawCards = [], recommendation = nul
 async function callAdjudicationModel(env, config, payload) {
 	if (!env.AI || payload.cards.length === 0 || payload.entities.length === 0) return null;
 	try {
-		const response = await env.AI.run(
+		const response = await runAi(
+			env,
 			config.llm.model,
 			{
 				messages: [

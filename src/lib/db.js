@@ -210,8 +210,9 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total,
 				saved_nodes, saved_slices, saved_events, saved_edges, saved_candidates,
 				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id,
-				saved_pages, source_packet_id, idempotency_key, scope_json, latency_ms, matched, source_mode)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				saved_pages, source_packet_id, idempotency_key, scope_json, latency_ms, matched, source_mode,
+				ai_calls, ai_input_tokens, ai_output_tokens, ai_neurons)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				id,
@@ -239,6 +240,11 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				Number.isFinite(receipt?.latency_ms) ? Math.round(receipt.latency_ms) : null,
 				Number.isFinite(receipt?.matched) ? Math.round(receipt.matched) : null,
 				receipt?.source_mode ?? null,
+				// Workers AI rollups for this save. Null when nothing was metered.
+				Number.isFinite(receipt?.ai_calls) ? receipt.ai_calls : null,
+				Number.isFinite(receipt?.ai_input_tokens) ? receipt.ai_input_tokens : null,
+				Number.isFinite(receipt?.ai_output_tokens) ? receipt.ai_output_tokens : null,
+				Number.isFinite(receipt?.ai_neurons) ? receipt.ai_neurons : null,
 			)
 			.run();
 		if (receipt && typeof receipt === "object") receipt.id = id;

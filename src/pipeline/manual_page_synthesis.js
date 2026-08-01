@@ -8,6 +8,7 @@
  */
 
 import { canonicalIdentity } from "./manual_identity.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const MAXIMUMS = Object.freeze({
 	key_facts: 10,
@@ -751,7 +752,8 @@ Each factual array item must be {"text":"concise paraphrase","claim_ids":["C0"]}
 async function callSynthesisModel(env, config, model, claims, options, failures) {
 	if (!env?.AI || !claims.length) return null;
 	try {
-		const response = await env.AI.run(
+		const response = await runAi(
+			env,
 			model,
 			{
 				messages: [

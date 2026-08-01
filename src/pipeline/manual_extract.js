@@ -10,6 +10,7 @@ import {
 	unsafeManualEntityLabel,
 } from "./manual_language.js";
 import { titleCaseWords } from "./title.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const MANUAL_SYSTEM_PROMPT = `You are the isolated MANUAL memory extractor. The user explicitly submitted content to a memory tool.
 
@@ -1116,7 +1117,8 @@ function heuristicManualFacts(submittedContent) {
 async function callManualModel(env, config, envelope) {
 	if (!env.AI) return null;
 	try {
-		const result = await env.AI.run(
+		const result = await runAi(
+			env,
 			config.llm.model,
 			{
 				messages: [

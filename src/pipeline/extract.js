@@ -32,6 +32,7 @@ import { buildReceipt, emptyReceipt } from "./receipt.js";
 import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
 import { getMemoryRules } from "./rules.js";
+import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 
@@ -99,7 +100,33 @@ function runListsFromPlan(plan) {
 	};
 }
 
+/**
+ * A save, wrapped in a Workers AI meter. Every model call the extraction makes
+ * — extract, digest, pass-2 summaries, embeddings — is attributed to this one
+ * run, then written to `ai_calls` and rolled up onto the receipt.
+ *
+ * Metering is strictly observational: it cannot alter the result, and a failure
+ * inside it is swallowed rather than allowed to fail a save.
+ */
 export async function runExtraction(env, userId, chunk, recent, overrides = {}) {
+	return withAiMeter("save", async (meter) => {
+		const result = await runExtractionInner(env, userId, chunk, recent, overrides, meter);
+		try {
+			const totals = await flushAiMeter(env, userId, meter);
+			if (result?.receipt) {
+				result.receipt.ai_calls = totals.calls;
+				result.receipt.ai_input_tokens = totals.input_tokens;
+				result.receipt.ai_output_tokens = totals.output_tokens;
+				result.receipt.ai_neurons = totals.neurons;
+			}
+		} catch (error) {
+			console.warn("ai meter rollup failed:", error?.message ?? error);
+		}
+		return result;
+	});
+}
+
+async function runExtractionInner(env, userId, chunk, recent, overrides = {}, meter = null) {
 	const config = getConfig(env);
 	// Wall time for the whole extraction, carried onto every receipt this
 	// function can return. It is what the Requests page reports as latency.
@@ -137,6 +164,8 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		status: "running",
 	});
 	meta.extraction_run_id = extractionRunId;
+	// Attribute every model call in this run to it, now that the id exists.
+	tagAiMeter(extractionRunId);
 
 	// D — packet (three separated parts).
 	const packet = buildPacket(chunk, recent);

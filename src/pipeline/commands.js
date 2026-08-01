@@ -5,6 +5,7 @@ import { saveConversation, saveMemory } from "./manual.js";
 import { recall } from "./recall.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
+import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 function receiptId(receipt, fallback = null) {
 	return receipt?.id ?? fallback ?? null;
@@ -69,6 +70,7 @@ async function storeStatusReceipt(env, userId, sourcePacket, outcome, reason, so
 		skipped: meta.skipped,
 		latency_ms: meta.latency_ms,
 		matched: meta.matched,
+		ai: meta.ai,
 	});
 	if (meta.processing !== undefined) receipt.processing = Boolean(meta.processing);
 	if (meta.final !== undefined) receipt.final = Boolean(meta.final);
@@ -260,8 +262,14 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 	});
 	const sourcePacket = await storeSourcePacket(env, normalized.packet);
 	const startedAt = Date.now();
-	const result = await recall(env, getConfig(env), userId, query, {
-		memoryScope: input.memoryScope,
+	// Recall is metered separately from a save: it is the other half of "what
+	// does this cost", and it runs a different (much smaller) set of calls.
+	const { result, aiTotals } = await withAiMeter("recall", async (meter) => {
+		tagAiMeter(sourcePacket?.id ?? null);
+		const value = await recall(env, getConfig(env), userId, query, {
+			memoryScope: input.memoryScope,
+		});
+		return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 	});
 	const latencyMs = Date.now() - startedAt;
 	const outcome = result.recall_mode === "no_recall" ? "no_recall" : "recalled";
@@ -272,6 +280,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		received: 1,
 		latency_ms: latencyMs,
 		matched: Number(result.count ?? 0),
+		ai: aiTotals,
 	});
 	const summary = result.count ? "Found relevant memory." : "No relevant memory found.";
 	const { mode: recallStatus, ok: _ok, ...recallDetails } = result;

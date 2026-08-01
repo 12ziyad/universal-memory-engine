@@ -19,6 +19,7 @@
 import { responseText } from "./llm.js";
 import { rulesPromptLines } from "./rules.js";
 import { classifyMessage } from "./trigger.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const DIGEST_SYSTEM = `You compress a chat into clean MEMORY lines about the USER.
 Output ONLY durable facts about the user, ONE per line, plain text — no bullets, no numbering, no preamble, no commentary.
@@ -71,7 +72,8 @@ async function llmDigest(env, config, userLines, assistantLines, rules = null) {
 	const ruleLines = rulesPromptLines(rules);
 	const system = ruleLines.length ? `${DIGEST_SYSTEM}\n${ruleLines.join("\n")}` : DIGEST_SYSTEM;
 	try {
-		const res = await env.AI.run(
+		const res = await runAi(
+			env,
 			config.llm.digestModel,
 			{
 				messages: [

@@ -1,4 +1,5 @@
 import { hashText } from "./source.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const MAX_PROFILE_PART = 8000;
 
@@ -319,7 +320,7 @@ async function embedAndUpsertProfile(env, config, userId, profile) {
 		profile.semantic_text,
 		profile.context_text,
 	], MAX_PROFILE_PART);
-	const response = await env.AI.run(config.embedModel, { text: [vectorText] });
+	const response = await runAi(env, config.embedModel, { text: [vectorText] }, undefined, { task: "embed_profile" });
 	const values = response?.data?.[0];
 	if (!Array.isArray(values) || values.length === 0) throw new Error("embedding response did not contain a vector");
 	const latest = await activeStoredProfile(env, userId, profile.object_kind, profile.object_id);

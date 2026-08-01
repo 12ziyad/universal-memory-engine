@@ -17,6 +17,7 @@
 
 import { CATEGORIES, ACTIONS, IMPORTANCE, EDGE_TYPES, SLICE_KINDS } from "../config.js";
 import { rulesPromptLines } from "./rules.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const SYSTEM_PROMPT = `You extract durable, long-term MEMORY about the USER from their chat messages. You ONLY propose; a backend decides what is actually saved.
 
@@ -208,10 +209,12 @@ async function callModel(env, config, packet, shortlist, { dense = false, rules 
 	];
 	const options = config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined;
 	try {
-		const res = await env.AI.run(
+		const res = await runAi(
+			env,
 			config.llm.model,
 			{ messages, temperature: config.llm.temperature, max_tokens: config.llm.maxTokens },
 			options,
+			{ task: "extract" },
 		);
 		const raw = responseText(res);
 		const parsed = extractJson(raw);

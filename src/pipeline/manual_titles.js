@@ -7,6 +7,7 @@ import {
 	unsafeManualEntityLabel,
 } from "./manual_language.js";
 import { isBadTitle } from "./title.js";
+import { runAi } from "../lib/ai_meter.js";
 
 const TITLE_SYSTEM = `Generate one concise canonical title for a durable memory entity.
 Return exactly {"title":"..."}.
@@ -44,7 +45,8 @@ async function generateManualTitle(env, config, identity, input) {
 	if (override != null) return String(override);
 	if (!env?.AI) return null;
 	try {
-		const result = await env.AI.run(
+		const result = await runAi(
+			env,
 			config.llm.summaryModel,
 			{
 				messages: [

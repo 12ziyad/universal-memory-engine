@@ -11,6 +11,7 @@
 import { getCurrentSlices, getNodeEvents } from "../lib/db.js";
 import { clusterForMemory } from "./clusters.js";
 import { responseText } from "./llm.js";
+import { runAi } from "../lib/ai_meter.js";
 
 // Planner-written bookkeeping events ("updated: was X → now Y"). They belong in
 // the node's timeline, never in its summary.
@@ -27,7 +28,8 @@ async function summarizeNode(env, config, node, slices, events) {
 		...slices.slice(0, 12).map((s) => `- ${s.kind}: ${s.text}`),
 		...events.slice(0, 6).map((e) => `- ${e.action}: ${e.text}`),
 	].join("\n");
-	const res = await env.AI.run(
+	const res = await runAi(
+		env,
 		config.llm.summaryModel,
 		{
 			messages: [

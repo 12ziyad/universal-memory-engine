@@ -14,6 +14,7 @@
 import { responseText } from "./llm.js";
 import { rulesAllowText, rulesPromptLines } from "./rules.js";
 import { classifyMessage } from "./trigger.js";
+import { runAi } from "../lib/ai_meter.js";
 
 // An explicit whole-chat save: the object of the save verb is the chat itself
 // ("everything", "this chat", "the whole conversation"), not a topic's details.
@@ -121,7 +122,8 @@ async function llmNotes(env, config, turns, rules = null) {
 	const ruleLines = rulesPromptLines(rules);
 	const system = ruleLines.length ? `${NOTES_SYSTEM}\n${ruleLines.join("\n")}` : NOTES_SYSTEM;
 	try {
-		const res = await env.AI.run(
+		const res = await runAi(
+			env,
 			config.llm.digestModel,
 			{
 				messages: [
