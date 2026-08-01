@@ -150,6 +150,12 @@ export class UserMemory extends DurableObject {
 			const { chunk, recent } = await this.#load();
 			if (chunk.length === 0) return { outcome: "empty" };
 
+			// Watchdog: alarms survive isolate death, `this.busy` does not. If
+			// this fire is killed mid-flight (eviction, crash, deploy), the
+			// pending alarm revives extraction in a fresh instance instead of
+			// stranding the held chunk. Completion logic below replaces it.
+			await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
+
 			const processedIds = new Set(chunk.map((m) => m.id));
 			const lastId = chunk[chunk.length - 1].id;
 
@@ -196,10 +202,20 @@ export class UserMemory extends DurableObject {
 					await this.ctx.storage.put("failCount", fails);
 					if (fails <= 6) {
 						await this.ctx.storage.setAlarm(Date.now() + Math.min(5000 * 2 ** (fails - 1), 600000));
+					} else {
+						await this.ctx.storage.deleteAlarm();
 					}
+				} else {
+					// meaningful_no_write: the chunk waits for NEW messages. The
+					// start-of-fire watchdog must not retry identical input on a
+					// five-minute loop.
+					await this.ctx.storage.deleteAlarm();
 				}
 			} else {
 				await this.ctx.storage.put("failCount", 0);
+				// Nothing held → the only pending alarm is our watchdog. Clear it
+				// (an addMessages fire-alarm implies a non-empty chunk).
+				await this.ctx.storage.deleteAlarm();
 			}
 
 			// user_opt_out no_write is final; meaningful_no_write/failed outcomes remain retryable.
