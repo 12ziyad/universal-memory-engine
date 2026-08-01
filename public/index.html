@@ -2415,6 +2415,7 @@ async function saveRulesForm() {
 			excludes: parseTermList($("#rule-excludes").value),
 			customCategories: parseCategoryLines($("#rule-categories").value),
 			captureDefault: $("#rule-capture").value,
+			captureDensity: $("#rule-density").value,
 			autoCollect: $("#rule-autocollect").checked,
 		};
 		const res = await api("/v1/rules", { method: "PUT", body: JSON.stringify(scopedPayload({ rules })) });
@@ -2465,6 +2466,11 @@ function viewRules(v) {
 					<option value="graph_only">Never build pages</option>
 				</select></label>
 			<label><input type="checkbox" id="rule-autocollect" checked style="margin-right:6px" />Auto-collect on /v1/turn</label>
+			<label>How much to keep
+				<select id="rule-density" style="margin-left:8px">
+					<option value="standard">Balanced — durable facts only (default)</option>
+					<option value="dense">Exhaustive — keep every detail</option>
+				</select></label>
 		</div>
 		<div style="display:flex;gap:10px;align-items:center;margin-top:14px">
 			<button onclick="saveRulesForm()">Save rules</button>
@@ -2479,6 +2485,7 @@ function viewRules(v) {
 		$("#rule-categories").value = (rules.customCategories || [])
 			.map((c) => c.description ? `${c.name}: ${c.description}` : c.name).join("\n");
 		$("#rule-capture").value = rules.captureDefault || "auto";
+		$("#rule-density").value = rules.captureDensity || "standard";
 		$("#rule-autocollect").checked = rules.autoCollect !== false;
 		renderRulesSummary(rules);
 	}).catch((err) => {

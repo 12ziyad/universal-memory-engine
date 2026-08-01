@@ -361,7 +361,12 @@ const routes = {
 			memoryScope: auth.memoryScope,
 			source: "ingest",
 			sourceMode: "ingest",
-			overrides: body._test ?? {},
+			overrides: {
+				...(body._test ?? {}),
+				...(["dense", "standard"].includes(body.captureDensity)
+					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
+					: {}),
+			},
 		});
 		return json(result);
 	},
@@ -963,7 +968,12 @@ const routes = {
 				memoryScope: auth.memoryScope,
 				source: "ingest",
 				sourceMode: "turn",
-				overrides: body._test ?? {},
+				overrides: {
+				...(body._test ?? {}),
+				...(["dense", "standard"].includes(body.captureDensity)
+					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
+					: {}),
+			},
 			});
 			collect = {
 				enabled: true,

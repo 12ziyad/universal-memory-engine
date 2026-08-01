@@ -23,7 +23,7 @@ Reply with EXACTLY ONE JSON object and nothing else — no prose, no markdown, n
 {
   "objects": [
     { "kind": "node", "label": "Boxing", "category": "skill", "matches_existing": null, "confidence": 0.95 },
-    { "kind": "event", "on": "Boxing", "action": "started", "text": "Started boxing", "importance": "ordinary", "confidence": 0.95 },
+    { "kind": "event", "on": "Boxing", "action": "started", "text": "Started boxing", "importance": "ordinary", "confidence": 0.95, "date": "2023-05-08" },
     { "kind": "slice", "on": "Boxing", "text": "Trains three days a week", "kind_detail": "progress", "confidence": 0.9 },
     { "kind": "node", "label": "Grandmother", "category": "family", "matches_existing": null, "confidence": 0.95 },
     { "kind": "event", "on": "Grandmother", "action": "passed_away", "text": "Grandmother passed away", "importance": "life_significant", "confidence": 0.95 },
@@ -58,7 +58,9 @@ Rules:
 - ALWAYS pair a life event with its subject NODE: "my grandmother died" → node Grandmother (family) + event passed_away (life_significant). "I was diagnosed with asthma" → node Asthma (health) + event diagnosed. "I got married" → node Marriage (life_event) + event married (life_significant). Never emit an event with no node.
 - Add an EDGE only when the user states an explicit relationship (e.g. "X uses Y", "X runs on Y", "X built with Y", "X depends on Y"). Never from mere co-mention.
 - For such a relationship, include BOTH endpoints as nodes: if X or Y is not already in existing_nodes, propose a node for it (with its category) in the SAME response, then propose the edge between them. "Kaka uses Cloudflare Workers" → node Kaka (project) + node Cloudflare Workers (tool) + edge Kaka -uses-> Cloudflare Workers. An edge must connect two real nodes.
-- Extract ONLY from new_slice. Use bridge_context only to resolve references. NEVER learn from assistant_context.`;
+- Extract ONLY from new_slice. Use bridge_context only to resolve references. NEVER learn from assistant_context.
+- Events MAY carry "date" (YYYY-MM-DD): COPY it from an explicit date in the text or the message timestamp. NEVER invent or guess a date — omit the field instead.
+- When a fact mentions when it happened, keep that timing inside the slice/event "text" too ("ran the charity race on 7 May 2023"), so the memory keeps its date even as plain text.`;
 
 function buildUserPrompt(packet, shortlist) {
 	return JSON.stringify(
@@ -189,10 +191,12 @@ export function responseText(res) {
 	return "";
 }
 
-async function callModel(env, config, packet, shortlist) {
+const DENSE_ADDENDUM = "\n\nDENSE CAPTURE MODE for this request: enumerate EVERY distinct durable fact as its own object — activities, plans, dates, quantities, names, relationships, preferences, outcomes. Do not summarize several facts into one object. Medium-confidence facts are wanted: propose them with honest confidence rather than dropping them.";
+
+async function callModel(env, config, packet, shortlist, { dense = false } = {}) {
 	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false };
 	const messages = [
-		{ role: "system", content: SYSTEM_PROMPT },
+		{ role: "system", content: dense ? SYSTEM_PROMPT + DENSE_ADDENDUM : SYSTEM_PROMPT },
 		{ role: "user", content: buildUserPrompt(packet, shortlist) },
 	];
 	const options = config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined;
@@ -220,5 +224,7 @@ export async function proposeMemory(env, config, { packet, shortlist }, override
 	if (overrides && overrides.llmResponse !== undefined && overrides.llmResponse !== null) {
 		return normalize(overrides.llmResponse);
 	}
-	return callModel(env, config, packet, shortlist);
+	return callModel(env, config, packet, shortlist, {
+		dense: overrides?.settings?.captureDensity === "dense",
+	});
 }

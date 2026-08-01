@@ -165,10 +165,17 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	}
 
 	// G — gates (the backend judge). manual=true → lenient Path A gate.
+	// The newest message timestamp anchors undated events: "yesterday I ran the
+	// race" said on May 8 lands on/near May 8, not on extraction day.
+	const lastTs = chunk.reduce((max, m) => {
+		const ts = Number(m?.ts);
+		return Number.isFinite(ts) && ts > max ? ts : max;
+	}, 0) || null;
 	const plan = await applyGates(env, config, userId, proposal, shortlist, overrides.settings, {
 		manual: Boolean(overrides.manual),
 		updateMode,
 		sourceText: text,
+		lastTs,
 	});
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.

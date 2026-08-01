@@ -185,7 +185,20 @@ export function applyUserSettings(objects, settings) {
 	});
 }
 
-const DEFAULT_SETTINGS = { paused: false, disabledCategories: [] };
+const DEFAULT_SETTINGS = { paused: false, disabledCategories: [], captureDensity: null };
+
+/**
+ * Parse a model-proposed "date" (YYYY-MM-DD, copied from the source text or
+ * message timestamps, never invented) into epoch ms. Anything unparseable,
+ * pre-1970, or more than 48h in the future is rejected.
+ */
+function parseProposedDate(value, now) {
+	const match = /^s*(d{4})-(d{2})-(d{2})s*$/.exec(String(value ?? ""));
+	if (!match) return null;
+	const ms = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+	if (!Number.isFinite(ms) || ms < 0 || ms > now + 48 * 60 * 60 * 1000) return null;
+	return ms;
+}
 
 export async function applyGates(
 	env,
@@ -202,7 +215,10 @@ export async function applyGates(
 	const updateMode = Boolean(opts.updateMode);
 	const sourceText = String(opts.sourceText ?? "");
 	const supersedeKinds = updateMode ? UPDATE_MODE_SUPERSEDE_KINDS : SUPERSEDE_KINDS;
-	const confMin = manual ? config.manualConfidenceMin : config.confidenceMin;
+	// Dense capture keeps every durable detail: the auto-lane floor drops to the
+	// manual (lenient) floor. Standard stays exactly as before.
+	const dense = (settings?.captureDensity ?? null) === "dense";
+	let confMin = manual || dense ? config.manualConfidenceMin : config.confidenceMin;
 
 	const plan = {
 		newNodes: [],
@@ -240,6 +256,11 @@ export async function applyGates(
 	// Per-user memory rules (includes/excludes) — deterministic enforcement for
 	// every auto-lane save, whatever the model proposed.
 	const rules = opts.rules ?? await getMemoryRules(env, userId);
+	// Per-user density preference (Settings → exhaustive) lowers the floor too;
+	// a per-request setting always wins when present.
+	if (!manual && (settings?.captureDensity ?? null) === null && rules.captureDensity === "dense") {
+		confMin = config.manualConfidenceMin;
+	}
 	if (rules.includes?.length || rules.excludes?.length) {
 		objects = objects.filter((obj) => {
 			const reason = rulesRejection(rules, obj?.text, obj?.label, obj?.on, obj?.from, obj?.to);
@@ -357,7 +378,7 @@ export async function applyGates(
 				action,
 				text: durable.text,
 				importance: valid(durable.importance, IMPORTANCE, "important"),
-				happened_at: now,
+				happened_at: parseProposedDate(durable.date, now) ?? opts.lastTs ?? now,
 				created_at: now,
 				confidence: durable.confidence,
 			});
@@ -557,7 +578,7 @@ export async function applyGates(
 				action,
 				text: obj.text ?? "",
 				importance: valid(obj.importance, IMPORTANCE, "ordinary"),
-				happened_at: now,
+				happened_at: parseProposedDate(obj.date, now) ?? opts.lastTs ?? now,
 				created_at: now,
 			});
 			plan.affectedNodeIds.add(node.id);

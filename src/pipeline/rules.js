@@ -30,6 +30,7 @@ export const DEFAULT_MEMORY_RULES = Object.freeze({
 	excludes: Object.freeze([]),
 	customCategories: Object.freeze([]),
 	captureDefault: "auto",
+	captureDensity: "standard",
 	autoCollect: true,
 	retentionDays: null,
 });
@@ -93,6 +94,10 @@ export function normalizeMemoryRules(row = {}) {
 		excludes: cleanTermList(row.excludes_json ?? row.excludes),
 		customCategories: cleanCategories(row.custom_categories_json ?? row.customCategories),
 		captureDefault: CAPTURE_DEFAULTS.has(captureDefault) ? captureDefault : "auto",
+		// "standard" = selective high-precision capture (the default character of
+		// the product); "dense" = exhaustive capture for users who want every
+		// durable detail kept (lower gate floor, enumerate-everything prompt).
+		captureDensity: String(row.capture_density ?? row.captureDensity ?? "standard") === "dense" ? "dense" : "standard",
 		autoCollect: row.auto_collect === undefined && row.autoCollect === undefined
 			? true
 			: Number(row.auto_collect ?? (row.autoCollect ? 1 : 0)) === 1,
@@ -103,7 +108,7 @@ export function normalizeMemoryRules(row = {}) {
 export function memoryRulesAreDefault(rules) {
 	return !rules.customInstructions && !rules.includes.length && !rules.excludes.length &&
 		!rules.customCategories.length && rules.captureDefault === "auto" && rules.autoCollect === true &&
-		rules.retentionDays === null;
+		rules.captureDensity === "standard" && rules.retentionDays === null;
 }
 
 export async function getMemoryRules(env, userId) {
@@ -126,6 +131,7 @@ export async function saveMemoryRules(env, userId, patch = {}) {
 		customCategories: patch.customCategories ?? patch.custom_categories ?? current.customCategories,
 		captureDefault: patch.captureDefault ?? patch.capture_default ?? current.captureDefault,
 		autoCollect: patch.autoCollect ?? patch.auto_collect ?? current.autoCollect,
+		captureDensity: patch.captureDensity ?? patch.capture_density ?? current.captureDensity,
 		retentionDays: patch.retentionDays !== undefined
 			? patch.retentionDays
 			: patch.retention_days !== undefined ? patch.retention_days : current.retentionDays,
@@ -134,8 +140,8 @@ export async function saveMemoryRules(env, userId, patch = {}) {
 	await env.DB.prepare(
 		`INSERT INTO memory_rules
 			(user_id, custom_instructions, includes_json, excludes_json, custom_categories_json,
-			 capture_default, auto_collect, retention_days, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 capture_default, auto_collect, retention_days, capture_density, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(user_id) DO UPDATE SET
 			custom_instructions = excluded.custom_instructions,
 			includes_json = excluded.includes_json,
@@ -144,6 +150,7 @@ export async function saveMemoryRules(env, userId, patch = {}) {
 			capture_default = excluded.capture_default,
 			auto_collect = excluded.auto_collect,
 			retention_days = excluded.retention_days,
+			capture_density = excluded.capture_density,
 			updated_at = excluded.updated_at`,
 	).bind(
 		userId,
@@ -154,6 +161,7 @@ export async function saveMemoryRules(env, userId, patch = {}) {
 		merged.captureDefault,
 		merged.autoCollect ? 1 : 0,
 		merged.retentionDays,
+		merged.captureDensity,
 		now,
 		now,
 	).run();

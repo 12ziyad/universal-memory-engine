@@ -280,3 +280,12 @@ describe("POST /v1/turn", () => {
 		expect(response.status).toBe(400);
 	});
 });
+
+describe("capture density", () => {
+	it("defaults to standard and round-trips dense", () => {
+		expect(normalizeMemoryRules({}).captureDensity).toBe("standard");
+		expect(normalizeMemoryRules({ capture_density: "dense" }).captureDensity).toBe("dense");
+		expect(normalizeMemoryRules({ captureDensity: "dense" }).captureDensity).toBe("dense");
+		expect(normalizeMemoryRules({ capture_density: "garbage" }).captureDensity).toBe("standard");
+	});
+});
