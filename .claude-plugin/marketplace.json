@@ -1,0 +1,13 @@
+{
+	"name": "itsuki-plugins",
+	"owner": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
+	"metadata": { "description": "Itsuki — one private memory for every AI." },
+	"plugins": [
+		{
+			"name": "itsuki",
+			"source": "./",
+			"description": "Persistent memory for Claude Code: save durable facts and decisions, recall them in any future session. Receipts for every write; your rules decide what is remembered.",
+			"category": "productivity"
+		}
+	]
+}

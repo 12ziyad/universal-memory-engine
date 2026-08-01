@@ -1,0 +1,17 @@
+{
+	"name": "itsuki",
+	"displayName": "Itsuki Memory",
+	"version": "0.1.0",
+	"description": "One private memory for every AI. Save durable facts, recall them in any session — with receipts for every write.",
+	"author": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
+	"license": "Apache-2.0",
+	"mcpServers": {
+		"itsuki": {
+			"type": "http",
+			"url": "${ITSUKI_MCP_URL}"
+		}
+	},
+	"metadata": {
+		"setup": "Create an MCP link in the Itsuki app (API Keys → Create MCP link), then set ITSUKI_MCP_URL to it — e.g. https://your-deployment/mcp/itsuki_live_…"
+	}
+}

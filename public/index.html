@@ -2073,37 +2073,20 @@ curl -X POST ${origin}/v1/recall \\
   -H "authorization: Bearer ${apiKey}" \\
   -H "content-type: application/json" \\
   -d '{"query": "what am I learning?"}'`,
-		python: `import requests
+		python: `# pip install itsuki
+from itsuki import MemoryClient
 
-BASE = "${origin}"
-KEY = "${apiKey}"
+memory = MemoryClient(api_key="${apiKey}", base_url="${origin}")
 
-def add(content):
-    return requests.post(f"{BASE}/v1/save",
-        headers={"authorization": f"Bearer {KEY}"},
-        json={"content": content}).json()
+memory.add("I started learning Kotlin this week.")
+print(memory.search("what am I learning?")["context"])`,
+		node: `// npm install itsuki
+import { MemoryClient } from "itsuki";
 
-def search(query):
-    return requests.post(f"{BASE}/v1/recall",
-        headers={"authorization": f"Bearer {KEY}"},
-        json={"query": query}).json()
+const memory = new MemoryClient({ apiKey: "${apiKey}", baseUrl: "${origin}" });
 
-add("I started learning Kotlin this week.")
-print(search("what am I learning?")["context"])`,
-		node: `const BASE = "${origin}";
-const KEY = "${apiKey}";
-
-async function call(path, body) {
-  const res = await fetch(BASE + path, {
-    method: "POST",
-    headers: { authorization: \`Bearer \${KEY}\`, "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return res.json();
-}
-
-await call("/v1/save", { content: "I started learning Kotlin this week." });
-const { context } = await call("/v1/recall", { query: "what am I learning?" });
+await memory.add("I started learning Kotlin this week.");
+const { context } = await memory.search("what am I learning?");
 console.log(context);`,
 		claudeCode: `claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${origin}/mcp/${mcpToken}`,
 		cursor: `{
@@ -2180,8 +2163,8 @@ function viewInstall(v) {
 			</div>
 			<div data-pane-group="sdk">
 				<div data-pane="curl" class="active">${code(s.curl)}</div>
-				<div data-pane="python">${code(s.python)}<div class="help">The <b>${esc(PRODUCT.name.toLowerCase())}</b> Python SDK (pip) is coming — these raw calls work today and won't break.</div></div>
-				<div data-pane="node">${code(s.node)}<div class="help">The <b>${esc(PRODUCT.name.toLowerCase())}</b> npm SDK is coming — these raw calls work today and won't break.</div></div>
+				<div data-pane="python">${code(s.python)}<div class="help">Package publishing is rolling out — if <i>pip install itsuki</i> isn't live yet, the cURL calls work identically today.</div></div>
+				<div data-pane="node">${code(s.node)}<div class="help">Package publishing is rolling out — if <i>npm install itsuki</i> isn't live yet, the cURL calls work identically today.</div></div>
 			</div>
 			<div class="help" style="margin-top:10px">Also available: <i>/v1/turn</i> (recall + auto-save in one call), <i>/v1/graph</i>, <i>/v1/status</i>, <i>/v1/export</i>, <i>/v1/rules</i>. Full reference in the <a href="/docs/" target="_blank" rel="noopener">docs↗</a>.</div>
 		</div>

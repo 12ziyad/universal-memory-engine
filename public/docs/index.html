@@ -351,47 +351,62 @@ PAGES["/api/mcp"] = { title: "MCP tools", html: `
 
 PAGES["/sdk/python"] = { title: "Python SDK", html: `
 <h1>Python SDK</h1>
-<p class="lede"><code>pip install ${PRODUCT.pkg}</code> — coming very soon. The raw API works today and the SDK is a thin, stable wrapper over it.</p>
-${codeBlock(`# Until the package ships, this is the equivalent — and it won't break:
-import requests
+<p class="lede"><code>pip install ${PRODUCT.pkg}</code> · Python 3.9+ · synchronous · one dependency (httpx).</p>
+${codeBlock(`from itsuki import MemoryClient
 
-class Memory:
-    def __init__(self, api_key, base_url="${ORIGIN}"):
-        self.s = requests.Session()
-        self.s.headers["authorization"] = f"Bearer {api_key}"
-        self.base = base_url
+memory = MemoryClient(api_key="YOUR_API_KEY", base_url="${ORIGIN}")
 
-    def add(self, content, **kw):
-        return self.s.post(f"{self.base}/v1/save", json={"content": content, **kw}).json()
+memory.add("I started learning Kotlin this week.")
+print(memory.search("what am I learning?")["context"])
 
-    def search(self, query, **kw):
-        return self.s.post(f"{self.base}/v1/recall", json={"query": query, **kw}).json()
+# recall + auto-capture in one call
+memory.turn([{"role": "user", "content": "We picked Postgres."}])
 
-m = Memory(api_key="YOUR_API_KEY")
-m.add("I started learning Kotlin this week.")
-print(m.search("what am I learning?")["context"])`)}
-<p>The published SDK adds: typed errors, retry with backoff on 429/5xx (idempotency-key aware), <code>turn()</code>, <code>graph()</code>, <code>usage()</code>, <code>rules()</code>, and sub-tenant support via <code>user_id=</code>.</p>
+# safe retries on writes
+memory.add("Big decision", idempotencyKey=MemoryClient.new_idempotency_key())
+
+# one key, many end users of YOUR app (isolated memory spaces)
+alice = MemoryClient(api_key="YOUR_API_KEY", user_id="alice")`)}
+<h2>Surface</h2>
+<table>
+<tr><th>Method</th><th>Endpoint</th></tr>
+<tr><td><code>add(content)</code> / <code>add_conversation(messages)</code></td><td>POST /v1/save</td></tr>
+<tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
+<tr><td><code>turn(messages)</code> · <code>ingest(messages, flush=True)</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
+<tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>export_all()</code></td><td>GET /v1/*</td></tr>
+<tr><td><code>get_rules()</code> · <code>set_rules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
+</table>
+<p>Errors raise <code>MemoryAPIError</code> (<code>.status</code>, <code>.code</code>, <code>.body</code>). Reads retry on 429/5xx with backoff; writes retry only when you pass <code>idempotencyKey</code>. If the package isn't on PyPI yet (publishing is rolling out), the <a href="#/quickstart">cURL quickstart</a> works identically today.</p>
 ` };
 
 PAGES["/sdk/js"] = { title: "JavaScript SDK", html: `
 <h1>JavaScript SDK</h1>
-<p class="lede"><code>npm install ${PRODUCT.pkg}</code> — coming very soon. The raw API works today and the SDK is a thin, stable wrapper over it.</p>
-${codeBlock(`// Until the package ships, this is the equivalent — and it won't break:
-const BASE = "${ORIGIN}";
+<p class="lede"><code>npm install ${PRODUCT.pkg}</code> · Node 18+ · ESM · zero dependencies.</p>
+${codeBlock(`import { MemoryClient } from "itsuki";
 
-async function call(path, body, key) {
-  const res = await fetch(BASE + path, {
-    method: "POST",
-    headers: { authorization: \`Bearer \${key}\`, "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(\`\${path} -> \${res.status}\`);
-  return res.json();
-}
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, baseUrl: "${ORIGIN}" });
 
-await call("/v1/save", { content: "I started learning Kotlin this week." }, KEY);
-const { context } = await call("/v1/recall", { query: "what am I learning?" }, KEY);`)}
-<p>The published SDK adds: <code>MemoryClient</code> with typed <code>MemoryAPIError</code>, retries with backoff (idempotency-key aware), <code>turn()</code>, <code>graph()</code>, <code>usage()</code>, <code>rules()</code>, and sub-tenant support via <code>userId</code>. Node 18+; server-side use (keep keys out of browsers).</p>
+await memory.add("I started learning Kotlin this week.");
+const { context } = await memory.search("what am I learning?");
+
+// recall + auto-capture in one call
+await memory.turn([{ role: "user", content: "We picked Postgres." }]);
+
+// safe retries on writes
+await memory.add("Big decision", { idempotencyKey: memory.newIdempotencyKey() });
+
+// one key, many end users of YOUR app (isolated memory spaces)
+const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "alice" });`)}
+<h2>Surface</h2>
+<table>
+<tr><th>Method</th><th>Endpoint</th></tr>
+<tr><td><code>add(content, opts)</code> / <code>addConversation(messages)</code></td><td>POST /v1/save</td></tr>
+<tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
+<tr><td><code>turn(messages)</code> · <code>ingest(messages, { flush: true })</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
+<tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>exportAll()</code></td><td>GET /v1/*</td></tr>
+<tr><td><code>getRules()</code> · <code>setRules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
+</table>
+<p>Errors throw <code>MemoryAPIError</code> (<code>status</code>, <code>code</code>, <code>body</code>). Reads retry on 429/5xx with backoff honoring Retry-After; writes retry only when you pass <code>idempotencyKey</code>. Server-side use — keep keys out of browsers. If the package isn't on npm yet (publishing is rolling out), the <a href="#/quickstart">cURL quickstart</a> works identically today.</p>
 ` };
 
 PAGES["/concepts/memory"] = { title: "How memory works", html: `
