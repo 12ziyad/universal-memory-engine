@@ -53,6 +53,7 @@ import {
 	ACCEPTED_TOKEN_PREFIXES,
 	clearSessionCookie,
 	createConnectionToken,
+	deleteConnectionToken,
 	getSessionUser,
 	googleAuthCallback,
 	googleAuthStart,
@@ -1446,6 +1447,16 @@ async function handleRequestInner(request, env, ctx, url) {
 			if (!auth) return json({ error: "unauthorized" }, 401);
 			const id = url.pathname.slice("/auth/tokens/".length).replace(/\/revoke$/, "");
 			return json(await revokeConnectionToken(env, auth.userId, id));
+		}
+
+		// The app offers one action per key now: delete. Revoke stays reachable
+		// above for anything already scripted against it.
+		if (request.method === "DELETE" && url.pathname.startsWith("/auth/tokens/")) {
+			const auth = await getSessionUser(env, request);
+			if (!auth) return json({ error: "unauthorized" }, 401);
+			const id = url.pathname.slice("/auth/tokens/".length);
+			if (!id) return json({ error: "not found" }, 404);
+			return json(await deleteConnectionToken(env, auth.userId, decodeURIComponent(id)));
 		}
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {

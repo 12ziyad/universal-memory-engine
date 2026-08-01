@@ -143,12 +143,6 @@ describe("dashboard script", () => {
 		expect(script).toContain("function viewInstall(");
 		expect(script).toContain("function viewKeys(");
 		expect(script).toContain("function installSnippets(");
-		expect(script).toContain("Generated MCP URL");
-		expect(script).toContain("Copy MCP URL");
-		expect(script).toContain("Generated API token/key");
-		expect(script).toContain("toggleOneTimeSecret()");
-		expect(script).toContain("clearOneTimeLink()");
-		expect(script).toContain("cancelConnectFlow()");
 		expect(script).toContain("Full secrets are shown only once");
 		expect(script).toContain('authorization: Bearer');
 		// Get started is a numbered stepper: three method cards, per-client tabs,
@@ -210,25 +204,41 @@ describe("dashboard script", () => {
 		expect(script).toContain("Support / report issue");
 	});
 
-	it("shows revoked key behavior in API Keys", () => {
+	it("offers one action per key, and it deletes", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		expect(script).toContain('class="${active ? "" : "key-revoked"}"');
-		expect(script).toContain("Revoked keys stay listed for audit");
-		expect(script).toContain("Revoked keys stay listed for audit");
-		expect(script).toContain("revokeToken(");
-		expect(script).toContain("disabled");
+		expect(script).toContain('data-key-action="delete"');
+		expect(script).toContain("function deleteToken(");
+		expect(script).toContain("Deleting a key stops it working immediately and removes it from this list.");
+		// Rotate and Revoke are gone from the UI entirely.
+		expect(script).not.toContain("rotateConnection");
+		expect(script).not.toContain("revokeToken");
+		expect(script).not.toContain("key-revoked");
 	});
 
-	it("uses JS-safe delegated token actions for awkward token labels", () => {
+	it("keeps token row actions delegated, so awkward labels cannot break them", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		const awkwardLabels = ["Ziyad's Claude", 'Quote " Tool', "Backslash \\\\ Tool", "<script>alert(1)</script>"];
 		expect(awkwardLabels).toContain("Ziyad's Claude");
-		expect(script).toContain('data-key-action="rotate"');
-		expect(script).toContain('button.dataset.keyLabel || ""');
-		expect(script).toContain('data-key-action="revoke"');
+		expect(script).toContain('button.dataset.keyLabel || "this key"');
 		expect(script).toContain('event.target.closest("[data-key-action]")');
-		expect(script).not.toContain("onclick=\"rotateConnection('");
-		expect(script).not.toContain("onclick=\"revokeToken('");
+		expect(script).not.toContain("onclick=\"deleteToken('");
+	});
+
+	it("creates keys in a modal, because the secret is shown once", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(html).toContain('<div id="keyModal" class="modal-backdrop" hidden></div>');
+		expect(script).toContain("function openKeyModal(");
+		expect(script).toContain("function submitKeyModal(");
+		expect(script).toContain("function closeKeyModal(");
+		expect(script).toContain(">Key name</label>");
+		expect(script).toContain('class="key-warning"');
+		expect(script).toContain("won't be shown again.");
+		// Get started's create-link button opens the same modal.
+		expect(script).toContain('function createInstallKey() {\n\treturn openKeyModal("mcp");');
+		// The old inline panel is gone, so the secret has exactly one home.
+		expect(script).not.toContain("oneTimeSecretPanel");
+		// And the second create button on API Keys is gone with it.
+		expect(script).not.toContain(">Create MCP link</button>");
 	});
 
 	it("includes a settings danger zone with exact confirmation gating", () => {

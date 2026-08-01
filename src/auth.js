@@ -489,6 +489,21 @@ export async function revokeConnectionToken(env, userId, tokenId) {
 	return { revoked: (result.meta?.changes ?? 0) > 0 };
 }
 
+/**
+ * Delete a key outright. Revoking kept the row so the list could show what had
+ * existed; the product now offers one action instead, and a deleted key leaves
+ * no row. Either way the secret stops working immediately — resolveConnectionToken
+ * matches on the hash, and there is nothing left to match.
+ */
+export async function deleteConnectionToken(env, userId, tokenId) {
+	const result = await env.DB.prepare(
+		"DELETE FROM connection_tokens WHERE id = ? AND user_id = ?",
+	)
+		.bind(tokenId, userId)
+		.run();
+	return { deleted: (result.meta?.changes ?? 0) > 0 };
+}
+
 export async function resolveConnectionToken(env, token, { allowedTypes = ["api", "mcp"] } = {}) {
 	if (!ACCEPTED_TOKEN_PREFIXES.some((prefix) => String(token || "").startsWith(prefix))) return null;
 	const tokenHash = await sha256Hex(token);

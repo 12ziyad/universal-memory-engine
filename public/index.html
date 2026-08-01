@@ -314,7 +314,27 @@
 	.keys-table td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 	.keys-table tr:last-child td { border-bottom: 0; }
 	.key-mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
-	.key-revoked td { opacity: .55; }
+	.row-delete { background: transparent; border: 0; padding: 5px; border-radius: 7px;
+		color: var(--faint); display: inline-grid; place-items: center; }
+	.row-delete:hover { color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); filter: none; }
+	.row-delete svg { width: 16px; height: 16px; display: block; }
+	/* Key creation lives in a modal because the key is shown once. On a full
+	   page that warning competed with everything else and people missed it. */
+	.key-modal { width: min(440px, 100%); background: var(--panel); border: 1px solid var(--border2);
+		border-radius: 14px; padding: 20px; box-shadow: 0 24px 60px rgba(16,24,40,.18); }
+	.key-modal h3 { margin: 0 0 14px; }
+	.key-modal .form-row { margin: 0 0 14px; }
+	.key-modal input { width: 100%; }
+	.secret-field { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border2);
+		border-radius: 8px; padding: 2px 4px 2px 0; background: var(--panel3); }
+	.secret-field input { flex: 1; min-width: 0; border: 0; background: transparent;
+		font-family: var(--font-mono); font-size: 13px; }
+	.secret-field input:focus { border: 0; outline: 0; }
+	.key-warning { border: 1px solid color-mix(in srgb, var(--red) 34%, transparent);
+		background: color-mix(in srgb, var(--red) 7%, transparent); color: var(--red);
+		border-radius: 8px; padding: 9px 11px; font-size: 13px; line-height: 1.5; }
+	.key-error { color: var(--red); font-size: 13px; margin-bottom: 12px; }
+	.key-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 	/* Get started: the steps sit directly on the page. They used to live inside a
 	   panel, which put a frame inside a frame inside the rail — that single box
 	   was the biggest source of the crowded feeling, so it is gone. */
@@ -1217,6 +1237,7 @@
 </main>
 
 <div id="toast"></div>
+<div id="keyModal" class="modal-backdrop" hidden></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
 <div id="legalView" class="legal-shell" hidden></div>
 
@@ -2233,74 +2254,9 @@ async function refreshTokens() {
 	}
 }
 
-async function generateToken(type) {
-	return generateTokenNamed(type, type === "mcp" ? "MCP client" : "API client");
-}
-
-async function generateMcpLink() {
-	return generateMcpLinkNamed(($("#mcpConnectionName")?.value || "").trim() || "MCP client");
-}
-
-async function rotateConnection(id, label, type = "mcp") {
-	if (!confirm("Rotate this connection? The old private link will stop working and a new full link will be shown once.")) return;
-	try {
-		await api(`/auth/tokens/${encodeURIComponent(id)}/revoke`, { method:"POST" });
-		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type, label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast("Rotate failed: " + e.message, true); }
-}
-
-function clearOneTimeLink() {
-	S.oneTimeToken = null;
-	S.oneTimeVisible = true;
-	renderView();
-}
-
-function toggleOneTimeSecret() {
-	S.oneTimeVisible = !S.oneTimeVisible;
-	renderView();
-}
-
-function cancelConnectFlow() {
-	S.oneTimeToken = null;
-	S.oneTimeVisible = true;
-	renderView();
-}
-
-async function revokeToken(id) {
-	if (!confirm("Revoking this token immediately stops that tool from saving or recalling memory.")) return;
-	try {
-		await api(`/auth/tokens/${encodeURIComponent(id)}/revoke`, { method:"POST" });
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast("Revoke failed: " + e.message, true); }
-}
-
-function oneTimeSecretPanel(latest) {
-	if (!latest?.tokenRecord || !latest.token) return "";
-	const isMcp = latest.tokenRecord.type === "mcp";
-	const secret = isMcp ? mcpUrlForToken(latest.token) : latest.token;
-	const title = isMcp ? "Generated MCP URL" : "Generated API token/key";
-	const copyLabel = isMcp ? "Copy MCP URL" : "Copy API token";
-	const help = isMcp
-		? "This MCP URL includes a private token. Copy it into the connector settings once, then close this panel."
-		: "This API token is shown once. Use it as Authorization: Bearer <token>, then close this panel.";
-	const display = S.oneTimeVisible ? esc(secret) : "Hidden. Use Reveal to inspect or Copy to copy it.";
-	return `<div class="token-secret" id="oneTimeSecretPanel">
-		<b>${title}</b><br>
-		<span class="help">Connection name: ${esc(latest.connectionName || latest.tokenRecord.label || "Itsuki connection")}</span>
-		<div class="mcp-url" id="generatedSecret" style="margin-top:10px">${display}</div>
-		<div class="secret-toolbar">
-			<button class="mini" onclick="copyText('${esc(secret)}','${isMcp ? "MCP URL copied" : "API token copied"}')">${copyLabel}</button>
-			<button class="mini ghost" onclick="toggleOneTimeSecret()">${S.oneTimeVisible ? "Hide" : "Reveal"}</button>
-			<button class="mini ghost" onclick="clearOneTimeLink()">Close</button>
-		</div>
-		<div class="help" style="margin-top:9px">${help} Itsuki will only list the masked token later. If you lose the secret, rotate or create a new connection.</div>
-	</div>`;
-}
+// Rotate, Revoke and the inline one-time secret panel are gone. There is one
+// action per key now (Delete), and a new secret is shown once inside the
+// creation modal, where nothing else competes with the warning.
 
 /**
  * THE key for Get started. One variable: `installKey()` is null until the
@@ -2314,8 +2270,9 @@ function installKey() {
 	return S.oneTimeToken?.tokenRecord?.type === "mcp" ? (S.oneTimeToken.token || null) : null;
 }
 
+/** The one place an MCP link is created. Opens the same modal API keys use. */
 function createInstallKey() {
-	return createKeyFor("mcp");
+	return openKeyModal("mcp");
 }
 
 /** Cursor's one-click install URL: base64 of the MCP server config. */
@@ -2425,7 +2382,9 @@ function installMethods() {
 	const name = PRODUCT.name.toLowerCase();
 	const mcpKey = `<button class="mini" onclick="createInstallKey()">Create link</button>`;
 	const apiKey = `<button class="mini" onclick="createKeyFor('api')">Create an API key</button>`;
-	const linkReady = `<div class="step-done">Link created. It is in the panel above, and in every block below.</div>`;
+	// No inline secret panel any more — the modal showed it, so the only place
+	// it survives is the code blocks on this page.
+	const linkReady = `<div class="step-done">Link created. It's in every block below.</div>`;
 	return {
 		// App Connect leads: connecting the chat apps people already use is the
 		// thing this product does that developer-only memory tools do not.
@@ -2593,15 +2552,9 @@ function setInstallVariant(variant) {
 	renderView();
 }
 
-async function createKeyFor(type) {
-	const label = type === "mcp" ? "My connection" : "My app";
-	try {
-		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type, label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
+/** Every "create a key" affordance on Get started goes through the modal. */
+function createKeyFor(type) {
+	return openKeyModal(type);
 }
 
 /**
@@ -2689,7 +2642,6 @@ function viewInstall(v) {
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		${oneTimeSecretPanel(S.oneTimeToken)}
 		<div class="steps">${steps}</div>
 		${door.footnote ? `<div class="install-foot" style="margin-top:14px">${door.footnote}</div>` : ""}
 		<div class="install-foot">
@@ -3044,95 +2996,143 @@ async function playgroundDeleteThread(id) {
 }
 
 function viewKeys(v) {
-	const latest = S.oneTimeToken;
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="page-head">
 			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
 				<div><h2 class="page-title">API keys</h2>
-					<p class="page-sub">Keys let tools and apps reach your memory. MCP keys become connector URLs; API keys are Bearer tokens for the HTTP API and SDK.</p></div>
-				<div style="display:flex;gap:8px;flex-wrap:wrap">
-					<button onclick="createKeyFlow('api')">Create API key</button>
-					<button class="ghost" onclick="createKeyFlow('mcp')">Create MCP link</button>
-				</div>
+					<p class="page-sub">Keys let tools and apps reach your memory. API keys are Bearer tokens for the HTTP API and SDK. To connect a chat app, create an MCP link in <a href="#" onclick="setView('install');return false">Get started</a>.</p></div>
+				<button onclick="openKeyModal('api')">Create API key</button>
 			</div>
-			<div class="form-row" style="margin-top:14px;max-width:360px"><label for="keyLabel">Key name</label>
-				<input id="keyLabel" placeholder="e.g. Production agent, Claude desktop" /></div>
 		</div>
-		${oneTimeSecretPanel(latest)}
 		<div class="box" style="max-width:1080px">
 			<h3>Your keys</h3>
 			<div class="keys-table-wrap"><table class="keys-table">
 				<thead><tr><th>Name</th><th>Key</th><th>Type</th><th>Created</th><th>Last used</th><th></th></tr></thead>
 				<tbody id="keysTableBody"></tbody>
 			</table></div>
-			<div class="help" style="margin-top:10px">Full secrets are shown only once at creation. Revoked keys stay listed for audit and can never be used again. Use one key per tool so you can revoke access cleanly.</div>
+			<div class="help" style="margin-top:10px">Full secrets are shown only once, when the key is created. Deleting a key stops it working immediately and removes it from this list. Use one key per tool so you can cut off one without touching the others.</div>
 		</div>`;
 	v.appendChild(wrap);
 	renderKeysTable();
 }
 
-function createKeyFlow(type) {
-	const label = ($("#keyLabel")?.value || "").trim();
-	if (type === "mcp") {
-		const input = $("#mcpConnectionName");
-		if (input) input.value = label;
-		generateMcpLinkNamed(label || "MCP client");
-	} else {
-		generateTokenNamed("api", label || "API client");
+/**
+ * Key creation lives in a modal for one reason: the key is shown once, and on
+ * a full page that warning competed with everything else and people missed it.
+ * In a modal there is nothing else to look at.
+ */
+const KEYMODAL = { open: false, type: "api", busy: false, result: null, error: "" };
+
+function openKeyModal(type = "api") {
+	KEYMODAL.open = true;
+	KEYMODAL.type = type;
+	KEYMODAL.busy = false;
+	KEYMODAL.result = null;
+	KEYMODAL.error = "";
+	renderKeyModal();
+}
+
+function closeKeyModal() {
+	KEYMODAL.open = false;
+	KEYMODAL.result = null;
+	renderKeyModal();
+	// Get started reads the key from S.oneTimeToken, so re-render behind it.
+	if (["install", "keys"].includes(S.view)) renderView();
+}
+
+function renderKeyModal() {
+	const host = $("#keyModal");
+	if (!host) return;
+	host.hidden = !KEYMODAL.open;
+	if (!KEYMODAL.open) { host.innerHTML = ""; return; }
+	const isMcp = KEYMODAL.type === "mcp";
+	const noun = isMcp ? "MCP link" : "API key";
+	const made = KEYMODAL.result;
+	host.innerHTML = `
+		<div class="key-modal" role="dialog" aria-modal="true" aria-label="Create ${esc(noun)}">
+			<h3>Create ${esc(noun)}</h3>
+			${made ? `
+				<div class="form-row">
+					<label for="keyModalSecret">${isMcp ? "Your MCP link" : "Your API key"}</label>
+					<div class="secret-field">
+						<input id="keyModalSecret" readonly value="${esc(made.secret)}" onclick="this.select()" />
+						<button class="code-copy" title="Copy" aria-label="Copy"
+							onclick="copyCode(this, ${JSON.stringify(made.secret).replace(/"/g, "&quot;")})">${ICON.copy}</button>
+					</div>
+				</div>
+				<div class="key-warning">Copy it now. This ${esc(noun)} won't be shown again.</div>
+				<div class="key-modal-actions"><button onclick="closeKeyModal()">Close</button></div>
+			` : `
+				<div class="form-row">
+					<label for="keyModalName">Key name</label>
+					<input id="keyModalName" placeholder="e.g. Production agent, Claude desktop"
+						onkeydown="if(event.key==='Enter'){event.preventDefault();submitKeyModal();}" />
+				</div>
+				${KEYMODAL.error ? `<div class="key-error">${esc(KEYMODAL.error)}</div>` : ""}
+				<div class="key-modal-actions">
+					<button class="ghost" onclick="closeKeyModal()">Cancel</button>
+					<button id="keyModalCreate" onclick="submitKeyModal()" ${KEYMODAL.busy ? "disabled" : ""}>${KEYMODAL.busy ? "Creating…" : "Create"}</button>
+				</div>
+			`}
+		</div>`;
+	if (!made) $("#keyModalName")?.focus();
+}
+
+async function submitKeyModal() {
+	if (KEYMODAL.busy) return;
+	const isMcp = KEYMODAL.type === "mcp";
+	const label = ($("#keyModalName")?.value || "").trim() || (isMcp ? "MCP client" : "API client");
+	KEYMODAL.busy = true;
+	KEYMODAL.error = "";
+	renderKeyModal();
+	try {
+		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type: KEYMODAL.type, label }) });
+		S.oneTimeToken = { ...result, connectionName: label };
+		S.oneTimeVisible = true;
+		KEYMODAL.result = { secret: isMcp ? mcpUrlForToken(result.token) : result.token };
+		await refreshTokens();
+	} catch (e) {
+		KEYMODAL.error = e.message || "Could not create that key. Please try again.";
+	} finally {
+		KEYMODAL.busy = false;
+		renderKeyModal();
 	}
-}
-
-async function generateMcpLinkNamed(label) {
-	try {
-		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type: "mcp", label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
-}
-
-async function generateTokenNamed(type, label) {
-	try {
-		const result = await api("/auth/tokens", { method: "POST", body: JSON.stringify({ type, label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
 }
 
 function renderKeysTable() {
 	const body = $("#keysTableBody");
 	if (!body) return;
 	if (!S.tokens.length) {
-		body.innerHTML = `<tr><td colspan="6" class="help" style="padding:16px 10px">No keys yet — create one above to connect your first tool.</td></tr>`;
+		body.innerHTML = `<tr><td colspan="6" class="help" style="padding:16px 10px">No keys yet. Create one to connect your first app or agent.</td></tr>`;
 		return;
 	}
-	body.innerHTML = S.tokens.map((t) => {
-		const active = !t.revoked_at && t.status !== "revoked";
-		return `<tr class="${active ? "" : "key-revoked"}">
+	body.innerHTML = S.tokens.map((t) => `
+		<tr>
 			<td><b>${esc(t.label || "Unnamed")}</b></td>
 			<td class="key-mono">${esc(t.masked_token || "")}</td>
 			<td>${t.type === "mcp" ? "MCP" : "API"}</td>
 			<td>${fmtDate(t.created_at)}</td>
 			<td>${t.last_used_at ? ago(t.last_used_at) : "never"}</td>
-			<td style="text-align:right;white-space:nowrap">
-				${active
-					? `<button class="ghost mini" data-key-action="rotate" data-key-id="${esc(t.id)}" data-key-label="${esc(t.label || "")}" data-key-type="${esc(t.type || "mcp")}">Rotate</button>
-					   <button class="ghost danger mini" data-key-action="revoke" data-key-id="${esc(t.id)}">Revoke</button>`
-					: `<span class="badge state-inactive">Revoked</span>`}
+			<td style="text-align:right">
+				<button class="row-delete" data-key-action="delete" data-key-id="${esc(t.id)}"
+					data-key-label="${esc(t.label || "this key")}" title="Delete key" aria-label="Delete key">${ICON.trash}</button>
 			</td>
-		</tr>`;
-	}).join("");
+		</tr>`).join("");
 	body.onclick = (event) => {
 		const button = event.target.closest("[data-key-action]");
-		if (!button) return;
-		const id = button.dataset.keyId;
-		if (button.dataset.keyAction === "rotate") rotateConnection(id, button.dataset.keyLabel || "", button.dataset.keyType || "mcp");
-		if (button.dataset.keyAction === "revoke") revokeToken(id);
+		if (button?.dataset.keyAction === "delete") deleteToken(button.dataset.keyId, button.dataset.keyLabel || "this key");
 	};
+}
+
+async function deleteToken(id, label) {
+	if (!confirm(`Delete ${label}? Anything using it stops working immediately.`)) return;
+	try {
+		await api(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+		await refreshTokens();
+		renderKeysTable();
+		toast("Key deleted.");
+	} catch (e) { toast(e.message || "Could not delete that key. Please try again.", true); }
 }
 
 /**
@@ -5901,7 +5901,7 @@ $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t && t.dataset.view) setView(t.dataset.view); });
 window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
-window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
+window.addEventListener("keydown", (event) => { if (event.key === "Escape") { closePolicyModal(); closeKeyModal(); } });
 initConnectWidget();
 initHeroReel();
 installKeyGuard();

@@ -239,6 +239,42 @@ describe("connection tokens", () => {
 		expect(rejected.status).toBe(401);
 	});
 
+	// The app now offers one action per key. Deleting must actually stop the
+	// key working, not just hide the row.
+	it("deletes a key outright, and the key stops working", async () => {
+		const a = await signupAccount("token-delete");
+		await insertNode(a.user.id, "node-del", "Delete Project");
+		const { token, tokenRecord } = await (await jsonRequest("/auth/tokens", { type: "api", label: "Doomed" }, a.cookie)).json();
+
+		expect((await request("/v1/status", { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+
+		const gone = await request(`/auth/tokens/${tokenRecord.id}`, { method: "DELETE", headers: { cookie: a.cookie } });
+		expect(gone.status).toBe(200);
+		expect((await gone.json()).deleted).toBe(true);
+
+		// The row is gone from the list and from the table.
+		const listed = await (await request("/auth/tokens", { headers: { cookie: a.cookie } })).json();
+		expect(listed.tokens.find((t) => t.id === tokenRecord.id)).toBeUndefined();
+		const row = await env.DB.prepare("SELECT id FROM connection_tokens WHERE id = ?").bind(tokenRecord.id).first();
+		expect(row).toBeNull();
+
+		expect((await request("/v1/status", { headers: { authorization: `Bearer ${token}` } })).status).toBe(401);
+	});
+
+	it("will not delete another account's key", async () => {
+		const mine = await signupAccount("token-mine");
+		const theirs = await signupAccount("token-theirs");
+		const { token, tokenRecord } = await (await jsonRequest("/auth/tokens", { type: "api", label: "Mine" }, mine.cookie)).json();
+
+		const attempt = await request(`/auth/tokens/${tokenRecord.id}`, { method: "DELETE", headers: { cookie: theirs.cookie } });
+		expect(attempt.status).toBe(200);
+		expect((await attempt.json()).deleted).toBe(false);
+		expect((await request("/v1/status", { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+
+		const anon = await request(`/auth/tokens/${tokenRecord.id}`, { method: "DELETE" });
+		expect(anon.status).toBe(401);
+	});
+
 	it("allows normal bearer tokens on safe memory routes and blocks control routes", async () => {
 		const a = await signupAccount("token-safe");
 		await insertNode(a.user.id, "node-token-safe", "Token Safe Project");
