@@ -206,6 +206,10 @@ export function getConfig(env) {
 			// in wrangler.jsonc vars or via env without touching code.
 			model: env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8",
 			maxTokens: Number(env.LLM_MAX_TOKENS ?? 4096),
+			// The v2 edge/reflexion passes: output-light JSON lists. A tighter
+			// budget than the extractor's keeps a thinking model from spending
+			// half a minute ruminating per pass.
+			passMaxTokens: Number(env.LLM_PASS_MAX_TOKENS ?? 2048),
 			// Cheap model for the secondary jobs: Pass-2 summaries and the
 			// save_conversation digest. Stays small/fast on purpose.
 			summaryModel:

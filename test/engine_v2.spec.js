@@ -8,7 +8,7 @@
  * write — is the production code under test.
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { env, createExecutionContext, waitOnExecutionContext, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import { runExtraction } from "../src/pipeline/extract.js";
 import { runObserveMessagesCommand } from "../src/pipeline/commands.js";
@@ -84,9 +84,11 @@ describe("the three-call save", () => {
 
 		// Code, not the model, numbered the entities 1..n.
 		expect(edgeEntitiesSeen.map((e) => e.n)).toEqual([1, 2, 3, 4]);
-		// The reflexion pass was told what was already found.
+		// The reflexion pass was told what was already found (entities + facts;
+		// the edge pass runs concurrently, so relations are deduped later, not
+		// pre-announced).
 		expect(reflexionSummarySeen).toContain("entity 1:");
-		expect(reflexionSummarySeen).toContain("relation:");
+		expect(reflexionSummarySeen).toContain("fact:");
 
 		// The unknown-id edge was refused, with the gate named on the receipt.
 		expect(result.receipt.skippedReasons.edge_unknown_entity_id).toBe(1);
@@ -254,6 +256,52 @@ describe("the three-call save", () => {
 		expect(modelSaw).not.toBeNull();
 		expect(modelSaw).not.toContain("kX9mP2vLqR8wN4jT7hB3cF6d");
 		expect(modelSaw).toContain("[REDACTED:password]");
+	});
+});
+
+describe("the backlog cannot strand", () => {
+	it("messages that arrive during a fire are drained by a re-armed alarm", async () => {
+		const userId = `v2-drain-${crypto.randomUUID()}`;
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+
+		const nodeHooks = {
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		};
+		const respond = ({ packet }) => ({
+			objects: packet.new_slice.map((m) => ({ kind: "node", label: `Fact ${m.id}`, category: "other", confidence: 0.9 })),
+		});
+
+		await stub.addMessages(userId, msgs(["I started training for the Porto half marathon this week"]), { flush: true });
+
+		// A slow model: the fire blocks on `gate` while a late message arrives —
+		// the real production interleaving, just deterministic.
+		await runInDurableObject(stub, async (instance) => {
+			let release;
+			const gate = new Promise((resolve) => { release = resolve; });
+			const fire = instance.runExtraction(userId, {
+				...nodeHooks,
+				llmResponse: async (args) => { await gate; return respond(args); },
+			});
+			await instance.addMessages(userId, [
+				{ id: "late-1", role: "user", content: "Also we finally hired a designer, her name is Ines", ts: TS + 999_000 },
+			], {});
+			release();
+			const first = await fire;
+			if (first.outcome !== "wrote") throw new Error(`first fire: ${first.outcome}`);
+			const { chunkSize } = await instance.getDebugState();
+			if (chunkSize === 0) throw new Error("late message was not held");
+		});
+
+		// Before the fix this backlog sat until the NEXT ingest — forever, if
+		// the conversation had ended. Now the finished fire re-armed the alarm.
+		const ranAlarm = await runDurableObjectAlarm(stub);
+		expect(ranAlarm).toBe(true);
+		// The alarm path runs without our canned hooks (no AI binding in tests),
+		// so drain explicitly — the point above is that the alarm WAS armed.
+		const second = await stub.runExtraction(userId, { ...nodeHooks, llmResponse: respond });
+		expect(second.outcome).toBe("wrote");
+		expect((await stub.getDebugState()).chunkSize).toBe(0);
 	});
 });
 

@@ -177,6 +177,31 @@ export class UserMemory extends DurableObject {
 			}
 			// meaningful_no_write / llm_failed / db_write_failed → keep chunk + checkpoint.
 
+			// Re-arm the alarm when messages are still held, or a backlog that
+			// accumulated DURING this fire is stranded until the next ingest —
+			// with multi-call fires taking tens of seconds, that stranded a whole
+			// conversation's tail. After a write: drain promptly. After a
+			// failure: retry with exponential backoff, capped attempts, so a
+			// permanently poisoned chunk cannot ping the model forever.
+			// meaningful_no_write deliberately does NOT re-arm — that chunk waits
+			// for more context, and retrying identical input yields identical
+			// results.
+			const held = ((await this.ctx.storage.get("chunk")) ?? []).length;
+			if (held > 0) {
+				if (result.outcome === "wrote" || finalizedNoWrite) {
+					await this.ctx.storage.put("failCount", 0);
+					await this.ctx.storage.setAlarm(Date.now() + 1500);
+				} else if (["llm_failed", "db_write_failed"].includes(result.outcome)) {
+					const fails = ((await this.ctx.storage.get("failCount")) ?? 0) + 1;
+					await this.ctx.storage.put("failCount", fails);
+					if (fails <= 6) {
+						await this.ctx.storage.setAlarm(Date.now() + Math.min(5000 * 2 ** (fails - 1), 600000));
+					}
+				}
+			} else {
+				await this.ctx.storage.put("failCount", 0);
+			}
+
 			// user_opt_out no_write is final; meaningful_no_write/failed outcomes remain retryable.
 			return result;
 		} finally {

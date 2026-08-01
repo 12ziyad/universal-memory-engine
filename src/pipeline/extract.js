@@ -330,20 +330,24 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		const entities = numberEntities(objects, shortlist);
 		meta.engine = "v2";
 
-		const edgePass = await proposeEdges(env, config, packet, entities, withRules);
+		// Calls 2 and 3 run CONCURRENTLY — they both depend only on call 1, and
+		// serializing them doubled fire latency measured against the live model.
+		// The reflexion pass therefore doesn't see call 2's relations; if both
+		// find the same edge the gates dedupe it (duplicate_edge / reinforce).
+		const foundSummary = [
+			...entities.map((e) => `entity ${e.n}: ${e.label}`),
+			...objects.filter((o) => o.kind === "slice" || o.kind === "event").map((o) => `fact: ${o.text}`),
+		].join("\n");
+		const [edgePass, reflexion] = await Promise.all([
+			proposeEdges(env, config, packet, entities, withRules),
+			proposeReflexion(env, config, packet, entities, foundSummary, withRules),
+		]);
 		preRejected.push(...edgePass.rejected);
 		if (edgePass.raw_ok === false) {
 			// The edge model returned something unreadable. The save still lands
 			// with call 1's facts; the refusal is named on the receipt.
 			preRejected.push({ kind: "edge", label: "edge pass", reason: "edge_pass_unparseable" });
 		}
-
-		const foundSummary = [
-			...entities.map((e) => `entity ${e.n}: ${e.label}`),
-			...objects.filter((o) => o.kind === "slice" || o.kind === "event").map((o) => `fact: ${o.text}`),
-			...edgePass.edges.map((e) => `relation: ${e.fact ?? `${e.from} ${e.type} ${e.to}`}`),
-		].join("\n");
-		const reflexion = await proposeReflexion(env, config, packet, entities, foundSummary, withRules);
 		preRejected.push(...reflexion.rejected);
 		if (reflexion.raw_ok === false) {
 			preRejected.push({ kind: "node", label: "reflexion pass", reason: "reflexion_pass_unparseable" });

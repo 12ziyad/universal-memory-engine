@@ -118,7 +118,9 @@ export async function proposeEdges(env, config, packet, entities, overrides = {}
 						},
 					],
 					temperature: config.llm.temperature,
-					max_tokens: config.llm.maxTokens,
+					// Edge lists are output-light; a tight budget also bounds how
+					// long a thinking model can ruminate before answering.
+					max_tokens: config.llm.passMaxTokens,
 				},
 				config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
 				{ task: "edges" },
@@ -221,7 +223,7 @@ export async function proposeReflexion(env, config, packet, entities, foundSumma
 						},
 					],
 					temperature: config.llm.temperature,
-					max_tokens: config.llm.maxTokens,
+					max_tokens: config.llm.passMaxTokens,
 				},
 				config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
 				{ task: "reflexion" },
