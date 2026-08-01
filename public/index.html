@@ -6,6 +6,7 @@
 <title>Itsuki — personal memory for every AI</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
+<link rel="preload" as="font" type="font/woff2" href="/assets/jetbrains-mono-latin.woff2" crossorigin />
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <style>
 	/* Inter, self-hosted and Latin-subset (62 KB). Deliberately NOT Google
@@ -18,9 +19,19 @@
 		font-style: normal;
 		font-display: swap;
 	}
+	/* JetBrains Mono for every code block — self-hosted Latin subset (21 KB),
+	   OFL. Same reason as Inter: no third-party font host, so no visitor IP
+	   ever leaves this origin. */
+	@font-face {
+		font-family: "JetBrains Mono";
+		src: url("/assets/jetbrains-mono-latin.woff2") format("woff2");
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+	}
 	:root {
 		--font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-		--font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+		--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
 		--border: #2b333f; --border2: #3a4452;
@@ -32,7 +43,9 @@
 	body.app-mode {
 		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7; --panel3: #f8fafc;
 		--border: #e4e7ec; --border2: #d0d5dd;
-		--text: #101828; --muted: #5a6472; --faint: #98a2b3; --accent: #4f46b8;
+		/* Three text levels, not two: primary (near-black) for headings, secondary
+		   for body prose, muted for hints and footnotes. Flat UI is usually two. */
+		--text: #101828; --muted: #667085; --faint: #98a2b3; --accent: #4f46b8;
 		--green: #12b76a; --amber: #dc6803; --red: #d92d20; --purple: #7a5af8;
 		color-scheme: light;
 	}
@@ -43,6 +56,40 @@
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	code { font-family: var(--font-mono); }
+
+	/* ---- app type scale ----------------------------------------------------
+	   Two weights only: 600 for headings, 400 for body. 500 is reserved for tab
+	   labels. The negative tracking on headings matters — Inter ships loose at
+	   display sizes and tightening it is the single biggest readability win
+	   available here. Scoped to body.app-mode so the landing art is untouched.
+	   ------------------------------------------------------------------------ */
+	body.app-mode { font-size: 14px; line-height: 1.6; }
+	body.app-mode .page-title { font-size: 32px; font-weight: 600; letter-spacing: -.02em;
+		line-height: 1.18; margin: 0 0 6px; color: var(--text); }
+	body.app-mode .page-sub { font-size: 14px; font-weight: 400; letter-spacing: 0;
+		line-height: 1.6; color: var(--muted); margin: 0; max-width: 720px; }
+	body.app-mode .page-head { margin-bottom: 24px; }
+	body.app-mode h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+	body.app-mode .box h3, body.app-mode .action-box h3, body.app-mode .detail h2,
+	body.app-mode .card .title, body.app-mode .section-h {
+		font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
+	body.app-mode .card .summary, body.app-mode .method-card span {
+		font-size: 14px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
+	body.app-mode .method-card b { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+	body.app-mode .step-title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+	body.app-mode .step-desc, body.app-mode .help, body.app-mode .kv, body.app-mode .empty {
+		font-size: 14px; font-weight: 400; letter-spacing: 0; line-height: 1.6; max-width: 720px; }
+	body.app-mode .step-note, body.app-mode .install-foot, body.app-mode .hint,
+	body.app-mode .card .mini-line, body.app-mode .card .cat {
+		font-size: 12px; font-weight: 400; letter-spacing: 0; line-height: 1.6; color: var(--faint); }
+	body.app-mode pre, body.app-mode code, body.app-mode .install-code pre,
+	body.app-mode .pg-context, body.app-mode .mcp-url, body.app-mode .key-mono {
+		font-family: var(--font-mono); font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1.5; }
+	body.app-mode .term-tab, body.app-mode .tab {
+		font-size: 13px; font-weight: 500; letter-spacing: .01em; }
+	body.app-mode .tab.active { font-weight: 600; }
+	body.app-mode th { font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+	body.app-mode td { font-size: 13px; }
 
 	/* ---- product shell ---- */
 	body.public-mode header, body.public-mode main, body.public-mode #banner,
@@ -255,9 +302,11 @@
 	.method-card.active b { color: var(--accent); }
 	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 14px; }
 	.steps-panel { max-width: 1080px; background: var(--panel); border: 1px solid var(--border);
-		border-radius: 14px; padding: 6px 26px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+		border-radius: 14px; padding: 10px 26px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+	/* 12px above + 12px below = a 24px gap between steps. It was 72px, which read
+	   as dead space — worst in step 1, where the right column is often empty. */
 	.step-row { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); gap: 36px;
-		padding: 36px 0; border-bottom: 1px solid var(--border); align-items: start; }
+		padding: 12px 0; border-bottom: 1px solid var(--border); align-items: start; }
 	.step-row:last-child { border-bottom: 0; }
 	.step-left { display: flex; gap: 14px; }
 	.step-num { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
@@ -578,8 +627,8 @@
 	.term-step i { color: var(--text); font-style: normal; font-weight: 600; }
 	.term-code { display: flex; align-items: center; gap: 10px; background: #0b141d; border: 1px solid rgba(132,233,255,.16);
 		border-radius: 10px; padding: 11px 12px; margin: 10px 0 8px; }
-	.term-code code { flex: 1; overflow-x: auto; white-space: pre; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-		font-size: 12.5px; color: #9fe3ff; scrollbar-width: thin; }
+	.term-code code { flex: 1; overflow-x: auto; white-space: pre; font-family: var(--font-mono);
+		font-size: 13px; line-height: 1.5; color: #9fe3ff; scrollbar-width: thin; }
 	.copy-btn { flex-shrink: 0; background: rgba(132,233,255,.12); color: var(--accent); border: 1px solid rgba(132,233,255,.3);
 		padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 700; }
 	.copy-btn:hover { background: rgba(132,233,255,.2); filter: none; }
@@ -659,7 +708,7 @@
 	.danger-zone input { width: min(100%, 280px); border-color: rgba(248,81,73,.42); }
 	.danger-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
 	.mcp-url { background: var(--bg); border: 1px solid var(--border2); border-radius: 8px; padding: 9px 11px;
-		font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; color: var(--accent); }
+		font-family: var(--font-mono); font-size: 13px; word-break: break-all; color: var(--accent); }
 	.steps { margin: 8px 0 0; padding-left: 18px; } .steps li { margin: 4px 0; color: var(--muted); }
 	.test-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 9px; }
 	.test-btn { text-align: left; background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
@@ -1709,10 +1758,10 @@ function viewOverview(v) {
 		`<button class="term-tab ${range === key ? "active" : ""}" onclick="setUsageRange('${key}')">${label}</button>`;
 	const t = usage?.totals || {};
 	wrap.innerHTML = onboarding + `
-		<div class="box" style="max-width:1080px">
-			<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-				<div><h3 style="margin-bottom:4px">Welcome back, ${esc(name)}</h3>
-					<div class="help">${empty ? "Your memory is empty — the Playground is the fastest way to see it work." : "Your private memory, at a glance."}</div></div>
+		<div class="page-head">
+			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+				<div><h2 class="page-title">Welcome back, ${esc(name)}</h2>
+					<p class="page-sub">${empty ? "Your memory is empty — the Playground is the fastest way to see it work." : "Your private memory, at a glance."}</p></div>
 				<div class="terminal-tabs">${rangeButton("1d", "1d")}${rangeButton("7d", "7d")}${rangeButton("30d", "30d")}${rangeButton("all", "All time")}</div>
 			</div>
 		</div>
@@ -2370,9 +2419,9 @@ function viewInstall(v) {
 
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="install-intro">
-			<h2>Get started with ${PRODUCT.name}</h2>
-			<p>Three ways in. All of them read and write the same memory.</p>
+		<div class="install-intro page-head">
+			<h2 class="page-title">Get started with ${PRODUCT.name}</h2>
+			<p class="page-sub">Three ways in. All of them read and write the same memory.</p>
 		</div>
 		<div class="method-cards">
 			${Object.entries(methods).map(([id, m]) => `
@@ -2494,16 +2543,16 @@ function viewKeys(v) {
 	const latest = S.oneTimeToken;
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="box" style="max-width:1080px">
-			<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-				<div><h3 style="margin-bottom:4px">API Keys</h3>
-					<div class="help">Keys let tools and apps reach your memory. MCP keys become connector URLs; API keys are Bearer tokens for the HTTP API and SDK.</div></div>
+		<div class="page-head">
+			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+				<div><h2 class="page-title">API keys</h2>
+					<p class="page-sub">Keys let tools and apps reach your memory. MCP keys become connector URLs; API keys are Bearer tokens for the HTTP API and SDK.</p></div>
 				<div style="display:flex;gap:8px;flex-wrap:wrap">
 					<button onclick="createKeyFlow('api')">Create API key</button>
 					<button class="ghost" onclick="createKeyFlow('mcp')">Create MCP link</button>
 				</div>
 			</div>
-			<div class="form-row" style="margin-top:12px;max-width:360px"><label for="keyLabel">Key name</label>
+			<div class="form-row" style="margin-top:14px;max-width:360px"><label for="keyLabel">Key name</label>
 				<input id="keyLabel" placeholder="e.g. Production agent, Claude desktop" /></div>
 		</div>
 		${oneTimeSecretPanel(latest)}
@@ -2585,9 +2634,9 @@ function renderKeysTable() {
 function viewReceipts(v) {
 	markReceiptsSeen();
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:920px">
-		<h3>History</h3>
-		<div class="help">A plain record of everything Itsuki saved, updated, or skipped — and when.</div>
+	wrap.innerHTML = `<div class="page-head">
+		<h2 class="page-title">History</h2>
+		<p class="page-sub">A plain record of everything Itsuki saved, updated, or skipped — and when.</p>
 	</div>`;
 	if (!S.receipts.length) {
 		wrap.appendChild(el("div","empty","Receipts will show what Itsuki saved, updated, or ignored — with source and timestamp."));
