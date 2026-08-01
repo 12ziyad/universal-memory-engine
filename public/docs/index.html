@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Itsuki Docs</title>
+<link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
+<style>
+	:root {
+		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7;
+		--border: #e4e7ec; --border2: #d0d5dd;
+		--text: #101828; --muted: #5a6472; --faint: #98a2b3; --accent: #4f46b8;
+		--green: #12b76a; --amber: #dc6803; --red: #d92d20;
+	}
+	* { box-sizing: border-box; }
+	html, body { height: 100%; }
+	body { margin: 0; font: 15px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		background: var(--bg); color: var(--text); }
+	a { color: var(--accent); }
+	.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px;
+		padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--border); }
+	.topbar .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px;
+		color: var(--text); text-decoration: none; }
+	.topbar .brand img { width: 24px; height: 24px; border-radius: 6px; }
+	.topbar .brand span { color: var(--faint); font-weight: 500; }
+	.topbar input { flex: 1; max-width: 420px; padding: 8px 12px; border: 1px solid var(--border2);
+		border-radius: 8px; font-size: 14px; outline: none; background: var(--bg); }
+	.topbar input:focus { border-color: var(--accent); }
+	.topbar .app-link { margin-left: auto; font-size: 14px; font-weight: 600; text-decoration: none; }
+	.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); max-width: 1220px; margin: 0 auto; }
+	nav.side { padding: 22px 14px 60px; border-right: 1px solid var(--border); }
+	nav.side .sec { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+		color: var(--faint); padding: 16px 10px 6px; }
+	nav.side .sec:first-child { padding-top: 0; }
+	nav.side a { display: block; padding: 7px 10px; border-radius: 8px; color: var(--muted);
+		text-decoration: none; font-size: 14px; }
+	nav.side a:hover { color: var(--text); background: var(--panel2); }
+	nav.side a.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); font-weight: 600; }
+	main { padding: 30px 40px 100px; min-width: 0; }
+	main h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.01em; }
+	main .lede { color: var(--muted); font-size: 16px; margin: 0 0 26px; }
+	main h2 { font-size: 20px; margin: 34px 0 10px; }
+	main h3 { font-size: 16px; margin: 24px 0 8px; }
+	main p, main li { color: #2a3342; }
+	main code { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
+		padding: 1px 6px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+	main pre { position: relative; margin: 14px 0; padding: 16px; background: #0d1117; color: #dbe7ee;
+		border-radius: 12px; overflow-x: auto; font-family: ui-monospace, Consolas, monospace;
+		font-size: 13px; line-height: 1.6; }
+	main pre code { background: none; border: 0; padding: 0; color: inherit; font-size: inherit; }
+	.copy { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+		background: rgba(255,255,255,.1); color: #dbe7ee; border: 1px solid rgba(255,255,255,.2);
+		border-radius: 7px; cursor: pointer; }
+	.copy:hover { background: rgba(255,255,255,.18); }
+	table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; }
+	th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+		color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+	td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+	.note { border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 10px;
+		background: color-mix(in srgb, var(--amber) 6%, transparent); padding: 12px 14px; margin: 14px 0; font-size: 14px; }
+	.searchbox { position: relative; flex: 1; max-width: 420px; }
+	.searchbox input { width: 100%; }
+	.search-results { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--panel);
+		border: 1px solid var(--border2); border-radius: 10px; box-shadow: 0 8px 30px rgba(16,24,40,.12);
+		max-height: 320px; overflow-y: auto; display: none; }
+	.search-results.open { display: block; }
+	.search-results a { display: block; padding: 10px 14px; text-decoration: none; color: var(--text);
+		border-bottom: 1px solid var(--border); font-size: 14px; }
+	.search-results a:last-child { border-bottom: 0; }
+	.search-results a:hover { background: var(--panel2); }
+	.search-results a small { display: block; color: var(--faint); }
+	.menu-btn { display: none; background: transparent; border: 1px solid var(--border2); border-radius: 8px;
+		font-size: 15px; padding: 6px 10px; cursor: pointer; color: var(--text); }
+	@media (max-width: 860px) {
+		.layout { grid-template-columns: minmax(0, 1fr); }
+		nav.side { position: fixed; inset: 53px auto 0 0; width: 260px; background: var(--panel); z-index: 20;
+			transform: translateX(-100%); transition: transform .18s ease; overflow-y: auto; }
+		body.nav-open nav.side { transform: none; box-shadow: 0 0 40px rgba(16,24,40,.18); }
+		.menu-btn { display: inline-block; }
+		main { padding: 22px 18px 80px; }
+	}
+</style>
+</head>
+<body>
+<div class="topbar">
+	<button class="menu-btn" onclick="document.body.classList.toggle('nav-open')">☰</button>
+	<a class="brand" href="#/"><img src="/assets/uml-icon.png?v=2" alt="" /> Itsuki <span>Docs</span></a>
+	<div class="searchbox">
+		<input id="search" placeholder="Search the docs…" autocomplete="off" />
+		<div class="search-results" id="searchResults"></div>
+	</div>
+	<a class="app-link" href="/app" target="_blank" rel="noopener">Open Itsuki →</a>
+</div>
+<div class="layout">
+	<nav class="side" id="sideNav"></nav>
+	<main id="page"></main>
+</div>
+
+<script>
+const PRODUCT = { name: "Itsuki", pkg: "itsuki", tokenPrefix: "itsuki_live_" };
+const ORIGIN = location.origin;
+
+/* ---------------------------------------------------------------- nav */
+const NAV = [
+	{ sec: "Get started", items: [
+		["/", "What is Itsuki?"],
+		["/quickstart", "Quickstart (5 minutes)"],
+	]},
+	{ sec: "Connect a tool", items: [
+		["/install/claude", "Claude"],
+		["/install/chatgpt", "ChatGPT"],
+		["/install/claude-code", "Claude Code (MCP)"],
+		["/install/plugin", "Claude Code plugin"],
+		["/install/cursor", "Cursor & other editors"],
+	]},
+	{ sec: "Build with the API", items: [
+		["/api/rest", "REST API reference"],
+		["/api/auth", "Authentication & keys"],
+		["/api/mcp", "MCP tools"],
+		["/sdk/python", "Python SDK"],
+		["/sdk/js", "JavaScript SDK"],
+	]},
+	{ sec: "Concepts", items: [
+		["/concepts/memory", "How memory works"],
+		["/concepts/receipts", "Receipts & rules"],
+	]},
+	{ sec: "Trust", items: [
+		["/privacy", "Privacy & limits"],
+	]},
+];
+
+/* ---------------------------------------------------------------- helpers */
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const codeBlock = (text) => `<pre><button class="copy">Copy</button><code>${esc(text)}</code></pre>`;
+
+/* ---------------------------------------------------------------- pages */
+const PAGES = {};
+
+PAGES["/"] = { title: "What is Itsuki?", html: `
+<h1>What is Itsuki?</h1>
+<p class="lede">One private memory, shared by every AI you use. Tell it once — Claude, ChatGPT, your editor, and your own apps all remember.</p>
+<p>Itsuki (樹, "tree") is a personal memory engine. Tools you connect can <b>save</b> durable facts about you and <b>recall</b> them later. Memory is stored as a structured graph — memories, details, events, and the connections between them — that you can see, edit, and delete from your dashboard. Nothing is hidden inside an app you don't control.</p>
+<h2>One engine, three doors</h2>
+<table>
+<tr><th>Door</th><th>Who it's for</th><th>How</th></tr>
+<tr><td><b>MCP</b></td><td>AI chats &amp; editors (Claude, ChatGPT, Cursor…)</td><td>One private URL pasted into the client's connector settings</td></tr>
+<tr><td><b>REST API</b></td><td>Your own apps, agents, and scripts</td><td>Bearer key + two main endpoints: save and recall</td></tr>
+<tr><td><b>Dashboard</b></td><td>You</td><td>See the graph, review suggestions, set rules, read receipts</td></tr>
+</table>
+<p>All three doors read and write the <b>same</b> memory. There is exactly one engine behind them.</p>
+<h2>What makes it different</h2>
+<ul>
+<li><b>You can see it.</b> Your memory is a living graph in your dashboard, not a black box.</li>
+<li><b>Receipts for every write.</b> Each save produces a receipt: what was stored, what was skipped, and why.</li>
+<li><b>Selective by design.</b> Itsuki stores durable facts, not chat logs. Your rules decide what's worth remembering.</li>
+<li><b>Private by default.</b> No trackers, no ads, no training on your memory. <a href="#/privacy">Read the privacy page</a>.</li>
+</ul>
+<p>Ready? The <a href="#/quickstart">quickstart</a> takes about five minutes.</p>
+` };
+
+PAGES["/quickstart"] = { title: "Quickstart", html: `
+<h1>Quickstart</h1>
+<p class="lede">From zero to a working memory in about five minutes.</p>
+<h2>1 · Create an account</h2>
+<p>Sign up at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a> (free, email or Google).</p>
+<h2>2 · Create a key</h2>
+<p>In the app: <b>API Keys → Create API key</b>. The full key (<code>${PRODUCT.tokenPrefix}…</code>) is shown once — copy it somewhere safe.</p>
+<h2>3 · Save a memory</h2>
+${codeBlock(`curl -X POST ${ORIGIN}/v1/save \\
+  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{"content": "I started learning Kotlin this week."}'`)}
+<p>The response is a <b>receipt</b> — what was saved and why. Extraction finishes in the background within a few seconds.</p>
+<h2>4 · Recall it</h2>
+${codeBlock(`curl -X POST ${ORIGIN}/v1/recall \\
+  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{"query": "what am I learning?"}'`)}
+<p>The <code>context</code> field of the response is a compact text block — exactly what a connected AI receives.</p>
+<h2>5 · Connect an AI chat</h2>
+<p>Follow the guide for <a href="#/install/claude">Claude</a> or <a href="#/install/chatgpt">ChatGPT</a> — one URL, two minutes. After that, saying <i>"save this to ${PRODUCT.name.toLowerCase()}"</i> or asking <i>"what do you know about me?"</i> just works.</p>
+<div class="note">Prefer clicking to curling? The <b>Playground</b> in the app does steps 3–4 with buttons.</div>
+` };
+
+PAGES["/install/claude"] = { title: "Connect Claude", html: `
+<h1>Connect Claude</h1>
+<p class="lede">Claude (claude.ai) supports custom connectors on every plan, including free.</p>
+<div class="note"><b>Set up on a computer, not your phone.</b> The Claude mobile apps can't add connectors — configure once in a computer browser and it syncs to your phone automatically.</div>
+<h2>Steps</h2>
+<ol>
+<li>In the Itsuki app, open <b>API Keys → Create MCP link</b> and copy your private URL (shown once): <code>${ORIGIN}/mcp/${PRODUCT.tokenPrefix}…</code></li>
+<li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai → Settings → Connectors → Add custom connector</a> (this link opens the dialog directly).</li>
+<li>Name it <code>${PRODUCT.name.toLowerCase()}</code>, paste the URL, click <b>Add</b>.</li>
+<li>In any chat: click the <b>+</b> (bottom-left) → <b>Connectors</b> → switch on <code>${PRODUCT.name.toLowerCase()}</code>. A saved connector stays off until you enable it in a chat — this step is the one everyone misses.</li>
+</ol>
+<h2>Try it</h2>
+<p>Say: <i>"Save to ${PRODUCT.name.toLowerCase()}: I'm training for a half marathon."</i> Then in a new chat: <i>"What do you know about my training?"</i></p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Connector missing in a chat</b> — enable it via <b>+</b> → Connectors (per-chat switch).</li>
+<li><b>"Unauthorized"</b> — the key was revoked or rotated; create a fresh MCP link and update the URL.</li>
+<li><b>Claude doesn't save automatically</b> — by design. The model decides when to call tools; ask it explicitly, or use the API for guaranteed capture.</li>
+</ul>
+` };
+
+PAGES["/install/chatgpt"] = { title: "Connect ChatGPT", html: `
+<h1>Connect ChatGPT</h1>
+<p class="lede">ChatGPT supports custom MCP connectors on paid plans (Plus/Pro/Business), behind Developer mode.</p>
+<div class="note">Set up on a computer. Nothing MCP-related appears anywhere until Developer mode is on.</div>
+<h2>Steps</h2>
+<ol>
+<li>ChatGPT → <b>Settings → Connectors</b> (called <i>Plugins</i> in some builds) → <b>Advanced</b> → turn on <b>Developer mode</b>.</li>
+<li>Back in Connectors, click <b>Create</b>. Name: <code>${PRODUCT.name.toLowerCase()}</code>. Description: <i>Personal memory — save and recall facts about me across chats.</i> (the model reads this when deciding to use it). URL: your MCP link from <b>API Keys → Create MCP link</b>.</li>
+<li>In a new chat, enable Developer mode / <b>Add sources</b> and pick <code>${PRODUCT.name.toLowerCase()}</code> — a saved connector is off until selected in the chat.</li>
+</ol>
+<h2>Limits worth knowing</h2>
+<ul>
+<li>Free ChatGPT accounts can't add custom connectors at all.</li>
+<li>Mobile can use the connector after desktop setup, with some write limits on OpenAI's side.</li>
+</ul>
+` };
+
+PAGES["/install/claude-code"] = { title: "Claude Code (MCP)", html: `
+<h1>Connect Claude Code</h1>
+<p class="lede">One command. Your coding agent gets save, recall, and conversation capture.</p>
+${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORIGIN}/mcp/YOUR_MCP_KEY`)}
+<p>Replace <code>YOUR_MCP_KEY</code> with a fresh MCP link from <b>API Keys</b> (the full <code>${PRODUCT.tokenPrefix}…</code> value is shown once at creation).</p>
+<h2>What it gets</h2>
+<table>
+<tr><th>Tool</th><th>What it does</th></tr>
+<tr><td><code>save_memory</code></td><td>Saves one explicit durable fact, returns a receipt</td></tr>
+<tr><td><code>save_conversation</code></td><td>Captures scoped facts (or a whole-chat notes page) from several turns</td></tr>
+<tr><td><code>recall_memory</code></td><td>Returns a compact context block of what's already known</td></tr>
+</table>
+<p>Then just tell it: <i>"save that decision to ${PRODUCT.name.toLowerCase()}"</i> or <i>"check ${PRODUCT.name.toLowerCase()} for context about this project"</i>.</p>
+` };
+
+PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
+<h1>Claude Code plugin</h1>
+<p class="lede">Coming soon: install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
+${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
+/plugin install ${PRODUCT.pkg}`)}
+<p>Until the plugin ships, the <a href="#/install/claude-code">MCP setup</a> gives you the same three tools today.</p>
+` };
+
+PAGES["/install/cursor"] = { title: "Cursor & other editors", html: `
+<h1>Cursor, Codex &amp; other MCP editors</h1>
+<p class="lede">Any MCP-capable client connects with the same URL.</p>
+<h2>Cursor</h2>
+<p>Add to <code>.cursor/mcp.json</code> (project) or <code>~/.cursor/mcp.json</code> (global):</p>
+${codeBlock(`{
+  "mcpServers": {
+    "${PRODUCT.name.toLowerCase()}": { "url": "${ORIGIN}/mcp/YOUR_MCP_KEY" }
+  }
+}`)}
+<h2>Codex / anything else</h2>
+<p>Point the client's MCP server config at the same URL. Transport is Streamable HTTP; no extra headers needed — identity rides in the URL.</p>
+<div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest.</div>
+` };
+
+PAGES["/api/rest"] = { title: "REST API reference", html: `
+<h1>REST API reference</h1>
+<p class="lede">Base URL: <code>${ORIGIN}</code> · JSON in, JSON out · Bearer auth.</p>
+<h2>The two calls that matter</h2>
+<h3>POST /v1/save — write memory</h3>
+${codeBlock(`POST /v1/save
+{ "content": "I started learning Kotlin this week." }
+
+// or conversation mode:
+{ "mode": "conversation",
+  "conversationId": "chat-42",
+  "messages": [
+    { "role": "user", "content": "We decided on Postgres for the new service." },
+    { "role": "assistant", "content": "Noted — Postgres it is." }
+  ] }`)}
+<p>Returns a <b>receipt</b>: <code>summary</code>, counts of what was written/updated/skipped, and a <code>receipt_id</code>. Extraction is asynchronous — allow a few seconds before recalling brand-new facts.</p>
+<h3>POST /v1/recall — read memory</h3>
+${codeBlock(`POST /v1/recall
+{ "query": "what am I learning?" }
+
+// response (abridged)
+{ "count": 2,
+  "context": "Kotlin (skill, state: active) - started learning this week…",
+  "items": [ { "type": "node", "label": "Kotlin", "score": 7.9 } ] }`)}
+<p><code>context</code> is the compact text block a connected AI receives. Empty string + <code>count: 0</code> means nothing relevant is stored.</p>
+<h2>Everything else</h2>
+<table>
+<tr><th>Endpoint</th><th>What it does</th></tr>
+<tr><td><code>POST /v1/turn</code></td><td>Recall + auto-capture in one call — send the latest chat messages, get context back while durable facts are collected. Needs write scope.</td></tr>
+<tr><td><code>POST /v1/ingest</code></td><td>Bulk message ingestion with optional <code>flush: true</code> to force digestion.</td></tr>
+<tr><td><code>GET /v1/graph</code></td><td>The full laid-out memory graph (nodes, details, events, edges, clusters).</td></tr>
+<tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
+<tr><td><code>GET /v1/usage?range=30d</code></td><td>Activity rollups: saves/recalls per day, by source, totals. Ranges 1d/7d/30d/all.</td></tr>
+<tr><td><code>GET /v1/receipts?limit=50</code></td><td>Latest save/recall receipts.</td></tr>
+<tr><td><code>GET /v1/export</code></td><td>Complete JSON export of your memory. Your data is never locked in.</td></tr>
+<tr><td><code>GET/PUT /v1/rules</code></td><td>Read or update capture rules (what to remember / never remember).</td></tr>
+</table>
+<h2>Useful request fields</h2>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>idempotencyKey</code></td><td>Safe retries: the same key is processed at most once.</td></tr>
+<tr><td><code>conversationId</code>, <code>threadId</code>, <code>sourceId</code></td><td>Provenance tracking; also used for de-duplication of re-sent chats.</td></tr>
+<tr><td><code>userId</code></td><td><b>Sub-tenant selector.</b> Omit it to use the key owner's own memory. Pass any string to read/write a separate memory space derived from it — useful when your app serves multiple end users under one key.</td></tr>
+</table>
+<h2>Rate limits</h2>
+<p>Writes (<code>/v1/save</code>, <code>/v1/turn</code>, <code>/v1/ingest</code>): 60/minute per user — a <code>429</code> includes a friendly message; honor <code>Retry-After</code> style backoff. Reads are not currently rate limited.</p>
+<h2>Errors</h2>
+<p>Errors are JSON: <code>{ "error": "code_or_message" }</code> with conventional status codes (400 invalid body, 401 unauthenticated, 403 wrong scope, 429 slow down, 5xx our fault — automatically reported on our side).</p>
+` };
+
+PAGES["/api/auth"] = { title: "Authentication & keys", html: `
+<h1>Authentication &amp; keys</h1>
+<p class="lede">Two kinds of key, one rule: secrets are shown once.</p>
+<h2>API keys (Bearer)</h2>
+${codeBlock(`authorization: Bearer ${PRODUCT.tokenPrefix}XXXXXXXX`)}
+<p>Create in <b>API Keys → Create API key</b>. Use for the REST API and SDKs. Also accepted via the <code>x-uml-token</code> header (legacy name kept for compatibility).</p>
+<h2>MCP links</h2>
+<p><code>${ORIGIN}/mcp/&lt;key&gt;</code> — the key rides in the URL because that's what chat clients can carry. An MCP link IS a secret; treat it like a password.</p>
+<h2>Scopes</h2>
+<table>
+<tr><th>Scope</th><th>Grants</th></tr>
+<tr><td><code>memory:read</code></td><td>recall, graph, status, usage, receipts, export, read rules</td></tr>
+<tr><td><code>memory:write</code></td><td>save, turn, ingest, write rules — implies read</td></tr>
+</table>
+<p>Default keys carry both. Create a read-only key by passing <code>"scopes": ["memory:read"]</code> when creating the token.</p>
+<h2>Lifecycle</h2>
+<ul>
+<li><b>Shown once</b> — only a hash is stored server-side. Lose it → rotate.</li>
+<li><b>Rotate</b> — revokes the old key and mints a fresh one with the same name.</li>
+<li><b>Revoke</b> — immediate; revoked keys stay listed for audit and can never be used again.</li>
+<li>Keys minted before the Itsuki rename (<code>uml_live_…</code>) keep working forever.</li>
+</ul>
+` };
+
+PAGES["/api/mcp"] = { title: "MCP tools", html: `
+<h1>MCP tools</h1>
+<p class="lede">Server: <code>itsuki-memory</code> · Transport: Streamable HTTP · URL: <code>${ORIGIN}/mcp/&lt;key&gt;</code></p>
+<h2>The three tools</h2>
+<h3>save_memory</h3>
+<p>Saves exactly one explicitly submitted durable fact. Input: <code>content</code> (required, the user's words), optional <code>recentContext</code> for resolving references like "it". Returns a final receipt — <i>Saved: 1 memory (Kotlin)…</i> — only after the write completes.</p>
+<h3>save_conversation</h3>
+<p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Only user-stated facts enter the graph; assistant content becomes notes, never facts, unless the user explicitly adopted it.</p>
+<h3>recall_memory</h3>
+<p>Input: <code>query</code>. The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
+<h2>Design guarantees</h2>
+<ul>
+<li>No write is ever claimed without a receipt.</li>
+<li>The host model decides <i>when</i> to call tools — if you need guaranteed per-turn capture, use <code>POST /v1/turn</code> from your own code instead.</li>
+</ul>
+` };
+
+PAGES["/sdk/python"] = { title: "Python SDK", html: `
+<h1>Python SDK</h1>
+<p class="lede"><code>pip install ${PRODUCT.pkg}</code> — coming very soon. The raw API works today and the SDK is a thin, stable wrapper over it.</p>
+${codeBlock(`# Until the package ships, this is the equivalent — and it won't break:
+import requests
+
+class Memory:
+    def __init__(self, api_key, base_url="${ORIGIN}"):
+        self.s = requests.Session()
+        self.s.headers["authorization"] = f"Bearer {api_key}"
+        self.base = base_url
+
+    def add(self, content, **kw):
+        return self.s.post(f"{self.base}/v1/save", json={"content": content, **kw}).json()
+
+    def search(self, query, **kw):
+        return self.s.post(f"{self.base}/v1/recall", json={"query": query, **kw}).json()
+
+m = Memory(api_key="YOUR_API_KEY")
+m.add("I started learning Kotlin this week.")
+print(m.search("what am I learning?")["context"])`)}
+<p>The published SDK adds: typed errors, retry with backoff on 429/5xx (idempotency-key aware), <code>turn()</code>, <code>graph()</code>, <code>usage()</code>, <code>rules()</code>, and sub-tenant support via <code>user_id=</code>.</p>
+` };
+
+PAGES["/sdk/js"] = { title: "JavaScript SDK", html: `
+<h1>JavaScript SDK</h1>
+<p class="lede"><code>npm install ${PRODUCT.pkg}</code> — coming very soon. The raw API works today and the SDK is a thin, stable wrapper over it.</p>
+${codeBlock(`// Until the package ships, this is the equivalent — and it won't break:
+const BASE = "${ORIGIN}";
+
+async function call(path, body, key) {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: { authorization: \`Bearer \${key}\`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(\`\${path} -> \${res.status}\`);
+  return res.json();
+}
+
+await call("/v1/save", { content: "I started learning Kotlin this week." }, KEY);
+const { context } = await call("/v1/recall", { query: "what am I learning?" }, KEY);`)}
+<p>The published SDK adds: <code>MemoryClient</code> with typed <code>MemoryAPIError</code>, retries with backoff (idempotency-key aware), <code>turn()</code>, <code>graph()</code>, <code>usage()</code>, <code>rules()</code>, and sub-tenant support via <code>userId</code>. Node 18+; server-side use (keep keys out of browsers).</p>
+` };
+
+PAGES["/concepts/memory"] = { title: "How memory works", html: `
+<h1>How memory works</h1>
+<p class="lede">Chat history is not memory. Memory is structured meaning.</p>
+<h2>The pipeline</h2>
+<ol>
+<li><b>You tell it something</b> — through any door: a chat tool, the API, the Playground.</li>
+<li><b>Extraction</b> — a model proposes durable facts from what you said. Small talk, questions, and noise are skipped.</li>
+<li><b>Grounding</b> — every proposed fact must be traceable to your actual words. Facts the model can't ground are rejected, not stored.</li>
+<li><b>The graph</b> — facts land as <b>memories</b> (things: Kotlin, Sarah, your project) with <b>details</b> (current truths) and <b>events</b> (things that happened), connected by edges and clustered by life area.</li>
+<li><b>Latest truth wins</b> — new information supersedes old instead of piling up; superseded details stay in history.</li>
+<li><b>Recall</b> — a query pulls the most relevant slice of the graph as a compact context block, bounded so it never floods a prompt.</li>
+</ol>
+<h2>Suggestions</h2>
+<p>Weak or unclear signals don't enter the graph directly — they wait in <b>Memories → Suggestions</b> for you to keep or drop. Your memory stays yours to curate.</p>
+<h2>Notes</h2>
+<p>Whole-conversation captures become organized <b>notes</b> pages — condensed and searchable, without polluting the fact graph.</p>
+` };
+
+PAGES["/concepts/receipts"] = { title: "Receipts & rules", html: `
+<h1>Receipts &amp; rules</h1>
+<p class="lede">Trust needs proof and control. Receipts are the proof; rules are the control.</p>
+<h2>Receipts</h2>
+<p>Every save attempt produces a receipt: what was written, what was updated, what was skipped and why. They live in <b>History</b> and come back on every API save. A tool can never claim "saved!" without one — receipts are generated by the backend, not the model.</p>
+${codeBlock(`{ "summary": "Saved: 1 memory (Kotlin), 1 detail. Skipped: 1 (question).",
+  "receipt_id": "receipt_1a2b…",
+  "receipt": { "outcome": "wrote", "saved": { "nodes": 1, "slices": 1 }, "skipped": 1 } }`)}
+<h2>Rules</h2>
+<p>In <b>Settings → What to remember</b> (or <code>PUT /v1/rules</code>):</p>
+<ul>
+<li><b>Custom instructions</b> — plain language: <i>"Always save exam progress. Never save jokes."</i></li>
+<li><b>Includes / excludes</b> — topic lists; excludes always win.</li>
+<li><b>Auto-capture</b> — whether conversational ingestion collects quietly or only on explicit request.</li>
+</ul>
+<p>Rules apply at the engine, so every door obeys them — MCP tools, API, SDK, and the app itself.</p>
+` };
+
+PAGES["/privacy"] = { title: "Privacy & limits", html: `
+<h1>Privacy &amp; limits</h1>
+<p class="lede">The short version we hold ourselves to: no selling data, no ads, no third-party trackers, no training on your memory.</p>
+<h2>Privacy</h2>
+<ul>
+<li>Your memory belongs to you. Export everything anytime (<code>GET /v1/export</code>); delete everything anytime (Settings → danger zone). Deletion is immediate.</li>
+<li>Site analytics are aggregate-only: no cookies, no visitor IDs, bot-filtered counts.</li>
+<li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed.</li>
+<li>Full details: <a href="${ORIGIN}/privacy" target="_blank" rel="noopener">Privacy Policy</a> · <a href="${ORIGIN}/terms" target="_blank" rel="noopener">Terms</a>.</li>
+</ul>
+<h2>Limits (early access)</h2>
+<table>
+<tr><th>Thing</th><th>Limit</th></tr>
+<tr><td>Writes (save/turn/ingest)</td><td>60 per minute per user</td></tr>
+<tr><td>Auth attempts</td><td>10 per minute per IP</td></tr>
+<tr><td>Recall context</td><td>Bounded (~1,800 chars) by design — memory should sharpen prompts, not flood them</td></tr>
+<tr><td>Extraction</td><td>Asynchronous; allow a few seconds before recalling brand-new facts</td></tr>
+</table>
+<p>Itsuki is an early product. Keep exports of anything critical, and report anything odd — every server error is auto-reported to the operator already.</p>
+` };
+
+/* ---------------------------------------------------------------- router */
+function currentRoute() {
+	const hash = location.hash.replace(/^#/, "") || "/";
+	return PAGES[hash] ? hash : "/";
+}
+
+function render() {
+	const route = currentRoute();
+	const page = PAGES[route];
+	document.getElementById("page").innerHTML = page.html;
+	document.title = route === "/" ? `${PRODUCT.name} Docs` : `${page.title} · ${PRODUCT.name} Docs`;
+	const nav = document.getElementById("sideNav");
+	nav.innerHTML = NAV.map((group) => `<div class="sec">${group.sec}</div>` +
+		group.items.map(([r, label]) => `<a href="#${r}" class="${r === route ? "active" : ""}">${label}</a>`).join("")).join("");
+	document.body.classList.remove("nav-open");
+	document.getElementById("searchResults").classList.remove("open");
+	window.scrollTo(0, 0);
+}
+
+window.addEventListener("hashchange", render);
+render();
+
+/* ------------------------------------------------------------- copy btns */
+document.addEventListener("click", (event) => {
+	const btn = event.target.closest(".copy");
+	if (!btn) return;
+	const code = btn.parentElement.querySelector("code");
+	navigator.clipboard.writeText(code ? code.textContent : "").then(() => {
+		btn.textContent = "Copied";
+		setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+	}).catch(() => {});
+});
+
+/* ---------------------------------------------------------------- search */
+const INDEX = Object.entries(PAGES).map(([route, page]) => ({
+	route,
+	title: page.title,
+	text: page.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase(),
+}));
+
+const searchInput = document.getElementById("search");
+const resultsBox = document.getElementById("searchResults");
+searchInput.addEventListener("input", () => {
+	const q = searchInput.value.trim().toLowerCase();
+	if (q.length < 2) { resultsBox.classList.remove("open"); return; }
+	const hits = INDEX
+		.map((entry) => {
+			const inTitle = entry.title.toLowerCase().includes(q) ? 2 : 0;
+			const at = entry.text.indexOf(q);
+			return { entry, score: inTitle + (at >= 0 ? 1 : 0), at };
+		})
+		.filter((h) => h.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, 8);
+	resultsBox.innerHTML = hits.length
+		? hits.map(({ entry, at }) => {
+			const snippet = at >= 0 ? entry.text.slice(Math.max(0, at - 30), at + 70) : "";
+			return `<a href="#${entry.route}"><b>${entry.title}</b><small>…${snippet}…</small></a>`;
+		}).join("")
+		: `<a href="#/"><small>No matches — try different words.</small></a>`;
+	resultsBox.classList.add("open");
+});
+document.addEventListener("click", (event) => {
+	if (!event.target.closest(".searchbox")) resultsBox.classList.remove("open");
+});
+</script>
+</body>
+</html>
