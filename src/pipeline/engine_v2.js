@@ -68,6 +68,17 @@ function entityListLines(entities) {
 	return entities.map((e) => `${e.n}. ${e.label} (${e.category})`).join("\n");
 }
 
+/**
+ * Qwen3's reasoning mode will happily spend an entire output budget inside
+ * <think> and return EMPTY content — measured on conv-0: five edge calls,
+ * five empty responses. The documented soft switch turns thinking off for
+ * these output-light JSON passes. Appended only for qwen3 models; other
+ * models never see it.
+ */
+function noThink(config) {
+	return String(config?.llm?.model ?? "").includes("qwen3") ? "\n/no_think" : "";
+}
+
 function messagesBlock(packet) {
 	return JSON.stringify(packet.new_slice ?? [], null, 1);
 }
@@ -114,7 +125,7 @@ export async function proposeEdges(env, config, packet, entities, overrides = {}
 						{ role: "system", content: EDGE_SYSTEM_PROMPT },
 						{
 							role: "user",
-							content: `ENTITIES:\n${entityListLines(entities)}\n\nMESSAGES:\n${messagesBlock(packet)}`,
+							content: `ENTITIES:\n${entityListLines(entities)}\n\nMESSAGES:\n${messagesBlock(packet)}${noThink(config)}`,
 						},
 					],
 					temperature: config.llm.temperature,
@@ -219,7 +230,7 @@ export async function proposeReflexion(env, config, packet, entities, foundSumma
 							role: "user",
 							content:
 								`ENTITIES ALREADY FOUND:\n${entityListLines(entities)}\n\n` +
-								`ALREADY RECORDED:\n${foundSummary || "(nothing)"}\n\nMESSAGES:\n${messagesBlock(packet)}`,
+								`ALREADY RECORDED:\n${foundSummary || "(nothing)"}\n\nMESSAGES:\n${messagesBlock(packet)}${noThink(config)}`,
 						},
 					],
 					temperature: config.llm.temperature,
