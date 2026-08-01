@@ -17,6 +17,10 @@ import html from "../public/index.html?raw";
 const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
+// The origin the specs simulate the page running on. One constant so a domain
+// move is a one-line change here; the page itself only ever sees location.origin.
+const FIXTURE_ORIGIN = "https://uml.gpmai.workers.dev";
+
 /** Pull one top-level function's source out of the single-file app. */
 function fnSource(name) {
 	const start = script.indexOf(`function ${name}(`);
@@ -43,7 +47,7 @@ function build(names, returnName) {
 		"MCP_KEY_PLACEHOLDER",
 		`${source}\nreturn ${returnName};`,
 	)(
-		{ origin: "https://uml.gpmai.workers.dev" },
+		{ origin: FIXTURE_ORIGIN },
 		{ name: "Itsuki", tokenPrefix: "itsuki_live_" },
 		placeholder,
 	);
@@ -67,7 +71,7 @@ describe("the key rule", () => {
 	it("substitutes the real key into every snippet that carries one", () => {
 		const installSnippets = build(["installSnippets"], "installSnippets");
 		const withKey = installSnippets("itsuki_live_abc123");
-		expect(withKey.mcpUrl).toBe("https://uml.gpmai.workers.dev/mcp/itsuki_live_abc123");
+		expect(withKey.mcpUrl).toBe(`${FIXTURE_ORIGIN}/mcp/itsuki_live_abc123`);
 		expect(withKey.claudeCode).toContain("itsuki_live_abc123");
 		expect(withKey.cursor).toContain("itsuki_live_abc123");
 		for (const value of Object.values(withKey)) {
@@ -176,7 +180,7 @@ describe("Cursor tab", () => {
 		const config = decodeURIComponent(link.split("config=")[1]);
 		expect(JSON.parse(atob(config))).toEqual({
 			type: "http",
-			url: "https://uml.gpmai.workers.dev/mcp/itsuki_live_xyz",
+			url: `${FIXTURE_ORIGIN}/mcp/itsuki_live_xyz`,
 		});
 	});
 

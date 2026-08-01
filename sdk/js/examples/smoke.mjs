@@ -6,7 +6,8 @@ import { MemoryClient } from "../index.js";
 
 const memory = new MemoryClient({
 	apiKey: process.env.ITSUKI_API_KEY,
-	baseUrl: process.env.ITSUKI_BASE_URL || "https://uml.gpmai.workers.dev",
+	// No fallback here: the SDK's own DEFAULT_BASE_URL is the single source.
+	...(process.env.ITSUKI_BASE_URL ? { baseUrl: process.env.ITSUKI_BASE_URL } : {}),
 });
 
 const stamp = Date.now();

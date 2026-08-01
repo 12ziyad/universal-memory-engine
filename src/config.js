@@ -6,6 +6,16 @@
  * tests (and local dev without --remote) run without Workers AI / Vectorize.
  */
 
+/**
+ * The one public origin of the deployment. Every server-side absolute URL —
+ * redirects, emails, docs links — routes through this; nothing else may
+ * hardcode a host. Requests arriving on a legacy host get their HTML paths
+ * 301'd here (API and MCP paths are served natively on every host, because
+ * not every client follows redirects).
+ */
+export const PUBLIC_ORIGIN = "https://uml.gpmai.workers.dev";
+export const LEGACY_HOSTS = [];
+
 // Trigger dials — the only numbers you should need to touch to retune holding.
 export const DIALS = {
 	idleMs: 30000, // fire a held chunk after this much silence
