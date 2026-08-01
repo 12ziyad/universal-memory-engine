@@ -1159,7 +1159,7 @@
 		<h2 class="section-title">Support</h2>
 		<p class="public-note">Need help connecting Itsuki or shaping an integration?</p>
 		<div class="contact-grid" style="margin-top:18px">
-			<div class="product-card contact-card"><h3>Contact support</h3><p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
+			<div class="product-card contact-card"><h3>Contact support</h3><p><a href="mailto:hello@itsuki.app">hello@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
 			<div class="product-card"><h3>Open source</h3><p>Itsuki's engine is open source under Apache 2.0 — read the code, open issues, or star the repo on <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>.</p></div>
 		</div>
 	</section>
@@ -1172,7 +1172,7 @@
 			<a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>
 			<a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a>
 			<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Open source &middot; Apache 2.0</a>
-			<a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>
+			<a href="mailto:hello@itsuki.app">hello@itsuki.app</a>
 			<span>&copy; 2026 Itsuki</span>
 		</div>
 	</footer>
@@ -1471,7 +1471,7 @@ function showForgotPassword(event) {
 			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
 			<div class="auth-agree">Use the <b>same email</b> as your Itsuki account and you'll land right back in it — same memory, no password required. You can keep using Google from then on.</div>
 			<div class="auth-divider">no Google account with that email?</div>
-			<p class="help">Email <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> from your account email and we'll verify you and reset it manually — usually within a day. Automatic email reset links are coming once email sending launches.</p>
+			<p class="help">Email <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> from your account email and we'll verify you and reset it manually — usually within a day. Automatic email reset links are coming once email sending launches.</p>
 			<div class="auth-actions" style="margin-top:16px">
 				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">&larr; Back to login</a>
 			</div>
@@ -3607,7 +3607,7 @@ function viewHelp(v) {
 		["Rotate or revoke", "Generate a new token to rotate. Revoke stops that tool immediately."],
 		["Reset memory", "Settings contains a Danger Zone requiring DELETE ALL. It deletes only your memory rows, not your account."],
 		["Troubleshooting", "For signup or login issues, try again with a valid email and an 8+ character password. For connectors, check that the URL and token are pasted into the right fields and that the token has not been revoked."],
-		["Contact", "For help, production feedback, or partnership: founder@gpmai.dev or ejziyad@gmail.com."],
+		["Contact", "For help, production feedback, or partnership: hello@itsuki.app or ejziyad@gmail.com."],
 	];
 	const grid = el("div","help-grid");
 	for (const [h,p] of topics) grid.appendChild(el("div","action-box", `<h3>${esc(h)}</h3><div class="help">${esc(p)}</div>`));
@@ -3635,7 +3635,7 @@ const LEGAL_PAGES = {
 	terms: {
 		title: "Terms of Service",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
 			<p>Welcome to Itsuki. These Terms of Service ("Terms") are a binding agreement between you and the operator of Itsuki ("Itsuki", "we", "us") governing your use of the Itsuki hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
 			<h2>1. What the Service is</h2>
@@ -3647,7 +3647,7 @@ const LEGAL_PAGES = {
 			<h2>3. Your account</h2>
 			<ul>
 				<li>You must provide accurate information at signup and keep your login credentials secure. You are responsible for all activity under your account.</li>
-				<li>Notify us promptly at <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> if you suspect unauthorized access to your account.</li>
+				<li>Notify us promptly at <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> if you suspect unauthorized access to your account.</li>
 				<li>We may require email verification or additional sign-in protections as the Service evolves.</li>
 			</ul>
 
@@ -3716,17 +3716,17 @@ const LEGAL_PAGES = {
 			<p>We may update these Terms as the Service evolves. For material changes we will give notice in the app (and by email where appropriate) before the changes take effect. Continued use of the Service after the effective date constitutes acceptance. The "Effective" date above always reflects the current version.</p>
 
 			<h2>17. Contact</h2>
-			<p>Questions about these Terms: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</p>`,
+			<p>Questions about these Terms: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</p>`,
 	},
 	privacy: {
 		title: "Privacy Policy",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a></p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
 			<p>Itsuki exists to store personal memory, so this policy is written to be read. It describes what we collect through the Itsuki website, dashboard, API, and MCP endpoints (the "Service"), how we use it, who processes it, and the rights and controls you have. The short version we hold ourselves to: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
 
 			<h2>Summary at a glance</h2>
 			<ul>
-				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a>.</li>
+				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</li>
 				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write. Operational account activity — sign-ins, save/recall counts, and errors your browser reports — is visible to the operator for support and abuse prevention; the content of your memories is not.</li>
 				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
 				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
@@ -3812,7 +3812,7 @@ const LEGAL_PAGES = {
 			<p>We keep this policy under review. For material changes we will give notice in the app before they take effect, and update the date above. Earlier versions are available on request.</p>
 
 			<h2>15. Grievances and contact</h2>
-			<p>Privacy questions, rights requests, and grievances: <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
+			<p>Privacy questions, rights requests, and grievances: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
 	},
 };
 
@@ -4309,7 +4309,7 @@ const POLICY_CONTENT = {
 	},
 	support: {
 		title: "Support and Reports",
-		body: `<p>For support, reports, or production feedback, contact <a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
+		body: `<p>For support, reports, or production feedback, contact <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
 			<ul class="policy-list">
 				<li>For connection issues, include the tool name, token label, and setup path. Do not send full tokens or private MCP URLs.</li>
 				<li>For privacy or safety reports, include enough detail to reproduce the issue without exposing secrets.</li>
@@ -4388,7 +4388,7 @@ function viewSettingsMain(v) {
 		</div>
 		<div class="action-box settings-section"><h3>Support</h3>
 			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
-			<p><a href="mailto:founder@gpmai.dev">founder@gpmai.dev</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
+			<p><a href="mailto:hello@itsuki.app">hello@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
 			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('support')">Support / report issue</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Legal / Terms</h3>

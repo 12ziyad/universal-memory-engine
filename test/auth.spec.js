@@ -439,11 +439,12 @@ describe("product shell routes", () => {
 		expect(html).toContain("Avoid sensitive or regulated data");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
-		expect(html).toContain("founder@gpmai.dev");
+		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("ejziyad@gmail.com");
 		expect(html).toContain("/assets/uml-icon.png");
-		const withoutContactEmail = html.replace(/mailto:founder@gpmai\.dev|founder@gpmai\.dev/g, "");
-		expect(withoutContactEmail).not.toMatch(/gpmai/i);
+		// Brand hygiene, tightened for the domain move: the old brand appears
+		// NOWHERE in the page — not even as a contact address.
+		expect(html).not.toMatch(/gpmai/i);
 	});
 
 	it("/app redirects unauthenticated visitors to login", async () => {

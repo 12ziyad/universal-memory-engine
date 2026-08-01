@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import html from "../public/index.html?raw";
+import docsHtml from "../public/docs/index.html?raw";
 
 describe("dashboard script", () => {
 	it("parses and exposes graph modes/actions", () => {
@@ -76,7 +77,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("Privacy Policy");
 		expect(html).toContain("Terms of Service");
 		expect(html).toContain("Support");
-		expect(html).toContain("founder@gpmai.dev");
+		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("ejziyad@gmail.com");
 		expect(html).toContain("/assets/uml-icon.png");
 		for (const forbidden of [
@@ -93,8 +94,10 @@ describe("dashboard script", () => {
 		]) {
 			expect(html).not.toContain(forbidden);
 		}
-		const withoutContactEmail = html.replace(/mailto:founder@gpmai\.dev|founder@gpmai\.dev/g, "");
-		expect(withoutContactEmail).not.toMatch(/gpmai/i);
+		// Brand hygiene, tightened for the domain move: no gpmai anywhere,
+		// contact address included. The docs page gets the same rule.
+		expect(html).not.toMatch(/gpmai/i);
+		expect(docsHtml).not.toMatch(/gpmai/i);
 	});
 
 	it("keeps sidebar sorting and evidence display deterministic", () => {
