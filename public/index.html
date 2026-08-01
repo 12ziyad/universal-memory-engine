@@ -241,6 +241,24 @@
 		padding: 6px 12px; border-radius: 8px; font-weight: 600; font-size: 13px; }
 	body.app-mode .term-tab.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 	.pg-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+	.uchart { display: flex; align-items: flex-end; gap: 4px; height: 150px; margin-top: 14px; }
+	.uchart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
+	.uchart-bars { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 2px; }
+	.uchart-bar { width: 42%; max-width: 14px; border-radius: 3px 3px 0 0; min-height: 2px; }
+	.uchart-bar.saves { background: var(--accent); }
+	.uchart-bar.recalls { background: color-mix(in srgb, var(--green) 80%, transparent); }
+	.uchart-col span { font-size: 10px; color: var(--faint); text-align: center; margin-top: 6px;
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.uchart-col:nth-child(2n) span { visibility: hidden; }
+	.uchart-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; }
+	.uchart-key.saves { background: var(--accent); }
+	.uchart-key.recalls { background: color-mix(in srgb, var(--green) 80%, transparent); }
+	.explore-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+	.explore-card { display: block; border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+		text-decoration: none; color: var(--text); transition: border-color .12s, transform .12s; }
+	.explore-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+	.explore-card b { display: block; margin-bottom: 4px; }
+	.explore-card span { color: var(--muted); font-size: 13px; line-height: 1.5; }
 	.pg-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13.5px; }
 	.pg-result.ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 	.pg-result.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
@@ -1617,8 +1635,8 @@ function viewOverview(v) {
 			<h3>Welcome — set up in 3 steps</h3>
 			<div class="onboard-step"><b>1</b><div><b>Create your private memory link</b><div class="help">One click. This is the key AI tools use to reach your memory.</div></div>
 				<button onclick="onboardCreateLink()">Create link</button></div>
-			<div class="onboard-step"><b>2</b><div><b>Connect Claude or ChatGPT</b><div class="help">Paste the link into your AI tool — the Connect tab shows exactly where (on a computer, not the phone app).</div></div>
-				<button class="ghost" onclick="setView('connect')">Show me</button></div>
+			<div class="onboard-step"><b>2</b><div><b>Connect Claude or ChatGPT</b><div class="help">Paste the link into your AI tool — Get started shows exactly where (on a computer, not the phone app).</div></div>
+				<button class="ghost" onclick="setView('install')">Show me</button></div>
 			<div class="onboard-step"><b>3</b><div><b>Save your first memory</b><div class="help">Tell it something worth remembering — "I'm learning Kotlin" — and watch your graph grow.</div></div>
 				<button class="ghost" onclick="setView('memory')">Save one</button></div>
 			<div style="margin-top:10px"><a class="help" href="#" onclick="dismissOnboarding(event)">I'll do this later</a></div>
@@ -1629,60 +1647,91 @@ function viewOverview(v) {
 	const recent = (S.receipts || []).filter((r) => Number(r.created_at) > monthAgo);
 	const saves30 = recent.filter((r) => r.source !== "recall").length;
 	const recalls30 = recent.filter((r) => r.source === "recall").length;
+	const range = S.usageRange || "30d";
+	const usage = S.usage;
+	const rangeButton = (key, label) =>
+		`<button class="term-tab ${range === key ? "active" : ""}" onclick="setUsageRange('${key}')">${label}</button>`;
+	const t = usage?.totals || {};
 	wrap.innerHTML = onboarding + `
-		<div class="box" style="max-width:980px">
-			<h3>Home</h3>
-			<div class="help">Welcome, ${esc(name)}. Itsuki is your private structured memory graph for AI tools, agents, apps, docs, events, workflows, and SDK integrations.</div>
-			<div class="help" style="margin-top:7px">${empty ? "Your graph is empty. Connect a tool or save a memory to begin." : "Your memory graph has active structured context ready for bounded recall."}</div>
-			<div class="stats" style="margin-top:12px">
-				${[["pages",s.pages||0],["nodes",s.nodes||0],["edges",s.edges||0],["receipts",S.receipts.length||0],["tools",S.tokens.length||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
-			</div>
-			<div class="quick-actions" style="margin-top:14px">
-				<button onclick="setView('memory')">Open Memory</button>
-				<button onclick="setView('graph')">Open Graph</button>
-				<button class="ghost" onclick="setView('connect')">Connect Tool</button>
-				<button class="ghost" onclick="setView('rules')">Capture Rules</button>
+		<div class="box" style="max-width:1080px">
+			<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+				<div><h3 style="margin-bottom:4px">Welcome back, ${esc(name)}</h3>
+					<div class="help">${empty ? "Your memory is empty — the Playground is the fastest way to see it work." : "Your private memory, at a glance."}</div></div>
+				<div class="terminal-tabs">${rangeButton("1d", "1d")}${rangeButton("7d", "7d")}${rangeButton("30d", "30d")}${rangeButton("all", "All time")}</div>
 			</div>
 		</div>
-		<div class="panel-grid">
-			<div class="action-box"><h3>Saves (30 days)</h3><div class="stat-big">${saves30}</div><div class="help">Memories and conversations written by you or your connected tools.</div></div>
-			<div class="action-box"><h3>Recalls (30 days)</h3><div class="stat-big">${recalls30}</div><div class="help">Times a tool looked something up from your memory.</div></div>
-			<div class="action-box"><h3>Connections</h3><div class="stat-big">${S.tokens.length}</div><div class="help">Active private links. Create, rotate, or revoke them in Connect.</div></div>
-			<div class="action-box"><h3>Latest activity</h3><div class="help">${S.receipts[0] ? `${esc(S.receipts[0].source || "save")} · ${fmtDate(S.receipts[0].created_at)}<br/>${esc(String(S.receipts[0].summary || "").slice(0, 140))}` : "No activity yet — save your first memory to start."}</div></div>
+		<div class="panel-grid" style="max-width:1080px">
+			<div class="action-box"><h3>Total memories</h3><div class="stat-big">${usage ? t.memories : "…"}</div><div class="help">${usage ? `${t.nodes} memories · ${t.pages} notes · ${t.slices} details` : "Loading…"}</div></div>
+			<div class="action-box"><h3>Saves</h3><div class="stat-big">${usage ? t.saves : "…"}</div><div class="help">Writes in this range, by you or your connected tools.</div></div>
+			<div class="action-box"><h3>Recalls</h3><div class="stat-big">${usage ? t.recalls : "…"}</div><div class="help">Times a tool looked something up.</div></div>
+			<div class="action-box"><h3>Requests</h3><div class="stat-big">${usage ? t.requests : "…"}</div><div class="help">Saves + recalls in this range · ${S.tokens.length} active key${S.tokens.length === 1 ? "" : "s"}.</div></div>
 		</div>
-		<div class="box" style="max-width:980px"><h3>Last 14 days</h3>
-			<div class="help">Days you saved something, from your own history.</div>
-			${sparkline14(S.receipts || [])}
+		<div class="box" style="max-width:1080px">
+			<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+				<h3 style="margin:0">Activity</h3>
+				<label class="pg-toggle" style="margin:0"><input type="checkbox" id="usageBreakdown" ${S.usageBreakdown ? "checked" : ""} onchange="S.usageBreakdown=this.checked;renderView()" /> breakdown by source</label>
+			</div>
+			${usage ? usageChart(usage.by_day) : `<div class="help" style="padding:24px 0">Loading your activity…</div>`}
+			${S.usageBreakdown && usage ? usageBreakdownTable(usage.by_source) : ""}
+		</div>
+		<div class="box" style="max-width:1080px">
+			<h3>Explore ${PRODUCT.name}</h3>
+			<div class="explore-grid">
+				<a class="explore-card" href="#" onclick="setView('playground');return false"><b>Try the Playground</b><span>Add a memory and search it back, live, before wiring anything.</span></a>
+				<a class="explore-card" href="#" onclick="setView('install');return false"><b>Connect a tool</b><span>Claude, ChatGPT, Cursor, or your own app — one key each.</span></a>
+				<a class="explore-card" href="/docs/" target="_blank" rel="noopener"><b>Read the docs ↗</b><span>API reference, SDK guides, and how memory works.</span></a>
+				<a class="explore-card" href="#" onclick="setView('settings');return false"><b>Tune what's remembered</b><span>Rules decide what ${PRODUCT.name} saves and what it never touches.</span></a>
+			</div>
 		</div>`;
 	v.appendChild(wrap);
+	if (!usage) refreshUsage();
 }
 
-/** Tiny dependency-free bar chart of saves per day over the last 14 days. */
-function sparkline14(receipts) {
-	const days = [];
-	for (let i = 13; i >= 0; i--) {
-		const d = new Date(Date.now() - i * 86400000);
-		days.push(d.toISOString().slice(0, 10));
+async function refreshUsage() {
+	try {
+		const res = await api(`/v1/usage?range=${encodeURIComponent(S.usageRange || "30d")}`);
+		S.usage = res;
+		if (S.view === "overview") renderView();
+	} catch {
+		// Dashboard degrades to placeholders; the next visit retries.
 	}
-	const counts = new Map(days.map((d) => [d, 0]));
-	for (const r of receipts) {
-		if (r.source === "recall") continue;
-		const day = new Date(Number(r.created_at)).toISOString().slice(0, 10);
-		if (counts.has(day)) counts.set(day, counts.get(day) + 1);
-	}
-	const max = Math.max(1, ...counts.values());
-	const total = [...counts.values()].reduce((a, b) => a + b, 0);
-	if (!total) return `<div class="help" style="margin-top:10px">Nothing saved in the last 14 days.</div>`;
-	const bars = days.map((day) => {
-		const n = counts.get(day);
-		const pct = Math.round((n / max) * 100);
-		return `<div class="spark-col" title="${day}: ${n} saved">
-			<div class="spark-bar" style="height:${Math.max(n ? 8 : 2, pct)}%"></div>
-			<span>${day.slice(8)}</span></div>`;
-	}).join("");
-	return `<div class="spark" style="margin-top:12px">${bars}</div>
-		<div class="help" style="margin-top:8px"><b>${total}</b> saved in the last 14 days · busiest day <b>${max}</b></div>`;
 }
+
+function setUsageRange(range) {
+	S.usageRange = range;
+	S.usage = null;
+	renderView();
+	refreshUsage();
+}
+
+/** Dependency-free area/bar chart: saves + recalls per day. */
+function usageChart(byDay) {
+	if (!byDay || !byDay.length) return `<div class="help" style="padding:24px 0">No activity in this range yet — the Playground is a good place to make some.</div>`;
+	const max = Math.max(1, ...byDay.map((d) => Math.max(Number(d.saves) || 0, Number(d.recalls) || 0)));
+	const cols = byDay.map((d) => {
+		const savePct = Math.round(((Number(d.saves) || 0) / max) * 100);
+		const recallPct = Math.round(((Number(d.recalls) || 0) / max) * 100);
+		return `<div class="uchart-col" title="${d.day}: ${d.saves} saves · ${d.recalls} recalls · ${d.memories_added} new memories">
+			<div class="uchart-bars">
+				<div class="uchart-bar saves" style="height:${Math.max(d.saves > 0 ? 6 : 2, savePct)}%"></div>
+				<div class="uchart-bar recalls" style="height:${Math.max(d.recalls > 0 ? 6 : 2, recallPct)}%"></div>
+			</div>
+			<span>${d.day.slice(5)}</span>
+		</div>`;
+	}).join("");
+	return `<div class="uchart">${cols}</div>
+		<div class="help" style="margin-top:8px"><span class="uchart-key saves"></span> saves&nbsp;&nbsp;<span class="uchart-key recalls"></span> recalls</div>`;
+}
+
+function usageBreakdownTable(bySource) {
+	if (!bySource || !bySource.length) return "";
+	const label = { save_memory: "Saved memories", save_conversation: "Saved conversations", ingest: "Auto-captured", recall: "Recalls", ui_test: "Tests" };
+	return `<div class="keys-table-wrap" style="margin-top:12px"><table class="keys-table">
+		<thead><tr><th>Source</th><th>Requests</th><th>Objects written</th></tr></thead>
+		<tbody>${bySource.map((row) => `<tr><td>${esc(label[row.source] || row.source)}</td><td>${row.count}</td><td>${row.saved_total ?? 0}</td></tr>`).join("")}</tbody>
+	</table></div>`;
+}
+
 
 async function onboardCreateLink() {
 	// One-click first connection: create the MCP link, then land the user in
