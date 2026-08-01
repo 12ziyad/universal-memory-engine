@@ -7,7 +7,9 @@
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
 <link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
-<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
+<!-- Self-hosted (v9.1.9, MIT). A CDN copy would send every visitor's IP to a
+     third party — the same reason the fonts live in /assets/. -->
+<script src="/assets/vis-network.min.js"></script>
 <style>
 	/* Geist (Vercel + basement.studio, SIL Open Font License 1.1 — the OFL
 	   explicitly allows fonts to be "bundled, embedded, redistributed and/or

@@ -22,7 +22,11 @@ describe("app type scale", () => {
 		// Geist 400 is preloaded; body text is the first thing anyone reads.
 		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2"');
 		// The privacy promise on the landing page depends on this staying true.
-		expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit|fontawesome|cdn\.jsdelivr|unpkg\.com\/@fontsource/i);
+		// No third-party loads of any kind — fonts OR scripts. A CDN request
+		// sends every visitor's IP off-origin, which the landing page promises
+		// does not happen.
+		expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit|fontawesome|cdn\.jsdelivr|unpkg\.com/i);
+		expect(html).not.toMatch(/<script[^>]+src="https?:\/\//i);
 	});
 
 	it("ships two static Geist weights, not the variable font", () => {
