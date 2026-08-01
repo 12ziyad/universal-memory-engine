@@ -14,7 +14,13 @@
 	],
 	"workers_dev": true,
 	"assets": {
-		"directory": "./public"
+		"directory": "./public",
+		"binding": "ASSETS",
+		// HTML paths run through the worker so the legacy host can 301 them to
+		// itsuki.app. Everything else (fonts, /assets/*) is served straight from
+		// the edge as before. /v1/* and /mcp/* are never redirected — not every
+		// client follows redirects, so both hosts serve them natively.
+		"run_worker_first": ["/", "/docs", "/docs/*"]
 	},
 	"observability": {
 		"enabled": true

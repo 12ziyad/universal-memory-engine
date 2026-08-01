@@ -9,7 +9,7 @@
 
 import { createMcpHandler } from "agents/mcp";
 
-import { getConfig } from "./config.js";
+import { getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
 import { getUserReceipts } from "./lib/db.js";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
@@ -1423,7 +1423,23 @@ async function handleRequest(request, env, ctx) {
 		return handleRequestInner(request, env, ctx, url);
 }
 
+// HTML paths a legacy host 301s to the canonical origin. API and MCP paths are
+// deliberately absent: both hosts serve those natively, forever.
+const REDIRECT_EXACT_PATHS = new Set(["/", "/terms", "/privacy", "/app", "/login", "/signup"]);
+
+function isRedirectableHtmlPath(pathname) {
+	return REDIRECT_EXACT_PATHS.has(pathname) || pathname === "/docs" || pathname.startsWith("/docs/");
+}
+
 async function handleRequestInner(request, env, ctx, url) {
+		if (
+			(request.method === "GET" || request.method === "HEAD") &&
+			LEGACY_HOSTS.includes(url.hostname) &&
+			isRedirectableHtmlPath(url.pathname)
+		) {
+			return Response.redirect(`${PUBLIC_ORIGIN}${url.pathname}${url.search}`, 301);
+		}
+
 		if ((request.method === "GET" || request.method === "HEAD") && ["/terms", "/privacy"].includes(url.pathname)) {
 			// Legal pages must resolve on a direct visit (directory listings,
 			// payment-provider reviews) — serve the shell; the client routes it.
@@ -1466,6 +1482,16 @@ async function handleRequestInner(request, env, ctx, url) {
 		const handler = routes[`${request.method} ${url.pathname}`];
 
 		if (!handler) {
+			// run_worker_first hands the HTML paths to the worker on every host so
+			// the legacy redirect above can see them; on the canonical host they
+			// fall through here to the static assets they always were.
+			if (
+				(request.method === "GET" || request.method === "HEAD") &&
+				env.ASSETS &&
+				(url.pathname === "/" || url.pathname === "/docs" || url.pathname.startsWith("/docs/"))
+			) {
+				return env.ASSETS.fetch(request);
+			}
 			return json({ error: "not found" }, 404);
 		}
 
