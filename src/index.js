@@ -1065,6 +1065,35 @@ const routes = {
 		return json({ ok: true, settings });
 	},
 
+	"GET /v1/requests": async (request, env) => {
+		// The Requests page. METADATA ONLY — this query deliberately never
+		// selects `summary` or `detail`, because both can contain the person's
+		// own words. What went through, how long it took, whether it worked.
+		const url = new URL(request.url);
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+
+		const dayMs = 24 * 60 * 60 * 1000;
+		const rangeDays = { "1d": 1, "7d": 7, "30d": 30, "90d": 90 }[url.searchParams.get("range") ?? "7d"] ?? 7;
+		const fromMs = Date.now() - rangeDays * dayMs;
+		const limit = Math.min(Number(url.searchParams.get("limit") ?? 300), 1000);
+
+		const { results } = await env.DB.prepare(
+			`SELECT id, source, source_mode, outcome, saved_total, saved_nodes, saved_pages,
+				updated_nodes, skipped, latency_ms, matched, created_at, extraction_run_id
+			 FROM receipts WHERE user_id = ? AND created_at >= ?
+			 ORDER BY created_at DESC LIMIT ?`,
+		).bind(auth.userId, fromMs, limit).all();
+
+		return json({
+			ok: true,
+			range: { days: rangeDays, from: fromMs, to: Date.now() },
+			requests: results ?? [],
+		});
+	},
+
 	"GET /v1/receipts": async (request, env) => {
 		const url = new URL(request.url);
 		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {

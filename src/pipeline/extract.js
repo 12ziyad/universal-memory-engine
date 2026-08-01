@@ -101,6 +101,10 @@ function runListsFromPlan(plan) {
 
 export async function runExtraction(env, userId, chunk, recent, overrides = {}) {
 	const config = getConfig(env);
+	// Wall time for the whole extraction, carried onto every receipt this
+	// function can return. It is what the Requests page reports as latency.
+	const startedAt = Date.now();
+	const elapsed = () => Date.now() - startedAt;
 	const sourceMode = overrides.meta?.source_mode
 		?? (overrides.manual
 			? (overrides.source === "save_conversation" ? "manual_collect" : "manual_direct")
@@ -114,6 +118,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	if (optOut.optedOut) {
 		const receipt = emptyReceipt("no_write", "user_opt_out", {
 			...meta,
+			latency_ms: elapsed(),
 			received: chunk.filter((m) => (m?.role ?? "user") === "user").length,
 		});
 		receipt.durable = false;
@@ -167,7 +172,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		});
 		return {
 			outcome: "llm_failed",
-			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", meta),
+			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", { ...meta, latency_ms: elapsed() }),
 		};
 	}
 
@@ -196,7 +201,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		return {
 			outcome: "meaningful_no_write",
 			rejected: plan.rejected,
-			receipt: buildReceipt("meaningful_no_write", plan, meta),
+			receipt: buildReceipt("meaningful_no_write", plan, { ...meta, latency_ms: elapsed() }),
 		};
 	}
 
@@ -213,11 +218,11 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		return {
 			outcome: "db_write_failed",
 			error: String(err?.message ?? err),
-			receipt: emptyReceipt("db_write_failed", "a storage error interrupted the save", meta),
+			receipt: emptyReceipt("db_write_failed", "a storage error interrupted the save", { ...meta, latency_ms: elapsed() }),
 		};
 	}
 
-	const receipt = buildReceipt("wrote", plan, meta);
+	const receipt = buildReceipt("wrote", plan, { ...meta, latency_ms: elapsed() });
 	await updateExtractionRun(env, userId, extractionRunId, {
 		status: "wrote",
 		...runListsFromPlan(plan),

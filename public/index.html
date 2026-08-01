@@ -360,6 +360,10 @@
 	.uchart-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; }
 	.uchart-key.saves { background: var(--accent); }
 	.uchart-key.recalls { background: color-mix(in srgb, var(--green) 80%, transparent); }
+	/* Requests / Memory exports control strip. */
+	.rq-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+	.rq-controls input { flex: 1; min-width: min(100%, 280px); }
+	.rq-controls .terminal-tabs { padding: 0; background: transparent; }
 	.explore-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
 	.explore-card { display: block; border: 1px solid var(--border); border-radius: 12px; padding: 14px;
 		text-decoration: none; color: var(--text); transition: border-color .12s, transform .12s; }
@@ -1107,6 +1111,7 @@
 			<button class="tab active" data-view="overview"><span class="ti">◔</span>Dashboard</button>
 			<button class="tab" data-view="memory"><span class="ti">◈</span>Memories<span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="graph"><span class="ti">⁂</span>Graph</button>
+			<button class="tab" data-view="requests"><span class="ti">⇄</span>Requests</button>
 			<button class="tab" data-view="receipts"><span class="ti">≡</span>History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<div class="rail-sep"></div>
 			<a class="tab rail-doclink" href="/docs/" target="_blank" rel="noopener"><span class="ti">✧</span>Docs<span class="ext">↗</span></a>
@@ -1196,7 +1201,7 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -1732,6 +1737,7 @@ const VIEW_TITLES = {
 	overview: "Dashboard", memory: "Memories", graph: "Graph",
 	install: "Get started", playground: "Playground", keys: "API Keys",
 	receipts: "History", settings: "Settings", admin: "Admin",
+	requests: "Requests",
 };
 
 function toggleRail() {
@@ -1764,7 +1770,7 @@ function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
 	// Setup screens must never wait on /v1/graph — a brand-new account has no
 	// graph to load, and Get started is the first thing they open.
-	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -1775,6 +1781,7 @@ function renderView() {
 		install: viewInstall,
 		playground: viewPlayground,
 		keys: viewKeys,
+		requests: viewRequests,
 		receipts: viewReceipts,
 		rules: viewRules,
 		admin: viewAdmin,
@@ -2969,6 +2976,179 @@ function renderKeysTable() {
 		if (button.dataset.keyAction === "rotate") rotateConnection(id, button.dataset.keyLabel || "", button.dataset.keyType || "mcp");
 		if (button.dataset.keyAction === "revoke") revokeToken(id);
 	};
+}
+
+/**
+ * Requests — every call that reached your memory, as metadata.
+ *
+ * This page never renders memory content. Not the summary, not a label, not a
+ * sentence: the server does not even select those columns. What happened, how
+ * long it took, whether it worked. The admin analytics follow the same rule.
+ */
+const RQ = { rows: [], range: "7d", type: "all", query: "", loading: false, error: "" };
+
+// Two request types exist in this engine: writes and lookups. There is no
+// third — inventing one to fill a column would be inventing data.
+const REQUEST_TYPES = { all: "All", save: "Save", recall: "Recall" };
+
+function requestType(row) {
+	return row.source === "recall" ? "recall" : "save";
+}
+
+/** A metadata-only phrase for what happened. Never the receipt summary. */
+function requestEvent(row) {
+	if (requestType(row) === "recall") {
+		if (row.outcome === "no_recall") return "Lookup skipped — no personal context needed";
+		const n = Number(row.matched ?? 0);
+		return n ? `Recalled ${n} memor${n === 1 ? "y" : "ies"}` : "Recalled nothing";
+	}
+	const saved = Number(row.saved_total ?? 0);
+	if (row.outcome === "accepted" || row.outcome === "accumulating") return "Accepted, processing";
+	if (saved > 0) return `Wrote ${saved} object${saved === 1 ? "" : "s"}`;
+	if (Number(row.skipped ?? 0) > 0) return `Skipped ${row.skipped}, nothing durable`;
+	return "Nothing durable found";
+}
+
+function requestStatus(row) {
+	if (["llm_failed", "db_write_failed"].includes(row.outcome)) return { label: "Failed", cls: "state-inactive" };
+	if (["accepted", "accumulating"].includes(row.outcome)) return { label: "Processing", cls: "state-paused" };
+	if (requestType(row) === "recall") return { label: "OK", cls: "state-active" };
+	if (Number(row.saved_total ?? 0) > 0) return { label: "OK", cls: "state-active" };
+	return { label: "No write", cls: "state-completed" };
+}
+
+function requestEntities(row) {
+	return requestType(row) === "recall"
+		? Number(row.matched ?? 0)
+		: Number(row.saved_nodes ?? 0) + Number(row.saved_pages ?? 0) + Number(row.updated_nodes ?? 0);
+}
+
+function filteredRequests() {
+	const q = String(RQ.query || "").trim().toLowerCase();
+	return RQ.rows.filter((row) => {
+		if (RQ.type !== "all" && requestType(row) !== RQ.type) return false;
+		if (!q) return true;
+		return [requestType(row), row.source, row.source_mode, row.outcome, requestEvent(row), requestStatus(row).label, row.id]
+			.filter(Boolean).join(" ").toLowerCase().includes(q);
+	});
+}
+
+/** Request volume over the selected range, bucketed by day (or hour for 1d). */
+function requestChart(rows) {
+	const hourly = RQ.range === "1d";
+	const buckets = new Map();
+	const size = hourly ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+	const count = hourly ? 24 : { "7d": 7, "30d": 30, "90d": 90 }[RQ.range] ?? 7;
+	const now = Date.now();
+	for (let i = count - 1; i >= 0; i--) {
+		const start = Math.floor((now - i * size) / size) * size;
+		buckets.set(start, { saves: 0, recalls: 0 });
+	}
+	for (const row of rows) {
+		const start = Math.floor(Number(row.created_at) / size) * size;
+		const bucket = buckets.get(start);
+		if (!bucket) continue;
+		if (requestType(row) === "recall") bucket.recalls++; else bucket.saves++;
+	}
+	const entries = [...buckets.entries()];
+	const max = Math.max(1, ...entries.map(([, b]) => b.saves + b.recalls));
+	return `
+		<div class="uchart">${entries.map(([start, b]) => `
+			<div class="uchart-col" title="${esc(new Date(start).toLocaleString())}: ${b.saves} save${b.saves === 1 ? "" : "s"}, ${b.recalls} recall${b.recalls === 1 ? "" : "s"}">
+				<div class="uchart-bars">
+					<div class="uchart-bar saves" style="height:${Math.round((b.saves / max) * 100)}%"></div>
+					<div class="uchart-bar recalls" style="height:${Math.round((b.recalls / max) * 100)}%"></div>
+				</div>
+				<span>${esc(hourly ? new Date(start).toLocaleTimeString(undefined, { hour: "2-digit" }) : new Date(start).toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</span>
+			</div>`).join("")}</div>
+		<div class="hint" style="margin-top:8px"><span class="uchart-key saves"></span> saves &nbsp; <span class="uchart-key recalls"></span> recalls</div>`;
+}
+
+function viewRequests(v) {
+	const rows = filteredRequests();
+	const wrap = el("div");
+	const rangeButton = (key, label) =>
+		`<button class="term-tab ${RQ.range === key ? "active" : ""}" onclick="setRequestRange('${key}')">${label}</button>`;
+	wrap.innerHTML = `
+		<div class="page-head">
+			<h2 class="page-title">Requests</h2>
+			<p class="page-sub">Every call that reached your memory — what it did, how long it took, and whether it worked. Metadata only: nothing you stored is shown on this page.</p>
+		</div>
+		<div class="rq-controls">
+			<input id="rqSearch" placeholder="Search type, event, or status" value="${esc(RQ.query)}" oninput="RQ.query=this.value;renderRequestsTable()" />
+			<select id="rqType" onchange="RQ.type=this.value;renderRequestsTable()">
+				${Object.entries(REQUEST_TYPES).map(([id, label]) => `<option value="${id}" ${RQ.type === id ? "selected" : ""}>${esc(label)}</option>`).join("")}
+			</select>
+			<div class="terminal-tabs">${rangeButton("1d", "24h")}${rangeButton("7d", "7d")}${rangeButton("30d", "30d")}${rangeButton("90d", "90d")}</div>
+			<button class="ghost" onclick="loadRequests()">${RQ.loading ? "Refreshing…" : "Refresh"}</button>
+		</div>
+		<div class="box" style="max-width:none">
+			<div class="section-h">Request volume</div>
+			${RQ.loading && !RQ.rows.length ? `<div class="hint" style="padding:28px 0">Loading…</div>` : requestChart(rows)}
+		</div>
+		<div class="box" style="max-width:none;padding:0;overflow:hidden">
+			<div class="keys-table-wrap"><table class="keys-table">
+				<thead><tr><th>Time</th><th>Type</th><th>Entities</th><th>Event</th><th>Latency</th><th>Status</th></tr></thead>
+				<tbody id="rqBody"></tbody>
+			</table></div>
+			<div id="rqEmpty"></div>
+		</div>`;
+	v.appendChild(wrap);
+	renderRequestsTable();
+	if (!RQ.rows.length && !RQ.loading) loadRequests();
+}
+
+function renderRequestsTable() {
+	const body = $("#rqBody");
+	const empty = $("#rqEmpty");
+	if (!body || !empty) return;
+	const rows = filteredRequests();
+	if (!rows.length) {
+		body.innerHTML = "";
+		empty.innerHTML = RQ.error
+			? `<div class="pg-empty">${esc(RQ.error)}</div>`
+			: RQ.rows.length
+				? `<div class="pg-empty">No requests match that filter. Clear the search or widen the range.</div>`
+				: `<div class="pg-empty">Nothing has reached your memory yet.<br><br>
+					<a href="#" onclick="setView('playground');return false">Open the Playground</a> and say something worth remembering, or
+					<a href="#" onclick="setView('install');return false">connect a tool</a> — every call either way shows up here.</div>`;
+		return;
+	}
+	empty.innerHTML = "";
+	body.innerHTML = rows.map((row) => {
+		const status = requestStatus(row);
+		const latency = Number.isFinite(Number(row.latency_ms)) && row.latency_ms !== null
+			? `${Number(row.latency_ms) >= 1000 ? `${(row.latency_ms / 1000).toFixed(1)}s` : `${row.latency_ms}ms`}`
+			: "—";
+		return `<tr>
+			<td>${esc(ago(row.created_at))}</td>
+			<td><span class="badge ${requestType(row) === "recall" ? "state-completed" : "state-active"}">${esc(REQUEST_TYPES[requestType(row)])}</span></td>
+			<td>${requestEntities(row)}</td>
+			<td>${esc(requestEvent(row))}</td>
+			<td class="key-mono">${esc(latency)}</td>
+			<td><span class="badge ${status.cls}">${esc(status.label)}</span></td>
+		</tr>`;
+	}).join("");
+}
+
+function setRequestRange(range) {
+	RQ.range = range;
+	loadRequests();
+}
+
+async function loadRequests() {
+	RQ.loading = true;
+	if (S.view === "requests") renderView();
+	try {
+		const res = await api(`/v1/requests?range=${encodeURIComponent(RQ.range)}`);
+		RQ.rows = res.requests || [];
+		RQ.error = "";
+	} catch (e) {
+		RQ.error = e.message || "Could not load your requests. Try refreshing in a moment.";
+	} finally {
+		RQ.loading = false;
+		if (S.view === "requests") renderView();
+	}
 }
 
 function viewReceipts(v) {

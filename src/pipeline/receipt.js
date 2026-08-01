@@ -103,6 +103,9 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
+		// How long the memory work took. Metadata for the Requests page; null
+		// when the caller did not measure it.
+		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		saved,
 		savedTotal,
 		skipped: rejected.length,
@@ -135,6 +138,8 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
+		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
+		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
 		saved: {
 			pages: 0,
 			nodes: 0,

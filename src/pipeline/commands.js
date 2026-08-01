@@ -67,6 +67,8 @@ async function storeStatusReceipt(env, userId, sourcePacket, outcome, reason, so
 		...sourceMeta(sourcePacket),
 		received: meta.received,
 		skipped: meta.skipped,
+		latency_ms: meta.latency_ms,
+		matched: meta.matched,
 	});
 	if (meta.processing !== undefined) receipt.processing = Boolean(meta.processing);
 	if (meta.final !== undefined) receipt.final = Boolean(meta.final);
@@ -257,15 +259,19 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		scope: input.memoryScope,
 	});
 	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	const startedAt = Date.now();
 	const result = await recall(env, getConfig(env), userId, query, {
 		memoryScope: input.memoryScope,
 	});
+	const latencyMs = Date.now() - startedAt;
 	const outcome = result.recall_mode === "no_recall" ? "no_recall" : "recalled";
 	const reason = result.recall_mode === "no_recall"
 		? "recall gate skipped memory lookup"
 		: "bounded recall completed";
 	const stored = await storeStatusReceipt(env, userId, sourcePacket, outcome, reason, "recall", {
 		received: 1,
+		latency_ms: latencyMs,
+		matched: Number(result.count ?? 0),
 	});
 	const summary = result.count ? "Found relevant memory." : "No relevant memory found.";
 	const { mode: recallStatus, ok: _ok, ...recallDetails } = result;

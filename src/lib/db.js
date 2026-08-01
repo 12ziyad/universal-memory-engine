@@ -210,8 +210,8 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total,
 				saved_nodes, saved_slices, saved_events, saved_edges, saved_candidates,
 				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id,
-				saved_pages, source_packet_id, idempotency_key, scope_json)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				saved_pages, source_packet_id, idempotency_key, scope_json, latency_ms, matched, source_mode)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				id,
@@ -236,6 +236,9 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				receipt?.source_packet_id ?? null,
 				receipt?.idempotency_key ?? null,
 				receipt?.scope_json ?? null,
+				Number.isFinite(receipt?.latency_ms) ? Math.round(receipt.latency_ms) : null,
+				Number.isFinite(receipt?.matched) ? Math.round(receipt.matched) : null,
+				receipt?.source_mode ?? null,
 			)
 			.run();
 		if (receipt && typeof receipt === "object") receipt.id = id;
