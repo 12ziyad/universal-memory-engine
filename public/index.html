@@ -246,7 +246,7 @@
 	.install-intro p { margin: 0; color: var(--muted); font-size: 15px; }
 	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		gap: 14px; max-width: 1080px; margin-bottom: 32px; }
-	.method-card { display: block; text-align: left; background: var(--panel); border: 1px solid var(--border);
+	.method-card { display: block; text-align: left; color: var(--text); background: var(--panel); border: 1px solid var(--border);
 		border-radius: 12px; padding: 16px 18px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
 	.method-card b { display: block; font-size: 15px; color: var(--text); margin-bottom: 3px; font-weight: 650; }
 	.method-card span { display: block; color: var(--muted); font-size: 13px; }
@@ -357,9 +357,12 @@
 		font-weight: 600; cursor: pointer; font-size: 13px; }
 	/* Light shell: solid accent needs white text, panels need shadow instead of
 	   the borders that carried structure on dark. */
-	/* Scoped away from .tab and .ghost: a bare `button` rule here outranks
-	   .tab's own color and would paint the whole nav white-on-white. */
-	body.app-mode button:not(.tab):not(.ghost):not(.rail-toggle) { color: #fff; }
+	/* Filled buttons need white text — but this must NEVER outrank a component's
+	   own color, or class-styled buttons (nav items, tabs, cards) get painted
+	   white-on-white. :where() zeroes this rule's specificity contribution, so
+	   any button carrying a class wins on its own terms. Chasing this with
+	   :not() lists failed twice; specificity is the real fix. */
+	:where(body.app-mode) button { color: #fff; }
 	body.app-mode button.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border2); }
 	body.app-mode button.danger { background: #fef3f2; color: var(--red); border: 1px solid #fda29b; }
 	body.app-mode .box, body.app-mode .action-box, body.app-mode .browser-col {
@@ -2120,19 +2123,21 @@ function installSnippets() {
   -H "authorization: Bearer ${apiKey}" \\
   -H "content-type: application/json" \\
   -d '{"query": "what am I learning?"}'`,
-		python: `# pip install itsuki
-from itsuki import MemoryClient
+		pythonInit: `from itsuki import MemoryClient
 
-memory = MemoryClient(api_key="${apiKey}", base_url="${origin}")
-
+memory = MemoryClient(api_key="${apiKey}", base_url="${origin}")`,
+		python: `# save a durable fact
 memory.add("I started learning Kotlin this week.")
+
+# ask for it back
 print(memory.search("what am I learning?")["context"])`,
-		node: `// npm install itsuki
-import { MemoryClient } from "itsuki";
+		nodeInit: `import { MemoryClient } from "itsuki";
 
-const memory = new MemoryClient({ apiKey: "${apiKey}", baseUrl: "${origin}" });
-
+const memory = new MemoryClient({ apiKey: "${apiKey}", baseUrl: "${origin}" });`,
+		node: `// save a durable fact
 await memory.add("I started learning Kotlin this week.");
+
+// ask for it back
 const { context } = await memory.search("what am I learning?");
 console.log(context);`,
 		claudeCode: `claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${origin}/mcp/${mcpToken}`,
@@ -2212,7 +2217,7 @@ function installMethods() {
 					label: "Python",
 					steps: [
 						{ t: "Install the SDK", d: "One package, one dependency.", code: "pip install itsuki" },
-						{ t: "Create an API key", d: "A Bearer key for server-side use. Keep it out of browsers.", html: apiKey },
+						{ t: "Initialize the client", d: "Point it at your key. Server-side only — keep keys out of browsers.", code: s.pythonInit, note: "<div class=\"step-note\">Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once.</div>" },
 						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.python },
 						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.pythonTurn },
 					],
@@ -2221,7 +2226,7 @@ function installMethods() {
 					label: "Node.js",
 					steps: [
 						{ t: "Install the SDK", d: "Zero dependencies, Node 18 or newer.", code: "npm install itsuki" },
-						{ t: "Create an API key", d: "A Bearer key for server-side use. Keep it out of browsers.", html: apiKey },
+						{ t: "Initialize the client", d: "Point it at your key. Server-side only — keep keys out of browsers.", code: s.nodeInit, note: "<div class=\"step-note\">Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once.</div>" },
 						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.node },
 						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.nodeTurn },
 					],
@@ -2229,7 +2234,7 @@ function installMethods() {
 				curl: {
 					label: "cURL",
 					steps: [
-						{ t: "Create an API key", d: "Send it as a Bearer token on every request.", html: apiKey },
+						{ t: "Create an API key", d: "Send it as a Bearer token on every request.", html: apiKey, note: "<div class=\"step-note\">Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>.</div>" },
 						{ t: "Save a memory", d: "Returns a receipt: what was stored, what was skipped, and why.", code: s.curlSave },
 						{ t: "Recall it", d: "The context field is the block you drop into your prompt.", code: s.curlRecall },
 					],
@@ -2239,6 +2244,7 @@ function installMethods() {
 		plugin: {
 			label: "Plugin",
 			blurb: "Memory inside your coding agent",
+			footnote: "Looking for Claude or ChatGPT? Those are chat apps — use <b>App Connect</b> above.",
 			clients: {
 				"claude-code": {
 					label: "Claude Code",
@@ -2361,6 +2367,7 @@ function viewInstall(v) {
 			</div>` : ""}
 		${oneTimeSecretPanel(S.oneTimeToken)}
 		<div class="steps-panel">${steps}</div>
+		${method.footnote ? `<div class="install-foot" style="margin-top:14px">${method.footnote}</div>` : ""}
 		<div class="install-foot">
 			Full reference, concepts, and troubleshooting live in the
 			<a href="/docs/" target="_blank" rel="noopener">documentation ↗</a>.
