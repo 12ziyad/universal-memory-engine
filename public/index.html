@@ -2147,6 +2147,16 @@ console.log(context);`,
   }
 }`,
 		pluginMarketplace: `claude plugin marketplace add 12ziyad/universal-memory-engine`,
+		codexMarketplace: `{
+  "name": "${PRODUCT.name.toLowerCase()}-plugins",
+  "interface": { "displayName": "${PRODUCT.name}" },
+  "plugins": [{
+    "name": "${PRODUCT.name.toLowerCase()}",
+    "source": { "source": "local", "path": "./plugins/${PRODUCT.name.toLowerCase()}" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Productivity"
+  }]
+}`,
 		pluginInstall: `/plugin install ${PRODUCT.name.toLowerCase()}`,
 		pythonTurn: `# one call per agent turn: recall + capture together
 result = memory.turn([
@@ -2271,12 +2281,27 @@ function installMethods() {
 				},
 				codex: {
 					label: "Codex",
-					steps: [
-						{ t: "Create your link", d: "The same private URL, used by Codex's MCP config.", html: mcpKey },
-						{ t: "Add the server", d: "Point Codex's MCP configuration at your link.", code: s.cursor },
-						{ t: "Restart the agent", d: "It connects over HTTP and the memory tools appear.",
-							html: `<div class="step-done">Any MCP-capable agent works the same way.</div>` },
-					],
+					variants: {
+						mcp: {
+							label: "MCP",
+							steps: [
+								{ t: "Create your link", d: "The same private URL, used by Codex's MCP config.", html: mcpKey },
+								{ t: "Add the server", d: "Point Codex's MCP configuration at your link.", code: s.cursor },
+								{ t: "Restart the agent", d: "It connects over HTTP and the memory tools appear.",
+									html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+							],
+						},
+						plugin: {
+							label: "Plugin",
+							steps: [
+								{ t: "Register the marketplace", d: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", code: s.codexMarketplace },
+								{ t: "Install from the Codex UI", d: "The plugin appears in Codex's plugin list and bundles the MCP server, so there is no URL to paste.",
+									html: `<div class="step-note">Codex plugins package skills and MCP servers together — one install instead of a config edit.</div>` },
+								{ t: "Not published yet", d: "This needs the repository to be public before Codex can fetch it.",
+									html: `<div class="step-note">Until then the <b>MCP</b> tab connects Codex today.</div>` },
+							],
+						},
+					},
 				},
 			},
 		},
