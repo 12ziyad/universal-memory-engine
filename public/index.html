@@ -240,6 +240,12 @@
 	body.app-mode .term-tab { background: transparent; color: var(--muted); border: 1px solid transparent;
 		padding: 6px 12px; border-radius: 8px; font-weight: 600; font-size: 13px; }
 	body.app-mode .term-tab.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+	.pg-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+	.pg-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13.5px; }
+	.pg-result.ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+	.pg-result.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
+	.pg-context { margin: 0; padding: 10px; background: var(--panel2); border-radius: 8px; white-space: pre-wrap;
+		font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.55; overflow-x: auto; max-height: 260px; overflow-y: auto; }
 	.onboard-card { border-color: rgba(132,233,255,.35); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
@@ -2136,9 +2142,92 @@ function viewInstall(v) {
 
 function viewPlayground(v) {
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Playground</h3>
-		<div class="help">Try ${PRODUCT.name} live — add a memory, then search for it. Coming in the next update.</div></div>`;
+	wrap.innerHTML = `
+		<div class="box" style="max-width:1080px">
+			<h3>Playground</h3>
+			<div class="help">Try ${PRODUCT.name} live before wiring it into anything. This uses your real memory — whatever you add here is genuinely saved (and shows in History with a receipt).</div>
+		</div>
+		<div class="panel-grid" style="max-width:1080px">
+			<div class="action-box">
+				<h3>1 · Add a memory</h3>
+				<div class="help" style="margin-bottom:10px">A durable fact in your own words — or flip to conversation mode and paste a short chat.</div>
+				<label class="pg-toggle"><input type="checkbox" id="pgConvMode" /> Conversation mode (paste multiple lines, oldest first)</label>
+				<textarea id="pgAddText" rows="5" placeholder="I started learning Kotlin this week."></textarea>
+				<div style="margin-top:10px"><button id="pgAddBtn" onclick="playgroundAdd()">Add memory</button></div>
+				<div id="pgAddResult" style="margin-top:12px"></div>
+			</div>
+			<div class="action-box">
+				<h3>2 · Search it back</h3>
+				<div class="help" style="margin-bottom:10px">Ask a question the way an AI tool would. You get exactly the context a connected tool gets.</div>
+				<input id="pgQuery" placeholder="what am I learning?" onkeydown="if(event.key==='Enter') playgroundSearch()" />
+				<div style="margin-top:10px"><button id="pgSearchBtn" onclick="playgroundSearch()">Search</button></div>
+				<div id="pgSearchResult" style="margin-top:12px"></div>
+			</div>
+		</div>
+		<div class="box" style="max-width:1080px">
+			<h3>The same thing, from your own code</h3>
+			<div class="help">Everything this playground does is two API calls. <a href="#" onclick="setView('install');return false">Get started</a> has the copy-paste versions for cURL, Python, and Node.</div>
+		</div>`;
 	v.appendChild(wrap);
+}
+
+async function playgroundAdd() {
+	const text = ($("#pgAddText")?.value || "").trim();
+	const out = $("#pgAddResult");
+	const btn = $("#pgAddBtn");
+	if (!text) { toast("Type something to remember first.", true); return; }
+	const convMode = $("#pgConvMode")?.checked;
+	out.innerHTML = `<div class="help">Saving… extraction usually takes a few seconds.</div>`;
+	btn.disabled = true;
+	try {
+		const body = convMode
+			? { mode: "conversation", conversationId: `playground-${Date.now()}`, messages: text.split("\n").filter(Boolean).map((line) => ({ role: "user", content: line })) }
+			: { content: text };
+		const res = await api("/v1/save", { method: "POST", body: JSON.stringify(body) });
+		const receipt = res.receipt || {};
+		const chips = [];
+		if (receipt.saved?.nodes || res.counts?.nodes) chips.push(`${receipt.saved?.nodes ?? res.counts?.nodes} memories`);
+		if (receipt.saved?.slices) chips.push(`${receipt.saved.slices} details`);
+		if (receipt.saved?.events) chips.push(`${receipt.saved.events} events`);
+		if (receipt.saved?.pages || res.counts?.pages) chips.push(`${receipt.saved?.pages ?? res.counts?.pages} notes`);
+		out.innerHTML = `
+			<div class="pg-result ok">
+				<b>${esc(res.summary || receipt.summary || "Saved.")}</b>
+				${chips.length ? `<div style="margin-top:6px">${chips.map((c) => `<span class="badge state-active" style="margin-right:6px">${esc(c)}</span>`).join("")}</div>` : ""}
+				<div class="help" style="margin-top:8px">Receipt logged — see <a href="#" onclick="setView('receipts');return false">History</a>. Now search it back on the right →</div>
+			</div>`;
+		await load().catch(() => {});
+	} catch (e) {
+		out.innerHTML = `<div class="pg-result err">${esc(e.message || "Could not save. Please try again.")}</div>`;
+	} finally {
+		btn.disabled = false;
+	}
+}
+
+async function playgroundSearch() {
+	const query = ($("#pgQuery")?.value || "").trim();
+	const out = $("#pgSearchResult");
+	const btn = $("#pgSearchBtn");
+	if (!query) { toast("Type a question first.", true); return; }
+	out.innerHTML = `<div class="help">Searching your memory…</div>`;
+	btn.disabled = true;
+	try {
+		const res = await api("/v1/recall", { method: "POST", body: JSON.stringify({ query }) });
+		const context = String(res.context || "").trim();
+		const items = (res.items || []).slice(0, 6);
+		out.innerHTML = context
+			? `<div class="pg-result ok">
+					<div class="help" style="margin-bottom:6px"><b>${res.count}</b> match${res.count === 1 ? "" : "es"} — this exact text is what a connected AI receives:</div>
+					<pre class="pg-context">${esc(context)}</pre>
+					${items.length ? `<div style="margin-top:8px">${items.map((i) => `<span class="badge state-active" style="margin-right:6px" title="score ${i.score ?? ""}">${esc(i.label || i.title || i.type)}</span>`).join("")}</div>` : ""}
+					<details style="margin-top:8px"><summary class="help">Raw response (for developers)</summary><pre class="pg-context">${esc(JSON.stringify(res, null, 2).slice(0, 4000))}</pre></details>
+				</div>`
+			: `<div class="pg-result">Nothing found for that. Add a memory on the left first, give extraction ~10 seconds, then try again.</div>`;
+	} catch (e) {
+		out.innerHTML = `<div class="pg-result err">${esc(e.message || "Search failed. Please try again.")}</div>`;
+	} finally {
+		btn.disabled = false;
+	}
 }
 
 function viewKeys(v) {
