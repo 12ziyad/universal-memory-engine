@@ -261,7 +261,9 @@ export async function applyGates(
 	if (!manual && (settings?.captureDensity ?? null) === null && rules.captureDensity === "dense") {
 		confMin = config.manualConfidenceMin;
 	}
-	if (rules.includes?.length || rules.excludes?.length) {
+	// Instructions can carry deny terms too ("never save anything about X"), so
+	// this gate runs whenever the user has written any rule at all.
+	if (rules.includes?.length || rules.excludes?.length || rules.customInstructions) {
 		objects = objects.filter((obj) => {
 			const reason = rulesRejection(rules, obj?.text, obj?.label, obj?.on, obj?.from, obj?.to);
 			if (!reason) return true;

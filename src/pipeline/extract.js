@@ -31,6 +31,7 @@ import { runPass2 } from "./pass2.js";
 import { buildReceipt, emptyReceipt } from "./receipt.js";
 import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
+import { getMemoryRules } from "./rules.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 
@@ -140,6 +141,12 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	// E — shortlist (~10 existing nodes, keyword + semantic).
 	const shortlist = await shortlistNodes(env, config, userId, text);
 
+	// The user's memory rules, resolved ONCE: the prompt gets them as guidance
+	// and the gates get the same object for enforcement. A caller may hand in a
+	// pre-merged set (the Playground layers thread settings over the account's).
+	const rules = overrides.rules ?? await getMemoryRules(env, userId);
+	const withRules = { ...overrides, rules };
+
 	// F — LLM proposes (deterministic in tests via overrides.llmResponse).
 	const { proposal, rescued } = await proposeWithSplitRescue(
 		env,
@@ -149,7 +156,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		recent,
 		packet,
 		shortlist,
-		overrides,
+		withRules,
 	);
 	if (rescued) meta.splitRescue = true;
 	if (!proposal._ok) {
@@ -176,10 +183,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		updateMode,
 		sourceText: text,
 		lastTs,
-		// A caller may hand the gates a rules object it has already resolved
-		// (the Playground merges thread settings over the account's rules).
-		// Null/undefined means "load the account's rules", exactly as before.
-		rules: overrides.rules ?? undefined,
+		rules,
 	});
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.

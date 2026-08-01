@@ -416,6 +416,8 @@
 		color: var(--text); border-radius: 8px; padding: 8px 10px; font: 400 13px/1.6 var(--font-ui); }
 	.pg-settings textarea { min-height: 96px; resize: vertical; }
 	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; margin-bottom: 6px; }
+	/* The form needs more room than a chat list does. */
+	.pg-shell.settings-open { grid-template-columns: 380px minmax(0, 1fr) 320px; }
 	@media (max-width: 1100px) {
 		.pg-shell { grid-template-columns: 200px minmax(0, 1fr); height: auto; }
 		.pg-shell .pg-col.pg-memories { grid-column: 1 / -1; max-height: 380px; }
@@ -2609,14 +2611,17 @@ function viewPlayground(v) {
 			<h2 class="page-title">Playground</h2>
 			<p class="page-sub">Talk to an AI that can see your memory, and watch what it keeps. Everything captured here is real — same pipeline, same receipts, same graph.</p>
 		</div>
-		<div class="pg-shell">
+		<div class="pg-shell${PG.tab === "settings" ? " settings-open" : ""}">
 			<div class="pg-col pg-chats">
 				<div class="pg-col-head">
 					<div class="client-tabs" style="margin-bottom:10px">
 						<button class="term-tab ${PG.tab === "chats" ? "active" : ""}" onclick="playgroundTab('chats')">Chats</button>
+						<button class="term-tab ${PG.tab === "settings" ? "active" : ""}" onclick="playgroundTab('settings')">Settings</button>
 					</div>
-					<button style="width:100%" onclick="playgroundNewChat()" ${PG.threads.length >= (PG.limits.maxThreads ?? 5) ? "disabled" : ""}>New chat</button>
-					<div class="pg-cap">${PG.threads.length} of ${PG.limits.maxThreads ?? 5} chats${PG.limits.dailyMessages ? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today` : ""}</div>
+					${PG.tab === "chats" ? `
+						<button style="width:100%" onclick="playgroundNewChat()" ${PG.threads.length >= (PG.limits.maxThreads ?? 5) ? "disabled" : ""}>New chat</button>
+						<div class="pg-cap">${PG.threads.length} of ${PG.limits.maxThreads ?? 5} chats${PG.limits.dailyMessages ? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today` : ""}</div>
+					` : `<div class="pg-cap">What this chat should keep. It changes what the extractor is told and what the gates let through.</div>`}
 				</div>
 				<div class="pg-col-body" id="pgSide"></div>
 			</div>
@@ -2659,11 +2664,15 @@ function playgroundTab(tab) {
 async function loadPlayground(threadId) {
 	try {
 		const res = await api(`/v1/playground${threadId ? `?thread=${encodeURIComponent(threadId)}` : ""}`);
+		const switched = PG.threadId !== (res.thread?.id ?? null);
 		PG.threads = res.threads || [];
 		PG.limits = res.limits || {};
 		PG.threadId = res.thread?.id ?? null;
 		PG.messages = res.thread?.messages ?? [];
 		PG.settings = res.thread?.settings ?? { customInstructions: "", customCategories: [] };
+		// Settings belong to one chat: opening a different one re-derives the
+		// form, but sending a message must not wipe what someone is typing.
+		if (switched) PG.settingsDraft = null;
 		PG.loaded = true;
 		if (S.view === "playground") renderView();
 	} catch (e) {
@@ -2676,6 +2685,8 @@ async function loadPlayground(threadId) {
 function renderPlaygroundSide() {
 	const side = $("#pgSide");
 	if (!side) return;
+	side.className = PG.tab === "settings" ? "pg-col-body pg-settings" : "pg-col-body";
+	if (PG.tab === "settings") return renderPlaygroundSettings(side);
 	if (!PG.threads.length) {
 		side.innerHTML = `<div class="pg-empty">No chats yet. Start one and say something about yourself — a plan, a preference, a person.</div>`;
 		return;
@@ -2685,6 +2696,81 @@ function renderPlaygroundSide() {
 			<span class="pg-thread-name">${esc(t.title || "New chat")}</span>
 			<span class="pg-thread-del" title="Delete chat" onclick="event.stopPropagation();playgroundDeleteThread('${esc(t.id)}')">✕</span>
 		</button>`).join("");
+}
+
+/**
+ * Settings for the open chat. These are NOT a second rules engine: the server
+ * normalizes them with the same normalizeMemoryRules() /v1/rules uses and
+ * layers them over the account's saved rules before extraction runs.
+ */
+function renderPlaygroundSettings(side) {
+	const draft = PG.settingsDraft ?? (PG.settingsDraft = {
+		customInstructions: PG.settings?.customInstructions ?? "",
+		customCategories: [...(PG.settings?.customCategories ?? [])],
+	});
+	const rows = draft.customCategories.map((c, i) => `
+		<div class="pg-cat-row">
+			<input placeholder="name" value="${esc(c.name || "")}" oninput="playgroundCategoryEdit(${i},'name',this.value)" />
+			<input placeholder="what it means" value="${esc(c.description || "")}" oninput="playgroundCategoryEdit(${i},'description',this.value)" />
+			<button class="ghost mini" title="Remove" onclick="playgroundCategoryRemove(${i})">✕</button>
+		</div>`).join("");
+	side.innerHTML = `
+		<label for="pgInstructions">Custom instructions</label>
+		<textarea id="pgInstructions" placeholder="Keep everything about my thesis. Never save anything about politics."
+			oninput="PG.settingsDraft.customInstructions=this.value">${esc(draft.customInstructions)}</textarea>
+		<div class="pg-note" style="margin-top:6px">Plain language. "Never save anything about X" is enforced, not just suggested — the gates drop it even if the model proposes it.</div>
+
+		<label>Custom categories</label>
+		<div id="pgCategories">${rows || `<div class="pg-note">None yet. Add one to file memories under a name that means something to you.</div>`}</div>
+		<button class="ghost mini" style="margin-top:6px" onclick="playgroundCategoryAdd()">Add category</button>
+
+		<details style="margin-top:16px">
+			<summary style="cursor:pointer;font-size:13px;font-weight:600">Advanced settings</summary>
+			<div class="pg-note" style="margin-top:8px">Nothing here yet. Account-wide controls live in <a href="#" onclick="setView('settings');return false">Settings</a>.</div>
+		</details>
+
+		<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">
+			<button onclick="playgroundApplySettings()" ${PG.threadId ? "" : "disabled"}>Apply settings to this chat</button>
+			<button class="ghost" onclick="playgroundResetSettings()">Reset configuration</button>
+		</div>
+		${PG.threadId ? "" : `<div class="pg-note" style="margin-top:8px">Open or start a chat first — settings attach to one conversation.</div>`}`;
+}
+
+function playgroundCategoryEdit(index, field, value) {
+	if (!PG.settingsDraft?.customCategories[index]) return;
+	PG.settingsDraft.customCategories[index][field] = value;
+}
+
+function playgroundCategoryAdd() {
+	PG.settingsDraft = PG.settingsDraft ?? { customInstructions: "", customCategories: [] };
+	PG.settingsDraft.customCategories.push({ name: "", description: "" });
+	renderPlaygroundSide();
+}
+
+function playgroundCategoryRemove(index) {
+	PG.settingsDraft?.customCategories.splice(index, 1);
+	renderPlaygroundSide();
+}
+
+async function playgroundApplySettings() {
+	if (!PG.threadId) { toast("Open or start a chat first."); return; }
+	try {
+		const res = await api("/v1/playground/settings", {
+			method: "PUT",
+			body: JSON.stringify({ threadId: PG.threadId, settings: PG.settingsDraft }),
+		});
+		if (!res.ok) { toast(res.message || "Could not apply those settings."); return; }
+		PG.settings = res.settings;
+		PG.settingsDraft = { customInstructions: res.settings.customInstructions, customCategories: [...res.settings.customCategories] };
+		renderPlaygroundSide();
+		toast("Settings applied to this chat.");
+	} catch (e) { toast(e.message || "Could not apply those settings. Try again.", true); }
+}
+
+async function playgroundResetSettings() {
+	PG.settingsDraft = { customInstructions: "", customCategories: [] };
+	if (PG.threadId) await playgroundApplySettings();
+	else renderPlaygroundSide();
 }
 
 function renderPlaygroundMessages() {

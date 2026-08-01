@@ -16,6 +16,7 @@
  */
 
 import { CATEGORIES, ACTIONS, IMPORTANCE, EDGE_TYPES, SLICE_KINDS } from "../config.js";
+import { rulesPromptLines } from "./rules.js";
 
 const SYSTEM_PROMPT = `You extract durable, long-term MEMORY about the USER from their chat messages. You ONLY propose; a backend decides what is actually saved.
 
@@ -193,10 +194,16 @@ export function responseText(res) {
 
 const DENSE_ADDENDUM = "\n\nDENSE CAPTURE MODE for this request: enumerate EVERY distinct durable fact as its own object — activities, plans, dates, quantities, names, relationships, preferences, outcomes. Do not summarize several facts into one object. Medium-confidence facts are wanted: propose them with honest confidence rather than dropping them.";
 
-async function callModel(env, config, packet, shortlist, { dense = false } = {}) {
+async function callModel(env, config, packet, shortlist, { dense = false, rules = null } = {}) {
 	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false };
+	// The user's own rules, as guidance. The digest and manual lanes already did
+	// this; the auto lane did not, so custom instructions never reached the
+	// extractor at all. Enforcement still happens in the gates — a model that
+	// ignores these lines still cannot write excluded content.
+	const ruleLines = rulesPromptLines(rules);
+	const base = dense ? SYSTEM_PROMPT + DENSE_ADDENDUM : SYSTEM_PROMPT;
 	const messages = [
-		{ role: "system", content: dense ? SYSTEM_PROMPT + DENSE_ADDENDUM : SYSTEM_PROMPT },
+		{ role: "system", content: ruleLines.length ? `${base}\n\n${ruleLines.join("\n")}` : base },
 		{ role: "user", content: buildUserPrompt(packet, shortlist) },
 	];
 	const options = config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined;
@@ -226,5 +233,6 @@ export async function proposeMemory(env, config, { packet, shortlist }, override
 	}
 	return callModel(env, config, packet, shortlist, {
 		dense: overrides?.settings?.captureDensity === "dense",
+		rules: overrides?.rules ?? null,
 	});
 }

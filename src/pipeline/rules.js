@@ -168,6 +168,56 @@ export async function saveMemoryRules(env, userId, patch = {}) {
 	return merged;
 }
 
+/**
+ * Plain-language instructions are mostly one shape: "never save X", "don't
+ * store X", "never capture anything about X". A prompt line is guidance and a
+ * model can ignore it, so those phrases are ALSO compiled into deny terms and
+ * enforced by the same filter as `excludes`. Nothing else in the instruction is
+ * interpreted — anything the pattern does not match stays guidance only, which
+ * is why this stays deliberately narrow.
+ */
+const NEVER_SAVE_RE = /\b(?:never|do\s+not|don['’]t)\s+(?:save|store|capture|keep|record|remember)\s+(?:anything\s+)?(?:about\s+|related\s+to\s+|regarding\s+|to\s+do\s+with\s+)?([^.;\n]+)/gi;
+
+// Terms so broad that enforcing them would silently disable memory entirely.
+const GENERIC_DENY_TERMS = new Set([
+	"anything", "everything", "it", "that", "this", "them", "these", "those",
+	"me", "us", "things", "stuff", "information", "data", "info", "details",
+]);
+
+export function instructionDenyTerms(instructions) {
+	const text = String(instructions ?? "");
+	if (!text.trim()) return [];
+	const terms = [];
+	const seen = new Set();
+	for (const match of text.matchAll(NEVER_SAVE_RE)) {
+		for (const part of String(match[1] ?? "").split(/\s*(?:,|\bor\b|\band\b)\s*/i)) {
+			const term = cleanTerm(part)
+				.replace(/^(?:any|all|my|our|the|a|an)\s+/i, "")
+				.replace(/[.!?]+$/, "")
+				.trim();
+			const key = term.toLocaleLowerCase("en-US");
+			if (term.length < 3 || GENERIC_DENY_TERMS.has(key) || seen.has(key)) continue;
+			seen.add(key);
+			terms.push(term);
+			if (terms.length >= MAX_TERMS) return terms;
+		}
+	}
+	return terms;
+}
+
+// Compiling on every gated object would re-run the regex thousands of times per
+// extraction; rules objects are stable for the length of one run.
+const denyCache = new WeakMap();
+
+function denyTermsFor(rules) {
+	if (!rules || typeof rules !== "object") return [];
+	const cached = denyCache.get(rules);
+	if (cached) return cached;
+	const terms = [...(rules.excludes ?? []), ...instructionDenyTerms(rules.customInstructions)];
+	denyCache.set(rules, terms);
+	return terms;
+}
+
 function normalizeMatchText(value) {
 	return String(value ?? "")
 		.normalize("NFKD")
@@ -188,7 +238,7 @@ export function rulesAllowText(rules, ...texts) {
 	if (!rules) return true;
 	const combined = texts.filter(Boolean).join(" ");
 	if (!combined.trim()) return true;
-	if ((rules.excludes ?? []).some((term) => termMatches(combined, term))) return false;
+	if (denyTermsFor(rules).some((term) => termMatches(combined, term))) return false;
 	if ((rules.includes ?? []).length) {
 		return rules.includes.some((term) => termMatches(combined, term));
 	}
@@ -200,7 +250,7 @@ export function rulesRejection(rules, ...texts) {
 	if (!rules) return null;
 	const combined = texts.filter(Boolean).join(" ");
 	if (!combined.trim()) return null;
-	if ((rules.excludes ?? []).some((term) => termMatches(combined, term))) return "excluded_by_rule";
+	if (denyTermsFor(rules).some((term) => termMatches(combined, term))) return "excluded_by_rule";
 	if ((rules.includes ?? []).length && !rules.includes.some((term) => termMatches(combined, term))) {
 		return "outside_include_rules";
 	}
