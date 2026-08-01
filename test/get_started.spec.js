@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import html from "../public/index.html?raw";
 
 const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
 /** Pull one top-level function's source out of the single-file app. */
 function fnSource(name) {
@@ -76,9 +77,9 @@ describe("the key rule", () => {
 		expect(installSnippets().mcpUrl).toContain("YOUR_MCP_KEY");
 	});
 
-	it("turns the copy button into the create-link button until a key exists", () => {
+	it("turns the copy affordance into the create-link button until a key exists", () => {
 		expect(script).toContain("const locked = text.includes(MCP_KEY_PLACEHOLDER);");
-		expect(script).toContain(`<button class="copy-btn mini" onclick="createInstallKey()">Create link</button>`);
+		expect(script).toContain(`<button class="code-create" onclick="createInstallKey()">Create link</button>`);
 		expect(script).toContain("function createInstallKey() {");
 	});
 
@@ -104,33 +105,48 @@ describe("one config, one state, one renderer", () => {
 });
 
 describe("Claude tab", () => {
-	it("says up front that custom connectors need a paid plan", () => {
-		expect(script).toContain("Custom connectors need a paid Claude plan.");
-		expect(script).toContain('class="install-callout"');
+	// The setup page's job is to be short. These strings are the agreed copy;
+	// if someone re-expands them into paragraphs, this goes red.
+	it("uses the short step copy, one line each", () => {
+		for (const [title, body] of [
+			["Create your link", '"Shown once. Save it."'],
+			["Add it to Claude", '"Desktop only. Syncs to your phone after."'],
+			["Turn it on", "`Tap +, choose Connectors, enable ${name}.`"],
+		]) {
+			expect(script, title).toContain(`{ title: "${title}", body: ${body},`);
+		}
+		// The paragraph-length versions are gone.
+		expect(script).not.toContain("It carries your private key, so it is shown once and never again.");
+		expect(script).not.toContain("Use a computer — the phone apps cannot add connectors.");
 	});
 
-	it("keeps the add-custom-connector deep link", () => {
+	it("states the plan requirement as one muted line, not a banner", () => {
+		expect(script).toContain('hint: "Needs a paid Claude plan."');
+		expect(script).toContain('class="install-hint"');
+		// The amber callout is gone entirely.
+		expect(script).not.toContain('class="install-callout"');
+		expect(css).not.toContain(".install-callout {");
+	});
+
+	it("keeps the add-custom-connector deep link, on the step title", () => {
 		expect(script).toContain("https://claude.ai/settings/connectors?modal=add-custom-connector");
+		expect(script).toContain("titleHref:");
+		expect(script).toContain('class="step-title-link"');
 	});
 
-	it("names the tool in the example phrase instead of overpromising", () => {
-		expect(script).toContain("save this to ${name}");
+	it("names the tool in the phrase to say", () => {
+		expect(script).toContain('codeLabel: "say this", code: () => `save this to ${name}`');
 		expect(script).not.toContain('Then simply say <i>"remember this"</i>');
 	});
 });
 
 describe("ChatGPT tab", () => {
-	it("warns that it is longer than Claude", () => {
-		expect(script).toContain("ChatGPT takes more steps than Claude");
-		expect(script).toContain("Requires ChatGPT on the web (not the phone app) and a paid plan.");
-	});
-
-	it("follows the real click path, in order", () => {
+	it("keeps the full click path in order, with Developer mode as its own step", () => {
 		const order = [
-			"Settings → Apps & connectors. The menu may read Apps, Connectors, or Apps & connectors",
-			"Open Advanced settings at the bottom of the panel, and turn Developer mode on.",
-			"A Create button now appears next to your enabled apps and connectors.",
-			"set authentication to None",
+			"Settings → Apps & connectors.",
+			"Advanced settings, at the bottom. Leave it on.",
+			"A Create button appears.",
+			"authentication None",
 			"The tools menu only refreshes on a new one.",
 			"Click + → More → Developer tools",
 		];
@@ -140,7 +156,11 @@ describe("ChatGPT tab", () => {
 			expect(at, phrase).toBeGreaterThan(cursor);
 			cursor = at;
 		}
-		expect(script).toContain("Developer mode has to stay on. Turn it off and the connector can't be selected.");
+		expect(script).toContain('{ title: "Turn on Developer mode"');
+	});
+
+	it("says the plan requirement once, muted", () => {
+		expect(script).toContain('hint: "Needs a paid ChatGPT plan, on the web."');
 	});
 
 	it("never invents a ChatGPT settings deep link", () => {
@@ -160,9 +180,59 @@ describe("Cursor tab", () => {
 		});
 	});
 
-	it("keeps the mcp.json config underneath as the fallback", () => {
+	it("keeps the mcp.json config as its own step", () => {
 		expect(script).toContain("Add to Cursor");
-		expect(script).toContain("code: (key) => installSnippets(key).cursor");
-		expect(script).toContain("Paste the config above into <b>.cursor/mcp.json</b> instead");
+		expect(script).toContain('codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor');
+		expect(script).toContain('{ title: "Or paste the config", body: "Works in any other MCP editor."');
+	});
+});
+
+describe("the visual redesign", () => {
+	it("drops the panel that wrapped the steps", () => {
+		expect(script).toContain('<div class="steps">');
+		expect(script).not.toContain('class="steps-panel"');
+		expect(css).not.toContain(".steps-panel {");
+		// The horizontal dividers are replaced by one vertical hairline.
+		expect(css).not.toMatch(/\.step-row \{[^}]*border-bottom/);
+		expect(css).toContain(".step-row:not(:last-child) .step-left::before");
+	});
+
+	it("gives every method card and client tab an icon", () => {
+		for (const door of ["ICON.link", "ICON.code", "ICON.plug"]) expect(script).toContain(`icon: ${door}`);
+		for (const client of ["ICON.spark", "ICON.hex", "ICON.pointer", "ICON.terminal", "ICON.hexN", "ICON.chevron"]) {
+			expect(script).toContain(`icon: ${client}`);
+		}
+		expect(script).toContain('<span class="mc-icon">${m.icon ?? ""}</span>');
+		expect(script).toContain('">${c.icon ?? ""}${esc(c.label)}</button>');
+		// Inline SVG only — an icon CDN would undo the no-third-party promise.
+		expect(script).toContain('const ICON = ((paths) =>');
+	});
+
+	it("shortens the method card subtitles", () => {
+		for (const blurb of ['blurb: "Claude and ChatGPT"', 'blurb: "Your own app"', 'blurb: "Your coding agent"']) {
+			expect(script).toContain(blurb);
+		}
+		expect(script).not.toContain("One link — Claude and ChatGPT remember you");
+	});
+
+	it("uses a small dark step badge, not a large accent one", () => {
+		expect(css).toMatch(/\.step-num \{[^}]*width: 22px; height: 22px[^}]*background: var\(--text\)/s);
+	});
+
+	it("restyles code blocks: light surface, labelled header, copy icon", () => {
+		expect(script).toContain("function installCodeBlock(");
+		expect(script).toContain('<div class="code-head"><span class="code-label">');
+		expect(script).toContain('<button class="code-copy"');
+		expect(script).toContain("function copyCode(");
+		// No black background and no large filled Copy button left.
+		expect(css).not.toContain("background: #0d1117; color: #dbe7ee");
+		expect(script).not.toContain('class="copy-btn mini"');
+		expect(css).toMatch(/\.install-code \{[^}]*border-radius: 8px/s);
+	});
+
+	it("labels every code block", () => {
+		const codeSteps = script.match(/\bcode: \((?:key|)\) =>/g) ?? [];
+		const labels = script.match(/\bcodeLabel: "/g) ?? [];
+		expect(labels.length).toBe(codeSteps.length);
 	});
 });

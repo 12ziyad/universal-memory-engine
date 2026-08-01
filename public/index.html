@@ -101,14 +101,14 @@
 	body.app-mode .box h3, body.app-mode .action-box h3, body.app-mode .detail h2,
 	body.app-mode .card .title, body.app-mode .section-h {
 		font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
-	body.app-mode .card .summary, body.app-mode .method-card span {
+	body.app-mode .card .summary, body.app-mode .method-card .mc-text > span {
 		font-size: 14px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
 	body.app-mode .method-card b { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
 	body.app-mode .step-title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 	body.app-mode .step-desc, body.app-mode .help, body.app-mode .kv, body.app-mode .empty {
 		font-size: 14px; font-weight: 400; letter-spacing: 0; line-height: 1.6; max-width: 720px; }
 	body.app-mode .step-note, body.app-mode .install-foot, body.app-mode .hint,
-	body.app-mode .card .mini-line, body.app-mode .card .cat {
+	body.app-mode .install-hint, body.app-mode .card .mini-line, body.app-mode .card .cat {
 		font-size: 12px; font-weight: 400; letter-spacing: 0; line-height: 1.6; color: var(--faint); }
 	body.app-mode pre, body.app-mode code, body.app-mode .install-code pre,
 	body.app-mode .pg-context, body.app-mode .mcp-url, body.app-mode .key-mono {
@@ -315,54 +315,77 @@
 	.keys-table tr:last-child td { border-bottom: 0; }
 	.key-mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 	.key-revoked td { opacity: .55; }
-	/* Get started: generous stepper — instruction left, thing-to-copy right. */
-	.install-intro { max-width: 1080px; margin-bottom: 26px; }
-	.install-intro h2 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.015em; }
-	.install-intro p { margin: 0; color: var(--muted); font-size: 15px; }
-	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 14px; max-width: 1080px; margin-bottom: 32px; }
-	.method-card { display: block; text-align: left; color: var(--text); background: var(--panel); border: 1px solid var(--border);
-		border-radius: 12px; padding: 16px 18px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
-	.method-card b { display: block; font-size: 15px; color: var(--text); margin-bottom: 3px; font-weight: 650; }
-	.method-card span { display: block; color: var(--muted); font-size: 13px; }
+	/* Get started: the steps sit directly on the page. They used to live inside a
+	   panel, which put a frame inside a frame inside the rail — that single box
+	   was the biggest source of the crowded feeling, so it is gone. */
+	.install-intro { max-width: 1080px; }
+	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+		gap: 10px; max-width: 1080px; margin-bottom: 20px; }
+	.method-card { display: flex; align-items: center; gap: 11px; text-align: left; color: var(--text);
+		background: var(--panel); border: 1px solid var(--border);
+		border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+	.method-card .mc-icon { flex: 0 0 auto; width: 18px; height: 18px; color: var(--faint); }
+	.method-card .mc-icon svg { width: 100%; height: 100%; display: block; }
+	.method-card .mc-text { min-width: 0; }
+	.method-card b { display: block; color: var(--text); }
+	.method-card span.mc-text > span { display: block; color: var(--muted); }
 	.method-card:hover { border-color: var(--border2); filter: none; }
 	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-	.method-card.active b { color: var(--accent); }
-	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 14px; }
-	.steps-panel { max-width: 1080px; background: var(--panel); border: 1px solid var(--border);
-		border-radius: 14px; padding: 10px 26px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
-	/* 12px above + 12px below = a 24px gap between steps. It was 72px, which read
-	   as dead space — worst in step 1, where the right column is often empty. */
-	.step-row { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); gap: 36px;
-		padding: 12px 0; border-bottom: 1px solid var(--border); align-items: start; }
-	.step-row:last-child { border-bottom: 0; }
-	.step-left { display: flex; gap: 14px; }
-	.step-num { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
-		color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; margin-top: 1px; }
-	.step-title { font-weight: 650; font-size: 15px; margin-bottom: 5px; }
-	.step-desc { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 62ch; }
-	.step-right .install-code { margin: 0 0 10px; }
-	.step-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
+	.method-card.active b, .method-card.active .mc-icon { color: var(--accent); }
+	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 10px; }
+	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 7px; }
+	.client-tabs .term-tab svg { width: 15px; height: 15px; flex: 0 0 auto; opacity: .85; }
+	/* One muted line, no coloured box. A banner for a plan requirement was
+	   louder than the requirement deserves. */
+	.install-hint { max-width: 1080px; margin: 0 0 18px; }
+	.steps { max-width: 1080px; }
+	.step-row { position: relative; display: grid; grid-template-columns: minmax(170px, 280px) minmax(0, 1fr);
+		gap: 32px; padding: 0 0 22px; align-items: start; }
+	.step-row:last-child { padding-bottom: 0; }
+	.step-left { display: flex; gap: 12px; }
+	/* A hairline joining the badges, instead of a divider under every step. */
+	.step-row:not(:last-child) .step-left::before { content: ""; position: absolute;
+		left: 11px; top: 26px; bottom: 0; width: 1px; background: var(--border); }
+	.step-num { position: relative; z-index: 1; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%;
+		background: var(--text); color: var(--panel); display: grid; place-items: center;
+		font-size: 11px; font-weight: 600; margin-top: 1px; }
+	.step-title { margin-bottom: 3px; }
+	.step-title-link { display: inline-block; width: 13px; height: 13px; margin-left: 5px;
+		color: var(--faint); vertical-align: -1px; }
+	.step-title-link:hover { color: var(--accent); }
+	.step-title-link svg { width: 100%; height: 100%; display: block; }
+	.step-desc { color: var(--muted); }
+	.step-right .install-code + .install-code { margin-top: 8px; }
+	.step-note { color: var(--faint); margin-top: 8px; }
 	.step-done { border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
-		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 10px;
-		padding: 10px 12px; font-size: 13.5px; }
-	.install-foot { max-width: 1080px; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
+		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 8px;
+		padding: 8px 11px; font-size: 13px; }
+	.install-foot { max-width: 1080px; margin-top: 20px; }
 	@media (max-width: 780px) {
-		.step-row { grid-template-columns: 1fr; gap: 14px; padding: 22px 0; }
-		.steps-panel { padding: 6px 18px; }
-		.install-intro h2 { font-size: 22px; }
+		.step-row { grid-template-columns: 1fr; gap: 12px; padding-bottom: 20px; }
+		.step-row:not(:last-child) .step-left::before { display: none; }
 	}
 	.install-card .install-head { margin-bottom: 4px; }
-	.install-code { position: relative; margin: 10px 0; }
-	.install-code pre { margin: 0; padding: 16px 18px; background: #0d1117; color: #dbe7ee; border-radius: 11px;
-		overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; }
-	.install-code .copy-btn { position: absolute; top: 8px; right: 8px; }
-	/* No key yet: the block is a preview of a string that cannot work, so it
-	   reads as inactive and its button creates the link instead of copying. */
-	.install-code.locked pre { opacity: .55; }
-	.install-callout { max-width: 1080px; margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;
-		border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
-		background: color-mix(in srgb, var(--amber) 7%, transparent); font-size: 14px; line-height: 1.6; }
+	/* Light code surface with a thin header strip: a small monospace label on
+	   the left, a copy icon on the right. No large filled button. */
+	.install-code { margin: 0; border: 1px solid var(--border); border-radius: 8px;
+		overflow: hidden; background: var(--panel3); }
+	.code-head { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+		padding: 5px 6px 5px 11px; border-bottom: 1px solid var(--border); background: var(--panel2); }
+	.code-label { font-family: var(--font-mono); font-size: 11px; color: var(--faint); letter-spacing: .02em; }
+	.code-copy { background: transparent; border: 0; padding: 4px; border-radius: 6px; color: var(--faint);
+		display: inline-grid; place-items: center; }
+	.code-copy:hover { color: var(--text); background: var(--panel3); filter: none; }
+	.code-copy.copied { color: var(--green); }
+	.code-copy svg { width: 15px; height: 15px; display: block; }
+	.code-create { background: transparent; border: 0; color: var(--accent); font-size: 12px;
+		font-weight: 600; padding: 3px 7px; border-radius: 6px; }
+	.code-create:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); filter: none; }
+	.install-code pre { margin: 0; padding: 11px 12px; background: transparent; color: var(--text);
+		overflow-x: auto; }
+	/* No key yet: the block previews a string that cannot work, so it reads as
+	   inactive and the header offers the link instead of a copy. */
+	.install-code.locked pre { opacity: .5; }
 	.install-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
 		background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 15px;
 		font-size: 13px; font-weight: 600; }
@@ -2349,6 +2372,31 @@ console.log(result.recall.context);`,
 }
 
 /**
+ * Line icons, inline so nothing is fetched from an icon CDN.
+ *
+ * These are neutral glyphs, NOT brand logos: shipping an approximation of
+ * someone's trademark drawn from memory would be both wrong and a worse thing
+ * to be wrong about than a generic mark. They exist to make a tab row scannable.
+ */
+const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]) =>
+	[name, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`],
+)))({
+	link: `<path d="M9.5 13.5a4 4 0 0 0 5.7.4l3-3a4 4 0 0 0-5.7-5.7l-1.8 1.7"/><path d="M14.5 10.5a4 4 0 0 0-5.7-.4l-3 3a4 4 0 0 0 5.7 5.7l1.8-1.7"/>`,
+	code: `<path d="m9 17-5-5 5-5"/><path d="m15 7 5 5-5 5"/>`,
+	plug: `<path d="M9 2.5v5M15 2.5v5"/><path d="M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5v5"/>`,
+	spark: `<path d="M12 3v18M3 12h18M5.8 5.8l12.4 12.4M18.2 5.8 5.8 18.2"/>`,
+	hex: `<path d="M12 2.6 20 7v10l-8 4.4L4 17V7z"/>`,
+	hexN: `<path d="M12 2.6 20 7v10l-8 4.4L4 17V7z"/><path d="M9.5 15.5v-7l5 7v-7"/>`,
+	pointer: `<path d="M5.5 3.2 19 11l-6.4 1.4L10 19.3z"/>`,
+	terminal: `<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m7.5 10 2.5 2.5-2.5 2.5M13 15h4"/>`,
+	chevron: `<path d="m4.5 7 4.5 5-4.5 5"/><path d="M12 17h7.5"/>`,
+	copy: `<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15.5V5.5a2.5 2.5 0 0 1 2.5-2.5H17"/>`,
+	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
+	trash: `<path d="M4 6.5h16"/><path d="M9 6.5V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 6.5 7.5 20a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-13.5"/>`,
+	external: `<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 11 13"/><path d="M18 14.5v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6h4"/>`,
+});
+
+/**
  * Get started — three doors, one config, one renderer.
  *
  * A step is always the same shape: { title, body, code(key), action, note,
@@ -2368,96 +2416,106 @@ function installMethods() {
 		// thing this product does that developer-only memory tools do not.
 		appConnect: {
 			label: "App Connect",
-			blurb: "One link — Claude and ChatGPT remember you",
+			blurb: "Claude and ChatGPT",
+			icon: ICON.link,
 			clients: {
 				claude: {
 					label: "Claude",
-					intro: "Custom connectors need a paid Claude plan. On a free account you can walk all the way to the settings screen before Claude tells you.",
+					icon: ICON.spark,
+					hint: "Needs a paid Claude plan.",
 					steps: [
-						{ title: "Create your link", body: "One click. It carries your private key, so it is shown once and never again.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add it to Claude", body: "Use a computer — the phone apps cannot add connectors. It syncs to your phone afterwards.",
-							code: (key) => installSnippets(key).mcpUrl,
-							note: `Paste into <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">Settings → Connectors → Add custom connector</a> and name it <b>${name}</b>.` },
-						{ title: "Switch it on in a chat", body: `Tap + at the bottom left, choose Connectors, turn on ${name}. Saved connectors stay off until you do this.`,
-							done: `Then say <i>"save this to ${name}"</i> — naming the tool is a much stronger hint than "remember this".` },
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add it to Claude", body: "Desktop only. Syncs to your phone after.",
+							// The one-click path to the exact settings screen, kept as an
+							// icon on the title so it costs no line of prose.
+							titleHref: "https://claude.ai/settings/connectors?modal=add-custom-connector",
+							titleHrefLabel: "Open Claude's add-connector screen",
+							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
+						{ title: "Turn it on", body: `Tap +, choose Connectors, enable ${name}.`,
+							codeLabel: "say this", code: () => `save this to ${name}` },
 					],
 				},
 				chatgpt: {
 					label: "ChatGPT",
-					intro: "ChatGPT takes more steps than Claude — six instead of three. Requires ChatGPT on the web (not the phone app) and a paid plan.",
+					icon: ICON.hex,
+					hint: "Needs a paid ChatGPT plan, on the web.",
 					steps: [
-						{ title: "Open apps and connectors", body: "Settings → Apps & connectors. The menu may read Apps, Connectors, or Apps & connectors depending on your build." },
-						{ title: "Turn on Developer mode", body: "Open Advanced settings at the bottom of the panel, and turn Developer mode on.",
-							note: "Developer mode has to stay on. Turn it off and the connector can't be selected." },
-						{ title: "Go back one screen", body: "A Create button now appears next to your enabled apps and connectors." },
-						{ title: "Create the connector", body: `Click Create. Name it ${name}, paste the URL, set authentication to None — your key is already in the URL — tick the trust checkbox, and click Create.`,
-							action: mcpKey, code: (key) => installSnippets(key).mcpUrl },
+						{ title: "Open apps and connectors", body: "Settings → Apps & connectors." },
+						{ title: "Turn on Developer mode", body: "Advanced settings, at the bottom. Leave it on." },
+						{ title: "Go back one screen", body: "A Create button appears." },
+						{ title: "Create the connector", body: `Name it ${name}, paste the URL, authentication None.`,
+							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
 						{ title: "Open a new chat", body: "The tools menu only refreshes on a new one." },
-						{ title: "Select it for the conversation", body: `Click + → More → Developer tools, and select ${name} for that conversation.`,
-							done: `Ready. Ask it what it remembers about you.` },
+						{ title: "Turn it on", body: `Click + → More → Developer tools, pick ${name}.`,
+							codeLabel: "say this", code: () => `save this to ${name}` },
 					],
 				},
 				cursor: {
 					label: "Cursor",
+					icon: ICON.pointer,
 					steps: [
-						{ title: "Create your link", body: "The same private URL works in any MCP-capable editor.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Install it in Cursor", body: "One click. Cursor opens and asks you to confirm the server.",
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add it to Cursor", body: "One click. Cursor asks you to confirm.",
 							action: (key) => key
 								? `<a class="install-btn" href="${esc(cursorInstallLink(key))}">Add to Cursor</a>`
-								: mcpKey,
-							code: (key) => installSnippets(key).cursor,
-							note: "Nothing happened? Your browser blocked the app link. Paste the config above into <b>.cursor/mcp.json</b> instead — it works in any other MCP editor too." },
-						{ title: "Reload the editor", body: "Cursor connects on start and the three memory tools appear.",
-							done: `save_memory · save_conversation · recall_memory` },
+								: mcpKey },
+						{ title: "Or paste the config", body: "Works in any other MCP editor.",
+							codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor },
 					],
 				},
 			},
 		},
 		sdk: {
 			label: "SDK Integration",
-			blurb: "Memory inside your own app or agent",
+			blurb: "Your own app",
+			icon: ICON.code,
 			clients: {
 				python: {
 					label: "Python",
+					icon: ICON.terminal,
 					steps: [
-						{ title: "Install the SDK", body: "One package, one dependency.", code: () => "pip install itsuki" },
-						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", code: (key) => installSnippets(key).python },
-						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", code: (key) => installSnippets(key).pythonTurn },
+						{ title: "Install the SDK", body: "One package, one dependency.", codeLabel: "bash", code: () => "pip install itsuki" },
+						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "python", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
+						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", codeLabel: "python", code: (key) => installSnippets(key).python },
+						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", codeLabel: "python", code: (key) => installSnippets(key).pythonTurn },
 					],
 				},
 				node: {
 					label: "Node.js",
+					icon: ICON.hexN,
 					steps: [
-						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", code: () => "npm install itsuki" },
-						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", code: (key) => installSnippets(key).node },
-						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", code: (key) => installSnippets(key).nodeTurn },
+						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", codeLabel: "bash", code: () => "npm install itsuki" },
+						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "js", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
+						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", codeLabel: "js", code: (key) => installSnippets(key).node },
+						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", codeLabel: "js", code: (key) => installSnippets(key).nodeTurn },
 					],
 				},
 				curl: {
 					label: "cURL",
+					icon: ICON.chevron,
 					steps: [
 						{ title: "Create an API key", body: "Send it as a Bearer token on every request.", action: apiKey, note: "Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>." },
-						{ title: "Save a memory", body: "Returns a receipt: what was stored, what was skipped, and why.", code: (key) => installSnippets(key).curlSave },
-						{ title: "Recall it", body: "The context field is the block you drop into your prompt.", code: (key) => installSnippets(key).curlRecall },
+						{ title: "Save a memory", body: "Returns a receipt: what was stored, what was skipped, and why.", codeLabel: "bash", code: (key) => installSnippets(key).curlSave },
+						{ title: "Recall it", body: "The context field is the block you drop into your prompt.", codeLabel: "bash", code: (key) => installSnippets(key).curlRecall },
 					],
 				},
 			},
 		},
 		plugin: {
 			label: "Plugin",
-			blurb: "Memory inside your coding agent",
+			blurb: "Your coding agent",
+			icon: ICON.plug,
 			footnote: "Looking for Claude or ChatGPT? Those are chat apps — use <b>App Connect</b> above.",
 			clients: {
 				"claude-code": {
 					label: "Claude Code",
+					icon: ICON.terminal,
 					variants: {
 						mcp: {
 							label: "MCP",
 							steps: [
 								{ title: "Create your link", body: "One key for this machine's agent.", action: mcpKey },
-								{ title: "Add the MCP server", body: "One native command — no npx, nothing to download.", code: (key) => installSnippets(key).claudeCode },
+								{ title: "Add the MCP server", body: "One native command — no npx, nothing to download.", codeLabel: "bash", code: (key) => installSnippets(key).claudeCode },
 								{ title: "Use it while you work", body: "Ask it to save decisions, or to check what it already knows about the project.",
 									done: `save_memory · save_conversation · recall_memory` },
 							],
@@ -2465,8 +2523,8 @@ function installMethods() {
 						plugin: {
 							label: "Plugin",
 							steps: [
-								{ title: "Add the marketplace", body: "Points Claude Code at this repository's plugin manifest.", code: (key) => installSnippets(key).pluginMarketplace },
-								{ title: "Install the plugin", body: "Bundles the MCP server so there is no URL to paste.", code: (key) => installSnippets(key).pluginInstall },
+								{ title: "Add the marketplace", body: "Points Claude Code at this repository's plugin manifest.", codeLabel: "bash", code: (key) => installSnippets(key).pluginMarketplace },
+								{ title: "Install the plugin", body: "Bundles the MCP server so there is no URL to paste.", codeLabel: "bash", code: (key) => installSnippets(key).pluginInstall },
 								{ title: "Not published yet", body: "Plugins install from a public repository. These commands go live the moment the repo is public.",
 									note: "Until then the <b>MCP</b> tab gives you the same three tools today." },
 							],
@@ -2475,12 +2533,13 @@ function installMethods() {
 				},
 				codex: {
 					label: "Codex",
+					icon: ICON.chevron,
 					variants: {
 						mcp: {
 							label: "MCP",
 							steps: [
 								{ title: "Create your link", body: "The same private URL, used by Codex's MCP config.", action: mcpKey },
-								{ title: "Add the server", body: "Point Codex's MCP configuration at your link.", code: (key) => installSnippets(key).cursor },
+								{ title: "Add the server", body: "Point Codex's MCP configuration at your link.", codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor },
 								{ title: "Restart the agent", body: "It connects over HTTP and the memory tools appear.",
 									done: `save_memory · save_conversation · recall_memory` },
 							],
@@ -2488,7 +2547,7 @@ function installMethods() {
 						plugin: {
 							label: "Plugin",
 							steps: [
-								{ title: "Register the marketplace", body: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", code: (key) => installSnippets(key).codexMarketplace },
+								{ title: "Register the marketplace", body: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", codeLabel: "json", code: (key) => installSnippets(key).codexMarketplace },
 								{ title: "Install from the Codex UI", body: "The plugin appears in Codex's plugin list and bundles the MCP server, so there is no URL to paste.",
 									note: "Codex plugins package skills and MCP servers together — one install instead of a config edit." },
 								{ title: "Not published yet", body: "This needs the repository to be public before Codex can fetch it.",
@@ -2560,16 +2619,6 @@ function viewInstall(v) {
 	if (variants) state.variant = variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0];
 	const active = variants ? variants[state.variant] : client;
 
-	const codeBlock = (text) => {
-		// A block that still carries the placeholder cannot work, so it is not
-		// copyable: the copy button IS the create-link button until a key exists.
-		const locked = text.includes(MCP_KEY_PLACEHOLDER);
-		const button = locked
-			? `<button class="copy-btn mini" onclick="createInstallKey()">Create link</button>`
-			: `<button class="copy-btn mini" onclick="copyText(${JSON.stringify(text).replace(/"/g, "&quot;")}, 'Copied')">Copy</button>`;
-		return `<div class="install-code${locked ? " locked" : ""}"><pre>${esc(text)}</pre>${button}</div>`;
-	};
-
 	const steps = active.steps.map((step, i) => {
 		const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;
 		// A locked code block already carries the create-link button. Showing the
@@ -2577,18 +2626,24 @@ function viewInstall(v) {
 		const action = code?.includes(MCP_KEY_PLACEHOLDER)
 			? ""
 			: typeof step.action === "function" ? step.action(state.key) : step.action;
+		// A link on the title costs no line of prose, which a note under the
+		// step would. That matters on a page whose whole problem was crowding.
+		const titleLink = step.titleHref
+			? ` <a class="step-title-link" href="${esc(step.titleHref)}" target="_blank" rel="noopener"
+					title="${esc(step.titleHrefLabel ?? "Open")}" aria-label="${esc(step.titleHrefLabel ?? "Open")}">${ICON.external}</a>`
+			: "";
 		return `
 		<div class="step-row">
 			<div class="step-left">
 				<div class="step-num">${i + 1}</div>
 				<div>
-					<div class="step-title">${esc(step.title)}</div>
+					<div class="step-title">${esc(step.title)}${titleLink}</div>
 					<div class="step-desc">${esc(step.body)}</div>
 				</div>
 			</div>
 			<div class="step-right">
 				${action ?? ""}
-				${code ? codeBlock(code) : ""}
+				${code ? installCodeBlock(code, step.codeLabel) : ""}
 				${step.done ? `<div class="step-done">${step.done}</div>` : ""}
 				${step.note ? `<div class="step-note">${step.note}</div>` : ""}
 			</div>
@@ -2604,28 +2659,56 @@ function viewInstall(v) {
 		<div class="method-cards">
 			${Object.entries(doors).map(([id, m]) => `
 				<button class="method-card ${id === state.method ? "active" : ""}" onclick="setInstallMethod('${id}')">
-					<b>${esc(m.label)}</b><span>${esc(m.blurb)}</span>
+					<span class="mc-icon">${m.icon ?? ""}</span>
+					<span class="mc-text"><b>${esc(m.label)}</b><span>${esc(m.blurb)}</span></span>
 				</button>`).join("")}
 		</div>
 		${Object.keys(door.clients).length > 1 ? `
 			<div class="client-tabs">
 				${Object.entries(door.clients).map(([id, c]) => `
-					<button class="term-tab ${id === state.client ? "active" : ""}" onclick="setInstallClient('${id}')">${esc(c.label)}</button>`).join("")}
+					<button class="term-tab ${id === state.client ? "active" : ""}" onclick="setInstallClient('${id}')">${c.icon ?? ""}${esc(c.label)}</button>`).join("")}
 			</div>` : ""}
 		${variants ? `
 			<div class="client-tabs variant-tabs">
 				${Object.entries(variants).map(([id, variant]) => `
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
-		${client.intro ? `<div class="install-callout">${esc(client.intro)}</div>` : ""}
+		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
 		${oneTimeSecretPanel(S.oneTimeToken)}
-		<div class="steps-panel">${steps}</div>
+		<div class="steps">${steps}</div>
 		${door.footnote ? `<div class="install-foot" style="margin-top:14px">${door.footnote}</div>` : ""}
 		<div class="install-foot">
 			Full reference, concepts, and troubleshooting live in the
 			<a href="/docs/" target="_blank" rel="noopener">documentation ↗</a>.
 		</div>`;
 	v.appendChild(wrap);
+}
+
+/**
+ * A code block: thin header strip with a small monospace label and a copy
+ * ICON, light body. A block still carrying the placeholder cannot work, so it
+ * is not copyable — the header offers "Create link" instead of handing out a
+ * string that would fail.
+ */
+function installCodeBlock(text, label = "code") {
+	const locked = text.includes(MCP_KEY_PLACEHOLDER);
+	const action = locked
+		? `<button class="code-create" onclick="createInstallKey()">Create link</button>`
+		: `<button class="code-copy" title="Copy" aria-label="Copy"
+				onclick="copyCode(this, ${JSON.stringify(text).replace(/"/g, "&quot;")})">${ICON.copy}</button>`;
+	return `<div class="install-code${locked ? " locked" : ""}">
+		<div class="code-head"><span class="code-label">${esc(label)}</span>${action}</div>
+		<pre>${esc(text)}</pre>
+	</div>`;
+}
+
+/** Copy, then swap the icon to a tick for a moment. No toast — the icon says it. */
+async function copyCode(button, text) {
+	const copied = await copyText(text, null);
+	if (!copied) return;
+	button.innerHTML = ICON.check;
+	button.classList.add("copied");
+	setTimeout(() => { button.innerHTML = ICON.copy; button.classList.remove("copied"); }, 1400);
 }
 
 /**
@@ -5719,7 +5802,18 @@ function closeDetail() {
 	if (S.network && S.view==="graph") setTimeout(() => graphFit(260), 180);
 }
 
-async function copyText(t, msg) { try { await navigator.clipboard.writeText(t); toast(msg||"Copied"); } catch { toast("Copy failed — select & copy manually", true); } }
+/** Copy to the clipboard. `msg === null` stays silent — the caller shows its
+ *  own confirmation (the copy icon swaps to a tick). Failure always speaks. */
+async function copyText(t, msg) {
+	try {
+		await navigator.clipboard.writeText(t);
+		if (msg !== null) toast(msg || "Copied");
+		return true;
+	} catch {
+		toast("Copy failed — select the text and copy it manually.", true);
+		return false;
+	}
+}
 
 async function logoutNow() {
 	await fetch("/auth/logout", { method:"POST", credentials:"include" }).catch(() => {});

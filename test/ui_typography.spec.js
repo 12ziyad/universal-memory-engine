@@ -66,10 +66,9 @@ describe("app type scale", () => {
 		expect(css).toMatch(/--text: #101828; --muted: #667085; --faint: #98a2b3;/);
 	});
 
-	it("caps text columns and tightens the Get started step rhythm", () => {
+	it("caps text columns at 720px", () => {
 		expect(css).toMatch(/body\.app-mode \.step-desc[\s\S]{0,220}max-width: 720px;/);
-		expect(css).toContain("padding: 12px 0; border-bottom: 1px solid var(--border); align-items: start; }");
-		expect(css).not.toContain("padding: 36px 0; border-bottom");
+		expect(css).toMatch(/\.page-sub \{[\s\S]{0,160}max-width: 720px;/);
 	});
 
 	it("uses the page title on the views that have one", () => {
