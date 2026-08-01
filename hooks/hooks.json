@@ -1,0 +1,27 @@
+{
+	"description": "Itsuki memory hooks: recall project memory at session start, save what the session learned at session end. Both fail silently and never block the agent.",
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"",
+						"timeout": 10
+					}
+				]
+			}
+		],
+		"SessionEnd": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.mjs\"",
+						"timeout": 20
+					}
+				]
+			}
+		]
+	}
+}
