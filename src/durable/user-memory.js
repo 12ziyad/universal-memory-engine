@@ -14,6 +14,7 @@ import { DurableObject } from "cloudflare:workers";
 import { classifyMessage, shouldFire, meaningfulCount } from "../pipeline/trigger.js";
 import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
 import { formatReceipt } from "../pipeline/receipt.js";
+import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt } from "../lib/db.js";
 
 const RECENT_LIMIT = 20;
@@ -181,6 +182,16 @@ export class UserMemory extends DurableObject {
 		} finally {
 			this.busy = false;
 		}
+	}
+
+	/**
+	 * Build a memory export. It lives here because reading every table a person
+	 * owns is slow enough to hold a response open, and the DO already owns this
+	 * user's serialized work. It touches no held state, so an export in flight
+	 * can never disturb ingest.
+	 */
+	async runExport(userId, exportId) {
+		return runExportJob(this.env, userId, exportId);
 	}
 
 	/** Inspect held state — used by tests to assert chunk retention. */

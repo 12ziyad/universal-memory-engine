@@ -46,6 +46,7 @@ import {
 	playgroundTurn,
 } from "./pipeline/playground.js";
 import { normalizeThreadSettings } from "./pipeline/playground_settings.js";
+import { createExport, exportFileName, getExport, listExports } from "./pipeline/exports.js";
 import {
 	changePassword,
 	ACCEPTED_TOKEN_PREFIXES,
@@ -1063,6 +1064,51 @@ const routes = {
 		await env.DB.prepare("UPDATE playground_threads SET settings_json = ?, updated_at = ? WHERE id = ? AND user_id = ?")
 			.bind(JSON.stringify(settings), Date.now(), thread.id, auth.userId).run();
 		return json({ ok: true, settings });
+	},
+
+	// ---- Memory exports ---------------------------------------------------
+	"GET /v1/exports": async (request, env) => {
+		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		return json({ ok: true, exports: await listExports(env, auth.userId) });
+	},
+
+	"POST /v1/exports": async (request, env, ctx) => {
+		const body = await request.json().catch(() => ({}));
+		const auth = await requireMemoryUser(request, env, body.userId, {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const job = await createExport(env, auth.userId, { entity: body.entity });
+		// The work happens in the user's Durable Object so a large graph cannot
+		// hold this response open. The page polls for the finished row.
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(auth.userId));
+		const run = stub.runExport(auth.userId, job.id).catch((error) => {
+			console.warn(`export dispatch failed user=${auth.userId}:`, error?.message ?? error);
+		});
+		if (ctx?.waitUntil) ctx.waitUntil(run); else await run;
+		return json({ ok: true, export: job }, 201);
+	},
+
+	"GET /v1/exports/download": async (request, env) => {
+		const url = new URL(request.url);
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const row = await getExport(env, auth.userId, url.searchParams.get("id"));
+		if (!row) return json({ error: "not_found", message: "That export is gone. Create a new one." }, 404);
+		if (row.status !== "complete" || !row.data) {
+			return json({ error: "not_ready", message: "This export is still being built. Refresh in a moment." }, 409);
+		}
+		return new Response(row.data, {
+			headers: {
+				"content-type": "application/json; charset=utf-8",
+				"content-disposition": `attachment; filename="${exportFileName(row)}"`,
+			},
+		});
 	},
 
 	"GET /v1/requests": async (request, env) => {

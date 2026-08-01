@@ -1112,6 +1112,7 @@
 			<button class="tab" data-view="memory"><span class="ti">◈</span>Memories<span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="graph"><span class="ti">⁂</span>Graph</button>
 			<button class="tab" data-view="requests"><span class="ti">⇄</span>Requests</button>
+			<button class="tab" data-view="exports"><span class="ti">↧</span>Memory exports</button>
 			<button class="tab" data-view="receipts"><span class="ti">≡</span>History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<div class="rail-sep"></div>
 			<a class="tab rail-doclink" href="/docs/" target="_blank" rel="noopener"><span class="ti">✧</span>Docs<span class="ext">↗</span></a>
@@ -1201,7 +1202,7 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -1737,7 +1738,7 @@ const VIEW_TITLES = {
 	overview: "Dashboard", memory: "Memories", graph: "Graph",
 	install: "Get started", playground: "Playground", keys: "API Keys",
 	receipts: "History", settings: "Settings", admin: "Admin",
-	requests: "Requests",
+	requests: "Requests", exports: "Memory exports",
 };
 
 function toggleRail() {
@@ -1770,7 +1771,7 @@ function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
 	// Setup screens must never wait on /v1/graph — a brand-new account has no
 	// graph to load, and Get started is the first thing they open.
-	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests","exports"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -1782,6 +1783,7 @@ function renderView() {
 		playground: viewPlayground,
 		keys: viewKeys,
 		requests: viewRequests,
+		exports: viewExports,
 		receipts: viewReceipts,
 		rules: viewRules,
 		admin: viewAdmin,
@@ -3148,6 +3150,113 @@ async function loadRequests() {
 	} finally {
 		RQ.loading = false;
 		if (S.view === "requests") renderView();
+	}
+}
+
+/**
+ * Memory exports — start a job, come back for the file.
+ *
+ * The work runs in the Durable Object, so this page polls while a job is
+ * queued or running rather than holding a request open.
+ */
+const EX = { rows: [], loading: false, creating: false, error: "", poll: null };
+
+const EXPORT_STATUS = {
+	queued: { label: "Queued", cls: "state-paused" },
+	running: { label: "Building", cls: "state-paused" },
+	complete: { label: "Complete", cls: "state-active" },
+	failed: { label: "Failed", cls: "state-inactive" },
+};
+
+function viewExports(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="page-head">
+			<h2 class="page-title">Memory exports</h2>
+			<p class="page-sub">A full copy of your memory as JSON — every memory, detail, event, link, note, and receipt. Yours to keep, move, or read offline.</p>
+		</div>
+		<div class="rq-controls">
+			<button onclick="createExportJob()" ${EX.creating ? "disabled" : ""}>${EX.creating ? "Starting…" : "Create export"}</button>
+			<button class="ghost" onclick="loadExports()">${EX.loading ? "Refreshing…" : "Refresh"}</button>
+		</div>
+		<div class="box" style="max-width:none;padding:0;overflow:hidden">
+			<div class="keys-table-wrap"><table class="keys-table">
+				<thead><tr><th>ID</th><th>Status</th><th>Entity</th><th>Started</th><th>Completed</th><th></th></tr></thead>
+				<tbody id="exBody"></tbody>
+			</table></div>
+			<div id="exEmpty"></div>
+		</div>`;
+	v.appendChild(wrap);
+	renderExportsTable();
+	if (!EX.rows.length && !EX.loading) loadExports();
+}
+
+function renderExportsTable() {
+	const body = $("#exBody");
+	const empty = $("#exEmpty");
+	if (!body || !empty) return;
+	if (!EX.rows.length) {
+		body.innerHTML = "";
+		empty.innerHTML = EX.error
+			? `<div class="pg-empty">${esc(EX.error)}</div>`
+			: `<div class="pg-empty">No exports yet.<br><br>
+				An export is a full JSON copy of your memory — useful for a backup, for moving it somewhere else, or just for reading what ${esc(PRODUCT.name)} actually knows.<br><br>
+				<button onclick="createExportJob()">Create export</button></div>`;
+		return;
+	}
+	empty.innerHTML = "";
+	body.innerHTML = EX.rows.map((row) => {
+		const status = EXPORT_STATUS[row.status] ?? { label: row.status, cls: "state-completed" };
+		const size = Number(row.size_bytes) ? ` · ${(row.size_bytes / 1024).toFixed(0)} KB` : "";
+		return `<tr>
+			<td class="key-mono">${esc(String(row.id).slice(0, 18))}</td>
+			<td><span class="badge ${status.cls}">${esc(status.label)}</span>${row.error ? `<div class="hint" style="margin-top:4px;max-width:38ch">${esc(row.error)}</div>` : ""}</td>
+			<td>${esc(row.entity || "All memories")}${row.object_count ? `<div class="hint">${row.object_count} objects${size}</div>` : ""}</td>
+			<td>${esc(row.started_at ? ago(row.started_at) : "—")}</td>
+			<td>${esc(row.completed_at ? ago(row.completed_at) : "—")}</td>
+			<td>${row.status === "complete"
+				? `<a class="install-btn" style="padding:5px 11px;font-size:12px" href="/v1/exports/download?id=${encodeURIComponent(row.id)}">Download</a>`
+				: `<span class="hint">—</span>`}</td>
+		</tr>`;
+	}).join("");
+}
+
+async function loadExports() {
+	EX.loading = true;
+	if (S.view === "exports") renderView();
+	try {
+		const res = await api("/v1/exports");
+		EX.rows = res.exports || [];
+		EX.error = "";
+	} catch (e) {
+		EX.error = e.message || "Could not load your exports. Try refreshing in a moment.";
+	} finally {
+		EX.loading = false;
+		if (S.view === "exports") renderView();
+		scheduleExportPoll();
+	}
+}
+
+/** Poll only while something is actually in flight, then stop. */
+function scheduleExportPoll() {
+	clearTimeout(EX.poll);
+	const pending = EX.rows.some((row) => row.status === "queued" || row.status === "running");
+	if (!pending || S.view !== "exports") return;
+	EX.poll = setTimeout(() => { if (S.view === "exports") loadExports(); }, 2500);
+}
+
+async function createExportJob() {
+	if (EX.creating) return;
+	EX.creating = true;
+	if (S.view === "exports") renderView();
+	try {
+		await api("/v1/exports", { method: "POST", body: JSON.stringify({}) });
+		toast("Export started. It appears below when it's ready.");
+	} catch (e) {
+		toast(e.message || "Could not start that export. Try again in a moment.", true);
+	} finally {
+		EX.creating = false;
+		await loadExports();
 	}
 }
 
