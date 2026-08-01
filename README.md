@@ -1,269 +1,196 @@
-# UML - Universal Memory Layer
+# Itsuki
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-One shared memory layer for supported AI tools, MCP clients, coding agents, and your own apps.
+**One private memory graph, shared by every AI you use.**
 
-UML is a Cloudflare-native memory engine and product shell that stores durable user context as pages, nodes, slices, events, edges, and clusters. It gives supported assistants one private long-term memory layer through account sessions, per-tool API/MCP tokens, HTTP APIs, an MCP endpoint, and a dashboard for inspecting what was saved.
+Tell it once. Claude remembers. ChatGPT remembers. Your agent remembers. Itsuki (樹, "tree")
+stores the durable parts of what you say as a structured graph you can open, search, edit,
+and export — not a hidden blob, and not a chat log replayed back at you.
 
-## What It Is
+Live at **https://uml.gpmai.workers.dev** · Apache-2.0 · built entirely on Cloudflare.
 
-Universal Memory Engine turns messy conversation into structured memory:
+---
 
-- Nodes for people, projects, skills, health facts, tools, interests, preferences, and life events.
-- Events for changes over time, such as started, paused, completed, diagnosed, or passed away.
-- Slices for durable details about a node.
-- Edges for relationships between nodes when the extraction pipeline can infer them.
-- Receipts so every save has a traceable result.
+## What makes it different
 
-The goal is not to replace an assistant. The goal is to give many assistants one reliable external memory.
+Most memory tools onboard *developer* tools — an IDE, a coding agent, a CLI. Itsuki connects
+**claude.ai and ChatGPT directly**. A non-technical person pastes one link into their chat
+app's connector settings and their assistant starts remembering them. No SDK, no terminal.
 
-## Why It Exists
+The same memory is reachable four ways, and they are all the same engine:
 
-Most AI tools keep memory inside one product. That makes memory fragmented:
-
-| Problem | UML Approach |
+| Door | Who uses it |
 | --- | --- |
-| One assistant knows one set of facts and another starts fresh | Supported tools can connect to the same UML memory endpoint |
-| Raw chat logs are noisy | The pipeline extracts durable facts, events, slices, and candidates |
-| Memory is hard to inspect | The dashboard shows graph, table, cards, timeline, receipts, setup, and test views |
-| Recall needs relevance | Recall combines structured graph data with Vectorize-backed semantic search when enabled |
-| Long saves can time out | Saves return a receipt while Durable Objects continue background extraction |
+| **App Connect** | claude.ai, ChatGPT, Cursor — paste one MCP link |
+| **REST API** | `/v1/*` with a Bearer key |
+| **SDKs** | `itsuki` for Node and Python |
+| **The app itself** | dashboard, graph, and a Playground that captures as you talk |
 
-## Features
+One engine, many doors. A new door is never a new engine — the Playground you can try in the
+browser runs the same extraction and writes the same receipts a connected Claude does.
 
-- Manual memory save path for explicit "remember this" flows.
-- Conversation save path that digests recent messages before extraction.
-- Recall path that returns compact personal context for assistants.
-- Recall includes both structured graph nodes and compact manual_collect memory pages.
-- Public product landing page, email/password login, sign up, and authenticated dashboard shell.
-- Session-backed browser dashboard with per-account memory isolation.
-- Per-tool MCP/API tokens stored only as hashes and revealed once on creation.
-- MCP Streamable HTTP endpoint for supported MCP clients and custom agents.
-- Dashboard with Home, Graph, Memories, Save, Recall, Connect, Help, Profile, Settings, and Danger Zone / Reset sections.
-- Deterministic graph layout, procedural cluster hulls, dynamic semantic clusters, latest-first sidebars, clean/all/focus/debug graph modes, receipts, cleanup, reset, setup, test, and model views.
-- D1 relational storage for graph entities.
-- Durable Object per user for batching, retries, and background extraction.
-- Workers AI model configuration for extraction, digesting, summaries, and embeddings.
-- Vectorize support for semantic recall and node embeddings.
-- Receipt trail for saved memories and background processing states.
+## What it stores
+
+Chat history is not memory. Messages are source material; Itsuki keeps the meaning that
+should outlive the conversation.
+
+| Object | What it is |
+| --- | --- |
+| `nodes` | The stable things: a person, a project, a skill, a condition, a tool |
+| `slices` | Durable details about a node ("trains three days a week") |
+| `events` | Changes over time — started, moved, diagnosed, completed, passed away |
+| `edges` | Stated relationships between nodes |
+| `memory_pages` | Whole-conversation notes, with evidence |
+| `candidates` | Weak signals waiting to become real, or to be dropped |
+| `receipts` | What each call saved, updated, or refused — and why |
+
+The graph can **update**, not just append. New evidence supersedes an old fact and keeps the
+old one visible on a timeline. It is not an append-only log.
+
+**The backend is the authority, not the model.** The LLM only *proposes*. Gates decide what is
+written, and your own rules run as filters — so a model that ignores your instructions still
+cannot save what you told it not to.
+
+## Honest limits
+
+- Through MCP, the **host model decides** when to call a memory tool. Itsuki provides the
+  tools; it cannot force a call. For guaranteed per-turn capture, use the API or SDK inside
+  your own app.
+- Custom connectors need a **paid plan** on both Claude and ChatGPT, and must be added from a
+  computer — neither phone app can add one.
+- Itsuki does not sell data, run third-party trackers, or train on your memory. Fonts are
+  self-hosted for the same reason: a font CDN would see every visitor's IP.
 
 ## Architecture
 
 ```text
-Browser user / AI assistant / app
+claude.ai / ChatGPT / Cursor / your app / the dashboard
         |
-        | session, HTTP API token, or MCP token
+        |  MCP token, Bearer key, or browser session
         v
-Cloudflare Worker
+Cloudflare Worker  (src/index.js — exact-match route map)
         |
-        +--> D1 users / sessions / connection tokens
-        |
-        +--> UserMemory Durable Object
-        |       |
-        |       +--> extraction / digest / pass-2 pipeline
-        |
-        +--> D1 graph store
-        |
-        +--> Workers AI
-        |
-        +--> Vectorize
-        |
+        +--> D1            users, sessions, tokens, and the graph
+        +--> UserMemory    one Durable Object per user: holds, batches,
+        |    (per user)    runs extraction, builds exports
+        +--> Workers AI    extraction, digest, summaries, embeddings
+        +--> Vectorize     semantic half of the shortlist
         v
-Dashboard + recall context
+receipts + recall context
 ```
 
-## Cloudflare Stack
-
-| Component | Role |
+| Area | Path |
 | --- | --- |
-| Workers | Public product shell, HTTP API, dashboard assets, auth/session gate, MCP routing |
-| D1 | Users, sessions, connection tokens, nodes, slices, events, edges, candidates, checkpoints, receipts |
-| Durable Objects | Per-user batching and background extraction continuity |
-| Vectorize | Semantic shortlist and recall support |
-| Workers AI | Extraction, digesting, summaries, embeddings |
-| MCP endpoint | Remote tool door for assistants |
+| Routes | `src/index.js` |
+| Auth, tokens, Google OAuth | `src/auth.js` |
+| MCP server (3 tools) | `src/mcp/server.js` |
+| Extraction pipeline | `src/pipeline/` |
+| App UI — landing + dashboard, one file, no build step | `public/index.html` |
+| Docs site | `public/docs/index.html` → `/docs/` |
+| SDKs | `sdk/js/`, `sdk/python/` |
+| Benchmark harness | `evals/locomo/` |
+| Migrations | `migrations/` |
 
-## Data Model
+## The app
 
-| Entity | Purpose |
-| --- | --- |
-| `users` | Account identity for the private dashboard and memory ownership. |
-| `sessions` | HttpOnly browser sessions stored as hashed random tokens. |
-| `connection_tokens` | Per-tool API/MCP tokens stored as hashes and shown once on creation. |
-| `nodes` | Stable memory objects such as "Grandmother", "Boxing", or a project |
-| `memory_pages` | Manual_collect conversation pages with title, summary, key points, related concepts, and evidence |
-| `slices` | Durable descriptive facts attached to nodes |
-| `events` | Timeline entries that change or describe node state |
-| `edges` | Directed relationships between nodes |
-| `candidates` | Ambiguous or lower-confidence extracted memories |
-| `receipts` | Save results, processing state, summaries, and diagnostics |
-| `checkpoints` | Per-user ingestion progress |
+Signed in at `/app`:
 
-## Paths
+**Setup** — Get started (App Connect · SDK · Plugin), Playground, API Keys.
+**Activity** — Dashboard, Memories, Graph, Requests, Memory exports, History.
 
-| Path | Status | Description |
-| --- | --- | --- |
-| Path A: manual save / collect | Built | Save one durable fact or a selected conversation chunk. |
-| Path C: recall | Built | Retrieve compact memory context for a user query. |
-| Path B: hybrid live mode | Planned | Future `observe_turn` / `observe_pack` style live observation. Not built yet. |
+- **Get started** walks you through connecting Claude, ChatGPT, or Cursor. Before you create a
+  link, no code block is copyable — the copy button *is* the create-link button, so you can
+  never copy a URL that cannot work.
+- **Playground** is a real conversation with a live Memories panel. Everything it captures is
+  genuinely saved, by the same pipeline, with a receipt. Per-thread settings change what gets
+  captured, and they feed the real rules system.
+- **Requests** shows every call that reached your memory — type, entities, event, latency,
+  status. Metadata only: the query never selects a column that could contain your words.
+- **Memory exports** builds a full JSON copy as a background job in your Durable Object.
 
-## MCP Tools
-
-The MCP endpoint exposes three tools:
+## MCP tools
 
 | Tool | Use |
 | --- | --- |
-| `save_memory` | Save a single durable fact in the user's words. |
-| `save_conversation` | Save a recent conversation batch after digesting it into durable facts. |
-| `recall_memory` | Recall relevant context about the user. |
+| `save_memory` | Save one durable fact in the user's words. |
+| `save_conversation` | Digest a batch of messages, then extract. |
+| `recall_memory` | Return compact, relevant context about the user. |
 
-MCP identity is resolved from a per-tool `uml_live_...` token in the connector URL path. Treat generated MCP URLs and tokens as secrets. The older base64url `userId:API_KEY` connector format is retained only for hidden dev/admin mode and tests.
-
-## Auth And Identity
-
-UML now has a first-party account/session model:
-
-- `POST /auth/signup` creates a user and logs them in.
-- `POST /auth/login` verifies email/password with Worker-compatible PBKDF2-SHA256.
-- `GET /auth/me` returns the current browser profile.
-- `POST /auth/logout` revokes the current session.
-- `POST /auth/logout-all` revokes all browser sessions for the account.
-- `GET /auth/tokens` lists masked per-tool tokens.
-- `POST /auth/tokens` creates one-time API/MCP tokens.
-- `POST /auth/tokens/:id/revoke` revokes a token.
-
-Normal dashboard requests derive `userId` from the HttpOnly session cookie. API and MCP requests derive `userId` from the token owner. The legacy `x-api-key + userId` flow remains for dev/admin compatibility and tests, but it is not exposed in the normal product UI.
+Identity lives in the connector URL path (`/mcp/itsuki_live_...`). **Treat a generated MCP URL
+as a secret** — it is shown once. Tokens minted before the rename (`uml_live_...`) keep working
+forever; a rename must never break someone's integration.
 
 ## HTTP API
 
-| Route | Method | Auth | Purpose |
-| --- | --- | --- | --- |
-| `/health` | `GET` | No | Basic service health check. |
-| `/v1/save` | `POST` | Session, bearer token, or legacy dev key | Manual memory or conversation save. |
-| `/v1/recall` | `POST` | Session, bearer token, or legacy dev key | Recall compact context for a query. |
-| `/v1/graph` | `GET` | Session, bearer token, or legacy dev key | Load nodes, slices, events, edges, candidates, stats, and model metadata. |
-| `/v1/receipts` | `GET` | Session, bearer token, or legacy dev key | Load recent save receipts. |
-| `/v1/status` | `GET` | Session, bearer token, or legacy dev key | Return graph counts and checkpoint state. |
-| `/v1/ingest` | `POST` | Session, bearer token, or legacy dev key | Batch message ingestion through the Durable Object. |
-| `/v1/actions/repair-graph` | `POST` | Session or legacy dev key | Organize clusters, preview/clean junk with confirmation, repair safe page titles, and return a receipt. |
-| `/v1/actions/clean-junk` | `POST` | Session or legacy dev key | Preview junk-looking nodes/candidates; archives/suppresses only with `CLEAN JUNK`. |
-| `/v1/actions/delete-all` | `POST` | Session or legacy dev key | Reset the authenticated user's memory rows only with `DELETE ALL`. |
-| `/mcp/<token>` | MCP | Per-tool URL token | Streamable HTTP MCP endpoint. |
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/v1/save` | `POST` | Save a fact, or a conversation. |
+| `/v1/recall` | `POST` | Recall compact context for a query. |
+| `/v1/turn` | `POST` | One call per agent turn: recall + capture together. |
+| `/v1/ingest` | `POST` | Batch messages through the Durable Object. |
+| `/v1/graph` | `GET` | The whole graph: nodes, slices, events, edges, candidates. |
+| `/v1/usage` | `GET` | Per-day activity rollups. |
+| `/v1/requests` | `GET` | Request metadata for the Requests page. |
+| `/v1/exports` | `GET` `POST` | List or start an export job. |
+| `/v1/receipts` | `GET` | Recent save receipts. |
+| `/v1/rules` | `GET` `PUT` | What to collect, and what never to. |
+| `/v1/export` | `GET` | Everything you own, streamed as one JSON file. |
+| `/mcp/<token>` | MCP | Streamable HTTP MCP endpoint. |
 
-## Dashboard
+Auth is a session cookie (app), an `itsuki_live_` Bearer key (API/SDK), or the legacy
+`x-api-key` + explicit `userId` (admin/tools). Passing a `userId` different from the key owner
+creates an **isolated sub-tenant memory space** — that is how one key serves many end users.
 
-The web product shell is served from `public/index.html`.
+## SDKs
 
-- Public landing page with UML branding, "One memory for every AI you use", and Save/Recall diagram.
-- Login and sign up forms backed by real D1 users and sessions.
-- Private dashboard at `/app`.
-- Home tab with account welcome, stats, and quick actions.
-- Graph tab with backend-computed spaced positions, procedural canvas cluster hulls, memory-page card nodes, UI-only related-concept guide lines, clean/all/focus/debug modes, fitting, selection focus, and empty/error states.
-- Memories tab with latest-first pages/nodes and search.
-- Save tab for "Save a fact" and "Collect a conversation".
-- Recall tab for querying memory.
-- Connect tab for one-time MCP/API token generation, masked token list, revoke, and practical setup cards.
-- Help, Profile, Settings, and Danger Zone / Reset sections.
-- Hidden dev/admin mode keeps legacy manual `userId` and global API key controls out of the normal UI.
+```bash
+npm install itsuki      # Node 18+, zero dependencies
+pip install itsuki      # httpx
+```
 
-## Local Development
+```js
+import { MemoryClient } from "itsuki";
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_KEY });
 
-Install dependencies:
+await memory.add("I started learning Kotlin this week.");
+const { context } = await memory.search("what am I learning?");
+```
+
+Source lives in [`sdk/js/`](sdk/js) and [`sdk/python/`](sdk/python).
+
+## Local development
 
 ```bash
 npm install
-```
-
-Create local development secrets:
-
-```bash
-cp .dev.vars.example .dev.vars
-```
-
-Edit `.dev.vars` and set a local `API_KEY`. Do not commit `.dev.vars`.
-
-Run tests:
-
-```bash
-npm test
-```
-
-Run the Worker locally:
-
-```bash
+cp .dev.vars.example .dev.vars   # set a local API_KEY; never commit this file
+npx vitest run
 npx wrangler dev
-```
-
-## Deployment
-
-This project uses `wrangler.jsonc` for Cloudflare configuration. Configure your own D1 database, Durable Object migration, Vectorize index, Workers AI binding, and secrets before deploying.
-
-Set the production API key as a secret:
-
-```bash
-npx wrangler secret put API_KEY
 ```
 
 Deploy:
 
 ```bash
+npx wrangler d1 migrations apply uml-memory --remote
 npx wrangler deploy
 ```
 
-If you change bindings in `wrangler.jsonc`, regenerate types:
-
-```bash
-npx wrangler types
-```
-
-## Environment Variables And Secrets
+## Configuration
 
 | Name | Type | Notes |
 | --- | --- | --- |
-| `API_KEY` | Secret | Legacy dev/admin key for hidden manual `x-api-key + userId` flows and older encoded MCP URLs. Never commit it. |
-| `USE_VECTORS` | Var | Enables Vectorize-backed embedding and recall behavior. |
-| `ENABLE_PASS2` | Var | Enables pass-2 summary enrichment. |
-| `LLM_PROVIDER` | Var | Currently configured for Workers AI. |
-| `LLM_MODEL` | Var | Extraction model. Current deployment uses Qwen3 30B A3B FP8. |
-| `LLM_MAX_TOKENS` | Var | Output budget for extraction. |
-| `LLM_SUMMARY_MODEL` | Var | Smaller summary/pass-2 model. |
-| `LLM_DIGEST_MODEL` | Var | Conversation digest model. |
-| `EMBED_MODEL` | Var | Embedding model for semantic search. |
+| `API_KEY` | Secret | Legacy admin key for `x-api-key + userId` flows. Never commit it. |
+| `LLM_MODEL` | Var | Extraction model. Tuned for capture — changing it changes what is saved. |
+| `CHAT_MODEL` | Var | Playground conversation model. Deliberately separate from `LLM_MODEL`. |
+| `LLM_SUMMARY_MODEL` · `LLM_DIGEST_MODEL` | Var | Cheaper models for pass-2 and digests. |
+| `EMBED_MODEL` | Var | Embeddings for semantic recall. |
+| `USE_VECTORS` · `ENABLE_PASS2` | Var | Feature flags; off in tests. |
+| `ENABLE_CORS` | Var | Cross-origin `/v1/*`. Bearer only, credentials never allowed. |
+| `PLAYGROUND_DAILY_MESSAGES` · `PLAYGROUND_MAX_THREADS` | Var | Playground caps, per user. |
+| `EXPORT_MAX_BYTES` | Var | Largest export a job will hold for download. |
 
-## Security Warning
-
-Never commit:
-
-- Cloudflare API tokens or Wrangler auth tokens.
-- `.env`, `.dev.vars`, or local secret files.
-- Production API keys.
-- Browser session cookies.
-- API/MCP user URLs or tokens.
-- Raw logs, screenshots, PDFs, or transcripts that contain secrets.
-
-If a key or MCP URL was exposed in chat, screenshots, logs, or a public repo, rotate it before using the project in a public demo.
-
-## Current Status
-
-- Product shell auth is implemented in this repo: public landing page, login, sign up, browser sessions, per-user memory isolation, per-tool API/MCP tokens, private dashboard tabs, and session-scoped reset.
-- Run 3.4.4 is implemented in this repo: memory page identity, dynamic semantic clusters, evidence dedupe, sidebar latest-first ordering, graph spacing/color/living hull polish, safer cleanup/reset UX, graph repair, and title-quality fixes.
-- Tests pass locally.
-- Active extraction model is `@cf/qwen/qwen3-30b-a3b-fp8`.
-- Manual saves, conversation saves, memory page recall, graph loading, receipts, and MCP tools are built.
-- Graph view supports clean, all, focus, and debug modes. Clean is the default.
-- Safe reset/delete-all requires the exact confirmation string `DELETE ALL` for the selected user.
-- Path B live observation is intentionally not built yet.
-
-## Roadmap
-
-- Path B `observe_turn` / `observe_pack` live memory mode.
-- Key rotation UI and per-user credential management.
-- Memory edit, delete, and merge flows.
-- Password reset and account deletion flows.
-- Better graph clustering and relationship discovery.
-- Export/import for memory portability.
-- Richer audit and review workflows for proposed memories.
+Never commit Cloudflare tokens, `.dev.vars`, production keys, session cookies, or MCP URLs.
+If one has been exposed anywhere, rotate it before using the project in public.
 
 ## License
 

@@ -171,3 +171,7 @@ tmp/
 !.env.example
 .wrangler/
 uml.pdf
+
+# Python bytecode (the SDK is source, not build output)
+__pycache__/
+*.py[cod]

@@ -10,7 +10,9 @@ Paste this whole file as your first message in a new chat.
 every AI you use. Live at **https://uml.gpmai.workers.dev** (domain still says "uml"; the
 product was renamed to Itsuki on 2026-08-01 and a custom domain hasn't been bought yet).
 
-Repo: `C:\Users\ziyad\uml` → github.com/12ziyad/universal-memory-engine (Apache-2.0, **private**).
+Repo: `C:\Users\ziyad\uml` → github.com/12ziyad/universal-memory-engine (Apache-2.0, **public** —
+verified 2026-08-01 with `gh repo view`; this file previously said private, which is why the
+plugin-marketplace item below was listed as blocked. Re-check that blocker before trusting it).
 Owner/admin account: ejziyad@gmail.com. Cloudflare: **Workers Paid**, $10,000 startup credits
 active since 2026-06-17 (credits pay the invoice; card untouched).
 
