@@ -13,14 +13,32 @@ import html from "../public/index.html?raw";
 const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
 describe("app type scale", () => {
-	it("self-hosts JetBrains Mono and never reaches a font CDN", () => {
-		expect(css).toContain('font-family: "JetBrains Mono"');
-		expect(css).toContain('src: url("/assets/jetbrains-mono-latin.woff2") format("woff2")');
-		expect(css).toContain('--font-mono: "JetBrains Mono"');
-		// Preloaded so the first code block does not flash a fallback face.
-		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/jetbrains-mono-latin.woff2"');
+	it("self-hosts Geist and Geist Mono and never reaches a font CDN", () => {
+		for (const file of ["geist-400.woff2", "geist-600.woff2", "geist-mono-400.woff2"]) {
+			expect(css).toContain(`src: url("/assets/${file}") format("woff2")`);
+		}
+		expect(css).toContain('--font-ui: "Geist", "Inter"');
+		expect(css).toContain('--font-mono: "Geist Mono", "JetBrains Mono"');
+		// Geist 400 is preloaded; body text is the first thing anyone reads.
+		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2"');
 		// The privacy promise on the landing page depends on this staying true.
-		expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit|fontawesome/i);
+		expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit|fontawesome|cdn\.jsdelivr|unpkg\.com\/@fontsource/i);
+	});
+
+	it("ships two static Geist weights, not the variable font", () => {
+		const geistFaces = css.match(/font-family: "Geist";[\s\S]*?\}/g) ?? [];
+		expect(geistFaces).toHaveLength(2);
+		expect(geistFaces.filter((f) => /font-weight: 400;/.test(f))).toHaveLength(1);
+		expect(geistFaces.filter((f) => /font-weight: 600;/.test(f))).toHaveLength(1);
+		// A range like `font-weight: 100 900` would mean the variable file.
+		expect(css).not.toMatch(/font-family: "Geist";[\s\S]{0,160}font-weight: \d+ \d+/);
+		// Two real weights, so nothing should ever be faux-bolded into a third.
+		expect(css).toContain("font-synthesis-weight: none;");
+	});
+
+	it("keeps Inter and JetBrains Mono declared as the fallback faces", () => {
+		expect(css).toContain('src: url("/assets/inter-latin.woff2") format("woff2")');
+		expect(css).toContain('src: url("/assets/jetbrains-mono-latin.woff2") format("woff2")');
 	});
 
 	it("keeps every code surface on the shared mono variable", () => {

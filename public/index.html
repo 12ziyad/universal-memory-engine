@@ -6,12 +6,40 @@
 <title>Itsuki — personal memory for every AI</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
-<link rel="preload" as="font" type="font/woff2" href="/assets/jetbrains-mono-latin.woff2" crossorigin />
+<link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <style>
-	/* Inter, self-hosted and Latin-subset (62 KB). Deliberately NOT Google
-	   Fonts: that would send every visitor's IP to a third party and make the
-	   "no third-party trackers" line in our privacy policy untrue. */
+	/* Geist (Vercel + basement.studio, SIL Open Font License 1.1 — the OFL
+	   explicitly allows fonts to be "bundled, embedded, redistributed and/or
+	   sold with any software"). Self-hosted Latin subsets, two STATIC weights,
+	   not the variable font: 400 for body, 600 for headings, and nothing else.
+	   Deliberately NOT Google Fonts or any CDN — hotlinking would send every
+	   visitor's IP to a third party and make the "no third-party trackers" line
+	   in our privacy policy untrue. */
+	@font-face {
+		font-family: "Geist";
+		src: url("/assets/geist-400.woff2") format("woff2");
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+	}
+	@font-face {
+		font-family: "Geist";
+		src: url("/assets/geist-600.woff2") format("woff2");
+		font-weight: 600;
+		font-style: normal;
+		font-display: swap;
+	}
+	@font-face {
+		font-family: "Geist Mono";
+		src: url("/assets/geist-mono-400.woff2") format("woff2");
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+	}
+	/* Inter and JetBrains Mono stay declared as the next link in each stack, so
+	   a 404 on a Geist file degrades to a real typeface instead of a system
+	   default. They cost nothing unless Geist actually fails to load. */
 	@font-face {
 		font-family: "Inter";
 		src: url("/assets/inter-latin.woff2") format("woff2");
@@ -19,9 +47,6 @@
 		font-style: normal;
 		font-display: swap;
 	}
-	/* JetBrains Mono for every code block — self-hosted Latin subset (21 KB),
-	   OFL. Same reason as Inter: no third-party font host, so no visitor IP
-	   ever leaves this origin. */
 	@font-face {
 		font-family: "JetBrains Mono";
 		src: url("/assets/jetbrains-mono-latin.woff2") format("woff2");
@@ -30,8 +55,8 @@
 		font-display: swap;
 	}
 	:root {
-		--font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-		--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+		--font-ui: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
 		--border: #2b333f; --border2: #3a4452;
@@ -53,15 +78,18 @@
 	html, body { height: 100%; }
 	body { margin: 0; font: 13.5px/1.7 var(--font-ui);
 		-webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+		/* Geist ships here as two static weights. Without this, a rule asking for
+		   700+ could get a faux-bolded 600 rather than the real 600 face. */
+		font-synthesis-weight: none;
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	code { font-family: var(--font-mono); }
 
 	/* ---- app type scale ----------------------------------------------------
 	   Two weights only: 600 for headings, 400 for body. 500 is reserved for tab
-	   labels. The negative tracking on headings matters — Inter ships loose at
-	   display sizes and tightening it is the single biggest readability win
-	   available here. Scoped to body.app-mode so the landing art is untouched.
+	   labels, and those are the only three the page ever asks for. The negative
+	   tracking on headings still matters with Geist — it sets loose at display
+	   sizes. Scoped to body.app-mode so the landing art is untouched.
 	   ------------------------------------------------------------------------ */
 	body.app-mode { font-size: 14px; line-height: 1.6; }
 	body.app-mode .page-title { font-size: 32px; font-weight: 600; letter-spacing: -.02em;
