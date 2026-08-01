@@ -327,8 +327,18 @@
 	.install-card .install-head { margin-bottom: 4px; }
 	.install-code { position: relative; margin: 10px 0; }
 	.install-code pre { margin: 0; padding: 16px 18px; background: #0d1117; color: #dbe7ee; border-radius: 11px;
-		overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.75; }
+		overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; }
 	.install-code .copy-btn { position: absolute; top: 8px; right: 8px; }
+	/* No key yet: the block is a preview of a string that cannot work, so it
+	   reads as inactive and its button creates the link instead of copying. */
+	.install-code.locked pre { opacity: .55; }
+	.install-callout { max-width: 1080px; margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;
+		border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
+		background: color-mix(in srgb, var(--amber) 7%, transparent); font-size: 14px; line-height: 1.6; }
+	.install-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+		background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 15px;
+		font-size: 13px; font-weight: 600; }
+	.install-btn:hover { filter: brightness(1.08); }
 	.connect-inline-note { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(220,104,3,.35);
 		background: rgba(220,104,3,.06); border-radius: 10px; font-size: 13px; }
 	[data-pane-group] > [data-pane] { display: none; }
@@ -837,7 +847,7 @@
 				<div class="flow-num">1</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
 				<h3>You talk</h3>
-				<p>Tell your AI: <i>"save this to uml — I finished Unit 3."</i> Or let your app send it automatically.</p>
+				<p>Tell your AI: <i>"save this to itsuki — I finished Unit 3."</i> Or let your app send it automatically.</p>
 			</div>
 			<div class="flow-step">
 				<div class="flow-num">2</div>
@@ -881,7 +891,7 @@
 					<div class="term-step"><b>3</b><span>Name it <i>itsuki</i>, paste your private link, click Add:</span></div>
 					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
 					<div class="term-step"><b>4</b><span>In a chat, tap the <b>+</b> (bottom-left) &rarr; <i>Connectors</i> &rarr; switch on <i>itsuki</i></span></div>
-					<div class="term-note">Works on the free plan. On mobile after setup: it syncs automatically. Then just say <i>"save this to uml"</i> or <i>"what do you know about me?"</i></div>
+					<div class="term-note">Custom connectors need a paid Claude plan. Once it is set up it syncs to mobile automatically. Then say <i>"save this to itsuki"</i> or <i>"what do you know about me?"</i></div>
 				</div>
 				<div class="term-pane" data-pane="chatgpt">
 					<div class="term-step"><b>1</b><span>On a computer: ChatGPT &rarr; Settings &rarr; <i>Connectors</i> (called <i>Plugins</i> in some builds) &rarr; <i>Advanced</i> &rarr; turn on <b>Developer mode</b>. Nothing MCP-related appears until this is on.</span></div>
@@ -1694,7 +1704,9 @@ function setView(v, { updateHash = true } = {}) {
 
 function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
-	if (!S.data && !["memory","connect","settings","rules","receipts"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	// Setup screens must never wait on /v1/graph — a brand-new account has no
+	// graph to load, and Get started is the first thing they open.
+	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -2157,10 +2169,31 @@ function oneTimeSecretPanel(latest) {
 	</div>`;
 }
 
-function installSnippets() {
+/**
+ * THE key for Get started. One variable: `installKey()` is null until the
+ * person creates a link, and every code() on the page reads it through
+ * installSnippets(key). The secret is shown exactly once — it lives in memory
+ * for the session only, and installKeyGuard() warns before the tab closes.
+ */
+const MCP_KEY_PLACEHOLDER = "YOUR_MCP_KEY";
+
+function installKey() {
+	return S.oneTimeToken?.tokenRecord?.type === "mcp" ? (S.oneTimeToken.token || null) : null;
+}
+
+function createInstallKey() {
+	return createKeyFor("mcp");
+}
+
+/** Cursor's one-click install URL: base64 of the MCP server config. */
+function cursorInstallLink(key) {
+	const config = btoa(JSON.stringify({ type: "http", url: `${location.origin}/mcp/${key}` }));
+	return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(PRODUCT.name)}&config=${encodeURIComponent(config)}`;
+}
+
+function installSnippets(key = MCP_KEY_PLACEHOLDER) {
 	const origin = location.origin;
-	const mcpToken = S.oneTimeToken?.token && S.oneTimeToken?.tokenRecord?.type === "mcp"
-		? S.oneTimeToken.token : "YOUR_MCP_KEY";
+	const mcpToken = key || MCP_KEY_PLACEHOLDER;
 	const apiKey = "YOUR_API_KEY";
 	return {
 		mcpUrl: `${origin}/mcp/${mcpToken}`,
@@ -2221,49 +2254,66 @@ console.log(result.recall.context);`,
 }
 
 /**
- * Get started — three ways in, each a short numbered walkthrough: what to do
- * on the left, the exact thing to copy on the right. Short sentences only.
+ * Get started — three doors, one config, one renderer.
+ *
+ * A step is always the same shape: { title, body, code(key), action, note,
+ * done }. A step that needs a button and a step that needs a code block differ
+ * only in which fields are filled. `code` is a FUNCTION of the key, so there is
+ * exactly one place the key can come from, and a code block that still contains
+ * the placeholder is automatically un-copyable — its copy button becomes the
+ * create-link button instead of handing out a string that cannot work.
  */
 function installMethods() {
-	const s = installSnippets();
 	const name = PRODUCT.name.toLowerCase();
-	const mcpKey = `<button class="mini" onclick="createKeyFor('mcp')">Create a link</button>`;
+	const mcpKey = `<button class="mini" onclick="createInstallKey()">Create link</button>`;
 	const apiKey = `<button class="mini" onclick="createKeyFor('api')">Create an API key</button>`;
+	const linkReady = `<div class="step-done">Link created. It is in the panel above, and in every block below.</div>`;
 	return {
 		// App Connect leads: connecting the chat apps people already use is the
 		// thing this product does that developer-only memory tools do not.
-		connect: {
+		appConnect: {
 			label: "App Connect",
 			blurb: "One link — Claude and ChatGPT remember you",
 			clients: {
 				claude: {
 					label: "Claude",
+					intro: "Custom connectors need a paid Claude plan. On a free account you can walk all the way to the settings screen before Claude tells you.",
 					steps: [
-						{ t: "Create your link", d: "One click. It carries your private key, so it is shown only once.", html: mcpKey },
-						{ t: "Add it to Claude", d: "Use a computer — the phone apps cannot add connectors. It syncs to your phone afterwards.", code: s.mcpUrl,
+						{ title: "Create your link", body: "One click. It carries your private key, so it is shown once and never again.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add it to Claude", body: "Use a computer — the phone apps cannot add connectors. It syncs to your phone afterwards.",
+							code: (key) => installSnippets(key).mcpUrl,
 							note: `Paste into <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">Settings → Connectors → Add custom connector</a> and name it <b>${name}</b>.` },
-						{ t: "Switch it on in a chat", d: "Tap + at the bottom left, choose Connectors, turn on " + name + ". Saved connectors stay off until you do this.",
-							html: `<div class="step-done">Then simply say <i>"remember this"</i> or ask <i>"what do you know about me?"</i></div>` },
+						{ title: "Switch it on in a chat", body: `Tap + at the bottom left, choose Connectors, turn on ${name}. Saved connectors stay off until you do this.`,
+							done: `Then say <i>"save this to ${name}"</i> — naming the tool is a much stronger hint than "remember this".` },
 					],
 				},
 				chatgpt: {
 					label: "ChatGPT",
+					intro: "ChatGPT takes more steps than Claude — six instead of three. Requires ChatGPT on the web (not the phone app) and a paid plan.",
 					steps: [
-						{ t: "Turn on Developer mode", d: "Settings → Connectors → Advanced. Nothing MCP-related appears until this is on.",
-							html: `<div class="step-note">Needs a paid plan. Free ChatGPT accounts cannot add custom connectors.</div>` },
-						{ t: "Create the connector", d: "Connectors → Create. Name it " + name + ", then paste your link.", before: mcpKey, code: s.mcpUrl,
-							note: `In the description field write <i>Personal memory — save and recall facts about me.</i> The model reads it when deciding to use ${PRODUCT.name}.` },
-						{ t: "Pick it in a chat", d: "Start a new chat, enable Developer mode or Add sources, then choose " + name + ".",
-							html: `<div class="step-done">Ready. Ask it what it remembers about you.</div>` },
+						{ title: "Open apps and connectors", body: "Settings → Apps & connectors. The menu may read Apps, Connectors, or Apps & connectors depending on your build." },
+						{ title: "Turn on Developer mode", body: "Open Advanced settings at the bottom of the panel, and turn Developer mode on.",
+							note: "Developer mode has to stay on. Turn it off and the connector can't be selected." },
+						{ title: "Go back one screen", body: "A Create button now appears next to your enabled apps and connectors." },
+						{ title: "Create the connector", body: `Click Create. Name it ${name}, paste the URL, set authentication to None — your key is already in the URL — tick the trust checkbox, and click Create.`,
+							action: mcpKey, code: (key) => installSnippets(key).mcpUrl },
+						{ title: "Open a new chat", body: "The tools menu only refreshes on a new one." },
+						{ title: "Select it for the conversation", body: `Click + → More → Developer tools, and select ${name} for that conversation.`,
+							done: `Ready. Ask it what it remembers about you.` },
 					],
 				},
 				cursor: {
 					label: "Cursor",
 					steps: [
-						{ t: "Create your link", d: "The same private URL works in any MCP-capable editor.", html: mcpKey },
-						{ t: "Add it to your MCP config", d: "Project .cursor/mcp.json, or the global one in your home folder.", code: s.cursor },
-						{ t: "Reload the editor", d: "Cursor connects on start and the three memory tools appear.",
-							html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+						{ title: "Create your link", body: "The same private URL works in any MCP-capable editor.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Install it in Cursor", body: "One click. Cursor opens and asks you to confirm the server.",
+							action: (key) => key
+								? `<a class="install-btn" href="${esc(cursorInstallLink(key))}">Add to Cursor</a>`
+								: mcpKey,
+							code: (key) => installSnippets(key).cursor,
+							note: "Nothing happened? Your browser blocked the app link. Paste the config above into <b>.cursor/mcp.json</b> instead — it works in any other MCP editor too." },
+						{ title: "Reload the editor", body: "Cursor connects on start and the three memory tools appear.",
+							done: `save_memory · save_conversation · recall_memory` },
 					],
 				},
 			},
@@ -2275,27 +2325,27 @@ function installMethods() {
 				python: {
 					label: "Python",
 					steps: [
-						{ t: "Install the SDK", d: "One package, one dependency.", code: "pip install itsuki" },
-						{ t: "Initialize the client", d: "Point it at your key. Server-side only — keep keys out of browsers.", code: s.pythonInit, note: "<div class=\"step-note\">Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once.</div>" },
-						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.python },
-						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.pythonTurn },
+						{ title: "Install the SDK", body: "One package, one dependency.", code: () => "pip install itsuki" },
+						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
+						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", code: (key) => installSnippets(key).python },
+						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", code: (key) => installSnippets(key).pythonTurn },
 					],
 				},
 				node: {
 					label: "Node.js",
 					steps: [
-						{ t: "Install the SDK", d: "Zero dependencies, Node 18 or newer.", code: "npm install itsuki" },
-						{ t: "Initialize the client", d: "Point it at your key. Server-side only — keep keys out of browsers.", code: s.nodeInit, note: "<div class=\"step-note\">Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once.</div>" },
-						{ t: "Save and recall", d: "Two calls cover most of it. Everything else is optional.", code: s.node },
-						{ t: "Running an agent?", d: "One call per turn: recall context and capture what was learned, together.", code: s.nodeTurn },
+						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", code: () => "npm install itsuki" },
+						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
+						{ title: "Save and recall", body: "Two calls cover most of it. Everything else is optional.", code: (key) => installSnippets(key).node },
+						{ title: "Running an agent?", body: "One call per turn: recall context and capture what was learned, together.", code: (key) => installSnippets(key).nodeTurn },
 					],
 				},
 				curl: {
 					label: "cURL",
 					steps: [
-						{ t: "Create an API key", d: "Send it as a Bearer token on every request.", html: apiKey, note: "<div class=\"step-note\">Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>.</div>" },
-						{ t: "Save a memory", d: "Returns a receipt: what was stored, what was skipped, and why.", code: s.curlSave },
-						{ t: "Recall it", d: "The context field is the block you drop into your prompt.", code: s.curlRecall },
+						{ title: "Create an API key", body: "Send it as a Bearer token on every request.", action: apiKey, note: "Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>." },
+						{ title: "Save a memory", body: "Returns a receipt: what was stored, what was skipped, and why.", code: (key) => installSnippets(key).curlSave },
+						{ title: "Recall it", body: "The context field is the block you drop into your prompt.", code: (key) => installSnippets(key).curlRecall },
 					],
 				},
 			},
@@ -2311,19 +2361,19 @@ function installMethods() {
 						mcp: {
 							label: "MCP",
 							steps: [
-								{ t: "Create your link", d: "One key for this machine's agent.", html: mcpKey },
-								{ t: "Add the MCP server", d: "One native command — no npx, nothing to download.", code: s.claudeCode },
-								{ t: "Use it while you work", d: "Ask it to save decisions, or to check what it already knows about the project.",
-									html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+								{ title: "Create your link", body: "One key for this machine's agent.", action: mcpKey },
+								{ title: "Add the MCP server", body: "One native command — no npx, nothing to download.", code: (key) => installSnippets(key).claudeCode },
+								{ title: "Use it while you work", body: "Ask it to save decisions, or to check what it already knows about the project.",
+									done: `save_memory · save_conversation · recall_memory` },
 							],
 						},
 						plugin: {
 							label: "Plugin",
 							steps: [
-								{ t: "Add the marketplace", d: "Points Claude Code at this repository's plugin manifest.", code: s.pluginMarketplace },
-								{ t: "Install the plugin", d: "Bundles the MCP server so there is no URL to paste.", code: s.pluginInstall },
-								{ t: "Not published yet", d: "Plugins install from a public repository. These commands go live the moment the repo is public.",
-									html: `<div class="step-note">Until then the <b>MCP</b> tab gives you the same three tools today.</div>` },
+								{ title: "Add the marketplace", body: "Points Claude Code at this repository's plugin manifest.", code: (key) => installSnippets(key).pluginMarketplace },
+								{ title: "Install the plugin", body: "Bundles the MCP server so there is no URL to paste.", code: (key) => installSnippets(key).pluginInstall },
+								{ title: "Not published yet", body: "Plugins install from a public repository. These commands go live the moment the repo is public.",
+									note: "Until then the <b>MCP</b> tab gives you the same three tools today." },
 							],
 						},
 					},
@@ -2334,20 +2384,20 @@ function installMethods() {
 						mcp: {
 							label: "MCP",
 							steps: [
-								{ t: "Create your link", d: "The same private URL, used by Codex's MCP config.", html: mcpKey },
-								{ t: "Add the server", d: "Point Codex's MCP configuration at your link.", code: s.cursor },
-								{ t: "Restart the agent", d: "It connects over HTTP and the memory tools appear.",
-									html: `<div class="step-done">save_memory · save_conversation · recall_memory</div>` },
+								{ title: "Create your link", body: "The same private URL, used by Codex's MCP config.", action: mcpKey },
+								{ title: "Add the server", body: "Point Codex's MCP configuration at your link.", code: (key) => installSnippets(key).cursor },
+								{ title: "Restart the agent", body: "It connects over HTTP and the memory tools appear.",
+									done: `save_memory · save_conversation · recall_memory` },
 							],
 						},
 						plugin: {
 							label: "Plugin",
 							steps: [
-								{ t: "Register the marketplace", d: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", code: s.codexMarketplace },
-								{ t: "Install from the Codex UI", d: "The plugin appears in Codex's plugin list and bundles the MCP server, so there is no URL to paste.",
-									html: `<div class="step-note">Codex plugins package skills and MCP servers together — one install instead of a config edit.</div>` },
-								{ t: "Not published yet", d: "This needs the repository to be public before Codex can fetch it.",
-									html: `<div class="step-note">Until then the <b>MCP</b> tab connects Codex today.</div>` },
+								{ title: "Register the marketplace", body: "Add this to .agents/plugins/marketplace.json — repo-scoped, or ~/ for just you.", code: (key) => installSnippets(key).codexMarketplace },
+								{ title: "Install from the Codex UI", body: "The plugin appears in Codex's plugin list and bundles the MCP server, so there is no URL to paste.",
+									note: "Codex plugins package skills and MCP servers together — one install instead of a config edit." },
+								{ title: "Not published yet", body: "This needs the repository to be public before Codex can fetch it.",
+									note: "Until then the <b>MCP</b> tab connects Codex today." },
 							],
 						},
 					},
@@ -2385,37 +2435,70 @@ async function createKeyFor(type) {
 	} catch (e) { toast(e.message || "Could not create the key. Please try again.", true); }
 }
 
+/**
+ * The key is shown once, so a reload throws it away. Warn before the tab goes.
+ * Registered once at boot; the browser supplies its own generic wording.
+ */
+function installKeyGuard() {
+	window.addEventListener("beforeunload", (event) => {
+		if (!S.oneTimeToken) return;
+		event.preventDefault();
+		event.returnValue = "";
+	});
+}
+
+/** The Get started renderer. Reads { method, client, variant, key } and nothing else. */
 function viewInstall(v) {
-	const methods = installMethods();
-	const methodId = methods[S.installMethod] ? S.installMethod : "connect";
-	const method = methods[methodId];
-	const clientId = method.clients[S.installClient] ? S.installClient : Object.keys(method.clients)[0];
-	const client = method.clients[clientId];
+	const doors = installMethods();
+	const state = {
+		method: doors[S.installMethod] ? S.installMethod : "appConnect",
+		client: null,
+		variant: null,
+		key: installKey(),
+	};
+	const door = doors[state.method];
+	state.client = door.clients[S.installClient] ? S.installClient : Object.keys(door.clients)[0];
+	const client = door.clients[state.client];
 	// Some clients offer two install routes (plugin bundle vs raw MCP): a second
 	// tab row appears only for those, exactly where the choice actually exists.
 	const variants = client.variants ?? null;
-	const variantId = variants ? (variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0]) : null;
-	const active = variants ? variants[variantId] : client;
+	if (variants) state.variant = variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0];
+	const active = variants ? variants[state.variant] : client;
 
-	const codeBlock = (text) =>
-		`<div class="install-code"><pre>${esc(text)}</pre><button class="copy-btn mini" onclick="copyText(${JSON.stringify(text).replace(/"/g, "&quot;")}, 'Copied')">Copy</button></div>`;
+	const codeBlock = (text) => {
+		// A block that still carries the placeholder cannot work, so it is not
+		// copyable: the copy button IS the create-link button until a key exists.
+		const locked = text.includes(MCP_KEY_PLACEHOLDER);
+		const button = locked
+			? `<button class="copy-btn mini" onclick="createInstallKey()">Create link</button>`
+			: `<button class="copy-btn mini" onclick="copyText(${JSON.stringify(text).replace(/"/g, "&quot;")}, 'Copied')">Copy</button>`;
+		return `<div class="install-code${locked ? " locked" : ""}"><pre>${esc(text)}</pre>${button}</div>`;
+	};
 
-	const steps = active.steps.map((step, i) => `
+	const steps = active.steps.map((step, i) => {
+		const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;
+		// A locked code block already carries the create-link button. Showing the
+		// step's own one above it would offer the same action twice.
+		const action = code?.includes(MCP_KEY_PLACEHOLDER)
+			? ""
+			: typeof step.action === "function" ? step.action(state.key) : step.action;
+		return `
 		<div class="step-row">
 			<div class="step-left">
 				<div class="step-num">${i + 1}</div>
 				<div>
-					<div class="step-title">${esc(step.t)}</div>
-					<div class="step-desc">${esc(step.d)}</div>
+					<div class="step-title">${esc(step.title)}</div>
+					<div class="step-desc">${esc(step.body)}</div>
 				</div>
 			</div>
 			<div class="step-right">
-				${step.before ?? ""}
-				${step.code ? codeBlock(step.code) : ""}
-				${step.html ?? ""}
+				${action ?? ""}
+				${code ? codeBlock(code) : ""}
+				${step.done ? `<div class="step-done">${step.done}</div>` : ""}
 				${step.note ? `<div class="step-note">${step.note}</div>` : ""}
 			</div>
-		</div>`).join("");
+		</div>`;
+	}).join("");
 
 	const wrap = el("div");
 	wrap.innerHTML = `
@@ -2424,24 +2507,25 @@ function viewInstall(v) {
 			<p class="page-sub">Three ways in. All of them read and write the same memory.</p>
 		</div>
 		<div class="method-cards">
-			${Object.entries(methods).map(([id, m]) => `
-				<button class="method-card ${id === methodId ? "active" : ""}" onclick="setInstallMethod('${id}')">
+			${Object.entries(doors).map(([id, m]) => `
+				<button class="method-card ${id === state.method ? "active" : ""}" onclick="setInstallMethod('${id}')">
 					<b>${esc(m.label)}</b><span>${esc(m.blurb)}</span>
 				</button>`).join("")}
 		</div>
-		${Object.keys(method.clients).length > 1 ? `
+		${Object.keys(door.clients).length > 1 ? `
 			<div class="client-tabs">
-				${Object.entries(method.clients).map(([id, c]) => `
-					<button class="term-tab ${id === clientId ? "active" : ""}" onclick="setInstallClient('${id}')">${esc(c.label)}</button>`).join("")}
+				${Object.entries(door.clients).map(([id, c]) => `
+					<button class="term-tab ${id === state.client ? "active" : ""}" onclick="setInstallClient('${id}')">${esc(c.label)}</button>`).join("")}
 			</div>` : ""}
 		${variants ? `
 			<div class="client-tabs variant-tabs">
 				${Object.entries(variants).map(([id, variant]) => `
-					<button class="term-tab ${id === variantId ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
+					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
+		${client.intro ? `<div class="install-callout">${esc(client.intro)}</div>` : ""}
 		${oneTimeSecretPanel(S.oneTimeToken)}
 		<div class="steps-panel">${steps}</div>
-		${method.footnote ? `<div class="install-foot" style="margin-top:14px">${method.footnote}</div>` : ""}
+		${door.footnote ? `<div class="install-foot" style="margin-top:14px">${door.footnote}</div>` : ""}
 		<div class="install-foot">
 			Full reference, concepts, and troubleshooting live in the
 			<a href="/docs/" target="_blank" rel="noopener">documentation ↗</a>.
@@ -5109,6 +5193,7 @@ window.addEventListener("hashchange", () => { const v = hashView(); if (v && doc
 window.addEventListener("keydown", (event) => { if (event.key === "Escape") closePolicyModal(); });
 initConnectWidget();
 initHeroReel();
+installKeyGuard();
 initShell();
 </script>
 </body>
