@@ -8,7 +8,7 @@ Tell it once. Claude remembers. ChatGPT remembers. Your agent remembers. Itsuki 
 stores the durable parts of what you say as a structured graph you can open, search, edit,
 and export — not a hidden blob, and not a chat log replayed back at you.
 
-Live at **https://uml.gpmai.workers.dev** · Apache-2.0 · built entirely on Cloudflare.
+Live at **https://itsuki.app** · Apache-2.0 · built entirely on Cloudflare.
 
 ---
 

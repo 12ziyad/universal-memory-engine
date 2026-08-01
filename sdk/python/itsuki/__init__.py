@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import httpx
 
-DEFAULT_BASE_URL = "https://uml.gpmai.workers.dev"
+DEFAULT_BASE_URL = "https://itsuki.app"
 VERSION = "0.1.0"
 
 __all__ = ["MemoryClient", "Memory", "MemoryAPIError", "VERSION"]

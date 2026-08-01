@@ -9,7 +9,7 @@
  *   const { context } = await memory.search("what am I learning?");
  */
 
-const DEFAULT_BASE_URL = "https://uml.gpmai.workers.dev";
+const DEFAULT_BASE_URL = "https://itsuki.app";
 const VERSION = "0.1.0";
 
 export class MemoryAPIError extends Error {

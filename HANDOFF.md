@@ -7,8 +7,8 @@ Paste this whole file as your first message in a new chat.
 ## What Itsuki is
 
 **Itsuki** (樹, "tree") is a personal memory engine — one private memory graph shared by
-every AI you use. Live at **https://uml.gpmai.workers.dev** (domain still says "uml"; the
-product was renamed to Itsuki on 2026-08-01 and a custom domain hasn't been bought yet).
+every AI you use. Live at **https://itsuki.app** (custom domain since 2026-08-02; the old
+uml.gpmai.workers.dev host still serves /mcp/* and /v1/* natively and 301s HTML paths).
 
 Repo: `C:\Users\ziyad\uml` → github.com/12ziyad/universal-memory-engine (Apache-2.0, **public** —
 verified 2026-08-01 with `gh repo view`; this file previously said private, which is why the

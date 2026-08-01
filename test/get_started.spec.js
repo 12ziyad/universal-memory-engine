@@ -19,7 +19,7 @@ const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
 // The origin the specs simulate the page running on. One constant so a domain
 // move is a one-line change here; the page itself only ever sees location.origin.
-const FIXTURE_ORIGIN = "https://uml.gpmai.workers.dev";
+const FIXTURE_ORIGIN = "https://itsuki.app";
 
 /** Pull one top-level function's source out of the single-file app. */
 function fnSource(name) {

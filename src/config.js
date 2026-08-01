@@ -13,8 +13,8 @@
  * 301'd here (API and MCP paths are served natively on every host, because
  * not every client follows redirects).
  */
-export const PUBLIC_ORIGIN = "https://uml.gpmai.workers.dev";
-export const LEGACY_HOSTS = [];
+export const PUBLIC_ORIGIN = "https://itsuki.app";
+export const LEGACY_HOSTS = ["uml.gpmai.workers.dev"];
 
 // Trigger dials — the only numbers you should need to touch to retune holding.
 export const DIALS = {

@@ -12,6 +12,6 @@
 		}
 	},
 	"metadata": {
-		"setup": "Create an MCP link in the Itsuki app (API Keys → Create MCP link), then set ITSUKI_MCP_URL to it — e.g. https://your-deployment/mcp/itsuki_live_…"
+		"setup": "Create an MCP link in the Itsuki app (Get started → Create link), then set ITSUKI_MCP_URL to it — e.g. https://itsuki.app/mcp/itsuki_live_…"
 	}
 }
