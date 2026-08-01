@@ -22,7 +22,7 @@ async function main() {
 	const conv = dataset[convIndex];
 	if (!conv) throw new Error(`no conversation at index ${convIndex}`);
 
-	const userId = `locomo-conv-${convIndex}`;
+	const userId = process.env.SMOKE_USER || `locomo-conv-${convIndex}`;
 	const sessions = sessionsOf(conv.conversation);
 	const totalTurns = sessions.reduce((sum, s) => sum + s.turns.length, 0);
 	const logFile = path.join(__dirname, "results", `ingest-conv${convIndex}.jsonl`);
@@ -43,6 +43,7 @@ async function main() {
 					userId,
 					conversationId,
 					messages: [{ role: "user", content }],
+					...(process.env.CAPTURE_DENSITY ? { captureDensity: process.env.CAPTURE_DENSITY } : {}),
 				});
 			} catch (error) {
 				failures++;
