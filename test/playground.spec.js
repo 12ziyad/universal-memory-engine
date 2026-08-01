@@ -145,6 +145,32 @@ describe("a turn", () => {
 		expect(body.limits.maxThreads).toBeGreaterThan(0);
 	});
 
+	// Found by running against the live model instead of a stub: real
+	// extraction took 30s+, blew the turn's 9s wait budget, and the panel sat
+	// on "Capturing..." forever because nothing ever went back for the receipt.
+	it("folds a late receipt into the message it came from", async () => {
+		const me = await account("pg-late");
+		const turn = await send(me.cookie, "I started learning Kotlin this week for Android work.");
+		const packetId = turn.user_message.extraction.source_packet_id;
+		expect(packetId).toBeTruthy();
+
+		// Rewind this message to the state a turn that timed out would leave.
+		await env.DB.prepare("UPDATE playground_messages SET extraction_json = ? WHERE id = ?")
+			.bind(JSON.stringify({ items: [], processing: true, source_packet_id: packetId, saved_total: 0 }), turn.user_message.id)
+			.run();
+
+		const body = await (await request("/v1/playground", { headers: { cookie: me.cookie } })).json();
+		const message = body.thread.messages.find((m) => m.id === turn.user_message.id);
+		expect(message.extraction.processing).toBe(false);
+		expect(message.extraction.items.map((i) => i.text)).toContain("Learning Kotlin for Android work");
+		expect(message.extraction.receipt_id).toBeTruthy();
+
+		// And it stays folded — the reconcile is written back, not recomputed.
+		const stored = await env.DB.prepare("SELECT extraction_json FROM playground_messages WHERE id = ?")
+			.bind(turn.user_message.id).first();
+		expect(JSON.parse(stored.extraction_json).processing).toBe(false);
+	});
+
 	it("refuses an empty message without an error page", async () => {
 		const me = await account("pg-empty");
 		const res = await request("/v1/playground/chat", post({ message: "   " }, me.cookie));

@@ -42,7 +42,11 @@
 		}
 	],
 	"ai": {
-		"binding": "AI"
+		"binding": "AI",
+		// AI always runs against Cloudflare, deploy or local dev. Saying so
+		// explicitly is what lets `wrangler dev` reach the real models (and
+		// silences the "may incur usage charges in local dev" warning).
+		"remote": true
 	},
 	"vectorize": [
 		{

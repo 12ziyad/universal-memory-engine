@@ -85,6 +85,50 @@ export async function getThreadMessages(env, userId, threadId, limit = 200) {
 	}));
 }
 
+// Outcomes that mean extraction is finished, whatever it decided.
+const TERMINAL_OUTCOMES = ["wrote", "meaningful_no_write", "llm_failed", "db_write_failed", "no_write"];
+
+/**
+ * Fold late receipts into the messages they came from.
+ *
+ * A turn waits a bounded time for its receipt and then returns regardless —
+ * the model must never hold the response open. On a real extraction model that
+ * bound is often hit, so the message is stored as "processing" and the finished
+ * receipt lands seconds later. Without this the Memories panel would sit on
+ * "Capturing…" forever, which is exactly what happened the first time this ran
+ * against the live model instead of a stub.
+ */
+export async function reconcileExtractions(env, userId, messages) {
+	const pending = messages.filter((m) => m.extraction?.processing && m.extraction.source_packet_id);
+	if (!pending.length) return messages;
+
+	const updates = [];
+	for (const message of pending) {
+		const receipt = await env.DB.prepare(
+			`SELECT id, detail, outcome, saved_total FROM receipts
+			 WHERE user_id = ? AND source_packet_id = ?
+			   AND outcome IN (${TERMINAL_OUTCOMES.map(() => "?").join(",")})
+			 ORDER BY created_at DESC LIMIT 1`,
+		).bind(userId, message.extraction.source_packet_id, ...TERMINAL_OUTCOMES).first().catch(() => null);
+		if (!receipt) continue;
+
+		const detail = parseJson(receipt.detail, {});
+		message.extraction = {
+			...message.extraction,
+			items: await extractionItems(env, userId, detail),
+			summary: null,
+			saved_total: Number(receipt.saved_total ?? 0),
+			processing: false,
+			receipt_id: receipt.id,
+			at: message.extraction.at ?? message.created_at,
+		};
+		updates.push(env.DB.prepare("UPDATE playground_messages SET extraction_json = ? WHERE id = ? AND user_id = ?")
+			.bind(JSON.stringify(message.extraction), message.id, userId));
+	}
+	if (updates.length) await env.DB.batch(updates).catch(() => {});
+	return messages;
+}
+
 function parseJson(value, fallback) {
 	try {
 		const parsed = JSON.parse(value ?? "null");
@@ -262,6 +306,9 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		saved_total: capture.counts?.savedTotal ?? 0,
 		processing: Boolean(capture.processing),
 		receipt_id: capture.receipt_id ?? null,
+		// The handle reconcileExtractions() uses to find the real receipt once
+		// extraction outruns the wait budget, which on a live model it often does.
+		source_packet_id: capture.source_packet_id ?? null,
 		at: Date.now(),
 	};
 

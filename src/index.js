@@ -44,6 +44,7 @@ import {
 	listThreads,
 	playgroundLimits,
 	playgroundTurn,
+	reconcileExtractions,
 } from "./pipeline/playground.js";
 import { normalizeThreadSettings } from "./pipeline/playground_settings.js";
 import { createExport, exportFileName, getExport, listExports } from "./pipeline/exports.js";
@@ -1023,7 +1024,8 @@ const routes = {
 					id: active.id,
 					title: active.title,
 					settings: normalizeThreadSettings(JSON.parse(active.settings_json || "{}")),
-					messages: await getThreadMessages(env, auth.userId, active.id),
+					// Extraction that outran the turn's wait budget lands here.
+					messages: await reconcileExtractions(env, auth.userId, await getThreadMessages(env, auth.userId, active.id)),
 				}
 				: null,
 			limits: {

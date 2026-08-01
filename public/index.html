@@ -2611,6 +2611,7 @@ const PG = {
 	threads: [], threadId: null, messages: [], limits: {},
 	settings: { customInstructions: "", customCategories: [] },
 	tab: "chats", draft: "", sending: false, loaded: false, notice: "",
+	poll: null, pollTries: 0,
 };
 
 function viewPlayground(v) {
@@ -2684,11 +2685,29 @@ async function loadPlayground(threadId) {
 		if (switched) PG.settingsDraft = null;
 		PG.loaded = true;
 		if (S.view === "playground") renderView();
+		schedulePlaygroundPoll();
 	} catch (e) {
 		PG.loaded = true;
 		PG.notice = e.message || "Could not load your chats. Try again in a moment.";
 		if (S.view === "playground") renderView();
 	}
+}
+
+/**
+ * A turn waits a bounded time for its receipt and then answers regardless, so
+ * on a real extraction model the capture usually lands a few seconds after the
+ * reply. Poll until it does, then stop. Without this the panel sits on
+ * "Capturing…" forever — which is exactly what it did against the live model.
+ */
+function schedulePlaygroundPoll() {
+	clearTimeout(PG.poll);
+	const pending = PG.messages.some((m) => m.extraction?.processing);
+	if (!pending || S.view !== "playground") return;
+	PG.pollTries = (PG.pollTries ?? 0) + 1;
+	// A live extraction model has been measured at 30s+. Give it a real window,
+	// then stop claiming to be watching something we have stopped watching.
+	if (PG.pollTries > 24) { PG.pollGaveUp = true; renderPlaygroundMessages(); return; }
+	PG.poll = setTimeout(() => { if (S.view === "playground") loadPlayground(PG.threadId); }, 3000);
 }
 
 function renderPlaygroundSide() {
@@ -2798,10 +2817,16 @@ function renderPlaygroundMessages() {
 	}
 	box.innerHTML = PG.messages.map((m) => {
 		const items = m.extraction?.items ?? [];
+		// Extraction can outrun the poll window. When it does, say what is
+		// actually true — it finished in the background and left a receipt —
+		// rather than claiming to still be watching.
+		const stalled = PG.pollGaveUp || !m.extraction?.source_packet_id;
 		const capture = m.role === "user" && (items.length || m.extraction?.processing)
 			? `<div class="pg-capture">${items.length
 				? `<b>Added to memory</b><br>${items.map((i) => esc(i.text)).join("<br>")}`
-				: `<b>Capturing…</b> extraction is still running for this message.`}</div>`
+				: stalled
+					? `<b>Captured</b> — extraction finished in the background. The receipt is in <a href="#" onclick="setView('receipts');return false">History</a>.`
+					: `<b>Capturing…</b> extraction is still running for this message.`}</div>`
 			: "";
 		return `<div class="pg-msg ${esc(m.role)}"><div class="pg-bubble">${esc(m.content)}</div>${capture}</div>`;
 	}).join("") + (PG.sending ? `<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>` : "");
@@ -2860,6 +2885,8 @@ async function playgroundSend() {
 		toast(e.message || "That message didn't go through. Try again.", true);
 	} finally {
 		PG.sending = false;
+		PG.pollTries = 0;
+		PG.pollGaveUp = false;
 		if (btn) btn.disabled = false;
 		await loadPlayground(PG.threadId);
 		load().catch(() => {});
