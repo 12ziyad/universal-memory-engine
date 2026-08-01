@@ -22,6 +22,7 @@ export default defineConfig({
 			"test/manual_search_profiles.spec.js",
 			"test/manual_titles.spec.js",
 			"test/recall_gate.spec.js",
+			"test/sdk_js.spec.js",
 			"test/title.spec.js",
 		],
 	},

@@ -1,0 +1,13 @@
+{
+	"name": "itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki — one private memory for every AI. Official JavaScript SDK.",
+	"type": "module",
+	"main": "index.js",
+	"exports": { ".": "./index.js" },
+	"engines": { "node": ">=18" },
+	"keywords": ["memory", "ai", "llm", "mcp", "agents", "itsuki"],
+	"license": "Apache-2.0",
+	"repository": { "type": "git", "url": "git+https://github.com/12ziyad/universal-memory-engine.git", "directory": "sdk/js" },
+	"files": ["index.js", "README.md"]
+}
