@@ -41,6 +41,17 @@ describe("app type scale", () => {
 		expect(css).toContain('src: url("/assets/jetbrains-mono-latin.woff2") format("woff2")');
 	});
 
+	it("scopes the fallback faces so they are not downloaded speculatively", () => {
+		// A fallback that downloads on every load is not a fallback, it is a
+		// second font. One rail glyph Geist lacks was pulling 63 KB of Inter.
+		const fallbackFaces = css.match(/font-family: "(?:Inter|JetBrains Mono)";[\s\S]*?\}/g) ?? [];
+		expect(fallbackFaces).toHaveLength(2);
+		for (const face of fallbackFaces) expect(face).toMatch(/unicode-range: U\+0000-00FF/);
+		// Geist itself must stay unscoped — it is the primary face.
+		const geistFaces = css.match(/font-family: "Geist(?: Mono)?";[\s\S]*?\}/g) ?? [];
+		for (const face of geistFaces) expect(face).not.toMatch(/unicode-range/);
+	});
+
 	it("keeps every code surface on the shared mono variable", () => {
 		// A second hardcoded stack is how the two faces drifted apart before.
 		const hardcoded = css.match(/font-family:\s*ui-monospace/g) ?? [];
