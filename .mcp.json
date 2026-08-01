@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"itsuki": {
+			"type": "http",
+			"url": "${ITSUKI_MCP_URL}"
+		}
+	}
+}
