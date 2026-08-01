@@ -371,6 +371,60 @@
 	@media (prefers-reduced-motion: reduce) {
 		.explore-card, .explore-card:hover { transition: none; transform: none; }
 	}
+	/* ---- playground: chats | conversation | memories ---- */
+	.pg-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px; gap: 16px;
+		height: calc(100vh - 132px); min-height: 520px; }
+	.pg-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+		display: flex; flex-direction: column; min-height: 0; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+	.pg-col-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
+	.pg-col-body { flex: 1; overflow-y: auto; min-height: 0; padding: 10px; }
+	.pg-thread { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+		background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 8px;
+		padding: 9px 10px; margin-bottom: 2px; font-weight: 400; }
+	.pg-thread:hover { background: var(--panel2); filter: none; }
+	.pg-thread.active { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-weight: 600; }
+	.pg-thread .pg-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.pg-thread .pg-thread-del { opacity: 0; background: transparent; color: var(--faint); padding: 0 4px; }
+	.pg-thread:hover .pg-thread-del { opacity: 1; }
+	.pg-cap { font-size: 12px; color: var(--faint); margin-top: 8px; }
+	.pg-msg { max-width: 84%; margin-bottom: 14px; }
+	.pg-msg.user { margin-left: auto; }
+	.pg-bubble { border-radius: 12px; padding: 10px 13px; white-space: pre-wrap; line-height: 1.6; }
+	.pg-msg.user .pg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+	.pg-msg.assistant .pg-bubble { background: var(--panel2); color: var(--text); border-bottom-left-radius: 4px; }
+	/* The capture that came out of the message directly above it. */
+	.pg-capture { margin-top: 6px; border-left: 2px solid var(--green); padding: 4px 0 4px 10px;
+		font-size: 12px; color: var(--muted); line-height: 1.55; }
+	.pg-capture b { color: var(--green); font-weight: 600; }
+	.pg-composer { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; align-items: flex-end; }
+	.pg-composer textarea { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px;
+		border-radius: 10px; border: 1px solid var(--border2); background: var(--panel); color: var(--text);
+		font: 400 14px/1.6 var(--font-ui); }
+	.pg-memory { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+	.pg-memory .pg-memory-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+		font-size: 12px; margin-bottom: 4px; }
+	.pg-memory .pg-added { color: var(--green); font-weight: 600; }
+	.pg-memory .pg-when { color: var(--faint); }
+	.pg-memory p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text); }
+	.pg-memory .pg-kind { display: block; margin-top: 4px; font-size: 12px; color: var(--faint); }
+	.pg-note { font-size: 12px; color: var(--faint); line-height: 1.55; }
+	.pg-empty { padding: 18px 12px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+	.pg-settings { padding: 12px; overflow-y: auto; }
+	.pg-settings label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; }
+	.pg-settings label:first-child { margin-top: 0; }
+	.pg-settings textarea, .pg-settings input { width: 100%; background: var(--panel); border: 1px solid var(--border2);
+		color: var(--text); border-radius: 8px; padding: 8px 10px; font: 400 13px/1.6 var(--font-ui); }
+	.pg-settings textarea { min-height: 96px; resize: vertical; }
+	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; margin-bottom: 6px; }
+	@media (max-width: 1100px) {
+		.pg-shell { grid-template-columns: 200px minmax(0, 1fr); height: auto; }
+		.pg-shell .pg-col.pg-memories { grid-column: 1 / -1; max-height: 380px; }
+	}
+	@media (max-width: 780px) {
+		.pg-shell { grid-template-columns: minmax(0, 1fr); }
+		.pg-shell .pg-col.pg-chats { max-height: 220px; }
+		.pg-conversation { min-height: 460px; }
+	}
 	.pg-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13.5px; }
 	.pg-result.ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
 	.pg-result.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
@@ -1688,6 +1742,8 @@ function setView(v, { updateHash = true } = {}) {
 		v = VIEW_ALIASES[v];
 		redirected = true;
 	}
+	// Re-entering the Playground refetches: another door may have written since.
+	if (v === "playground" && S.view !== v) PG.loaded = false;
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
@@ -2533,94 +2589,208 @@ function viewInstall(v) {
 	v.appendChild(wrap);
 }
 
+/**
+ * Playground — a real conversation with a live view of what it captured.
+ *
+ * Three columns: chats, the conversation, and the Memories panel. The panel is
+ * not a mock: every line in it was written by the same extraction pipeline a
+ * connected Claude or ChatGPT goes through, and each one has a receipt.
+ */
+const PG = {
+	threads: [], threadId: null, messages: [], limits: {},
+	settings: { customInstructions: "", customCategories: [] },
+	tab: "chats", draft: "", sending: false, loaded: false, notice: "",
+};
+
 function viewPlayground(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="box" style="max-width:1080px">
-			<h3>Playground</h3>
-			<div class="help">Try ${PRODUCT.name} live before wiring it into anything. This uses your real memory — whatever you add here is genuinely saved (and shows in History with a receipt).</div>
+		<div class="page-head">
+			<h2 class="page-title">Playground</h2>
+			<p class="page-sub">Talk to an AI that can see your memory, and watch what it keeps. Everything captured here is real — same pipeline, same receipts, same graph.</p>
 		</div>
-		<div class="panel-grid" style="max-width:1080px">
-			<div class="action-box">
-				<h3>1 · Add a memory</h3>
-				<div class="help" style="margin-bottom:10px">A durable fact in your own words — or flip to conversation mode and paste a short chat.</div>
-				<label class="pg-toggle"><input type="checkbox" id="pgConvMode" /> Conversation mode (paste multiple lines, oldest first)</label>
-				<textarea id="pgAddText" rows="5" placeholder="I started learning Kotlin this week."></textarea>
-				<div style="margin-top:10px"><button id="pgAddBtn" onclick="playgroundAdd()">Add memory</button></div>
-				<div id="pgAddResult" style="margin-top:12px"></div>
+		<div class="pg-shell">
+			<div class="pg-col pg-chats">
+				<div class="pg-col-head">
+					<div class="client-tabs" style="margin-bottom:10px">
+						<button class="term-tab ${PG.tab === "chats" ? "active" : ""}" onclick="playgroundTab('chats')">Chats</button>
+					</div>
+					<button style="width:100%" onclick="playgroundNewChat()" ${PG.threads.length >= (PG.limits.maxThreads ?? 5) ? "disabled" : ""}>New chat</button>
+					<div class="pg-cap">${PG.threads.length} of ${PG.limits.maxThreads ?? 5} chats${PG.limits.dailyMessages ? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today` : ""}</div>
+				</div>
+				<div class="pg-col-body" id="pgSide"></div>
 			</div>
-			<div class="action-box">
-				<h3>2 · Search it back</h3>
-				<div class="help" style="margin-bottom:10px">Ask a question the way an AI tool would. You get exactly the context a connected tool gets.</div>
-				<input id="pgQuery" placeholder="what am I learning?" onkeydown="if(event.key==='Enter') playgroundSearch()" />
-				<div style="margin-top:10px"><button id="pgSearchBtn" onclick="playgroundSearch()">Search</button></div>
-				<div id="pgSearchResult" style="margin-top:12px"></div>
+			<div class="pg-col pg-conversation">
+				<div class="pg-col-body" id="pgMessages"></div>
+				<div class="pg-composer">
+					<textarea id="pgInput" rows="1" placeholder="Tell it something worth remembering…"
+						oninput="PG.draft=this.value;playgroundGrow(this)"
+						onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();playgroundSend();}"></textarea>
+					<button id="pgSendBtn" onclick="playgroundSend()">Send</button>
+				</div>
 			</div>
-		</div>
-		<div class="box" style="max-width:1080px">
-			<h3>The same thing, from your own code</h3>
-			<div class="help">Everything this playground does is two API calls. <a href="#" onclick="setView('install');return false">Get started</a> has the copy-paste versions for cURL, Python, and Node.</div>
+			<div class="pg-col pg-memories">
+				<div class="pg-col-head">
+					<div class="section-h">Memories</div>
+					<div class="pg-note">Written as you talk. Each one has a receipt in <a href="#" onclick="setView('receipts');return false">History</a>.</div>
+				</div>
+				<div class="pg-col-body" id="pgMemories"></div>
+			</div>
 		</div>`;
 	v.appendChild(wrap);
+	const input = $("#pgInput");
+	if (input) { input.value = PG.draft; playgroundGrow(input); }
+	renderPlaygroundSide();
+	renderPlaygroundMessages();
+	renderPlaygroundMemories();
+	if (!PG.loaded) loadPlayground();
 }
 
-async function playgroundAdd() {
-	const text = ($("#pgAddText")?.value || "").trim();
-	const out = $("#pgAddResult");
-	const btn = $("#pgAddBtn");
-	if (!text) { toast("Type something to remember first.", true); return; }
-	const convMode = $("#pgConvMode")?.checked;
-	out.innerHTML = `<div class="help">Saving… extraction usually takes a few seconds.</div>`;
-	btn.disabled = true;
+function playgroundGrow(area) {
+	area.style.height = "auto";
+	area.style.height = `${Math.min(160, area.scrollHeight)}px`;
+}
+
+function playgroundTab(tab) {
+	PG.tab = tab;
+	renderView();
+}
+
+async function loadPlayground(threadId) {
 	try {
-		const body = convMode
-			? { mode: "conversation", conversationId: `playground-${Date.now()}`, messages: text.split("\n").filter(Boolean).map((line) => ({ role: "user", content: line })) }
-			: { content: text };
-		const res = await api("/v1/save", { method: "POST", body: JSON.stringify(body) });
-		const receipt = res.receipt || {};
-		const chips = [];
-		if (receipt.saved?.nodes || res.counts?.nodes) chips.push(`${receipt.saved?.nodes ?? res.counts?.nodes} memories`);
-		if (receipt.saved?.slices) chips.push(`${receipt.saved.slices} details`);
-		if (receipt.saved?.events) chips.push(`${receipt.saved.events} events`);
-		if (receipt.saved?.pages || res.counts?.pages) chips.push(`${receipt.saved?.pages ?? res.counts?.pages} notes`);
-		out.innerHTML = `
-			<div class="pg-result ok">
-				<b>${esc(res.summary || receipt.summary || "Saved.")}</b>
-				${chips.length ? `<div style="margin-top:6px">${chips.map((c) => `<span class="badge state-active" style="margin-right:6px">${esc(c)}</span>`).join("")}</div>` : ""}
-				<div class="help" style="margin-top:8px">Receipt logged — see <a href="#" onclick="setView('receipts');return false">History</a>. Now search it back on the right →</div>
-			</div>`;
-		await load().catch(() => {});
+		const res = await api(`/v1/playground${threadId ? `?thread=${encodeURIComponent(threadId)}` : ""}`);
+		PG.threads = res.threads || [];
+		PG.limits = res.limits || {};
+		PG.threadId = res.thread?.id ?? null;
+		PG.messages = res.thread?.messages ?? [];
+		PG.settings = res.thread?.settings ?? { customInstructions: "", customCategories: [] };
+		PG.loaded = true;
+		if (S.view === "playground") renderView();
 	} catch (e) {
-		out.innerHTML = `<div class="pg-result err">${esc(e.message || "Could not save. Please try again.")}</div>`;
-	} finally {
-		btn.disabled = false;
+		PG.loaded = true;
+		PG.notice = e.message || "Could not load your chats. Try again in a moment.";
+		if (S.view === "playground") renderView();
 	}
 }
 
-async function playgroundSearch() {
-	const query = ($("#pgQuery")?.value || "").trim();
-	const out = $("#pgSearchResult");
-	const btn = $("#pgSearchBtn");
-	if (!query) { toast("Type a question first.", true); return; }
-	out.innerHTML = `<div class="help">Searching your memory…</div>`;
-	btn.disabled = true;
-	try {
-		const res = await api("/v1/recall", { method: "POST", body: JSON.stringify({ query }) });
-		const context = String(res.context || "").trim();
-		const items = (res.items || []).slice(0, 6);
-		out.innerHTML = context
-			? `<div class="pg-result ok">
-					<div class="help" style="margin-bottom:6px"><b>${res.count}</b> match${res.count === 1 ? "" : "es"} — this exact text is what a connected AI receives:</div>
-					<pre class="pg-context">${esc(context)}</pre>
-					${items.length ? `<div style="margin-top:8px">${items.map((i) => `<span class="badge state-active" style="margin-right:6px" title="score ${i.score ?? ""}">${esc(i.label || i.title || i.type)}</span>`).join("")}</div>` : ""}
-					<details style="margin-top:8px"><summary class="help">Raw response (for developers)</summary><pre class="pg-context">${esc(JSON.stringify(res, null, 2).slice(0, 4000))}</pre></details>
-				</div>`
-			: `<div class="pg-result">Nothing found for that. Add a memory on the left first, give extraction ~10 seconds, then try again.</div>`;
-	} catch (e) {
-		out.innerHTML = `<div class="pg-result err">${esc(e.message || "Search failed. Please try again.")}</div>`;
-	} finally {
-		btn.disabled = false;
+function renderPlaygroundSide() {
+	const side = $("#pgSide");
+	if (!side) return;
+	if (!PG.threads.length) {
+		side.innerHTML = `<div class="pg-empty">No chats yet. Start one and say something about yourself — a plan, a preference, a person.</div>`;
+		return;
 	}
+	side.innerHTML = PG.threads.map((t) => `
+		<button class="pg-thread ${t.id === PG.threadId ? "active" : ""}" onclick="playgroundOpenThread('${esc(t.id)}')">
+			<span class="pg-thread-name">${esc(t.title || "New chat")}</span>
+			<span class="pg-thread-del" title="Delete chat" onclick="event.stopPropagation();playgroundDeleteThread('${esc(t.id)}')">✕</span>
+		</button>`).join("");
+}
+
+function renderPlaygroundMessages() {
+	const box = $("#pgMessages");
+	if (!box) return;
+	if (PG.notice) {
+		box.innerHTML = `<div class="pg-empty">${esc(PG.notice)}</div>`;
+		return;
+	}
+	if (!PG.messages.length) {
+		box.innerHTML = `<div class="pg-empty">
+			Say something you'd want an AI to remember next week — <i>"I started learning Kotlin"</i>, <i>"my sister's wedding is in March"</i>, <i>"I prefer short answers"</i>.<br><br>
+			The reply comes from a small chat model. The capture on the right is the real product.
+		</div>`;
+		return;
+	}
+	box.innerHTML = PG.messages.map((m) => {
+		const items = m.extraction?.items ?? [];
+		const capture = m.role === "user" && (items.length || m.extraction?.processing)
+			? `<div class="pg-capture">${items.length
+				? `<b>Added to memory</b><br>${items.map((i) => esc(i.text)).join("<br>")}`
+				: `<b>Capturing…</b> extraction is still running for this message.`}</div>`
+			: "";
+		return `<div class="pg-msg ${esc(m.role)}"><div class="pg-bubble">${esc(m.content)}</div>${capture}</div>`;
+	}).join("") + (PG.sending ? `<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>` : "");
+	box.scrollTop = box.scrollHeight;
+}
+
+function renderPlaygroundMemories() {
+	const box = $("#pgMemories");
+	if (!box) return;
+	const entries = [];
+	for (const m of PG.messages) {
+		for (const item of m.extraction?.items ?? []) {
+			entries.push({ at: m.extraction.at || m.created_at, kind: item.kind, text: item.text });
+		}
+	}
+	if (!entries.length) {
+		box.innerHTML = `<div class="pg-empty">Nothing captured in this chat yet. Durable facts — decisions, people, plans, preferences — land here the moment they're written.</div>`;
+		return;
+	}
+	box.innerHTML = entries.reverse().map((e) => `
+		<div class="pg-memory">
+			<div class="pg-memory-top"><span class="pg-added">Added</span><span class="pg-when">${esc(ago(e.at))}</span></div>
+			<p>${esc(e.text)}</p>
+			<span class="pg-kind">${esc(e.kind)}</span>
+		</div>`).join("");
+}
+
+async function playgroundSend() {
+	const input = $("#pgInput");
+	const message = (input?.value || "").trim();
+	if (!message || PG.sending) return;
+	PG.sending = true;
+	PG.draft = "";
+	if (input) { input.value = ""; playgroundGrow(input); }
+	PG.messages = [...PG.messages, { id: `local-${Date.now()}`, role: "user", content: message, created_at: Date.now() }];
+	renderPlaygroundMessages();
+	const btn = $("#pgSendBtn");
+	if (btn) btn.disabled = true;
+	try {
+		const res = await api("/v1/playground/chat", {
+			method: "POST",
+			body: JSON.stringify({ message, threadId: PG.threadId }),
+		});
+		if (res.capped) {
+			PG.messages = PG.messages.slice(0, -1);
+			toast(res.message);
+			PG.notice = res.message;
+		} else {
+			PG.notice = "";
+			PG.threadId = res.thread_id;
+			PG.messages = [...PG.messages.slice(0, -1), res.user_message, res.assistant_message];
+			if (res.usage) PG.limits = { ...PG.limits, usedToday: res.usage.usedToday };
+		}
+	} catch (e) {
+		PG.messages = PG.messages.slice(0, -1);
+		toast(e.message || "That message didn't go through. Try again.", true);
+	} finally {
+		PG.sending = false;
+		if (btn) btn.disabled = false;
+		await loadPlayground(PG.threadId);
+		load().catch(() => {});
+	}
+}
+
+async function playgroundNewChat() {
+	try {
+		const res = await api("/v1/playground/thread", { method: "POST", body: JSON.stringify({ title: "New chat" }) });
+		if (!res.ok) { toast(res.message); return; }
+		PG.notice = "";
+		await loadPlayground(res.thread.id);
+	} catch (e) { toast(e.message || "Could not start a chat. Try again.", true); }
+}
+
+async function playgroundOpenThread(id) {
+	PG.notice = "";
+	await loadPlayground(id);
+}
+
+async function playgroundDeleteThread(id) {
+	try {
+		await api("/v1/playground/thread", { method: "POST", body: JSON.stringify({ threadId: id, delete: true }) });
+		if (PG.threadId === id) { PG.threadId = null; PG.messages = []; }
+		await loadPlayground(PG.threadId);
+	} catch (e) { toast(e.message || "Could not delete that chat.", true); }
 }
 
 function viewKeys(v) {

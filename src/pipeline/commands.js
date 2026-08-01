@@ -166,6 +166,10 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 	const sourceMode = input.sourceMode ?? source;
 	const res = await ingestMessages(env, ctx, userId, messages, {
 		flush: Boolean(input.flush),
+		// Callers that show the result to a human (the playground) may wait a
+		// bounded time for the real receipt. Default 0 keeps every other caller
+		// on the fire-and-forget path exactly as before.
+		waitBudgetMs: Number(input.waitBudgetMs ?? 0),
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,

@@ -176,6 +176,10 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 		updateMode,
 		sourceText: text,
 		lastTs,
+		// A caller may hand the gates a rules object it has already resolved
+		// (the Playground merges thread settings over the account's rules).
+		// Null/undefined means "load the account's rules", exactly as before.
+		rules: overrides.rules ?? undefined,
 	});
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.

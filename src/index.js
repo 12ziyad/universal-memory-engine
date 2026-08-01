@@ -36,6 +36,17 @@ import {
 } from "./pipeline/commands.js";
 import { getMemoryRules, saveMemoryRules } from "./pipeline/rules.js";
 import {
+	createThread,
+	deleteThread,
+	countMessagesToday,
+	getThread,
+	getThreadMessages,
+	listThreads,
+	playgroundLimits,
+	playgroundTurn,
+} from "./pipeline/playground.js";
+import { normalizeThreadSettings } from "./pipeline/playground_settings.js";
+import {
 	changePassword,
 	ACCEPTED_TOKEN_PREFIXES,
 	clearSessionCookie,
@@ -988,6 +999,70 @@ const routes = {
 			collect,
 			rules: { autoCollect: rules.autoCollect, captureDefault: rules.captureDefault },
 		});
+	},
+
+	// ---- Playground -------------------------------------------------------
+	// Session auth ONLY. An API key or MCP token must not be able to spend a
+	// free model call: those doors reach memory, not the chat model.
+	"GET /v1/playground": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const url = new URL(request.url);
+		const threads = await listThreads(env, auth.userId);
+		const requested = url.searchParams.get("thread");
+		const active = (await getThread(env, auth.userId, requested)) ?? (threads[0]
+			? await getThread(env, auth.userId, threads[0].id)
+			: null);
+		const limits = playgroundLimits(env);
+		return json({
+			ok: true,
+			threads,
+			thread: active
+				? {
+					id: active.id,
+					title: active.title,
+					settings: normalizeThreadSettings(JSON.parse(active.settings_json || "{}")),
+					messages: await getThreadMessages(env, auth.userId, active.id),
+				}
+				: null,
+			limits: {
+				...limits,
+				threadsUsed: threads.length,
+				usedToday: await countMessagesToday(env, auth.userId),
+			},
+		});
+	},
+
+	"POST /v1/playground/chat": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `pg:${auth.userId}`))) return tooMany();
+		const body = await request.json().catch(() => ({}));
+		return json(await playgroundTurn(env, ctx, auth.userId, {
+			message: body.message,
+			threadId: body.threadId,
+			overrides: body._test ?? {},
+		}));
+	},
+
+	"POST /v1/playground/thread": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const body = await request.json().catch(() => ({}));
+		if (body.delete) return json(await deleteThread(env, auth.userId, body.threadId));
+		return json(await createThread(env, auth.userId, body.title || "New chat"));
+	},
+
+	"PUT /v1/playground/settings": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const body = await request.json().catch(() => ({}));
+		const thread = await getThread(env, auth.userId, body.threadId);
+		if (!thread) return json({ ok: false, message: "Open a chat first, then apply settings to it." }, 404);
+		const settings = normalizeThreadSettings(body.settings ?? body);
+		await env.DB.prepare("UPDATE playground_threads SET settings_json = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+			.bind(JSON.stringify(settings), Date.now(), thread.id, auth.userId).run();
+		return json({ ok: true, settings });
 	},
 
 	"GET /v1/receipts": async (request, env) => {

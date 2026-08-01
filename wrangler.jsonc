@@ -68,6 +68,15 @@
 		"LLM_DIGEST_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
 		"LLM_DIGEST_MAX_TOKENS": "768",
 		"EMBED_MODEL": "@cf/baai/bge-base-en-v1.5",
+		// The Playground's conversational model. Deliberately SEPARATE from
+		// LLM_MODEL: that one is tuned for extraction and swapping it would
+		// change what the product captures. Small and fast is right here — the
+		// reply is a demonstration, the capture is the product.
+		"CHAT_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8",
+		// A public playground with a free model call per turn is a free LLM for
+		// anyone who signs up. Per user, per UTC day.
+		"PLAYGROUND_DAILY_MESSAGES": "30",
+		"PLAYGROUND_MAX_THREADS": "5",
 		// OAuth client id is public by design; the secret lives in a Worker secret.
 		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
