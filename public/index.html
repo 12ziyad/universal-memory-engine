@@ -227,6 +227,19 @@
 	.keys-table tr:last-child td { border-bottom: 0; }
 	.key-mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
 	.key-revoked td { opacity: .55; }
+	.install-card .install-head { margin-bottom: 4px; }
+	.install-code { position: relative; margin: 10px 0; }
+	.install-code pre { margin: 0; padding: 14px; background: #0d1117; color: #dbe7ee; border-radius: 10px;
+		overflow-x: auto; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.6; }
+	.install-code .copy-btn { position: absolute; top: 8px; right: 8px; }
+	.connect-inline-note { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(220,104,3,.35);
+		background: rgba(220,104,3,.06); border-radius: 10px; font-size: 13px; }
+	[data-pane-group] > [data-pane] { display: none; }
+	[data-pane-group] > [data-pane].active { display: block; }
+	body.app-mode .terminal-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+	body.app-mode .term-tab { background: transparent; color: var(--muted); border: 1px solid transparent;
+		padding: 6px 12px; border-radius: 8px; font-weight: 600; font-size: 13px; }
+	body.app-mode .term-tab.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 	.onboard-card { border-color: rgba(132,233,255,.35); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
@@ -1559,7 +1572,7 @@ function renderView() {
 		memory: viewMemory,
 		graph: viewGraph,
 		candidates: viewCandidates,
-		connect: viewConnect,
+		connect: viewInstall,
 		install: viewInstall,
 		playground: viewPlayground,
 		keys: viewKeys,
@@ -1916,26 +1929,11 @@ async function refreshTokens() {
 }
 
 async function generateToken(type) {
-	const fallback = type === "mcp" ? "MCP client" : "API client";
-	const label = ($(`#${type}TokenLabel`)?.value || fallback).trim();
-	try {
-		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type, label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast("Token creation failed: " + e.message, true); }
+	return generateTokenNamed(type, type === "mcp" ? "MCP client" : "API client");
 }
 
 async function generateMcpLink() {
-	const label = ($("#mcpConnectionName")?.value || "Claude MCP").trim();
-	try {
-		const result = await api("/auth/tokens", { method:"POST", body: JSON.stringify({ type:"mcp", label }) });
-		S.oneTimeToken = { ...result, connectionName: label };
-		S.oneTimeVisible = true;
-		await refreshTokens();
-		renderView();
-	} catch (e) { toast("MCP URL creation failed: " + e.message, true); }
+	return generateMcpLinkNamed(($("#mcpConnectionName")?.value || "").trim() || "MCP client");
 }
 
 async function rotateConnection(id, label, type = "mcp") {
@@ -1964,10 +1962,6 @@ function toggleOneTimeSecret() {
 function cancelConnectFlow() {
 	S.oneTimeToken = null;
 	S.oneTimeVisible = true;
-	const mcp = $("#mcpConnectionName");
-	const apiName = $("#apiTokenLabel");
-	if (mcp) mcp.value = "";
-	if (apiName) apiName.value = "";
 	renderView();
 }
 
@@ -2003,82 +1997,141 @@ function oneTimeSecretPanel(latest) {
 	</div>`;
 }
 
-function viewConnect(v) {
-	const latest = S.oneTimeToken;
-	const wrap = el("div");
-	wrap.innerHTML = `
-		<div class="box" style="max-width:980px">
-			<h3>Connect Itsuki</h3>
-			<div class="help">Create a named private connection for each tool or app. MCP clients use a generated MCP URL. Custom apps use a generated API token/key.</div>
-		</div>
-		<div class="panel-grid">
-			<div class="action-box connect-section">
-				<h3>Generate MCP URL</h3>
-				<div class="help">Use this for Claude, Cursor, Codex, or any MCP-capable client. The generated URL includes the private token.</div>
-				<div class="form-row"><label for="mcpConnectionName">Connection name</label><input id="mcpConnectionName" placeholder="Claude desktop" /></div>
-				<div class="section-actions"><button onclick="generateMcpLink()">Generate MCP URL</button><button class="ghost" onclick="cancelConnectFlow()">Cancel</button></div>
-			</div>
-			<div class="action-box connect-section api">
-				<h3>Generate API token/key</h3>
-				<div class="help">Use this for custom apps, agents, SDK-style integrations, or scripts that call the HTTP API directly.</div>
-				<div class="form-row"><label for="apiTokenLabel">Token name</label><input id="apiTokenLabel" placeholder="Custom production agent" /></div>
-				<div class="section-actions"><button onclick="generateToken('api')">Generate API token/key</button><button class="ghost" onclick="cancelConnectFlow()">Cancel</button></div>
-			</div>
-		</div>
-		${oneTimeSecretPanel(latest)}
-		<div class="box" style="max-width:980px"><h3>Connections and tokens</h3><div class="help">Active rows can be revoked. Revoked rows remain visible for audit and are not usable.</div><div id="tokenList"></div></div>
-		<div class="panel-grid">
-			<div class="action-box"><h3>Claude setup</h3>
-				<div class="help" style="margin-bottom:8px"><b style="color:#f2cc60">Use a computer browser</b> — the phone apps can't add connectors (it syncs to your phone after).</div>
-				<ol class="steps"><li>Generate a named MCP URL above and copy it.</li><li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (direct link).</li><li>Name it <i>itsuki</i>, paste the URL, click Add.</li><li>In a chat: tap <b>+</b> &rarr; Connectors &rarr; switch on <i>itsuki</i>.</li></ol></div>
-			<div class="action-box"><h3>ChatGPT setup</h3>
-				<div class="help" style="margin-bottom:8px">Needs a paid plan. On a computer:</div>
-				<ol class="steps"><li>Settings &rarr; Connectors (or Plugins) &rarr; Advanced &rarr; turn on <b>Developer mode</b> — nothing appears until this is on.</li><li>Connectors &rarr; Create. Name: <i>itsuki</i>. Description: <i>Personal memory — save and recall facts about me across chats.</i> Paste your MCP URL.</li><li>In a new chat, enable Developer mode / Add sources and pick <i>itsuki</i>.</li></ol></div>
-			<div class="action-box"><h3>API token usage</h3><div class="help">Send the token as a bearer credential. Never paste it into public logs, prompts, or client-side code.</div><div class="mcp-url" style="margin-top:10px">Authorization: Bearer itsuki_live_xxxxx<br><br>POST /v1/save<br>POST /v1/recall<br>GET /v1/status<br>GET /v1/graph</div></div>
-			<div class="action-box"><h3>Security notes</h3><ul class="policy-list"><li>Full secrets are shown only once.</li><li>Revoke a token if a device, workspace, or private link may be exposed.</li><li>Use one connection per tool so you can revoke access cleanly.</li></ul></div>
-		</div>`;
-	v.appendChild(wrap);
-	renderTokenList();
+function installSnippets() {
+	const origin = location.origin;
+	const mcpToken = S.oneTimeToken?.token && S.oneTimeToken?.tokenRecord?.type === "mcp"
+		? S.oneTimeToken.token : "YOUR_MCP_KEY";
+	const apiKey = "YOUR_API_KEY";
+	return {
+		mcpUrl: `${origin}/mcp/${mcpToken}`,
+		curl: `curl -X POST ${origin}/v1/save \\
+  -H "authorization: Bearer ${apiKey}" \\
+  -H "content-type: application/json" \\
+  -d '{"content": "I started learning Kotlin this week."}'
+
+curl -X POST ${origin}/v1/recall \\
+  -H "authorization: Bearer ${apiKey}" \\
+  -H "content-type: application/json" \\
+  -d '{"query": "what am I learning?"}'`,
+		python: `import requests
+
+BASE = "${origin}"
+KEY = "${apiKey}"
+
+def add(content):
+    return requests.post(f"{BASE}/v1/save",
+        headers={"authorization": f"Bearer {KEY}"},
+        json={"content": content}).json()
+
+def search(query):
+    return requests.post(f"{BASE}/v1/recall",
+        headers={"authorization": f"Bearer {KEY}"},
+        json={"query": query}).json()
+
+add("I started learning Kotlin this week.")
+print(search("what am I learning?")["context"])`,
+		node: `const BASE = "${origin}";
+const KEY = "${apiKey}";
+
+async function call(path, body) {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: { authorization: \`Bearer \${KEY}\`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
 }
 
-const CONNECTION_TOKEN_PLACEHOLDER = "itsuki_live_...";
-
-function renderTokenList() {
-	const list = $("#tokenList");
-	if (!list) return;
-	if (!S.tokens.length) { list.innerHTML = `<div class="empty">No tokens yet.</div>`; return; }
-	list.innerHTML = S.tokens.map(t => {
-		const active = !t.revoked_at && t.status !== "revoked";
-		const typeLabel = t.type === "mcp" ? "MCP connection" : "API token/key";
-		return `<div class="token-row ${active ? "" : "revoked"}" data-token-status="${active ? "active" : "revoked"}">
-			<div><b>${esc(t.label || "Unnamed connection")}</b><div class="kv">${typeLabel} - ${esc(t.masked_token || "")}<br>Created: ${fmtDate(t.created_at)}<br>Last used: ${t.last_used_at ? fmtDate(t.last_used_at) : "never"}<br>${active ? "Full secret was shown only once. Rotate to create a fresh secret." : "Revoked row. This token can no longer save or recall memory."}</div></div>
-			<span class="badge ${active ? "state-active" : "state-inactive"}">${active ? "Active" : "Revoked"}</span>
-			<div class="token-actions">
-				<button class="ghost mini" data-token-action="rotate" data-token-id="${esc(t.id)}" data-token-label="${esc(t.label || "")}" data-token-type="${esc(t.type || "mcp")}" ${active ? "" : "disabled"}>Rotate</button>
-				<button class="ghost danger mini" data-token-action="revoke" data-token-id="${esc(t.id)}" ${active ? "" : "disabled"}>Revoke</button>
-			</div>
-		</div>`;
-	}).join("");
-	list.onclick = (event) => {
-		const button = event.target.closest("[data-token-action]");
-		if (!button) return;
-		const action = button.dataset.tokenAction;
-		const id = button.dataset.tokenId || "";
-		if (!id) return;
-		if (action === "rotate") rotateConnection(id, button.dataset.tokenLabel || "", button.dataset.tokenType || "mcp");
-		if (action === "revoke") revokeToken(id);
+await call("/v1/save", { content: "I started learning Kotlin this week." });
+const { context } = await call("/v1/recall", { query: "what am I learning?" });
+console.log(context);`,
+		claudeCode: `claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${origin}/mcp/${mcpToken}`,
+		cursor: `{
+  "mcpServers": {
+    "${PRODUCT.name.toLowerCase()}": { "url": "${origin}/mcp/${mcpToken}" }
+  }
+}`,
+		plugin: `claude plugin marketplace add ${PRODUCT.repo}
+/plugin install ${PRODUCT.name.toLowerCase()}`,
 	};
 }
 
-// Placeholder platform views — replaced by the real Get started, Playground,
-// and API Keys screens in the next commits. They render, route, and deep-link
-// correctly so the IA ships whole.
+function installTab(group, button, key) {
+	S.installTabs = S.installTabs || {};
+	S.installTabs[group] = key;
+	const root = button.closest(".install-card");
+	root.querySelectorAll(`[data-tabgroup="${group}"] .term-tab`).forEach((t) => t.classList.toggle("active", t === button));
+	root.querySelectorAll(`[data-pane-group="${group}"] > [data-pane]`).forEach((p) => p.classList.toggle("active", p.dataset.pane === key));
+}
+
 function viewInstall(v) {
+	const s = installSnippets();
+	const hasMcpKey = s.mcpUrl.indexOf("YOUR_MCP_KEY") === -1;
+	const code = (text) => `<div class="install-code"><pre>${esc(text)}</pre><button class="copy-btn mini" onclick="copyText(${JSON.stringify(text).replace(/"/g, "&quot;")}, 'Copied')">Copy</button></div>`;
 	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Get started</h3>
-		<div class="help">Connect ${PRODUCT.name} to your tools — SDK, MCP, or plugin. This screen is being upgraded; your existing setup guides live here.</div></div>`;
+	wrap.innerHTML = `
+		<div class="box" style="max-width:1080px">
+			<h3>Get started with ${PRODUCT.name}</h3>
+			<div class="help">One memory, three doors. Pick how your tools connect — they all read and write the same private graph.</div>
+		</div>
+		${oneTimeSecretPanel(S.oneTimeToken)}
+
+		<div class="box install-card" style="max-width:1080px">
+			<div class="install-head"><h3>MCP — connect an AI chat or editor</h3>
+				<div class="help">Claude, ChatGPT, Cursor, Claude Code and any MCP client use one private URL.</div></div>
+			${hasMcpKey ? "" : `<div class="connect-inline-note">You need an MCP key first — <button class="mini" onclick="generateMcpLinkNamed('My MCP connection')">create one</button> and the snippets below fill in automatically (shown once).</div>`}
+			<div class="terminal-tabs" data-tabgroup="mcp" style="margin-top:10px">
+				<button class="term-tab active" onclick="installTab('mcp', this, 'claude')">Claude</button>
+				<button class="term-tab" onclick="installTab('mcp', this, 'chatgpt')">ChatGPT</button>
+				<button class="term-tab" onclick="installTab('mcp', this, 'claude-code')">Claude Code</button>
+				<button class="term-tab" onclick="installTab('mcp', this, 'cursor')">Cursor / Codex</button>
+			</div>
+			<div data-pane-group="mcp">
+				<div data-pane="claude" class="active">
+					<div class="help" style="margin:8px 0"><b style="color:var(--amber)">Set up on a computer</b> — phone apps can't add connectors; it syncs to your phone after.</div>
+					<ol class="steps"><li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai → Settings → Connectors → Add custom connector</a> (direct link).</li><li>Name it <i>${esc(PRODUCT.name.toLowerCase())}</i> and paste your MCP URL:</li></ol>
+					${code(s.mcpUrl)}
+					<ol class="steps" start="3"><li>In a chat: tap <b>+</b> → Connectors → switch on <i>${esc(PRODUCT.name.toLowerCase())}</i>. Works on the free plan.</li></ol>
+				</div>
+				<div data-pane="chatgpt">
+					<div class="help" style="margin:8px 0">Needs a paid ChatGPT plan. On a computer:</div>
+					<ol class="steps"><li>Settings → Connectors (or Plugins) → Advanced → turn on <b>Developer mode</b> — nothing appears until this is on.</li><li>Connectors → Create. Name: <i>${esc(PRODUCT.name.toLowerCase())}</i>. Description: <i>Personal memory — save and recall facts about me across chats.</i> URL:</li></ol>
+					${code(s.mcpUrl)}
+					<ol class="steps" start="3"><li>In a new chat, enable Developer mode / Add sources and pick <i>${esc(PRODUCT.name.toLowerCase())}</i>.</li></ol>
+				</div>
+				<div data-pane="claude-code">
+					<div class="help" style="margin:8px 0">One command in your terminal:</div>
+					${code(s.claudeCode)}
+				</div>
+				<div data-pane="cursor">
+					<div class="help" style="margin:8px 0">Add to your MCP config (<i>.cursor/mcp.json</i> or your client's equivalent):</div>
+					${code(s.cursor)}
+				</div>
+			</div>
+		</div>
+
+		<div class="box install-card" style="max-width:1080px">
+			<div class="install-head"><h3>API — build it into your own app</h3>
+				<div class="help">Two endpoints do most of the work: save and recall. Create an API key first in <a href="#" onclick="setView('keys');return false">API Keys</a>.</div></div>
+			<div class="terminal-tabs" data-tabgroup="sdk" style="margin-top:10px">
+				<button class="term-tab active" onclick="installTab('sdk', this, 'curl')">cURL</button>
+				<button class="term-tab" onclick="installTab('sdk', this, 'python')">Python</button>
+				<button class="term-tab" onclick="installTab('sdk', this, 'node')">Node.js</button>
+			</div>
+			<div data-pane-group="sdk">
+				<div data-pane="curl" class="active">${code(s.curl)}</div>
+				<div data-pane="python">${code(s.python)}<div class="help">The <b>${esc(PRODUCT.name.toLowerCase())}</b> Python SDK (pip) is coming — these raw calls work today and won't break.</div></div>
+				<div data-pane="node">${code(s.node)}<div class="help">The <b>${esc(PRODUCT.name.toLowerCase())}</b> npm SDK is coming — these raw calls work today and won't break.</div></div>
+			</div>
+			<div class="help" style="margin-top:10px">Also available: <i>/v1/turn</i> (recall + auto-save in one call), <i>/v1/graph</i>, <i>/v1/status</i>, <i>/v1/export</i>, <i>/v1/rules</i>. Full reference in the <a href="/docs/" target="_blank" rel="noopener">docs↗</a>.</div>
+		</div>
+
+		<div class="box install-card" style="max-width:1080px">
+			<div class="install-head"><h3>Plugin — Claude Code, one install</h3>
+				<div class="help">Memory across every coding session, with lifecycle hooks. Coming soon:</div></div>
+			${code(s.plugin)}
+		</div>`;
 	v.appendChild(wrap);
-	viewConnect(v);
 }
 
 function viewPlayground(v) {

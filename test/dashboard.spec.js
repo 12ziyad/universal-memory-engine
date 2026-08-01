@@ -140,20 +140,18 @@ describe("dashboard script", () => {
 		expect(script).toContain("Save a memory");
 		expect(script).toContain("Save from a chat or notes");
 		expect(script).toContain("Search your memories");
-		expect(script).toContain("Connect Itsuki");
-		expect(script).toContain("Create a named private connection for each tool or app.");
-		expect(script).toContain("Connection name");
-		expect(script).toContain("Generate MCP URL");
+		expect(script).toContain("function viewInstall(");
+		expect(script).toContain("function viewKeys(");
+		expect(script).toContain("function installSnippets(");
 		expect(script).toContain("Generated MCP URL");
 		expect(script).toContain("Copy MCP URL");
-		expect(script).toContain("Generate API token/key");
 		expect(script).toContain("Generated API token/key");
 		expect(script).toContain("toggleOneTimeSecret()");
 		expect(script).toContain("clearOneTimeLink()");
 		expect(script).toContain("cancelConnectFlow()");
-		expect(script).toContain("Full secret was shown only once");
-		expect(script).toContain("Authorization: Bearer itsuki_live_xxxxx");
-		expect(script).toContain("API token usage");
+		expect(script).toContain("Full secrets are shown only once");
+		expect(script).toContain('authorization: Bearer');
+		expect(script).toContain("API — build it into your own app");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [
@@ -206,11 +204,11 @@ describe("dashboard script", () => {
 		expect(script).toContain("Support / report issue");
 	});
 
-	it("shows revoked connection row behavior in Connect", () => {
+	it("shows revoked key behavior in API Keys", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		expect(script).toContain('data-token-status="${active ? "active" : "revoked"}"');
-		expect(script).toContain("Revoked row. This token can no longer save or recall memory.");
-		expect(script).toContain("Active rows can be revoked. Revoked rows remain visible for audit and are not usable.");
+		expect(script).toContain('class="${active ? "" : "key-revoked"}"');
+		expect(script).toContain("Revoked keys stay listed for audit");
+		expect(script).toContain("Revoked keys stay listed for audit");
 		expect(script).toContain("revokeToken(");
 		expect(script).toContain("disabled");
 	});
@@ -219,11 +217,10 @@ describe("dashboard script", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		const awkwardLabels = ["Ziyad's Claude", 'Quote " Tool', "Backslash \\\\ Tool", "<script>alert(1)</script>"];
 		expect(awkwardLabels).toContain("Ziyad's Claude");
-		expect(script).toContain('data-token-action="rotate"');
-		expect(script).toContain('data-token-label="${esc(t.label || "")}"');
-		expect(script).toContain('button.dataset.tokenLabel || ""');
-		expect(script).toContain('data-token-action="revoke"');
-		expect(script).toContain('event.target.closest("[data-token-action]")');
+		expect(script).toContain('data-key-action="rotate"');
+		expect(script).toContain('button.dataset.keyLabel || ""');
+		expect(script).toContain('data-key-action="revoke"');
+		expect(script).toContain('event.target.closest("[data-key-action]")');
 		expect(script).not.toContain("onclick=\"rotateConnection('");
 		expect(script).not.toContain("onclick=\"revokeToken('");
 	});
