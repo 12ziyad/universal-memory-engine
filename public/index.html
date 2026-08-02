@@ -308,6 +308,15 @@
 	.form-row { display: grid; gap: 6px; margin: 12px 0; }
 	.form-row label { font-size: 12px; color: #9ebdcc; font-weight: 650; }
 	.form-row input, .form-row textarea { width: 100%; }
+	/* A checkbox is not a text field: full width stretches its box across the
+	   row, stranding the control far from its own label. */
+	.form-row input[type="checkbox"], .form-row input[type="radio"] { width: auto; flex: 0 0 auto; margin: 0; }
+	/* A checkbox and its wording are one thing — they sit together, left. */
+	.check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 13px;
+		font-weight: 400; color: var(--text); cursor: pointer; max-width: 640px; }
+	.check-row input[type="checkbox"] { margin-top: 2px; }
+	.check-group { display: flex; gap: 16px; flex-wrap: wrap; }
+	.check-group .check-row { max-width: none; }
 	.auth-error { display: none; color: #ffb4ad; border: 1px solid rgba(248,81,73,.4); background: rgba(58,29,27,.6); padding: 9px 11px; border-radius: 8px; margin: 10px 0; }
 	.app-user { display: flex; gap: 8px; align-items: center; color: var(--muted); }
 	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #58a6ff, #ffc65b); color: #04121f; font-weight: 800; }
@@ -3336,7 +3345,37 @@ async function loadRequests() {
  * use. Metadata-only is a first-class toggle: deliveries say THAT something
  * changed, never what it says.
  */
-const WH = { rows: [], loading: false, creating: false, error: "", openLog: null, deliveries: [], events: ["memory.added", "memory.updated", "memory.deleted", "memory.categorized"] };
+const WH_EVENTS = ["memory.added", "memory.updated", "memory.deleted", "memory.categorized"];
+// `form` is the source of truth for what the person typed, NOT the DOM. This
+// view re-renders on every state change, so reading values out of inputs at
+// submit time meant reading a freshly-rebuilt (empty) form — the URL never
+// reached the server and the error blamed the URL for being blank.
+const WH = {
+	rows: [], loading: false, creating: false, error: "", openLog: null, deliveries: [],
+	events: WH_EVENTS,
+	form: { name: "", url: "", events: [...WH_EVENTS], metadataOnly: false },
+};
+
+function whFormReset() {
+	WH.form = { name: "", url: "", events: [...WH_EVENTS], metadataOnly: false };
+}
+
+/** Keep a field in state as it is typed, and retire a stale error on sight. */
+function whField(key, value) {
+	WH.form[key] = value;
+	if (WH.error) {
+		WH.error = "";
+		const box = $("#whError");
+		if (box) box.hidden = true;
+	}
+}
+
+function whToggleEvent(name, on) {
+	const set = new Set(WH.form.events);
+	if (on) set.add(name); else set.delete(name);
+	WH.form.events = WH_EVENTS.filter((e) => set.has(e));
+	whField("events", WH.form.events);
+}
 
 function viewWebhooks(v) {
 	const wrap = el("div");
@@ -3347,19 +3386,25 @@ function viewWebhooks(v) {
 		</div>
 		<div class="box" style="max-width:1080px">
 			<h3>New webhook</h3>
-			<div class="form-row"><label for="whName">Name</label>
-				<input id="whName" placeholder="e.g. CRM sync" /></div>
+			<div class="form-row"><label for="whName">Name <span class="help">(optional)</span></label>
+				<input id="whName" placeholder="e.g. CRM sync" value="${esc(WH.form.name)}"
+					oninput="whField('name', this.value)" /></div>
 			<div class="form-row"><label for="whUrl">Endpoint URL</label>
-				<input id="whUrl" placeholder="https://example.com/hooks/itsuki" /></div>
+				<input id="whUrl" placeholder="https://example.com/hooks/itsuki" value="${esc(WH.form.url)}"
+					oninput="whField('url', this.value)"
+					onkeydown="if(event.key==='Enter'){event.preventDefault();createWebhookNow();}" /></div>
 			<div class="form-row"><label>Events</label>
-				<div style="display:flex;gap:14px;flex-wrap:wrap">
-					${WH.events.map((e) => `<label style="display:inline-flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" class="wh-event" value="${e}" checked /> ${esc(e)}</label>`).join("")}
+				<div class="check-group">
+					${WH.events.map((e) => `<label class="check-row"><input type="checkbox" class="wh-event" value="${e}"
+						${WH.form.events.includes(e) ? "checked" : ""}
+						onchange="whToggleEvent('${e}', this.checked)" />${esc(e)}</label>`).join("")}
 				</div></div>
-			<div class="form-row"><label style="display:inline-flex;gap:8px;align-items:center;font-size:13px">
-				<input type="checkbox" id="whMetaOnly" />
-				Metadata only — announce that a memory changed without sending its content
+			<div class="form-row"><label class="check-row">
+				<input type="checkbox" id="whMetaOnly" ${WH.form.metadataOnly ? "checked" : ""}
+					onchange="whField('metadataOnly', this.checked)" />
+				<span>Metadata only — announce that a memory changed without sending its content</span>
 			</label></div>
-			${WH.error ? `<div class="key-error">${esc(WH.error)}</div>` : ""}
+			<div id="whError" class="key-error" ${WH.error ? "" : "hidden"}>${esc(WH.error)}</div>
 			<div class="section-actions">
 				<button id="whCreate" onclick="createWebhookNow()" ${WH.creating ? "disabled" : ""}>${WH.creating ? "Creating…" : "Create webhook"}</button>
 			</div>
@@ -3427,29 +3472,77 @@ function webhookLogHtml() {
 	</tbody></table>`;
 }
 
+/**
+ * Say what is actually wrong with a URL before asking the server. The server
+ * is still the authority (it also blocks private ranges); this exists so the
+ * common mistakes get an instant, specific answer instead of a round trip.
+ */
+function whUrlComplaint(raw) {
+	const value = String(raw ?? "").trim();
+	if (!value) return "Add the URL your endpoint listens on, e.g. https://example.com/hooks/itsuki";
+	let url;
+	try {
+		url = new URL(value);
+	} catch {
+		return value.includes(".") && !value.includes("://")
+			? "Add https:// to the front of that address."
+			: "That doesn't look like a valid URL — it should start with https:// and include a domain.";
+	}
+	if (!["https:", "http:"].includes(url.protocol)) return "The URL must start with https://";
+	if (!url.hostname.includes(".")) return "That URL needs a full domain name, e.g. example.com";
+	return null;
+}
+
 async function createWebhookNow() {
 	if (WH.creating) return;
+	// Read what the person typed BEFORE anything re-renders. Reading it after
+	// meant reading a rebuilt, empty form — the bug that made a valid URL
+	// arrive blank and get blamed for being invalid.
+	const form = {
+		name: String($("#whName")?.value ?? WH.form.name).trim(),
+		url: String($("#whUrl")?.value ?? WH.form.url).trim(),
+		events: [...document.querySelectorAll(".wh-event:checked")].map((c) => c.value),
+		metadataOnly: $("#whMetaOnly")?.checked === true,
+	};
+	if (!form.events.length) form.events = [...WH.form.events];
+	// State keeps it, so a failed submit never costs you your typing.
+	WH.form = { ...form };
+
+	const complaint = whUrlComplaint(form.url);
+	if (complaint) {
+		WH.error = complaint;
+		renderView();
+		$("#whUrl")?.focus();
+		return;
+	}
+	if (!form.events.length) {
+		WH.error = "Pick at least one event to be notified about.";
+		renderView();
+		return;
+	}
+
 	WH.creating = true;
 	WH.error = "";
 	renderView();
 	try {
-		const events = [...document.querySelectorAll(".wh-event:checked")].map((c) => c.value);
 		const result = await api("/v1/webhooks", {
 			method: "POST",
 			body: JSON.stringify({
-				name: $("#whName")?.value ?? "",
-				url: $("#whUrl")?.value ?? "",
-				events,
-				metadataOnly: $("#whMetaOnly")?.checked === true,
+				name: form.name,
+				url: form.url,
+				events: form.events,
+				metadataOnly: form.metadataOnly,
 			}),
 		});
 		WH.rows = [result.webhook, ...WH.rows];
-		showWebhookSecret(result.secret);
-	} catch (e) {
-		WH.error = e.message || "Could not create that webhook. Check the URL and try again.";
-	} finally {
 		WH.creating = false;
-		if (!$("#keyModal")?.hidden) { renderWebhooksTable(); } else { renderView(); }
+		whFormReset(); // only a SUCCESSFUL create clears the form
+		showWebhookSecret(result.secret);
+		renderWebhooksTable();
+	} catch (e) {
+		WH.creating = false;
+		WH.error = e.message || "Could not create that webhook. Check the URL and try again.";
+		renderView();
 	}
 }
 
