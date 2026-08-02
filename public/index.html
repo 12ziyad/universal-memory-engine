@@ -3351,7 +3351,11 @@ const WH_EVENTS = ["memory.added", "memory.updated", "memory.deleted", "memory.c
 // submit time meant reading a freshly-rebuilt (empty) form — the URL never
 // reached the server and the error blamed the URL for being blank.
 const WH = {
-	rows: [], loading: false, creating: false, error: "", openLog: null, deliveries: [],
+	rows: [], loading: false, creating: false, openLog: null, deliveries: [],
+	// Two independent operations, two error slots. Sharing one meant a list
+	// refresh could erase the form's explanation of a refused submit.
+	error: "",      // the create form
+	listError: "",  // loading/deleting in the table below it
 	events: WH_EVENTS,
 	form: { name: "", url: "", events: [...WH_EVENTS], metadataOnly: false },
 };
@@ -3426,9 +3430,12 @@ async function loadWebhooks() {
 	try {
 		const res = await api("/v1/webhooks");
 		WH.rows = res.webhooks || [];
-		WH.error = "";
+		// NOTE: this must never touch WH.error. That slot belongs to the create
+		// form; a background list refresh landing mid-edit used to wipe the
+		// message explaining why a submit had just been refused.
+		WH.listError = "";
 	} catch (e) {
-		WH.error = e.message || "Could not load webhooks. Try refreshing in a moment.";
+		WH.listError = e.message || "Could not load your webhooks. Try refreshing in a moment.";
 	} finally {
 		WH.loading = false;
 		if (S.view === "webhooks") renderWebhooksTable();
@@ -3441,7 +3448,9 @@ function renderWebhooksTable() {
 	if (!body || !empty) return;
 	if (!WH.rows.length) {
 		body.innerHTML = "";
-		empty.innerHTML = `<div class="pg-empty">No webhooks yet — create one above and your endpoint hears about every change the moment it lands.</div>`;
+		empty.innerHTML = WH.listError
+			? `<div class="pg-empty">${esc(WH.listError)}</div>`
+			: `<div class="pg-empty">No webhooks yet — create one above and your endpoint hears about every change the moment it lands.</div>`;
 		return;
 	}
 	empty.innerHTML = "";
@@ -3578,8 +3587,9 @@ async function deleteWebhookNow(id) {
 		await api(`/v1/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" });
 		WH.rows = WH.rows.filter((w) => w.id !== id);
 		if (WH.openLog === id) WH.openLog = null;
+		WH.listError = "";
 	} catch (e) {
-		WH.error = e.message || "Could not delete that webhook.";
+		WH.listError = e.message || "Could not delete that webhook.";
 	}
 	renderWebhooksTable();
 }
@@ -3590,7 +3600,7 @@ async function sendWebhookTest(id) {
 		WH.openLog = id;
 		await refreshWebhookLog(id);
 	} catch (e) {
-		WH.error = e.message || "Could not send the test event.";
+		WH.listError = e.message || "Could not send the test event.";
 		renderWebhooksTable();
 	}
 }

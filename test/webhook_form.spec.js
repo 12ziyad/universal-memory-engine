@@ -78,11 +78,12 @@ function harness({ apiImpl } = {}) {
 		return { webhook: { id: "wh_1", name: "x", url: "https://example.com", events: WH_EVENTS, metadata_only: false }, secret: "whsec_abc" };
 	});
 
-	const source = ["whFormReset", "whField", "whToggleEvent", "whUrlComplaint", "createWebhookNow"].map(fnSource).join("\n");
+	const source = ["whFormReset", "whField", "whToggleEvent", "whUrlComplaint", "createWebhookNow", "loadWebhooks"]
+		.map(fnSource).join("\n");
 	const built = new Function(
-		"WH", "WH_EVENTS", "$", "document", "api", "renderView", "renderWebhooksTable", "showWebhookSecret",
-		`${source}\nreturn { createWebhookNow, whUrlComplaint, whField, whToggleEvent, whFormReset };`,
-	)(WH, WH_EVENTS, $, documentStub, api, renderView, () => {}, () => {});
+		"WH", "WH_EVENTS", "$", "document", "api", "renderView", "renderWebhooksTable", "showWebhookSecret", "S",
+		`${source}\nreturn { createWebhookNow, whUrlComplaint, whField, whToggleEvent, whFormReset, loadWebhooks };`,
+	)(WH, WH_EVENTS, $, documentStub, api, renderView, () => {}, () => {}, { view: "webhooks" });
 
 	/** Simulate typing: sets the input AND fires the oninput binding. */
 	const type = (id, value) => {
@@ -167,6 +168,20 @@ describe("creating a webhook", () => {
 		expect(h.WH.form.events).toEqual(["memory.added", "memory.updated", "memory.categorized"]);
 		expect(h.fields.whUrl.value).toBe("https://example.com/hooks/itsuki");
 		expect(h.fields.whName.value).toBe("CRM sync");
+	});
+
+	it("a background list refresh cannot erase the form's error", async () => {
+		// Found on production after the first fix: loadWebhooks() and the form
+		// shared one WH.error slot, so a list refresh landing after a refused
+		// submit silently blanked the explanation. Two operations, two slots.
+		const h = harness({ apiImpl: async () => { throw new Error("Private and internal addresses can't receive webhooks."); } });
+		h.type("whUrl", "http://127.0.0.1:8787/x");
+		await h.createWebhookNow();
+		expect(h.WH.error).toContain("Private and internal");
+
+		h.loadWebhooks();            // the refresh that used to wipe it
+		await new Promise((r) => setTimeout(r, 10));
+		expect(h.WH.error).toContain("Private and internal");
 	});
 
 	it("the error clears the moment the input is corrected", async () => {
