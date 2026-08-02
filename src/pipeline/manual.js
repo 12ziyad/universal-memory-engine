@@ -5,7 +5,7 @@
  * still applies, so re-saving something already stored updates it (no duplicates).
  *
  * Compatibility implementation for the authenticated /v1/save route that
- * powers the UI test buttons. MCP saves use the isolated manual_mcp.js lane.
+ * powers the UI test buttons. MCP saves use the engine lane in mcp_engine.js.
  */
 
 import { getConfig } from "../config.js";

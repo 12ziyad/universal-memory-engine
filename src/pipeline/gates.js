@@ -550,6 +550,24 @@ export async function applyGates(
 		if (typeof obj.label === "string" && obj.label.length > LABEL_CAP) obj.label = obj.label.slice(0, LABEL_CAP);
 		if (typeof obj.text === "string" && obj.text.length > TEXT_CAP) obj.text = `${obj.text.slice(0, TEXT_CAP - 1)}…`;
 
+		// ---- MCP LENS --------------------------------------------------------
+		// Host-mediated input earns a grounding check the raw lanes don't need:
+		// a fact whose material words are mostly absent from what was actually
+		// sent is the host model talking, not the user. This is the retired
+		// manual lane's fabrication guard, carried across in reduced form.
+		// Edges are exempt — the numbered-entity contract already grounds them.
+		if (profile === "mcp" && (obj.kind === "slice" || obj.kind === "event") && sourceText) {
+			const material = tokens(String(obj.text ?? "")).filter((t) => t.length > 3);
+			if (material.length) {
+				const sourceTokens = new Set(tokens(sourceText));
+				const hits = material.filter((t) => sourceTokens.has(t)).length;
+				if (hits === 0 || hits / material.length < 0.5) {
+					reject(obj, "ungrounded_fact");
+					continue;
+				}
+			}
+		}
+
 		// ---- PLUGIN LENS -----------------------------------------------------
 		// Coding sessions memorize decisions, conventions and error→fix pairs —
 		// never paths as standalone memories, stack traces, or diffs.

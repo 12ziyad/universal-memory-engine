@@ -31,6 +31,7 @@ const REASON_PHRASE = {
 	durable_signal_no_node: "durable signal without a subject",
 	excluded_by_rule: "blocked by your rules",
 	outside_include_rules: "outside your include rules",
+	ungrounded_fact: "not grounded in what was sent",
 	unknown_kind: "unrecognized",
 };
 

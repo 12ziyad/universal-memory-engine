@@ -33,7 +33,7 @@ import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
 import { createMemoryJob, storeReceipt, updateMemoryJob } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
-import { getMemoryRules } from "./rules.js";
+import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { runExtraction } from "./extract.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
@@ -436,10 +436,18 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	}
 
 	const now = Date.now();
-	const capture = captureRequested(normalized.messages);
-	const userLines = durable.map((m) => m.content);
+	// The user's memory rules apply to PAGE CONTENT here (an excluded topic
+	// must never appear on a notes page); graph enforcement stays in the
+	// engine's gates, where each refusal is named on the receipt.
+	const rules = await getMemoryRules(env, userId);
+	const capture = captureRequested(normalized.messages) && rules.captureDefault !== "graph_only";
+	const userLines = durable.map((m) => m.content).filter((line) => rulesAllowText(rules, line));
 	const derivedLines = capture
-		? normalized.messages.filter((m) => m.role === "assistant").map((m) => m.content).slice(0, 40)
+		? normalized.messages
+			.filter((m) => m.role === "assistant")
+			.map((m) => m.content)
+			.filter((line) => rulesAllowText(rules, line))
+			.slice(0, 40)
 		: [];
 	const lastTs = normalized.messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0) || now;
 	const title = provisionalTitle(userLines, lastTs);
@@ -586,10 +594,15 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			fallbackTs: job.lastTs ?? Date.now(),
 			titleResponse: job.testOverrides?.titleResponse,
 		});
+		// Rules re-checked at finalize: they may have changed since staging, and
+		// an excluded topic must never survive onto the final page.
+		const derivedLines = job.captureMode
+			? (job.derivedLines ?? []).filter((line) => rulesAllowText(rules, line))
+			: [];
 		const markdown = enrichedMarkdown(title, {
 			factLines,
 			edgeLines,
-			derivedLines: job.captureMode ? (job.derivedLines ?? []) : [],
+			derivedLines,
 			savedAt: job.lastTs ?? Date.now(),
 		});
 		await env.DB.prepare(

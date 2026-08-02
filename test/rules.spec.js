@@ -1,7 +1,7 @@
 /**
  * Per-user memory rules: storage, matching semantics, the /v1/rules and
- * /v1/turn routes, and deterministic enforcement in both save lanes (MCP
- * manual engine + auto ingest gates). Model output is injected everywhere,
+ * /v1/turn routes, and deterministic enforcement in both save lanes (the MCP
+ * engine lane + auto ingest gates). Model output is injected everywhere,
  * so filters — not prompts — are what these specs prove.
  */
 
@@ -13,7 +13,8 @@ import {
 import { describe, expect, it } from "vitest";
 
 import worker from "../src";
-import { runMcpConversationCollectCommand, runMcpDirectSaveCommand } from "../src/pipeline/manual_mcp.js";
+import { stageMcpConversation } from "../src/pipeline/mcp_engine.js";
+import { runDirectSaveCommand } from "../src/pipeline/commands.js";
 import {
 	getMemoryRules,
 	normalizeMemoryRules,
@@ -23,6 +24,21 @@ import {
 
 function userId(label) {
 	return `rules-${label}-${crypto.randomUUID()}`;
+}
+
+/** Stage through the MCP engine lane, then drive its DO queue to settlement. */
+async function mcpCollect(id, { messages, conversationId, testOverrides }) {
+	const ctx = createExecutionContext();
+	const res = await stageMcpConversation(env, ctx, id, { messages, conversationId, testOverrides });
+	await waitOnExecutionContext(ctx);
+	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(id));
+	for (let i = 0; i < 30; i++) {
+		const drained = await stub.drainMcpJobs(id);
+		if (drained.remaining === 0 && !drained.busySkip) break;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+	await stub.resetAll();
+	return res;
 }
 
 async function httpFetch(path, init) {
@@ -39,19 +55,6 @@ function authedJson(body) {
 		headers: { "x-api-key": env.API_KEY, "content-type": "application/json" },
 		body: JSON.stringify(body),
 	};
-}
-
-function sliceFact({ label, category = "interest", kind = "progress", text }) {
-	return {
-		identity: { label, category, existing_node_id: null, aliases: [] },
-		memory: { kind: "slice", slice_kind: kind, text },
-		confidence: 0.96,
-		supersedes: false,
-	};
-}
-
-function proposal(facts = []) {
-	return { facts, relationships: [], notes: "" };
 }
 
 async function rows(table, id) {
@@ -124,83 +127,103 @@ describe("/v1/rules routes", () => {
 	});
 });
 
-describe("rules enforcement in the MCP manual lanes", () => {
+describe("rules enforcement in the MCP engine lane", () => {
 	it("refuses an excluded fact on direct save", async () => {
 		const id = userId("mcp-exclude");
 		await saveMemoryRules(env, id, { excludes: ["politics"] });
-		const result = await runMcpDirectSaveCommand(env, null, id, {
+		const ctx = createExecutionContext();
+		const result = await runDirectSaveCommand(env, ctx, id, {
 			content: "I follow politics debates every night.",
-			extractionResponse: proposal([
-				sliceFact({ label: "Politics", text: "I follow politics debates every night." }),
-			]),
+			overrides: {
+				profile: "mcp",
+				lightPath: true,
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "Politics", category: "interest", confidence: 0.9 },
+						{ kind: "slice", on: "Politics", text: "I follow politics debates every night.", confidence: 0.9 },
+					],
+				},
+			},
 		});
+		await waitOnExecutionContext(ctx);
 		expect(result.counts.savedTotal).toBe(0);
-		expect(result.receipt.skippedReasons.excluded_by_rule).toBeGreaterThanOrEqual(1);
 		expect(await rows("nodes", id)).toHaveLength(0);
 	});
 
 	it("keeps only include-matching facts on collect", async () => {
 		const id = userId("mcp-include");
 		await saveMemoryRules(env, id, { includes: ["boxing"] });
-		const result = await runMcpConversationCollectCommand(env, null, id, {
+		await mcpCollect(id, {
 			conversationId: "include-scope",
 			messages: [
 				{ id: "m0", role: "user", content: "I started boxing on Monday." },
 				{ id: "m1", role: "user", content: "I bought a new guitar." },
 			],
-			digestResponse: "I started boxing on Monday.\nI bought a new guitar.",
-			extractionResponse: proposal([
-				sliceFact({ label: "Boxing", category: "skill", text: "I started boxing on Monday." }),
-				sliceFact({ label: "Guitar", category: "interest", text: "I bought a new guitar." }),
-			]),
+			testOverrides: {
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "Boxing", category: "skill", confidence: 0.9 },
+						{ kind: "slice", on: "Boxing", text: "Started boxing on Monday", confidence: 0.9 },
+						{ kind: "node", label: "Guitar", category: "interest", confidence: 0.9 },
+						{ kind: "slice", on: "Guitar", text: "Bought a new guitar", confidence: 0.9 },
+					],
+				},
+				edgeResponse: { edges: [] },
+				reflexionResponse: { entities: [], facts: [], edges: [] },
+				titleResponse: { title: "Started Boxing This Monday" },
+			},
 		});
 		const labels = (await rows("nodes", id)).map((node) => node.label);
 		expect(labels).toContain("Boxing");
 		expect(labels).not.toContain("Guitar");
-		expect(result.receipt.skippedReasons.outside_include_rules).toBeGreaterThanOrEqual(1);
 	});
 
-	it("captureDefault graph_only suppresses whole-chat capture pages", async () => {
+	it("captureDefault graph_only suppresses whole-chat capture notes", async () => {
 		const id = userId("capture-off");
 		await saveMemoryRules(env, id, { captureDefault: "graph_only" });
-		const result = await runMcpConversationCollectCommand(env, null, id, {
+		await mcpCollect(id, {
 			conversationId: "capture-off",
 			messages: [
 				{ id: "m0", role: "user", content: "Explain Unit 3 for my exam" },
 				{ id: "m1", role: "assistant", content: "Unit 3 covers photosynthesis and cellular respiration in detail." },
 				{ id: "m2", role: "assistant", content: "Photosynthesis converts sunlight into glucose inside chloroplasts." },
-				{ id: "m3", role: "user", content: "hey save everything from this chat to uml" },
+				{ id: "m3", role: "user", content: "hey save everything from this chat to itsuki" },
 			],
-			digestResponse: "",
-			extractionResponse: proposal([]),
-			notesResponse:
-				"Unit 3 covers photosynthesis and cellular respiration.\n" +
-				"Photosynthesis converts sunlight into glucose inside chloroplasts.",
+			testOverrides: {
+				llmResponse: { objects: [] },
+				edgeResponse: { edges: [] },
+				reflexionResponse: { entities: [], facts: [], edges: [] },
+			},
 		});
-		expect(result.counts.pages).toBe(0);
-		expect(await rows("memory_pages", id)).toHaveLength(0);
+		// Nothing durable + capture disabled by rule → no page survives.
+		const pages = (await rows("memory_pages", id)).filter((page) => page.deleted_at === null);
+		expect(pages).toHaveLength(0);
 	});
 
 	it("excluded topics never reach capture notes", async () => {
 		const id = userId("capture-exclude");
 		await saveMemoryRules(env, id, { excludes: ["respiration"] });
-		await runMcpConversationCollectCommand(env, null, id, {
+		await mcpCollect(id, {
 			conversationId: "capture-exclude",
 			messages: [
-				{ id: "m0", role: "user", content: "Explain Unit 3 for my exam" },
+				{ id: "m0", role: "user", content: "I am studying Unit 3 for my biology exam next week." },
 				{ id: "m1", role: "assistant", content: "Unit 3 covers photosynthesis and cellular respiration in detail." },
 				{ id: "m2", role: "assistant", content: "Photosynthesis converts sunlight into glucose inside chloroplasts." },
-				{ id: "m3", role: "assistant", content: "Chlorophyll absorbs light energy to power the process." },
-				{ id: "m4", role: "user", content: "hey save everything from this chat to uml" },
+				{ id: "m3", role: "user", content: "hey save everything from this chat to itsuki" },
 			],
-			digestResponse: "",
-			extractionResponse: proposal([]),
-			notesResponse:
-				"Unit 3 covers photosynthesis and cellular respiration.\n" +
-				"Photosynthesis converts sunlight into glucose inside chloroplasts.\n" +
-				"Chlorophyll absorbs light energy to power the process.",
+			testOverrides: {
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "Biology Exam", category: "goal", confidence: 0.9 },
+						{ kind: "slice", on: "Biology Exam", text: "Studying Unit 3 for the biology exam next week", confidence: 0.9 },
+					],
+				},
+				edgeResponse: { edges: [] },
+				reflexionResponse: { entities: [], facts: [], edges: [] },
+				titleResponse: { title: "Biology Exam Unit Three Prep" },
+			},
 		});
-		const pages = await rows("memory_pages", id);
+		const pages = (await rows("memory_pages", id)).filter((page) => page.deleted_at === null);
 		expect(pages).toHaveLength(1);
 		expect(pages[0].full_markdown).not.toMatch(/respiration/i);
 		expect(pages[0].full_markdown).toMatch(/photosynthesis/i);

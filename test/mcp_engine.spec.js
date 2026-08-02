@@ -249,6 +249,27 @@ describe("trust attribution", () => {
 		expect(sawAssistantContext).toContain("decaf");
 	});
 
+	it("rejects a fact whose words are not grounded in what was sent (fabrication guard)", async () => {
+		const userId = `ground-${crypto.randomUUID()}`;
+		const res = await stage(userId, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Halcyon Robotics", category: "organization", confidence: 0.9 },
+					{ kind: "slice", on: "Halcyon Robotics", text: "Works as a firmware engineer at Halcyon Robotics", confidence: 0.9 },
+					// Whole-cloth: nothing in the conversation mentions any of this.
+					{ kind: "slice", on: "Halcyon Robotics", text: "Prefers decaf oat-milk cappuccinos every morning", confidence: 0.9 },
+				],
+			},
+			edgeResponse: { edges: [] },
+		});
+		await drainUntilSettled(userId);
+		const slices = await env.DB.prepare("SELECT text FROM slices WHERE user_id = ?").bind(userId).all();
+		const texts = slices.results.map((s) => s.text).join("\n");
+		expect(texts).toContain("firmware engineer");
+		expect(texts).not.toContain("decaf");
+		void res;
+	});
+
 	it("keeps assistant lines on the page only in capture mode, under a derived heading", async () => {
 		const userId = `capture-${crypto.randomUUID()}`;
 		const messages = [

@@ -536,7 +536,7 @@ const routes = {
 
 	"POST /v1/save": async (request, env, ctx) => {
 		// Manual Path A compatibility lane for the UI test buttons (and direct API
-		// callers). MCP saves use pipeline/manual_mcp.js. `_test` injects canned LLM/digest
+		// callers). MCP saves use pipeline/mcp_engine.js. `_test` injects canned LLM/digest
 		// output for deterministic tests; production never sends it.
 		const parsed = await readBody(request, "/v1/save");
 		if (parsed.response) return parsed.response;
