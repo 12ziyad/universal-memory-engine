@@ -3694,7 +3694,7 @@ function renderExportsTable() {
 			? `<div class="pg-empty">${esc(EX.error)}</div>`
 			: `<div class="pg-empty">No exports yet.<br><br>
 				An export is a full JSON copy of your memory — useful for a backup, for moving it somewhere else, or just for reading what ${esc(PRODUCT.name)} actually knows.<br><br>
-				<button onclick="createExportJob()">Create export</button></div>`;
+				<button onclick="createExportJob()" ${EX.creating ? "disabled" : ""}>${EX.creating ? "Starting…" : "Create export"}</button></div>`;
 		return;
 	}
 	empty.innerHTML = "";

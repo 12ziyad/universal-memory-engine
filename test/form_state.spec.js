@@ -238,6 +238,26 @@ describe("destructive actions ask first", () => {
 	});
 });
 
+describe("in-flight states", () => {
+	it("every Create export button disables and says what it is doing", () => {
+		// There are two of these — the page header and the empty state. The
+		// empty-state copy was missing the binding, so the button a brand-new
+		// account actually clicks stayed idle-looking mid-request.
+		const buttons = [...script.matchAll(/<button[^>]*onclick="createExportJob\(\)"[^>]*>[^<]*/g)].map((m) => m[0]);
+		expect(buttons.length).toBeGreaterThanOrEqual(2);
+		for (const b of buttons) {
+			expect(b, b).toContain("EX.creating");
+			expect(b, b).toContain("Starting…");
+		}
+	});
+
+	it("the webhook and key create buttons do the same", () => {
+		expect(script).toMatch(/id="whCreate"[^>]*\$\{WH\.creating \? "disabled" : ""\}/);
+		expect(script).toContain('${WH.creating ? "Creating…" : "Create webhook"}');
+		expect(script).toMatch(/id="keyModalCreate"[^>]*\$\{KEYMODAL\.busy \? "disabled" : ""\}/);
+	});
+});
+
 describe("no handler re-renders before it reads (static sweep)", () => {
 	it("every submit handler reads its inputs first", () => {
 		const RENDER = /\b(renderView|renderKeyModal|renderWebhooksTable|renderPlaygroundSide|renderAll)\s*\(/;
