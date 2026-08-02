@@ -233,7 +233,10 @@ describe("dashboard script", () => {
 		expect(script).toContain("function openKeyModal(");
 		expect(script).toContain("function submitKeyModal(");
 		expect(script).toContain("function closeKeyModal(");
-		expect(script).toContain(">Key name</label>");
+		expect(script).toContain(`<label for="keyModalName">Key name`);
+		// The field is bound to state so a failed create hands the name back
+		// rather than a blank input (see form_state.spec.js).
+		expect(script).toContain(`value="${"${esc(KEYMODAL.name)}"}" oninput="keyModalField(this.value)"`);
 		expect(script).toContain('class="key-warning"');
 		expect(script).toContain("won't be shown again.");
 		// Get started's create-link button opens the same modal.

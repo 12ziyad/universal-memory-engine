@@ -355,6 +355,7 @@
 		background: color-mix(in srgb, var(--red) 7%, transparent); color: var(--red);
 		border-radius: 8px; padding: 9px 11px; font-size: 13px; line-height: 1.5; }
 	.key-error { color: var(--red); font-size: 13px; margin-bottom: 12px; }
+	.rules-status-error { color: var(--red); }
 	.key-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 	/* Get started: the steps sit directly on the page. They used to live inside a
 	   panel, which put a frame inside a frame inside the rail — that single box
@@ -2244,16 +2245,17 @@ function viewSave(v) {
 async function saveFactFromForm() {
 	const content = $("#factText")?.value || "";
 	if (!content.trim()) return toast("Write a fact first.", true);
-	await doSave({ mode:"memory", content });
-	$("#factText").value = "";
+	// Clear ONLY on success: a failed save that also ate your sentence is the
+	// worst of both outcomes.
+	if (await doSave({ mode:"memory", content })) $("#factText").value = "";
 }
 
 async function saveConversationFromForm() {
 	const raw = $("#conversationText")?.value || "";
 	const lines = raw.split(/\n+/).map(x => x.trim()).filter(Boolean);
 	if (!lines.length) return toast("Paste a conversation first.", true);
-	await doSave({ mode:"conversation", conversationId:`dashboard-${Date.now()}`, messages: lines.map(content => ({ role:"user", content })) });
-	$("#conversationText").value = "";
+	const ok = await doSave({ mode:"conversation", conversationId:`dashboard-${Date.now()}`, messages: lines.map(content => ({ role:"user", content })) });
+	if (ok) $("#conversationText").value = "";
 }
 
 function viewRecall(v) {
@@ -2906,8 +2908,12 @@ async function playgroundApplySettings() {
 }
 
 async function playgroundResetSettings() {
+	// This used to erase saved settings on the server the instant it was
+	// clicked — no confirmation, no undo, next to a button called "Apply".
+	const saved = (PG.settings?.customInstructions || "").trim() || (PG.settings?.customCategories ?? []).length;
+	if (saved && !confirm("Clear the custom instructions and categories saved for this chat?")) return;
 	PG.settingsDraft = { customInstructions: "", customCategories: [] };
-	if (PG.threadId) await playgroundApplySettings();
+	if (PG.threadId && saved) await playgroundApplySettings();
 	else renderPlaygroundSide();
 }
 
@@ -3047,7 +3053,11 @@ function viewKeys(v) {
  * a full page that warning competed with everything else and people missed it.
  * In a modal there is nothing else to look at.
  */
-const KEYMODAL = { open: false, type: "api", busy: false, result: null, error: "" };
+// `name` lives in state for the same reason the webhook form's does: this
+// modal re-renders on every state change, and a re-render rebuilds the input.
+// Without it, a failed create handed back an empty field and no explanation
+// of what had just been typed.
+const KEYMODAL = { open: false, type: "api", busy: false, result: null, error: "", name: "" };
 
 function openKeyModal(type = "api") {
 	KEYMODAL.open = true;
@@ -3055,7 +3065,18 @@ function openKeyModal(type = "api") {
 	KEYMODAL.busy = false;
 	KEYMODAL.result = null;
 	KEYMODAL.error = "";
+	KEYMODAL.name = "";
 	renderKeyModal();
+}
+
+/** Keep the typed name, and retire a stale error the moment it is addressed. */
+function keyModalField(value) {
+	KEYMODAL.name = value;
+	if (KEYMODAL.error) {
+		KEYMODAL.error = "";
+		const box = $("#keyModalError");
+		if (box) box.hidden = true;
+	}
 }
 
 function closeKeyModal() {
@@ -3090,11 +3111,12 @@ function renderKeyModal() {
 				<div class="key-modal-actions"><button onclick="closeKeyModal()">Close</button></div>
 			` : `
 				<div class="form-row">
-					<label for="keyModalName">Key name</label>
+					<label for="keyModalName">Key name <span class="help">(optional)</span></label>
 					<input id="keyModalName" placeholder="e.g. Production agent, Claude desktop"
+						value="${esc(KEYMODAL.name)}" oninput="keyModalField(this.value)"
 						onkeydown="if(event.key==='Enter'){event.preventDefault();submitKeyModal();}" />
 				</div>
-				${KEYMODAL.error ? `<div class="key-error">${esc(KEYMODAL.error)}</div>` : ""}
+				<div id="keyModalError" class="key-error" ${KEYMODAL.error ? "" : "hidden"}>${esc(KEYMODAL.error)}</div>
 				<div class="key-modal-actions">
 					<button class="ghost" onclick="closeKeyModal()">Cancel</button>
 					<button id="keyModalCreate" onclick="submitKeyModal()" ${KEYMODAL.busy ? "disabled" : ""}>${KEYMODAL.busy ? "Creating…" : "Create"}</button>
@@ -3107,7 +3129,10 @@ function renderKeyModal() {
 async function submitKeyModal() {
 	if (KEYMODAL.busy) return;
 	const isMcp = KEYMODAL.type === "mcp";
-	const label = ($("#keyModalName")?.value || "").trim() || (isMcp ? "MCP client" : "API client");
+	// Read before the re-render below, and keep it in state so a failure
+	// hands the name back instead of a blank field.
+	KEYMODAL.name = ($("#keyModalName")?.value ?? KEYMODAL.name ?? "").trim();
+	const label = KEYMODAL.name || (isMcp ? "MCP client" : "API client");
 	KEYMODAL.busy = true;
 	KEYMODAL.error = "";
 	renderKeyModal();
@@ -3776,23 +3801,40 @@ function parseCategoryLines(value) {
 
 async function saveRulesForm() {
 	const status = $("#rules-status");
-	status.textContent = "Saving...";
+	const button = $("#rules-save");
+	if (button?.disabled) return; // no double submit
+	// Read every field BEFORE anything can re-render or disable them.
+	const rules = {
+		customInstructions: $("#rule-instructions").value.trim(),
+		includes: parseTermList($("#rule-includes").value),
+		excludes: parseTermList($("#rule-excludes").value),
+		customCategories: parseCategoryLines($("#rule-categories").value),
+		captureDefault: $("#rule-capture").value,
+		captureDensity: $("#rule-density").value,
+		autoCollect: $("#rule-autocollect").checked,
+	};
+	if (button) { button.disabled = true; button.textContent = "Saving…"; }
+	status.textContent = "Saving…";
+	status.classList.remove("rules-status-error");
 	try {
-		const rules = {
-			customInstructions: $("#rule-instructions").value.trim(),
-			includes: parseTermList($("#rule-includes").value),
-			excludes: parseTermList($("#rule-excludes").value),
-			customCategories: parseCategoryLines($("#rule-categories").value),
-			captureDefault: $("#rule-capture").value,
-			captureDensity: $("#rule-density").value,
-			autoCollect: $("#rule-autocollect").checked,
-		};
 		const res = await api("/v1/rules", { method: "PUT", body: JSON.stringify(scopedPayload({ rules })) });
 		status.textContent = "Saved ✓";
 		renderRulesSummary(res.rules);
 	} catch (err) {
-		status.textContent = `Save failed: ${err.message}`;
+		// Nothing is cleared on failure — the form still holds every word.
+		status.textContent = err.message || "Could not save your rules. Try again in a moment.";
+		status.classList.add("rules-status-error");
+	} finally {
+		if (button) { button.disabled = false; button.textContent = "Save rules"; }
 	}
+}
+
+/** Editing after a failed save retires the stale message. */
+function rulesStatusClear() {
+	const status = $("#rules-status");
+	if (!status || !status.textContent) return;
+	status.textContent = "";
+	status.classList.remove("rules-status-error");
 }
 
 function renderRulesSummary(rules) {
@@ -3818,16 +3860,16 @@ function viewRules(v) {
 	form.innerHTML = `
 		<div class="form-row"><h3>Custom instructions</h3>
 			<div class="help">Plain-language guidance for the extractors, e.g. "Always save exam and study progress. Never save jokes or small talk."</div>
-			<textarea id="rule-instructions" placeholder="Always save… Never save…"></textarea></div>
+			<textarea id="rule-instructions" placeholder="Always save… Never save…" oninput="rulesStatusClear()"></textarea></div>
 		<div class="form-row" style="margin-top:12px"><h3>Only collect (includes)</h3>
 			<div class="help">Comma-separated topics/keywords. When set, only content matching at least one term is saved.</div>
-			<input id="rule-includes" placeholder="e.g. exams, Itsuki project, health" /></div>
+			<input id="rule-includes" placeholder="e.g. exams, Itsuki project, health" oninput="rulesStatusClear()" /></div>
 		<div class="form-row" style="margin-top:12px"><h3>Never collect (excludes)</h3>
 			<div class="help">Comma-separated. Matching content is always refused, even if it matches an include.</div>
-			<input id="rule-excludes" placeholder="e.g. passwords, politics, jokes" /></div>
+			<input id="rule-excludes" placeholder="e.g. passwords, politics, jokes" oninput="rulesStatusClear()" /></div>
 		<div class="form-row" style="margin-top:12px"><h3>Custom categories</h3>
 			<div class="help">One per line as name: description (description optional).</div>
-			<textarea id="rule-categories" style="min-height:70px" placeholder="study_progress: exam and unit completion&#10;startup_ideas"></textarea></div>
+			<textarea id="rule-categories" style="min-height:70px" oninput="rulesStatusClear()" placeholder="study_progress: exam and unit completion&#10;startup_ideas"></textarea></div>
 		<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center">
 			<label>Whole-chat capture pages
 				<select id="rule-capture" style="margin-left:8px">
@@ -3842,7 +3884,7 @@ function viewRules(v) {
 				</select></label>
 		</div>
 		<div style="display:flex;gap:10px;align-items:center;margin-top:14px">
-			<button onclick="saveRulesForm()">Save rules</button>
+			<button id="rules-save" onclick="saveRulesForm()">Save rules</button>
 			<span id="rules-status" class="help"></span>
 		</div>`;
 	wrap.appendChild(form);
@@ -5850,12 +5892,15 @@ const SAMPLE_CHAT = [
 	{ role:"user", content:"whats the weather like?" },
 ];
 
+/** Returns true only when the save actually landed — callers must not clear
+ *  a person's typing on a failure they never heard about. */
 async function doSave(payload) {
 	try {
 		const r = await api("/v1/save", { method:"POST", body: JSON.stringify(scopedPayload(payload)) });
 		toast(r.summary || "Saved.");
 		setTimeout(load, 700);
-	} catch (e) { toast("Save failed: " + e.message, true); }
+		return true;
+	} catch (e) { toast("Save failed: " + e.message, true); return false; }
 }
 async function doRecall(query, opts = {}) {
 	try {
