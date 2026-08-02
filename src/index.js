@@ -101,10 +101,18 @@ async function doorOverrides(env, auth, body = {}) {
 	const isToken = auth.auth?.type === "token";
 	if (body.source === "plugin") out.profile = "plugin";
 	else if (isToken) out.profile = "sdk";
+
+	// Rules belong to the ACCOUNT, not to the memory space being written to.
+	// A sub-tenant id (mem_…) is derived and owns no configuration, so looking
+	// rules up under it silently returned defaults — an integrator's
+	// excludes:["salary"] applied to their own memory and to none of their
+	// end users', which is the only place it actually matters.
+	const ownerUserId = auth.auth?.userId ?? auth.userId;
 	const keyRules = isToken ? auth.auth.token?.rules : null;
 	const bodyRules = body.rules && typeof body.rules === "object" ? body.rules : null;
-	if (keyRules || bodyRules) {
-		const account = await getMemoryRules(env, auth.userId);
+	const scoped = ownerUserId !== auth.userId;
+	if (keyRules || bodyRules || scoped) {
+		const account = await getMemoryRules(env, ownerUserId);
 		out.rules = mergeRuleOverride(mergeRuleOverride(account, keyRules), bodyRules);
 	}
 	return out;

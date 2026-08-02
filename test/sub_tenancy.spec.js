@@ -179,3 +179,41 @@ describe("credential mistakes say what is actually wrong", () => {
 		expect(credentialShapeHint("itsuki_live_real")).toBeNull();
 	});
 });
+
+describe("account rules govern every tenant under the key", () => {
+	it("an exclusion set on the account applies to a sub-tenant save", async () => {
+		// Found by attacking production: rules were looked up under the SCOPED
+		// memory id (mem_…), which is derived and owns no rules row — so an
+		// integrator's excludes applied to their own memory and to none of
+		// their end users', the only place it matters.
+		const { key, cookie } = await bearerKey("rulescope");
+		await call("/v1/rules", {
+			method: "PUT",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ rules: { excludes: ["salary"] } }),
+		});
+
+		const res = await call("/v1/save", {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+			body: JSON.stringify({
+				content: "My salary is 91000 and I moved to Aveiro.",
+				user_id: "tenant-a",
+				_test: { ...canned, llmResponse: { objects: [
+					{ kind: "node", label: "Salary", category: "other", confidence: 0.9 },
+					{ kind: "slice", on: "Salary", text: "Salary is 91000", kind_detail: "other", confidence: 0.9 },
+					{ kind: "node", label: "Aveiro", category: "place", confidence: 0.9 },
+					{ kind: "slice", on: "Aveiro", text: "Moved to Aveiro", kind_detail: "other", confidence: 0.9 },
+				] } },
+			}),
+		});
+		expect(res.body.receipt.outcome).toBe("wrote");
+		expect(Object.keys(res.body.receipt.skippedReasons)).toContain("excluded_by_rule");
+
+		const memoryUserId = scopeOf(res.body).memory_user_id;
+		const { results } = await env.DB.prepare("SELECT label FROM nodes WHERE user_id = ?").bind(memoryUserId).all();
+		const labels = results.map((r) => r.label);
+		expect(labels).toContain("Aveiro");
+		expect(labels).not.toContain("Salary");
+	});
+});
