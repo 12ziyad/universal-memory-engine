@@ -124,12 +124,19 @@ function userMessagesOf(messages) {
 	return (messages ?? []).filter((m) => (m?.role ?? "user") === "user");
 }
 
+// Filler that often precedes a save command ("haha cool. ok save this") —
+// stripped before the instruction test so decoration cannot smuggle a bare
+// control message past the door as durable content.
+const LEADING_FILLER_RE =
+	/^[\s,.!?]*(?:(?:ok(?:ay)?|haha+|lol|lmao|hehe|cool|nice|sure|yep|yeah|yes|great|awesome|alright|anyway|hmm+)[\s,.!?]+)*/i;
+
 /** Durable user lines: not noise/utility, and not a bare save instruction. */
 export function durableUserMessages(messages) {
 	return userMessagesOf(messages).filter((m) => {
 		const content = String(m?.content ?? "").trim();
 		if (!content) return false;
-		if (SAVE_INSTRUCTION_RE.test(content)) return false;
+		const stripped = content.replace(LEADING_FILLER_RE, "");
+		if (SAVE_INSTRUCTION_RE.test(stripped) || !stripped) return false;
 		const cls = classifyMessage(content);
 		return cls === "signal" || cls === "meaningful";
 	});

@@ -325,6 +325,16 @@ describe("titles", () => {
 		expect(durable).toHaveLength(1);
 		expect(durable[0].content).toContain("Biscuit");
 	});
+
+	it("chatter decoration cannot smuggle control input past the door (live-found inputs)", () => {
+		// Both slipped the first deployed gate on production — pinned here.
+		const durable = durableUserMessages([
+			{ role: "user", content: "hey" },
+			{ role: "user", content: "sure lol" },
+			{ role: "user", content: "haha cool. ok save this conversation" },
+		]);
+		expect(durable).toHaveLength(0);
+	});
 });
 
 describe("save_memory light path", () => {

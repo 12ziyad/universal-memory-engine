@@ -19,7 +19,7 @@ export const ACTION = { IGNORE: "IGNORE", HOLD: "HOLD", FIRE: "FIRE" };
 
 // Pure noise: filler that is never worth holding.
 const NOISE_RE =
-	/^(ok|okay|k|kk|kay|yo|hey|hi|hello|thanks|thank you|thx|ty|np|lol|lmao|lmfao|haha+|hehe|nice|cool|great|awesome|amazing|sweet|sure|yep|yup|yes|no|nope|nah|fine|alright|aight|word|right|true|fr|facts|got it|gotcha|same|ok bro|ok then|sounds good|makes sense|good|bet)[\s,!.?]*((bro|man|dude|bruh|thanks|cool|then|good|nice|sounds good|makes sense)[\s,!.?]*)*$/i;
+	/^(ok|okay|k|kk|kay|yo|hey|hi|hello|thanks|thank you|thx|ty|np|lol|lmao|lmfao|haha+|hehe|nice|cool|great|awesome|amazing|sweet|sure|yep|yup|yes|no|nope|nah|fine|alright|aight|word|right|true|fr|facts|got it|gotcha|same|ok bro|ok then|sounds good|makes sense|good|bet)[\s,!.?]*((bro|man|dude|bruh|thanks|cool|then|good|nice|sounds good|makes sense|lol|lmao|haha+|hehe)[\s,!.?]*)*$/i;
 
 // Pure utility / lookups: questions and commands with no personal signal.
 const UTILITY_PREFIX_RE =
