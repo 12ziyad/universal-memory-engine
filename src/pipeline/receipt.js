@@ -127,6 +127,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		// when the caller did not measure it.
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		...splitRescueFields(meta),
+		...(meta.rules_active ? { rules_active: meta.rules_active } : {}),
 		saved,
 		savedTotal,
 		skipped: rejected.length,

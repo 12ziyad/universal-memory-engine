@@ -280,6 +280,15 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// pre-merged set (the Playground layers thread settings over the account's,
 	// and an SDK caller's per-request rules arrive the same way).
 	const rules = overrides.rules ?? await getMemoryRules(env, userId);
+	// Which rules were actually in force for this save. Without this, a rule
+	// that never loaded and a rule that matched nothing look identical on the
+	// receipt — which is exactly how unenforced excludes stayed invisible.
+	meta.rules_active = {
+		source: overrides.rules ? "caller" : "account",
+		excludes: rules.excludes?.length ?? 0,
+		includes: rules.includes?.length ?? 0,
+		instructions: Boolean(rules.customInstructions),
+	};
 	// One extractor, three lenses: which door this save came through decides
 	// the extraction stance and which deterministic gate filters apply.
 	const profile = overrides.profile
