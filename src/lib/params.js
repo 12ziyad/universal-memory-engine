@@ -48,6 +48,11 @@ export const ENDPOINT_PARAMS = {
 	"/v1/turn": [...COMMON, "messages", "query"],
 };
 
+// A save is a memory, not a file upload. Past this the extractor cannot do
+// anything useful with it anyway, and an accidental 500KB paste should be
+// told so rather than silently accepted and quietly truncated downstream.
+const MAX_CONTENT_CHARS = 120_000;
+
 /** Levenshtein-lite: is `a` plausibly a typo of `b`? Used only for hints. */
 function closeTo(a, b) {
 	const x = a.toLowerCase().replace(/[_-]/g, "");
@@ -101,7 +106,28 @@ export function validateBody(path, raw) {
 		}
 		body[canonical] = value;
 	}
+
+	const oversize = tooLarge(body);
+	if (oversize) return { error: "payload_too_large", message: oversize };
+
 	return { body, renamed };
+}
+
+/** Say which field is too big and by how much, rather than failing later. */
+function tooLarge(body) {
+	const describe = (field, len) =>
+		`${field} is ${Math.round(len / 1000)}KB — the limit is ${MAX_CONTENT_CHARS / 1000}KB. Split it into separate saves, or send it as messages[].`;
+	if (typeof body.content === "string" && body.content.length > MAX_CONTENT_CHARS) {
+		return describe("content", body.content.length);
+	}
+	if (typeof body.query === "string" && body.query.length > 8000) {
+		return "query is too long — a recall query should be a question, not a document.";
+	}
+	if (Array.isArray(body.messages)) {
+		const total = body.messages.reduce((n, m) => n + (typeof m?.content === "string" ? m.content.length : 0), 0);
+		if (total > MAX_CONTENT_CHARS) return describe("messages[]", total);
+	}
+	return null;
 }
 
 /**

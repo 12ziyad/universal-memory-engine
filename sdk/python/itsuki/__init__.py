@@ -17,7 +17,7 @@ from typing import Any, Optional
 import httpx
 
 DEFAULT_BASE_URL = "https://itsuki.app"
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 __all__ = ["MemoryClient", "Memory", "MemoryAPIError", "VERSION"]
 
@@ -64,8 +64,25 @@ class MemoryClient:
         )
 
     # ----------------------------------------------------------- write
-    def add(self, content: str, **opts: Any) -> dict:
-        """Save one durable fact. Returns the write receipt."""
+    def add(self, content: Optional[str] = None, *, messages: Optional[list] = None, **opts: Any) -> dict:
+        """Save one durable fact, or a list of messages.
+
+        user_id="alice" scopes this write to one of YOUR end users — an
+        isolated memory space inside your account. Omit it and the memory
+        belongs to the key's owner.
+
+            memory.add("Ada prefers email.", user_id="ada")
+            memory.add(messages=[{"role": "user", "content": "..."}], user_id="ada")
+        """
+        if messages is not None:
+            if content is not None:
+                raise MemoryAPIError("Pass either content= or messages=, not both.")
+            return self.add_conversation(messages, **opts)
+        if content is None:
+            raise MemoryAPIError(
+                "add() needs content='...' (a sentence to remember) or "
+                "messages=[{'role': 'user', 'content': '...'}]."
+            )
         return self._request("POST", "/v1/save", {"content": content, **opts})
 
     save = add
@@ -126,7 +143,36 @@ class MemoryClient:
         self.close()
 
     # -------------------------------------------------------- internal
+    # Python callers write snake_case; the wire is camelCase. Translating here
+    # is what keeps `add(..., user_id="alice")` from becoming an unrecognised
+    # key — which is exactly how sub-tenancy once failed silently.
+    _WIRE_NAMES = {
+        "user_id": "userId",
+        "external_user_id": "userId",
+        "end_user_id": "userId",
+        "tenant_id": "userId",
+        "conversation_id": "conversationId",
+        "thread_id": "threadId",
+        "source_id": "sourceId",
+        "idempotency_key": "idempotencyKey",
+        "capture_density": "captureDensity",
+        "memory_scope": "memoryScope",
+        "content_scope": "contentScope",
+    }
+
+    def _to_wire(self, body: Optional[dict]) -> Optional[dict]:
+        if not body:
+            return body
+        out = {}
+        for key, value in body.items():
+            wire = self._WIRE_NAMES.get(key, key)
+            if wire in out:
+                raise MemoryAPIError(f"'{key}' and '{wire}' mean the same thing — pass only one.")
+            out[wire] = value
+        return out
+
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
+        body = self._to_wire(body)
         params = {}
         if self.user_id:
             params["userId"] = self.user_id
