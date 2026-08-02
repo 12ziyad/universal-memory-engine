@@ -2351,6 +2351,24 @@ memory.add("I started learning Kotlin this week.")
 
 # ask for it back
 print(memory.search("what am I learning?")["context"])`,
+		pythonTenants: `# One key, many end users. user_id is the isolation boundary:
+# each value is a separate memory space inside your account.
+memory.add("Ada's depot is in Porto.", user_id="ada")
+memory.add("Grace's depot is in Faro.", user_id="grace")
+
+print(memory.search("where is my depot?", user_id="ada")["context"])
+# -> Porto. Grace's memory is unreachable from ada, and vice versa.`,
+		nodeTenants: `// One key, many end users. userId is the isolation boundary:
+// each value is a separate memory space inside your account.
+await memory.add("Ada's depot is in Porto.", { userId: "ada" });
+await memory.add("Grace's depot is in Faro.", { userId: "grace" });
+
+const { context } = await memory.search("where is my depot?", { userId: "ada" });
+// -> Porto. Grace's memory is unreachable from ada, and vice versa.`,
+		curlTenant: `curl -X POST ${origin}/v1/save \\
+  -H "authorization: Bearer ${apiKey}" \\
+  -H "content-type: application/json" \\
+  -d '{"content": "Ada prefers email.", "userId": "ada"}'`,
 		nodeInit: `import { MemoryClient } from "itsuki";
 
 const memory = new MemoryClient({ apiKey: "${apiKey}", baseUrl: "${origin}" });`,
@@ -2499,6 +2517,7 @@ function installMethods() {
 						{ title: "Install the SDK", body: "One package, one dependency.", codeLabel: "bash", code: () => "pip install itsuki" },
 						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "python", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
 						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "python", code: (key) => installSnippets(key).python },
+						{ title: "Serving many users?", body: "Pass user_id and each of your end users gets an isolated memory space inside your one key.", codeLabel: "python", code: (key) => installSnippets(key).pythonTenants },
 					],
 				},
 				node: {
@@ -2508,6 +2527,7 @@ function installMethods() {
 						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", codeLabel: "bash", code: () => "npm install itsuki" },
 						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "js", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
 						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "js", code: (key) => installSnippets(key).node },
+						{ title: "Serving many users?", body: "Pass userId and each of your end users gets an isolated memory space inside your one key.", codeLabel: "js", code: (key) => installSnippets(key).nodeTenants },
 					],
 				},
 				curl: {
@@ -2517,6 +2537,7 @@ function installMethods() {
 						{ title: "Create an API key", body: "Send it as a Bearer token on every request.", action: apiKey, note: "Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>." },
 						{ title: "Save a memory", body: "Returns a receipt: what was stored, what was skipped, and why.", codeLabel: "bash", code: (key) => installSnippets(key).curlSave },
 						{ title: "Recall it", body: "The context field is the block you drop into your prompt.", codeLabel: "bash", code: (key) => installSnippets(key).curlRecall },
+						{ title: "Serving many users?", body: "Add userId and each of your end users gets an isolated memory space inside your one key.", codeLabel: "bash", code: (key) => installSnippets(key).curlTenant },
 					],
 				},
 			},

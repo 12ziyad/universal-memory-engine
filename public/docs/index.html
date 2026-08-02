@@ -177,6 +177,22 @@ ${codeBlock(`curl -X POST ${ORIGIN}/v1/recall \\
   -H "content-type: application/json" \\
   -d '{"query": "what am I learning?"}'`)}
 <p>The <code>context</code> field of the response is a compact text block — exactly what a connected AI receives.</p>
+<h2>4b · Serving many end users</h2>
+<p>Your API key is your account. Add <code>userId</code> and each of <i>your</i> end users gets an
+<b>isolated memory space inside it</b> — nothing saved under one value is reachable from another,
+on save or on recall.</p>
+${codeBlock(`curl -X POST ${ORIGIN}/v1/save \\
+  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{"content": "Ada'"'"'s depot is in Porto.", "userId": "ada"}'`)}
+<p>The SDKs take it per call — <code>memory.add("…", user_id="ada")</code> in Python,
+<code>memory.add("…", { userId: "ada" })</code> in JavaScript — or once on the client.
+The value is yours to pick (a user id, a tenant slug, an email); it is hashed with your account id
+before it becomes a storage key, so two different API keys using the same string still get
+different spaces.</p>
+<div class="note"><b>Unknown parameters are rejected, not ignored.</b> A misspelled
+<code>usr_id</code> returns <code>400</code> naming the offending key. Silently dropping it is how
+somebody ships a multi-tenant app believing isolation worked.</div>
 <h2>5 · Connect an AI chat</h2>
 <p>Follow the guide for <a href="#/install/claude">Claude</a> or <a href="#/install/chatgpt">ChatGPT</a> — one URL, two minutes. After that, saying <i>"save this to ${PRODUCT.name.toLowerCase()}"</i> or asking <i>"what do you know about me?"</i> just works.</p>
 <div class="note">Prefer clicking to curling? The <b>Playground</b> in the app does steps 3–4 with buttons.</div>

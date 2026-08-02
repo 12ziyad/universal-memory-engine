@@ -19,3 +19,29 @@ const { context } = await memory.search("what am I learning?");
 - Safe retries: pass `idempotencyKey: memory.newIdempotencyKey()` to writes
 
 Errors throw `MemoryAPIError` with `status`, `code`, and `body`. Docs: your deployment's `/docs/`.
+
+## Many end users, one API key
+
+Your API key is your account. `userId` selects an
+**isolated memory space inside it** — one per end user of your app. Nothing
+saved for one value is reachable from another, on save or on recall.
+
+```
+await memory.add("Ada's depot is in Porto.", { userId: "ada" });
+await memory.add("Grace's depot is in Faro.", { userId: "grace" });
+
+const { context } = await memory.search("where is my depot?", { userId: "ada" });
+// -> Porto, never Faro
+```
+
+Pass it per call, or fix it for the life of a client with
+`new MemoryClient({ apiKey, userId: "ada" })`. Omit it entirely and the memory
+belongs to the key's owner.
+
+The value is yours to choose — a user id, a tenant slug, an email. It is
+hashed with your account id before it becomes a storage key, so two different
+API keys using the same string still get different spaces.
+
+**Unknown parameters are rejected**, not ignored: a misspelled `usr_id`
+returns `400` naming the offending key rather than silently writing to the
+wrong space.
