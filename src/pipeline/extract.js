@@ -32,7 +32,7 @@ import { runPass2 } from "./pass2.js";
 import { buildReceipt, emptyReceipt } from "./receipt.js";
 import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
-import { getMemoryRules } from "./rules.js";
+import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
@@ -385,7 +385,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 
 	// Provenance: a capped, scrubbed excerpt of the message that produced each
 	// object — enough to answer "why do you think that?".
-	attachProvenance(plan, chunk);
+	attachProvenance(plan, chunk, (text) => rulesAllowText(rules, text));
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.
 	if (!plan.hasWrites) {

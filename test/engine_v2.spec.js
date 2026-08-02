@@ -334,3 +334,37 @@ describe("engine v2 unit seams", () => {
 		expect(rejected.map((r) => r.reason)).toEqual(["edge_unknown_entity_id", "edge_self_loop"]);
 	});
 });
+
+describe("provenance obeys the caller's rules", () => {
+	it("an excluded sentence never survives as evidence on an allowed node", async () => {
+		// Found on production: excludes:["salary"] correctly refused the salary
+		// node, then stored the WHOLE sentence - salary included - as the
+		// source_snippet of the allowed neighbour, and /v1/graph returned it.
+		const userId = `v2-prov-rules-${crypto.randomUUID()}`;
+		const result = await runExtraction(env, userId, msgs([
+			"My salary is 91000 EUR and my blood pressure medication is lisinopril. Also I moved to Aveiro.",
+		]), [], {
+			rules: {
+				customInstructions: "", includes: [], excludes: ["salary", "medication"],
+				customCategories: [], captureDefault: "auto", captureDensity: "standard",
+				autoCollect: true, retentionDays: null,
+			},
+			llmResponse: { objects: [
+				{ kind: "node", label: "Aveiro", category: "place", confidence: 0.9 },
+				{ kind: "slice", on: "Aveiro", text: "Moved to Aveiro", kind_detail: "other", confidence: 0.9 },
+			] },
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+		expect(result.outcome).toBe("wrote");
+
+		const { results } = await env.DB.prepare(
+			"SELECT text, source_snippet FROM slices WHERE user_id = ?",
+		).bind(userId).all();
+		expect(results.length).toBeGreaterThan(0);
+		for (const row of results) {
+			expect(JSON.stringify(row)).not.toContain("91000");
+			expect(JSON.stringify(row).toLowerCase()).not.toContain("lisinopril");
+		}
+	});
+});

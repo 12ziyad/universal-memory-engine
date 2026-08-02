@@ -306,7 +306,16 @@ export async function proposeReflexion(env, config, packet, entities, foundSumma
  */
 const SNIPPET_CAP = 240;
 
-export function attachProvenance(plan, chunk) {
+/**
+ * @param {object} plan
+ * @param {Array} chunk
+ * @param {(text: string) => boolean} [allow] - the caller's rules. A snippet
+ *   is EVIDENCE, and evidence is still content: a sentence the rules refused
+ *   to store as a memory must not survive as provenance on a neighbouring
+ *   one. Without this, `excludes: ["salary"]` blocked the salary node and
+ *   then kept the whole sentence — salary included — on the node next to it.
+ */
+export function attachProvenance(plan, chunk, allow = null) {
 	const messages = (chunk ?? []).map((m) => ({
 		content: String(m?.content ?? ""),
 		tokens: new Set(normalizeLabel(String(m?.content ?? "")).split(" ").filter((t) => t.length > 2)),
@@ -324,6 +333,8 @@ export function attachProvenance(plan, chunk) {
 			if (score > bestScore) { bestScore = score; best = m; }
 		}
 		if (!best || bestScore === 0) return null;
+		// The rules apply to evidence exactly as they apply to memory.
+		if (allow && !allow(best.content)) return null;
 		return best.content.length > SNIPPET_CAP ? `${best.content.slice(0, SNIPPET_CAP - 1)}…` : best.content;
 	};
 
