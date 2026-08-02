@@ -2384,6 +2384,10 @@ console.log(context);`,
     "${PRODUCT.name.toLowerCase()}": { "url": "${origin}/mcp/${mcpToken}" }
   }
 }`,
+		// The "make it automatic" priming block. Tool descriptions decide whether a
+		// model calls a tool at all; standing instructions in the host app are the
+		// only other lever. One copy-paste block, same wording for every host.
+		autoInstructions: `You have an ${PRODUCT.name} memory tool. At the start of each conversation, call recall_memory to load what you already know about me. When I share something durable — a decision, preference, plan, person, or project — call save_memory without being asked. When a conversation produces lasting decisions or plans, call save_conversation with the relevant turns. Prefer sending my own words over your paraphrase. Never say you saved something unless you got the receipt back.`,
 		pluginMarketplace: `claude plugin marketplace add 12ziyad/universal-memory-engine`,
 		codexMarketplace: `{
   "name": "${PRODUCT.name.toLowerCase()}-plugins",
@@ -2473,6 +2477,8 @@ function installMethods() {
 							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
 						{ title: "Turn it on", body: `Tap +, choose Connectors, enable ${name}.`,
 							codeLabel: "say this", code: () => `save this to ${name}` },
+						{ title: "Make it automatic", body: "Paste into Claude → Settings → Profile (preferences box), or a Project's instructions. Claude then recalls and saves without being asked.",
+							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
 				chatgpt: {
@@ -2488,6 +2494,8 @@ function installMethods() {
 						{ title: "Open a new chat", body: "The tools menu only refreshes on a new one." },
 						{ title: "Turn it on", body: `Click + → More → Developer tools, pick ${name}.`,
 							codeLabel: "say this", code: () => `save this to ${name}` },
+						{ title: "Make it automatic", body: "Paste into Settings → Personalization → Custom instructions. ChatGPT then recalls and saves without being asked.",
+							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
 				cursor: {

@@ -37,13 +37,13 @@ function announceMcpWrite(env, ctx, userId, res) {
 }
 
 const SAVE_MEMORY_DESC =
-	"Manually save exactly the grounded memory the user explicitly submitted. This includes durable facts, decisions, plans, preferences, events, and meaningful casual experiences; unresolved references require clarification. Returns a final receipt after source-only extraction and the atomic memory write complete.";
+	"Save a single durable fact about the user. Call this whenever the user states a preference, decision, personal detail, relationship, date, or anything worth remembering in future conversations — including when they say \"remember that…\". Send one clear fact per call, in the user's own words.";
 
 const SAVE_CONVERSATION_DESC =
-	"Manually save a submitted conversation. Send messages oldest first; only scoped user-stated facts and specifically accepted assistant proposals enter the graph. When the user asks to save EVERYTHING (the whole chat), include all turns — user and assistant — and the conversation is additionally condensed into an organized notes page (assistant content included as notes, never as graph facts). Use contentScope.subject for strict subject filtering. Safe to re-send overlapping messages; returns a final page-and-graph receipt.";
+	"Save the important parts of the current conversation to long-term memory. Call this when the discussion has produced durable new information — decisions, plans, facts, preferences — that should persist. Send the relevant turns verbatim; do not pre-summarize. The memory service will extract the facts and relationships itself.";
 
 const RECALL_MEMORY_DESC =
-	"Call when the user asks what you know about them, or when answering needs their personal context (their projects, health, skills, goals, family, preferences). Returns a compact block of what is already known.";
+	"Search the user's saved memories. Call this at the START of a conversation, and whenever the user references anything personal, past, or context-dependent.";
 
 /** base64url helpers (no '+', '/', or '=' so the token is URL-path-safe). */
 export function encodeMcpToken(userId, key) {
@@ -135,7 +135,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	const server = new McpServer(
 		{ name: "itsuki-memory", version: "0.6.0" },
 		{
-			instructions: "Itsuki is a manual memory door with exactly three tools. Use save_memory for one explicitly submitted memory, save_conversation for scoped facts from several chat turns (or, when the user asks to save everything, a whole-chat notes capture — send all turns), and recall_memory to retrieve existing memory. Never claim a write without the final receipt. Assistant claims are context unless the user explicitly adopts one.",
+			instructions: "Itsuki gives this user persistent memory across conversations. Call recall_memory at the start of a conversation to load what is already known. Call save_memory the moment the user states one durable fact, and save_conversation when a discussion has produced lasting decisions, plans, or facts — send the relevant turns verbatim, oldest first; do not pre-summarize. Saves are staged instantly and finish processing in the background: report exactly what the receipt says, and never claim something was saved without a receipt. Assistant claims are context unless the user explicitly adopts one.",
 		},
 	);
 
