@@ -35,6 +35,7 @@ import {
 	runRecallCommand,
 } from "./pipeline/commands.js";
 import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
+import { credentialShapeHint, validateBody } from "./lib/params.js";
 import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
 import {
 	createThread,
@@ -135,6 +136,20 @@ function json(data, status = 200, extraHeaders = {}) {
 	});
 }
 
+/**
+ * Parse a memory-endpoint body and refuse unknown parameters. Returns
+ * { body } or { response } — an unrecognised key never reaches the engine,
+ * because a silently dropped `user_id` is a tenancy leak wearing an ok:true.
+ */
+async function readBody(request, path) {
+	const raw = await request.json().catch(() => ({}));
+	const checked = validateBody(path, raw);
+	if (checked.error) {
+		return { response: json({ error: checked.error, message: checked.message }, 400) };
+	}
+	return { body: checked.body };
+}
+
 async function isAuthorized(request, env) {
 	const key = request.headers.get("x-api-key");
 	return Boolean(env.API_KEY) && Boolean(key) && await timingSafeEqualString(key, env.API_KEY);
@@ -195,7 +210,11 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 	if (await isAuthorized(request, env)) {
 		return { response: json({ error: "userId is required" }, 400) };
 	}
-	return { response: json({ error: "unauthorized" }, 401) };
+	// Say what is actually wrong with the credential. A bare "unauthorized"
+	// sends someone hunting a permissions problem when they pasted the wrong
+	// KIND of secret entirely.
+	const hint = credentialShapeHint(bearerToken(request) ?? request.headers.get("x-api-key"));
+	return { response: json({ error: "unauthorized", ...(hint ? { message: hint } : {}) }, 401) };
 }
 
 function requireControlUser(request, env, explicitUserId, options = {}) {
@@ -375,7 +394,9 @@ const routes = {
 	},
 
 	"POST /v1/ingest": async (request, env, ctx) => {
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readBody(request, "/v1/ingest");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
 			requiredScope: MEMORY_WRITE_SCOPE,
@@ -508,7 +529,9 @@ const routes = {
 		// Manual Path A compatibility lane for the UI test buttons (and direct API
 		// callers). MCP saves use pipeline/manual_mcp.js. `_test` injects canned LLM/digest
 		// output for deterministic tests; production never sends it.
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readBody(request, "/v1/save");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
 			requiredScope: MEMORY_WRITE_SCOPE,
@@ -972,7 +995,9 @@ const routes = {
 		// One round trip for app builders: recall relevant memory for the newest
 		// user message, and (per rules.autoCollect) feed the turn into the
 		// auto-collect lane in the background. Auto-recall + auto-capture.
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readBody(request, "/v1/turn");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
 			requiredScope: MEMORY_WRITE_SCOPE,
@@ -1258,7 +1283,9 @@ const routes = {
 	},
 
 	"POST /v1/recall": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readBody(request, "/v1/recall");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
 			requiredScope: MEMORY_READ_SCOPE,
