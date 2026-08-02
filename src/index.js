@@ -35,6 +35,7 @@ import {
 	runRecallCommand,
 } from "./pipeline/commands.js";
 import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
+import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
 import {
 	createThread,
 	deleteThread,
@@ -1192,12 +1193,18 @@ const routes = {
 		return json(await deleteLastExtraction(env, auth.userId));
 	},
 
-	"POST /v1/actions/delete-object": async (request, env) => {
+	"POST /v1/actions/delete-object": async (request, env, ctx) => {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
-		return json(await deleteObject(env, auth.userId, body));
+		const result = await deleteObject(env, auth.userId, body);
+		ctx.waitUntil(emitWebhookEvent(env, (p) => ctx.waitUntil(p), auth.userId, "memory.deleted", {
+			source: "delete_object",
+			counts: { deleted: 1 },
+			kind: body.kind,
+		}));
+		return json(result);
 	},
 
 	"POST /v1/actions/archive-object": async (request, env) => {
@@ -1208,11 +1215,17 @@ const routes = {
 		return json(await archiveObject(env, auth.userId, body));
 	},
 
-	"POST /v1/actions/delete-all": async (request, env) => {
+	"POST /v1/actions/delete-all": async (request, env, ctx) => {
 		const body = await request.json().catch(() => ({}));
 		const auth = await requireControlUser(request, env, body.userId);
 		if (auth.response) return auth.response;
 		const result = await deleteAllMemories(env, auth.userId, body.confirm);
+		if (result.deleted) {
+			ctx.waitUntil(emitWebhookEvent(env, (p) => ctx.waitUntil(p), auth.userId, "memory.deleted", {
+				source: "delete_all",
+				counts: { deleted_all: true },
+			}));
+		}
 		return json(result, result.deleted ? 200 : 400);
 	},
 
@@ -1506,7 +1519,11 @@ async function handleRequestInner(request, env, ctx, url) {
 		}
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
-			return handleCandidateRoutes(request, env, url);
+			return handleCandidateRoutes(request, env, url, ctx);
+		}
+
+		if (url.pathname === "/v1/webhooks" || url.pathname.startsWith("/v1/webhooks/")) {
+			return handleWebhookRoutes(request, env, ctx, url);
 		}
 
 		const handler = routes[`${request.method} ${url.pathname}`];
@@ -1552,7 +1569,51 @@ async function handleMcp(request, env, ctx, url) {
 	return createMcpHandler(server)(normalized, env, ctx);
 }
 
-async function handleCandidateRoutes(request, env, url) {
+/**
+ * Webhooks are standing configuration, so they authenticate like keys do:
+ * session only, never a bearer token (a leaked API key must not be able to
+ * silently point a user's memory events somewhere new).
+ */
+async function handleWebhookRoutes(request, env, ctx, url) {
+	const auth = await getSessionUser(env, request);
+	if (!auth) return json({ error: "unauthorized" }, 401);
+	const userId = auth.userId;
+
+	if (request.method === "GET" && url.pathname === "/v1/webhooks") {
+		return json({ webhooks: await listWebhooks(env, userId) });
+	}
+	if (request.method === "POST" && url.pathname === "/v1/webhooks") {
+		const body = await request.json().catch(() => ({}));
+		const result = await createWebhook(env, userId, body);
+		if (result.error) return json({ error: "invalid_webhook", message: result.error }, 400);
+		return json(result, 201);
+	}
+
+	const rest = url.pathname.slice("/v1/webhooks/".length);
+	const [id, sub] = rest.split("/");
+	if (!id) return json({ error: "not found" }, 404);
+
+	if (request.method === "DELETE" && !sub) {
+		return json(await deleteWebhook(env, userId, decodeURIComponent(id)));
+	}
+	if (request.method === "GET" && sub === "deliveries") {
+		return json({ deliveries: await listDeliveries(env, userId, decodeURIComponent(id)) });
+	}
+	if (request.method === "POST" && sub === "test") {
+		// A synthetic event so a receiver can be verified before anything real
+		// flows. Uses the exact signing and delivery path.
+		await emitWebhookEvent(env, (p) => ctx.waitUntil(p), userId, "memory.added", {
+			source: "webhook_test",
+			receipt_id: null,
+			counts: { nodes: 1, updated_nodes: 0, slices: 1, events: 0, edges: 0 },
+			new_node_labels: ["Webhook test"],
+		});
+		return json({ ok: true, sent: true });
+	}
+	return json({ error: "not found" }, 404);
+}
+
+async function handleCandidateRoutes(request, env, url, ctx) {
 	if (request.method === "GET" && url.pathname === "/v1/candidates") {
 		const auth = await requireControlUser(request, env, url.searchParams.get("userId"));
 		if (auth.response) return auth.response;
@@ -1578,5 +1639,12 @@ async function handleCandidateRoutes(request, env, url) {
 			? await mergeCandidate(env, auth.userId, id, body)
 			: await rejectCandidate(env, auth.userId, id, body);
 	if (result?.ok === false) return json({ error: result.error }, result.status ?? 400);
+	if (["promote", "merge"].includes(action) && ctx) {
+		// A candidate becoming a real memory is the "categorised" moment.
+		ctx.waitUntil(emitWebhookEvent(env, (p) => ctx.waitUntil(p), auth.userId, "memory.categorized", {
+			source: `candidate_${action}`,
+			counts: { categorized: 1 },
+		}));
+	}
 	return json(result);
 }

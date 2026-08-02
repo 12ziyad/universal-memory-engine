@@ -16,6 +16,7 @@ import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
 import { formatReceipt } from "../pipeline/receipt.js";
 import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt } from "../lib/db.js";
+import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
 
 const RECENT_LIMIT = 20;
 
@@ -166,6 +167,33 @@ export class UserMemory extends DurableObject {
 			if (result.receipt) {
 				result.summary = formatReceipt(result.receipt);
 				await storeReceipt(this.env, userId, result.receipt.source, result.receipt, result.summary);
+			}
+
+			// Announce the write to any registered webhooks — strictly after the
+			// fact, strictly async, never able to fail the save. This one hook
+			// point covers every door that runs the engine (ingest, save, SDK,
+			// playground, plugin).
+			if (result.outcome === "wrote" && result.receipt) {
+				const saved = result.receipt.saved ?? {};
+				const added = (saved.nodes ?? 0) + (saved.slices ?? 0) + (saved.events ?? 0) + (saved.edges ?? 0) > 0;
+				const updated = (saved.updatedNodes ?? 0) + (saved.supersededSlices ?? 0) > 0;
+				const event = added ? "memory.added" : updated ? "memory.updated" : null;
+				if (event) {
+					const data = webhookDataFromReceipt(result.receipt);
+					// Scoped saves (SDK sub-tenants, plugin project spaces) announce
+					// to the OWNING account's webhooks too — the sub-tenant id is
+					// derived and owns no configuration of its own.
+					const targets = new Set([userId]);
+					try {
+						const owner = JSON.parse(result.receipt.scope_json ?? "{}")?.owner_user_id;
+						if (owner && owner !== "legacy") targets.add(owner);
+					} catch {}
+					for (const target of targets) {
+						this.ctx.waitUntil(
+							emitWebhookEvent(this.env, (p) => this.ctx.waitUntil(p), target, event, data),
+						);
+					}
+				}
 			}
 
 			const finalizedNoWrite = result.outcome === "no_write" && result.receipt?.reason === "user_opt_out";

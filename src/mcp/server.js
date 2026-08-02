@@ -19,6 +19,22 @@ import { z } from "zod";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
 import { runRecallCommand } from "../pipeline/commands.js";
 import { runMcpConversationCollectCommand, runMcpDirectSaveCommand } from "../pipeline/manual_mcp.js";
+import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
+
+/** MCP saves bypass the Durable Object, so they announce to webhooks here. */
+function announceMcpWrite(env, ctx, userId, res) {
+	try {
+		const receipt = res?.receipt;
+		if (!receipt || (receipt.savedTotal ?? 0) === 0) return;
+		// The emit itself runs under waitUntil too — even its initial table
+		// lookup must not race the response.
+		ctx.waitUntil(
+			emitWebhookEvent(env, (p) => ctx.waitUntil(p), userId, "memory.added", webhookDataFromReceipt(receipt)),
+		);
+	} catch (err) {
+		console.warn("mcp webhook announce failed:", err?.message ?? err);
+	}
+}
 
 const SAVE_MEMORY_DESC =
 	"Manually save exactly the grounded memory the user explicitly submitted. This includes durable facts, decisions, plans, preferences, events, and meaningful casual experiences; unresolved references require clarification. Returns a final receipt after source-only extraction and the atomic memory write complete.";
@@ -150,6 +166,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				idempotencyKey,
 				memoryScope,
 			});
+			announceMcpWrite(env, ctx, userId, res);
 			return mcpResult(res);
 		},
 	);
@@ -190,6 +207,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				contentScope,
 				memoryScope,
 			});
+			announceMcpWrite(env, ctx, userId, res);
 			return mcpResult(res);
 		},
 	);

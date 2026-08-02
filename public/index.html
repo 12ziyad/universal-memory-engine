@@ -1233,6 +1233,7 @@
 			<button class="tab" data-view="memory"><span class="ti">◈</span>Memories<span id="reviewTabCount" class="tab-count"></span></button>
 			<button class="tab" data-view="graph"><span class="ti">⁂</span>Graph</button>
 			<button class="tab" data-view="requests"><span class="ti">⇄</span>Requests</button>
+			<button class="tab" data-view="webhooks"><span class="ti">⌁</span>Webhooks</button>
 			<button class="tab" data-view="exports"><span class="ti">↧</span>Memory exports</button>
 			<button class="tab" data-view="receipts"><span class="ti">≡</span>History<span id="receiptsBadge" class="tab-badge" hidden></span></button>
 			<div class="rail-sep"></div>
@@ -1324,7 +1325,7 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -1893,7 +1894,7 @@ function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
 	// Setup screens must never wait on /v1/graph — a brand-new account has no
 	// graph to load, and Get started is the first thing they open.
-	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests","exports"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests","exports","webhooks"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -1905,6 +1906,7 @@ function renderView() {
 		playground: viewPlayground,
 		keys: viewKeys,
 		requests: viewRequests,
+		webhooks: viewWebhooks,
 		exports: viewExports,
 		receipts: viewReceipts,
 		rules: viewRules,
@@ -3325,6 +3327,195 @@ async function loadRequests() {
 		RQ.loading = false;
 		if (S.view === "requests") renderView();
 	}
+}
+
+/**
+ * Webhooks — announce memory changes to your own endpoint.
+ *
+ * The secret appears exactly once, in the same shown-once modal pattern keys
+ * use. Metadata-only is a first-class toggle: deliveries say THAT something
+ * changed, never what it says.
+ */
+const WH = { rows: [], loading: false, creating: false, error: "", openLog: null, deliveries: [], events: ["memory.added", "memory.updated", "memory.deleted", "memory.categorized"] };
+
+function viewWebhooks(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="page-head">
+			<h2 class="page-title">Webhooks</h2>
+			<p class="page-sub">Get a signed POST at your endpoint when memory changes. Every delivery carries an HMAC signature you can verify with the webhook's secret.</p>
+		</div>
+		<div class="box" style="max-width:1080px">
+			<h3>New webhook</h3>
+			<div class="form-row"><label for="whName">Name</label>
+				<input id="whName" placeholder="e.g. CRM sync" /></div>
+			<div class="form-row"><label for="whUrl">Endpoint URL</label>
+				<input id="whUrl" placeholder="https://example.com/hooks/itsuki" /></div>
+			<div class="form-row"><label>Events</label>
+				<div style="display:flex;gap:14px;flex-wrap:wrap">
+					${WH.events.map((e) => `<label style="display:inline-flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" class="wh-event" value="${e}" checked /> ${esc(e)}</label>`).join("")}
+				</div></div>
+			<div class="form-row"><label style="display:inline-flex;gap:8px;align-items:center;font-size:13px">
+				<input type="checkbox" id="whMetaOnly" />
+				Metadata only — announce that a memory changed without sending its content
+			</label></div>
+			${WH.error ? `<div class="key-error">${esc(WH.error)}</div>` : ""}
+			<div class="section-actions">
+				<button id="whCreate" onclick="createWebhookNow()" ${WH.creating ? "disabled" : ""}>${WH.creating ? "Creating…" : "Create webhook"}</button>
+			</div>
+		</div>
+		<div class="box" style="max-width:1080px;padding:0;overflow:hidden">
+			<div class="keys-table-wrap"><table class="keys-table">
+				<thead><tr><th>Name</th><th>Endpoint</th><th>Events</th><th>Mode</th><th></th></tr></thead>
+				<tbody id="whBody"></tbody>
+			</table></div>
+			<div id="whEmpty"></div>
+		</div>`;
+	v.appendChild(wrap);
+	renderWebhooksTable();
+	if (!WH.rows.length && !WH.loading) loadWebhooks();
+}
+
+async function loadWebhooks() {
+	WH.loading = true;
+	try {
+		const res = await api("/v1/webhooks");
+		WH.rows = res.webhooks || [];
+		WH.error = "";
+	} catch (e) {
+		WH.error = e.message || "Could not load webhooks. Try refreshing in a moment.";
+	} finally {
+		WH.loading = false;
+		if (S.view === "webhooks") renderWebhooksTable();
+	}
+}
+
+function renderWebhooksTable() {
+	const body = $("#whBody");
+	const empty = $("#whEmpty");
+	if (!body || !empty) return;
+	if (!WH.rows.length) {
+		body.innerHTML = "";
+		empty.innerHTML = `<div class="pg-empty">No webhooks yet — create one above and your endpoint hears about every change the moment it lands.</div>`;
+		return;
+	}
+	empty.innerHTML = "";
+	body.innerHTML = WH.rows.map((w) => `
+		<tr>
+			<td><b>${esc(w.name)}</b></td>
+			<td class="key-mono" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(w.url)}</td>
+			<td>${(w.events || []).map((e) => `<span class="badge state-completed">${esc(e.replace("memory.", ""))}</span>`).join(" ")}</td>
+			<td>${w.metadata_only ? `<span class="badge state-paused">metadata only</span>` : `<span class="badge state-active">full</span>`}</td>
+			<td style="text-align:right;white-space:nowrap">
+				<button class="ghost mini" onclick="sendWebhookTest('${esc(w.id)}')">Send test</button>
+				<button class="ghost mini" onclick="toggleWebhookLog('${esc(w.id)}')">${WH.openLog === w.id ? "Hide deliveries" : "Deliveries"}</button>
+				<button class="icon row-delete" title="Delete webhook" aria-label="Delete webhook" onclick="deleteWebhookNow('${esc(w.id)}')">${ICON.trash}</button>
+			</td>
+		</tr>
+		${WH.openLog === w.id ? `<tr><td colspan="5" style="background:var(--panel2);padding:10px 14px">${webhookLogHtml()}</td></tr>` : ""}
+	`).join("");
+}
+
+function webhookLogHtml() {
+	if (!WH.deliveries.length) return `<span class="help">No deliveries yet. "Send test" fires a synthetic signed event.</span>`;
+	return `<table class="keys-table" style="font-size:12px"><thead><tr><th>When</th><th>Event</th><th>Status</th><th>Attempts</th><th>Code</th><th>Error</th></tr></thead><tbody>
+		${WH.deliveries.map((d) => `<tr>
+			<td>${esc(ago(d.created_at))}</td><td class="key-mono">${esc(d.event)}</td>
+			<td><span class="badge ${d.status === "delivered" ? "state-active" : d.status === "failed" ? "state-inactive" : "state-paused"}">${esc(d.status)}</span></td>
+			<td>${d.attempts}</td><td>${d.response_code ?? "—"}</td><td class="help">${esc(d.error ?? "")}</td>
+		</tr>`).join("")}
+	</tbody></table>`;
+}
+
+async function createWebhookNow() {
+	if (WH.creating) return;
+	WH.creating = true;
+	WH.error = "";
+	renderView();
+	try {
+		const events = [...document.querySelectorAll(".wh-event:checked")].map((c) => c.value);
+		const result = await api("/v1/webhooks", {
+			method: "POST",
+			body: JSON.stringify({
+				name: $("#whName")?.value ?? "",
+				url: $("#whUrl")?.value ?? "",
+				events,
+				metadataOnly: $("#whMetaOnly")?.checked === true,
+			}),
+		});
+		WH.rows = [result.webhook, ...WH.rows];
+		showWebhookSecret(result.secret);
+	} catch (e) {
+		WH.error = e.message || "Could not create that webhook. Check the URL and try again.";
+	} finally {
+		WH.creating = false;
+		if (!$("#keyModal")?.hidden) { renderWebhooksTable(); } else { renderView(); }
+	}
+}
+
+/** The shown-once secret, in the same modal pattern keys use. */
+function showWebhookSecret(secret) {
+	const host = $("#keyModal");
+	if (!host) return;
+	host.hidden = false;
+	host.innerHTML = `
+		<div class="key-modal" role="dialog" aria-modal="true" aria-label="Webhook secret">
+			<h3>Webhook created</h3>
+			<div class="form-row">
+				<label for="whSecretField">Signing secret</label>
+				<div class="secret-field">
+					<input id="whSecretField" readonly value="${esc(secret)}" onclick="this.select()" />
+					<button class="code-copy" title="Copy" aria-label="Copy" onclick="copyCode(this, ${JSON.stringify(secret).replace(/"/g, "&quot;")})">${ICON.copy}</button>
+				</div>
+			</div>
+			<div class="key-warning">Copy it now. This secret won't be shown again — your endpoint needs it to verify the x-itsuki-signature header.</div>
+			<div class="key-modal-actions"><button onclick="closeWebhookSecret()">Close</button></div>
+		</div>`;
+}
+
+function closeWebhookSecret() {
+	const host = $("#keyModal");
+	if (host) { host.hidden = true; host.innerHTML = ""; }
+	if (S.view === "webhooks") renderView();
+}
+
+async function deleteWebhookNow(id) {
+	if (!confirm("Delete this webhook? Deliveries stop immediately.")) return;
+	try {
+		await api(`/v1/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+		WH.rows = WH.rows.filter((w) => w.id !== id);
+		if (WH.openLog === id) WH.openLog = null;
+	} catch (e) {
+		WH.error = e.message || "Could not delete that webhook.";
+	}
+	renderWebhooksTable();
+}
+
+async function sendWebhookTest(id) {
+	try {
+		await api(`/v1/webhooks/${encodeURIComponent(id)}/test`, { method: "POST" });
+		WH.openLog = id;
+		await refreshWebhookLog(id);
+	} catch (e) {
+		WH.error = e.message || "Could not send the test event.";
+		renderWebhooksTable();
+	}
+}
+
+async function toggleWebhookLog(id) {
+	WH.openLog = WH.openLog === id ? null : id;
+	if (WH.openLog) await refreshWebhookLog(id);
+	else renderWebhooksTable();
+}
+
+async function refreshWebhookLog(id) {
+	try {
+		const res = await api(`/v1/webhooks/${encodeURIComponent(id)}/deliveries`);
+		WH.deliveries = res.deliveries || [];
+	} catch {
+		WH.deliveries = [];
+	}
+	renderWebhooksTable();
 }
 
 /**
