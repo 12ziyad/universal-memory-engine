@@ -133,6 +133,22 @@ describe("creating a webhook", () => {
 		expect(h.calls[0].body.events).toEqual(["memory.added", "memory.updated"]);
 	});
 
+	it("reads the DOM before rendering — a value state never saw still gets sent", async () => {
+		// Autofill and some paste paths set an input's value WITHOUT firing
+		// oninput, so state has not seen it. This is the case that isolates the
+		// original bug: if anything re-renders before the read, the re-render
+		// repopulates the field from empty state and the value is lost.
+		const h = harness();
+		h.fields.whUrl.value = "https://webhook.site/pasted-without-an-input-event";
+		h.fields.whName.value = "Pasted";
+
+		await h.createWebhookNow();
+
+		expect(h.calls).toHaveLength(1);
+		expect(h.calls[0].body.url).toBe("https://webhook.site/pasted-without-an-input-event");
+		expect(h.calls[0].body.name).toBe("Pasted");
+	});
+
 	it("a failed submit preserves every field the person filled in", async () => {
 		const h = harness({ apiImpl: async () => { throw new Error("Endpoint rejected the test delivery."); } });
 		h.type("whName", "CRM sync");
