@@ -13,6 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { classifyMessage, shouldFire, meaningfulCount } from "../pipeline/trigger.js";
 import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
+import { enrichMcpConversation } from "../pipeline/mcp_engine.js";
 import { formatReceipt } from "../pipeline/receipt.js";
 import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt } from "../lib/db.js";
@@ -220,6 +221,15 @@ export class UserMemory extends DurableObject {
 			// meaningful_no_write deliberately does NOT re-arm — that chunk waits
 			// for more context, and retrying identical input yields identical
 			// results.
+			// A pending MCP enrichment owns the alarm too — clearing it here would
+			// strand a staged job, which is the exact silent-loss bug this lane
+			// was rebuilt to prevent. When jobs are queued, hand the alarm back
+			// to them instead of deleting it.
+			const mcpPending = (await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 })).size > 0;
+			const releaseAlarm = async () => {
+				if (mcpPending) await this.ctx.storage.setAlarm(Date.now() + 2000);
+				else await this.ctx.storage.deleteAlarm();
+			};
 			const held = ((await this.ctx.storage.get("chunk")) ?? []).length;
 			if (held > 0) {
 				if (result.outcome === "wrote" || finalizedNoWrite) {
@@ -231,19 +241,19 @@ export class UserMemory extends DurableObject {
 					if (fails <= 6) {
 						await this.ctx.storage.setAlarm(Date.now() + Math.min(5000 * 2 ** (fails - 1), 600000));
 					} else {
-						await this.ctx.storage.deleteAlarm();
+						await releaseAlarm();
 					}
 				} else {
 					// meaningful_no_write: the chunk waits for NEW messages. The
 					// start-of-fire watchdog must not retry identical input on a
 					// five-minute loop.
-					await this.ctx.storage.deleteAlarm();
+					await releaseAlarm();
 				}
 			} else {
 				await this.ctx.storage.put("failCount", 0);
 				// Nothing held → the only pending alarm is our watchdog. Clear it
 				// (an addMessages fire-alarm implies a non-empty chunk).
-				await this.ctx.storage.deleteAlarm();
+				await releaseAlarm();
 			}
 
 			// user_opt_out no_write is final; meaningful_no_write/failed outcomes remain retryable.
@@ -251,6 +261,68 @@ export class UserMemory extends DurableObject {
 		} finally {
 			this.busy = false;
 		}
+	}
+
+	/**
+	 * Durable enqueue for an MCP background enrichment. The entry is persisted
+	 * BEFORE the sync receipt returns, and the alarm — which survives isolate
+	 * death — drives processing. This is the design answer to the "queued
+	 * receipt, silently never saved" failure mode: a staged job can only end
+	 * enriched or failed, never vanish.
+	 */
+	async enqueueMcpJob(userId, job) {
+		if (!job?.jobId) return { queued: false };
+		await this.ctx.storage.put(`mcpjob:${job.jobId}`, job);
+		await this.ctx.storage.put("userId", userId);
+		const soon = Date.now() + 50;
+		const pending = await this.ctx.storage.getAlarm();
+		if (!pending || pending > soon) await this.ctx.storage.setAlarm(soon);
+		return { queued: true };
+	}
+
+	/**
+	 * Process every queued MCP enrichment under the per-user lock. Transient
+	 * engine failures (llm_failed / db_write_failed) retry with backoff up to
+	 * a bounded attempt count; everything else finishes the job one way or the
+	 * other. Returns what the alarm needs to decide about re-arming.
+	 */
+	async drainMcpJobs(userId) {
+		const jobs = await this.ctx.storage.list({ prefix: "mcpjob:" });
+		if (jobs.size === 0) return { remaining: 0, busySkip: false };
+		if (this.busy) return { remaining: jobs.size, busySkip: true };
+		this.busy = true;
+		try {
+			for (const [key, job] of jobs) {
+				// Watchdog: if this isolate dies mid-enrichment, the pending alarm
+				// revives the queue in a fresh instance instead of stranding it.
+				await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
+				const res = await enrichMcpConversation(this.env, userId, job, (p) => this.ctx.waitUntil(p));
+				if (res?.retry) {
+					const attempts = Number(job.attempts ?? 0) + 1;
+					await this.ctx.storage.put(key, { ...job, attempts });
+				} else {
+					await this.ctx.storage.delete(key);
+				}
+			}
+		} finally {
+			this.busy = false;
+		}
+		const left = await this.ctx.storage.list({ prefix: "mcpjob:" });
+		if (left.size === 0) {
+			// Queue drained: clear our watchdog so it cannot fire into a clean
+			// instance — then re-check, because an addMessages may have armed a
+			// fire alarm for a fresh chunk in the meantime. Never strand work.
+			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+			if (chunk.length === 0) {
+				await this.ctx.storage.deleteAlarm();
+				const chunkAfter = (await this.ctx.storage.get("chunk")) ?? [];
+				const jobsAfter = await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 });
+				if (chunkAfter.length > 0 || jobsAfter.size > 0) {
+					await this.ctx.storage.setAlarm(Date.now() + 1500);
+				}
+			}
+		}
+		return { remaining: left.size, busySkip: false };
 	}
 
 	/**
@@ -273,6 +345,9 @@ export class UserMemory extends DurableObject {
 	async resetAll() {
 		await this.ctx.blockConcurrencyWhile(async () => {
 			await this.ctx.storage.deleteAll();
+			// deleteAll clears values, not alarms — an orphaned alarm would wake
+			// a wiped instance (and in tests, fire into storage teardown).
+			await this.ctx.storage.deleteAlarm();
 			this.busy = false;
 		});
 		return { reset: true };
@@ -280,7 +355,15 @@ export class UserMemory extends DurableObject {
 
 	async alarm() {
 		const { userId, chunk } = await this.#load();
-		if (!userId || chunk.length === 0) return;
+		if (!userId) return;
+		// MCP enrichments first — a staged receipt is a promise with a clock on
+		// it; held auto-mode chunks tolerate the extra seconds far better.
+		const drained = await this.drainMcpJobs(userId);
+		if (drained.remaining > 0) {
+			// busy-skip → try again shortly; retryable failure → back off.
+			await this.ctx.storage.setAlarm(Date.now() + (drained.busySkip ? 2000 : 15000));
+		}
+		if (chunk.length === 0) return;
 		const result = await this.runExtraction(userId);
 		if (result?.skipped) {
 			await this.ctx.storage.setAlarm(Date.now() + 2000);

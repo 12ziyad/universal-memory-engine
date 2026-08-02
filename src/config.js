@@ -245,6 +245,18 @@ export function getConfig(env) {
 		// Lenient floor used by the user-commanded manual path (Path A): keep
 		// anything durable, drop only obvious junk.
 		manualConfidenceMin: Number(env.MANUAL_CONFIDENCE_MIN ?? 0.25),
+		// The MCP door is user-commanded but host-mediated: input often arrives
+		// already rewritten by the host model, so it does not earn Path A's
+		// leniency. One notch stricter — the auto-lane floor by default.
+		mcpConfidenceMin: Number(env.MCP_CONFIDENCE_MIN ?? 0.5),
+		// MCP staging caps and the save_memory light path. A single atomic fact
+		// has nothing to draw edges from: below minEntities distinct resolved
+		// entities the edge and reflexion passes are skipped entirely.
+		mcp: {
+			maxStagedChars: Number(env.MCP_MAX_STAGED_CHARS ?? 60000),
+			maxStagedMessages: Number(env.MCP_MAX_STAGED_MESSAGES ?? 200),
+			lightPathMinEntities: Number(env.MCP_EDGE_PASS_MIN_ENTITIES ?? 2),
+		},
 		shortlistSize: Number(env.SHORTLIST_SIZE ?? 10),
 		sliceRollupThreshold: Number(env.SLICE_ROLLUP_THRESHOLD ?? 10),
 

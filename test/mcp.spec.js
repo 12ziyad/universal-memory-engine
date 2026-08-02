@@ -167,7 +167,9 @@ describe("/mcp Streamable HTTP handler", () => {
 		]);
 	});
 
-	it("save_memory returns structured status, receipt, and source ids", async () => {
+	it("save_memory refuses junk deterministically and still returns the full contract", async () => {
+		// "ok thanks" is noise. The engine-lane MCP door refuses it at the
+		// trigger — no model call, honest zero, receipt and packet ids intact.
 		const res = await mcp(token, {
 			jsonrpc: "2.0",
 			id: 3,
@@ -181,14 +183,12 @@ describe("/mcp Streamable HTTP handler", () => {
 			ok: true,
 			mode: "direct_save",
 			source: "save_memory",
-			fired: true,
+			fired: false,
 			processing: false,
-			receipt: { outcome: "wrote", source: "save_memory" },
 		});
 		expect(result.source_packet_id).toMatch(/^src_/);
 		expect(result.receipt_id).toMatch(/^receipt_/);
-		expect(result.receipt.savedTotal).toBeGreaterThan(0);
-		expect(body.result.content[0].text).not.toContain("Saved: 0");
+		expect(body.result.content[0].text).toContain("Saved: 0");
 	});
 
 	it("does not register observe_messages", async () => {
@@ -208,7 +208,7 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(body.error).toBeUndefined();
 	});
 
-	it("save_conversation returns structured status, receipt, and source ids", async () => {
+	it("save_conversation stages instantly and returns the honest receipt-first contract", async () => {
 		const res = await mcp(token, {
 			jsonrpc: "2.0",
 			id: 45,
@@ -216,7 +216,6 @@ describe("/mcp Streamable HTTP handler", () => {
 			params: {
 				name: "save_conversation",
 				arguments: {
-					scope: "summary",
 					conversationId: "mcp-save-conversation-contract",
 					messages: [
 						{ id: "conv-1", role: "user", content: "I decided to use D1 for Itsuki storage." },
@@ -233,21 +232,46 @@ describe("/mcp Streamable HTTP handler", () => {
 			mode: "conversation_collect",
 			source: "save_conversation",
 			fired: true,
-			processing: false,
+			processing: true,
+			job_status: "staged",
 			receipt: {
 				source: "save_conversation",
-				source_mode: "manual_collect",
-				saved: { pages: 1 },
+				source_mode: "mcp_save",
+				outcome: "staged",
 			},
-			counts: { pages: 1 },
 		});
+		expect(result.page_id).toMatch(/^page_/);
+		expect(result.staged_facts).toBeGreaterThan(0);
+		// Provisional titles are entity + date, never fragment salads.
+		expect(result.title).toMatch(/ — [A-Z][a-z]{2} \d{1,2}, \d{4}$/);
 		expect(result.source_packet_id).toMatch(/^src_/);
 		expect(result.receipt_id).toMatch(/^receipt_/);
 		expect(body.result.content).toHaveLength(1);
-		expect(body.result.content[0].text).toContain("memory page");
+		expect(body.result.content[0].text).toContain("Staged");
 		expect(body.result.content[0].text).not.toContain("source_packet_id");
 		expect(body.result.content[0].text).not.toContain("receipt_id");
 		expect(body.result.content[0].text).not.toContain('"receipt"');
+
+		// The staged page and job row exist and say STAGED — the receipt's
+		// promise is backed by queryable state, not just prose.
+		const page = await env.DB.prepare("SELECT title, enrich_status, source_mode FROM memory_pages WHERE id = ?")
+			.bind(result.page_id).first();
+		expect(page.enrich_status).toBe("staged");
+		expect(page.source_mode).toBe("mcp_save");
+		const job = await env.DB.prepare("SELECT status FROM memory_jobs WHERE user_id = ? AND type = 'mcp_enrich' ORDER BY created_at DESC LIMIT 1")
+			.bind("mcp-user").first();
+		expect(job.status).toBe("staged");
+
+		// Walk the no-AI enrichment to its bounded end (llm_failed → retries →
+		// failed) and drop DO state, so nothing is in flight or armed when the
+		// pool's isolated storage pops after this test.
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName("mcp-user"));
+		for (let i = 0; i < 30; i++) {
+			const drained = await stub.drainMcpJobs("mcp-user");
+			if (drained.remaining === 0 && !drained.busySkip) break;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await stub.resetAll();
 	});
 
 	it("recall_memory returns structured recall result and receipt status", async () => {

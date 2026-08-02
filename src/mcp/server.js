@@ -17,23 +17,28 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
-import { runRecallCommand } from "../pipeline/commands.js";
-import { runMcpConversationCollectCommand, runMcpDirectSaveCommand } from "../pipeline/manual_mcp.js";
-import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
+import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js";
+import { stageMcpConversation } from "../pipeline/mcp_engine.js";
+import { tokens } from "../lib/text.js";
 
-/** MCP saves bypass the Durable Object, so they announce to webhooks here. */
-function announceMcpWrite(env, ctx, userId, res) {
-	try {
-		const receipt = res?.receipt;
-		if (!receipt || (receipt.savedTotal ?? 0) === 0) return;
-		// The emit itself runs under waitUntil too — even its initial table
-		// lookup must not race the response.
-		ctx.waitUntil(
-			emitWebhookEvent(env, (p) => ctx.waitUntil(p), userId, "memory.added", webhookDataFromReceipt(receipt)),
-		);
-	} catch (err) {
-		console.warn("mcp webhook announce failed:", err?.message ?? err);
+/**
+ * Compatibility filters for the old tool schema. lastN and topic narrowing
+ * were promises of the previous door; both are cheap and deterministic, so
+ * they are honored at the door before staging.
+ */
+function applyScopeFilters(messages, { scope, n, topic }) {
+	let out = messages ?? [];
+	if (scope === "lastN" && Number(n) > 0) out = out.slice(-Number(n));
+	const topicText = scope === "topic" || topic ? String(topic ?? "").trim() : "";
+	if (topicText) {
+		const wanted = tokens(topicText).filter((t) => t.length > 2);
+		if (wanted.length) {
+			out = out.filter((m) =>
+				(m?.role ?? "user") !== "user" ||
+				wanted.some((t) => String(m?.content ?? "").toLowerCase().includes(t)));
+		}
 	}
+	return out;
 }
 
 const SAVE_MEMORY_DESC =
@@ -157,7 +162,10 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ content, recentContext, conversationId, threadId, sourceId, idempotencyKey, memoryScope }) => {
 			const forbidden = ensureScope(authz, "direct_save", "save_memory", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
-			const res = await runMcpDirectSaveCommand(env, ctx, userId, {
+			// The same Engine v2 lane every other door uses — with the MCP lens
+			// (stricter gate floor) and the light path: a single atomic fact
+			// skips the edge and reflexion passes it has nothing to feed.
+			const res = await runDirectSaveCommand(env, ctx, userId, {
 				content,
 				recentContext,
 				conversationId,
@@ -165,8 +173,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				sourceId,
 				idempotencyKey,
 				memoryScope,
+				overrides: { profile: "mcp", lightPath: true },
 			});
-			announceMcpWrite(env, ctx, userId, res);
 			return mcpResult(res);
 		},
 	);
@@ -195,19 +203,20 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, contentScope, memoryScope }) => {
 			const forbidden = ensureScope(authz, "conversation_collect", "save_conversation", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
-			const res = await runMcpConversationCollectCommand(env, ctx, userId, {
-				messages: messages ?? [],
+			// Receipt-first: stage deterministically (no model calls), answer in
+			// under a second, and let the user's Durable Object run the full
+			// Engine v2 extraction in the background. contentScope is accepted
+			// for schema compatibility; subject narrowing now happens inside the
+			// shared engine's gates rather than a second extraction lane.
+			void contentScope;
+			const res = await stageMcpConversation(env, ctx, userId, {
+				messages: applyScopeFilters(messages ?? [], { scope, n, topic }),
 				conversationId,
 				threadId,
 				sourceId,
 				idempotencyKey,
-				scope,
-				n,
-				topic,
-				contentScope,
 				memoryScope,
 			});
-			announceMcpWrite(env, ctx, userId, res);
 			return mcpResult(res);
 		},
 	);

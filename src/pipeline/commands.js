@@ -299,6 +299,26 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 	});
 	const latencyMs = Date.now() - startedAt;
+
+	// Honest reads during async saves: if this user has a staged MCP save that
+	// has not enriched yet, say so — the caller must never conclude "not saved"
+	// from a lookup that raced the background phase. Best-effort, indexed, and
+	// never able to fail the recall.
+	let processingNote = null;
+	try {
+		const staged = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND type = 'mcp_enrich' AND status = 'staged' AND created_at > ?",
+		).bind(userId, Date.now() - 15 * 60 * 1000).first();
+		if ((staged?.n ?? 0) > 0) {
+			processingNote = "A recent save is still processing — some facts may not appear yet.";
+			if (typeof result.context === "string" && result.context.trim()) {
+				result.context = `${result.context}\n\n(${processingNote})`;
+			}
+		}
+	} catch (error) {
+		console.warn("staged-job recall check failed:", error?.message ?? error);
+	}
+
 	const outcome = result.recall_mode === "no_recall" ? "no_recall" : "recalled";
 	const reason = result.recall_mode === "no_recall"
 		? "recall gate skipped memory lookup"
@@ -309,7 +329,8 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		matched: Number(result.count ?? 0),
 		ai: aiTotals,
 	});
-	const summary = result.count ? "Found relevant memory." : "No relevant memory found.";
+	const baseSummary = result.count ? "Found relevant memory." : "No relevant memory found.";
+	const summary = processingNote ? `${baseSummary} ${processingNote}` : baseSummary;
 	const { mode: recallStatus, ok: _ok, ...recallDetails } = result;
 	return safeCommandResult({
 		mode: "recall",
@@ -323,6 +344,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		counts: { received: 1 },
 		extra: {
 			...recallDetails,
+			processing_note: processingNote,
 			recall_mode: result.recall_mode,
 			recall_status: recallStatus,
 			status: stored.receipt?.outcome ?? outcome,

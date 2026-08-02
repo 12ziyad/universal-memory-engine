@@ -257,6 +257,10 @@ export async function applyGates(
 	// manual (lenient) floor. Standard stays exactly as before.
 	const dense = (settings?.captureDensity ?? null) === "dense";
 	let confMin = manual || dense ? config.manualConfidenceMin : config.confidenceMin;
+	// MCP saves are user-commanded but host-mediated — the host model may have
+	// rewritten what "the user said". They keep manual flush semantics but not
+	// manual leniency: one notch stricter, on the auto-lane floor.
+	if (opts.profile === "mcp") confMin = config.mcpConfidenceMin;
 
 	const plan = {
 		newNodes: [],

@@ -154,7 +154,11 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 
 async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides) {
 	const limits = config.splitRescue ?? {};
-	if (overrides.manual && chunk.length > 1) {
+	// The MCP lane sends clean per-message conversations — the same shape the
+	// auto lane extracts in ONE call. The deliberate manual pre-split exists
+	// for digest blobs and messy Path A input; applying it here would charge
+	// this door several times the SDK price for identical input.
+	if (overrides.manual && overrides.profile !== "mcp" && chunk.length > 1) {
 		console.warn(`manual chunk has ${chunk.length} retained message(s); splitting before LLM`);
 		// The manual path splits deliberately (it is not rescuing a failed
 		// parse), so the ceiling does not apply — but fail-fast still does: a
@@ -335,7 +339,26 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// is rejected, never repaired.
 	let objects = proposal.objects ?? [];
 	const preRejected = [];
-	if (config.engineV2) {
+	// Light path (single atomic facts, e.g. MCP save_memory): a fact with fewer
+	// than N distinct resolved entities and no co-mention has nothing to draw
+	// edges from — passes 2 and 3 would be spend without yield. Threshold is
+	// config.mcp.lightPathMinEntities; the skip is named on the receipt.
+	if (overrides.lightPath === true && config.engineV2) {
+		const proposedLabels = [...new Set((objects ?? [])
+			.filter((o) => o?.kind === "node" && o.label)
+			.map((o) => o.label))];
+		const needed = Math.max(2, Number(config.mcp?.lightPathMinEntities ?? 2));
+		const hasRelationshipCandidate = proposedLabels.length >= 2 && chunk.some((m) => {
+			const content = String(m?.content ?? "").toLowerCase();
+			return proposedLabels.filter((label) => content.includes(String(label).toLowerCase())).length >= 2;
+		});
+		if (proposedLabels.length < needed || !hasRelationshipCandidate) {
+			meta.engine = "v2_light";
+			meta.light_path_skipped_passes = true;
+			meta.light_path_entities = proposedLabels.length;
+		}
+	}
+	if (config.engineV2 && meta.light_path_skipped_passes !== true) {
 		const entities = numberEntities(objects, shortlist);
 		meta.engine = "v2";
 
@@ -406,6 +429,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		return {
 			outcome: "meaningful_no_write",
 			rejected: plan.rejected,
+			plan,
 			receipt: buildReceipt("meaningful_no_write", plan, { ...meta, latency_ms: elapsed() }),
 		};
 	}
@@ -459,5 +483,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		});
 	}
 
-	return { outcome: "wrote", ...result, receipt };
+	// `plan` rides along for callers that render what was approved (the MCP
+	// enrichment writes the final memory-page body from it). Additive only.
+	return { outcome: "wrote", ...result, plan, receipt };
 }
