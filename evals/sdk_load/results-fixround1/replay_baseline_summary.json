@@ -1,0 +1,68 @@
+{
+ "tenant": "fixround1-replay-baseline",
+ "run_started": 1785758189262,
+ "writes_done": 1785758320376,
+ "quiesced_at": null,
+ "tail_to_clear_s": 601.924,
+ "calls": 65,
+ "errors": 0,
+ "error_samples": [],
+ "jobs_total": 58,
+ "jobs_by_status": {
+  "queued": 37,
+  "processing": 3,
+  "enriched": 18
+ },
+ "jobs_pending_after_quiesce": 40,
+ "graph": {
+  "nodes": 33,
+  "pages": 0,
+  "clusters": 6,
+  "slices": 16,
+  "events": 16,
+  "edges": 48,
+  "candidates": 3
+ },
+ "ai_calls": 109,
+ "neurons": 1964.2,
+ "usd_at_0011_per_1k": 0.0216,
+ "latency_ms": {
+  "ingest": {
+   "n": 27,
+   "p50": 315,
+   "p95": 1146,
+   "max": 1256
+  },
+  "add": {
+   "n": 32,
+   "p50": 1074.5,
+   "p95": 1292,
+   "max": 1352
+  },
+  "search": {
+   "n": 6,
+   "p50": 690,
+   "p95": 1327,
+   "max": 1327
+  }
+ },
+ "duplicates_reported": 0,
+ "converged": {
+  "jobs": {
+   "enriched": 57,
+   "failed": 1
+  },
+  "failed_job": "m145 long message, llm_failed x3, dead-lettered visibly",
+  "graph": {
+   "nodes": 51,
+   "pages": 0,
+   "slices": 40,
+   "events": 48,
+   "edges": 94,
+   "candidates": 6
+  },
+  "ai_calls": 223,
+  "neurons": 4000,
+  "usd": 0.044
+ }
+}
