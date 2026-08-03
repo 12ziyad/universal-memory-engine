@@ -44,3 +44,22 @@ API keys using the same string still get different spaces.
 **Unknown parameters are rejected**, not ignored: a misspelled `usr_id`
 returns `400` naming the offending key rather than silently writing to the
 wrong space.
+
+## Background processing, visibly
+
+Writes are accepted instantly and enriched in the background. The
+`source_packet_id` on every response is the public handle for that work:
+
+```
+receipt = memory.ingest(messages, flush=True)
+done = memory.wait_for(receipt["source_packet_id"])   # polls until terminal
+# done["status"] is "enriched" or "failed" — never silently neither.
+```
+
+`memory.packet_status(id)` answers once; `memory.jobs(status="failed")` lists
+every accepted write and where it is. Webhooks can subscribe to
+`memory.enriched` and `memory.failed` for push instead of poll.
+
+**Idempotent replay:** re-sending identical content (or reusing an
+`idempotency_key`) within 24 hours returns the ORIGINAL receipt and enqueues
+nothing — client retries after a timeout cannot double-ingest.

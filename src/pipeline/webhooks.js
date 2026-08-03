@@ -14,7 +14,16 @@
 
 import { newId } from "../lib/ids.js";
 
-export const WEBHOOK_EVENTS = ["memory.added", "memory.updated", "memory.deleted", "memory.categorized"];
+export const WEBHOOK_EVENTS = [
+	"memory.added",
+	"memory.updated",
+	"memory.deleted",
+	"memory.categorized",
+	// Job lifecycle (fix round 1, Part 2.3): one terminal event per accepted
+	// write — enriched or failed, never neither.
+	"memory.enriched",
+	"memory.failed",
+];
 
 const MAX_WEBHOOKS_PER_USER = 10;
 const ATTEMPTS = 3;

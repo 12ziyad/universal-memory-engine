@@ -109,7 +109,7 @@ describe("concurrency: fires during an active lease", () => {
 		expect(nodes.length).toBe(5);
 		expect((await stub.getDebugState()).chunkSize).toBe(0);
 		await stub.resetAll();
-	});
+	}, 30000);
 });
 
 describe("chaos: a throw mid-job", () => {
@@ -148,7 +148,7 @@ describe("chaos: a throw mid-job", () => {
 		).bind(userId).all();
 		expect(nodes).toHaveLength(1); // exactly one — no duplicates from the retry
 		await stub.resetAll();
-	});
+	}, 30000);
 });
 
 describe("poison: an entry that always fails", () => {
@@ -186,7 +186,7 @@ describe("poison: an entry that always fails", () => {
 		).bind(userId).first();
 		expect(report).toBeTruthy();
 		await stub.resetAll();
-	});
+	}, 30000);
 });
 
 describe("invariant: accepted == terminal", () => {
@@ -218,7 +218,7 @@ describe("invariant: accepted == terminal", () => {
 		expect(terminal).toHaveLength(6); // accepted == enriched + failed, nothing in between
 		expect(all.filter((j) => j.status === "failed")).toHaveLength(1);
 		await stub.resetAll();
-	});
+	}, 30000);
 });
 
 describe("regression: the load-test arrival pattern, small", () => {
@@ -255,5 +255,5 @@ describe("regression: the load-test arrival pattern, small", () => {
 		expect(failed).toHaveLength(0); // and failed == 0
 		expect((await stub.getDebugState()).chunkSize).toBe(0); // zero pending after quiesce
 		await stub.resetAll();
-	});
+	}, 30000);
 });

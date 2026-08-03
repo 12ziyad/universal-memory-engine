@@ -312,11 +312,11 @@ export class UserMemory extends DurableObject {
 			// A message finalized at the door settles its slice of the job NOW —
 			// if that empties the job, the row goes terminal before we return.
 			if (opts.jobId && settledNow.length) {
-				await settleMemoryJobs(this.env, userId, [{
+				await this.#announceJobTransitions(userId, await settleMemoryJobs(this.env, userId, [{
 					jobId: opts.jobId,
 					messageIds: settledNow.map((s) => s.id),
 					disposition: "skipped",
-				}]);
+				}]));
 			}
 
 			let queued = 0;
@@ -467,12 +467,12 @@ export class UserMemory extends DurableObject {
 			if (attempts >= MAX_ATTEMPTS) {
 				// Dead-letter here too, in case the engine's internal cap moves.
 				await this.ctx.storage.delete(key);
-				await settleMemoryJobs(this.env, userId, [{
+				await this.#announceJobTransitions(userId, await settleMemoryJobs(this.env, userId, [{
 					jobId: entry.job.jobId,
 					all: true,
 					disposition: "failed",
 					error: `retries exhausted (${res.reason ?? "transient failure"})`,
-				}]);
+				}]));
 				await reportServerError(this.env, "mcp_enrich_poison", new Error(String(res.reason ?? "unknown")), userId);
 				return { kind: "mcp", jobId: entry.job.jobId, outcome: "failed" };
 			}
@@ -537,10 +537,10 @@ export class UserMemory extends DurableObject {
 		if (result.outcome === "wrote" || finalizedNoWrite) {
 			await this.#announceWrite(userId, result);
 			// Settle jobs BEFORE deleting the entry (see method comment).
-			await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
+			await this.#announceJobTransitions(userId, await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
 				counts: result.receipt?.saved ?? null,
 				receiptId: result.receipt?.id ?? null,
-			}));
+			})));
 			if (lastId) {
 				await this.ctx.storage.put("checkpoint", lastId);
 				await this.#mirrorCheckpoint(userId, lastId);
@@ -556,10 +556,10 @@ export class UserMemory extends DurableObject {
 			// visible, terminal, zero saved — while the messages return to the
 			// held chunk as a rescue buffer: future context may still redeem
 			// them, and if it never comes they are already accounted for.
-			await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
+			await this.#announceJobTransitions(userId, await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
 				counts: { nodes: 0, slices: 0, events: 0, edges: 0 },
 				receiptId: result.receipt?.id ?? null,
-			}));
+			})));
 			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
 			const chunkIds = new Set(chunk.map((m) => m.id));
 			const restored = messages.filter((m) => !chunkIds.has(m.id)).map((m) => ({ ...m, _settled: true }));
@@ -573,10 +573,10 @@ export class UserMemory extends DurableObject {
 		const attempts = entry.attempts + 1;
 		await settleMemoryJobs(this.env, userId, jobUpdates("attempted", { attempts }));
 		if (attempts >= MAX_ATTEMPTS) {
-			await settleMemoryJobs(this.env, userId, jobUpdates("failed", {
+			await this.#announceJobTransitions(userId, await settleMemoryJobs(this.env, userId, jobUpdates("failed", {
 				error: String(result.error ?? result.outcome ?? "extraction failed").slice(0, 400),
 				receiptId: result.receipt?.id ?? null,
-			}));
+			})));
 			await reportServerError(
 				this.env,
 				"extract_poison",
@@ -591,6 +591,27 @@ export class UserMemory extends DurableObject {
 		}
 		await this.ctx.storage.put(key, { ...entry, attempts, runAfter: Date.now() + backoffMs(attempts) });
 		return { kind: "extract", outcome: result.outcome, retry: true, attempts, receipt: result.receipt ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
+	}
+
+	/**
+	 * Job lifecycle webhooks (Part 2.3): memory.enriched / memory.failed fire
+	 * exactly once per accepted write, on its terminal transition. Metadata
+	 * only — ids, status, counts — never memory content.
+	 */
+	async #announceJobTransitions(userId, transitions = []) {
+		for (const t of transitions ?? []) {
+			const event = t.status === "failed" ? "memory.failed" : "memory.enriched";
+			const data = {
+				job_id: t.jobId,
+				source_packet_id: t.sourcePacketId ?? null,
+				status: t.status,
+				counts: t.saved ?? null,
+				...(t.error ? { error: String(t.error).slice(0, 200) } : {}),
+			};
+			// Await the delivery-row insert (bounded D1 work); the HTTP attempt
+			// itself stays deferred through the waitUntil handed to the emitter.
+			await emitWebhookEvent(this.env, (p) => this.ctx.waitUntil(p), userId, event, data).catch((err) => console.warn("job webhook failed:", err?.message ?? err));
+		}
 	}
 
 	/** Webhook announcements for a landed write — after the fact, async, unfailable. */

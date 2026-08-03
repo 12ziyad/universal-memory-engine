@@ -127,6 +127,44 @@ class MemoryClient:
     def export_all(self) -> dict:
         return self._request("GET", "/v1/export")
 
+    def packet_status(self, source_packet_id: str) -> dict:
+        """Background-processing status for one accepted write, by packet id."""
+        from urllib.parse import quote
+        return self._request("GET", f"/v1/packets/{quote(source_packet_id, safe='')}/status")
+
+    def jobs(self, status: Optional[str] = None, since: Optional[int] = None,
+             limit: Optional[int] = None) -> dict:
+        """The jobs ledger: every accepted write and where it is."""
+        from urllib.parse import urlencode
+        params = {k: v for k, v in {"status": status, "since": since, "limit": limit}.items()
+                  if v is not None}
+        qs = f"?{urlencode(params)}" if params else ""
+        return self._request("GET", f"/v1/jobs{qs}")
+
+    def wait_for(self, source_packet_id: str, timeout: float = 60.0,
+                 interval: float = 1.5) -> dict:
+        """Wait for an accepted write to finish background processing.
+
+        Polls the packet status until it is terminal (``enriched`` or
+        ``failed``) or the timeout passes — in which case the last seen status
+        is returned with ``timed_out: True``, never an exception (a timeout is
+        not a failure)::
+
+            receipt = memory.ingest(messages, flush=True)
+            done = memory.wait_for(receipt["source_packet_id"])
+        """
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        last: Optional[dict] = None
+        while _time.monotonic() < deadline:
+            last = self.packet_status(source_packet_id)
+            if last and last.get("status") in ("enriched", "failed"):
+                return last
+            _time.sleep(interval)
+        out = dict(last or {"status": "unknown"})
+        out["timed_out"] = True
+        return out
+
     # --------------------------------------------------------- helpers
     @staticmethod
     def new_idempotency_key() -> str:

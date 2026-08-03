@@ -38,6 +38,7 @@ import {
 import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
 import { credentialShapeHint, validateBody } from "./lib/params.js";
 import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
+import { listJobs, packetStatus, queueCounters } from "./pipeline/jobs_api.js";
 import {
 	createThread,
 	deleteThread,
@@ -909,9 +910,15 @@ const routes = {
 				(SELECT COUNT(*) FROM users) AS accounts,
 				(SELECT COUNT(DISTINCT user_id) FROM nodes WHERE deleted_at IS NULL) AS with_memories`,
 		).all().catch(() => ({ results: [{}] }));
+		// Part 2.4 — the queue-health numbers the cron sweep alerts on.
+		const queue = await queueCounters(env).catch((error) => {
+			console.warn("queue counters failed:", error?.message ?? error);
+			return null;
+		});
 		return json({
 			ok: true,
 			generated_at: now,
+			queue,
 			users: Number(users.results?.[0]?.n ?? 0),
 			consented_users: Number(verifiedUsers.results?.[0]?.n ?? 0),
 			active_sessions_users: Number(sessionsActive.results?.[0]?.n ?? 0),
@@ -1213,6 +1220,21 @@ const routes = {
 			range: { days: rangeDays, from: fromMs, to: Date.now() },
 			requests: results ?? [],
 		});
+	},
+
+	"GET /v1/jobs": async (request, env) => {
+		// Part 2.2 — the jobs ledger for integrators, scoped to the caller.
+		const url = new URL(request.url);
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+		});
+		if (auth.response) return auth.response;
+		const jobs = await listJobs(env, auth.userId, {
+			status: url.searchParams.get("status") || undefined,
+			since: url.searchParams.get("since") || undefined,
+			limit: url.searchParams.get("limit") || undefined,
+		});
+		return json({ ok: true, jobs, count: jobs.length });
 	},
 
 	"GET /v1/receipts": async (request, env) => {
@@ -1554,6 +1576,20 @@ async function handleRequestInner(request, env, ctx, url) {
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
 			return handleCandidateRoutes(request, env, url, ctx);
+		}
+
+		// Packet status (Part 2.1): the public handle every receipt carries.
+		{
+			const match = url.pathname.match(/^\/v1\/packets\/([^/]+)\/status$/);
+			if (match && request.method === "GET") {
+				const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+					requiredScope: MEMORY_READ_SCOPE,
+				});
+				if (auth.response) return auth.response;
+				const status = await packetStatus(env, auth.userId, decodeURIComponent(match[1]));
+				if (!status) return json({ error: "not_found", message: "No accepted write with that source_packet_id." }, 404);
+				return json({ ok: true, ...status });
+			}
 		}
 
 		if (url.pathname === "/v1/webhooks" || url.pathname.startsWith("/v1/webhooks/")) {

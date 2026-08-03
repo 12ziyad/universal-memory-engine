@@ -4621,7 +4621,17 @@ function renderAdminBody() {
 		return;
 	}
 
+	const q = stats.queue || {};
+	const unp = q.edge_pass_unparseable_24h || {};
+	const queueHealthy = (q.queue_depth ?? 0) === 0 && (q.failed_24h ?? 0) === 0;
 	body.innerHTML = `<div class="panel-grid">
+		<div class="action-box"><h3>Write queue ${queueHealthy ? "· healthy" : "· attention"}</h3>
+			<div class="kv">Pending jobs: <b>${q.queue_depth ?? "—"}</b></div>
+			<div class="kv">Oldest pending: <b>${q.oldest_pending_age_s ? `${Math.round(q.oldest_pending_age_s / 60)}m ${q.oldest_pending_age_s % 60}s` : "0s"}</b></div>
+			<div class="kv">Failed (24h): <b>${q.failed_24h ?? "—"}</b></div>
+			<div class="kv">Edge-pass unparseable (24h): <b>${unp.unparseable ?? 0}</b> / ${unp.saves ?? 0} saves${unp.saves ? ` (${(100 * (unp.rate ?? 0)).toFixed(1)}%)` : ""}</div>
+			<div class="help">The cron sweep alerts on these every 5 minutes; anything stuck past 5 minutes gets rescued automatically.</div>
+		</div>
 		<div class="action-box"><h3>Extraction runs (14 days)</h3>
 			${(stats.run_statuses || []).map((row) => `<div class="kv">${esc(row.status || "unknown")}: <b>${row.n}</b></div>`).join("") || `<div class="help">No runs recorded.</div>`}
 		</div>

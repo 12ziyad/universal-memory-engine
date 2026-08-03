@@ -322,13 +322,17 @@ export async function createMemoryJob(env, userId, data = {}) {
  *   disposition: "processed" | "skipped" | "failed" | "attempted"
  *   - attempted: bookkeeping only (attempts + updated_at), no settlement
  *   - failed: terminal immediately, regardless of remaining
+ *
+ * Returns the jobs that reached a terminal state in THIS call, so the caller
+ * can announce memory.enriched / memory.failed exactly once.
  */
 export async function settleMemoryJobs(env, userId, updates = []) {
+	const transitions = [];
 	for (const update of updates) {
 		if (!update?.jobId) continue;
 		try {
 			const row = await env.DB.prepare(
-				"SELECT id, status, attempts, payload_json FROM memory_jobs WHERE id = ? AND user_id = ?",
+				"SELECT id, status, attempts, payload_json, source_packet_id FROM memory_jobs WHERE id = ? AND user_id = ?",
 			).bind(update.jobId, userId).first();
 			if (!row) continue;
 			if (["enriched", "failed", "completed"].includes(row.status)) continue; // terminal is terminal
@@ -352,6 +356,7 @@ export async function settleMemoryJobs(env, userId, updates = []) {
 					payload: { ...payload, remaining: [] },
 					completedAt: Date.now(),
 				});
+				transitions.push({ jobId: update.jobId, status: "failed", sourcePacketId: row.source_packet_id ?? null, error: update.error ?? null });
 				continue;
 			}
 
@@ -371,10 +376,14 @@ export async function settleMemoryJobs(env, userId, updates = []) {
 				payload: { ...payload, remaining: left, saved },
 				completedAt: terminal ? Date.now() : undefined,
 			});
+			if (terminal) {
+				transitions.push({ jobId: update.jobId, status: "enriched", sourcePacketId: row.source_packet_id ?? null, saved });
+			}
 		} catch (err) {
 			console.warn("memory job settle failed:", err?.message ?? err);
 		}
 	}
+	return transitions;
 }
 
 /** Count of a user's active (non-terminal) accept-time jobs — the queue depth. */

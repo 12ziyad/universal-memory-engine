@@ -338,8 +338,10 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 	// never able to fail the recall.
 	let processingNote = null;
 	try {
+		// Every lane has accept-time job rows now (Part 1.1), so the honest-read
+		// note covers all of them, not just MCP staging.
 		const staged = await env.DB.prepare(
-			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND type = 'mcp_enrich' AND status = 'staged' AND created_at > ?",
+			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND type IN ('mcp_enrich', 'extract') AND status IN ('staged', 'queued', 'processing') AND created_at > ?",
 		).bind(userId, Date.now() - 15 * 60 * 1000).first();
 		if ((staged?.n ?? 0) > 0) {
 			processingNote = "A recent save is still processing — some facts may not appear yet.";

@@ -544,7 +544,19 @@ async function markEnrichmentFailed(env, userId, job, reason, defer = null) {
 		console.warn("mcp enrich failure bookkeeping failed:", error?.message ?? error);
 	}
 	await reportServerError(env, "mcp_enrich", new Error(String(reason ?? "unknown")), userId);
-	void defer;
+	// Part 2.3: the job's terminal transition, announced exactly once.
+	if (defer) {
+		try {
+			await emitWebhookEvent(env, defer, userId, "memory.failed", {
+				job_id: job.jobId,
+				source_packet_id: job.sourceMeta?.source_packet_id ?? null,
+				status: "failed",
+				error: String(reason ?? "unknown").slice(0, 200),
+			});
+		} catch (error) {
+			console.warn("memory.failed webhook failed:", error?.message ?? error);
+		}
+	}
 }
 
 /**
@@ -667,6 +679,24 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 				if (added) await emitWebhookEvent(env, defer, userId, "memory.added", webhookDataFromReceipt(receipt));
 			} catch (error) {
 				console.warn("mcp enrich webhook failed:", error?.message ?? error);
+			}
+		}
+		// Part 2.3: the job's terminal transition, announced exactly once.
+		if (defer) {
+			try {
+				await emitWebhookEvent(env, defer, userId, "memory.enriched", {
+					job_id: job.jobId,
+					source_packet_id: job.sourceMeta?.source_packet_id ?? null,
+					status: "enriched",
+					counts: {
+						nodes: receipt?.saved?.nodes ?? 0,
+						edges: receipt?.saved?.edges ?? 0,
+						slices: receipt?.saved?.slices ?? 0,
+						events: receipt?.saved?.events ?? 0,
+					},
+				});
+			} catch (error) {
+				console.warn("memory.enriched webhook failed:", error?.message ?? error);
 			}
 		}
 		return { done: true };

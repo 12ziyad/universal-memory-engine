@@ -81,6 +81,41 @@ export class MemoryClient {
 		return `idem_${crypto.randomUUID()}`;
 	}
 
+	/** Background-processing status for one accepted write, by its packet id. */
+	packetStatus(sourcePacketId) {
+		return this.#get(`/v1/packets/${encodeURIComponent(sourcePacketId)}/status`);
+	}
+
+	/** The jobs ledger: every accepted write and where it is. */
+	jobs({ status, since, limit } = {}) {
+		const params = new URLSearchParams();
+		if (status) params.set("status", status);
+		if (since) params.set("since", String(since));
+		if (limit) params.set("limit", String(limit));
+		const qs = params.toString();
+		return this.#get(`/v1/jobs${qs ? `?${qs}` : ""}`);
+	}
+
+	/**
+	 * Wait for an accepted write to finish background processing. Polls the
+	 * packet status until it is terminal (`enriched` or `failed`) or the
+	 * timeout passes — in which case the last seen status is returned with
+	 * `timed_out: true`, never an exception (timeouts are not failures).
+	 *
+	 *   const receipt = await memory.ingest(messages, { flush: true });
+	 *   const done = await memory.waitFor(receipt.source_packet_id);
+	 */
+	async waitFor(sourcePacketId, { timeoutMs = 60000, intervalMs = 1500 } = {}) {
+		const deadline = Date.now() + timeoutMs;
+		let last = null;
+		while (Date.now() < deadline) {
+			last = await this.packetStatus(sourcePacketId);
+			if (last && ["enriched", "failed"].includes(last.status)) return last;
+			await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		}
+		return { ...(last ?? { status: "unknown" }), timed_out: true };
+	}
+
 	#get(path) { return this.#request("GET", path); }
 	#post(path, body) { return this.#request("POST", path, body); }
 
