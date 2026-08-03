@@ -139,13 +139,11 @@ class MemoryClient:
         SAFE BY DEFAULT: without ``confirm=True`` this is a dry run that only
         reports what would go.
         """
-        from urllib.parse import urlencode
-        params = {k: v for k, v in {"source": source, "before": before, "after": after}.items()
-                  if v is not None}
+        params = {"source": source, "before": before, "after": after}
         if confirm:
             params["confirm"] = "true"
             params["dry_run"] = "false"
-        return self._request("DELETE", f"/v1/memories?{urlencode(params)}")
+        return self._request("DELETE", "/v1/memories", params=params)
 
     def packet_status(self, source_packet_id: str) -> dict:
         """Background-processing status for one accepted write, by packet id."""
@@ -155,11 +153,8 @@ class MemoryClient:
     def jobs(self, status: Optional[str] = None, since: Optional[int] = None,
              limit: Optional[int] = None) -> dict:
         """The jobs ledger: every accepted write and where it is."""
-        from urllib.parse import urlencode
-        params = {k: v for k, v in {"status": status, "since": since, "limit": limit}.items()
-                  if v is not None}
-        qs = f"?{urlencode(params)}" if params else ""
-        return self._request("GET", f"/v1/jobs{qs}")
+        return self._request("GET", "/v1/jobs",
+                             params={"status": status, "since": since, "limit": limit})
 
     def wait_for(self, source_packet_id: str, timeout: float = 60.0,
                  interval: float = 1.5) -> dict:
@@ -229,11 +224,14 @@ class MemoryClient:
             out[wire] = value
         return out
 
-    def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
+    def _request(self, method: str, path: str, body: Optional[dict] = None,
+                 params: Optional[dict] = None) -> dict:
         body = self._to_wire(body)
-        params = {}
+        # httpx REPLACES a URL's own query string when params= is given, so
+        # every query parameter must come through this dict — never the path.
+        params = {k: v for k, v in (params or {}).items() if v is not None}
         if self.user_id:
-            params["userId"] = self.user_id
+            params.setdefault("userId", self.user_id)
             if body is not None and "userId" not in body:
                 body = {**body, "userId": self.user_id}
 
