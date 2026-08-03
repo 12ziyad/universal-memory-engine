@@ -94,6 +94,21 @@ function saveResponse(mode, source, res, env, userId, sourcePacketHint = null, m
 }
 
 async function finalizeSaveResponse({ mode, source, res, env, userId, sourcePacket, meta = {} }) {
+	// 1.10 idempotent replay: surface it, don't launder it into "ignored".
+	if (res.duplicate) {
+		return safeCommandResult({
+			mode,
+			source,
+			fired: false,
+			processing: false,
+			summary: res.summary ?? "Already accepted — this exact content was saved earlier (idempotent replay).",
+			receipt: res.receipt ?? null,
+			receipt_id: res.receipt_id ?? null,
+			sourcePacket: res.sourcePacket ?? sourcePacket,
+			counts: { received: meta.received ?? 1, skipped: 1 },
+			extra: { duplicate: true },
+		});
+	}
 	let receipt = res.receipt ?? null;
 	let summary = res.summary ?? null;
 	let id = res.receipt_id ?? receipt?.id ?? null;
