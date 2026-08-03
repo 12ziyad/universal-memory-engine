@@ -181,10 +181,26 @@ export class UserMemory extends DurableObject {
 		}
 	}
 
+	/**
+	 * Queue keys: ordered by a counter, made unique by a random suffix.
+	 *
+	 * The counter alone was a silent data-loss bug. It is a non-atomic
+	 * read-modify-write called from TWO paths guarded by DIFFERENT locks —
+	 * addMessages (blockConcurrencyWhile) and drain (the storage lease) — which
+	 * do not exclude each other. Under a concurrent burst both could read the
+	 * same value, write the same value, and `put` the same key: the second
+	 * enqueue silently overwrote the first, and the overwritten batch's job
+	 * rows sat at `queued`/attempts=0 forever, unreachable by any drain and
+	 * immune to the sweep's kick. Measured on the owner account: 10 of a
+	 * 20-wide add() burst lost this way.
+	 *
+	 * The suffix makes a collision harmless — both entries survive, adjacent in
+	 * key order — so FIFO is preserved and no work can be clobbered.
+	 */
 	async #nextSeq() {
 		const seq = ((await this.ctx.storage.get("qseq")) ?? 0) + 1;
 		await this.ctx.storage.put("qseq", seq);
-		return String(seq).padStart(10, "0");
+		return `${String(seq).padStart(10, "0")}-${crypto.randomUUID().slice(0, 8)}`;
 	}
 
 	/**
@@ -671,13 +687,34 @@ export class UserMemory extends DurableObject {
 		return { remaining: drained.remaining, busySkip: drained.leased };
 	}
 
-	/** Reconciliation sweep's poke: make sure this DO wakes up and drains. */
+	/**
+	 * Reconciliation sweep's poke: wake up and drain — and report exactly WHICH
+	 * jobs this object actually holds work for.
+	 *
+	 * That last part is what stops the sweep lying. A kick can only drain what
+	 * is in storage; if a job row exists with no queue entry and no held
+	 * message behind it, no amount of kicking will ever settle it. Returning
+	 * the known job ids lets the sweep tell "wake up, you have work" apart from
+	 * "this job is orphaned" instead of reporting a rescue it did not achieve.
+	 */
 	async kick(userId) {
 		if (userId) await this.ctx.storage.put("userId", userId);
 		await this.#armAlarm(Date.now() + 50);
-		const entries = await this.ctx.storage.list({ prefix: "q:", limit: 64 });
+		const entries = await this.ctx.storage.list({ prefix: "q:", limit: 256 });
+		const legacy = await this.ctx.storage.list({ prefix: "mcpjob:", limit: 64 });
 		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
-		return { queued: entries.size, held: chunk.length };
+		const jobIds = new Set();
+		for (const [, entry] of entries) {
+			if (entry?.job?.jobId) jobIds.add(entry.job.jobId);
+			for (const jobId of Object.values(entry?.jobByMessage ?? {})) jobIds.add(jobId);
+		}
+		for (const [, job] of legacy) if (job?.jobId) jobIds.add(job.jobId);
+		for (const msg of chunk) if (msg?._job) jobIds.add(msg._job);
+		return {
+			queued: entries.size + legacy.size,
+			held: chunk.length,
+			jobIds: [...jobIds],
+		};
 	}
 
 	/**

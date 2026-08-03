@@ -39,7 +39,10 @@ describe("reconciliation sweep", () => {
 		const result = await runReconciliationSweep(env);
 		const mine = result.rescued.find((r) => r.userId === userId);
 		expect(mine).toBeTruthy();
-		expect(mine.staleJobs).toBe(1);
+		// Stale but inside the orphan margin: still treated as reachable, so
+		// the sweep kicks rather than condemning work a slow drain may hold.
+		expect(mine.reachableJobs).toBe(1);
+		expect(result.orphaned.some((o) => o.userId === userId)).toBe(false);
 		// And the admin heard about it.
 		expect((await reports("sweep_rescue")).length).toBeGreaterThan(0);
 	});

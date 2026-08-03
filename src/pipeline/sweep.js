@@ -13,19 +13,34 @@
  */
 
 import { reportServerError } from "../lib/report.js";
+import { updateMemoryJob } from "../lib/db.js";
+import { settleStagedText } from "./staged_text.js";
 
 const STALE_MS = 5 * 60 * 1000;
+// A job the owning Durable Object has no work for is ORPHANED: no queue entry,
+// no held message, nothing a kick can reach. Given a wider margin than plain
+// staleness so a slow drain (one entry can take tens of seconds) is never
+// mistaken for lost work — the entry exists throughout processing, and the job
+// is settled BEFORE the entry is deleted, so there is no window where live
+// work looks orphaned.
+const ORPHAN_MS = 15 * 60 * 1000;
 const FAILED_WINDOW_MS = 10 * 60 * 1000;
 const RECEIPT_SCAN_MS = 60 * 60 * 1000;
 const MAX_USERS_PER_SWEEP = 50;
+const MAX_STALE_JOBS_PER_USER = 200;
 
 export async function runReconciliationSweep(env) {
 	const now = Date.now();
-	const result = { rescued: [], failedUsers: [], orphanReceipts: 0, errors: [] };
+	const result = { rescued: [], orphaned: [], failedUsers: [], orphanReceipts: 0, errors: [] };
 
-	// 1. Rescue: stale non-terminal jobs → kick the owning DO.
+	// 1. Rescue stale non-terminal jobs — and tell a real rescue apart from a
+	// futile one. A kick can only drain what is in the Durable Object's
+	// storage; a job row with no queue entry behind it will never settle, and
+	// reporting "rescued" for it every five minutes forever is exactly the
+	// silent-failure disease this sweep exists to end. Those get resolved to a
+	// visible terminal state instead.
 	try {
-		const { results } = await env.DB.prepare(
+		const { results: staleUsers } = await env.DB.prepare(
 			`SELECT user_id, COUNT(*) AS n, MIN(updated_at) AS oldest
 			 FROM memory_jobs
 			 WHERE status IN ('queued', 'staged', 'processing') AND updated_at < ?
@@ -33,20 +48,73 @@ export async function runReconciliationSweep(env) {
 			 ORDER BY oldest
 			 LIMIT ?`,
 		).bind(now - STALE_MS, MAX_USERS_PER_SWEEP).all();
-		for (const row of results ?? []) {
+
+		for (const row of staleUsers ?? []) {
 			try {
 				const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(row.user_id));
 				const kicked = await stub.kick(row.user_id);
-				result.rescued.push({ userId: row.user_id, staleJobs: row.n, oldestMs: now - row.oldest, ...kicked });
+				const known = new Set(kicked.jobIds ?? []);
+
+				// Which of this user's stale jobs does the object actually hold
+				// work for? Anything older than the orphan margin that it does
+				// not know about cannot be rescued by waking it.
+				const { results: jobs } = await env.DB.prepare(
+					`SELECT id, type, attempts, created_at, updated_at, source_packet_id
+					 FROM memory_jobs
+					 WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')
+					 ORDER BY updated_at LIMIT ?`,
+				).bind(row.user_id, MAX_STALE_JOBS_PER_USER).all();
+
+				const orphans = (jobs ?? []).filter(
+					(job) => !known.has(job.id) && job.updated_at < now - ORPHAN_MS,
+				);
+				const reachable = (jobs ?? []).length - orphans.length;
+
+				if (reachable > 0) {
+					result.rescued.push({
+						userId: row.user_id,
+						reachableJobs: reachable,
+						queued: kicked.queued,
+						held: kicked.held,
+						oldestMs: now - row.oldest,
+					});
+				}
+
+				for (const job of orphans) {
+					await updateMemoryJob(env, row.user_id, job.id, {
+						status: "failed",
+						error: "work never reached the queue — no durable entry exists for this job, so it can never be processed",
+						completedAt: Date.now(),
+					});
+					await settleStagedText(env, row.user_id, [job.id]);
+				}
+				if (orphans.length) {
+					result.orphaned.push({
+						userId: row.user_id,
+						count: orphans.length,
+						jobIds: orphans.slice(0, 10).map((job) => job.id),
+						oldestMs: now - Math.min(...orphans.map((job) => job.updated_at)),
+					});
+				}
 			} catch (error) {
 				result.errors.push(`kick ${row.user_id}: ${error?.message ?? error}`);
 			}
 		}
+
 		if (result.rescued.length) {
 			await reportServerError(
 				env,
 				"sweep_rescue",
-				new Error(`rescued ${result.rescued.length} user(s) with stale jobs: ${result.rescued.map((r) => `${r.userId}(${r.staleJobs} jobs, oldest ${Math.round(r.oldestMs / 1000)}s)`).join("; ").slice(0, 300)}`),
+				new Error(`kicked ${result.rescued.length} user(s) with reachable stale jobs: ${result.rescued.map((r) => `${r.userId}(${r.reachableJobs} jobs, oldest ${Math.round(r.oldestMs / 1000)}s)`).join("; ").slice(0, 300)}`),
+				null,
+			);
+		}
+		if (result.orphaned.length) {
+			const total = result.orphaned.reduce((a, o) => a + o.count, 0);
+			await reportServerError(
+				env,
+				"sweep_orphaned_jobs",
+				new Error(`RED ALERT: ${total} job(s) had NO durable work behind them and were failed rather than kicked forever — ${result.orphaned.map((o) => `${o.userId}(${o.count})`).join("; ").slice(0, 250)}`),
 				null,
 			);
 		}
@@ -103,7 +171,8 @@ export async function runReconciliationSweep(env) {
 	}
 
 	console.log(
-		`sweep: rescued=${result.rescued.length} failedUsers=${result.failedUsers.length} orphanReceipts=${result.orphanReceipts} errors=${result.errors.length}`,
+		`sweep: rescued=${result.rescued.length} orphanedJobs=${result.orphaned.reduce((a, o) => a + o.count, 0)} ` +
+		`failedUsers=${result.failedUsers.length} orphanReceipts=${result.orphanReceipts} errors=${result.errors.length}`,
 	);
 	return result;
 }
