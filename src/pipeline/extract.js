@@ -407,6 +407,9 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		manual: Boolean(overrides.manual),
 		updateMode,
 		sourceText: text,
+		// 7.4: the chunk's individual messages — the only permissible source
+		// for fallback slice/event text and candidate evidence.
+		sourceMessages: chunk.map((m) => ({ id: m.id, content: m.content })),
 		lastTs,
 		rules,
 		profile,

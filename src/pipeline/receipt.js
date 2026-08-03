@@ -32,6 +32,7 @@ const REASON_PHRASE = {
 	excluded_by_rule: "blocked by your rules",
 	outside_include_rules: "outside your include rules",
 	ungrounded_fact: "not grounded in what was sent",
+	batch_text_blob: "stitched from multiple messages",
 	unknown_kind: "unrecognized",
 };
 

@@ -252,6 +252,45 @@ export async function applyGates(
 	const manual = Boolean(opts.manual);
 	const updateMode = Boolean(opts.updateMode);
 	const sourceText = String(opts.sourceText ?? "");
+
+	// 7.4 — no raw batch text on nodes. The chunk's individual messages, each
+	// with its index, are the ONLY permissible source for fallback text and
+	// candidate evidence. `sourceText` (the concatenation) stays for whole-chunk
+	// checks (MCP grounding) and as the last resort when the chunk has one
+	// message — it must never again be stored as slice/event/evidence text of a
+	// multi-message batch, which is how "ugh the traffic on Avenida" ended up
+	// smeared across five nodes and poisoned recall's seed selection.
+	const sourceMessages = (opts.sourceMessages ?? [])
+		.map((m, idx) => ({
+			idx,
+			id: m?.id ?? null,
+			content: String(m?.content ?? ""),
+			tokens: new Set(normalizeLabel(String(m?.content ?? "")).split(" ").filter((t) => t.length > 2)),
+		}))
+		.filter((m) => m.tokens.size > 0);
+
+	/** Best single message for a piece of text, by token overlap. */
+	function bestMessageFor(text) {
+		const wanted = normalizeLabel(String(text ?? "")).split(" ").filter((t) => t.length > 2);
+		if (!wanted.length || !sourceMessages.length) return null;
+		let best = null;
+		let bestScore = 0;
+		for (const m of sourceMessages) {
+			let score = 0;
+			for (const t of wanted) if (m.tokens.has(t)) score++;
+			if (score > bestScore) { bestScore = score; best = m; }
+		}
+		return best ? { ...best, coverage: bestScore / wanted.length } : null;
+	}
+
+	/** Per-message evidence for an object — never the concatenated chunk. */
+	function messageEvidenceFor(obj) {
+		const basis = [obj?.text, obj?.label, obj?.on].filter(Boolean).join(" ");
+		const match = bestMessageFor(basis);
+		if (match) return match.content;
+		if (sourceMessages.length === 1) return sourceMessages[0].content;
+		return sourceMessages.length ? "" : sourceText;
+	}
 	const supersedeKinds = updateMode ? UPDATE_MODE_SUPERSEDE_KINDS : SUPERSEDE_KINDS;
 	// Dense capture keeps every durable detail: the auto-lane floor drops to the
 	// manual (lenient) floor. Standard stays exactly as before.
@@ -285,7 +324,11 @@ export async function applyGates(
 
 	let objects = applyUserSettings(proposal.objects ?? [], settings);
 	if (!settings?.paused && objects.length === 0) {
-		const durable = durablePlanFromText(sourceText);
+		// 7.4: probe each message individually; the concatenation is not a
+		// sentence and must never become one.
+		const durable = sourceMessages.length
+			? sourceMessages.map((m) => durablePlanFromText(m.content)).find(Boolean)
+			: durablePlanFromText(sourceText);
 		if (durable) {
 			objects = applyUserSettings([{
 				kind: "candidate",
@@ -399,7 +442,14 @@ export async function applyGates(
 	}
 
 	async function materializeDurableSignal(obj) {
-		const durable = durablePlanFromText(sourceText, obj);
+		// 7.4: the durable-signal fallback works from the ONE message that
+		// carries this object, never the concatenated batch — its output
+		// becomes stored slice/event text.
+		const basis = sourceMessages.length
+			? (bestMessageFor([obj?.text, obj?.label, obj?.on].filter(Boolean).join(" "))?.content ?? "")
+			: sourceText;
+		if (!basis) return false;
+		const durable = durablePlanFromText(basis, obj);
 		if (!durable) return false;
 		if (isSuppressed("node", durable.label)) {
 			reject(obj, "suppressed_blocked");
@@ -472,13 +522,13 @@ export async function applyGates(
 			plan.candidateBumps.push({
 				id: existingCand.id,
 				mentions: (existingCand.mentions ?? existingCand.mention_count ?? 1) + 1,
-				evidence: meta.evidence ?? sourceText,
+				evidence: meta.evidence ?? messageEvidenceFor({ label }),
 				now,
 			});
 			return;
 		}
 		if (plan.newCandidates.some((c) => normalizeLabel(c.label) === norm)) return;
-		const evidenceText = String(meta.evidence ?? sourceText ?? "").trim();
+		const evidenceText = String(meta.evidence ?? messageEvidenceFor({ label }) ?? "").trim();
 		const clusterGuess = clusterHint ?? meta.clusterGuess ?? clusterForMemory({
 			label,
 			category: meta.roleGuess ?? "interest",
@@ -546,6 +596,24 @@ export async function applyGates(
 		if (typeof obj.text === "string" && obj.text.length > TEXT_REJECT) {
 			reject(obj, "attr_too_long");
 			continue;
+		}
+
+		// ---- 7.4: BATCH-TEXT BLOB GATE --------------------------------------
+		// A slice/event whose text is stitched together from SEVERAL messages
+		// is the batch talking, not a fact: no single message covers it, but
+		// the whole chunk does. Conservative thresholds — a fact paraphrased
+		// from one message always passes.
+		if ((obj.kind === "slice" || obj.kind === "event") && typeof obj.text === "string" && sourceMessages.length > 1) {
+			const wanted = normalizeLabel(obj.text).split(" ").filter((t) => t.length > 2);
+			if (wanted.length >= 25) {
+				const best = bestMessageFor(obj.text);
+				const chunkTokens = new Set(normalizeLabel(sourceText).split(" ").filter((t) => t.length > 2));
+				const chunkCoverage = wanted.filter((t) => chunkTokens.has(t)).length / wanted.length;
+				if ((best?.coverage ?? 0) < 0.5 && chunkCoverage >= 0.9) {
+					reject(obj, "batch_text_blob");
+					continue;
+				}
+			}
 		}
 		if (typeof obj.label === "string" && obj.label.length > LABEL_CAP) obj.label = obj.label.slice(0, LABEL_CAP);
 		if (typeof obj.text === "string" && obj.text.length > TEXT_CAP) obj.text = `${obj.text.slice(0, TEXT_CAP - 1)}…`;
@@ -617,7 +685,7 @@ export async function applyGates(
 					confidence: conf,
 					roleGuess: category,
 					reason: manual ? "manual_low_confidence_rejected" : "low_confidence_downgraded",
-					evidence: sourceText,
+					evidence: messageEvidenceFor(obj),
 				});
 				reject(obj, manual ? "low_confidence" : "low_confidence_downgraded");
 				continue;
@@ -641,7 +709,7 @@ export async function applyGates(
 						confidence: conf,
 						roleGuess: category,
 						reason: "node_without_detail",
-						evidence: sourceText,
+						evidence: messageEvidenceFor(obj),
 					});
 				}
 				reject(obj, "node_without_detail");
@@ -816,7 +884,7 @@ export async function applyGates(
 				confidence: conf,
 				roleGuess: obj.category ?? obj.role_guess ?? null,
 				reason: obj.reason ?? "model_candidate",
-				evidence: sourceText,
+				evidence: messageEvidenceFor(obj),
 				possibleExistingNodeId: obj.matches_existing ?? obj.possible_existing_node_id ?? null,
 			});
 			continue;
