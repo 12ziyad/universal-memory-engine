@@ -71,3 +71,11 @@ nothing — client retries after a timeout cannot double-ingest.
 memory page. It now runs the same extraction engine as every other write:
 entities, facts, relationships, bi-temporal history. Expect richer results
 from the same call — nodes AND edges where you used to get a page.
+
+## Version skew (read this if a method is missing)
+
+The **source in this repo is 0.2.0** and npm tracks it. The PyPI package may
+still be **0.1.1** until the next release is pushed, so a Python service and a
+JS service in the same system can disagree about which helpers exist
+(`waitFor`/`wait_for`, `jobs`, `delete`, `deleteBySource`). The REST endpoints
+behind them are live either way.

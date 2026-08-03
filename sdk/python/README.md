@@ -70,3 +70,16 @@ nothing — client retries after a timeout cannot double-ingest.
 memory page. It now runs the same extraction engine as every other write:
 entities, facts, relationships, bi-temporal history. Expect richer results
 from the same call — nodes AND edges where you used to get a page.
+
+## Version skew (read this if a method is missing)
+
+The **source in this repo is 0.2.0**; the published PyPI package may still be
+**0.1.1** until the next release is pushed. 0.1.1 predates the background-status
+and delete helpers, so on the published wheel these are absent:
+
+`wait_for` · `packet_status` · `jobs` · `delete` · `delete_by_source`
+
+The REST endpoints they call (`/v1/packets/:id/status`, `/v1/jobs`,
+`DELETE /v1/memories`) are live regardless — call them directly, or install
+from source (`pip install -e sdk/python`) until the publish lands. The npm
+package tracks 0.2.0.

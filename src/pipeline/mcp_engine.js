@@ -42,6 +42,7 @@ import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.j
 import { classifyMessage } from "./trigger.js";
 import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
+import { settleStagedText, stageMemoryText } from "./staged_text.js";
 import { runAi } from "../lib/ai_meter.js";
 import { responseText, extractJson } from "./llm.js";
 
@@ -491,6 +492,16 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		payload: { pageId, title },
 	});
 
+	// 8.2 read-your-writes: every durable line is findable the moment this
+	// receipt returns — not just the first one via the page's short_summary
+	// (the gap the 0.3 trace measured on this exact lane).
+	await stageMemoryText(env, userId, {
+		jobId,
+		sourcePacketId: sourcePacket?.id ?? null,
+		lane: SOURCE_MODE,
+		messages: durable.map((m) => ({ id: m.id, role: "user", content: m.content })),
+	});
+
 	// Durable enqueue on the user's DO — the alarm drives enrichment even if
 	// this isolate dies the moment we return. The job entry carries everything
 	// the background phase needs; assistant turns ride only as context.
@@ -544,6 +555,9 @@ async function markEnrichmentFailed(env, userId, job, reason, defer = null) {
 		console.warn("mcp enrich failure bookkeeping failed:", error?.message ?? error);
 	}
 	await reportServerError(env, "mcp_enrich", new Error(String(reason ?? "unknown")), userId);
+	// A failed enrichment is terminal too: the staged page is what the user
+	// has, and the job row says why. Staged text stops answering either way.
+	await settleStagedText(env, userId, [job.jobId]);
 	// Part 2.3: the job's terminal transition, announced exactly once.
 	if (defer) {
 		try {
@@ -615,6 +629,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 				payload: { pageId: job.pageId, page_deleted: true, reason: "no durable content survived extraction" },
 				completedAt: Date.now(),
 			});
+			await settleStagedText(env, userId, [job.jobId]);
 			return { done: true };
 		}
 
@@ -669,6 +684,10 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			},
 			completedAt: Date.now(),
 		});
+
+		// 8.2 upgrade: the graph now holds this content, so its staged rows
+		// stop answering recall.
+		await settleStagedText(env, userId, [job.jobId]);
 
 		// Announce like every other engine door: strictly after the fact,
 		// strictly async, never able to fail the save.

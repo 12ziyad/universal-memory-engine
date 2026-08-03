@@ -11,6 +11,7 @@ import { queryNodeVectors } from "../lib/vectorize.js";
 import { tokens, normalizeLabel, wordContains } from "../lib/text.js";
 import { resolveScope } from "./source.js";
 import { classifyMessage } from "./trigger.js";
+import { findStagedText } from "./staged_text.js";
 
 const TOP_N = 8;
 const MAX_EVENTS_PER_NODE = 8;
@@ -272,10 +273,16 @@ function dedupeEntries(entries) {
 	return out;
 }
 
-export function buildContext(entries, plan = recallGate("memory")) {
+export function buildContext(entries, plan = recallGate("memory"), staged = []) {
 	const lines = [];
 	let nodeCount = 0;
 	let pageCount = 0;
+	// 8.2 — just-saved text leads. It is the freshest thing the user told us
+	// and the whole point of read-your-writes: the answer, not a promise.
+	for (const row of staged.slice(0, 3)) {
+		const text = String(row?.text ?? "").replace(/\s+/g, " ").trim();
+		if (text) lines.push(`Just saved (still being organized): ${text}`);
+	}
 	for (const entry of entries) {
 		if (entry.type === "node" && nodeCount < plan.maxContextNodes) {
 			const n = entry.item;
@@ -471,7 +478,24 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const nodes = nodesRes.results ?? [];
 	const pages = pagesRes.results ?? [];
 	const profile = profileRes.results?.[0] ?? null;
+
+	// 8.2 read-your-writes: text accepted moments ago, before its enrichment
+	// landed. Consulted BEFORE the empty-graph exit — the very first save on a
+	// new account is exactly the case that must not answer "I know nothing".
+	const stagedRows = await findStagedText(env, userId, tokens(q));
+
 	if ((nodes.length === 0 && pages.length === 0) || q.length === 0) {
+		if (stagedRows.length && q.length > 0) {
+			const context = buildContext([], plan, stagedRows);
+			return {
+				...emptyRecall(plan),
+				context,
+				count: stagedRows.length,
+				staged_used: true,
+				staged_count: stagedRows.length,
+				compressed: Boolean(context),
+			};
+		}
 		return emptyRecall(plan);
 	}
 
@@ -659,7 +683,21 @@ export async function recall(env, config, userId, query, opts = {}) {
 		}
 	}
 
-	if (fused.size === 0) return emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+	if (fused.size === 0) {
+		// Nothing in the graph matched — but freshly staged text might.
+		if (stagedRows.length) {
+			const context = buildContext([], plan, stagedRows);
+			return {
+				...emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed }),
+				context,
+				count: stagedRows.length,
+				staged_used: true,
+				staged_count: stagedRows.length,
+				compressed: Boolean(context),
+			};
+		}
+		return emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+	}
 
 	let entries = [...fused.entries()].map(([key, score]) => {
 		const [type, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
@@ -675,7 +713,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
-	const context = buildContext(entries, plan);
+	const context = buildContext(entries, plan, stagedRows);
 	const items = entries.map(itemSummary);
 
 	return {
@@ -685,7 +723,9 @@ export async function recall(env, config, userId, query, opts = {}) {
 		reason: plan.reason,
 		context,
 		items,
-		count: items.length,
+		count: items.length + stagedRows.length,
+		staged_used: stagedRows.length > 0,
+		staged_count: stagedRows.length,
 		nodes: resultNodes,
 		pages: resultPages,
 		activated_clusters: activatedClusters,

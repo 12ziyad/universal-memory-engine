@@ -404,7 +404,12 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND type IN ('mcp_enrich', 'extract') AND status IN ('staged', 'queued', 'processing') AND created_at > ?",
 		).bind(userId, Date.now() - 15 * 60 * 1000).first();
 		if ((staged?.n ?? 0) > 0) {
-			processingNote = "A recent save is still processing — some facts may not appear yet.";
+			// 8.2: when staged text already answered, say what is actually true —
+			// the content is here, its relationships are still being worked out.
+			// "Still processing" alongside the answer reads as a non-answer.
+			processingNote = result.staged_used
+				? "Some of this was saved moments ago; its connections are still being worked out."
+				: "A recent save is still processing — some facts may not appear yet.";
 			if (typeof result.context === "string" && result.context.trim()) {
 				result.context = `${result.context}\n\n(${processingNote})`;
 			}

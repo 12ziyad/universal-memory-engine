@@ -29,6 +29,7 @@ import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt, settleMemoryJobs } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
+import { settleStagedText } from "../pipeline/staged_text.js";
 import { DIALS } from "../config.js";
 
 const RECENT_LIMIT = 20;
@@ -599,6 +600,10 @@ export class UserMemory extends DurableObject {
 	 * only — ids, status, counts — never memory content.
 	 */
 	async #announceJobTransitions(userId, transitions = []) {
+		// 8.2 upgrade: a job that reached a terminal state has its content in
+		// the graph (or a visible failure) — its staged text stops answering.
+		const terminalJobs = (transitions ?? []).map((t) => t.jobId).filter(Boolean);
+		if (terminalJobs.length) await settleStagedText(this.env, userId, terminalJobs);
 		for (const t of transitions ?? []) {
 			const event = t.status === "failed" ? "memory.failed" : "memory.enriched";
 			const data = {

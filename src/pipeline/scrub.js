@@ -48,6 +48,13 @@ const URI_CREDENTIAL_RE = /\b([a-z][a-z0-9+.-]{1,30}):\/\/([^\s/@:]{1,64}):([^\s
 // Query-string secrets: ?api_key=…, &token=…, &secret=…, &password=…
 const QUERY_SECRET_RE = /([?&](?:api[_-]?key|token|secret|password|passwd|pwd|auth|access[_-]?token|apikey)=)([^\s&#]{6,})/gi;
 
+// "Bearer <token>" in prose — the shape people paste out of a curl command or
+// a Postman tab. The word Bearer is the giveaway, so the token needs no
+// entropy floor beyond being token-shaped: prose after "Bearer" that is 12+
+// chars of key alphabet with no spaces is never an English sentence.
+// (8.1: the load test proved sk-/ghp-/URI-creds; this is the shape it missed.)
+const BEARER_RE = /\b(bearer\s+)([A-Za-z0-9._~+/=-]{12,})/gi;
+
 // Generic high-entropy net: 32+ chars of key-alphabet with real character-class
 // mixing. Ordinary long text — URLs, file paths, German compound nouns, hex
 // commit hashes people paste in stack traces — must NOT match; see looksSecret.
@@ -107,6 +114,14 @@ export function scrubText(input) {
 	for (const re of KEY_PATTERNS) {
 		text = text.replace(re, () => { hit("api_key"); return "[REDACTED:api-key]"; });
 	}
+
+	// After the named families: a token already replaced above leaves
+	// "[REDACTED:api-key]" here, which this pattern must not re-wrap.
+	text = text.replace(BEARER_RE, (m, prefix, token) => {
+		if (token.startsWith("[REDACTED")) return m;
+		hit("bearer_token");
+		return `${prefix}[REDACTED:token]`;
+	});
 
 	text = text.replace(LONG_TOKEN_RE, (m) => {
 		if (!looksSecret(m)) return m;

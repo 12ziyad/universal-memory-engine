@@ -22,6 +22,7 @@ import { hashText, normalizeSourcePacket, sourceMeta, storeSourcePacket } from "
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { scrubMessages } from "./scrub.js";
 import { activeJobDepth, createMemoryJob } from "../lib/db.js";
+import { stageMemoryText } from "./staged_text.js";
 
 // 1.7 backpressure: never accept unbounded work you can't see.
 const MAX_QUEUE_DEPTH = 200;
@@ -164,6 +165,15 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	if (!jobId) {
 		throw new Error("memory job row could not be created — refusing to accept work without a durable record");
 	}
+
+	// 8.2 read-your-writes: the scrubbed text is findable NOW, not after
+	// enrichment. Best-effort — a staging failure never fails an accepted write.
+	await stageMemoryText(env, userId, {
+		jobId,
+		sourcePacketId: sourcePacket?.id ?? null,
+		lane: opts.sourceMode ?? overrides.source ?? "ingest",
+		messages: normalized.messages,
+	});
 
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
 	const { fired, held, skipped, queued } = await stub.addMessages(userId, normalized.messages, {

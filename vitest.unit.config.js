@@ -21,6 +21,9 @@ export default defineConfig({
 			"test/manual_plan.spec.js",
 			"test/manual_search_profiles.spec.js",
 			"test/manual_titles.spec.js",
+			// Source-policy guard: reads the migrations directory from disk, so
+			// it belongs here rather than in the Workers pool.
+			"test/migrations_append_only.spec.js",
 			"test/recall_gate.spec.js",
 			"test/sdk_js.spec.js",
 			"test/title.spec.js",
