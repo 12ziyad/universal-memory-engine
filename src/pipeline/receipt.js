@@ -138,6 +138,12 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		...(meta.rules_active ? { rules_active: meta.rules_active } : {}),
 		saved,
 		savedTotal,
+		// 7.3 — repetition is an explicit NOOP, visible: these rows already
+		// existed and were refreshed, not re-inserted. Changes the arithmetic
+		// of saves-in vs memories-out on purpose.
+		duplicates_noop: saved.reinforcedSlices + saved.reinforcedEvents + saved.reinforcedEdges,
+		// 7.2 — every non-exact merge, with its basis, for contamination audits.
+		...(Array.isArray(p.merges) && p.merges.length ? { merges: p.merges } : {}),
 		skipped: rejected.length,
 		skippedReasons,
 		actions: {

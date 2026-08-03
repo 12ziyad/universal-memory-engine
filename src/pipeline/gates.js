@@ -157,10 +157,42 @@ function isJunkLabel(label) {
 }
 
 /**
- * Canonical match: does this label really refer to an existing node?
- * Checks the model's hint first, then exact / containment / fuzzy.
+ * 7.1/7.2 — canonical match, biased to SPLIT. Merge into an existing node only
+ * on:
+ *   (a) the model's explicit hint (an id from the shortlist it was shown),
+ *   (b) exact normalized-name match,
+ *   (c) an explicitly stated alias (aliases_json),
+ *   (d) high similarity (>=0.85) AND matching category class AND no
+ *       conflicting DISTINCTIVE token — for multi-word names, any non-shared
+ *       token that isn't a stopword-ish filler kills the merge. Meridian
+ *       Freight and Meridian Labs share "Meridian"; "Freight" vs "Labs" are
+ *       distinctive, so they NEVER merge, whatever the similarity score says.
+ *
+ * Uncertain ⇒ new node: wrong-splits are mergeable later; wrong-merges poison
+ * summaries and history. Every non-exact merge is recorded (`trace`) so
+ * contamination stays auditable on the receipt.
  */
-function matchExisting(label, matchesExistingId, existing, existingById) {
+const NON_DISTINCTIVE_TOKENS = new Set([
+	"the", "a", "an", "of", "and", "for", "my", "our", "de", "da", "van", "von",
+	"class", "classes", "club", "team", "group",
+]);
+
+function distinctiveTokens(aTokens, bTokens) {
+	const a = new Set(aTokens);
+	const b = new Set(bTokens);
+	const nonShared = [...a, ...b].filter((t) => !(a.has(t) && b.has(t)));
+	return nonShared.filter((t) => t.length >= 3 && !NON_DISTINCTIVE_TOKENS.has(t));
+}
+
+function categoryClassOf(category) {
+	const canonical = canonicalizeCategory(category) ?? "other";
+	if (["person", "family", "relationship"].includes(canonical)) return "person";
+	if (canonical === "organization") return "org";
+	if (canonical === "place") return "place";
+	return canonical;
+}
+
+function matchExisting(label, matchesExistingId, existing, existingById, opts = {}) {
 	if (matchesExistingId && existingById.has(matchesExistingId)) {
 		return existingById.get(matchesExistingId);
 	}
@@ -172,7 +204,14 @@ function matchExisting(label, matchesExistingId, existing, existingById) {
 	for (const node of existing) {
 		const nNorm = normalizeLabel(node.label);
 		if (nNorm === norm) return node; // exact
-		if (wordContains(norm, nNorm) || wordContains(nNorm, norm)) return node; // containment
+		// explicitly stated alias
+		try {
+			const aliases = JSON.parse(node.aliases_json || "[]");
+			if (Array.isArray(aliases) && aliases.some((a) => normalizeLabel(a) === norm)) {
+				opts.trace?.push({ label, into: node.id, into_label: node.label, basis: "alias" });
+				return node;
+			}
+		} catch {}
 		const j = jaccard(labelTokens, tokens(node.label));
 		const lev = levenshteinRatio(norm, nNorm);
 		const score = Math.max(j, lev);
@@ -181,8 +220,18 @@ function matchExisting(label, matchesExistingId, existing, existingById) {
 			best = node;
 		}
 	}
-	if (best && (bestScore >= 0.6)) return best;
-	return null;
+	if (!best || bestScore < 0.85) return null; // bias to split
+	if (opts.category !== undefined && opts.category !== null) {
+		if (categoryClassOf(opts.category) !== categoryClassOf(best.category)) return null;
+	}
+	if (distinctiveTokens(labelTokens, tokens(best.label)).length > 0) return null;
+	opts.trace?.push({
+		label,
+		into: best.id,
+		into_label: best.label,
+		basis: `similarity_${bestScore.toFixed(2)}`,
+	});
+	return best;
 }
 
 async function recentEventMatch(env, userId, nodeId, action, now) {
@@ -196,13 +245,20 @@ async function recentEventMatch(env, userId, nodeId, action, now) {
 	return row?.id ?? null;
 }
 
+/**
+ * 7.3 — same-fact dedup (NOOP). The check is by normalized content on the
+ * SAME entity across ALL slice kinds: daily "working on X" must refresh the
+ * existing fact, never insert row thirty-one — whatever kind_detail the model
+ * felt like using that day. (Supersede handles contradiction; this handles
+ * repetition.)
+ */
 async function matchingSliceId(env, userId, nodeId, kind, text) {
 	const { results } = await env.DB.prepare(
-		`SELECT id, text FROM slices
-		 WHERE user_id = ? AND node_id = ? AND kind = ? AND deleted_at IS NULL
-		 ORDER BY created_at DESC LIMIT 50`,
+		`SELECT id, text, kind FROM slices
+		 WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
+		 ORDER BY created_at DESC LIMIT 80`,
 	)
-		.bind(userId, nodeId, kind)
+		.bind(userId, nodeId)
 		.all();
 	const norm = normalizeLabel(text);
 	return (results ?? []).find((s) => normalizeLabel(s.text) === norm)?.id ?? null;
@@ -319,6 +375,7 @@ export async function applyGates(
 		candidateBumps: [],
 		affectedNodeIds: new Set(),
 		autoCreated: [], // labels of nodes synthesized by the anti-orphan rule
+		merges: [], // 7.2 audit: every non-exact merge, with its basis
 		rejected: [],
 	};
 
@@ -419,7 +476,7 @@ export async function applyGates(
 		if (!ref) return null;
 		const norm = normalizeLabel(ref);
 		if (resolved.has(norm)) return { id: resolved.get(norm) };
-		const match = matchExisting(ref, null, existing, existingById);
+		const match = matchExisting(ref, null, existing, existingById, { trace: plan.merges });
 		if (match) {
 			resolved.set(norm, match.id);
 			return { id: match.id };
@@ -511,7 +568,7 @@ export async function applyGates(
 		const norm = normalizeLabel(label);
 		if (isSuppressed("candidate", label) || isSuppressed("node", label)) return;
 		// Already a node? Then it isn't a candidate.
-		const existingNode = matchExisting(label, meta.possibleExistingNodeId ?? null, existing, existingById);
+		const existingNode = matchExisting(label, meta.possibleExistingNodeId ?? null, existing, existingById, { trace: plan.merges });
 		if (existingNode) {
 			plan.nodeTouches.add(existingNode.id);
 			plan.affectedNodeIds.add(existingNode.id);
@@ -690,7 +747,7 @@ export async function applyGates(
 				reject(obj, manual ? "low_confidence" : "low_confidence_downgraded");
 				continue;
 			}
-			const match = matchExisting(obj.label, obj.matches_existing, existing, existingById);
+			const match = matchExisting(obj.label, obj.matches_existing, existing, existingById, { category: obj.category, trace: plan.merges });
 			if (match) {
 				// Canonical match → update, do NOT create a duplicate.
 				resolved.set(normalizeLabel(obj.label), match.id);
