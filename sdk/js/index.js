@@ -81,6 +81,27 @@ export class MemoryClient {
 		return `idem_${crypto.randomUUID()}`;
 	}
 
+	/** Delete one memory object (node_… / page_… / candidate_… id). */
+	delete(memoryId) {
+		return this.#request("DELETE", `/v1/memories/${encodeURIComponent(memoryId)}`);
+	}
+
+	/**
+	 * Bulk delete by source lane and/or time window. SAFE BY DEFAULT: without
+	 * `confirm: true` this is a dry run that only reports what would go.
+	 *
+	 *   await memory.deleteBySource({ source: "ingest", after: t0 });            // counts only
+	 *   await memory.deleteBySource({ source: "ingest", after: t0, confirm: true }); // deletes
+	 */
+	deleteBySource({ source, before, after, confirm = false } = {}) {
+		const params = new URLSearchParams();
+		if (source) params.set("source", source);
+		if (before) params.set("before", String(before));
+		if (after) params.set("after", String(after));
+		if (confirm) { params.set("confirm", "true"); params.set("dry_run", "false"); }
+		return this.#request("DELETE", `/v1/memories?${params.toString()}`);
+	}
+
 	/** Background-processing status for one accepted write, by its packet id. */
 	packetStatus(sourcePacketId) {
 		return this.#get(`/v1/packets/${encodeURIComponent(sourcePacketId)}/status`);

@@ -1,8 +1,10 @@
 import { getConfig } from "../config.js";
-import { addSuppression } from "../lib/db.js";
+import { addSuppression, storeReceipt } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
 import { normalizeLabel } from "../lib/text.js";
+import { deleteNodeVectors } from "../lib/vectorize.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
+import { fallbackSummary } from "./pass2.js";
 import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
@@ -306,6 +308,67 @@ export async function deleteLastExtraction(env, userId) {
 	return { deleted: true, extraction_run_id: run.id, counts };
 }
 
+/**
+ * Summary residue removal (fix round 1, Part 3.4). Every node summary carries
+ * provenance (`summary_sources_json` — the fact ids it was built from). After
+ * a delete, any summary whose sources intersect the deleted ids is DIRTY and
+ * gets rebuilt from surviving facts only, in one pass — the 3-passes-to-clean
+ * bug dies here. Nodes named in `touchedNodeIds` (they lost rows directly)
+ * are rebuilt regardless of recorded provenance, which also covers legacy
+ * rows from before the provenance column existed.
+ */
+export async function regenerateDirtySummaries(env, userId, deletedIds = [], touchedNodeIds = []) {
+	const deleted = new Set(deletedIds.filter(Boolean));
+	const touched = new Set(touchedNodeIds.filter(Boolean));
+	if (deleted.size === 0 && touched.size === 0) return { regenerated: 0 };
+
+	const { results: nodes } = await env.DB.prepare(
+		`SELECT id, label, category, state, summary, cluster, summary_sources_json
+		 FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
+	).bind(userId).all();
+
+	let regenerated = 0;
+	for (const node of nodes ?? []) {
+		const sources = parseJsonArray(node.summary_sources_json);
+		const dirty = touched.has(node.id) || sources.some((sid) => deleted.has(sid));
+		if (!dirty) continue;
+		const [slicesRes, eventsRes] = await env.DB.batch([
+			env.DB.prepare(
+				"SELECT id, text, kind, created_at FROM slices WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL ORDER BY created_at DESC",
+			).bind(userId, node.id),
+			env.DB.prepare(
+				"SELECT id, action, text, happened_at, created_at FROM events WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL AND COALESCE(action, '') <> 'updated' ORDER BY COALESCE(happened_at, created_at) DESC LIMIT 12",
+			).bind(userId, node.id),
+		]);
+		const slices = slicesRes.results ?? [];
+		const events = eventsRes.results ?? [];
+		const summary = fallbackSummary(node, slices, events);
+		const provenance = JSON.stringify([...slices.map((s) => s.id), ...events.map((e) => e.id)].slice(0, 40));
+		await env.DB.prepare(
+			"UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+		).bind(summary, provenance, Date.now(), node.id, userId).run();
+		regenerated++;
+	}
+	if (regenerated) await refreshManualSearchProfiles(env, getConfig(env), userId, {});
+	return { regenerated };
+}
+
+/** Audit tombstone: what was deleted, when, by which credential. Best-effort. */
+export async function storeDeletionTombstone(env, userId, { kind, ids = [], by = null, source = "delete" }) {
+	const receipt = {
+		outcome: "deleted",
+		reason: "user-requested deletion",
+		source,
+		deleted_kind: kind,
+		deleted_ids: ids.slice(0, 200),
+		deleted_count: ids.length,
+		deleted_by: by ?? null,
+		created_at: Date.now(),
+	};
+	await storeReceipt(env, userId, source, receipt, `Deleted ${ids.length} ${kind}(s).`);
+	return receipt;
+}
+
 export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 	const now = Date.now();
 	if (kind === "page" || kind === "memory_page") {
@@ -324,6 +387,11 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		const { results: touchingEdges } = await env.DB.prepare(
 			"SELECT from_node, to_node FROM edges WHERE user_id = ? AND deleted_at IS NULL AND (from_node = ? OR to_node = ?)",
 		).bind(userId, id, id).all();
+		// Capture the fact ids about to die — the summary-residue pass needs them.
+		const { results: dyingRows } = await env.DB.prepare(
+			`SELECT id FROM slices WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
+			 UNION ALL SELECT id FROM events WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL`,
+		).bind(userId, id, userId, id).all();
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
@@ -345,9 +413,19 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 			),
 		]);
 		await deleteManualSearchObjects(env, getConfig(env), userId, { nodeIds: [id] });
+		// The full cascade (Part 3.3): the vector goes too (async on Vectorize's
+		// side — recall's live-row filter hides it meanwhile), and neighbours
+		// whose summaries were built from this node's facts are regenerated.
+		await deleteNodeVectors(env, getConfig(env), [id]);
 		const neighbourIds = [...new Set((touchingEdges ?? []).flatMap((edge) => [edge.from_node, edge.to_node])
 			.filter((nodeId) => nodeId && nodeId !== id))];
 		if (neighbourIds.length) await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: neighbourIds });
+		await regenerateDirtySummaries(
+			env,
+			userId,
+			[id, ...(dyingRows ?? []).map((r) => r.id)],
+			neighbourIds,
+		);
 		return { deleted: true, kind: "node", id };
 	}
 	if (kind === "candidate") {
@@ -658,4 +736,147 @@ export async function repairGraph(env, userId, opts = {}) {
 			note: "No fake edges were created. Semantic edge backfill remains preview-only until strong evidence exists.",
 		},
 	};
+}
+
+/**
+ * Bulk delete by source (fix round 1, Part 3.2). Deletion is scoped by the
+ * extraction ledger: every engine write records what it created on its
+ * extraction_runs row, so "delete what source X wrote between A and B" is a
+ * walk over those lists — including edges that joined two PRE-EXISTING nodes,
+ * which no node cascade would ever reach.
+ *
+ * dry_run (the DEFAULT) counts everything that would go and touches nothing.
+ * The destructive pass requires confirm=true and ends with: FTS rows gone,
+ * Vectorize ids deleted, dependent summaries regenerated from surviving
+ * facts, and one tombstone receipt for audit. Job rows are kept.
+ */
+export async function bulkDeleteBySource(env, userId, {
+	source = null,
+	before = null,
+	after = null,
+	dryRun = true,
+	confirm = false,
+	by = null,
+} = {}) {
+	const clauses = ["user_id = ?"];
+	const binds = [userId];
+	if (source) {
+		clauses.push("(source_mode = ? OR tool_name = ?)");
+		binds.push(source, source);
+	}
+	const beforeMs = Number(before);
+	if (Number.isFinite(beforeMs) && beforeMs > 0) {
+		clauses.push("created_at < ?");
+		binds.push(beforeMs);
+	}
+	const afterMs = Number(after);
+	if (Number.isFinite(afterMs) && afterMs > 0) {
+		clauses.push("created_at > ?");
+		binds.push(afterMs);
+	}
+	const { results: runs } = await env.DB.prepare(
+		`SELECT id, source_mode, tool_name, created_nodes_json, created_pages_json,
+			created_slices_json, created_events_json, created_edges_json
+		 FROM extraction_runs WHERE ${clauses.join(" AND ")}`,
+	).bind(...binds).all();
+
+	const ids = { nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(), edges: new Set() };
+	const labels = [];
+	for (const run of runs ?? []) {
+		for (const item of parseJsonArray(run.created_nodes_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.nodes.add(id);
+			if (item?.label && labels.length < 30) labels.push(item.label);
+		}
+		for (const item of parseJsonArray(run.created_pages_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.pages.add(id);
+		}
+		for (const item of parseJsonArray(run.created_slices_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.slices.add(id);
+		}
+		for (const item of parseJsonArray(run.created_events_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.events.add(id);
+		}
+		for (const item of parseJsonArray(run.created_edges_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.edges.add(id);
+		}
+	}
+
+	const counts = {
+		runs: (runs ?? []).length,
+		nodes: ids.nodes.size,
+		pages: ids.pages.size,
+		slices: ids.slices.size,
+		events: ids.events.size,
+		edges: ids.edges.size,
+	};
+
+	if (dryRun || !confirm) {
+		return { ok: true, dry_run: true, would_delete: counts, sample_labels: labels };
+	}
+
+	const now = Date.now();
+	const config = getConfig(env);
+
+	// Nodes first: their cascade also removes their remaining slices/events/
+	// edges, FTS rows, vectors, and regenerates neighbour summaries.
+	for (const nodeId of ids.nodes) {
+		await deleteObject(env, userId, { kind: "node", id: nodeId, suppress: false });
+	}
+	// Rows that landed on PRE-EXISTING nodes (or between them, for edges):
+	// the node cascade never saw these — delete them directly.
+	const slicesLeft = [...ids.slices];
+	const eventsLeft = [...ids.events];
+	const edgesLeft = [...ids.edges];
+	await softDeleteByIds(env, userId, "slices", slicesLeft, now);
+	await softDeleteByIds(env, userId, "events", eventsLeft, now);
+	await softDeleteByIds(env, userId, "edges", edgesLeft, now);
+	for (const pageId of ids.pages) {
+		await deleteObject(env, userId, { kind: "page", id: pageId, suppress: false });
+	}
+
+	// Which surviving nodes just lost facts? Their summaries are dirty.
+	const touched = new Set();
+	if (slicesLeft.length || eventsLeft.length) {
+		const list = async (table, rowIds) => {
+			const out = [];
+			for (const id of rowIds) {
+				const row = await env.DB.prepare(`SELECT node_id FROM ${table} WHERE id = ? AND user_id = ?`)
+					.bind(id, userId).first();
+				if (row?.node_id) out.push(row.node_id);
+			}
+			return out;
+		};
+		for (const nodeId of await list("slices", slicesLeft)) touched.add(nodeId);
+		for (const nodeId of await list("events", eventsLeft)) touched.add(nodeId);
+	}
+	for (const edgeId of edgesLeft) {
+		const row = await env.DB.prepare("SELECT from_node, to_node FROM edges WHERE id = ? AND user_id = ?")
+			.bind(edgeId, userId).first();
+		if (row?.from_node) touched.add(row.from_node);
+		if (row?.to_node) touched.add(row.to_node);
+	}
+	for (const nodeId of ids.nodes) touched.delete(nodeId);
+
+	const { regenerated } = await regenerateDirtySummaries(
+		env,
+		userId,
+		[...ids.nodes, ...slicesLeft, ...eventsLeft, ...edgesLeft],
+		[...touched],
+	);
+	await deleteNodeVectors(env, config, [...ids.nodes]);
+	if (touched.size) await refreshManualSearchProfiles(env, config, userId, { nodeIds: [...touched] });
+
+	await storeDeletionTombstone(env, userId, {
+		kind: "bulk_by_source",
+		ids: [...ids.nodes, ...ids.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft],
+		by,
+		source: "bulk_delete",
+	});
+
+	return { ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated };
 }

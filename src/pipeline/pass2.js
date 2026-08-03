@@ -68,7 +68,7 @@ function summaryClause(nodeLabel, text) {
 	return clause || null;
 }
 
-function fallbackSummary(node, slices, events) {
+export function fallbackSummary(node, slices, events) {
 	const clauses = [];
 	for (const item of [...slices, ...withoutAuditEvents(events)]) {
 		const clause = summaryClause(node.label, item?.text);
@@ -238,8 +238,16 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 			const summary = await summarizeNodeBestEffort(env, config, node, slices, events);
 			const cluster = clusterForMemory({ ...node, summary });
 			if (summary) {
-				await env.DB.prepare("UPDATE nodes SET summary = ?, cluster = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-					.bind(summary, cluster, Date.now(), nodeId, userId)
+				// Provenance (Part 3.4): the fact ids this summary was built from,
+				// so deletion can find and regenerate dependent summaries.
+				const sources = JSON.stringify([
+					...slices.map((s) => s.id),
+					...withoutAuditEvents(events).map((e) => e.id),
+				].slice(0, 40));
+				await env.DB.prepare(
+					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+				)
+					.bind(summary, cluster, sources, Date.now(), nodeId, userId)
 					.run();
 				refreshed++;
 				if (node.cluster !== cluster) clustered++;

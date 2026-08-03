@@ -1297,6 +1297,21 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				...guard.bindings,
 			),
 		);
+		// Summary provenance (Part 3.4): record which live facts this summary
+		// could have been built from, so a later delete can find and regenerate
+		// exactly the summaries that depended on the deleted content. Superset
+		// provenance — a false-positive regen is cheap; residue is not.
+		stmts.push(
+			env.DB.prepare(
+				`UPDATE nodes SET summary_sources_json = (
+					SELECT json_group_array(id) FROM (
+						SELECT id FROM slices WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL
+						UNION ALL
+						SELECT id FROM events WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL AND COALESCE(action, '') <> 'updated'
+					)
+				) WHERE id = ? AND user_id = ?`,
+			).bind(userId, update.id, userId, update.id, update.id, userId),
+		);
 	}
 
 	// Transient correction guards never survive a successful batch. If any later

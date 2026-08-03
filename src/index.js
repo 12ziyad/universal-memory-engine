@@ -15,6 +15,7 @@ import { getUserReceipts } from "./lib/db.js";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
 import {
 	archiveObject,
+	bulkDeleteBySource,
 	cleanJunkMemories,
 	clearFailedReceipts,
 	deleteAccountCompletely,
@@ -22,6 +23,7 @@ import {
 	deleteLastExtraction,
 	deleteObject,
 	repairGraph,
+	storeDeletionTombstone,
 } from "./pipeline/cleanup.js";
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
@@ -1578,6 +1580,12 @@ async function handleRequestInner(request, env, ctx, url) {
 			return handleCandidateRoutes(request, env, url, ctx);
 		}
 
+		// Real delete for API keys (Part 3). Sessions keep full power; Bearer
+		// keys are scoped to their account (and sub-tenant when userId given).
+		if (request.method === "DELETE" && (url.pathname === "/v1/memories" || url.pathname.startsWith("/v1/memories/"))) {
+			return handleMemoryDeleteRoutes(request, env, url, ctx);
+		}
+
 		// Packet status (Part 2.1): the public handle every receipt carries.
 		{
 			const match = url.pathname.match(/^\/v1\/packets\/([^/]+)\/status$/);
@@ -1681,6 +1689,52 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 		return json({ ok: true, sent: true });
 	}
 	return json({ error: "not found" }, 404);
+}
+
+/**
+ * DELETE /v1/memories/:id and DELETE /v1/memories?source=&before=&after=
+ * (fix round 1, Part 3). API keys are first-class here — the old blanket
+ * token_not_allowed on delete routes meant key holders could write forever
+ * and remove nothing. Bulk defaults to dry_run; destruction needs confirm.
+ */
+async function handleMemoryDeleteRoutes(request, env, url) {
+	const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+		requiredScope: MEMORY_WRITE_SCOPE,
+	});
+	if (auth.response) return auth.response;
+	if (!(await allowRate(env.SAVE_LIMITER, `del:${auth.userId}`))) return tooMany();
+	const by = auth.auth?.type === "token" ? `token:${auth.auth.token?.id ?? "unknown"}` : auth.auth?.type ?? "session";
+
+	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));
+	if (id) {
+		const kind = id.startsWith("node_") ? "node"
+			: id.startsWith("page_") ? "page"
+				: id.startsWith("cand") ? "candidate"
+					: null;
+		if (!kind) {
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, or candidate id." }, 400);
+		}
+		const exists = await env.DB.prepare(
+			`SELECT id FROM ${kind === "page" ? "memory_pages" : kind === "node" ? "nodes" : "candidates"} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		).bind(id, auth.userId).first();
+		if (!exists) return json({ error: "not_found" }, 404);
+		const result = await deleteObject(env, auth.userId, { kind, id, suppress: url.searchParams.get("suppress") !== "false" });
+		await storeDeletionTombstone(env, auth.userId, { kind, ids: [id], by, source: "delete_memory" });
+		return json({ ok: true, ...result });
+	}
+
+	// Bulk by source/time. dry_run defaults TRUE; only confirm=true destroys.
+	const dryRunParam = url.searchParams.get("dry_run");
+	const confirm = url.searchParams.get("confirm") === "true";
+	const result = await bulkDeleteBySource(env, auth.userId, {
+		source: url.searchParams.get("source") || null,
+		before: url.searchParams.get("before") || null,
+		after: url.searchParams.get("after") || null,
+		dryRun: dryRunParam === null ? !confirm : dryRunParam !== "false",
+		confirm,
+		by,
+	});
+	return json(result);
 }
 
 async function handleCandidateRoutes(request, env, url, ctx) {

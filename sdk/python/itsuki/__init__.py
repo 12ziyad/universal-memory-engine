@@ -127,6 +127,26 @@ class MemoryClient:
     def export_all(self) -> dict:
         return self._request("GET", "/v1/export")
 
+    def delete(self, memory_id: str) -> dict:
+        """Delete one memory object (node_/page_/candidate_ id)."""
+        from urllib.parse import quote
+        return self._request("DELETE", f"/v1/memories/{quote(memory_id, safe='')}")
+
+    def delete_by_source(self, source: Optional[str] = None, before: Optional[int] = None,
+                         after: Optional[int] = None, confirm: bool = False) -> dict:
+        """Bulk delete by source lane and/or time window.
+
+        SAFE BY DEFAULT: without ``confirm=True`` this is a dry run that only
+        reports what would go.
+        """
+        from urllib.parse import urlencode
+        params = {k: v for k, v in {"source": source, "before": before, "after": after}.items()
+                  if v is not None}
+        if confirm:
+            params["confirm"] = "true"
+            params["dry_run"] = "false"
+        return self._request("DELETE", f"/v1/memories?{urlencode(params)}")
+
     def packet_status(self, source_packet_id: str) -> dict:
         """Background-processing status for one accepted write, by packet id."""
         from urllib.parse import quote
