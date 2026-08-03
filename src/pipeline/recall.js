@@ -154,6 +154,67 @@ export function recallGate(query, opts = {}) {
 	return { ...base, mode: "light_recall", reason: opts.reason ?? "targeted_query" };
 }
 
+/**
+ * Relational-word → entity resolution (Part 5). "my partner", "my sister",
+ * "my manager" name people the graph knows only by their proper label. Each
+ * relation word maps to the edge types and node categories that can hold it,
+ * plus a text probe over stored facts ("Amara is my sister"). Deterministic,
+ * bounded (≤3 seeds per relation word), zero model calls.
+ */
+const RELATION_WORDS = {
+	partner: { edges: ["MARRIED_TO", "ENGAGED_TO", "DATING", "PARTNER_OF"], categories: ["relationship"] },
+	spouse: { edges: ["MARRIED_TO"], categories: ["relationship"] },
+	wife: { edges: ["MARRIED_TO"], categories: ["relationship"] },
+	husband: { edges: ["MARRIED_TO"], categories: ["relationship"] },
+	girlfriend: { edges: ["DATING", "ENGAGED_TO"], categories: ["relationship"] },
+	boyfriend: { edges: ["DATING", "ENGAGED_TO"], categories: ["relationship"] },
+	sister: { edges: ["SIBLING_OF"], categories: ["family"] },
+	brother: { edges: ["SIBLING_OF"], categories: ["family"] },
+	mother: { edges: ["PARENT_OF", "CHILD_OF"], categories: ["family"] },
+	father: { edges: ["PARENT_OF", "CHILD_OF"], categories: ["family"] },
+	cousin: { edges: [], categories: ["family"] },
+	aunt: { edges: [], categories: ["family"] },
+	uncle: { edges: [], categories: ["family"] },
+	grandmother: { edges: [], categories: ["family"] },
+	grandfather: { edges: [], categories: ["family"] },
+	manager: { edges: ["REPORTS_TO", "MANAGED_BY"], categories: [] },
+	boss: { edges: ["REPORTS_TO", "MANAGED_BY"], categories: [] },
+	teacher: { edges: ["TEACHES", "TAUGHT_BY"], categories: [] },
+};
+
+export function relationalSeeds(query, { nodes, edgeRows, slicesByNode, pastIntent = false } = {}) {
+	const queryWords = new Set(tokens(query));
+	const seeds = new Set();
+	const now = Date.now();
+	for (const [word, spec] of Object.entries(RELATION_WORDS)) {
+		if (!queryWords.has(word)) continue;
+		const found = [];
+		// (a) an edge of a matching type names the person directly
+		if (spec.edges.length) {
+			for (const edge of edgeRows ?? []) {
+				if (!spec.edges.includes(String(edge.type))) continue;
+				if (!pastIntent && edge.invalid_at != null && Number(edge.invalid_at) <= now) continue;
+				found.push(edge.from_node, edge.to_node);
+			}
+		}
+		// (b) a stored fact says so: "<label> is my sister", "my manager is <label>"
+		const probe = new RegExp(`\\bmy\\s+${word}\\b|\\bis\\s+my\\s+${word}\\b|\\b${word}\\s+is\\b`, "i");
+		for (const node of nodes ?? []) {
+			const slices = slicesByNode?.get(node.id) ?? [];
+			const corpus = [node.summary, ...slices.map((s) => s.text)].filter(Boolean).join(" ");
+			if (probe.test(corpus)) found.push(node.id);
+		}
+		// (c) category fallback, only when nothing more specific matched
+		if (found.length === 0 && spec.categories.length) {
+			for (const node of nodes ?? []) {
+				if (spec.categories.includes(String(node.category))) found.push(node.id);
+			}
+		}
+		for (const id of found.slice(0, 3)) seeds.add(id);
+	}
+	return seeds;
+}
+
 function tokenMatches(a, b) {
 	if (a === b) return true;
 	if (a.length >= 4 && b.startsWith(a)) return true;
@@ -509,29 +570,59 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 6 });
 	const vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
 
-	// ---- signal 4: graph expansion -------------------------------------------
+	// ---- signal 4: graph expansion (fix round 1, Part 5) ---------------------
 	// Walk edges out from the seeds the other signals matched — the only way a
 	// multi-hop question ("who works at the company I mentioned?") reaches an
-	// answer whose own text shares nothing with the query. Closed validity
-	// windows stay invisible here unless the question is about the past.
+	// answer whose own text shares nothing with the query. Two hops over
+	// ACTIVE validity windows only (valid_at <= now < invalid_at), ≤10
+	// neighbours per seed, ≤50 added total, hop-2 at half weight so nearer
+	// context outranks farther. Closed windows stay invisible unless the
+	// question is about the past. Recall stays zero LLM calls.
 	const seedIds = new Set();
 	for (const list of [exactRank, lexicalRank, vectorRank]) {
 		for (const entry of list.slice(0, 6)) {
 			if (entry.key.startsWith("node:")) seedIds.add(entry.key.slice(5));
 		}
 	}
-	const graphRank = [];
-	const expanded = new Set();
-	for (const edge of edgeRows) {
-		if (edge.invalid_at != null && !pastIntent) continue;
-		const fromSeed = seedIds.has(edge.from_node);
-		const toSeed = seedIds.has(edge.to_node);
-		if (!fromSeed && !toSeed) continue;
-		const other = fromSeed ? edge.to_node : edge.from_node;
-		if (!byId.has(other) || seedIds.has(other) || expanded.has(other)) continue;
-		expanded.add(other);
-		graphRank.push({ key: `node:${other}`, w: Number(edge.weight ?? 1) + Number(edge.reinforcement_count ?? 0) * 0.1 });
+	// Relational words resolve to entities: "my partner/sister/manager" names
+	// a PERSON the graph knows by label, alias, edge type, or a stored fact
+	// ("Amara is my sister") — without this, the one natural way to ask about
+	// your own people contributed zero seeds (trace 0.2, finding 4).
+	for (const id of relationalSeeds(q, { nodes, edgeRows, slicesByNode, pastIntent })) {
+		seedIds.add(id);
 	}
+	const now = Date.now();
+	const edgeActive = (edge) =>
+		(pastIntent || edge.invalid_at == null || Number(edge.invalid_at) > now)
+		&& (edge.valid_at == null || Number(edge.valid_at) <= now);
+	const MAX_NEIGHBOURS_PER_SEED = 10;
+	const MAX_EXPANSION_TOTAL = 50;
+	const graphRank = [];
+	const expanded = new Map(); // node id -> hop
+	let frontier = new Set(seedIds);
+	for (let hop = 1; hop <= 2 && graphRank.length < MAX_EXPANSION_TOTAL; hop++) {
+		const perSeed = new Map();
+		const nextFrontier = new Set();
+		for (const edge of edgeRows) {
+			if (graphRank.length >= MAX_EXPANSION_TOTAL) break;
+			if (!edgeActive(edge)) continue;
+			const fromSeed = frontier.has(edge.from_node);
+			const toSeed = frontier.has(edge.to_node);
+			if (!fromSeed && !toSeed) continue;
+			const seed = fromSeed ? edge.from_node : edge.to_node;
+			const other = fromSeed ? edge.to_node : edge.from_node;
+			if (!byId.has(other) || seedIds.has(other) || expanded.has(other)) continue;
+			const used = perSeed.get(seed) ?? 0;
+			if (used >= MAX_NEIGHBOURS_PER_SEED) continue;
+			perSeed.set(seed, used + 1);
+			expanded.set(other, hop);
+			nextFrontier.add(other);
+			const base = Number(edge.weight ?? 1) + Number(edge.reinforcement_count ?? 0) * 0.1;
+			graphRank.push({ key: `node:${other}`, w: base * (hop === 1 ? 1 : 0.5), hop });
+		}
+		frontier = nextFrontier;
+	}
+	// Hop decay lands through rank order: nearer, heavier neighbours first.
 	graphRank.sort((a, b) => b.w - a.w);
 
 	const lexicalUsed = exactRank.length > 0 || lexicalRank.length > 0;
