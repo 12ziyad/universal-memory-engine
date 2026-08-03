@@ -63,3 +63,10 @@ every accepted write and where it is. Webhooks can subscribe to
 **Idempotent replay:** re-sending identical content (or reusing an
 `idempotency_key`) within 24 hours returns the ORIGINAL receipt and enqueues
 nothing — client retries after a timeout cannot double-ingest.
+
+## Changelog note — add_conversation now builds the graph
+
+`add_conversation()` previously condensed the conversation into one flat
+memory page. It now runs the same extraction engine as every other write:
+entities, facts, relationships, bi-temporal history. Expect richer results
+from the same call — nodes AND edges where you used to get a page.

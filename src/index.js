@@ -567,6 +567,9 @@ const routes = {
 		let res;
 		if (mode === "conversation") {
 			if (!Array.isArray(messages)) return json({ error: "messages[] is required for conversation" }, 400);
+			// Engine-path test hooks (edge/reflexion responses) ride through like
+			// /v1/ingest's; digestResponse alone selects the legacy digest lane.
+			const { digestResponse, ...engineHooks } = t;
 			res = await runConversationCollectCommand(env, ctx, auth.userId, {
 				messages,
 				scope,
@@ -577,9 +580,16 @@ const routes = {
 				sourceId: body.sourceId,
 				idempotencyKey: body.idempotencyKey,
 				memoryScope: auth.memoryScope,
-				overrides,
-				digestResponse: t.digestResponse,
+				overrides: { ...overrides, ...engineHooks },
+				digestResponse,
 			});
+			if (res.backpressure) {
+				return json(
+					{ error: "queue_full", message: res.summary, retry_after_s: res.retry_after_s, queue_depth: res.queue_depth },
+					429,
+					{ "retry-after": String(res.retry_after_s ?? 30) },
+				);
+			}
 		} else {
 			if (typeof content !== "string" || !content.trim()) {
 				return json({ error: "content is required for a memory save" }, 400);

@@ -147,22 +147,67 @@ export async function runDirectSaveCommand(env, ctx, userId, input = {}) {
 	return finalizeSaveResponse(saveResponse("direct_save", "save_memory", res, env, userId, null, { received: 1 }));
 }
 
+/**
+ * lastN/topic narrowing — cheap, deterministic, honored at the door before
+ * the engine sees anything. (Local copy: the MCP server has the same helper,
+ * but it imports this module, so sharing would be a cycle.)
+ */
+function applyConversationScope(messages, { scope, n, topic }) {
+	let out = messages ?? [];
+	if (scope === "lastN" && Number(n) > 0) out = out.slice(-Number(n));
+	const topicText = scope === "topic" || topic ? String(topic ?? "").trim() : "";
+	if (topicText) {
+		const wanted = topicText.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+		if (wanted.length) {
+			out = out.filter((m) =>
+				(m?.role ?? "user") !== "user"
+				|| wanted.some((t) => String(m?.content ?? "").toLowerCase().includes(t)));
+		}
+	}
+	return out;
+}
+
 export async function runConversationCollectCommand(env, ctx, userId, input = {}) {
-	const res = await saveConversation(env, ctx, userId, input.messages ?? [], {
-		scope: input.scope,
-		n: input.n,
-		topic: input.topic,
+	// Legacy digest-page lane — deprecated alias. Reachable through its test
+	// hook and through scope:"summary" (a page-producing feature by
+	// definition; the engine path has no flat-page concept to map it onto).
+	if (input.digestResponse !== undefined || input.scope === "summary") {
+		console.log("manual_collect (deprecated): legacy digest-page lane used");
+		const res = await saveConversation(env, ctx, userId, input.messages ?? [], {
+			scope: input.scope,
+			n: input.n,
+			topic: input.topic,
+			conversationId: input.conversationId,
+			threadId: input.threadId,
+			sourceId: input.sourceId,
+			idempotencyKey: input.idempotencyKey,
+			memoryScope: input.memoryScope,
+			overrides: input.overrides,
+			digestResponse: input.digestResponse,
+		});
+		return finalizeSaveResponse(saveResponse("conversation_collect", "save_conversation", res, env, userId, null, {
+			received: (input.messages ?? []).length,
+		}));
+	}
+
+	// Fix round 1, Part 4: add_conversation IS the engine —
+	// ingest(messages, flush=true) semantics, so a rich conversation produces
+	// nodes AND edges instead of one flat digest page.
+	const messages = applyConversationScope(input.messages ?? [], input);
+	const result = await runObserveMessagesCommand(env, ctx, userId, messages, {
+		flush: true,
+		waitBudgetMs: Number(input.waitBudgetMs ?? getConfig(env).saveWaitBudgetMs),
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,
 		idempotencyKey: input.idempotencyKey,
 		memoryScope: input.memoryScope,
-		overrides: input.overrides,
-		digestResponse: input.digestResponse,
+		source: "save_conversation",
+		sourceMode: "conversation_collect",
+		overrides: { manual: true, ...(input.overrides ?? {}) },
 	});
-	return finalizeSaveResponse(saveResponse("conversation_collect", "save_conversation", res, env, userId, null, {
-		received: (input.messages ?? []).length,
-	}));
+	if (result.backpressure) return result;
+	return { ...result, command_mode: "conversation_collect", mode: "conversation_collect" };
 }
 
 export async function runObserveMessagesCommand(env, ctx, userId, messages, input = {}) {
