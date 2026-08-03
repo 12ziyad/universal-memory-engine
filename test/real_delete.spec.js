@@ -145,6 +145,38 @@ describe("bulk delete by source restores the before-state in ONE pass", () => {
 	}, 60000);
 });
 
+describe("candidates are covered by delete-by-source (Part 9 finding)", () => {
+	it("a run's weak candidates die with it, evidence text included", async () => {
+		const userId = `del-cand-${crypto.randomUUID()}`;
+		await new Promise((r) => setTimeout(r, 5));
+		const t0 = Date.now();
+		// A node-only proposal at low confidence parks a CANDIDATE carrying the
+		// message as evidence — the shape that survived a "complete" delete.
+		await ingest(userId, "c1", `${TAG} I might take up freediving in Sesimbra someday`, {
+			objects: [
+				{ kind: "node", label: "Freediving", category: "skill", matches_existing: null, confidence: 0.3 },
+			],
+			notes: "",
+		});
+		const before = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM candidates WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(before.n).toBeGreaterThan(0);
+
+		const dry = await call("DELETE", `/v1/memories?after=${t0}&userId=${encodeURIComponent(userId)}`);
+		expect(dry.body.would_delete.candidates).toBeGreaterThan(0);
+
+		const del = await call("DELETE", `/v1/memories?after=${t0}&confirm=true&dry_run=false&userId=${encodeURIComponent(userId)}`);
+		expect(del.body.deleted.candidates).toBeGreaterThan(0);
+
+		const after = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM candidates WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(after.n).toBe(0);
+		expect(await grepAccount(userId, TAG)).toEqual([]);
+	}, 30000);
+});
+
 describe("single-object delete for API callers (3.1)", () => {
 	it("DELETE /v1/memories/:id cascades and tombstones; unknown id 404s", async () => {
 		const userId = `del-one-${crypto.randomUUID()}`;

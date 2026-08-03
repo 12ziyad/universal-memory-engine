@@ -120,9 +120,10 @@ export async function createExtractionRun(env, userId, data = {}) {
 		`INSERT INTO extraction_runs
 			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
-			 created_edges_json, updated_objects_json, reinforced_objects_json, skipped_objects_json,
-			 error, created_at, updated_at, source_packet_id, idempotency_key, scope_json, job_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 created_edges_json, created_candidates_json, updated_objects_json, reinforced_objects_json,
+			 skipped_objects_json, error, created_at, updated_at, source_packet_id, idempotency_key,
+			 scope_json, job_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			id,
@@ -137,6 +138,7 @@ export async function createExtractionRun(env, userId, data = {}) {
 			JSON.stringify(data.created_slices ?? data.createdSlices ?? []),
 			JSON.stringify(data.created_events ?? data.createdEvents ?? []),
 			JSON.stringify(data.created_edges ?? data.createdEdges ?? []),
+			JSON.stringify(data.created_candidates ?? data.createdCandidates ?? []),
 			JSON.stringify(data.updated_objects ?? data.updatedObjects ?? []),
 			JSON.stringify(data.reinforced_objects ?? data.reinforcedObjects ?? []),
 			JSON.stringify(data.skipped_objects ?? data.skippedObjects ?? []),
@@ -164,6 +166,7 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 		created_slices_json: "createdSlices",
 		created_events_json: "createdEvents",
 		created_edges_json: "createdEdges",
+		created_candidates_json: "createdCandidates",
 		updated_objects_json: "updatedObjects",
 		reinforced_objects_json: "reinforcedObjects",
 		skipped_objects_json: "skippedObjects",
@@ -183,6 +186,7 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 			"created_slices_json",
 			"created_events_json",
 			"created_edges_json",
+			"created_candidates_json",
 			"updated_objects_json",
 			"reinforced_objects_json",
 			"skipped_objects_json",

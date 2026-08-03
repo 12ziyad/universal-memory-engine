@@ -24,5 +24,6 @@
  "0023_webhooks.sql": "ec8dcacd90da6a8e810506ffd9010be0cc950687559e79e89397fd2c5f6cd05e",
  "0024_mcp_engine_lane.sql": "f90a5ef110d1766648d9cb26a6f1a588522ee9b577b741df78efdcc587f8248a",
  "0025_summary_provenance.sql": "cc7a3bfa7e1dc5600669b9a23a418b659bd93d52784fd0c2688cba1928389c28",
- "0026_staged_memories.sql": "d3c1183bba19372aaf0da95e9adcb8c93e7baf800d8124c2a55b1988a53e9cc7"
+ "0026_staged_memories.sql": "d3c1183bba19372aaf0da95e9adcb8c93e7baf800d8124c2a55b1988a53e9cc7",
+ "0027_run_candidates.sql": "f149da65a386d2c536212d19e867c55b6b544f391e84bebfeb7ed4f00cfeb89f"
 }

@@ -192,6 +192,11 @@ function runListsFromPlan(plan) {
 		createdSlices: (plan.newSlices ?? []).map((s) => ({ id: s.id, node_id: s.node_id, kind: s.kind })),
 		createdEvents: (plan.newEvents ?? []).map((e) => ({ id: e.id, node_id: e.node_id, action: e.action })),
 		createdEdges: (plan.newEdges ?? []).map((e) => ({ id: e.id, from_node: e.from_node, to_node: e.to_node, type: e.type })),
+		// Candidates are created objects too. Leaving them off the ledger meant
+		// delete-by-source could not see them: the Part 9 acceptance run found
+		// eight fictional candidates (and their evidence text) surviving a
+		// "complete" bulk delete.
+		createdCandidates: (plan.newCandidates ?? []).map((c) => ({ id: c.id, label: c.label })),
 		updatedObjects: [
 			...[...(plan.nodeTouches ?? [])].map((id) => ({ kind: "node", id })),
 			...(plan.nodeStateUpdates ?? []).map((u) => ({ kind: "node", id: u.id, state: u.state })),

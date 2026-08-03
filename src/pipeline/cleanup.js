@@ -776,11 +776,14 @@ export async function bulkDeleteBySource(env, userId, {
 	}
 	const { results: runs } = await env.DB.prepare(
 		`SELECT id, source_mode, tool_name, created_nodes_json, created_pages_json,
-			created_slices_json, created_events_json, created_edges_json
+			created_slices_json, created_events_json, created_edges_json, created_candidates_json
 		 FROM extraction_runs WHERE ${clauses.join(" AND ")}`,
 	).bind(...binds).all();
 
-	const ids = { nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(), edges: new Set() };
+	const ids = {
+		nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(),
+		edges: new Set(), candidates: new Set(),
+	};
 	const labels = [];
 	for (const run of runs ?? []) {
 		for (const item of parseJsonArray(run.created_nodes_json)) {
@@ -804,6 +807,12 @@ export async function bulkDeleteBySource(env, userId, {
 			const id = item?.id ?? item;
 			if (id) ids.edges.add(id);
 		}
+		// Candidates carry their own evidence text — a delete that skips them
+		// leaves the deleted content findable (Part 9 acceptance finding).
+		for (const item of parseJsonArray(run.created_candidates_json)) {
+			const id = item?.id ?? item;
+			if (id) ids.candidates.add(id);
+		}
 	}
 
 	const counts = {
@@ -813,6 +822,7 @@ export async function bulkDeleteBySource(env, userId, {
 		slices: ids.slices.size,
 		events: ids.events.size,
 		edges: ids.edges.size,
+		candidates: ids.candidates.size,
 	};
 
 	if (dryRun || !confirm) {
@@ -835,6 +845,7 @@ export async function bulkDeleteBySource(env, userId, {
 	await softDeleteByIds(env, userId, "slices", slicesLeft, now);
 	await softDeleteByIds(env, userId, "events", eventsLeft, now);
 	await softDeleteByIds(env, userId, "edges", edgesLeft, now);
+	await softDeleteByIds(env, userId, "candidates", [...ids.candidates], now);
 	for (const pageId of ids.pages) {
 		await deleteObject(env, userId, { kind: "page", id: pageId, suppress: false });
 	}
@@ -873,7 +884,7 @@ export async function bulkDeleteBySource(env, userId, {
 
 	await storeDeletionTombstone(env, userId, {
 		kind: "bulk_by_source",
-		ids: [...ids.nodes, ...ids.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft],
+		ids: [...ids.nodes, ...ids.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft, ...ids.candidates],
 		by,
 		source: "bulk_delete",
 	});
