@@ -1,0 +1,72 @@
+{
+ "tenant": "fixround1-replay-block567",
+ "run_started": 1785769935942,
+ "writes_done": 1785770102086,
+ "quiesced_at": null,
+ "tail_to_clear_s": 607.577,
+ "calls": 65,
+ "errors": 0,
+ "error_samples": [],
+ "jobs_total": 58,
+ "jobs_by_status": {
+  "queued": 35,
+  "processing": 3,
+  "enriched": 20
+ },
+ "jobs_pending_after_quiesce": 38,
+ "graph": {
+  "nodes": 33,
+  "pages": 0,
+  "clusters": 7,
+  "slices": 39,
+  "events": 15,
+  "edges": 36,
+  "candidates": 2
+ },
+ "ai_calls": 128,
+ "neurons": 2520.3,
+ "usd_at_0011_per_1k": 0.0277,
+ "latency_ms": {
+  "ingest": {
+   "n": 27,
+   "p50": 882,
+   "p95": 5721,
+   "max": 6730
+  },
+  "add": {
+   "n": 32,
+   "p50": 1301.5,
+   "p95": 1783,
+   "max": 5649
+  },
+  "search": {
+   "n": 6,
+   "p50": 259.5,
+   "p95": 401,
+   "max": 401
+  }
+ },
+ "duplicates_reported": 1,
+ "converged": {
+  "jobs": {
+   "enriched": 58,
+   "failed": 0
+  },
+  "graph": {
+   "nodes": 59,
+   "pages": 0,
+   "slices": 83,
+   "events": 44,
+   "edges": 84,
+   "candidates": 8
+  },
+  "ai_calls": 240,
+  "neurons": 4171.4,
+  "usd": 0.0459,
+  "edge_pass_unparseable_receipts": "0 of 50",
+  "duplicates_noop": 11,
+  "multi_hop_live": "5/5 (was 0/5 on Aug 2)",
+  "edge_precision_graded": "5/5 mechanically graded; ZERO type-pair violations in 84 edges (baseline: 5/10 with org/place-as-subject bugs)",
+  "gold_recall": "5/7 relations, 3/3 expected nodes incl Aveiro; marriage edge from the sister sentence present"
+ }
+}
