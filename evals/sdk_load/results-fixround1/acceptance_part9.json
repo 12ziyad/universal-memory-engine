@@ -1,0 +1,134 @@
+{
+ "tenant": "fixround1-accept2",
+ "run_started": 1785777942487,
+ "criteria": [
+  {
+   "criterion": 1,
+   "name": "accepted == enriched + failed, failed == 0, zero pending after quiesce",
+   "pass": true,
+   "detail": "accepted=58 enriched=58 failed=0 pending=0 (sweep evidence captured separately from production logs)"
+  },
+  {
+   "criterion": 2,
+   "name": "status endpoint answers correctly for every packet id",
+   "pass": true,
+   "detail": "58 packet ids checked, all terminal"
+  },
+  {
+   "criterion": 3,
+   "name": "multi-hop fixtures >= 4/5 (live)",
+   "pass": true,
+   "detail": "4/5 — Q1=hit, Q2=hit, Q3=hit, Q4=hit, Q5=MISS"
+  },
+  {
+   "criterion": 4,
+   "name": "edge quality MEASURED (type-pair violations, Aveiro, sister relations, node typing)",
+   "pass": true,
+   "detail": "type_pair_violations=0 []; Aveiro=True; sister_relations=['Ines Barbosa -[LIVES_IN]-> Aveiro', 'Ines Barbosa -[TEACHES_IN]-> Aveiro', 'Paulo Ramalho -[WORKS_AT]-> Aveiro']; off-enum categories=[] (precision scored separately by evals/edge_gold/score.py — measured, never gated)"
+  },
+  {
+   "criterion": 5,
+   "name": "no cross-contamination into pre-existing nodes",
+   "pass": false,
+   "detail": "1: ['Swimming: summary changed']"
+  },
+  {
+   "criterion": 7,
+   "name": "cost and p50s recorded (vs the 5+6+7 block run: $0.0459, ingest p50 882ms)",
+   "pass": true,
+   "detail": "ai_calls=218 neurons=3789.4 usd=0.0417; ingest p50=386ms p95=4111ms; add p50=1076.0ms; search p50=595.5ms"
+  },
+  {
+   "criterion": 6,
+   "name": "bulk delete by source restores the exact baseline in ONE pass",
+   "pass": true,
+   "detail": "before={'nodes': 7, 'pages': 0, 'clusters': 4, 'slices': 8, 'events': 1, 'edges': 0, 'candidates': 0} after_run={'nodes': 67, 'pages': 0, 'clusters': 9, 'slices': 72, 'events': 48, 'edges': 86, 'candidates': 7} restored={'nodes': 7, 'pages': 0, 'clusters': 4, 'slices': 8, 'events': 1, 'edges': 0, 'candidates': 0} | dry_run_counts={'runs': 58, 'nodes': 60, 'pages': 0, 'slices': 64, 'events': 47, 'edges': 86, 'candidates': 7} deleted={'runs': 58, 'nodes': 60, 'pages': 0, 'slices': 64, 'events': 47, 'edges': 86, 'candidates': 7} summaries_regenerated=1 | residue=[]"
+  }
+ ],
+ "jobs_by_status_all": {
+  "enriched": 64
+ },
+ "graph_after_run": {
+  "nodes": 67,
+  "pages": 0,
+  "clusters": 9,
+  "slices": 72,
+  "events": 48,
+  "edges": 86,
+  "candidates": 7
+ },
+ "baseline": {
+  "nodes": 7,
+  "pages": 0,
+  "clusters": 4,
+  "slices": 8,
+  "events": 1,
+  "edges": 0,
+  "candidates": 0
+ },
+ "restored": {
+  "nodes": 7,
+  "pages": 0,
+  "clusters": 4,
+  "slices": 8,
+  "events": 1,
+  "edges": 0,
+  "candidates": 0
+ },
+ "cost": {
+  "ai_calls": 218,
+  "neurons": 3789.4,
+  "usd": 0.0417
+ },
+ "latency_ms": {
+  "ingest": {
+   "n": 27,
+   "p50": 386,
+   "p95": 4111,
+   "max": 10925
+  },
+  "add": {
+   "n": 32,
+   "p50": 1076,
+   "p95": 1234,
+   "max": 5644
+  },
+  "search": {
+   "n": 6,
+   "p50": 595.5,
+   "p95": 1714,
+   "max": 1714
+  }
+ },
+ "edge_quality_measured": {
+  "edges_total": 86,
+  "graded": 5,
+  "precision_graded": "5/5 = 100%",
+  "gold_recall": "5/7 = 71%",
+  "expected_nodes_present": [
+   "Aveiro",
+   "Ines Barbosa",
+   "Paulo Ramalho"
+  ],
+  "wrong_edges": [],
+  "ungraded_for_human_judgement": 81,
+  "note": "MEASURED, never gated - 5 graded edges is far too small a sample to gate on"
+ },
+ "criterion_5_diagnosis": {
+  "node": "Swimming (habit)",
+  "baseline_slices": 1,
+  "midrun_slices": 4,
+  "cause": "EXACT-name match: the dataset also describes swimming, so its facts merged into the pre-existing Swimming node. Not the Aug 2 wrong-merge disease (Meridian Freight/Labs, Clara/Amara) - no wrong-entity fusion occurred; 6 of 7 baseline nodes untouched.",
+  "reverted_by_delete": true
+ },
+ "sweep_evidence": [
+  "run 1: rescued=1 x5 during drain, orphanReceipts=0 and errors=0 on every fire, rescued=0 at quiesce"
+ ],
+ "comparison_anchor": {
+  "block_5_6_7": {
+   "usd": 0.0459,
+   "ingest_p50_ms": 882,
+   "jobs": "58/58 enriched"
+  }
+ }
+}
