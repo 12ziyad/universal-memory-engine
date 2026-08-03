@@ -225,6 +225,25 @@ state, and the sweep. Next migration number is **0025**.
 
 ---
 
+## Addendum (2026-08-03, after Parts 1–4): the orphan-vector census
+
+Because `deleteNodeVectors` had no callers before Part 3, every delete ever made
+left its vector behind. Measured with `wrangler vectorize list-vectors` against
+live D1 rows:
+
+- Index held **219 vectors**: 205 node-keyed, 14 page-keyed (`page:` prefix,
+  written by the search-profile lane).
+- **24 true orphans (11%)** — 21 node vectors + 3 page vectors with no live row.
+- Effect on recall: correctness was never at risk (the live-row filter drops
+  them), but each orphan that ranks in a query's topK (topN+6 ≈ 14 slots)
+  displaces a live candidate — silent recall-quality degradation concentrated
+  exactly where deletions happened (the QA account).
+- One-time sweep EXECUTED the same day: 24 ids re-verified against D1 and
+  deleted (mutation `8e20ff69-ada0-4d43-8dbd-f8af66183f90`). Going forward the
+  Part 3 cascade deletes vectors at delete time, so the census should stay at
+  zero orphans (page-vector deletion runs through deleteManualSearchObjects, which
+  was already wired).
+
 ## Reconciliation of findings vs the build spec
 
 - Part 1: fully confirmed; no deviation. The completion-race delete (0.1c-1) is the
