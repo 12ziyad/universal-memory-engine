@@ -33,6 +33,12 @@ const REASON_PHRASE = {
 	outside_include_rules: "outside your include rules",
 	ungrounded_fact: "not grounded in what was sent",
 	batch_text_blob: "stitched from multiple messages",
+	edge_type_pair_mismatch: "impossible relation for these kinds of things",
+	edge_no_evidence: "no quoted evidence",
+	edge_evidence_not_verbatim: "evidence quote not found in the messages",
+	edge_evidence_missing_endpoint: "evidence quote does not name both sides",
+	edge_unknown_entity_id: "cited an unknown entity",
+	fact_unknown_entity_id: "cited an unknown entity",
 	unknown_kind: "unrecognized",
 };
 

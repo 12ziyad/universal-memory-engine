@@ -401,8 +401,12 @@ const routes = {
 			messages: body.messages,
 			temperature: body.temperature ?? 0,
 			max_tokens: body.max_tokens ?? 512,
+			// Pass-through for the 6.3 structured-output verification (and any
+			// future eval that needs schema-constrained decoding).
+			...(body.response_format ? { response_format: body.response_format } : {}),
+			...(body.guided_json ? { guided_json: body.guided_json } : {}),
 		});
-		return json({ text: responseText(res), model });
+		return json({ text: responseText(res), model, raw_keys: Object.keys(res ?? {}), ...(body.debug_raw ? { raw: res } : {}) });
 	},
 
 	"POST /v1/ingest": async (request, env, ctx) => {

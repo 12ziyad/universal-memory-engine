@@ -34,6 +34,8 @@ Reply with EXACTLY ONE JSON object and nothing else — no prose, no markdown, n
     { "kind": "node", "label": "Kaka", "category": "project", "matches_existing": null, "confidence": 0.9 },
     { "kind": "node", "label": "Cloudflare Workers", "category": "tool", "matches_existing": null, "confidence": 0.9 },
     { "kind": "edge", "from": "Kaka", "to": "Cloudflare Workers", "type": "uses", "confidence": 0.9 },
+    { "kind": "node", "label": "Aveiro", "category": "place", "matches_existing": null, "confidence": 0.9 },
+    { "kind": "slice", "on": "Aveiro", "text": "Sister lives in Aveiro", "kind_detail": "other", "confidence": 0.9 },
     { "kind": "candidate", "label": "Piano", "strength": "weak", "confidence": 0.5 }
   ],
   "notes": "short reasoning"
@@ -44,6 +46,7 @@ What counts as memory (SAVE these — judge by meaning, not keywords):
 - health: a diagnosis, condition, injury, fitness or mental-health update.
 - life changes: moved, new job, left a job, graduated.
 - the user's projects, skills, habits, goals, decisions, preferences, and the tools/systems they use.
+- PLACES the user's life happens in: home city, a relative's city, a workplace's location. "My sister lives in Aveiro" → node Aveiro (place), not just a fact about the sister.
 Do NOT save: greetings/thanks/jokes ("ok", "lol", "thanks"), pure questions, generic world facts not about the user, your own assistant explanations, or trivial throwaway details.
 
 Rules:

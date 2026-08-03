@@ -33,6 +33,7 @@ import { buildReceipt, emptyReceipt } from "./receipt.js";
 import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
 import { getMemoryRules, rulesAllowText } from "./rules.js";
+import { normalizeLabel } from "../lib/text.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
@@ -394,6 +395,23 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		];
 		meta.edge_pass_edges = edgePass.edges.length;
 		meta.reflexion_added = reflexion.entities.length + reflexion.facts.length + reflexion.edges.length;
+
+		// 6.6 OPTIONAL delta edge pass — a 4th call scoped to entities the
+		// reflexion pass surfaced, so their relationships get an attention
+		// budget too. Behind ENGINE_DELTA_PASS, DEFAULT OFF: it changes cost
+		// and latency, which is Ziyad's dial, not the build's.
+		if (config.engineDeltaPass && reflexion.entities.length > 0) {
+			const extended = numberEntities(objects, shortlist);
+			const delta = await proposeEdges(env, config, packet, extended, withRules);
+			preRejected.push(...delta.rejected);
+			const known = new Set(objects.filter((o) => o.kind === "edge").map((e) => `${e.from}|${e.type}|${e.to}`));
+			const newLabels = new Set(reflexion.entities.map((e) => normalizeLabel(e.label)));
+			const fresh = delta.edges.filter((e) =>
+				!known.has(`${e.from}|${e.type}|${e.to}`)
+				&& (newLabels.has(normalizeLabel(e.from)) || newLabels.has(normalizeLabel(e.to))));
+			objects = [...objects, ...fresh];
+			meta.delta_pass_edges = fresh.length;
+		}
 	}
 
 	// G — gates (the backend judge). manual=true → lenient Path A gate.

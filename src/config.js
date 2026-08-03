@@ -197,6 +197,9 @@ export function getConfig(env) {
 		// Engine v2: the edge and reflexion passes after extraction. ON by
 		// default; ENGINE_V2="false" is the kill switch back to one-call saves.
 		engineV2: flag(env.ENGINE_V2, true),
+		// 6.6 delta edge pass over reflexion's new entities: a conditional 4th
+		// model call. DEFAULT OFF — enabling it is a cost/latency decision.
+		engineDeltaPass: flag(env.ENGINE_DELTA_PASS, false),
 
 		// LLM (the proposer). Provider + model are configurable; route through an
 		// AI Gateway by setting AI_GATEWAY_ID.

@@ -1,0 +1,35 @@
+{
+  "description": "Gold relations for the 150-message load dataset (harness 9c42384). Derived from the dataset messages themselves; type_class groups acceptable relation-type synonyms. Part 6.7: MEASURE precision/recall against this set - never gate on it (14-edge samples are too small to gate).",
+  "type_classes": {
+    "employment": ["WORKS_AT", "EMPLOYED_AT", "EMPLOYED_BY", "WORKS_FOR"],
+    "reporting": ["REPORTS_TO", "MANAGED_BY"],
+    "managing": ["MANAGES"],
+    "residence": ["LIVES_IN", "BASED_IN", "RESIDES_IN"],
+    "location": ["LOCATED_IN", "IN", "BASED_IN"],
+    "marriage": ["MARRIED_TO", "SPOUSE_OF", "HUSBAND_OF", "WIFE_OF"],
+    "family": ["SISTER_OF", "SIBLING_OF", "BROTHER_IN_LAW_OF", "SISTER_IN_LAW_OF"],
+    "teaching": ["TEACHES", "TAUGHT_BY", "INSTRUCTS"],
+    "membership": ["MEMBER_OF", "PART_OF", "SWIMS_WITH", "BELONGS_TO"],
+    "partner": ["PARTNER_OF", "MARRIED_TO", "DATING", "ENGAGED_TO"]
+  },
+  "expected": [
+    {"from": "Marta Coelho", "to": "Atelier Barro", "class": "employment", "source": "m003"},
+    {"from": "Rui Salgado", "to": "Setubal", "class": "residence", "source": "m006"},
+    {"from": "Yusuf Demir", "to": "Rui Salgado", "class": "reporting", "source": "m007"},
+    {"from": "Ines Barbosa", "to": "Aveiro", "class": "residence", "source": "m010"},
+    {"from": "Ines Barbosa", "to": "Paulo Ramalho", "class": "marriage", "source": "m010"},
+    {"from": "Teodor Vlahov", "to": "Ceramics", "class": "teaching", "source": "m012", "to_fuzzy": true},
+    {"from": "Nils Andersen", "to": "Meridian Freight", "class": "employment", "source": "m065"},
+    {"from": "Marta Coelho", "to": "Setubal", "class": "residence", "source": "m054", "optional": true}
+  ],
+  "expected_nodes": ["Aveiro", "Ines Barbosa", "Paulo Ramalho"],
+  "known_wrong_patterns": [
+    {"pattern": "org-endpoint WORKS_AT/LIVES_IN place", "example": "Cabo Verde Shipping WORKS_AT Lisbon", "kills": "6.2 type-pair gate"},
+    {"pattern": "co-mention invention", "example": "Teodor Vlahov USES Atelier Barro", "kills": "6.1 evidence gate"}
+  ],
+  "aug2_sample_grades": {
+    "note": "Aug 2 judged sample: 8 correct, 2 wrong, 4 questionable out of 14 new edges",
+    "wrong": ["Cabo Verde Shipping WORKS_AT Lisbon", "Teodor Vlahov uses Atelier Barro"],
+    "questionable": ["Ceramics class part_of Atelier Barro", "Dr. Alma Ferreira related_to Estrela", "Teodor Vlahov related_to Japan", "Container Dwell-Time Model part_of Cabo Verde Shipping"]
+  }
+}
