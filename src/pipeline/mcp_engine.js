@@ -31,7 +31,7 @@
 
 import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
-import { createMemoryJob, storeReceipt, updateMemoryJob } from "../lib/db.js";
+import { activeJobDepth, createMemoryJob, storeReceipt, updateMemoryJob } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { runExtraction } from "./extract.js";
@@ -422,6 +422,20 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			receiptId,
 			sourcePacket: normalized.packet,
 			extra: { page_id: existing.page?.id ?? null, title, staged_facts: null, job_status: status, duplicate: true },
+		});
+	}
+
+	// 1.7 backpressure — every lane refuses clearly at the same depth cap.
+	const queueDepth = await activeJobDepth(env, userId);
+	if (queueDepth >= 200) {
+		const receipt = emptyReceipt("queue_full", "too much unprocessed work — retry shortly", {
+			source: SOURCE, source_mode: SOURCE_MODE, received,
+		});
+		const summary = "Your memory queue is full — give it a moment to catch up, then retry this save.";
+		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
+		return commandResult({
+			fired: false, processing: false, summary, receipt, receiptId,
+			extra: { backpressure: true, queue_depth: queueDepth, retry_after_s: 30 },
 		});
 	}
 

@@ -32,6 +32,32 @@ function finalize(res, { prefix = "", processingNote }) {
 			source_packet_id: res.receipt?.source_packet_id ?? res.sourcePacket?.id ?? null,
 		};
 	}
+	if (res.duplicate) {
+		// 1.10 idempotent replay: this exact content was already accepted —
+		// answer with the original receipt, having enqueued nothing.
+		return {
+			fired: false,
+			processing: false,
+			duplicate: true,
+			summary: prefix + (res.summary ?? "Already saved — this exact content was accepted earlier."),
+			receipt: res.receipt ?? null,
+			receipt_id: res.receiptId ?? res.receipt?.id ?? null,
+			sourcePacket: res.sourcePacket ?? null,
+			source_packet_id: res.receipt?.source_packet_id ?? null,
+		};
+	}
+	if (res.backpressure) {
+		return {
+			fired: false,
+			processing: false,
+			backpressure: true,
+			summary: prefix + "Your memory queue is full — give it a moment to catch up, then retry.",
+			receipt: null,
+			receipt_id: null,
+			sourcePacket: null,
+			source_packet_id: null,
+		};
+	}
 	if (!res.fired) {
 		return {
 			fired: false,

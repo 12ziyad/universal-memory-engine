@@ -1,13 +1,23 @@
 /**
  * UserMemory — one Durable Object per user (keyed by userId). It owns, per user:
- *   - the held chunk (messages waiting to be processed),
- *   - a small rolling buffer of recent raw messages (for bridge/assistant context),
+ *   - the held chunk (messages waiting for the trigger),
+ *   - a durable QUEUE of fired work (`q:*` entries), one small sub-chunk each,
+ *   - a small rolling buffer of recent raw messages (bridge/assistant context),
  *   - the checkpoint (last_processed_msg_id),
- *   - a lock so only one extraction runs at a time (no double-processing).
+ *   - a storage-backed LEASE so only one drain runs at a time.
  *
- * All ingest for a user routes through this object. It decides IGNORE/HOLD/FIRE
- * (via the trigger) but delegates the heavy extraction to the pipeline. The
- * checkpoint advances ONLY after a successful write.
+ * Design principle (fix round 1): alarms are hints; storage is truth. The
+ * drain loop is driven by queue contents in storage, never by whether one
+ * particular fire "got through". The failure this replaces: an in-memory
+ * `busy` flag plus a completion-time alarm delete raced concurrent ingests
+ * and stranded accepted work with no alarm and no record — 200s all the way
+ * down, nothing saved (docs/fix-round-1-trace.md, 0.1).
+ *
+ * Invariant this file upholds: every accepted write (a `memory_jobs` row
+ * created at the door) ends in `enriched` or `failed`, visibly. Entries are
+ * processed a bounded number per alarm, poison entries dead-letter after
+ * MAX_ATTEMPTS without blocking the head of the queue, and every exit path
+ * that leaves work in storage guarantees a future alarm before returning.
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -16,17 +26,57 @@ import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
 import { enrichMcpConversation } from "../pipeline/mcp_engine.js";
 import { formatReceipt } from "../pipeline/receipt.js";
 import { runExport as runExportJob } from "../pipeline/exports.js";
-import { storeReceipt } from "../lib/db.js";
+import { storeReceipt, settleMemoryJobs } from "../lib/db.js";
+import { reportServerError } from "../lib/report.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
+import { DIALS } from "../config.js";
 
 const RECENT_LIMIT = 20;
 
-export class UserMemory extends DurableObject {
-	constructor(ctx, env) {
-		super(ctx, env);
-		this.busy = false; // in-memory extraction lock for this instance
-	}
+// 1.6 chunk caps: a queue entry never exceeds either bound, whichever first.
+// ~4 chars/token puts 12k chars near the 3k-token input budget that keeps one
+// extraction call fast, parseable, and cheap to retry.
+const MAX_ENTRY_MSGS = 20;
+const MAX_ENTRY_CHARS = 12000;
 
+// 1.5 poison ceiling and 1.9 drain pacing.
+const MAX_ATTEMPTS = 3;
+const MAX_JOBS_PER_DRAIN = 3;
+
+// 1.2 lease: storage-backed concurrency guard. Long enough for one capped
+// extraction (multi-pass, slow model), short enough that a killed isolate
+// frees the queue quickly.
+const LEASE_MS = 120_000;
+
+// Entries older than this get `drained_from_backlog` on their receipts so a
+// sudden burst of graph changes is explainable in the UI.
+const BACKLOG_AGE_MS = 10 * 60 * 1000;
+
+const backoffMs = (attempts) => Math.min(5000 * 2 ** Math.max(0, attempts - 1), 600_000);
+
+/**
+ * Overrides may carry function-valued test hooks (JSRPC passes them as
+ * callback stubs). Those can ride an inline drain call but can never be
+ * persisted — DO storage structured-clones. Keep the serializable subset for
+ * the queue; the caller passes the full object as inlineOverrides when it
+ * wants the hooks honored right now.
+ */
+function persistableOverrides(value) {
+	if (value === null || value === undefined) return value ?? {};
+	if (typeof value === "function") return undefined;
+	if (Array.isArray(value)) return value.map((v) => persistableOverrides(v)).filter((v) => v !== undefined);
+	if (typeof value === "object") {
+		const out = {};
+		for (const [k, v] of Object.entries(value)) {
+			const kept = persistableOverrides(v);
+			if (kept !== undefined) out[k] = kept;
+		}
+		return out;
+	}
+	return value;
+}
+
+export class UserMemory extends DurableObject {
 	async #load() {
 		const [chunk, recent, checkpoint, userId, seen] = await Promise.all([
 			this.ctx.storage.get("chunk"),
@@ -64,9 +114,131 @@ export class UserMemory extends DurableObject {
 	}
 
 	/**
-	 * Append new messages, run the trigger, and report whether a fire is due.
+	 * Earliest-next-wake alarm arming. A DO has exactly ONE alarm and setAlarm
+	 * overwrites, so every scheduling decision goes through this min-merge —
+	 * nothing may push an existing wake-up later.
+	 *
+	 * DO_WAKE_ALARMS="false" (vitest only) disables self-arming: the test
+	 * pool's per-test stacked storage cannot tolerate alarms firing across
+	 * test boundaries, and every test drives drains explicitly instead. The
+	 * production guarantee (queue in storage + alarms + cron sweep) is
+	 * covered by dedicated queue tests.
+	 */
+	async #armAlarm(at) {
+		if (String(this.env.DO_WAKE_ALARMS ?? "true") === "false") return;
+		const pending = await this.ctx.storage.getAlarm();
+		if (!pending || pending > at) await this.ctx.storage.setAlarm(at);
+	}
+
+	/**
+	 * The exit gate: called on EVERY path that returns control while storage
+	 * may hold work. Re-checks storage AFTER any alarm delete, so the
+	 * completion race that stranded backlogs (trace 0.1c-1) is structurally
+	 * closed: no code path can observe "work present" without an alarm set.
+	 */
+	async #guaranteeWake() {
+		const entries = await this.ctx.storage.list({ prefix: "q:", limit: 64 });
+		const legacy = await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 });
+		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+		const unsettled = chunk.filter((m) => !m._settled);
+
+		let earliest = null;
+		if (legacy.size > 0) earliest = Date.now() + 250;
+		for (const [, entry] of entries) {
+			const at = Math.max(Date.now() + 250, Number(entry.runAfter ?? 0));
+			if (earliest === null || at < earliest) earliest = at;
+		}
+		// A live lease means a drain is actively working the queue — waking
+		// before it could finish is pure churn. Floor the wake at lease expiry
+		// (which is also the revival path if the drainer's isolate died).
+		if (earliest !== null) {
+			const lease = await this.ctx.storage.get("lease");
+			if (lease && Number(lease.until) > Date.now()) {
+				earliest = Math.max(earliest, Number(lease.until) + 1000);
+			}
+		}
+		if (earliest === null && unsettled.length > 0) {
+			// Held-but-not-fired messages must still fire within a bounded time:
+			// the idle trigger needs a clock, not a hope that another message
+			// arrives. (+1s so the idle_gap condition is true when we wake.)
+			const lastTs = unsettled[unsettled.length - 1]?.ts ?? Date.now();
+			earliest = Math.max(Date.now() + 1000, lastTs + DIALS.idleMs + 1000);
+		}
+
+		if (earliest !== null) {
+			await this.#armAlarm(earliest);
+			return;
+		}
+		// Nothing pending → clear, then RE-CHECK: a concurrent addMessages may
+		// have appended between our reads and the delete. Never strand work.
+		await this.ctx.storage.deleteAlarm();
+		const chunkAfter = (await this.ctx.storage.get("chunk")) ?? [];
+		const entriesAfter = await this.ctx.storage.list({ prefix: "q:", limit: 1 });
+		const legacyAfter = await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 });
+		if (entriesAfter.size > 0 || legacyAfter.size > 0 || chunkAfter.some((m) => !m._settled)) {
+			await this.#armAlarm(Date.now() + 500);
+		}
+	}
+
+	async #nextSeq() {
+		const seq = ((await this.ctx.storage.get("qseq")) ?? 0) + 1;
+		await this.ctx.storage.put("qseq", seq);
+		return String(seq).padStart(10, "0");
+	}
+
+	/**
+	 * Move fired messages out of the held chunk into durable queue entries,
+	 * split at the 1.6 caps (≤20 messages AND ≤~3k tokens, whichever first) so
+	 * each entry is one small, retryable extraction. Splitting happens HERE, at
+	 * enqueue time — never inside a model call.
+	 */
+	async #enqueueFired(userId, { overrides = null } = {}) {
+		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+		if (chunk.length === 0) return 0;
+		const pendingOverrides = persistableOverrides(overrides ?? (await this.ctx.storage.get("pendingOverrides")) ?? {});
+
+		let batch = [];
+		let chars = 0;
+		const batches = [];
+		for (const msg of chunk) {
+			const len = String(msg.content ?? "").length;
+			if (batch.length > 0 && (batch.length >= MAX_ENTRY_MSGS || chars + len > MAX_ENTRY_CHARS)) {
+				batches.push(batch);
+				batch = [];
+				chars = 0;
+			}
+			batch.push(msg);
+			chars += len;
+		}
+		if (batch.length) batches.push(batch);
+
+		for (const msgs of batches) {
+			const seq = await this.#nextSeq();
+			await this.ctx.storage.put(`q:${seq}`, {
+				kind: "extract",
+				messages: msgs.map(({ _settled, ...m }) => m),
+				jobByMessage: Object.fromEntries(msgs.filter((m) => m._job).map((m) => [m.id, m._job])),
+				overrides: pendingOverrides,
+				attempts: 0,
+				runAfter: 0,
+				enqueuedAt: Date.now(),
+			});
+		}
+		await this.ctx.storage.put("chunk", []);
+		await this.ctx.storage.put("userId", userId);
+		return batches.length;
+	}
+
+	/**
+	 * Append new messages, run the trigger, and enqueue when a fire is due.
 	 * Fast (no LLM / no heavy D1) so the caller can respond immediately. Atomic
 	 * via blockConcurrencyWhile so concurrent ingests can't interleave.
+	 *
+	 * opts.jobId (from the door's accept-time memory_jobs row) tags each held
+	 * message so completion/settlement reaches the right row. Messages decided
+	 * TERMINALLY here (noise-ignored, deduplicated) settle their share of the
+	 * job immediately — a noise-only packet is `enriched` with 0 saved before
+	 * the caller even reads the response.
 	 */
 	async addMessages(userId, messages, opts = {}) {
 		return this.ctx.blockConcurrencyWhile(async () => {
@@ -80,6 +252,7 @@ export class UserMemory extends DurableObject {
 			let lastSignal = false;
 			let held = 0;
 			let skipped = 0;
+			const settledNow = []; // message ids finalized right here
 
 			for (const msg of messages ?? []) {
 				if (!msg || !msg.id) continue;
@@ -92,6 +265,7 @@ export class UserMemory extends DurableObject {
 				// overlapping batches — only genuinely new messages get processed.
 				if (chunkIds.has(norm.id) || norm.id === checkpoint || seen.has(norm.id)) {
 					skipped++;
+					settledNow.push({ id: norm.id, disposition: "deduplicated" });
 					continue;
 				}
 
@@ -105,10 +279,11 @@ export class UserMemory extends DurableObject {
 						checkpointChanged = true;
 						seen.add(norm.id);
 					}
+					settledNow.push({ id: norm.id, disposition: "skipped_noise" });
 					continue;
 				}
 
-				chunk.push({ ...norm, _cls: cls });
+				chunk.push({ ...norm, _cls: cls, ...(opts.jobId ? { _job: opts.jobId } : {}) });
 				chunkIds.add(norm.id);
 				held++;
 				if (cls === "signal") lastSignal = true;
@@ -116,7 +291,7 @@ export class UserMemory extends DurableObject {
 
 			if (recent.length > RECENT_LIMIT) recent = recent.slice(-RECENT_LIMIT);
 
-			const { fire } = shouldFire(chunk, {
+			const { fire } = shouldFire(chunk.filter((m) => !m._settled), {
 				flush: Boolean(opts.flush),
 				now: Date.now(),
 				lastSignal,
@@ -125,6 +300,7 @@ export class UserMemory extends DurableObject {
 			await this.ctx.storage.put("chunk", chunk);
 			await this.ctx.storage.put("recent", recent);
 			await this.ctx.storage.put("userId", userId);
+			if (opts.overrides !== undefined) await this.ctx.storage.put("pendingOverrides", persistableOverrides(opts.overrides ?? {}));
 			if (checkpointChanged) {
 				await this.ctx.storage.put("checkpoint", checkpoint);
 				await this.#mirrorCheckpoint(userId, checkpoint);
@@ -132,197 +308,350 @@ export class UserMemory extends DurableObject {
 			if (seen.size !== state.seen.length) {
 				await this.ctx.storage.put("seen", this.#capSeen([...seen]));
 			}
-			if (fire) {
-				await this.ctx.storage.setAlarm(Date.now() + 1000);
+
+			// A message finalized at the door settles its slice of the job NOW —
+			// if that empties the job, the row goes terminal before we return.
+			if (opts.jobId && settledNow.length) {
+				await settleMemoryJobs(this.env, userId, [{
+					jobId: opts.jobId,
+					messageIds: settledNow.map((s) => s.id),
+					disposition: "skipped",
+				}]);
 			}
 
-			return { fired: fire, held, skipped };
+			let queued = 0;
+			if (fire) {
+				queued = await this.#enqueueFired(userId, { overrides: opts.overrides });
+			}
+			// Every exit guarantees a wake while work exists — fired or held.
+			await this.#guaranteeWake();
+
+			return { fired: fire, held, skipped, queued };
 		});
 	}
 
 	/**
-	 * Run the extraction pipeline under the per-user lock. Advances the checkpoint
-	 * and clears the processed messages ONLY on a successful write; otherwise the
-	 * chunk is retained for retry and the checkpoint stays put.
-	 */
-	async runExtraction(userId, overrides = {}) {
-		if (this.busy) return { skipped: true };
-		this.busy = true;
-		try {
-			const { chunk, recent } = await this.#load();
-			if (chunk.length === 0) return { outcome: "empty" };
-
-			// Watchdog: alarms survive isolate death, `this.busy` does not. If
-			// this fire is killed mid-flight (eviction, crash, deploy), the
-			// pending alarm revives extraction in a fresh instance instead of
-			// stranding the held chunk. Completion logic below replaces it.
-			await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
-
-			const processedIds = new Set(chunk.map((m) => m.id));
-			const lastId = chunk[chunk.length - 1].id;
-
-			const result = await runExtractionPipeline(this.env, userId, chunk, recent, overrides);
-
-			// Persist the receipt (Priority 5) + attach the human one-liner so the
-			// caller (MCP tool) can show it. Best-effort; never blocks the result.
-			if (result.receipt) {
-				result.summary = formatReceipt(result.receipt);
-				await storeReceipt(this.env, userId, result.receipt.source, result.receipt, result.summary);
-			}
-
-			// Announce the write to any registered webhooks — strictly after the
-			// fact, strictly async, never able to fail the save. This one hook
-			// point covers every door that runs the engine (ingest, save, SDK,
-			// playground, plugin).
-			if (result.outcome === "wrote" && result.receipt) {
-				const saved = result.receipt.saved ?? {};
-				const added = (saved.nodes ?? 0) + (saved.slices ?? 0) + (saved.events ?? 0) + (saved.edges ?? 0) > 0;
-				const updated = (saved.updatedNodes ?? 0) + (saved.supersededSlices ?? 0) > 0;
-				const event = added ? "memory.added" : updated ? "memory.updated" : null;
-				if (event) {
-					const data = webhookDataFromReceipt(result.receipt);
-					// Scoped saves (SDK sub-tenants, plugin project spaces) announce
-					// to the OWNING account's webhooks too — the sub-tenant id is
-					// derived and owns no configuration of its own.
-					const targets = new Set([userId]);
-					try {
-						const owner = JSON.parse(result.receipt.scope_json ?? "{}")?.owner_user_id;
-						if (owner && owner !== "legacy") targets.add(owner);
-					} catch {}
-					for (const target of targets) {
-						this.ctx.waitUntil(
-							emitWebhookEvent(this.env, (p) => this.ctx.waitUntil(p), target, event, data),
-						);
-					}
-				}
-			}
-
-			const finalizedNoWrite = result.outcome === "no_write" && result.receipt?.reason === "user_opt_out";
-			if (result.outcome === "wrote" || finalizedNoWrite) {
-				// Remove only the messages we processed (a concurrent addMessages may
-				// have appended more), then advance the checkpoint.
-				const current = (await this.ctx.storage.get("chunk")) ?? [];
-				const remaining = current.filter((m) => !processedIds.has(m.id));
-				await this.ctx.storage.put("chunk", remaining);
-				await this.ctx.storage.put("checkpoint", lastId);
-				await this.#mirrorCheckpoint(userId, lastId);
-				// Remember what we processed so a re-sent batch skips it.
-				const seen = (await this.ctx.storage.get("seen")) ?? [];
-				await this.ctx.storage.put("seen", this.#capSeen([...new Set([...seen, ...processedIds])]));
-			}
-			// meaningful_no_write / llm_failed / db_write_failed → keep chunk + checkpoint.
-
-			// Re-arm the alarm when messages are still held, or a backlog that
-			// accumulated DURING this fire is stranded until the next ingest —
-			// with multi-call fires taking tens of seconds, that stranded a whole
-			// conversation's tail. After a write: drain promptly. After a
-			// failure: retry with exponential backoff, capped attempts, so a
-			// permanently poisoned chunk cannot ping the model forever.
-			// meaningful_no_write deliberately does NOT re-arm — that chunk waits
-			// for more context, and retrying identical input yields identical
-			// results.
-			// A pending MCP enrichment owns the alarm too — clearing it here would
-			// strand a staged job, which is the exact silent-loss bug this lane
-			// was rebuilt to prevent. When jobs are queued, hand the alarm back
-			// to them instead of deleting it.
-			const mcpPending = (await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 })).size > 0;
-			const releaseAlarm = async () => {
-				if (mcpPending) await this.ctx.storage.setAlarm(Date.now() + 2000);
-				else await this.ctx.storage.deleteAlarm();
-			};
-			const held = ((await this.ctx.storage.get("chunk")) ?? []).length;
-			if (held > 0) {
-				if (result.outcome === "wrote" || finalizedNoWrite) {
-					await this.ctx.storage.put("failCount", 0);
-					await this.ctx.storage.setAlarm(Date.now() + 1500);
-				} else if (["llm_failed", "db_write_failed"].includes(result.outcome)) {
-					const fails = ((await this.ctx.storage.get("failCount")) ?? 0) + 1;
-					await this.ctx.storage.put("failCount", fails);
-					if (fails <= 6) {
-						await this.ctx.storage.setAlarm(Date.now() + Math.min(5000 * 2 ** (fails - 1), 600000));
-					} else {
-						await releaseAlarm();
-					}
-				} else {
-					// meaningful_no_write: the chunk waits for NEW messages. The
-					// start-of-fire watchdog must not retry identical input on a
-					// five-minute loop.
-					await releaseAlarm();
-				}
-			} else {
-				await this.ctx.storage.put("failCount", 0);
-				// Nothing held → the only pending alarm is our watchdog. Clear it
-				// (an addMessages fire-alarm implies a non-empty chunk).
-				await releaseAlarm();
-			}
-
-			// user_opt_out no_write is final; meaningful_no_write/failed outcomes remain retryable.
-			return result;
-		} finally {
-			this.busy = false;
-		}
-	}
-
-	/**
 	 * Durable enqueue for an MCP background enrichment. The entry is persisted
-	 * BEFORE the sync receipt returns, and the alarm — which survives isolate
-	 * death — drives processing. This is the design answer to the "queued
-	 * receipt, silently never saved" failure mode: a staged job can only end
-	 * enriched or failed, never vanish.
+	 * BEFORE the sync receipt returns, and the queue in storage — not any
+	 * particular alarm — is what guarantees processing. A staged job can only
+	 * end enriched or failed, never vanish.
 	 */
 	async enqueueMcpJob(userId, job) {
 		if (!job?.jobId) return { queued: false };
-		await this.ctx.storage.put(`mcpjob:${job.jobId}`, job);
+		const seq = await this.#nextSeq();
+		await this.ctx.storage.put(`q:${seq}`, {
+			kind: "mcp",
+			job,
+			attempts: Number(job.attempts ?? 0),
+			runAfter: 0,
+			enqueuedAt: Date.now(),
+		});
 		await this.ctx.storage.put("userId", userId);
-		const soon = Date.now() + 50;
-		const pending = await this.ctx.storage.getAlarm();
-		if (!pending || pending > soon) await this.ctx.storage.setAlarm(soon);
+		await this.#armAlarm(Date.now() + 50);
 		return { queued: true };
 	}
 
 	/**
-	 * Process every queued MCP enrichment under the per-user lock. Transient
-	 * engine failures (llm_failed / db_write_failed) retry with backoff up to
-	 * a bounded attempt count; everything else finishes the job one way or the
-	 * other. Returns what the alarm needs to decide about re-arming.
+	 * Oldest runnable queue entry, skipping backed-off ones and anything this
+	 * drain invocation already attempted — one failing entry gets exactly one
+	 * attempt per drain, then the queue moves past it.
 	 */
-	async drainMcpJobs(userId) {
-		const jobs = await this.ctx.storage.list({ prefix: "mcpjob:" });
-		if (jobs.size === 0) return { remaining: 0, busySkip: false };
-		if (this.busy) return { remaining: jobs.size, busySkip: true };
-		this.busy = true;
+	async #nextEntry(now, { ignoreBackoff = false, skip } = {}) {
+		const entries = await this.ctx.storage.list({ prefix: "q:" });
+		for (const [key, entry] of entries) {
+			if (skip?.has(key)) continue;
+			if (ignoreBackoff || Number(entry.runAfter ?? 0) <= now) return { key, entry };
+		}
+		// Legacy mcpjob:* entries written by the previous build may still be in
+		// storage across the deploy — adopt them into the queue shape lazily.
+		const legacy = await this.ctx.storage.list({ prefix: "mcpjob:" });
+		for (const [key, job] of legacy) {
+			const entry = { kind: "mcp", job, attempts: Number(job.attempts ?? 0), runAfter: 0, enqueuedAt: Date.now() };
+			const seq = await this.#nextSeq();
+			await this.ctx.storage.put(`q:${seq}`, entry);
+			await this.ctx.storage.delete(key);
+			return { key: `q:${seq}`, entry };
+		}
+		return null;
+	}
+
+	/** Storage-backed lease acquire; null when someone else holds it. */
+	async #acquireLease() {
+		const now = Date.now();
+		const lease = await this.ctx.storage.get("lease");
+		if (lease && Number(lease.until) > now) return null;
+		const token = crypto.randomUUID();
+		await this.ctx.storage.put("lease", { until: now + LEASE_MS, token });
+		return token;
+	}
+
+	async #refreshLease(token) {
+		await this.ctx.storage.put("lease", { until: Date.now() + LEASE_MS, token });
+	}
+
+	async #releaseLease(token) {
+		const lease = await this.ctx.storage.get("lease");
+		if (!lease || lease.token === token) await this.ctx.storage.delete("lease");
+	}
+
+	/**
+	 * THE drain loop — the only code that processes queue entries. Runs from
+	 * the alarm, from a door's inline call (so `add()` can wait a bounded time
+	 * for a real receipt), and from the reconciliation sweep's kick. All three
+	 * are the same path; whoever gets the lease does the work.
+	 *
+	 * Returns { leased, remaining, results } — `leased: true` means another
+	 * drain holds the lease and this call guaranteed a wake instead.
+	 */
+	async drain(opts = {}) {
+		const maxJobs = Number(opts.maxJobs ?? MAX_JOBS_PER_DRAIN);
+		const userId = opts.userId ?? (await this.ctx.storage.get("userId"));
+		const results = [];
+		if (!userId) return { leased: false, remaining: 0, results };
+
+		const token = await this.#acquireLease();
+		if (!token) {
+			await this.#guaranteeWake();
+			const lease = await this.ctx.storage.get("lease");
+			if (lease) await this.#armAlarm(Number(lease.until) + 1000);
+			return { leased: true, remaining: (await this.ctx.storage.list({ prefix: "q:" })).size, results };
+		}
+
 		try {
-			for (const [key, job] of jobs) {
-				// Watchdog: if this isolate dies mid-enrichment, the pending alarm
-				// revives the queue in a fresh instance instead of stranding it.
-				await this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
-				const res = await enrichMcpConversation(this.env, userId, job, (p) => this.ctx.waitUntil(p));
-				if (res?.retry) {
-					const attempts = Number(job.attempts ?? 0) + 1;
-					await this.ctx.storage.put(key, { ...job, attempts });
-				} else {
-					await this.ctx.storage.delete(key);
-				}
+			// An idle-fire may be due (held chunk, no entries): check the trigger.
+			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+			const unsettled = chunk.filter((m) => !m._settled);
+			if (unsettled.length > 0) {
+				const { fire } = shouldFire(unsettled, { flush: Boolean(opts.forceFire), now: Date.now() });
+				if (fire || opts.forceFire) await this.#enqueueFired(userId, { overrides: opts.forceFire ? opts.inlineOverrides : undefined });
+			}
+
+			const attempted = new Set();
+			for (let i = 0; i < maxJobs; i++) {
+				const next = await this.#nextEntry(Date.now(), { ignoreBackoff: Boolean(opts.ignoreBackoff), skip: attempted });
+				if (!next) break;
+				attempted.add(next.key);
+				await this.#refreshLease(token);
+				const result = next.entry.kind === "mcp"
+					? await this.#processMcpEntry(userId, next.key, next.entry)
+					: await this.#processExtractEntry(userId, next.key, next.entry, opts.inlineOverrides);
+				if (result) results.push(result);
 			}
 		} finally {
-			this.busy = false;
+			await this.#releaseLease(token);
+			// The one non-negotiable: never return while storage holds work
+			// without a guaranteed future alarm.
+			await this.#guaranteeWake();
 		}
-		const left = await this.ctx.storage.list({ prefix: "mcpjob:" });
-		if (left.size === 0) {
-			// Queue drained: clear our watchdog so it cannot fire into a clean
-			// instance — then re-check, because an addMessages may have armed a
-			// fire alarm for a fresh chunk in the meantime. Never strand work.
-			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
-			if (chunk.length === 0) {
-				await this.ctx.storage.deleteAlarm();
-				const chunkAfter = (await this.ctx.storage.get("chunk")) ?? [];
-				const jobsAfter = await this.ctx.storage.list({ prefix: "mcpjob:", limit: 1 });
-				if (chunkAfter.length > 0 || jobsAfter.size > 0) {
-					await this.ctx.storage.setAlarm(Date.now() + 1500);
-				}
+
+		const remaining = (await this.ctx.storage.list({ prefix: "q:" })).size;
+		return { leased: false, remaining, results };
+	}
+
+	/** One MCP enrichment entry. The engine's own bookkeeping marks the D1 job. */
+	async #processMcpEntry(userId, key, entry) {
+		let res;
+		try {
+			res = await enrichMcpConversation(
+				this.env,
+				userId,
+				{ ...entry.job, attempts: entry.attempts },
+				(p) => this.ctx.waitUntil(p),
+			);
+		} catch (error) {
+			// enrichMcpConversation catches internally; this is belt-and-braces.
+			res = { retry: true, reason: String(error?.message ?? error) };
+		}
+		if (res?.retry) {
+			const attempts = entry.attempts + 1;
+			if (attempts >= MAX_ATTEMPTS) {
+				// Dead-letter here too, in case the engine's internal cap moves.
+				await this.ctx.storage.delete(key);
+				await settleMemoryJobs(this.env, userId, [{
+					jobId: entry.job.jobId,
+					all: true,
+					disposition: "failed",
+					error: `retries exhausted (${res.reason ?? "transient failure"})`,
+				}]);
+				await reportServerError(this.env, "mcp_enrich_poison", new Error(String(res.reason ?? "unknown")), userId);
+				return { kind: "mcp", jobId: entry.job.jobId, outcome: "failed" };
 			}
+			await this.ctx.storage.put(key, { ...entry, attempts, runAfter: Date.now() + backoffMs(attempts) });
+			return { kind: "mcp", jobId: entry.job.jobId, outcome: "retry", attempts };
 		}
-		return { remaining: left.size, busySkip: false };
+		await this.ctx.storage.delete(key);
+		return { kind: "mcp", jobId: entry.job.jobId, outcome: res?.failed ? "failed" : "enriched" };
+	}
+
+	/**
+	 * One extraction entry: run the engine over its messages, then do the
+	 * bookkeeping the outcome demands. At-least-once safe: the graph write
+	 * inside the pipeline is one atomic D1 batch, and job settlement is
+	 * recorded BEFORE the entry is deleted, so a crash between the two leaves
+	 * a settled job with a stale entry — re-running it re-extracts into
+	 * canonical-match upserts, never duplicate rows.
+	 */
+	async #processExtractEntry(userId, key, entry, inlineOverrides = null) {
+		const recent = (await this.ctx.storage.get("recent")) ?? [];
+		// The entry's own persisted overrides win (they carry the packet's true
+		// source attribution); inline values fill gaps — except function-valued
+		// test hooks, which can never be persisted and therefore always apply.
+		const overrides = { ...(inlineOverrides ?? {}), ...(entry.overrides ?? {}) };
+		for (const [k, v] of Object.entries(inlineOverrides ?? {})) {
+			if (typeof v === "function") overrides[k] = v;
+		}
+		if (Date.now() - Number(entry.enqueuedAt ?? 0) > BACKLOG_AGE_MS) {
+			overrides.meta = { ...(overrides.meta ?? {}), drained_from_backlog: true };
+		}
+
+		const messages = entry.messages ?? [];
+		const processedIds = messages.map((m) => m.id);
+		const lastId = processedIds[processedIds.length - 1] ?? null;
+		const jobUpdates = (disposition, extra = {}) => {
+			const byJob = new Map();
+			for (const [msgId, jobId] of Object.entries(entry.jobByMessage ?? {})) {
+				if (!byJob.has(jobId)) byJob.set(jobId, []);
+				byJob.get(jobId).push(msgId);
+			}
+			return [...byJob.entries()].map(([jobId, messageIds]) => ({ jobId, messageIds, disposition, ...extra }));
+		};
+
+		let result;
+		try {
+			result = await runExtractionPipeline(this.env, userId, messages, recent, overrides);
+		} catch (error) {
+			// An engine throw (not a reported outcome) counts as an attempt like
+			// any other transient failure — recorded, bounded, never head-of-line.
+			result = { outcome: "llm_failed", error: String(error?.message ?? error) };
+			console.warn(`extraction threw user=${userId}:`, result.error);
+		}
+
+		// Persist the receipt + human one-liner for whichever outcome we got.
+		if (result.receipt) {
+			result.summary = formatReceipt(result.receipt);
+			await storeReceipt(this.env, userId, result.receipt.source, result.receipt, result.summary);
+		}
+
+		const finalizedNoWrite = result.outcome === "no_write" && result.receipt?.reason === "user_opt_out";
+
+		if (result.outcome === "wrote" || finalizedNoWrite) {
+			await this.#announceWrite(userId, result);
+			// Settle jobs BEFORE deleting the entry (see method comment).
+			await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
+				counts: result.receipt?.saved ?? null,
+				receiptId: result.receipt?.id ?? null,
+			}));
+			if (lastId) {
+				await this.ctx.storage.put("checkpoint", lastId);
+				await this.#mirrorCheckpoint(userId, lastId);
+			}
+			const seen = (await this.ctx.storage.get("seen")) ?? [];
+			await this.ctx.storage.put("seen", this.#capSeen([...new Set([...seen, ...processedIds])]));
+			await this.ctx.storage.delete(key);
+			return { kind: "extract", outcome: result.outcome, receipt: result.receipt ?? null, summary: result.summary ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
+		}
+
+		if (result.outcome === "meaningful_no_write") {
+			// The engine looked and found nothing durable. The JOB settles now —
+			// visible, terminal, zero saved — while the messages return to the
+			// held chunk as a rescue buffer: future context may still redeem
+			// them, and if it never comes they are already accounted for.
+			await settleMemoryJobs(this.env, userId, jobUpdates("processed", {
+				counts: { nodes: 0, slices: 0, events: 0, edges: 0 },
+				receiptId: result.receipt?.id ?? null,
+			}));
+			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+			const chunkIds = new Set(chunk.map((m) => m.id));
+			const restored = messages.filter((m) => !chunkIds.has(m.id)).map((m) => ({ ...m, _settled: true }));
+			await this.ctx.storage.put("chunk", [...restored, ...chunk]);
+			await this.ctx.storage.delete(key);
+			return { kind: "extract", outcome: result.outcome, receipt: result.receipt ?? null, summary: result.summary ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
+		}
+
+		// llm_failed / db_write_failed / engine throw → bounded retry with
+		// backoff; the queue moves on past this entry meanwhile (1.5).
+		const attempts = entry.attempts + 1;
+		await settleMemoryJobs(this.env, userId, jobUpdates("attempted", { attempts }));
+		if (attempts >= MAX_ATTEMPTS) {
+			await settleMemoryJobs(this.env, userId, jobUpdates("failed", {
+				error: String(result.error ?? result.outcome ?? "extraction failed").slice(0, 400),
+				receiptId: result.receipt?.id ?? null,
+			}));
+			await reportServerError(
+				this.env,
+				"extract_poison",
+				new Error(`entry dead-lettered after ${attempts} attempts: ${result.error ?? result.outcome}`),
+				userId,
+			);
+			// Poison messages are finalized (seen) so re-sends don't loop them.
+			const seen = (await this.ctx.storage.get("seen")) ?? [];
+			await this.ctx.storage.put("seen", this.#capSeen([...new Set([...seen, ...processedIds])]));
+			await this.ctx.storage.delete(key);
+			return { kind: "extract", outcome: "failed", receipt: result.receipt ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
+		}
+		await this.ctx.storage.put(key, { ...entry, attempts, runAfter: Date.now() + backoffMs(attempts) });
+		return { kind: "extract", outcome: result.outcome, retry: true, attempts, receipt: result.receipt ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
+	}
+
+	/** Webhook announcements for a landed write — after the fact, async, unfailable. */
+	async #announceWrite(userId, result) {
+		if (result.outcome !== "wrote" || !result.receipt) return;
+		const saved = result.receipt.saved ?? {};
+		const added = (saved.nodes ?? 0) + (saved.slices ?? 0) + (saved.events ?? 0) + (saved.edges ?? 0) > 0;
+		const updated = (saved.updatedNodes ?? 0) + (saved.supersededSlices ?? 0) > 0;
+		const event = added ? "memory.added" : updated ? "memory.updated" : null;
+		if (!event) return;
+		const data = webhookDataFromReceipt(result.receipt);
+		// Scoped saves (SDK sub-tenants, plugin project spaces) announce to the
+		// OWNING account's webhooks too — the sub-tenant id is derived and owns
+		// no configuration of its own.
+		const targets = new Set([userId]);
+		try {
+			const owner = JSON.parse(result.receipt.scope_json ?? "{}")?.owner_user_id;
+			if (owner && owner !== "legacy") targets.add(owner);
+		} catch {}
+		for (const target of targets) {
+			this.ctx.waitUntil(
+				emitWebhookEvent(this.env, (p) => this.ctx.waitUntil(p), target, event, data),
+			);
+		}
+	}
+
+	/**
+	 * Back-compat surface (tests, tools): force-fire everything held with the
+	 * given overrides and drain inline. `{ skipped: true }` when another drain
+	 * holds the lease — the work is queued and alarm-guaranteed either way.
+	 */
+	async runExtraction(userId, overrides = {}) {
+		const drained = await this.drain({
+			userId,
+			maxJobs: 10,
+			forceFire: true,
+			inlineOverrides: overrides,
+		});
+		if (drained.leased) return { skipped: true };
+		const extract = drained.results.find((r) => r.kind === "extract");
+		if (!extract) return { outcome: "empty" };
+		return { outcome: extract.outcome, receipt: extract.receipt ?? null, summary: extract.summary ?? null, retry: extract.retry ?? false };
+	}
+
+	/**
+	 * Back-compat surface for MCP tests/tools: drain and report queue state.
+	 * Explicit manual drains ignore retry backoff — a human (or test) asking
+	 * "process it NOW" outranks the scheduler's politeness.
+	 */
+	async drainMcpJobs(userId) {
+		const drained = await this.drain({ userId, maxJobs: 10, ignoreBackoff: true });
+		return { remaining: drained.remaining, busySkip: drained.leased };
+	}
+
+	/** Reconciliation sweep's poke: make sure this DO wakes up and drains. */
+	async kick(userId) {
+		if (userId) await this.ctx.storage.put("userId", userId);
+		await this.#armAlarm(Date.now() + 50);
+		const entries = await this.ctx.storage.list({ prefix: "q:", limit: 64 });
+		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+		return { queued: entries.size, held: chunk.length };
 	}
 
 	/**
@@ -335,10 +664,21 @@ export class UserMemory extends DurableObject {
 		return runExportJob(this.env, userId, exportId);
 	}
 
-	/** Inspect held state — used by tests to assert chunk retention. */
+	/** Inspect held state — used by tests to assert chunk/queue retention. */
 	async getDebugState() {
 		const { chunk, checkpoint } = await this.#load();
-		return { chunkSize: chunk.length, checkpoint };
+		const entries = await this.ctx.storage.list({ prefix: "q:" });
+		let queuedMessages = 0;
+		for (const [, entry] of entries) queuedMessages += entry.kind === "extract" ? (entry.messages?.length ?? 0) : 0;
+		const lease = await this.ctx.storage.get("lease");
+		return {
+			chunkSize: chunk.length + queuedMessages,
+			heldSize: chunk.length,
+			queuedEntries: entries.size,
+			queuedMessages,
+			checkpoint,
+			leased: Boolean(lease && Number(lease.until) > Date.now()),
+		};
 	}
 
 	/** Clear held ingest state after an explicit DELETE ALL reset. */
@@ -348,25 +688,21 @@ export class UserMemory extends DurableObject {
 			// deleteAll clears values, not alarms — an orphaned alarm would wake
 			// a wiped instance (and in tests, fire into storage teardown).
 			await this.ctx.storage.deleteAlarm();
-			this.busy = false;
 		});
 		return { reset: true };
 	}
 
 	async alarm() {
-		const { userId, chunk } = await this.#load();
-		if (!userId) return;
-		// MCP enrichments first — a staged receipt is a promise with a clock on
-		// it; held auto-mode chunks tolerate the extra seconds far better.
-		const drained = await this.drainMcpJobs(userId);
-		if (drained.remaining > 0) {
-			// busy-skip → try again shortly; retryable failure → back off.
-			await this.ctx.storage.setAlarm(Date.now() + (drained.busySkip ? 2000 : 15000));
+		const userId = await this.ctx.storage.get("userId");
+		if (!userId) {
+			// No identity means nothing can be processed — but if work exists,
+			// that is a bug worth hearing about, not a silent return.
+			const entries = await this.ctx.storage.list({ prefix: "q:", limit: 1 });
+			if (entries.size > 0) {
+				await reportServerError(this.env, "do_alarm_no_user", new Error("queue entries with no userId"), null);
+			}
+			return;
 		}
-		if (chunk.length === 0) return;
-		const result = await this.runExtraction(userId);
-		if (result?.skipped) {
-			await this.ctx.storage.setAlarm(Date.now() + 2000);
-		}
+		await this.drain({ userId, maxJobs: MAX_JOBS_PER_DRAIN });
 	}
 }

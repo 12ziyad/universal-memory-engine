@@ -289,19 +289,23 @@ describe("the backlog cannot strand", () => {
 			release();
 			const first = await fire;
 			if (first.outcome !== "wrote") throw new Error(`first fire: ${first.outcome}`);
-			const { chunkSize } = await instance.getDebugState();
-			if (chunkSize === 0) throw new Error("late message was not held");
 		});
 
-		// Before the fix this backlog sat until the NEXT ingest — forever, if
-		// the conversation had ended. Now the finished fire re-armed the alarm.
-		const ranAlarm = await runDurableObjectAlarm(stub);
-		expect(ranAlarm).toBe(true);
-		// The alarm path runs without our canned hooks (no AI binding in tests),
-		// so drain explicitly — the point above is that the alarm WAS armed.
+		// The old bug: the late message sat until the NEXT ingest — forever, if
+		// the conversation had ended. The queue rewrite makes the guarantee
+		// structural: the late message went into a durable queue entry the
+		// moment it fired, and the SAME drain that ran the first fire picks it
+		// up before returning. If anything were somehow still held, this
+		// explicit drain (standing in for the alarm/sweep, which are disabled
+		// in the test pool) must finish it.
+		await runDurableObjectAlarm(stub);
 		const second = await stub.runExtraction(userId, { ...nodeHooks, llmResponse: respond });
-		expect(second.outcome).toBe("wrote");
-		expect((await stub.getDebugState()).chunkSize).toBe(0);
+		expect(["wrote", "empty"]).toContain(second.outcome);
+		// The invariant: the late arrival was PROCESSED (checkpoint reached it)
+		// and nothing is held or queued anywhere.
+		const debug = await stub.getDebugState();
+		expect(debug.chunkSize).toBe(0);
+		expect(debug.checkpoint).toBe("late-1");
 	});
 });
 

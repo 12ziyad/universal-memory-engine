@@ -309,6 +309,87 @@ export async function createMemoryJob(env, userId, data = {}) {
 	}
 }
 
+/**
+ * Per-message settlement of accept-time job rows (fix round 1, Part 1.1).
+ *
+ * A job row is created at the door with `payload.remaining` = the user-message
+ * ids it accepted. As the Durable Object finalizes messages (processed by a
+ * write, skipped as noise, deduplicated, or dead-lettered) it reports them
+ * here; when nothing remains the row goes terminal: `enriched` or `failed`.
+ * Runs under the DO's per-user serialization, so read-modify-write is safe.
+ *
+ * updates: [{ jobId, messageIds?, all?, disposition, counts?, error?, receiptId?, attempts? }]
+ *   disposition: "processed" | "skipped" | "failed" | "attempted"
+ *   - attempted: bookkeeping only (attempts + updated_at), no settlement
+ *   - failed: terminal immediately, regardless of remaining
+ */
+export async function settleMemoryJobs(env, userId, updates = []) {
+	for (const update of updates) {
+		if (!update?.jobId) continue;
+		try {
+			const row = await env.DB.prepare(
+				"SELECT id, status, attempts, payload_json FROM memory_jobs WHERE id = ? AND user_id = ?",
+			).bind(update.jobId, userId).first();
+			if (!row) continue;
+			if (["enriched", "failed", "completed"].includes(row.status)) continue; // terminal is terminal
+
+			let payload = {};
+			try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+
+			if (update.disposition === "attempted") {
+				await updateMemoryJob(env, userId, update.jobId, {
+					status: "processing",
+					attempts: Number(update.attempts ?? Number(row.attempts ?? 0) + 1),
+				});
+				continue;
+			}
+
+			if (update.disposition === "failed") {
+				await updateMemoryJob(env, userId, update.jobId, {
+					status: "failed",
+					error: String(update.error ?? "processing failed").slice(0, 400),
+					receiptId: update.receiptId ?? undefined,
+					payload: { ...payload, remaining: [] },
+					completedAt: Date.now(),
+				});
+				continue;
+			}
+
+			const remaining = Array.isArray(payload.remaining) ? payload.remaining : [];
+			const done = new Set(update.all ? remaining : (update.messageIds ?? []));
+			const left = remaining.filter((id) => !done.has(id));
+			const saved = payload.saved ?? {};
+			if (update.counts && update.disposition === "processed") {
+				for (const k of ["nodes", "slices", "events", "edges", "pages", "candidates"]) {
+					saved[k] = (saved[k] ?? 0) + (update.counts[k] ?? 0);
+				}
+			}
+			const terminal = left.length === 0;
+			await updateMemoryJob(env, userId, update.jobId, {
+				status: terminal ? "enriched" : "processing",
+				receiptId: update.receiptId ?? undefined,
+				payload: { ...payload, remaining: left, saved },
+				completedAt: terminal ? Date.now() : undefined,
+			});
+		} catch (err) {
+			console.warn("memory job settle failed:", err?.message ?? err);
+		}
+	}
+}
+
+/** Count of a user's active (non-terminal) accept-time jobs — the queue depth. */
+export async function activeJobDepth(env, userId) {
+	try {
+		const row = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')",
+		).bind(userId).first();
+		return Number(row?.n ?? 0);
+	} catch (err) {
+		console.warn("job depth query failed:", err?.message ?? err);
+		return 0;
+	}
+}
+
 export async function updateMemoryJob(env, userId, jobId, data = {}) {
 	if (!jobId) return;
 	const fields = [];

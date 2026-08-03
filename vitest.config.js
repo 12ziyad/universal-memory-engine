@@ -23,6 +23,11 @@ export default defineWorkersConfig(async () => {
 							TEST_MIGRATIONS: migrations,
 							USE_VECTORS: "false",
 							ENABLE_PASS2: "true",
+							// The DO's self-arming wake alarms are structural in prod
+							// (queue in storage + alarm + cron sweep) but fire across
+							// test boundaries here, corrupting the pool's stacked
+							// storage. Tests drive drains explicitly instead.
+							DO_WAKE_ALARMS: "false",
 						},
 					},
 				},

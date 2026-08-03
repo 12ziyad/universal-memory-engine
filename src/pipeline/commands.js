@@ -1,5 +1,5 @@
 import { getConfig } from "../config.js";
-import { storeReceipt } from "../lib/db.js";
+import { storeReceipt, updateMemoryJob } from "../lib/db.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
 import { recall } from "./recall.js";
@@ -183,6 +183,19 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		overrides: { source, ...(input.overrides ?? {}) },
 	});
 
+	// 1.7: too much unprocessed work for this user — surface a clear 429
+	// upstream instead of accepting invisibly.
+	if (res.backpressure) {
+		return {
+			ok: false,
+			backpressure: true,
+			error: "queue_full",
+			retry_after_s: res.retryAfterS ?? 30,
+			queue_depth: res.queueDepth ?? null,
+			summary: "Your memory queue is full — give it a moment to catch up, then retry.",
+		};
+	}
+
 	let receipt = res.receipt ?? null;
 	let summary = res.summary ?? null;
 	let id = res.receiptId ?? receipt?.id ?? null;
@@ -210,6 +223,15 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			summary = accepted.summary;
 			id = accepted.receipt_id;
 			processing = true;
+		} else if (res.duplicate) {
+			const stored = await storeStatusReceipt(env, userId, res.sourcePacket, "duplicate", "this exact content was already accepted (idempotent replay)", source, {
+				received: (messages ?? []).length,
+				skipped: res.skipped,
+				status: res.jobStatus ?? null,
+			});
+			receipt = stored.receipt;
+			summary = res.summary ?? stored.summary;
+			id = stored.receipt_id;
 		} else {
 			const outcome = res.held > 0 ? "accumulating" : "ignored";
 			const reason = res.held > 0
@@ -224,6 +246,13 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			summary = stored.summary;
 			id = stored.receipt_id;
 		}
+	}
+
+	// Link the receipt onto the accept-time job row so the packet id → job →
+	// receipt chain is walkable from the status endpoint.
+	if (res.jobId && id && !res.duplicate) {
+		try { await updateMemoryJob(env, userId, res.jobId, { receiptId: id }); }
+		catch (error) { console.warn("job receipt link failed:", error?.message ?? error); }
 	}
 
 	return safeCommandResult({
@@ -244,6 +273,9 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			received: true,
 			held: res.held,
 			skipped: res.skipped,
+			...(res.jobId ? { job_id: res.jobId } : {}),
+			...(res.queueDepth != null ? { queue_depth: res.queueDepth } : {}),
+			...(res.duplicate ? { duplicate: true } : {}),
 		},
 	});
 }

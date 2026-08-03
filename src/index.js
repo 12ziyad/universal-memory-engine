@@ -435,6 +435,13 @@ const routes = {
 					: {}),
 			},
 		});
+		if (result.backpressure) {
+			return json(
+				{ error: "queue_full", message: result.summary, retry_after_s: result.retry_after_s, queue_depth: result.queue_depth },
+				429,
+				{ "retry-after": String(result.retry_after_s ?? 30) },
+			);
+		}
 		return json(result);
 	},
 
