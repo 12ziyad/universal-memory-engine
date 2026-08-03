@@ -25,6 +25,12 @@
 	"observability": {
 		"enabled": true
 	},
+	// The reconciliation sweep (fix round 1): every 5 minutes, rescue stale
+	// jobs, alert on failures, and assert accepted-in == jobs-tracked. It is
+	// deliberately a Cron Trigger — independent of the DO alarms it audits.
+	"triggers": {
+		"crons": ["*/5 * * * *"]
+	},
 	"upload_source_maps": true,
 	"compatibility_flags": [
 		"nodejs_compat"

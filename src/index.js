@@ -1444,6 +1444,15 @@ const routes = {
 const FRIENDLY_FAILURE = "Something went wrong on our side. It has been reported automatically — please try again in a moment.";
 
 export default {
+	/**
+	 * Workers Cron Trigger — the reconciliation sweep (Part 1.8). Runs on its
+	 * own clock, independent of the Durable Object alarm chains it audits.
+	 */
+	async scheduled(controller, env, ctx) {
+		const { runReconciliationSweep } = await import("./pipeline/sweep.js");
+		ctx.waitUntil(runReconciliationSweep(env));
+	},
+
 	async fetch(request, env, ctx) {
 		// Users must never see a raw exception or an infrastructure error page:
 		// every unhandled failure is reported for the admin and answered with one
