@@ -175,3 +175,9 @@ uml.pdf
 # Python bytecode (the SDK is source, not build output)
 __pycache__/
 *.py[cod]
+
+# Owner-account snapshots. These carry the real graph — every node label,
+# summary and category from a live personal account — so they stay local.
+# verify_owner_restore.py reads the file from disk next to itself; it is
+# never committed.
+evals/**/owner_account_snapshot.json
