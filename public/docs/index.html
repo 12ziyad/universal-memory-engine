@@ -241,6 +241,7 @@ PAGES["/install/claude-code"] = { title: "Claude Code (MCP)", html: `
 <p class="lede">One command. Your coding agent gets save, recall, and conversation capture.</p>
 ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORIGIN}/mcp/YOUR_MCP_KEY`)}
 <p>Replace <code>YOUR_MCP_KEY</code> with a fresh MCP link from <b>API Keys</b> (the full <code>${PRODUCT.tokenPrefix}…</code> value is shown once at creation).</p>
+<div class="note"><b>MCP link ≠ API key.</b> Both start with <code>${PRODUCT.tokenPrefix}</code>, but only a token created as an <b>MCP link</b> works in the URL. An <b>API key</b> goes in a header instead — <code>${ORIGIN}/mcp</code> with <code>Authorization: Bearer &lt;key&gt;</code> — which is exactly what the <a href="#/install/plugin">Claude Code plugin</a> does for you. Paste an API key into the URL and the server will tell you so by name.</div>
 <h2>What it gets</h2>
 <table>
 <tr><th>Tool</th><th>What it does</th></tr>
@@ -256,12 +257,14 @@ PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
 <p class="lede">Install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
 <h2>1. Set your key</h2>
 <p>Create an API key in <b>API Keys</b>, then put it in your environment. This is the only variable the plugin needs:</p>
-${codeBlock(`export ITSUKI_API_KEY=${PRODUCT.tokenPrefix}…      # shell profile
-setx ITSUKI_API_KEY ${PRODUCT.tokenPrefix}…            # Windows`)}
-<p>Restart your shell so the variable is loaded.</p>
+${codeBlock(`export ITSUKI_API_KEY=YOUR_KEY      # shell profile
+setx ITSUKI_API_KEY YOUR_KEY            # Windows`)}
+<p>Replace <code>YOUR_KEY</code> with the full <code>${PRODUCT.tokenPrefix}…</code> value (shown once at creation), then restart your shell so the variable is loaded. In cmd.exe, paste with right-click — Ctrl-V can insert a control character instead of pasting.</p>
 <h2>2. Install</h2>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
 claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
+<h2>3. Verify</h2>
+<p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the key's shape, the network path, the hooks door, and the MCP door, and prints the exact fix for whichever fails. All four pass — you're done.</p>
 <h2>What you get</h2>
 <p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: project memory is loaded at session start, and what the session learned is saved at session end.</p>
 <div class="note">One key, one variable — there is no MCP URL to configure. The plugin points at <code>${ORIGIN}/mcp</code> and sends your key as a Bearer header. If the key is missing or rejected, the plugin tells you at session start instead of failing quietly.</div>
@@ -280,7 +283,7 @@ ${codeBlock(`{
 <h2>Codex / anything else</h2>
 <p>Point the client's MCP server config at the same URL. Transport is Streamable HTTP; identity rides in the URL, so no extra headers are needed.</p>
 <p>If your client prefers a fixed URL with header auth, that works too: point it at <code>${ORIGIN}/mcp</code> with no path token and send <code>Authorization: Bearer</code> plus an API key. Same server, same tools.</p>
-<div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest.</div>
+<div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest. And it must be an <b>MCP link</b>, created as such in API Keys — an API key in the URL is refused (API keys belong in the <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code>).</div>
 ` };
 
 PAGES["/api/rest"] = { title: "REST API reference", html: `

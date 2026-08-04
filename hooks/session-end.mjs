@@ -16,7 +16,7 @@ import { createReadStream, existsSync } from "node:fs";
 
 const API_KEY = process.env.ITSUKI_API_KEY;
 const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 10000;
 const MAX_MESSAGES = 80;
 const MAX_CHARS_PER_MESSAGE = 4000;
 
@@ -71,11 +71,30 @@ function notSaved(reason, fix) {
 }
 
 const SETUP_FIX =
-	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell.";
+	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell. Run /itsuki:doctor to verify.";
+
+/** Same pre-flight as session-start: a header-unsafe key must be named, not
+ * allowed to throw inside fetch and masquerade as a network failure. */
+function keyProblem(key) {
+	if (!key) return "ITSUKI_API_KEY is not set.";
+	if (!/^[!-~]+$/.test(key)) {
+		return "ITSUKI_API_KEY contains characters that cannot go in an HTTP header (a mangled paste, most likely).";
+	}
+	return null;
+}
+
+function describeNetworkError(error) {
+	if (error?.name === "AbortError" || error?.name === "TimeoutError") {
+		return `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.`;
+	}
+	const cause = error?.cause?.code || error?.cause?.message || error?.message || String(error);
+	return `could not reach ${BASE_URL} (${cause}).`;
+}
 
 async function main() {
-	if (!API_KEY) {
-		notSaved("ITSUKI_API_KEY is not set.", SETUP_FIX);
+	const problem = keyProblem(API_KEY);
+	if (problem) {
+		notSaved(problem, SETUP_FIX);
 		return;
 	}
 
@@ -106,12 +125,7 @@ async function main() {
 			}),
 		});
 	} catch (error) {
-		notSaved(
-			error?.name === "AbortError"
-				? `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.`
-				: `could not reach ${BASE_URL}.`,
-			"This is usually a network problem, not a setup problem.",
-		);
+		notSaved(describeNetworkError(error), "Run /itsuki:doctor for a full connection check.");
 		return;
 	} finally {
 		clearTimeout(timer);

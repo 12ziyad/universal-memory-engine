@@ -6,19 +6,18 @@
  *
  *   1. NEVER block or break a session. Always exit 0. A memory tool that
  *      breaks someone's coding session gets uninstalled the same afternoon.
- *   2. NEVER fail invisibly. A plugin that is installed but doing nothing
- *      must say so, or the user spends an hour proving it themselves.
- *
- * So: every failure exits 0, and every failure says why. `systemMessage` is
- * shown to the user; `additionalContext` tells the agent memory is off so it
- * doesn't imply it has history it never received.
+ *   2. NEVER fail invisibly, and never fail with the WRONG reason. A garbage
+ *      key used to be reported as "could not reach the server" because the
+ *      fetch threw on the Authorization header before any network I/O
+ *      (undici UND_ERR_INVALID_ARG). Diagnose locally first, and when the
+ *      network really is the problem, name the underlying error code.
  */
 
 import { basename } from "node:path";
 
 const API_KEY = process.env.ITSUKI_API_KEY;
 const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
-const TIMEOUT_MS = 4000;
+const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 8000;
 
 /** The one stdout write. Claude Code parses a single JSON payload per hook. */
 function emit(payload) {
@@ -42,13 +41,42 @@ function unavailable(reason, fix) {
 }
 
 const SETUP_FIX =
-	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell.";
+	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell. Run /itsuki:doctor to verify.";
+
+/**
+ * A key that cannot ride in an HTTP header must be caught BEFORE fetch, or
+ * undici throws and the failure gets misread as a network problem. This is
+ * exactly what a mangled paste produces: a control character (Ctrl-V typed
+ * into a console that doesn't paste), a copied placeholder, a stray newline.
+ */
+function keyProblem(key) {
+	if (!key) return "ITSUKI_API_KEY is not set.";
+	if (!/^[!-~]+$/.test(key)) {
+		return (
+			"ITSUKI_API_KEY is set but is not a usable key — it contains characters " +
+			"that cannot go in an HTTP header (length " + key.length + "). This is usually a paste that " +
+			"didn't paste: Ctrl-V in some Windows consoles inserts a control character instead. " +
+			"Real keys are plain text starting with itsuki_live_."
+		);
+	}
+	return null;
+}
+
+/** Name the real cause: DNS, TLS, refused, timeout — not just "unreachable". */
+function describeNetworkError(error) {
+	if (error?.name === "AbortError" || error?.name === "TimeoutError") {
+		return `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.`;
+	}
+	const cause = error?.cause?.code || error?.cause?.message || error?.message || String(error);
+	return `could not reach ${BASE_URL} (${cause}).`;
+}
 
 async function main() {
 	const project = basename(process.cwd()) || "project";
 
-	if (!API_KEY) {
-		unavailable("ITSUKI_API_KEY is not set.", SETUP_FIX);
+	const problem = keyProblem(API_KEY);
+	if (problem) {
+		unavailable(problem, SETUP_FIX);
 		return;
 	}
 
@@ -73,11 +101,7 @@ async function main() {
 			}),
 		});
 	} catch (error) {
-		const timedOut = error?.name === "AbortError";
-		unavailable(
-			timedOut ? `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.` : `could not reach ${BASE_URL}.`,
-			"This is usually a network problem, not a setup problem. The session continues normally.",
-		);
+		unavailable(describeNetworkError(error), "Run /itsuki:doctor for a full connection check. The session continues normally.");
 		return;
 	} finally {
 		clearTimeout(timer);

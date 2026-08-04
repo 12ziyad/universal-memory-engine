@@ -1,7 +1,7 @@
 {
 	"name": "itsuki",
 	"displayName": "Itsuki Memory",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "One private memory for every AI. Loads project memory when a session starts, saves decisions and fixes when it ends, and bundles the memory tools — with receipts for every write.",
 	"author": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
 	"license": "Apache-2.0",
@@ -13,6 +13,6 @@
 		}
 	},
 	"metadata": {
-		"setup": "Set ITSUKI_API_KEY in your shell profile (create one at https://itsuki.app → API keys), then restart your shell. That is the only step — the hooks and the in-session memory tools both use that one key."
+		"setup": "Set ITSUKI_API_KEY in your shell profile (create one at https://itsuki.app → API keys), then restart your shell. That is the only step — the hooks and the in-session memory tools both use that one key. Verify with /itsuki:doctor."
 	}
 }

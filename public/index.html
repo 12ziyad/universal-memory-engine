@@ -2568,8 +2568,9 @@ function installMethods() {
 						note:
 							`<b>The whole setup, in order:</b><br>` +
 							`1. <a href="#" onclick="setView('keys');return false">Create an API key</a> — it is shown once.<br>` +
-							`2. Put it in your environment as <b>ITSUKI_API_KEY</b>: <code>export ITSUKI_API_KEY=…</code> in your shell profile, or <code>setx ITSUKI_API_KEY …</code> on Windows.<br>` +
-							`3. Restart your shell so the variable is loaded, then run the two commands above.<br><br>` +
+							`2. Put it in your environment as <b>ITSUKI_API_KEY</b>: <code>export ITSUKI_API_KEY=YOUR_KEY</code> in your shell profile, or <code>setx ITSUKI_API_KEY YOUR_KEY</code> on Windows — replacing <code>YOUR_KEY</code> with the full <code>itsuki_live_</code> key. In cmd.exe, paste with right-click (Ctrl-V can insert a control character instead of pasting).<br>` +
+							`3. Restart your shell so the variable is loaded, then run the two commands above.<br>` +
+							`4. In a Claude Code session, run <code>/itsuki:doctor</code> — four checks that tell you exactly what is broken if anything is.<br><br>` +
 							`That is everything — <b>one key, one variable</b>. The session hooks and the in-session memory tools both authenticate with it, and there is no second URL to configure. ` +
 							`If the key is missing or rejected, the plugin says so at session start rather than sitting there doing nothing.`,
 					},

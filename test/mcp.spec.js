@@ -214,10 +214,21 @@ describe("/mcp header door", () => {
 		expect((await res.json()).message).toMatch(/ITSUKI_API_KEY/);
 	});
 
-	it("still refuses an api-type key in the path, where only MCP links belong", async () => {
+	it("still refuses an api-type key in the path, and says it IS an API key", async () => {
 		const token = await apiToken("mcp-path-api");
 		const res = await mcp(token, { jsonrpc: "2.0", id: 34, method: "initialize", params: {} });
 		expect(res.status).toBe(401);
+		const body = await res.json();
+		// The docs-trap case: an API key pasted where an MCP link belongs must
+		// be named as such, not lumped in with revoked links.
+		expect(body.message).toMatch(/API key, not an MCP link/);
+		expect(body.message).toMatch(/Authorization: Bearer/);
+	});
+
+	it("a token that is neither api nor mcp still gets the link message", async () => {
+		const res = await mcp("itsuki_live_neverminted", { jsonrpc: "2.0", id: 35, method: "initialize", params: {} });
+		expect(res.status).toBe(401);
+		expect((await res.json()).message).toMatch(/revoked, expired, or not an MCP token/);
 	});
 });
 

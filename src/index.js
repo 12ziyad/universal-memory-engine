@@ -1678,7 +1678,18 @@ async function handleMcp(request, env, ctx, url) {
 
 	if (ACCEPTED_TOKEN_PREFIXES.some((prefix) => pathToken?.startsWith(prefix))) {
 		const auth = await resolveConnectionToken(env, pathToken, { allowedTypes: ["mcp"] });
-		if (!auth) return unauthorizedMcp("That MCP link is revoked, expired, or not an MCP token.");
+		if (!auth) {
+			// The most common way to land here is pasting an API key where an
+			// MCP link belongs. Name that precisely — the generic message sends
+			// people off to regenerate a link that was never the problem.
+			const asApiKey = await resolveConnectionToken(env, pathToken, { allowedTypes: ["api"] });
+			if (asApiKey) {
+				return unauthorizedMcp(
+					"That is an API key, not an MCP link. API keys authenticate at POST /mcp with an 'Authorization: Bearer <key>' header — only MCP links (created as MCP in the app) go in the URL.",
+				);
+			}
+			return unauthorizedMcp("That MCP link is revoked, expired, or not an MCP token.");
+		}
 		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
 	}
 
