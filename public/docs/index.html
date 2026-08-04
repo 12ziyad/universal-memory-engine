@@ -263,6 +263,7 @@ setx ITSUKI_API_KEY YOUR_KEY            # Windows`)}
 <h2>2. Install</h2>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
 claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
+<p>On Windows, <code>marketplace add</code> can occasionally fail with an <code>EPERM: operation not permitted, rename…</code> error — a transient file-lock race (antivirus scanning the fresh clone). Just run the same command again.</p>
 <h2>3. Verify</h2>
 <p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the key's shape, the network path, the hooks door, and the MCP door, and prints the exact fix for whichever fails. All four pass — you're done.</p>
 <h2>What you get</h2>

@@ -1,15 +1,20 @@
 {
 	"name": "itsuki",
 	"displayName": "Itsuki Memory",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "One private memory for every AI. Loads project memory when a session starts, saves decisions and fixes when it ends, and bundles the memory tools — with receipts for every write.",
-	"author": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
+	"author": {
+		"name": "Itsuki",
+		"url": "https://github.com/12ziyad/universal-memory-engine"
+	},
 	"license": "Apache-2.0",
 	"mcpServers": {
 		"itsuki": {
 			"type": "http",
 			"url": "https://itsuki.app/mcp",
-			"headers": { "Authorization": "Bearer ${ITSUKI_API_KEY}" }
+			"headers": {
+				"Authorization": "Bearer ${ITSUKI_API_KEY}"
+			}
 		}
 	},
 	"metadata": {

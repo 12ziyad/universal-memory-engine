@@ -20,14 +20,16 @@ const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.en
 const MAX_MESSAGES = 80;
 const MAX_CHARS_PER_MESSAGE = 4000;
 
-/** Read the hook payload Claude Code pipes in on stdin. */
+/** Read the hook payload Claude Code pipes in on stdin. Null means the
+ * payload was unreadable — which must be REPORTED, not treated as an empty
+ * session. A malformed payload once hid as "nothing to save". */
 async function readStdin() {
 	const chunks = [];
 	for await (const chunk of process.stdin) chunks.push(chunk);
 	try {
 		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 	} catch {
-		return {};
+		return null;
 	}
 }
 
@@ -99,7 +101,15 @@ async function main() {
 	}
 
 	const payload = await readStdin();
-	const messages = await messagesFromTranscript(payload?.transcript_path);
+	if (payload === null) {
+		notSaved("Claude Code sent a session-end payload this hook could not parse.", "Nothing to fix in your setup — if this repeats, report it.");
+		return;
+	}
+	if (payload.transcript_path && !existsSync(payload.transcript_path)) {
+		notSaved("the session transcript file was not found.", "Nothing to fix in your setup — if this repeats, report it.");
+		return;
+	}
+	const messages = await messagesFromTranscript(payload.transcript_path);
 	// Nothing worth sending is the normal quiet case, not a failure.
 	if (!messages.length) return;
 
