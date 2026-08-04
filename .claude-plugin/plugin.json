@@ -5,7 +5,6 @@
 	"description": "One private memory for every AI. Loads project memory when a session starts, saves decisions and fixes when it ends, and bundles the memory tools — with receipts for every write.",
 	"author": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
 	"license": "Apache-2.0",
-	"hooks": "./hooks/hooks.json",
 	"mcpServers": {
 		"itsuki": {
 			"type": "http",
