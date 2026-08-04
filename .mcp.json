@@ -2,7 +2,8 @@
 	"mcpServers": {
 		"itsuki": {
 			"type": "http",
-			"url": "${ITSUKI_MCP_URL}"
+			"url": "${ITSUKI_MCP_URL:-https://itsuki.app/mcp}",
+			"headers": { "Authorization": "Bearer ${ITSUKI_API_KEY}" }
 		}
 	}
 }

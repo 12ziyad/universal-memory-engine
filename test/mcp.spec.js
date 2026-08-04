@@ -22,6 +22,23 @@ async function mcp(token, body) {
 	return response;
 }
 
+/** The header door: bare /mcp, identity in `Authorization: Bearer`. */
+async function mcpBearer(token, body) {
+	const request = new Request("http://example.com/mcp", {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+			...(token ? { authorization: `Bearer ${token}` } : {}),
+		},
+		body: JSON.stringify(body),
+	});
+	const ctx = createExecutionContext();
+	const response = await worker.fetch(request, env, ctx);
+	await waitOnExecutionContext(ctx);
+	return response;
+}
+
 async function mcpJson(response) {
 	const text = await response.text();
 	const data = text
@@ -139,6 +156,68 @@ describe("/mcp auth gate", () => {
 		expect(saveBody.result.content[0].text).toBe("Forbidden: token lacks required scope.");
 		expect(saveBody.result.content[0].text).not.toContain("structuredContent");
 		expect(saveBody.result.content[0].text).not.toContain("receipt_id");
+	});
+});
+
+/**
+ * The plugin ships a fixed URL and one env var, so an ordinary API key — not
+ * just a purpose-minted MCP link — has to authenticate on bare /mcp.
+ */
+describe("/mcp header door", () => {
+	async function apiToken(prefix, body = {}) {
+		const account = await signupAccount(prefix);
+		const created = await jsonRequest("/auth/tokens", { type: "api", label: "Plugin key", ...body }, account.cookie);
+		expect(created.status).toBe(201);
+		return (await created.json()).token;
+	}
+
+	it("an api-type key authenticates on bare /mcp", async () => {
+		const token = await apiToken("mcp-header");
+		const res = await mcpBearer(token, {
+			jsonrpc: "2.0",
+			id: 30,
+			method: "tools/call",
+			params: { name: "recall_memory", arguments: { query: "anything" } },
+		});
+		expect(res.status).toBe(200);
+		expect((await mcpJson(res)).result.structuredContent).toMatchObject({ ok: true, source: "recall" });
+	});
+
+	it("carries the key's scopes through the header door", async () => {
+		const token = await apiToken("mcp-header-scope", { scopes: ["memory:read"] });
+		const res = await mcpBearer(token, {
+			jsonrpc: "2.0",
+			id: 31,
+			method: "tools/call",
+			params: { name: "save_memory", arguments: { content: "I took up bouldering." } },
+		});
+		expect(res.status).toBe(200);
+		expect((await mcpJson(res)).result.structuredContent).toMatchObject({
+			ok: false,
+			error: "forbidden",
+			code: "insufficient_scope",
+			required_scope: "memory:write",
+		});
+	});
+
+	it("rejects a key that is not real, and says why", async () => {
+		const res = await mcpBearer("itsuki_live_nope", { jsonrpc: "2.0", id: 32, method: "initialize", params: {} });
+		expect(res.status).toBe(401);
+		const body = await res.json();
+		expect(body.message).toMatch(/revoked or not valid/i);
+		expect(res.headers.get("www-authenticate")).toMatch(/^Bearer /);
+	});
+
+	it("tells an unconfigured client what is missing instead of a bare 401", async () => {
+		const res = await mcpBearer("", { jsonrpc: "2.0", id: 33, method: "initialize", params: {} });
+		expect(res.status).toBe(401);
+		expect((await res.json()).message).toMatch(/ITSUKI_API_KEY/);
+	});
+
+	it("still refuses an api-type key in the path, where only MCP links belong", async () => {
+		const token = await apiToken("mcp-path-api");
+		const res = await mcp(token, { jsonrpc: "2.0", id: 34, method: "initialize", params: {} });
+		expect(res.status).toBe(401);
 	});
 });
 

@@ -1,5 +1,5 @@
 {
-	"description": "Itsuki memory hooks: recall project memory at session start, save what the session learned at session end. Both fail silently and never block the agent.",
+	"description": "Itsuki memory hooks: recall project memory at session start, save what the session learned at session end. Neither ever blocks the agent, and neither ever fails silently — if memory is off, they say so and why.",
 	"hooks": {
 		"SessionStart": [
 			{

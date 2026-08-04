@@ -1637,28 +1637,74 @@ async function handleRequestInner(request, env, ctx, url) {
 		return handler(request, env, ctx);
 }
 
-/** Authenticate the path token, then serve the MCP Streamable HTTP endpoint. */
-async function handleMcp(request, env, ctx, url) {
-	const token = url.pathname.slice("/mcp/".length).split("/")[0];
-	if (ACCEPTED_TOKEN_PREFIXES.some((prefix) => token?.startsWith(prefix))) {
-		const auth = await resolveConnectionToken(env, token, { allowedTypes: ["mcp"] });
-		if (!auth) return json({ error: "unauthorized mcp token" }, 401);
-		const server = buildMemoryServer(env, ctx, auth.userId, {
-			scopes: auth.token?.scopes ?? [],
-		});
-		const normalized = new Request(new URL("/mcp", url).toString(), request);
-		return createMcpHandler(server)(normalized, env, ctx);
-	}
+/** Read `Authorization: Bearer <token>`, or "" when the header is absent. */
+function bearerFromRequest(request) {
+	const match = /^Bearer\s+(.+)$/i.exec((request.headers.get("authorization") || "").trim());
+	return match ? match[1].trim() : "";
+}
 
-	const id = decodeMcpToken(token);
-	if (!id || !env.API_KEY || !(await timingSafeEqualString(id.key, env.API_KEY))) {
-		return json({ error: "unauthorized mcp token" }, 401);
-	}
+/**
+ * 401 with a reason. MCP clients surface the body when a connection fails, and
+ * "unauthorized" on its own has cost people an afternoon of guessing.
+ */
+function unauthorizedMcp(message) {
+	return json({ error: "unauthorized mcp token", message }, 401, {
+		"www-authenticate": 'Bearer realm="itsuki", error="invalid_token"',
+	});
+}
 
-	const server = buildMemoryServer(env, ctx, id.userId);
+/** Build the server for an identity and hand the request to the transport. */
+function serveMcp(request, env, ctx, url, userId, scopes) {
+	const server = buildMemoryServer(env, ctx, userId, scopes ? { scopes } : undefined);
 	// Normalize the path to /mcp so the transport never depends on the token suffix.
 	const normalized = new Request(new URL("/mcp", url).toString(), request);
 	return createMcpHandler(server)(normalized, env, ctx);
+}
+
+/**
+ * Authenticate the caller, then serve the MCP Streamable HTTP endpoint. Two
+ * doors reach the same server:
+ *
+ *   POST /mcp/<token>  — identity in the path, which is what an MCP link is
+ *   POST /mcp          — identity in `Authorization: Bearer <key>`
+ *
+ * The header door exists so a client can ship a fixed URL and still be
+ * per-user: the plugin hardcodes https://itsuki.app/mcp and sends the same
+ * ITSUKI_API_KEY its hooks already use, instead of asking for a second
+ * per-account URL that only the app can mint.
+ */
+async function handleMcp(request, env, ctx, url) {
+	const pathToken = url.pathname.slice("/mcp/".length).split("/")[0];
+
+	if (ACCEPTED_TOKEN_PREFIXES.some((prefix) => pathToken?.startsWith(prefix))) {
+		const auth = await resolveConnectionToken(env, pathToken, { allowedTypes: ["mcp"] });
+		if (!auth) return unauthorizedMcp("That MCP link is revoked, expired, or not an MCP token.");
+		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
+	}
+
+	// Header door. `api` is allowed as well as `mcp` so the one key a user
+	// already has in their shell profile is the only thing they need to set.
+	const bearer = bearerFromRequest(request);
+	if (!pathToken && bearer) {
+		const auth = await resolveConnectionToken(env, bearer, { allowedTypes: ["api", "mcp"] });
+		if (!auth) {
+			return unauthorizedMcp(
+				"That key is revoked or not valid. Create one at https://itsuki.app under API keys, then set ITSUKI_API_KEY.",
+			);
+		}
+		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
+	}
+
+	const id = decodeMcpToken(pathToken);
+	if (!id || !env.API_KEY || !(await timingSafeEqualString(id.key, env.API_KEY))) {
+		return unauthorizedMcp(
+			pathToken || bearer
+				? "That credential is not valid for MCP."
+				: "No credential. Send Authorization: Bearer <your ITSUKI_API_KEY> to /mcp, or connect an MCP link URL.",
+		);
+	}
+
+	return serveMcp(request, env, ctx, url, id.userId, null);
 }
 
 /**

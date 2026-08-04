@@ -4,9 +4,10 @@
  * pairs get remembered; file paths, stack traces, and tool chatter are
  * discarded by the server's deterministic gates.
  *
- * Same absolute rule as session-start: fail silently, never block. The save
- * is accepted by the server and extracted in the background, so this only
- * waits for the acknowledgement, capped hard.
+ * Same two rules as session-start: never block (always exit 0), and never
+ * fail invisibly (say why nothing was saved). The save is accepted by the
+ * server and extracted in the background, so this only waits for the
+ * acknowledgement, capped hard.
  */
 
 import { basename } from "node:path";
@@ -62,19 +63,34 @@ async function messagesFromTranscript(path) {
 	return out.slice(-MAX_MESSAGES);
 }
 
+/** Tell the user nothing was saved, and why. Always paired with exit 0. */
+function notSaved(reason, fix) {
+	process.stdout.write(JSON.stringify({
+		systemMessage: `Itsuki: this session was NOT saved to memory — ${reason} ${fix}`,
+	}));
+}
+
+const SETUP_FIX =
+	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell.";
+
 async function main() {
-	if (!API_KEY) return;
+	if (!API_KEY) {
+		notSaved("ITSUKI_API_KEY is not set.", SETUP_FIX);
+		return;
+	}
 
 	const payload = await readStdin();
 	const messages = await messagesFromTranscript(payload?.transcript_path);
+	// Nothing worth sending is the normal quiet case, not a failure.
 	if (!messages.length) return;
 
 	const project = basename(payload?.cwd || process.cwd()) || "project";
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
+	let res;
 	try {
-		await fetch(`${BASE_URL}/v1/ingest`, {
+		res = await fetch(`${BASE_URL}/v1/ingest`, {
 			method: "POST",
 			signal: controller.signal,
 			headers: {
@@ -89,10 +105,24 @@ async function main() {
 				messages: messages.map((m, i) => ({ id: `${payload?.session_id ?? "sess"}-${i}`, ...m })),
 			}),
 		});
-	} catch {
-		// Silent by design.
+	} catch (error) {
+		notSaved(
+			error?.name === "AbortError"
+				? `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.`
+				: `could not reach ${BASE_URL}.`,
+			"This is usually a network problem, not a setup problem.",
+		);
+		return;
 	} finally {
 		clearTimeout(timer);
+	}
+
+	if (res.status === 401 || res.status === 403) {
+		notSaved(`the server rejected ITSUKI_API_KEY (HTTP ${res.status}).`, `The key is revoked or mistyped. ${SETUP_FIX}`);
+		return;
+	}
+	if (!res.ok) {
+		notSaved(`the memory service answered HTTP ${res.status}.`, "Nothing to fix locally — try again next session.");
 	}
 }
 

@@ -1,17 +1,18 @@
 {
 	"name": "itsuki",
 	"displayName": "Itsuki Memory",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "One private memory for every AI. Loads project memory when a session starts, saves decisions and fixes when it ends, and bundles the memory tools — with receipts for every write.",
 	"author": { "name": "Itsuki", "url": "https://github.com/12ziyad/universal-memory-engine" },
 	"license": "Apache-2.0",
 	"mcpServers": {
 		"itsuki": {
 			"type": "http",
-			"url": "${ITSUKI_MCP_URL}"
+			"url": "https://itsuki.app/mcp",
+			"headers": { "Authorization": "Bearer ${ITSUKI_API_KEY}" }
 		}
 	},
 	"metadata": {
-		"setup": "Set ITSUKI_API_KEY in your shell profile (create one at https://itsuki.app → API keys) — the session hooks need it. Optionally set ITSUKI_MCP_URL to an MCP link for the in-session memory tools."
+		"setup": "Set ITSUKI_API_KEY in your shell profile (create one at https://itsuki.app → API keys), then restart your shell. That is the only step — the hooks and the in-session memory tools both use that one key."
 	}
 }

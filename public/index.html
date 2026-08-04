@@ -2562,10 +2562,16 @@ function installMethods() {
 					label: "Claude Code",
 					icon: ICON.terminal,
 					copyOnly: {
-						body: "Two commands (they work as /slash commands inside a session too). The plugin loads project memory when a session starts and saves what it learned when it ends.",
+						body: "Set your key, then run two commands (they work as /slash commands inside a session too). The plugin loads project memory when a session starts and saves what it learned when it ends.",
 						codeLabel: "terminal",
 						code: () => `${installSnippets().pluginMarketplace}\nclaude plugin install itsuki@itsuki-plugins`,
-						note: `Set <b>ITSUKI_API_KEY</b> once in your shell profile (create one in <a href="#" onclick="setView('keys');return false">API keys</a>) so the plugin can reach your memory.`,
+						note:
+							`<b>The whole setup, in order:</b><br>` +
+							`1. <a href="#" onclick="setView('keys');return false">Create an API key</a> — it is shown once.<br>` +
+							`2. Put it in your environment as <b>ITSUKI_API_KEY</b>: <code>export ITSUKI_API_KEY=…</code> in your shell profile, or <code>setx ITSUKI_API_KEY …</code> on Windows.<br>` +
+							`3. Restart your shell so the variable is loaded, then run the two commands above.<br><br>` +
+							`That is everything — <b>one key, one variable</b>. The session hooks and the in-session memory tools both authenticate with it, and there is no second URL to configure. ` +
+							`If the key is missing or rejected, the plugin says so at session start rather than sitting there doing nothing.`,
 					},
 				},
 				codex: {

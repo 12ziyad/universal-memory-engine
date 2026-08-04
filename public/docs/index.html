@@ -253,10 +253,18 @@ ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORI
 
 PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
 <h1>Claude Code plugin</h1>
-<p class="lede">Coming soon: install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
+<p class="lede">Install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
+<h2>1. Set your key</h2>
+<p>Create an API key in <b>API Keys</b>, then put it in your environment. This is the only variable the plugin needs:</p>
+${codeBlock(`export ITSUKI_API_KEY=${PRODUCT.tokenPrefix}…      # shell profile
+setx ITSUKI_API_KEY ${PRODUCT.tokenPrefix}…            # Windows`)}
+<p>Restart your shell so the variable is loaded.</p>
+<h2>2. Install</h2>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
-/plugin install ${PRODUCT.pkg}`)}
-<p>Until the plugin ships, the <a href="#/install/claude-code">MCP setup</a> gives you the same three tools today.</p>
+claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
+<h2>What you get</h2>
+<p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: project memory is loaded at session start, and what the session learned is saved at session end.</p>
+<div class="note">One key, one variable — there is no MCP URL to configure. The plugin points at <code>${ORIGIN}/mcp</code> and sends your key as a Bearer header. If the key is missing or rejected, the plugin tells you at session start instead of failing quietly.</div>
 ` };
 
 PAGES["/install/cursor"] = { title: "Cursor & other editors", html: `
@@ -270,7 +278,8 @@ ${codeBlock(`{
   }
 }`)}
 <h2>Codex / anything else</h2>
-<p>Point the client's MCP server config at the same URL. Transport is Streamable HTTP; no extra headers needed — identity rides in the URL.</p>
+<p>Point the client's MCP server config at the same URL. Transport is Streamable HTTP; identity rides in the URL, so no extra headers are needed.</p>
+<p>If your client prefers a fixed URL with header auth, that works too: point it at <code>${ORIGIN}/mcp</code> with no path token and send <code>Authorization: Bearer</code> plus an API key. Same server, same tools.</p>
 <div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest.</div>
 ` };
 
