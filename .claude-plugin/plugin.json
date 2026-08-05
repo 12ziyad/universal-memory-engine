@@ -1,23 +1,38 @@
 {
 	"name": "itsuki",
 	"displayName": "Itsuki Memory",
-	"version": "0.4.1",
-	"description": "One private memory for every AI. Loads project memory when a session starts, saves decisions and fixes when it ends, and bundles the memory tools — with receipts for every write.",
+	"version": "0.5.0",
+	"description": "One private memory for every AI. Loads project memory at session start, queues decisions and fixes safely at session end, and bundles memory tools with receipts for every write.",
 	"author": {
 		"name": "Itsuki",
 		"url": "https://github.com/12ziyad/universal-memory-engine"
 	},
+	"homepage": "https://itsuki.app",
+	"repository": "https://github.com/12ziyad/universal-memory-engine",
+	"keywords": ["memory", "mcp", "claude-code", "productivity"],
 	"license": "Apache-2.0",
+	"userConfig": {
+		"node_executable": {
+			"type": "file",
+			"title": "Node executable",
+			"description": "Select the absolute Node 22 or Node 24 LTS executable used by Itsuki hooks.",
+			"required": true
+		},
+		"itsuki_api_key": {
+			"type": "string",
+			"title": "Itsuki API key",
+			"description": "Create an API key at https://itsuki.app under API keys.",
+			"sensitive": true,
+			"required": true
+		}
+	},
 	"mcpServers": {
 		"itsuki": {
 			"type": "http",
 			"url": "https://itsuki.app/mcp",
 			"headers": {
-				"Authorization": "Bearer ${ITSUKI_API_KEY}"
+				"Authorization": "Bearer ${user_config.itsuki_api_key}"
 			}
 		}
-	},
-	"metadata": {
-		"setup": "Set ITSUKI_API_KEY in your shell profile (create one at https://itsuki.app → API keys), then restart your shell. That is the only step — the hooks and the in-session memory tools both use that one key. Verify with /itsuki:doctor."
 	}
 }

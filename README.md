@@ -161,6 +161,30 @@ SessionStart. Older plugin versions wrote `project:<basename>` as isolated sub-t
 account graph reports those legacy spaces as read-only inventory because basename collisions
 make an automatic destructive merge unsafe.
 
+### Claude Code plugin delivery
+
+The plugin requires a maintained **Node 22 or 24 LTS** runtime. During installation, select that executable by its absolute
+path (for example, `(Get-Command node).Source` in PowerShell or `command -v node` on macOS/Linux); hooks never resolve
+`node` through a project-controlled `PATH`. SessionEnd does not use the network: it scrubs the
+captured messages and atomically places one protected envelope under Claude's persistent
+`${CLAUDE_PLUGIN_DATA}/outbox/v1` directory, then returns within Claude's shutdown budget.
+SessionStart delivers up to four pending envelopes before recall. Offline, DNS, timeout, 429,
+and server failures remain queued with idempotent backoff; a rejected key pauses delivery; a
+permanent request error remains available for `/itsuki:doctor` instead of being discarded.
+
+The outbox permits at most 128 raw envelopes, 64 MiB total, and 2 MiB per envelope. It never
+evicts undelivered content to make room. Raw content is removed as soon as `/v1/ingest`
+durably accepts it; body-free completion tombstones remain for seven days. Directories/files
+are protected as 0700/0600 on POSIX and with a verified current-user/SYSTEM/Administrators
+DACL on Windows. If that protection cannot be established, the hook fails closed and says
+that the session was **not queued**.
+
+"Queued locally" is not "delivered", and server acceptance is not terminal enrichment. The
+next SessionStart reports delivery/backlog state; packet status remains the authority for
+enrichment. Claude's SessionEnd budget can be tuned with
+`CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`, but correctness does not depend on changing it.
+Claude removes plugin data on final uninstall unless its `--keep-data` option is used.
+
 ## SDKs
 
 ```bash

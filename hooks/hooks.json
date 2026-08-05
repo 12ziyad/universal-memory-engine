@@ -1,12 +1,34 @@
 {
-	"description": "Itsuki memory hooks: recall project memory at session start, save what the session learned at session end. Neither ever blocks the agent, and neither ever fails silently — if memory is off, they say so and why.",
+	"description": "Itsuki memory hooks: deliver protected local outbox entries and recall project memory at session start; queue the session locally at session end. Neither hook may break the agent session.",
 	"hooks": {
+		"UserPromptExpansion": [
+			{
+				"matcher": "^(?:doctor|itsuki:doctor)$",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${user_config.node_executable}",
+						"args": [
+							"${CLAUDE_PLUGIN_ROOT}/hooks/doctor-hook.mjs",
+							"--plugin-data",
+							"${CLAUDE_PLUGIN_DATA}"
+						],
+						"timeout": 30
+					}
+				]
+			}
+		],
 		"SessionStart": [
 			{
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"",
+						"command": "${user_config.node_executable}",
+						"args": [
+							"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs",
+							"--plugin-data",
+							"${CLAUDE_PLUGIN_DATA}"
+						],
 						"timeout": 15
 					}
 				]
@@ -17,8 +39,12 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.mjs\"",
-						"timeout": 25
+						"command": "${user_config.node_executable}",
+						"args": [
+							"${CLAUDE_PLUGIN_ROOT}/hooks/session-end.mjs",
+							"--plugin-data",
+							"${CLAUDE_PLUGIN_DATA}"
+						]
 					}
 				]
 			}

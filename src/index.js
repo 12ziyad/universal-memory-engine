@@ -1762,8 +1762,8 @@ function serveMcp(request, env, ctx, url, userId, scopes) {
  *
  * The header door exists so a client can ship a fixed URL and still be
  * per-user: the plugin hardcodes https://itsuki.app/mcp and sends the same
- * ITSUKI_API_KEY its hooks already use, instead of asking for a second
- * per-account URL that only the app can mint.
+ * sensitive plugin userConfig key its hooks receive, instead of asking for a
+ * second per-account URL that only the app can mint.
  */
 async function handleMcp(request, env, ctx, url) {
 	const pathToken = url.pathname.slice("/mcp/".length).split("/")[0];
@@ -1785,14 +1785,14 @@ async function handleMcp(request, env, ctx, url) {
 		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
 	}
 
-	// Header door. `api` is allowed as well as `mcp` so the one key a user
-	// already has in their shell profile is the only thing they need to set.
+	// Header door. `api` is allowed as well as `mcp`; clients keep the credential
+	// in their own protected configuration (Claude uses sensitive userConfig).
 	const bearer = bearerFromRequest(request);
 	if (!pathToken && bearer) {
 		const auth = await resolveConnectionToken(env, bearer, { allowedTypes: ["api", "mcp"] });
 		if (!auth) {
 			return unauthorizedMcp(
-				"That key is revoked or not valid. Create one at https://itsuki.app under API keys, then set ITSUKI_API_KEY.",
+				"That key is revoked or not valid. Create one at https://itsuki.app under API keys, then configure it in your client (Claude plugin users: use /plugin).",
 			);
 		}
 		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
@@ -1803,7 +1803,7 @@ async function handleMcp(request, env, ctx, url) {
 		return unauthorizedMcp(
 			pathToken || bearer
 				? "That credential is not valid for MCP."
-				: "No credential. Send Authorization: Bearer <your ITSUKI_API_KEY> to /mcp, or connect an MCP link URL.",
+				: "No credential. Send Authorization: Bearer <your API key> to /mcp, or connect an MCP link URL.",
 		);
 	}
 

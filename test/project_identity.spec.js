@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -33,11 +33,15 @@ async function captureHookRequest(script, payload, env = {}) {
 	await once(server, "listening");
 	const { port } = server.address();
 
-	const child = spawn(process.execPath, [join(ROOT, "hooks", script)], {
+	const child = spawn(process.execPath, [
+		join(ROOT, "hooks", script),
+		"--service-url-for-test", `http://127.0.0.1:${port}`,
+	], {
 		cwd: ROOT,
 		env: {
 			...process.env,
-			ITSUKI_API_KEY: "itsuki_live_synthetic_test",
+			CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY: "itsuki_live_synthetic_test",
+			ITSUKI_API_KEY: "",
 			ITSUKI_BASE_URL: `http://127.0.0.1:${port}`,
 			ITSUKI_PROJECT_ID: "",
 			CLAUDE_PROJECT_DIR: "",
@@ -155,7 +159,10 @@ describe("Claude hook project identity", () => {
 		const stableEnv = { CLAUDE_PROJECT_DIR: cwd };
 		const start = await captureHookRequest("session-start.mjs", { cwd }, stableEnv);
 		const temp = await mkdtemp(join(tmpdir(), "itsuki-project-identity-"));
+		const configRoot = join(temp, "claude-config");
+		const pluginData = join(configRoot, "plugins", "data", "itsuki");
 		const transcriptPath = join(temp, "synthetic.jsonl");
+		await mkdir(pluginData, { recursive: true });
 		await writeFile(transcriptPath, `${JSON.stringify({
 			type: "user",
 			uuid: "synthetic-event-id",
@@ -164,26 +171,54 @@ describe("Claude hook project identity", () => {
 		})}\n`, "utf8");
 
 		try {
-			const end = await captureHookRequest("session-end.mjs", {
+			const payload = {
 				cwd: join(cwd, "packages", "worker"),
 				session_id: "synthetic-session",
 				transcript_path: transcriptPath,
-			}, stableEnv);
+			};
+			const child = spawn(process.execPath, [join(ROOT, "hooks", "session-end.mjs"), "--plugin-data", pluginData], {
+				cwd: ROOT,
+				env: {
+					...process.env,
+					CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY: "itsuki_live_synthetic_project_identity",
+					CLAUDE_PLUGIN_DATA: pluginData,
+					CLAUDE_CONFIG_DIR: configRoot,
+					ITSUKI_API_KEY: "",
+					ITSUKI_BASE_URL: "https://itsuki.app",
+					ITSUKI_PROJECT_ID: "",
+					...stableEnv,
+				},
+				stdio: ["pipe", "pipe", "pipe"],
+				windowsHide: true,
+			});
+			let stdout = "";
+			let stderr = "";
+			child.stdout.setEncoding("utf8");
+			child.stderr.setEncoding("utf8");
+			child.stdout.on("data", (chunk) => { stdout += chunk; });
+			child.stderr.on("data", (chunk) => { stderr += chunk; });
+			child.stdin.end(JSON.stringify(payload));
+			const [code] = await once(child, "exit");
+			const pending = await readdir(join(pluginData, "outbox", "v1", "pending"));
+			expect(pending).toHaveLength(1);
+			const envelope = JSON.parse(await readFile(join(pluginData, "outbox", "v1", "pending", pending[0]), "utf8"));
+			const endBody = envelope.request.body;
 
-			expect(end.code).toBe(0);
-			expect(end.body.userId).toBeUndefined();
-			expect(end.body.memoryScope).toEqual(start.body.memoryScope);
-			expect(end.body).toMatchObject({
+			expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+			expect(JSON.parse(stdout).systemMessage).toContain("queued locally");
+			expect(endBody.userId).toBeUndefined();
+			expect(endBody.memoryScope).toEqual(start.body.memoryScope);
+			expect(endBody).toMatchObject({
 				source: "plugin",
 				flush: true,
-				conversationId: "synthetic-session",
 			});
-			expect(JSON.stringify(end.body)).not.toContain("synthetic-a");
-			expect(JSON.stringify(end.body)).not.toContain("itsuki-project-identity-");
+			expect(endBody.conversationId).toMatch(/^claude_session_v1_[a-f0-9]{32}$/);
+			expect(JSON.stringify(endBody)).not.toContain("synthetic-a");
+			expect(JSON.stringify(endBody)).not.toContain("itsuki-project-identity-");
 		} finally {
 			await rm(temp, { recursive: true, force: true });
 		}
-	});
+	}, 10_000);
 
 	it("passes ITSUKI_PROJECT_ID through both the hook scope and display metadata", async () => {
 		const request = await captureHookRequest("session-start.mjs", { cwd: join(ROOT, "private", "atlas") }, {

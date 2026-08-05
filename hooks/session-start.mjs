@@ -1,18 +1,18 @@
 /**
- * Itsuki SessionStart hook — print project memory into the session so the
- * agent knows the project before the user types.
- *
- * Two rules, and they are not in conflict:
- *
- *   1. NEVER block or break a session. Always exit 0. A memory tool that
- *      breaks someone's coding session gets uninstalled the same afternoon.
- *   2. NEVER fail invisibly, and never fail with the WRONG reason. A garbage
- *      key used to be reported as "could not reach the server" because the
- *      fetch threw on the Authorization header before any network I/O
- *      (undici UND_ERR_INVALID_ARG). Diagnose locally first, and when the
- *      network really is the problem, name the underlying error code.
+ * Claude SessionStart: drain the protected local outbox first, then recall
+ * project memory. All status/context is aggregated into one JSON document and
+ * every network wait is bounded below the hook's 15-second host timeout.
  */
 
+import {
+	DEFAULT_DELIVERY_BASE_URL,
+	drainOutbox,
+	inspectOutbox,
+	normalizeDeliveryBaseUrl,
+	pluginDataFromArgs,
+	sanitizeMemoryScope,
+	validItsukiApiKey,
+} from "./outbox.mjs";
 import {
 	PROJECT_RECALL_SCOPE,
 	claudeProjectDirectory,
@@ -20,142 +20,236 @@ import {
 	resolveProjectIdentity,
 } from "./project-identity.mjs";
 
-const API_KEY = process.env.ITSUKI_API_KEY;
-const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
-const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 8000;
+const API_KEY = process.env.CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY;
+function explicitServiceUrl(argv = process.argv.slice(2)) {
+	for (let index = 0; index < argv.length; index += 1) {
+		if (argv[index] === "--service-url-for-test") return argv[index + 1];
+		if (String(argv[index]).startsWith("--service-url-for-test=")) {
+			return String(argv[index]).slice("--service-url-for-test=".length);
+		}
+	}
+	return DEFAULT_DELIVERY_BASE_URL;
+}
+let BASE_URL = null;
+try { BASE_URL = normalizeDeliveryBaseUrl(explicitServiceUrl()); } catch {}
+const CONFIGURED_TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 8_000;
+const TOTAL_BUDGET_MS = 12_000;
 
-/** SessionStart includes the project cwd on stdin. Invalid or absent input
- * falls back to the process cwd, preserving the hook's non-blocking behavior. */
 async function readStdin() {
 	const chunks = [];
 	for await (const chunk of process.stdin) chunks.push(chunk);
 	if (!chunks.length) return {};
 	try {
-		const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		return payload && typeof payload === "object" ? payload : {};
+		const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		return value && typeof value === "object" ? value : {};
 	} catch {
 		return {};
 	}
 }
 
-/** The one stdout write. Claude Code parses a single JSON payload per hook. */
-function emit(payload) {
-	process.stdout.write(JSON.stringify(payload));
-}
-
-/**
- * Report that memory is off, to the user and to the agent, then exit 0.
- * `fix` is the concrete next action — never just "something went wrong".
- */
-function unavailable(reason, fix) {
-	emit({
-		systemMessage: `Itsuki: ${reason} Project memory is OFF for this session. ${fix}`,
-		hookSpecificOutput: {
-			hookEventName: "SessionStart",
-			additionalContext:
-				`Itsuki project memory is unavailable this session (${reason}). ` +
-				`Do not claim to have memory of previous sessions. If the user asks about it, tell them: ${fix}`,
-		},
-	});
-}
-
-const SETUP_FIX =
-	"Create a key at https://itsuki.app under API keys, set ITSUKI_API_KEY in your shell profile, then restart your shell. Run /itsuki:doctor to verify.";
-
-/**
- * A key that cannot ride in an HTTP header must be caught BEFORE fetch, or
- * undici throws and the failure gets misread as a network problem. This is
- * exactly what a mangled paste produces: a control character (Ctrl-V typed
- * into a console that doesn't paste), a copied placeholder, a stray newline.
- */
 function keyProblem(key) {
-	if (!key) return "ITSUKI_API_KEY is not set.";
-	if (!/^[!-~]+$/.test(key)) {
-		return (
-			"ITSUKI_API_KEY is set but is not a usable key — it contains characters " +
-			"that cannot go in an HTTP header (length " + key.length + "). This is usually a paste that " +
-			"didn't paste: Ctrl-V in some Windows consoles inserts a control character instead. " +
-			"Real keys are plain text starting with itsuki_live_."
-		);
-	}
+	if (!key) return "the Itsuki plugin API key is not configured";
+	if (!/^[!-~]+$/.test(key)) return "the Itsuki plugin API key contains characters that cannot go in an HTTP header";
+	if (!validItsukiApiKey(key)) return "the Itsuki plugin API key has an invalid format";
 	return null;
 }
 
-/** Name the real cause: DNS, TLS, refused, timeout — not just "unreachable". */
-function describeNetworkError(error) {
-	if (error?.name === "AbortError" || error?.name === "TimeoutError") {
-		return `${BASE_URL} did not answer within ${TIMEOUT_MS / 1000}s.`;
-	}
-	const cause = error?.cause?.code || error?.cause?.message || error?.message || String(error);
-	return `could not reach ${BASE_URL} (${cause}).`;
+function setupFix() {
+	return "Create a key at https://itsuki.app under API keys, configure itsuki_api_key for the plugin through /plugin, reload or restart Claude Code, then run /itsuki:doctor.";
 }
 
-async function main() {
-	const problem = keyProblem(API_KEY);
-	if (problem) {
-		unavailable(problem, SETUP_FIX);
-		return;
+function networkReason(error, timeoutMs) {
+	if (error?.name === "AbortError" || error?.name === "TimeoutError") return `the configured memory service did not answer within ${timeoutMs / 1000}s`;
+	return "could not reach the configured memory service (network, DNS, proxy, or TLS failure)";
+}
+
+async function readLimitedJson(response, controller, maxBytes = 256 * 1024) {
+	const announced = Number(response.headers.get("content-length"));
+	if (Number.isFinite(announced) && announced > maxBytes) {
+		controller.abort();
+		await response.body?.cancel().catch(() => {});
+		return null;
 	}
-
-	const payload = await readStdin();
-	const project = await resolveProjectIdentity(claudeProjectDirectory(payload?.cwd));
-	const memoryScope = projectMemoryScope(project);
-
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-	let res;
+	if (!response.body?.getReader) {
+		const text = await response.text();
+		if (Buffer.byteLength(text, "utf8") > maxBytes) return null;
+		try { return JSON.parse(text); } catch { return null; }
+	}
+	const reader = response.body.getReader();
+	const chunks = [];
+	let bytes = 0;
 	try {
-		res = await fetch(`${BASE_URL}/v1/recall`, {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const chunk = Buffer.from(value);
+			bytes += chunk.length;
+			if (bytes > maxBytes) {
+				controller.abort();
+				await reader.cancel().catch(() => {});
+				return null;
+			}
+			chunks.push(chunk);
+		}
+	} finally {
+		try { reader.releaseLock(); } catch {}
+	}
+	try { return JSON.parse(Buffer.concat(chunks, bytes).toString("utf8")); }
+	catch { return null; }
+}
+
+async function recallProject(project, memoryScope, timeoutMs) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const response = await fetch(`${BASE_URL}/v1/recall`, {
 			method: "POST",
 			signal: controller.signal,
-			headers: {
-				authorization: `Bearer ${API_KEY}`,
-				"content-type": "application/json",
-			},
+			redirect: "manual",
+			headers: { authorization: `Bearer ${API_KEY}`, "content-type": "application/json" },
 			body: JSON.stringify({
 				query: `project decisions, conventions, architecture, and fixes for ${project.projectName}`,
 				memoryScope,
 				recallScope: PROJECT_RECALL_SCOPE,
 			}),
 		});
+		if (response.status === 401 || response.status === 403) {
+			await response.body?.cancel().catch(() => {});
+			return { unavailable: `the server rejected the configured Itsuki plugin key (HTTP ${response.status})`, fix: setupFix() };
+		}
+		if (!response.ok) {
+			await response.body?.cancel().catch(() => {});
+			return { unavailable: `the memory service answered HTTP ${response.status}`, fix: "The session continues normally; run /itsuki:doctor if this repeats." };
+		}
+		if (String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+			await response.body?.cancel().catch(() => {});
+			return { unavailable: "the memory service sent an unexpected response type", fix: "Run /itsuki:doctor. The session continues normally." };
+		}
+		const data = await readLimitedJson(response, controller);
+		if (!data || data.ok !== true || typeof data.context !== "string") {
+			return { unavailable: "the memory service sent an unreadable, oversized, or unsuccessful recall receipt", fix: "Run /itsuki:doctor. The session continues normally." };
+		}
+		return { context: data.context.trim() };
 	} catch (error) {
-		unavailable(describeNetworkError(error), "Run /itsuki:doctor for a full connection check. The session continues normally.");
-		return;
+		return { unavailable: networkReason(error, timeoutMs), fix: "Run /itsuki:doctor. The session continues normally." };
 	} finally {
 		clearTimeout(timer);
 	}
+}
 
-	if (res.status === 401 || res.status === 403) {
-		unavailable(`the server rejected ITSUKI_API_KEY (HTTP ${res.status}).`, `The key is revoked or mistyped. ${SETUP_FIX}`);
-		return;
+async function main() {
+	const startedAt = Date.now();
+	const payload = await readStdin();
+	const pluginData = pluginDataFromArgs();
+	const project = await resolveProjectIdentity(claudeProjectDirectory(payload.cwd));
+	const memoryScope = sanitizeMemoryScope(projectMemoryScope(project));
+	const system = [];
+	let unavailable = null;
+	let skipRecall = false;
+	let drainedHealth = null;
+
+	if (!BASE_URL) {
+		system.push("Itsuki: the configured memory service URL is invalid or unsafe; no queued data was sent. Run /itsuki:doctor.");
+		unavailable = { reason: "the configured memory service URL is invalid or unsafe", fix: "Use an HTTPS service URL (or loopback HTTP for development), then run /itsuki:doctor." };
+		skipRecall = true;
 	}
-	if (!res.ok) {
-		unavailable(`the memory service answered HTTP ${res.status}.`, "Nothing to fix locally — the session continues normally.");
-		return;
+
+	if (!pluginData) {
+		system.push("Itsuki: Claude did not provide a protected plugin-data directory; local delivery is unavailable. Run /itsuki:doctor.");
+	} else if (BASE_URL) {
+		try {
+			const drained = await drainOutbox({ pluginData, apiKey: API_KEY, baseUrl: BASE_URL });
+			drainedHealth = drained.health ?? null;
+			if (drained.delivered > 0) {
+				const packetIds = drained.accepted.map((item) => item.sourcePacketId).filter(Boolean);
+				system.push(
+					`Itsuki: delivered ${drained.delivered} locally queued session${drained.delivered === 1 ? "" : "s"}; ` +
+					`the server accepted ${drained.delivered === 1 ? "it" : "them"}, and enrichment may continue` +
+					`${packetIds.length ? ` (packet${packetIds.length === 1 ? "" : "s"}: ${packetIds.join(", ")})` : ""}.`,
+				);
+			}
+			if (drained.authBlocked) {
+				system.push("Itsuki: local delivery is paused because the API key was rejected; protected sessions remain queued. Run /itsuki:doctor.");
+				skipRecall = true;
+				unavailable = {
+					reason: "the API key was rejected while delivering the protected local queue",
+					fix: setupFix(),
+				};
+			}
+			if (drained.bindingRequired > 0) {
+				system.push(`Itsuki: ${drained.bindingRequired} protected queued session${drained.bindingRequired === 1 ? " requires" : "s require"} explicit API-key binding; run /itsuki:doctor.`);
+			}
+			if (drained.permanentFailures > 0 || drained.health?.permanentFailures > 0) {
+				const count = drained.health?.permanentFailures || drained.permanentFailures;
+				system.push(`Itsuki: ${count} queued session${count === 1 ? "" : "s"} require intervention and remain protected; run /itsuki:doctor.`);
+			}
+			if (drained.retried > 0) {
+				system.push(`Itsuki: delivery will retry later for ${drained.retried} queued session${drained.retried === 1 ? "" : "s"}.`);
+			}
+			if (drained.transportUnavailable) {
+				skipRecall = true;
+				unavailable = { reason: "the memory service was unreachable while delivering the protected local queue", fix: "Queued data was preserved; run /itsuki:doctor when connectivity returns." };
+			}
+		} catch {
+			system.push("Itsuki: the protected local outbox could not be inspected; no queued data was discarded. Run /itsuki:doctor.");
+		}
+	}
+
+	const problem = keyProblem(API_KEY);
+	if (problem) {
+		if (pluginData) {
+			try {
+				const health = drainedHealth ?? (BASE_URL ? await inspectOutbox({ pluginData, apiKey: API_KEY, baseUrl: BASE_URL }) : null);
+				if (health?.counts.pending > 0) system.push(`Itsuki: ${health.counts.pending} protected session${health.counts.pending === 1 ? " is" : "s are"} waiting for a valid key.`);
+			} catch {}
+		}
+		unavailable = { reason: problem, fix: setupFix() };
+		skipRecall = true;
 	}
 
 	let context = "";
-	try {
-		const data = await res.json();
-		context = String(data?.context ?? "").trim();
-	} catch {
-		unavailable("the memory service sent a response this hook could not read.", "The session continues normally.");
-		return;
+	if (!skipRecall) {
+		const remaining = Math.max(1, TOTAL_BUDGET_MS - (Date.now() - startedAt));
+		if (remaining < 250) {
+			unavailable = { reason: "the local delivery work used this hook's recall budget", fix: "The session continues normally; recall will retry next session." };
+		} else {
+			const recalled = await recallProject(project, memoryScope, Math.min(CONFIGURED_TIMEOUT_MS, remaining));
+			context = recalled.context ?? "";
+			if (recalled.unavailable) unavailable = { reason: recalled.unavailable, fix: recalled.fix };
+		}
 	}
 
-	// A new project with nothing stored yet is the normal, quiet case — the key
-	// works, there is simply no history. Saying nothing here is correct.
-	if (!context) return;
-
-	emit({
-		hookSpecificOutput: {
+	const output = {};
+	if (system.length) output.systemMessage = system.join(" ");
+	if (context) {
+		output.hookSpecificOutput = {
 			hookEventName: "SessionStart",
 			additionalContext:
 				`Itsuki project memory for ${project.projectName} (from previous sessions):\n${context}\n` +
-				`(Use this as established context. Durable new decisions from this session are saved automatically at session end.)`,
-		},
-	});
+				"(Use this as established context. New durable outcomes are queued locally at SessionEnd and delivered on a later SessionStart.)",
+		};
+	} else if (unavailable) {
+		output.systemMessage = `${output.systemMessage ? `${output.systemMessage} ` : ""}Itsuki: ${unavailable.reason}. Project memory is OFF for this session. ${unavailable.fix}`;
+		output.hookSpecificOutput = {
+			hookEventName: "SessionStart",
+			additionalContext:
+				`Itsuki project memory is unavailable this session (${unavailable.reason}). ` +
+				`Do not claim memory of previous sessions. If asked, say: ${unavailable.fix}`,
+		};
+	}
+	return output;
 }
 
-main().then(() => process.exit(0), () => process.exit(0));
+let output;
+try { output = await main(); }
+catch {
+	output = {
+		systemMessage: "Itsuki: an unexpected startup hook error occurred. The coding session continues normally; run /itsuki:doctor.",
+		hookSpecificOutput: {
+			hookEventName: "SessionStart",
+			additionalContext: "Itsuki project memory is unavailable this session. Do not claim memory of previous sessions.",
+		},
+	};
+}
+process.stdout.write(JSON.stringify(output ?? {}));
+process.exitCode = 0;

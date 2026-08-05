@@ -1,15 +1,19 @@
 ---
-description: Check the Itsuki memory connection — key, network, hooks door, MCP door — and report exactly what is broken and how to fix it.
+description: Verify Itsuki through its trusted hook, protected outbox, production REST path, and MCP lifecycle.
+argument-hint: [--bind-outbox]
+disable-model-invocation: true
 ---
 
-Run the Itsuki connection check and relay its results.
+The trusted Itsuki `UserPromptExpansion` hook must intercept every user-typed
+`/itsuki:doctor` command and show the complete PASS/FAIL/WARN/SKIP report
+directly. It is the only process in this flow that receives sensitive plugin
+configuration.
 
-1. Execute with the Bash tool:
+If this fallback prompt reaches Claude, do not run Bash or any other tool and
+do not claim that diagnostics passed. Tell the user exactly:
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs"
-```
+`FAIL  trusted doctor hook -- the UserPromptExpansion hook did not run. Confirm the Itsuki hook in /hooks, run /reload-plugins, and type /itsuki:doctor again.`
 
-2. Show the user every PASS/FAIL/SKIP line verbatim — do not summarize them away.
-3. If anything failed, restate the printed fix as the next action. If all four passed, tell the user Itsuki is fully connected and no further setup is needed.
-4. Never print, echo, or log the value of ITSUKI_API_KEY.
+If protected entries need rebinding, only the user may confirm it by typing
+`/itsuki:doctor --bind-outbox` directly. Never synthesize that slash command,
+never run a script as a substitute, and never print or request the API key.

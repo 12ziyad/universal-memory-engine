@@ -5,9 +5,20 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		environment: "node",
+		// Windows integration specs launch the real ACL verifier. Bounding file
+		// concurrency keeps those host-budget tests representative instead of
+		// turning PowerShell process-start contention into suite-only flakes.
+		maxWorkers: 4,
 		include: [
 			"test/claude_transcript.spec.js",
+			"test/claude_transcript_tail.spec.js",
+			"test/doctor.spec.js",
+			"test/hook_manifest.spec.js",
+			"test/hook_outbox.spec.js",
+			"test/mcp_diagnostic.spec.js",
 			"test/project_identity.spec.js",
+			"test/session_end_delivery.spec.js",
+			"test/session_start_delivery.spec.js",
 			"test/dashboard.spec.js",
 			"test/eval_extraction.spec.js",
 			"test/hulls.spec.js",

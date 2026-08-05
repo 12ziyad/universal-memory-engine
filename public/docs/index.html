@@ -255,24 +255,21 @@ ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORI
 PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
 <h1>Claude Code plugin</h1>
 <p class="lede">Install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
-<h2>1. Set your key</h2>
-<p>Create an API key in <b>API Keys</b>, then put it in your environment. This is the only variable the plugin needs:</p>
-${codeBlock(`export ITSUKI_API_KEY=YOUR_KEY      # shell profile
-setx ITSUKI_API_KEY YOUR_KEY            # Windows`)}
-<p>Replace <code>YOUR_KEY</code> with the full <code>${PRODUCT.tokenPrefix}…</code> value (shown once at creation), then restart your shell so the variable is loaded. In cmd.exe, paste with right-click — Ctrl-V can insert a control character instead of pasting.</p>
-<h2>2. Install</h2>
+<h2>1. Install</h2>
+<p>Install a maintained <b>Node 22 or 24 LTS</b> runtime first. Find its absolute executable path with <code>(Get-Command node).Source</code> in PowerShell or <code>command -v node</code> on macOS/Linux. Create an API key in <b>API Keys</b>; Claude will request both the executable file and the key through the plugin configuration prompt when the plugin is enabled.</p>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
 claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
-<p>On Windows, <code>marketplace add</code> can occasionally fail with an <code>EPERM: operation not permitted, rename…</code> error — a transient file-lock race (antivirus scanning the fresh clone). Just run the same command again.</p>
-<h2>3. Verify</h2>
-<p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the key's shape, the network path, the hooks door, and the MCP door, and prints the exact fix for whichever fails. All four pass — you're done.</p>
+<p>Select the absolute Node executable, paste the full <code>${PRODUCT.tokenPrefix}…</code> value only into the masked key prompt, then run <code>/reload-plugins</code>. You do not need to put the key in a shell profile or settings file, and hooks never resolve Node through a workspace-controlled <code>PATH</code>.</p>
+<h2>2. Verify</h2>
+<p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the installed files and hook configuration, protected local outbox, key, network path, REST door, and real MCP tools, then prints the exact fix for whichever fails.</p>
 <h2>What you get</h2>
-<p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: project memory is loaded at session start, and what the session learned is saved at session end.</p>
-<div class="note">One key, one variable — there is no MCP URL to configure. The plugin points at <code>${ORIGIN}/mcp</code> and sends your key as a Bearer header. If the key is missing or rejected, the plugin tells you at session start instead of failing quietly.</div>
+<p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: SessionEnd scrubs and queues what the session learned <b>locally, with no network wait</b>; the next SessionStart delivers that queue and loads project memory.</p>
+<div class="note"><b>Delivery states are explicit.</b> “Queued locally” is not “delivered”, and server acceptance is not terminal enrichment. Offline and retryable failures stay queued idempotently; rejected credentials pause delivery; permanent failures are retained for <code>/itsuki:doctor</code>. The protected outbox is capped at 128 raw entries / 64 MiB total / 2 MiB each and never evicts undelivered content. Claude deletes plugin data on final uninstall unless you use its <code>--keep-data</code> option.</div>
+<div class="note">Two plugin settings: an absolute Node executable and one sensitive API key; there is no MCP URL to configure. Claude stores the key in its credential store, exports it only to plugin subprocesses, and interpolates it into the bundled MCP Bearer header. If either setting is missing or the key is rejected, the plugin tells you at session start instead of failing quietly.</div>
 ` };
 
 PAGES["/install/cursor"] = { title: "Cursor & other editors", html: `
-<h1>Cursor, Codex &amp; other MCP editors</h1>
+<h1>Cursor &amp; other MCP editors</h1>
 <p class="lede">Any MCP-capable client connects with the same URL.</p>
 <h2>Cursor</h2>
 <p>Add to <code>.cursor/mcp.json</code> (project) or <code>~/.cursor/mcp.json</code> (global):</p>
@@ -281,8 +278,8 @@ ${codeBlock(`{
     "${PRODUCT.name.toLowerCase()}": { "url": "${ORIGIN}/mcp/YOUR_MCP_KEY" }
   }
 }`)}
-<h2>Codex / anything else</h2>
-<p>Point the client's MCP server config at the same URL. Transport is Streamable HTTP; identity rides in the URL, so no extra headers are needed.</p>
+<h2>Other MCP clients</h2>
+<p>Where a client supports Streamable HTTP MCP, point its documented remote-server configuration at the same generated URL. Client-specific lifecycle hooks and transcript capture require separate tested adapters and are not implied by this MCP connection.</p>
 <p>If your client prefers a fixed URL with header auth, that works too: point it at <code>${ORIGIN}/mcp</code> with no path token and send <code>Authorization: Bearer</code> plus an API key. Same server, same tools.</p>
 <div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest. And it must be an <b>MCP link</b>, created as such in API Keys — an API key in the URL is refused (API keys belong in the <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code>).</div>
 ` };

@@ -41,7 +41,7 @@ function parsedTimestamp(value) {
  * ID, the same stable fields plus the full-transcript occurrence/ordinal form
  * the deterministic fallback. Raw transcript content never appears in the ID.
  */
-function stableMessageId({ row, namespace, role, text, timestamp, ordinal, occurrence }) {
+function stableMessageId({ row, namespace, role, text, timestamp, ordinal, occurrence, byteOffset }) {
 	const contentHash = sha256(text);
 	const eventUuid = cleanHostId(row?.uuid ?? row?.event_id ?? row?.eventId);
 	if (eventUuid) {
@@ -49,7 +49,10 @@ function stableMessageId({ row, namespace, role, text, timestamp, ordinal, occur
 	}
 
 	const messageId = cleanHostId(row?.message?.id ?? row?.message_id ?? row?.messageId);
-	const stableFields = [namespace, role, timestamp ?? "", contentHash, ordinal, occurrence].join("\0");
+	const hasByteOffset = Number.isSafeInteger(byteOffset) && byteOffset >= 0;
+	const stableFields = hasByteOffset
+		? [namespace, role, timestamp ?? "", contentHash, `byte:${byteOffset}`].join("\0")
+		: [namespace, role, timestamp ?? "", contentHash, `ordinal:${ordinal}`, occurrence].join("\0");
 	if (messageId) {
 		return `${CLAUDE_MESSAGE_ID_VERSION}_m_${sha256(`message\0${messageId}\0${stableFields}`).slice(0, 32)}`;
 	}
@@ -64,7 +67,6 @@ export async function messagesFromClaudeTranscriptLines(lines, options = {}) {
 	const maxMessages = Number(options.maxMessages ?? DEFAULT_MAX_MESSAGES);
 	const maxCharsPerMessage = Number(options.maxCharsPerMessage ?? DEFAULT_MAX_CHARS_PER_MESSAGE);
 	const namespace = String(options.sessionId ?? options.transcriptId ?? "session");
-	const now = typeof options.now === "function" ? options.now : Date.now;
 	const messages = [];
 	const occurrences = new Map();
 	let ordinal = 0;
@@ -72,7 +74,7 @@ export async function messagesFromClaudeTranscriptLines(lines, options = {}) {
 	for await (const line of lines ?? []) {
 		let row;
 		try {
-			row = typeof line === "string" ? JSON.parse(line) : line;
+			row = typeof line === "string" ? JSON.parse(line) : JSON.parse(line?.raw ?? "");
 		} catch {
 			continue;
 		}
@@ -86,13 +88,14 @@ export async function messagesFromClaudeTranscriptLines(lines, options = {}) {
 		const fingerprint = sha256([role, timestamp ?? "", text].join("\0"));
 		const occurrence = occurrences.get(fingerprint) ?? 0;
 		occurrences.set(fingerprint, occurrence + 1);
-		const id = stableMessageId({ row, namespace, role, text, timestamp, ordinal, occurrence });
+		const byteOffset = typeof line === "object" ? Number(line?.byteOffset) : null;
+		const id = stableMessageId({ row, namespace, role, text, timestamp, ordinal, occurrence, byteOffset });
 
 		messages.push({
 			id,
 			role,
 			content: text.length > maxCharsPerMessage ? `${text.slice(0, maxCharsPerMessage)}\u2026` : text,
-			ts: timestamp ?? now(),
+			...(timestamp === null ? {} : { ts: timestamp }),
 		});
 		ordinal += 1;
 	}

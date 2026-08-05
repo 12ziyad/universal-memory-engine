@@ -163,6 +163,15 @@ describe("Claude transcript message identity", () => {
 		expect(restartedRetry.map((message) => message.id)).toEqual(timedOutAttempt.map((message) => message.id));
 	});
 
+	it("omits an unavailable timestamp so exact retries keep the same envelope material", async () => {
+		const timestampLess = { type: "user", message: { content: "stable without a timestamp" } };
+		const [first] = await parse([timestampLess], { now: () => 1 });
+		const [retry] = await parse([timestampLess], { now: () => 9_999_999 });
+
+		expect(first).toEqual(retry);
+		expect(first).not.toHaveProperty("ts");
+	});
+
 	it("skips malformed JSONL without destabilizing surrounding fallback IDs", async () => {
 		const first = { type: "user", timestamp: "2026-01-01T00:00:00.000Z", message: { content: "first valid" } };
 		const second = { type: "assistant", timestamp: "2026-01-01T00:00:01.000Z", message: { content: "second valid" } };

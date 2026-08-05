@@ -211,7 +211,9 @@ describe("/mcp header door", () => {
 	it("tells an unconfigured client what is missing instead of a bare 401", async () => {
 		const res = await mcpBearer("", { jsonrpc: "2.0", id: 33, method: "initialize", params: {} });
 		expect(res.status).toBe(401);
-		expect((await res.json()).message).toMatch(/ITSUKI_API_KEY/);
+		const message = (await res.json()).message;
+		expect(message).toMatch(/Authorization: Bearer <your API key>/);
+		expect(message).not.toMatch(/ITSUKI_API_KEY|shell profile|environment variable/i);
 	});
 
 	it("still refuses an api-type key in the path, and says it IS an API key", async () => {
