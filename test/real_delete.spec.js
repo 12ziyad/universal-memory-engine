@@ -206,3 +206,97 @@ describe("single-object delete for API callers (3.1)", () => {
 		expect(badId.status).toBe(400);
 	}, 30000);
 });
+
+/**
+ * Slice-scoped delete. The smallest deletable unit used to be a whole node, so
+ * one wrong fact could only be removed by destroying every true fact beside it.
+ */
+describe("slice delete removes one fact and leaves the rest of the node", () => {
+	it("kills the named slice, keeps its sibling, and rebuilds the summary", async () => {
+		const userId = `del-slice-${crypto.randomUUID()}`;
+
+		// One node carrying TWO co-current facts: one to remove, one that must
+		// survive. Different kinds, so the second does not supersede the first —
+		// the same shape as a node that accumulated facts over several sessions.
+		const twoFacts = {
+			objects: [
+				{ kind: "node", label: "Vermilion", category: "project", matches_existing: null, confidence: 0.95 },
+				{ kind: "slice", on: "Vermilion", text: "Vermilion ships on Fridays", kind_detail: "progress", confidence: 0.9 },
+				{ kind: "slice", on: "Vermilion", text: `Vermilion uses ${TAG} internally`, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await ingest(userId, "s1", "Vermilion ships on Fridays and uses a specific internal tool", twoFacts);
+
+		const node = await env.DB.prepare(
+			"SELECT id, summary FROM nodes WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(node).toBeTruthy();
+
+		const slices = (await env.DB.prepare(
+			"SELECT id, text, is_current FROM slices WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL ORDER BY created_at",
+		).bind(userId, node.id).all()).results ?? [];
+		expect(slices.length).toBe(2);
+		// Both facts are current here — the second save adds to the node, it does
+		// not supersede the first. So the survivor is eligible for the rebuild.
+		expect(slices.map((s) => s.is_current)).toEqual([1, 1]);
+
+		const doomed = slices.find((s) => s.text.includes(TAG));
+		const keeper = slices.find((s) => !s.text.includes(TAG));
+		expect(doomed).toBeTruthy();
+		expect(keeper).toBeTruthy();
+
+		// The tagged text is in the node summary before the delete — that is the
+		// residue a slice delete has to clear, not just the row.
+		const summaryBefore = (await env.DB.prepare(
+			"SELECT summary FROM nodes WHERE id = ? AND user_id = ?",
+		).bind(node.id, userId).first())?.summary ?? "";
+		expect(summaryBefore).toContain(TAG);
+
+		const del = await call("DELETE", `/v1/memories/${doomed.id}?userId=${encodeURIComponent(userId)}`);
+		expect(del.status).toBe(200);
+		expect(del.body).toMatchObject({ deleted: true, kind: "slice", id: doomed.id, node_id: node.id });
+
+		// The node itself is untouched.
+		const nodeAfter = await env.DB.prepare(
+			"SELECT id, summary FROM nodes WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+		).bind(node.id, userId).first();
+		expect(nodeAfter).toBeTruthy();
+
+		// The sibling fact survives; the deleted one is gone from every surface.
+		const after = (await env.DB.prepare(
+			"SELECT id, text FROM slices WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL",
+		).bind(userId, node.id).all()).results ?? [];
+		expect(after.map((s) => s.id)).toEqual([keeper.id]);
+		expect(await grepAccount(userId, TAG)).toEqual([]);
+		expect(nodeAfter.summary ?? "").not.toContain(TAG);
+		expect(nodeAfter.summary ?? "").toContain("Fridays");
+	}, 30000);
+
+	it("is scoped to the caller's own account", async () => {
+		const mine = `del-slice-mine-${crypto.randomUUID()}`;
+		const theirs = `del-slice-theirs-${crypto.randomUUID()}`;
+		await ingest(theirs, "t1", "I am building project Cobalt this month", canned("Cobalt", "Cobalt is private"));
+		const theirSlice = await env.DB.prepare(
+			"SELECT id FROM slices WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(theirs).first();
+		expect(theirSlice).toBeTruthy();
+
+		// Same key, different sub-tenant: the row must be invisible, not deletable.
+		const res = await call("DELETE", `/v1/memories/${theirSlice.id}?userId=${encodeURIComponent(mine)}`);
+		expect(res.status).toBe(404);
+		const still = await env.DB.prepare(
+			"SELECT id FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+		).bind(theirSlice.id, theirs).first();
+		expect(still).toBeTruthy();
+	}, 30000);
+
+	it("404s an unknown slice id and still rejects unknown id shapes", async () => {
+		const userId = `del-slice-404-${crypto.randomUUID()}`;
+		const missing = await call("DELETE", `/v1/memories/slice_nope?userId=${encodeURIComponent(userId)}`);
+		expect(missing.status).toBe(404);
+		const bad = await call("DELETE", `/v1/memories/frag_whatever?userId=${encodeURIComponent(userId)}`);
+		expect(bad.status).toBe(400);
+		expect(bad.body.message).toContain("slice_");
+	}, 30000);
+});

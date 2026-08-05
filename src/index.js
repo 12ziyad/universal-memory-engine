@@ -1780,13 +1780,18 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 	if (id) {
 		const kind = id.startsWith("node_") ? "node"
 			: id.startsWith("page_") ? "page"
-				: id.startsWith("cand") ? "candidate"
-					: null;
+				: id.startsWith("slice_") ? "slice"
+					: id.startsWith("cand") ? "candidate"
+						: null;
 		if (!kind) {
-			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, or candidate id." }, 400);
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id." }, 400);
 		}
+		const table = kind === "page" ? "memory_pages"
+			: kind === "node" ? "nodes"
+				: kind === "slice" ? "slices"
+					: "candidates";
 		const exists = await env.DB.prepare(
-			`SELECT id FROM ${kind === "page" ? "memory_pages" : kind === "node" ? "nodes" : "candidates"} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+			`SELECT id FROM ${table} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 		).bind(id, auth.userId).first();
 		if (!exists) return json({ error: "not_found" }, 404);
 		const result = await deleteObject(env, auth.userId, { kind, id, suppress: url.searchParams.get("suppress") !== "false" });

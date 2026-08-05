@@ -409,11 +409,14 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		receipt.status = status;
 		receipt.processing = stillProcessing;
 		receipt.final = !stillProcessing;
+		// No title means the page this job wrote is gone (deleted since). The
+		// acceptance still happened, so say that and not "already saved" — the
+		// saved thing may no longer exist.
 		const summary = title
 			? (stillProcessing
 				? `Already staged — "${title}" is still being enriched in the background.`
 				: `Already saved — "${title}" (${status}).`)
-			: "Already saved.";
+			: `Already accepted — this exact conversation was staged earlier (${status}); its page is no longer present.`;
 		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
 		return commandResult({
 			fired: false,

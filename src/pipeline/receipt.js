@@ -205,6 +205,46 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 	};
 }
 
+/**
+ * Outcomes that mean the content really was taken in. Everything else — the
+ * gate's "ignored", an opt-out, a failure — was NOT saved, and a replay of it
+ * must never be described as if it were.
+ */
+const ACCEPTED_OUTCOMES = new Set(["accepted", "saved", "accumulating"]);
+const SKIPPED_OUTCOMES = new Set(["ignored", "skipped", "opted_out"]);
+
+/**
+ * Honest wording for an idempotent replay (1.10). Re-sending the same content
+ * inside the window answers with the ORIGINAL verdict, and that verdict decides
+ * the sentence:
+ *
+ *   accepted earlier  → "Already saved…"
+ *   gated out earlier → "Not saved… skipped, and why"
+ *   verdict unknown   → say only that it was seen before
+ *
+ * The old fallback claimed acceptance whenever the original receipt could not
+ * be read, so content the gate had rejected came back as "Already saved — this
+ * exact content was accepted earlier." That is the one lie this product cannot
+ * tell: never claim an acceptance that did not happen.
+ */
+export function replaySummary(receipt, storedSummary = null) {
+	const outcome = receipt?.outcome ?? null;
+	const reason = String(receipt?.reason ?? "").trim().replace(/\.$/, "");
+
+	if (ACCEPTED_OUTCOMES.has(outcome)) {
+		// The original receipt's own words are the most accurate thing we have.
+		return storedSummary || "Already saved — this exact content was accepted earlier.";
+	}
+	if (SKIPPED_OUTCOMES.has(outcome)) {
+		return `Not saved — this exact content was sent before and skipped${reason ? `: ${reason}` : ""}.`;
+	}
+	if (outcome) {
+		return `Not saved — this exact content was sent before and recorded as "${outcome}"${reason ? `: ${reason}` : ""}.`;
+	}
+	// No readable verdict. State the fact we are sure of and nothing more.
+	return "Seen before — this exact content was already received. Nothing new was saved; check the packet status for what became of the original.";
+}
+
 /** The one-line human string a save tool returns. */
 export function formatReceipt(receipt) {
 	if (!receipt) return "Captured.";

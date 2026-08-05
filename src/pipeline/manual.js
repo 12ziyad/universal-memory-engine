@@ -11,7 +11,7 @@
 import { getConfig } from "../config.js";
 import { ingestMessages, stableMsgId } from "./ingest.js";
 import { digestConversation } from "./digest.js";
-import { buildReceipt, emptyReceipt, formatReceipt } from "./receipt.js";
+import { buildReceipt, emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
 import { writeApproved } from "./write.js";
 import { storeReceipt, getUserNodes } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
@@ -33,13 +33,14 @@ function finalize(res, { prefix = "", processingNote }) {
 		};
 	}
 	if (res.duplicate) {
-		// 1.10 idempotent replay: this exact content was already accepted —
-		// answer with the original receipt, having enqueued nothing.
+		// 1.10 idempotent replay: answer with the ORIGINAL verdict, having
+		// enqueued nothing — and let that verdict pick the words. Content the
+		// gate skipped must not come back as "already saved".
 		return {
 			fired: false,
 			processing: false,
 			duplicate: true,
-			summary: prefix + (res.summary ?? "Already saved — this exact content was accepted earlier."),
+			summary: prefix + replaySummary(res.receipt, res.summary),
 			receipt: res.receipt ?? null,
 			receipt_id: res.receiptId ?? res.receipt?.id ?? null,
 			sourcePacket: res.sourcePacket ?? null,

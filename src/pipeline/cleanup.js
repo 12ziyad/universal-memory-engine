@@ -428,6 +428,30 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		);
 		return { deleted: true, kind: "node", id };
 	}
+	// One wrong fact inside an otherwise-good node. Before this, the smallest
+	// deletable unit was the whole node, so removing a single bad slice meant
+	// destroying every true fact beside it. The node survives here; only the
+	// slice dies — and the summary is rebuilt, because the deleted text fed it.
+	if (kind === "slice") {
+		const row = await env.DB.prepare(
+			"SELECT id, node_id FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+		).bind(id, userId).first();
+		if (!row) return { deleted: false, kind: "slice", id, reason: "not_found" };
+		const nodeId = row.node_id ?? null;
+		await env.DB.batch([
+			// The same fact-identity cleanup the bulk path does for slices, so the
+			// canonical key is freed and re-saving that fact later counts as new.
+			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, id),
+			env.DB.prepare("UPDATE slices SET deleted_at = ?, is_current = 0 WHERE id = ? AND user_id = ?").bind(now, id, userId),
+		]);
+		if (nodeId) {
+			// The parent keeps its vector (label and category are unchanged), but
+			// its search profile and summary are built from slice text.
+			await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: [nodeId] });
+			await regenerateDirtySummaries(env, userId, [id], [nodeId]);
+		}
+		return { deleted: true, kind: "slice", id, node_id: nodeId };
+	}
 	if (kind === "candidate") {
 		await env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
 			.bind(now, suppress ? now : null, id, userId)

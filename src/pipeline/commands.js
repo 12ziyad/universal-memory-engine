@@ -3,7 +3,7 @@ import { storeReceipt, updateMemoryJob } from "../lib/db.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
 import { recall } from "./recall.js";
-import { emptyReceipt, formatReceipt } from "./receipt.js";
+import { emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
@@ -101,7 +101,7 @@ async function finalizeSaveResponse({ mode, source, res, env, userId, sourcePack
 			source,
 			fired: false,
 			processing: false,
-			summary: res.summary ?? "Already accepted — this exact content was saved earlier (idempotent replay).",
+			summary: replaySummary(res.receipt, res.summary),
 			receipt: res.receipt ?? null,
 			receipt_id: res.receipt_id ?? null,
 			sourcePacket: res.sourcePacket ?? sourcePacket,

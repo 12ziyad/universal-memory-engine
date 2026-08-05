@@ -53,6 +53,19 @@ async function findRecentJob(env, userId, idempotencyKey) {
 				try { receipt = JSON.parse(row.detail ?? "null"); } catch {}
 			}
 		}
+		// A job whose receipt_id was never linked (the gate's "ignored" receipt is
+		// written at the API layer, not by the job) used to leave the caller with
+		// no verdict at all — and the old fallback then guessed "accepted".
+		// Receipts carry the idempotency key themselves, so ask them directly.
+		if (!receipt) {
+			const row = await env.DB.prepare(
+				"SELECT detail, summary FROM receipts WHERE user_id = ? AND idempotency_key = ? ORDER BY created_at DESC LIMIT 1",
+			).bind(userId, idempotencyKey).first();
+			if (row) {
+				summary = summary ?? row.summary ?? null;
+				try { receipt = JSON.parse(row.detail ?? "null"); } catch {}
+			}
+		}
 		return { job, receipt, summary };
 	} catch (err) {
 		console.warn("idempotent replay lookup failed:", err?.message ?? err);
