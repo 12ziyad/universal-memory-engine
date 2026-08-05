@@ -7,6 +7,8 @@ import { newId } from "./ids.js";
 import { hasProjectScopeOption, normalizeProjectScope } from "./project_scope.js";
 import { normalizeLabel } from "./text.js";
 
+export const MEMORY_JOB_ACTIVE_LIMIT = 200;
+
 function activeWhere(alias = "") {
 	const p = alias ? `${alias}.` : "";
 	return `(${p}deleted_at IS NULL) AND (${p}archived_at IS NULL) AND (${p}suppressed_at IS NULL)`;
@@ -197,6 +199,66 @@ export async function createExtractionRun(env, userId, data = {}) {
 	return id;
 }
 
+/**
+ * Claim one deterministic extraction attempt. The primary key is the durable
+ * inference fence: concurrent drains may observe the same row, but only the
+ * caller that inserted it is allowed to invoke the model.
+ */
+export async function claimExtractionRun(env, userId, data = {}) {
+	const now = Date.now();
+	const id = data.id;
+	if (!id) throw new Error("an extraction-run claim requires a deterministic id");
+	const owner = {
+		toolName: data.tool_name ?? data.toolName ?? null,
+		sourceMode: data.source_mode ?? data.sourceMode ?? null,
+		topicFilter: data.topic_filter ?? data.topicFilter ?? null,
+		sourcePacketId: data.source_packet_id ?? data.sourcePacketId ?? null,
+		idempotencyKey: data.idempotency_key ?? data.idempotencyKey ?? null,
+		scopeJson: data.scope_json ?? data.scopeJson ?? null,
+	};
+	const inserted = await env.DB.prepare(
+		`INSERT INTO extraction_runs
+			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
+			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
+			 created_edges_json, created_candidates_json, updated_objects_json, reinforced_objects_json,
+			 skipped_objects_json, error, created_at, updated_at, source_packet_id, idempotency_key,
+			 scope_json, job_id)
+		 VALUES (?, ?, ?, ?, ?, NULL, 'running', '[]', '[]', '[]', '[]', '[]', '[]', '[]', '[]',
+			 '[]', NULL, ?, ?, ?, ?, ?, NULL)
+		 ON CONFLICT(id) DO NOTHING
+		 RETURNING id`,
+	)
+		.bind(
+			id,
+			userId,
+			owner.toolName,
+			owner.sourceMode,
+			owner.topicFilter,
+			now,
+			now,
+			owner.sourcePacketId,
+			owner.idempotencyKey,
+			owner.scopeJson,
+		)
+		.first();
+	const row = await env.DB.prepare(
+		`SELECT * FROM extraction_runs WHERE id = ? LIMIT 1`,
+	).bind(id).first();
+	if (
+		!row
+		|| row.user_id !== userId
+		|| (row.tool_name ?? null) !== owner.toolName
+		|| (row.source_mode ?? null) !== owner.sourceMode
+		|| (row.topic_filter ?? null) !== owner.topicFilter
+		|| (row.source_packet_id ?? null) !== owner.sourcePacketId
+		|| (row.idempotency_key ?? null) !== owner.idempotencyKey
+		|| (row.scope_json ?? null) !== owner.scopeJson
+	) {
+		throw new Error("extraction-run id is already bound to different work");
+	}
+	return { claimed: Boolean(inserted?.id), id, row };
+}
+
 export async function updateExtractionRun(env, userId, runId, data = {}) {
 	if (!runId) return;
 	const fields = [];
@@ -248,7 +310,7 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
  * Persist a save receipt (Priority 5). Best-effort: a receipt failure must never
  * break a save, so this swallows errors. `summary` is the human one-liner.
  */
-export async function storeReceipt(env, userId, source, receipt, summary) {
+export async function storeReceipt(env, userId, source, receipt, summary, { strict = false } = {}) {
 	const s = receipt?.saved ?? {};
 	const id = receipt?.id ?? newId("receipt");
 	const detail = receipt && typeof receipt === "object" ? { ...receipt, id } : receipt;
@@ -259,7 +321,8 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id,
 				saved_pages, source_packet_id, idempotency_key, scope_json, latency_ms, matched, source_mode,
 				ai_calls, ai_input_tokens, ai_output_tokens, ai_neurons)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(id) DO NOTHING`,
 		)
 			.bind(
 				id,
@@ -294,12 +357,33 @@ export async function storeReceipt(env, userId, source, receipt, summary) {
 				Number.isFinite(receipt?.ai_neurons) ? receipt.ai_neurons : null,
 			)
 			.run();
+		// Deterministic receipt ids make concurrent/replayed door responses one
+		// immutable verdict. A conflicting primary key owned by another user is
+		// never treated as success.
+		const stored = await env.DB.prepare(
+			"SELECT id, user_id, source_packet_id, idempotency_key FROM receipts WHERE id = ? LIMIT 1",
+		).bind(id).first();
+		if (
+			!stored
+			|| stored.user_id !== userId
+			|| (
+				receipt?.source_packet_id
+				&& (stored.source_packet_id ?? null) !== receipt.source_packet_id
+			)
+			|| (
+				receipt?.idempotency_key
+				&& (stored.idempotency_key ?? null) !== receipt.idempotency_key
+			)
+		) {
+			throw new Error("receipt id is not durably owned by this user");
+		}
 		if (receipt && typeof receipt === "object") receipt.id = id;
 		if (receipt?.extraction_run_id) {
 			await updateExtractionRun(env, userId, receipt.extraction_run_id, { receiptId: id });
 		}
 		return id;
 	} catch (err) {
+		if (strict) throw err;
 		console.warn("receipt store failed:", err?.message ?? err);
 		return null;
 	}
@@ -309,51 +393,120 @@ export async function createMemoryJob(env, userId, data = {}) {
 	const now = Date.now();
 	const id = data.id ?? newId("job");
 	const idempotencyKey = data.idempotency_key ?? data.idempotencyKey ?? null;
+	const type = data.type ?? "job";
+	const sourcePacketId = data.source_packet_id ?? data.sourcePacketId ?? null;
+	const extractionRunId = data.extraction_run_id ?? data.extractionRunId ?? null;
+	const payloadJson = JSON.stringify(data.payload ?? data.payload_json ?? {});
 	try {
-		await env.DB.prepare(
+		const inserted = await env.DB.prepare(
 			`INSERT INTO memory_jobs
 				(id, user_id, type, status, idempotency_key, source_packet_id, extraction_run_id,
 				 receipt_id, attempts, payload_json, error, run_after, created_at, updated_at, completed_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(user_id, idempotency_key) DO UPDATE SET
-				status = excluded.status,
-				source_packet_id = excluded.source_packet_id,
-				extraction_run_id = excluded.extraction_run_id,
-				receipt_id = excluded.receipt_id,
-				payload_json = excluded.payload_json,
-				error = excluded.error,
-				run_after = excluded.run_after,
-				updated_at = excluded.updated_at,
-				completed_at = excluded.completed_at`,
+			 ON CONFLICT(user_id, idempotency_key) DO NOTHING
+			 RETURNING id`,
 		)
 			.bind(
 				id,
 				userId,
-				data.type ?? "job",
+				type,
 				data.status ?? "queued",
 				idempotencyKey,
-				data.source_packet_id ?? data.sourcePacketId ?? null,
-				data.extraction_run_id ?? data.extractionRunId ?? null,
+				sourcePacketId,
+				extractionRunId,
 				data.receipt_id ?? data.receiptId ?? null,
 				data.attempts ?? 0,
-				JSON.stringify(data.payload ?? data.payload_json ?? {}),
+				payloadJson,
 				data.error ?? null,
 				data.run_after ?? data.runAfter ?? now,
 				now,
 				now,
 				data.completed_at ?? data.completedAt ?? null,
 			)
-			.run();
-		const row = idempotencyKey
-			? await env.DB.prepare("SELECT id FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?")
-				.bind(userId, idempotencyKey)
-				.first()
-			: { id };
-		return row?.id ?? id;
+			.first();
+		if (inserted?.id) return inserted.id;
+		if (!idempotencyKey) return null;
+		const existing = await env.DB.prepare(
+			`SELECT id, type, source_packet_id, extraction_run_id, payload_json
+			 FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
+		).bind(userId, idempotencyKey).first();
+		const sameOwner = Boolean(
+			existing
+			&& existing.type === type
+			&& (existing.source_packet_id ?? null) === sourcePacketId
+			&& (existing.extraction_run_id ?? null) === extractionRunId
+			&& String(existing.payload_json ?? "{}") === payloadJson
+		);
+		if (sameOwner) return existing.id;
+		console.warn("memory job idempotency ownership conflict; existing row left unchanged");
+		return null;
 	} catch (err) {
 		console.warn("memory job create failed:", err?.message ?? err);
 		return null;
 	}
+}
+
+/**
+ * Atomically claim a memory job by its permanent, account-wide idempotency
+ * key. Every door shares this uniqueness boundary: a caller may observe an
+ * existing job, but it may never reset or replace it with another lane's job.
+ * A caller that intentionally retries failed enrichment must use a new key.
+ */
+export async function claimMemoryJob(env, userId, data = {}) {
+	const now = Date.now();
+	const proposedId = data.id ?? newId("job");
+	const idempotencyKey = data.idempotency_key ?? data.idempotencyKey ?? null;
+	if (!idempotencyKey) throw new Error("a memory job claim requires an idempotency key");
+	const type = data.type ?? "extract";
+	const row = await env.DB.prepare(
+		`INSERT INTO memory_jobs
+			(id, user_id, type, status, idempotency_key, source_packet_id, extraction_run_id,
+			 receipt_id, attempts, payload_json, error, run_after, created_at, updated_at, completed_at)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		 WHERE (
+			SELECT COUNT(*) FROM memory_jobs
+			WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')
+		 ) < ?
+		 ON CONFLICT(user_id, idempotency_key) DO NOTHING
+		 RETURNING id`,
+	)
+		.bind(
+			proposedId,
+			userId,
+			type,
+			data.status ?? "queued",
+			idempotencyKey,
+			data.source_packet_id ?? data.sourcePacketId ?? null,
+			data.extraction_run_id ?? data.extractionRunId ?? null,
+			data.receipt_id ?? data.receiptId ?? null,
+			data.attempts ?? 0,
+			JSON.stringify(data.payload ?? data.payload_json ?? {}),
+			data.error ?? null,
+			data.run_after ?? data.runAfter ?? now,
+			now,
+			now,
+			data.completed_at ?? data.completedAt ?? null,
+			userId,
+			MEMORY_JOB_ACTIVE_LIMIT,
+		)
+		.first();
+	if (row?.id) return { claimed: true, id: row.id };
+	const existing = await env.DB.prepare(
+		"SELECT id, status, type, receipt_id, source_packet_id FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
+	).bind(userId, idempotencyKey).first();
+	if (existing?.id) return { claimed: false, id: existing.id, job: existing };
+	return {
+		claimed: false,
+		id: null,
+		job: null,
+		capacityExceeded: true,
+		activeLimit: MEMORY_JOB_ACTIVE_LIMIT,
+	};
+}
+
+/** Backwards-compatible name for the HTTP ingest lane. */
+export async function claimIngestMemoryJob(env, userId, data = {}) {
+	return claimMemoryJob(env, userId, data);
 }
 
 /**
@@ -373,77 +526,152 @@ export async function createMemoryJob(env, userId, data = {}) {
  * Returns the jobs that reached a terminal state in THIS call, so the caller
  * can announce memory.enriched / memory.failed exactly once.
  */
-export async function settleMemoryJobs(env, userId, updates = []) {
+
+/**
+ * CAS-based settlement. D1 calls from a door and a drain may interleave even
+ * though the Durable Object is the normal coordinator; compare both status and
+ * payload bytes so distinct subsets cannot overwrite each other or emit two
+ * terminal transitions.
+ */
+export async function settleMemoryJobs(env, userId, updates = [], { strict = false } = {}) {
 	const transitions = [];
+	const terminalStates = new Set(["enriched", "failed", "completed"]);
 	for (const update of updates) {
 		if (!update?.jobId) continue;
+		let finished = false;
 		try {
-			const row = await env.DB.prepare(
-				"SELECT id, status, attempts, payload_json, source_packet_id, receipt_id FROM memory_jobs WHERE id = ? AND user_id = ?",
-			).bind(update.jobId, userId).first();
-			if (!row) continue;
-			if (["enriched", "failed", "completed"].includes(row.status)) continue; // terminal is terminal
-
-			let payload = {};
-			try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
-
-			if (update.disposition === "attempted") {
-				await updateMemoryJob(env, userId, update.jobId, {
-					status: "processing",
-					attempts: Number(update.attempts ?? Number(row.attempts ?? 0) + 1),
-				});
-				continue;
-			}
-
-			if (update.disposition === "failed") {
-				await updateMemoryJob(env, userId, update.jobId, {
-					status: "failed",
-					error: String(update.error ?? "processing failed").slice(0, 400),
-					receiptId: update.receiptId ?? undefined,
-					payload: { ...payload, remaining: [] },
-					completedAt: Date.now(),
-				});
-				transitions.push({
-					jobId: update.jobId,
-					status: "failed",
-					sourcePacketId: row.source_packet_id ?? null,
-					receiptId: update.receiptId ?? row.receipt_id ?? null,
-					project_id: payload.project_id ?? null,
-					project_name: payload.project_name ?? null,
-					error: update.error ?? null,
-				});
-				continue;
-			}
-
-			const remaining = Array.isArray(payload.remaining) ? payload.remaining : [];
-			const done = new Set(update.all ? remaining : (update.messageIds ?? []));
-			const left = remaining.filter((id) => !done.has(id));
-			const saved = payload.saved ?? {};
-			if (update.counts && update.disposition === "processed") {
-				for (const k of ["nodes", "slices", "events", "edges", "pages", "candidates"]) {
-					saved[k] = (saved[k] ?? 0) + (update.counts[k] ?? 0);
+			for (let attempt = 0; attempt < 8 && !finished; attempt++) {
+				const row = await env.DB.prepare(
+					"SELECT id, status, attempts, payload_json, source_packet_id, receipt_id FROM memory_jobs WHERE id = ? AND user_id = ?",
+				).bind(update.jobId, userId).first();
+				if (!row) {
+					if (strict) throw new Error(`memory job ${update.jobId} is missing`);
+					finished = true;
+					break;
 				}
+				if (terminalStates.has(row.status)) {
+					finished = true;
+					break;
+				}
+
+				let payload = {};
+				try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+				let safeReceiptId = null;
+				if (update.receiptId) {
+					const receiptOwner = await env.DB.prepare(
+						"SELECT source_packet_id FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+					).bind(update.receiptId, userId).first();
+					if (receiptOwner && (receiptOwner.source_packet_id ?? null) === (row.source_packet_id ?? null)) {
+						safeReceiptId = update.receiptId;
+					} else {
+						console.warn("memory job receipt ownership mismatch; link omitted");
+					}
+				}
+
+				if (update.disposition === "attempted") {
+					const nextAttempts = Number(update.attempts ?? Number(row.attempts ?? 0) + 1);
+					const changed = await env.DB.prepare(
+						`UPDATE memory_jobs
+						 SET status = 'processing',
+						     attempts = CASE WHEN attempts < ? THEN ? ELSE attempts END,
+						     updated_at = ?
+						 WHERE id = ? AND user_id = ? AND status = ? AND payload_json IS ?
+						 RETURNING id`,
+					).bind(
+						nextAttempts,
+						nextAttempts,
+						Date.now(),
+						update.jobId,
+						userId,
+						row.status,
+						row.payload_json,
+					).first();
+					finished = Boolean(changed?.id);
+					continue;
+				}
+
+				if (update.disposition === "failed") {
+					const nextPayload = JSON.stringify({ ...payload, remaining: [] });
+					const changed = await env.DB.prepare(
+						`UPDATE memory_jobs
+						 SET status = 'failed', error = ?, receipt_id = COALESCE(?, receipt_id),
+						     payload_json = ?, completed_at = ?, updated_at = ?
+						 WHERE id = ? AND user_id = ? AND status = ? AND payload_json IS ?
+						 RETURNING receipt_id`,
+					).bind(
+						String(update.error ?? "processing failed").slice(0, 400),
+						safeReceiptId,
+						nextPayload,
+						Date.now(),
+						Date.now(),
+						update.jobId,
+						userId,
+						row.status,
+						row.payload_json,
+					).first();
+					if (!changed) continue;
+					transitions.push({
+						jobId: update.jobId,
+						status: "failed",
+						sourcePacketId: row.source_packet_id ?? null,
+						receiptId: changed.receipt_id ?? row.receipt_id ?? null,
+						project_id: payload.project_id ?? null,
+						project_name: payload.project_name ?? null,
+						error: update.error ?? null,
+					});
+					finished = true;
+					continue;
+				}
+
+				const remaining = Array.isArray(payload.remaining) ? payload.remaining : [];
+				const remainingSet = new Set(remaining);
+				const newlyDone = (update.all ? remaining : (update.messageIds ?? []))
+					.filter((messageId) => remainingSet.has(messageId));
+				const done = new Set(newlyDone);
+				const left = remaining.filter((messageId) => !done.has(messageId));
+				const saved = { ...(payload.saved ?? {}) };
+				if (newlyDone.length > 0 && update.counts && update.disposition === "processed") {
+					for (const key of ["nodes", "slices", "events", "edges", "pages", "candidates"]) {
+						saved[key] = Number(saved[key] ?? 0) + Number(update.counts[key] ?? 0);
+					}
+				}
+				const terminal = left.length === 0;
+				const nextPayload = JSON.stringify({ ...payload, remaining: left, saved });
+				const changed = await env.DB.prepare(
+					`UPDATE memory_jobs
+					 SET status = ?, receipt_id = COALESCE(?, receipt_id), payload_json = ?,
+					     completed_at = ?, updated_at = ?
+					 WHERE id = ? AND user_id = ? AND status = ? AND payload_json IS ?
+					 RETURNING receipt_id`,
+				).bind(
+					terminal ? "enriched" : "processing",
+					safeReceiptId,
+					nextPayload,
+					terminal ? Date.now() : null,
+					Date.now(),
+					update.jobId,
+					userId,
+					row.status,
+					row.payload_json,
+				).first();
+				if (!changed) continue;
+				if (terminal) {
+					transitions.push({
+						jobId: update.jobId,
+						status: "enriched",
+						sourcePacketId: row.source_packet_id ?? null,
+						receiptId: changed.receipt_id ?? row.receipt_id ?? null,
+						project_id: payload.project_id ?? null,
+						project_name: payload.project_name ?? null,
+						saved,
+					});
+				}
+				finished = true;
 			}
-			const terminal = left.length === 0;
-			await updateMemoryJob(env, userId, update.jobId, {
-				status: terminal ? "enriched" : "processing",
-				receiptId: update.receiptId ?? undefined,
-				payload: { ...payload, remaining: left, saved },
-				completedAt: terminal ? Date.now() : undefined,
-			});
-			if (terminal) {
-				transitions.push({
-					jobId: update.jobId,
-					status: "enriched",
-					sourcePacketId: row.source_packet_id ?? null,
-					receiptId: update.receiptId ?? row.receipt_id ?? null,
-					project_id: payload.project_id ?? null,
-					project_name: payload.project_name ?? null,
-					saved,
-				});
-			}
-		} catch (err) {
-			console.warn("memory job settle failed:", err?.message ?? err);
+			if (!finished) throw new Error(`memory job ${update.jobId} settlement CAS was exhausted`);
+		} catch (error) {
+			if (strict) throw error;
+			console.warn("memory job settle failed:", error?.message ?? error);
 		}
 	}
 	return transitions;
@@ -486,6 +714,51 @@ export async function updateMemoryJob(env, userId, jobId, data = {}) {
 	await env.DB.prepare(`UPDATE memory_jobs SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
 		.bind(...values, jobId, userId)
 		.run();
+}
+
+/**
+ * Link only a receipt that belongs to the same ingest packet, without ever
+ * replacing a receipt chosen by terminal processing or another concurrent
+ * response. Transient door receipts belong only on active jobs. A known
+ * ignored verdict from this invocation may fill a terminal job's empty link.
+ */
+export async function linkIngestMemoryJobReceipt(env, userId, jobId, {
+	receiptId,
+	sourcePacketId,
+	outcome,
+	terminalReplay = false,
+	duplicate = false,
+} = {}) {
+	if (!jobId || !receiptId || !sourcePacketId) return false;
+	let statuses;
+	if (["accepted", "accumulating"].includes(outcome)) {
+		statuses = "('queued', 'staged', 'processing')";
+	} else if (outcome === "ignored" && !terminalReplay && !duplicate) {
+		statuses = "('enriched', 'completed')";
+	} else {
+		return false;
+	}
+	const result = await env.DB.prepare(
+		`UPDATE memory_jobs
+		 SET receipt_id = ?, updated_at = ?
+		 WHERE id = ? AND user_id = ? AND type = 'extract'
+		   AND source_packet_id = ? AND receipt_id IS NULL
+		   AND status IN ${statuses}
+		   AND EXISTS (
+			   SELECT 1 FROM receipts
+			   WHERE id = ? AND user_id = ? AND source_packet_id = ?
+		   )`,
+	).bind(
+		receiptId,
+		Date.now(),
+		jobId,
+		userId,
+		sourcePacketId,
+		receiptId,
+		userId,
+		sourcePacketId,
+	).run();
+	return Number(result?.meta?.changes ?? 0) > 0;
 }
 
 /** Recent save receipts for a user, newest first. */

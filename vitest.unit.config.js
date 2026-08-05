@@ -10,6 +10,8 @@ export default defineConfig({
 		// turning PowerShell process-start contention into suite-only flakes.
 		maxWorkers: 4,
 		include: [
+			"test/ingest_contract.spec.js",
+			"test/hook_batching.spec.js",
 			"test/claude_transcript.spec.js",
 			"test/claude_transcript_tail.spec.js",
 			"test/doctor.spec.js",

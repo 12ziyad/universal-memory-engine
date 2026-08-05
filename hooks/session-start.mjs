@@ -158,13 +158,24 @@ async function main() {
 		system.push("Itsuki: Claude did not provide a protected plugin-data directory; local delivery is unavailable. Run /itsuki:doctor.");
 	} else if (BASE_URL) {
 		try {
-			const drained = await drainOutbox({ pluginData, apiKey: API_KEY, baseUrl: BASE_URL });
+			const drained = await drainOutbox({
+				pluginData,
+				apiKey: API_KEY,
+				baseUrl: BASE_URL,
+				maxTotalDurationMs: Math.max(1, TOTAL_BUDGET_MS - (Date.now() - startedAt) - 250),
+			});
 			drainedHealth = drained.health ?? null;
-			if (drained.delivered > 0) {
+			const deliveredBatches = Number(drained.deliveredBatches ?? drained.delivered ?? 0);
+			const deliveredGroups = Number(drained.deliveredGroups ?? deliveredBatches);
+			const completedGroups = Number(drained.completedDeliveryGroups ?? deliveredGroups);
+			if (deliveredBatches > 0) {
 				const packetIds = drained.accepted.map((item) => item.sourcePacketId).filter(Boolean);
+				const deliverySubject = deliveredBatches === deliveredGroups && completedGroups === deliveredGroups
+					? `${completedGroups} locally queued session${completedGroups === 1 ? "" : "s"}`
+					: `${deliveredBatches} ordered batch${deliveredBatches === 1 ? "" : "es"} across ${deliveredGroups} protected session${deliveredGroups === 1 ? "" : "s"}`;
 				system.push(
-					`Itsuki: delivered ${drained.delivered} locally queued session${drained.delivered === 1 ? "" : "s"}; ` +
-					`the server accepted ${drained.delivered === 1 ? "it" : "them"}, and enrichment may continue` +
+					`Itsuki: delivered ${deliverySubject}; ` +
+					`the server accepted ${deliveredBatches === 1 ? "it" : "them"}, and enrichment may continue` +
 					`${packetIds.length ? ` (packet${packetIds.length === 1 ? "" : "s"}: ${packetIds.join(", ")})` : ""}.`,
 				);
 			}
@@ -177,14 +188,32 @@ async function main() {
 				};
 			}
 			if (drained.bindingRequired > 0) {
-				system.push(`Itsuki: ${drained.bindingRequired} protected queued session${drained.bindingRequired === 1 ? " requires" : "s require"} explicit API-key binding; run /itsuki:doctor.`);
+				system.push(`Itsuki: ${drained.bindingRequired} protected delivery ${drained.bindingRequired === 1 ? "entry requires" : "entries require"} explicit API-key binding; run /itsuki:doctor.`);
 			}
 			if (drained.permanentFailures > 0 || drained.health?.permanentFailures > 0) {
 				const count = drained.health?.permanentFailures || drained.permanentFailures;
-				system.push(`Itsuki: ${count} queued session${count === 1 ? "" : "s"} require intervention and remain protected; run /itsuki:doctor.`);
+				system.push(`Itsuki: ${count} queued delivery ${count === 1 ? "entry requires intervention and remains" : "entries require intervention and remain"} protected; run /itsuki:doctor.`);
 			}
-			if (drained.retried > 0) {
-				system.push(`Itsuki: delivery will retry later for ${drained.retried} queued session${drained.retried === 1 ? "" : "s"}.`);
+			const retriedBatches = Number(drained.retriedBatches ?? drained.retried ?? 0);
+			if (retriedBatches > 0) {
+				const retriedGroups = Number(drained.retriedGroups ?? retriedBatches);
+				system.push(`Itsuki: delivery will retry later for ${retriedBatches} protected batch${retriedBatches === 1 ? "" : "es"} across ${retriedGroups} session${retriedGroups === 1 ? "" : "s"}.`);
+			}
+			if (Number(drained.orderBlockedBatches ?? drained.orderBlocked ?? 0) > 0) {
+				const blocked = Number(drained.orderBlockedBatches ?? drained.orderBlocked);
+				system.push(`Itsuki: ${blocked} later ordered batch${blocked === 1 ? " remains" : "es remain"} protected until preceding batches are accepted; run /itsuki:doctor if this persists.`);
+			}
+			if (Number(drained.health?.deliveryGroups?.incomplete ?? 0) > 0) {
+				const incomplete = Number(drained.health.deliveryGroups.incomplete);
+				system.push(`Itsuki: ${incomplete} protected session delivery group${incomplete === 1 ? " is an" : "s are"} incomplete but recoverable ordered prefix${incomplete === 1 ? "" : "es"}; later SessionStart runs resume materialization without duplicates.`);
+			}
+			if (Number(drained.materializationBlocked ?? 0) > 0) {
+				const blocked = Number(drained.materializationBlocked);
+				system.push(`Itsuki: ${blocked} protected shutdown snapshot${blocked === 1 ? " remains" : "s remain"} staged locally until its earlier delivery, local capacity, or a concurrent queue update permits safe expansion; no content was discarded.`);
+			}
+			if (Number(drained.materializationDeferred ?? 0) > 0) {
+				const deferred = Number(drained.materializationDeferred);
+				system.push(`Itsuki: ${deferred} later protected shutdown snapshot${deferred === 1 ? " remains" : "s remain"} staged so startup delivery stays inside the host time budget; a later SessionStart will resume it.`);
 			}
 			if (drained.transportUnavailable) {
 				skipRecall = true;
@@ -200,7 +229,8 @@ async function main() {
 		if (pluginData) {
 			try {
 				const health = drainedHealth ?? (BASE_URL ? await inspectOutbox({ pluginData, apiKey: API_KEY, baseUrl: BASE_URL }) : null);
-				if (health?.counts.pending > 0) system.push(`Itsuki: ${health.counts.pending} protected session${health.counts.pending === 1 ? " is" : "s are"} waiting for a valid key.`);
+				const waiting = Number(health?.counts.pending ?? 0) + Number(health?.counts.staged ?? 0);
+				if (waiting > 0) system.push(`Itsuki: ${waiting} protected delivery ${waiting === 1 ? "entry is" : "entries are"} waiting for a valid key.`);
 			} catch {}
 		}
 		unavailable = { reason: problem, fix: setupFix() };

@@ -26,5 +26,6 @@
  "0025_summary_provenance.sql": "cc7a3bfa7e1dc5600669b9a23a418b659bd93d52784fd0c2688cba1928389c28",
  "0026_staged_memories.sql": "d3c1183bba19372aaf0da95e9adcb8c93e7baf800d8124c2a55b1988a53e9cc7",
  "0027_run_candidates.sql": "f149da65a386d2c536212d19e867c55b6b544f391e84bebfeb7ed4f00cfeb89f",
- "0028_project_scope.sql": "24ab27550d50d7015191bf41ad101673bc7344c737beb2f98936cc3c21326891"
+ "0028_project_scope.sql": "24ab27550d50d7015191bf41ad101673bc7344c737beb2f98936cc3c21326891",
+ "0029_webhook_outbox.sql": "a84fd24a5cc5dddaf3aec7963c5274c78b333ef3bd11294410723d5cfb17cdcf"
 }

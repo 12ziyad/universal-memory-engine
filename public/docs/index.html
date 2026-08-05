@@ -263,8 +263,11 @@ claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
 <h2>2. Verify</h2>
 <p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the installed files and hook configuration, protected local outbox, key, network path, REST door, and real MCP tools, then prints the exact fix for whichever fails.</p>
 <h2>What you get</h2>
-<p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: SessionEnd scrubs and queues what the session learned <b>locally, with no network wait</b>; the next SessionStart delivers that queue and loads project memory.</p>
-<div class="note"><b>Delivery states are explicit.</b> “Queued locally” is not “delivered”, and server acceptance is not terminal enrichment. Offline and retryable failures stay queued idempotently; rejected credentials pause delivery; permanent failures are retained for <code>/itsuki:doctor</code>. The protected outbox is capped at 128 raw entries / 64 MiB total / 2 MiB each and never evicts undelivered content. Claude deletes plugin data on final uninstall unless you use its <code>--keep-data</code> option.</div>
+<p>The three memory tools (<code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>) plus two lifecycle hooks: SessionEnd scrubs and queues what the session learned <b>locally, with no network wait</b>; the next SessionStart attempts up to four due batches in order, then loads project memory.</p>
+<p>New writes use ordered v2 delivery groups. Each ingest request holds at most 30 messages, 4,000 Unicode code points per message, 120,000 code points across message content, and 512 KiB for the complete serialized UTF-8 JSON body. Oversized logical messages are split at natural Unicode boundaries where possible and every segment is position-labelled; no content is silently dropped from the captured-and-scrubbed set.</p>
+<div class="note"><b>The capture boundary is reported separately.</b> SessionEnd reads a bounded snapshot of the newest 80 eligible transcript records. If an older, malformed, or oversized record is omitted, or the transcript changes during the snapshot, each batch records <code>captureTruncated</code> / <code>truncationReason</code> metadata and the hook says so. This is different from the lossless splitting performed after capture.</div>
+<div class="note"><b>Delivery states are explicit.</b> “Queued locally” means the protected local write completed. “Accepted” means the service durably created the source packet/job for that batch. Neither means terminal enrichment; packet/job status eventually reports <code>enriched</code> or <code>failed</code>. Offline and retryable failures stay queued with content-bound idempotency; later batches cannot overtake an earlier batch; rejected credentials pause delivery; permanent failures are retained for <code>/itsuki:doctor</code>.</div>
+<p>The protected outbox is capped at 128 raw batch envelopes / 64 MiB total / 2 MiB each and never evicts undelivered content. Existing v1 spool files remain drainable under their former 2 MiB raw-envelope cap and bounded legacy request contract; those responses carry <code>x-itsuki-ingest-contract: legacy-claude-outbox-v1</code> and the server emits content-free migration telemetry. This dual contract exists only to avoid stranding already-protected local data; all new writes use the v2 limits above. Downstream, each extraction queue entry is capped at 20 messages and 12,000 Unicode code points. Every complete serialized chat-model input is guarded at no more than 24,576 UTF-8 bytes; any model-bound omission is labelled, and an unfit fixed prompt fails before inference. Claude deletes plugin data on final uninstall unless you use its <code>--keep-data</code> option.</p>
 <div class="note">Two plugin settings: an absolute Node executable and one sensitive API key; there is no MCP URL to configure. Claude stores the key in its credential store, exports it only to plugin subprocesses, and interpolates it into the bundled MCP Bearer header. If either setting is missing or the key is rejected, the plugin tells you at session start instead of failing quietly.</div>
 ` };
 
@@ -318,7 +321,8 @@ ${codeBlock(`POST /v1/recall
 <table>
 <tr><th>Endpoint</th><th>What it does</th></tr>
 <tr><td><code>POST /v1/turn</code></td><td>Recall + auto-capture in one call — send the latest chat messages, get context back while durable facts are collected. Needs write scope.</td></tr>
-<tr><td><code>POST /v1/ingest</code></td><td>Bulk message ingestion with optional <code>flush: true</code> to force digestion.</td></tr>
+<tr><td><code>POST /v1/ingest</code></td><td>Bounded message ingestion with optional <code>flush: true</code> to force digestion.</td></tr>
+<tr><td><code>GET /v1/ingest/limits</code></td><td>Authoritative machine-readable limits, character unit, request encoding, and ordered-delivery schema.</td></tr>
 <tr><td><code>GET /v1/graph</code></td><td>The full laid-out memory graph (nodes, details, events, edges, clusters).</td></tr>
 <tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
 <tr><td><code>GET /v1/usage?range=30d</code></td><td>Activity rollups: saves/recalls per day, by source, totals. Ranges 1d/7d/30d/all.</td></tr>
@@ -326,10 +330,27 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>GET /v1/export</code></td><td>Complete JSON export of your memory. Your data is never locked in.</td></tr>
 <tr><td><code>GET/PUT /v1/rules</code></td><td>Read or update capture rules (what to remember / never remember).</td></tr>
 </table>
+<h2>Conversation-ingest boundaries</h2>
+<table>
+<tr><th>Boundary</th><th>Current limit</th></tr>
+<tr><td>Messages in one <code>POST /v1/ingest</code></td><td>30</td></tr>
+<tr><td>One message's <code>content</code></td><td>4,000 Unicode code points</td></tr>
+<tr><td>Combined message content</td><td>120,000 Unicode code points</td></tr>
+<tr><td>Complete serialized request</td><td>512 KiB of actual UTF-8 JSON</td></tr>
+</table>
+<p>Those four wire limits are exactly what <a href="/v1/ingest/limits"><code>GET /v1/ingest/limits</code></a> returns. The engine also enforces these separate downstream safeguards:</p>
+<table>
+<tr><th>Internal boundary</th><th>Limit</th></tr>
+<tr><td>One downstream extraction queue entry</td><td>20 messages and 12,000 Unicode code points</td></tr>
+<tr><td>Complete serialized chat-model input</td><td>At most 24,576 UTF-8 bytes</td></tr>
+</table>
+<p>The configured model context windows are 32,768 tokens for Qwen3 extraction, 32,000 for Llama 3.1 summary/digest, and 60,000 for Llama 3.2 playground chat. After output/template reserves and the global byte ceiling, their maximum serialized inputs are 24,576, 23,808, and 24,576 bytes respectively; unknown model overrides use the conservative 32,000-token profile.</p>
+<p>Fetch the limits endpoint instead of copying wire constants into a client. A body over the byte limit receives a machine-readable <code>413</code>; count, character, or delivery-metadata violations receive a machine-readable <code>422</code>. Retry an unchanged request with the same <code>idempotencyKey</code>; reusing that key for different content is a <code>409</code>.</p>
 <h2>Useful request fields</h2>
 <table>
 <tr><th>Field</th><th>Meaning</th></tr>
 <tr><td><code>idempotencyKey</code></td><td>Safe retries: the same key is processed at most once.</td></tr>
+<tr><td><code>delivery</code></td><td>Ordered-batch metadata: schema, stable group ID, batch index/count, source/segment counts, and explicit capture-omission state.</td></tr>
 <tr><td><code>conversationId</code>, <code>threadId</code>, <code>sourceId</code></td><td>Provenance tracking; also used for de-duplication of re-sent chats.</td></tr>
 <tr><td><code>userId</code></td><td><b>Sub-tenant selector.</b> Omit it to use the key owner's own memory. Pass any string to read/write a separate memory space derived from it — useful when your app serves multiple end users under one key.</td></tr>
 <tr><td><code>memoryScope.projectId</code>, <code>projectName</code></td><td><b>Project metadata, not tenancy.</b> Project memories remain in the authenticated account graph with explicit provenance. Omit <code>projectId</code> for account-global writes.</td></tr>
@@ -502,6 +523,7 @@ PAGES["/privacy"] = { title: "Privacy & limits", html: `
 <table>
 <tr><th>Thing</th><th>Limit</th></tr>
 <tr><td>Writes (save/turn/ingest)</td><td>60 per minute per user</td></tr>
+<tr><td>One ingest request</td><td>30 messages; 4,000 Unicode code points/message; 120,000 total; 512 KiB serialized UTF-8 JSON</td></tr>
 <tr><td>Auth attempts</td><td>10 per minute per IP</td></tr>
 <tr><td>Recall context</td><td>Bounded (~1,800 chars) by design — memory should sharpen prompts, not flood them</td></tr>
 <tr><td>Extraction</td><td>Asynchronous; allow a few seconds before recalling brand-new facts</td></tr>

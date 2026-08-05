@@ -30,7 +30,13 @@ import { applyGates } from "./gates.js";
 import { writeApproved } from "./write.js";
 import { runPass2 } from "./pass2.js";
 import { buildReceipt, emptyReceipt } from "./receipt.js";
-import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemoryJob } from "../lib/db.js";
+import {
+	claimExtractionRun,
+	createExtractionRun,
+	createMemoryJob,
+	updateExtractionRun,
+	updateMemoryJob,
+} from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
 import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
@@ -38,6 +44,122 @@ import { normalizeProjectScope } from "../lib/project_scope.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
+const EXTRACTION_CLAIM_TTL_MS = 15 * 60 * 1000;
+
+function jsonList(value) {
+	try {
+		const parsed = JSON.parse(value ?? "[]");
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function planFromExtractionRun(row) {
+	const updated = jsonList(row.updated_objects_json);
+	const reinforced = jsonList(row.reinforced_objects_json);
+	return {
+		newPages: jsonList(row.created_pages_json),
+		newNodes: jsonList(row.created_nodes_json),
+		newSlices: jsonList(row.created_slices_json),
+		newEvents: jsonList(row.created_events_json),
+		newEdges: jsonList(row.created_edges_json),
+		newCandidates: jsonList(row.created_candidates_json),
+		nodeTouches: new Set(updated.filter((item) => item?.kind === "node" && item.id).map((item) => item.id)),
+		sliceTouches: reinforced.filter((item) => item?.kind === "slice" && item.id),
+		eventTouches: reinforced.filter((item) => item?.kind === "event" && item.id),
+		edgeTouches: reinforced.filter((item) => item?.kind === "edge" && item.id),
+		rejected: jsonList(row.skipped_objects_json),
+	};
+}
+
+async function receiptFromExtractionRun(env, userId, row) {
+	if (!row?.receipt_id) return null;
+	const stored = await env.DB.prepare(
+		"SELECT detail FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(row.receipt_id, userId).first();
+	if (!stored?.detail) return null;
+	try {
+		const receipt = JSON.parse(stored.detail);
+		return receipt && typeof receipt === "object"
+			? { ...receipt, id: row.receipt_id }
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+async function extractionRunResult(env, userId, row, chunk, meta, {
+	markInterrupted = false,
+	error = null,
+} = {}) {
+	let current = row;
+	if (["running", "committing"].includes(current?.status)) {
+		const stale = Date.now() - Number(current.updated_at ?? current.created_at ?? 0) > EXTRACTION_CLAIM_TTL_MS;
+		if (!markInterrupted && !stale) {
+			return {
+				outcome: "in_progress",
+				extraction_run_id: current.id,
+				retry_after_ms: Math.max(1000, EXTRACTION_CLAIM_TTL_MS - (Date.now() - Number(current.updated_at ?? 0))),
+			};
+		}
+		const reason = `inference_outcome_unknown: ${String(error?.message ?? error ?? "the extraction worker stopped before publishing a durable result").slice(0, 300)}`;
+		await env.DB.prepare(
+			`UPDATE extraction_runs
+			 SET status = 'failed', error = ?, updated_at = ?
+			 WHERE id = ? AND user_id = ? AND status = ? AND updated_at IS ?`,
+		).bind(reason, Date.now(), current.id, userId, current.status, current.updated_at).run();
+		current = await env.DB.prepare(
+			"SELECT * FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(current.id, userId).first();
+	}
+
+	const recoveredMeta = {
+		...meta,
+		source: current.tool_name ?? meta.source ?? "ingest",
+		source_mode: current.source_mode ?? meta.source_mode ?? null,
+		extraction_run_id: current.id,
+		source_packet_id: current.source_packet_id ?? meta.source_packet_id ?? null,
+		idempotency_key: current.idempotency_key ?? meta.idempotency_key ?? null,
+		scope_json: current.scope_json ?? meta.scope_json ?? null,
+		received: (chunk ?? []).filter((message) => (message?.role ?? "user") === "user").length,
+	};
+	const plan = planFromExtractionRun(current);
+	if (current.status === "wrote") {
+		const receipt = await receiptFromExtractionRun(env, userId, current)
+			?? buildReceipt("wrote", plan, recoveredMeta);
+		if (current.receipt_id) receipt.id = current.receipt_id;
+		receipt.created_at = Number(current.created_at ?? Date.now());
+		receipt.recovered_from_extraction_run = true;
+		return { outcome: "wrote", plan, receipt, recovered: true };
+	}
+	if (current.status === "skipped") {
+		const receipt = await receiptFromExtractionRun(env, userId, current)
+			?? buildReceipt("meaningful_no_write", plan, recoveredMeta);
+		if (current.receipt_id) receipt.id = current.receipt_id;
+		receipt.created_at = Number(current.created_at ?? Date.now());
+		receipt.recovered_from_extraction_run = true;
+		return { outcome: "meaningful_no_write", plan, receipt, recovered: true };
+	}
+	if (current.status === "failed") {
+		const storedError = String(current.error ?? "extraction failed");
+		const interrupted = storedError.startsWith("inference_outcome_unknown:");
+		const outcome = interrupted
+			? "interrupted_unknown"
+			: storedError.startsWith("db_write_failed:") ? "db_write_failed" : "llm_failed";
+		const receipt = emptyReceipt(
+			outcome,
+			interrupted
+				? "processing was interrupted after inference began; the model was not called again"
+				: outcome === "db_write_failed" ? "a storage error interrupted the save" : "the extractor returned nothing readable",
+			recoveredMeta,
+		);
+		receipt.created_at = Number(current.created_at ?? Date.now());
+		receipt.recovered_from_extraction_run = true;
+		return { outcome, error: storedError, receipt, recovered: true };
+	}
+	throw new Error(`extraction run ${current?.id ?? "unknown"} has an unsupported status`);
+}
 
 // Rescue batches run a few messages at a time so an abort decision happens
 // BEFORE the next batch spends anything — the old Promise.all over the whole
@@ -192,9 +314,28 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 function runListsFromPlan(plan) {
 	return {
 		createdNodes: (plan.newNodes ?? []).map((n) => ({ id: n.id, label: n.label })),
-		createdSlices: (plan.newSlices ?? []).map((s) => ({ id: s.id, node_id: s.node_id, kind: s.kind })),
-		createdEvents: (plan.newEvents ?? []).map((e) => ({ id: e.id, node_id: e.node_id, action: e.action })),
-		createdEdges: (plan.newEdges ?? []).map((e) => ({ id: e.id, from_node: e.from_node, to_node: e.to_node, type: e.type })),
+		// Recovery callers such as MCP render the final memory page from this
+		// durable plan. Keep the approved human-readable fields as well as ids;
+		// otherwise a post-commit replay can overwrite the page with an empty body.
+		createdSlices: (plan.newSlices ?? []).map((s) => ({
+			id: s.id,
+			node_id: s.node_id,
+			kind: s.kind,
+			text: s.text,
+		})),
+		createdEvents: (plan.newEvents ?? []).map((e) => ({
+			id: e.id,
+			node_id: e.node_id,
+			action: e.action,
+			text: e.text,
+		})),
+		createdEdges: (plan.newEdges ?? []).map((e) => ({
+			id: e.id,
+			from_node: e.from_node,
+			to_node: e.to_node,
+			type: e.type,
+			fact: e.fact,
+		})),
 		// Candidates are created objects too. Leaving them off the ledger meant
 		// delete-by-source could not see them: the Part 9 acceptance run found
 		// eight fictional candidates (and their evidence text) surviving a
@@ -221,9 +362,47 @@ function runListsFromPlan(plan) {
  * Metering is strictly observational: it cannot alter the result, and a failure
  * inside it is swallowed rather than allowed to fail a save.
  */
-export async function runExtraction(env, userId, chunk, recent, overrides = {}) {
+export async function runExtraction(env, userId, chunk, recent, overrides = {}, execution = {}) {
 	return withAiMeter("save", async (meter) => {
-		const result = await runExtractionInner(env, userId, chunk, recent, overrides, meter);
+		let result;
+		try {
+			result = await runExtractionInner(env, userId, chunk, recent, overrides, meter, execution);
+		} catch (error) {
+			if (!execution.runId) throw error;
+			let row = await env.DB.prepare(
+				"SELECT * FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+			).bind(execution.runId, userId).first();
+			if (!row) throw error;
+			// A synchronous failure while the run is still in its pre-commit phase
+			// is an explicit failed attempt and remains eligible for the bounded
+			// retry policy. Once `committing` begins, the outcome is ambiguous unless
+			// the atomic graph marker says `wrote`, so that path fails closed instead.
+			if (row.status === "running") {
+				await env.DB.prepare(
+					`UPDATE extraction_runs
+					 SET status = 'failed', error = ?, updated_at = ?
+					 WHERE id = ? AND user_id = ? AND status = 'running' AND updated_at IS ?`,
+				).bind(
+					`llm_failed: ${String(error?.message ?? error).slice(0, 300)}`,
+					Date.now(),
+					row.id,
+					userId,
+					row.updated_at,
+				).run();
+				row = await env.DB.prepare(
+					"SELECT * FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+				).bind(execution.runId, userId).first();
+			}
+			const sourceMode = overrides.meta?.source_mode
+				?? (overrides.manual
+					? (overrides.source === "save_conversation" ? "manual_collect" : "manual_direct")
+					: "auto_ingest");
+			result = await extractionRunResult(env, userId, row, chunk, {
+				source: overrides.source ?? "ingest",
+				source_mode: sourceMode,
+				...(overrides.meta ?? {}),
+			}, { markInterrupted: row.status === "committing", error });
+		}
 		try {
 			const totals = await flushAiMeter(env, userId, meter);
 			if (result?.receipt) {
@@ -239,7 +418,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}) 
 	});
 }
 
-async function runExtractionInner(env, userId, chunk, recent, overrides = {}, meter = null) {
+async function runExtractionInner(env, userId, chunk, recent, overrides = {}, meter = null, execution = {}) {
 	const config = getConfig(env);
 	// Wall time for the whole extraction, carried onto every receipt this
 	// function can return. It is what the Requests page reports as latency.
@@ -268,7 +447,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		receipt.skippedReasons = { user_opt_out: receipt.received || 1 };
 		return { outcome: "no_write", receipt };
 	}
-	const extractionRunId = await createExtractionRun(env, userId, {
+	const runOwner = {
 		toolName: overrides.source ?? "ingest",
 		sourceMode,
 		topicFilter: meta.topic_filter ?? null,
@@ -276,7 +455,20 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		idempotencyKey: meta.idempotency_key ?? null,
 		scopeJson: meta.scope_json ?? null,
 		status: "running",
-	});
+	};
+	let extractionRunId;
+	if (execution.runId) {
+		const claim = await claimExtractionRun(env, userId, { id: execution.runId, ...runOwner });
+		extractionRunId = claim.id;
+		if (!claim.claimed) {
+			return extractionRunResult(env, userId, claim.row, chunk, {
+				...meta,
+				extraction_run_id: extractionRunId,
+			});
+		}
+	} else {
+		extractionRunId = await createExtractionRun(env, userId, runOwner);
+	}
 	meta.extraction_run_id = extractionRunId;
 	// Attribute every model call in this run to it, now that the id exists.
 	tagAiMeter(extractionRunId);
@@ -335,7 +527,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
 		await updateExtractionRun(env, userId, extractionRunId, {
 			status: "failed",
-			error: "the extractor returned nothing readable",
+			error: "llm_failed: the extractor returned nothing readable",
 		});
 		return {
 			outcome: "llm_failed",
@@ -465,15 +657,21 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		};
 	}
 
-	// H — write (atomic). On failure, keep chunk + checkpoint.
+	// H — write (atomic). Publish the recovery lists before committing, then
+	// move the run to `wrote` in the same D1 batch as the graph. A retry can
+	// therefore settle from this run without invoking the model again.
 	let result;
+	await updateExtractionRun(env, userId, extractionRunId, {
+		status: "committing",
+		...runListsFromPlan(plan),
+	});
 	try {
-		result = await writeApproved(env, config, userId, plan);
+		result = await writeApproved(env, config, userId, plan, { extractionRunId });
 	} catch (err) {
 		console.error(`extraction db_write_failed user=${userId}:`, err?.message ?? err);
 		await updateExtractionRun(env, userId, extractionRunId, {
 			status: "failed",
-			error: String(err?.message ?? err),
+			error: `db_write_failed: ${String(err?.message ?? err)}`,
 		});
 		return {
 			outcome: "db_write_failed",
@@ -483,26 +681,23 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	}
 
 	const receipt = buildReceipt("wrote", plan, { ...meta, latency_ms: elapsed() });
-	await updateExtractionRun(env, userId, extractionRunId, {
-		status: "wrote",
-		...runListsFromPlan(plan),
-	});
 
 	// I — Pass 2 (background, cheap). Never affects Pass-1 writes.
-	const jobId = await createMemoryJob(env, userId, {
-		type: "pass2_rollup",
-		status: "running",
-		idempotencyKey: `pass2:${extractionRunId}`,
-		sourcePacketId: meta.source_packet_id ?? null,
-		extractionRunId,
-		payload: {
-			affectedNodeIds: result.affectedNodeIds,
-			project_id: projectScope.projectId,
-			project_name: projectScope.projectName,
-		},
-	});
-	if (jobId) await updateExtractionRun(env, userId, extractionRunId, { jobId });
+	let jobId = null;
 	try {
+		jobId = await createMemoryJob(env, userId, {
+			type: "pass2_rollup",
+			status: "running",
+			idempotencyKey: `pass2:${extractionRunId}`,
+			sourcePacketId: meta.source_packet_id ?? null,
+			extractionRunId,
+			payload: {
+				affectedNodeIds: result.affectedNodeIds,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
+			},
+		});
+		if (jobId) await updateExtractionRun(env, userId, extractionRunId, { jobId });
 		const pass2 = await runPass2(env, config, userId, result.affectedNodeIds, { jobId });
 		await updateMemoryJob(env, userId, jobId, {
 			status: pass2?.ran ? "completed" : "skipped",
@@ -516,11 +711,13 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		});
 	} catch (err) {
 		console.warn(`pass2 failed user=${userId}:`, err?.message ?? err);
-		await updateMemoryJob(env, userId, jobId, {
-			status: "failed",
-			error: String(err?.message ?? err),
-			completedAt: Date.now(),
-		});
+		if (jobId) {
+			await updateMemoryJob(env, userId, jobId, {
+				status: "failed",
+				error: String(err?.message ?? err),
+				completedAt: Date.now(),
+			});
+		}
 	}
 
 	// `plan` rides along for callers that render what was approved (the MCP

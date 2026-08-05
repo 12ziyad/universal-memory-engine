@@ -4,6 +4,8 @@
  * helpers turn the memory_jobs ledger into API responses.
  */
 
+import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
+
 const ACCEPT_TIME_TYPES = ["extract", "mcp_enrich"];
 
 function shapeJob(row) {
@@ -25,6 +27,7 @@ function shapeJob(row) {
 		lane: payload.lane ?? (row.type === "mcp_enrich" ? "mcp_save" : null),
 		project_id: payload.project_id ?? null,
 		project_name: payload.project_name ?? null,
+		delivery: normalizeDeliveryMetadata(payload.delivery),
 		attempts: Number(row.attempts ?? 0),
 		created_at: row.created_at,
 		updated_at: row.updated_at,

@@ -104,9 +104,9 @@ function runSessionEnd({
 	});
 }
 
-async function pendingEnvelopes(pluginData) {
+async function stagedGroups(pluginData) {
 	try {
-		return (await readdir(join(pluginData, "outbox", "v1", "pending")))
+		return (await readdir(join(pluginData, "outbox", "v1", "staged")))
 			.filter((name) => name.endsWith(".json"));
 	} catch (error) {
 		if (error?.code === "ENOENT") return [];
@@ -114,10 +114,10 @@ async function pendingEnvelopes(pluginData) {
 	}
 }
 
-async function readPendingEnvelope(pluginData) {
-	const names = await pendingEnvelopes(pluginData);
+async function readStagedGroup(pluginData) {
+	const names = await stagedGroups(pluginData);
 	expect(names).toHaveLength(1);
-	return JSON.parse(await readFile(join(pluginData, "outbox", "v1", "pending", names[0]), "utf8"));
+	return JSON.parse(await readFile(join(pluginData, "outbox", "v1", "staged", names[0]), "utf8"));
 }
 
 function expectAtMostOneJsonDocument(stdout) {
@@ -161,6 +161,42 @@ async function unusedLocalEndpoint() {
 }
 
 describe("SessionEnd host-budget delivery", () => {
+	it("spools a near-8 MiB valid capture once without eager segmentation or dozens of fsyncs", async () => {
+		const rows = Array.from({ length: 32 }, (_, index) => JSON.stringify({
+			type: index % 2 === 0 ? "user" : "assistant",
+			uuid: `host-event-near-limit-${index}`,
+			timestamp: `2026-08-05T00:00:${String(index).padStart(2, "0")}.000Z`,
+			message: {
+				content: `${String(index).padStart(2, "0")}:${"x".repeat((250 * 1024) - 64)}:FINAL-OUTCOME-${index}`,
+			},
+		}));
+		const transcriptContents = `${rows.join("\n")}\n`;
+		expect(Buffer.byteLength(transcriptContents, "utf8")).toBeGreaterThan(7.5 * 1024 * 1024);
+		expect(rows.every((row) => Buffer.byteLength(row, "utf8") < 256 * 1024)).toBe(true);
+		const data = await fixture({ transcriptContents });
+		try {
+			const result = await runSessionEnd({
+				baseUrl: await unusedLocalEndpoint(),
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+			const staged = await readStagedGroup(data.pluginData);
+			const pending = await readdir(join(data.pluginData, "outbox", "v1", "pending"));
+			const manifests = await readdir(join(data.pluginData, "outbox", "v1", "groups"));
+
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			expect(result.elapsedMs).toBeLessThan(CLAUDE_SESSION_END_BUDGET_MS);
+			expect(staged.schema).toBe("itsuki.outbox-staged-group/v1");
+			expect(staged.messages).toHaveLength(32);
+			expect(staged.messages.at(-1).content).toContain("FINAL-OUTCOME-31");
+			expect(JSON.stringify(staged)).not.toContain("[Itsuki segment ");
+			expect(pending).toEqual([]);
+			expect(manifests).toEqual([]);
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 10_000);
+
 	it("queues the final durable event from behind a huge early line within the 1.5s host budget", async () => {
 		const hugeEarlyMarker = "HUGE_EARLY_PROGRESS_MUST_NOT_BE_QUEUED";
 		const finalContent = "Keep the final durable event even when an early transcript row is enormous.";
@@ -183,18 +219,22 @@ describe("SessionEnd host-budget delivery", () => {
 				pluginData: data.pluginData,
 			});
 			const output = JSON.parse(result.stdout);
-			const envelope = await readPendingEnvelope(data.pluginData);
+			const envelope = await readStagedGroup(data.pluginData);
 
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
 			expect(result.elapsedMs).toBeLessThan(CLAUDE_SESSION_END_BUDGET_MS);
 			expect(endpoint.requestCount()).toBe(0);
-			expect(envelope.request.body.messages).toEqual([
+			expect(envelope.messages).toEqual([
 				expect.objectContaining({ role: "user", content: finalContent }),
 			]);
 			expect(JSON.stringify(envelope)).not.toContain(hugeEarlyMarker);
-			expect(output.systemMessage).toContain(
-				"The bounded shutdown snapshot may have omitted oversized, older, or concurrently appended transcript records",
-			);
+			expect(output.systemMessage).toContain("The bounded shutdown snapshot omitted older records");
+			expect(output.systemMessage).toContain("1 record larger than the 256 KiB line-safety limit");
+			expect(output.systemMessage).toContain("the source transcript was not modified");
+			expect(envelope.capture).toMatchObject({
+				captureTruncated: true,
+				truncationReason: "max_bytes",
+			});
 		} finally {
 			await endpoint.close();
 			await rm(data.root, { recursive: true, force: true });
@@ -210,7 +250,7 @@ describe("SessionEnd host-budget delivery", () => {
 				payload: data.payload,
 				pluginData: data.pluginData,
 			});
-			const pending = await pendingEnvelopes(data.pluginData);
+			const pending = await stagedGroups(data.pluginData);
 			expectAtMostOneJsonDocument(result.stdout);
 
 			expect({
@@ -242,7 +282,7 @@ describe("SessionEnd host-budget delivery", () => {
 			expectAtMostOneJsonDocument(result.stdout);
 
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
-			expect(await pendingEnvelopes(data.pluginData)).toHaveLength(1);
+			expect(await stagedGroups(data.pluginData)).toHaveLength(1);
 		} finally {
 			await rm(data.root, { recursive: true, force: true });
 		}
@@ -259,7 +299,7 @@ describe("SessionEnd host-budget delivery", () => {
 				pluginKey: null,
 				legacyKey,
 			});
-			const envelope = await readPendingEnvelope(data.pluginData);
+			const envelope = await readStagedGroup(data.pluginData);
 
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
 			expect(JSON.parse(result.stdout).systemMessage).toContain("not bound to a valid key");
@@ -280,7 +320,7 @@ describe("SessionEnd host-budget delivery", () => {
 				pluginData: data.pluginData,
 				explicitService: false,
 			});
-			const envelope = await readPendingEnvelope(data.pluginData);
+			const envelope = await readStagedGroup(data.pluginData);
 
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
 			expect(endpoint.requestCount()).toBe(0);

@@ -1,5 +1,5 @@
 import { getConfig } from "../config.js";
-import { storeReceipt, updateMemoryJob } from "../lib/db.js";
+import { linkIngestMemoryJobReceipt, storeReceipt } from "../lib/db.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
 import { recall, RecallScopeError, validateRecallScope } from "./recall.js";
@@ -89,10 +89,23 @@ async function storeStatusReceipt(env, userId, sourcePacket, outcome, reason, so
 	if (meta.processing !== undefined) receipt.processing = Boolean(meta.processing);
 	if (meta.final !== undefined) receipt.final = Boolean(meta.final);
 	if (meta.status) receipt.status = meta.status;
+	// One immutable door receipt per source packet. Concurrent exact retries
+	// race on this deterministic primary key and all return the first durable
+	// verdict instead of manufacturing accepted/accumulating duplicates.
+	if (sourcePacket?.id) receipt.id = `receipt_door_${sourcePacket.id}`;
 	const summary = formatReceipt(receipt);
-	const id = await storeReceipt(env, userId, source, receipt, summary);
-	if (id) receipt.id = id;
-	return { receipt, summary, receipt_id: id ?? receipt.id ?? null };
+	const id = await storeReceipt(env, userId, source, receipt, summary, { strict: true });
+	let durableReceipt = receipt;
+	let durableSummary = summary;
+	if (id) {
+		const row = await env.DB.prepare(
+			"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(id, userId).first();
+		try { durableReceipt = JSON.parse(row?.detail ?? "null") ?? receipt; } catch {}
+		durableSummary = row?.summary ?? summary;
+		durableReceipt.id = id;
+	}
+	return { receipt: durableReceipt, summary: durableSummary, receipt_id: id ?? durableReceipt.id ?? null };
 }
 
 function saveResponse(mode, source, res, env, userId, sourcePacketHint = null, meta = {}) {
@@ -108,13 +121,34 @@ function saveResponse(mode, source, res, env, userId, sourcePacketHint = null, m
 }
 
 async function finalizeSaveResponse({ mode, source, res, env, userId, sourcePacket, meta = {} }) {
+	if (res.idempotencyConflict) {
+		return {
+			ok: false,
+			idempotencyConflict: true,
+			error: "idempotency_conflict",
+			http_status: 409,
+			summary: res.summary ?? "That idempotency key is already owned by different content or a different operation.",
+			idempotency_key: res.idempotencyKey ?? res.idempotency_key ?? null,
+			source_packet_id: res.sourcePacketId ?? res.source_packet_id ?? null,
+		};
+	}
+	if (res.backpressure) {
+		return {
+			ok: false,
+			backpressure: true,
+			error: "queue_full",
+			summary: "Your memory queue is full — give it a moment to catch up, then retry.",
+			retry_after_s: res.retryAfterS ?? 30,
+			queue_depth: res.queueDepth ?? null,
+		};
+	}
 	// 1.10 idempotent replay: surface it, don't launder it into "ignored".
 	if (res.duplicate) {
 		return safeCommandResult({
 			mode,
 			source,
 			fired: false,
-			processing: false,
+			processing: Boolean(res.processing),
 			summary: replaySummary(res.receipt, res.summary),
 			receipt: res.receipt ?? null,
 			receipt_id: res.receipt_id ?? null,
@@ -230,6 +264,7 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 		threadId: input.threadId,
 		sourceId: input.sourceId,
 		idempotencyKey: input.idempotencyKey,
+		delivery: input.delivery,
 		memoryScope: input.memoryScope,
 		source: "save_conversation",
 		sourceMode: "conversation_collect",
@@ -252,6 +287,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		threadId: input.threadId,
 		sourceId: input.sourceId,
 		idempotencyKey: input.idempotencyKey,
+		delivery: input.delivery,
 		memoryScope: input.memoryScope,
 		sourceMode,
 		overrides: { source, ...(input.overrides ?? {}) },
@@ -267,6 +303,16 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			retry_after_s: res.retryAfterS ?? 30,
 			queue_depth: res.queueDepth ?? null,
 			summary: "Your memory queue is full — give it a moment to catch up, then retry.",
+		};
+	}
+	if (res.idempotencyConflict) {
+		return {
+			ok: false,
+			idempotencyConflict: true,
+			error: "idempotency_conflict",
+			summary: res.summary,
+			idempotency_key: res.idempotencyKey ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
 		};
 	}
 
@@ -297,6 +343,23 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			summary = accepted.summary;
 			id = accepted.receipt_id;
 			processing = true;
+		} else if (res.held > 0) {
+			const stored = await storeStatusReceipt(
+				env,
+				userId,
+				res.sourcePacket,
+				"accumulating",
+				"learning trigger is accumulating more context",
+				source,
+				{
+					received: (messages ?? []).length,
+					held: res.held,
+					skipped: res.skipped,
+				},
+			);
+			receipt = stored.receipt;
+			summary = stored.summary;
+			id = stored.receipt_id;
 		} else if (res.duplicate) {
 			const stored = await storeStatusReceipt(env, userId, res.sourcePacket, "duplicate", "this exact content was already accepted (idempotent replay)", source, {
 				received: (messages ?? []).length,
@@ -307,11 +370,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			summary = res.summary ?? stored.summary;
 			id = stored.receipt_id;
 		} else {
-			const outcome = res.held > 0 ? "accumulating" : "ignored";
-			const reason = res.held > 0
-				? "learning trigger is accumulating more context"
-				: "no durable learning signal found";
-			const stored = await storeStatusReceipt(env, userId, res.sourcePacket, outcome, reason, source, {
+			const stored = await storeStatusReceipt(env, userId, res.sourcePacket, "ignored", "no durable learning signal found", source, {
 				received: (messages ?? []).length,
 				held: res.held,
 				skipped: res.skipped,
@@ -322,10 +381,19 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		}
 	}
 
-	// Link the receipt onto the accept-time job row so the packet id → job →
-	// receipt chain is walkable from the status endpoint.
-	if (res.jobId && id && !res.duplicate) {
-		try { await updateMemoryJob(env, userId, res.jobId, { receiptId: id }); }
+	// Link only a same-packet receipt valid for the job's current lifecycle.
+	// The compare-and-set cannot replace a terminal engine receipt, and a
+	// duplicate/unknown terminal replay never becomes the canonical verdict.
+	if (res.jobId && id) {
+		try {
+			await linkIngestMemoryJobReceipt(env, userId, res.jobId, {
+				receiptId: id,
+				sourcePacketId: res.sourcePacket?.id ?? null,
+				outcome: receipt?.outcome ?? null,
+				terminalReplay: Boolean(res.terminalReplay),
+				duplicate: Boolean(res.duplicate),
+			});
+		}
 		catch (error) { console.warn("job receipt link failed:", error?.message ?? error); }
 	}
 
@@ -420,6 +488,22 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		scope: input.memoryScope,
 	});
 	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	if (sourcePacket?.idempotency_conflict) {
+		return {
+			ok: false,
+			command_mode: "recall",
+			mode: "recall",
+			source: "recall",
+			error: "idempotency_conflict",
+			code: "idempotency_conflict",
+			http_status: 409,
+			summary: "That idempotency key is already owned by different content or a different operation. Use a new key.",
+			source_packet_id: sourcePacket.id ?? null,
+			receipt_id: null,
+			receipt: null,
+			counts: { received: 1, items: 0, nodes: 0, pages: 0, savedTotal: 0 },
+		};
+	}
 	const startedAt = Date.now();
 	// Recall is metered separately from a save: it is the other half of "what
 	// does this cost", and it runs a different (much smaller) set of calls.

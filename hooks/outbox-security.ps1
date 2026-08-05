@@ -78,7 +78,7 @@ try {
 	$allowed = [System.Security.Principal.SecurityIdentifier[]]@($current, $system, $admins)
 	$allowedText = [string[]]@($current.Value, $system.Value, $admins.Value)
 
-	$directoryNames = @("tmp", "pending", "inflight", "accepted", "done", "failed", "state", "locks", "control")
+	$directoryNames = @("tmp", "staged", "groups", "pending", "inflight", "accepted", "done", "failed", "state", "locks", "control")
 	$directories = @((Get-Item -LiteralPath $v1 -Force))
 	foreach ($name in $directoryNames) {
 		$directory = Join-Path $v1 $name
@@ -110,7 +110,7 @@ try {
 		# Accepted completion tombstones contain no transcript body and may grow
 		# throughout the seven-day retention window. Verify only active/sensitive
 		# files here so SessionStart cannot acquire an unbounded recursive walk.
-		$activeNames = @("tmp", "pending", "inflight", "accepted", "failed", "state", "control")
+		$activeNames = @("tmp", "staged", "pending", "inflight", "accepted", "failed", "state", "control")
 		foreach ($name in $activeNames) {
 			$active = Join-Path $v1 $name
 			if (Test-Path -LiteralPath $active -PathType Container) {

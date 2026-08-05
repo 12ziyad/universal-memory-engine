@@ -1,4 +1,5 @@
 import { newId } from "../lib/ids.js";
+import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 
 const PREVIEW_LIMIT = 900;
@@ -100,6 +101,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const sessionId = scope.session_id ?? conversationId ?? threadId ?? userId;
 	const sourceRole = cleanKey(input.sourceRole ?? input.role, null);
 	const topic = cleanKey(input.topic ?? scope.topic, null);
+	const delivery = normalizeDeliveryMetadata(input.delivery);
 	const messages = await normalizeMessages(
 		input.messages ?? (input.content ? [{ id: input.messageId, role: input.role ?? "user", content: input.content, ts: input.ts }] : []),
 		{ conversationId: conversationId ?? sessionId, sessionId },
@@ -118,6 +120,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		threadId,
 		topic,
 		scope: hashScope,
+		...(delivery ? { delivery } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
@@ -142,6 +145,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			: baseIdempotencyKey;
 	const preview = clamp(messages.map((m) => m.content).join("\n"));
 	const rawMeta = {
+		delivery,
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
@@ -174,25 +178,23 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			message_count: messages.length,
 			raw_meta_json: JSON.stringify(rawMeta),
 			received_at: numberOrNow(input.receivedAt),
+			delivery,
 			messages,
 		},
 	};
 }
 
-export async function storeSourcePacket(env, packet) {
+export async function storeSourcePacket(env, packet, { immutableIdempotency = true } = {}) {
 	if (!env?.DB || !packet) return null;
 	const now = Date.now();
 	const id = packet.id ?? newId("src");
 	try {
-		const row = await env.DB.prepare(
-			`INSERT INTO source_packets
-				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
-				 workspace_id, app_id, agent_id, session_id, source_scope, project_id, project_name,
-				 source_type, source_mode, source_id, source_role, conversation_id, thread_id, topic,
-				 idempotency_key, content_hash, content_preview, message_count, raw_meta_json,
-				 seen_count, received_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(user_id, idempotency_key) DO UPDATE SET
+		const conflictUpdate = immutableIdempotency
+			? `DO UPDATE SET
+				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
+				updated_at = excluded.updated_at
+			 WHERE source_packets.content_hash = excluded.content_hash`
+			: `DO UPDATE SET
 				memory_user_id = excluded.memory_user_id,
 				owner_user_id = excluded.owner_user_id,
 				external_user_id = excluded.external_user_id,
@@ -212,8 +214,17 @@ export async function storeSourcePacket(env, packet) {
 				raw_meta_json = excluded.raw_meta_json,
 				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
 				received_at = excluded.received_at,
-				updated_at = excluded.updated_at
-			 RETURNING id, seen_count`,
+				updated_at = excluded.updated_at`;
+		const row = await env.DB.prepare(
+			`INSERT INTO source_packets
+				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
+				 workspace_id, app_id, agent_id, session_id, source_scope, project_id, project_name,
+				 source_type, source_mode, source_id, source_role, conversation_id, thread_id, topic,
+				 idempotency_key, content_hash, content_preview, message_count, raw_meta_json,
+				 seen_count, received_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(user_id, idempotency_key) ${conflictUpdate}
+			 RETURNING *`,
 		)
 			.bind(
 				id,
@@ -247,15 +258,59 @@ export async function storeSourcePacket(env, packet) {
 				now,
 			)
 			.first();
-		return { ...packet, id: row?.id ?? id, seen_count: row?.seen_count ?? 1 };
+		if (!row && immutableIdempotency) {
+			const existing = await env.DB.prepare(
+				"SELECT * FROM source_packets WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
+			).bind(packet.user_id, packet.idempotency_key).first();
+			if (existing && existing.content_hash !== packet.content_hash) {
+				return {
+					...existing,
+					messages: [],
+					delivery: sourceDelivery(existing),
+					idempotency_conflict: true,
+					existing_content_hash: existing.content_hash,
+				};
+			}
+			if (existing) {
+				return {
+					...packet,
+					...existing,
+					idempotent_replay: true,
+					messages: packet.messages ?? [],
+					delivery: sourceDelivery(existing),
+				};
+			}
+			throw new Error("an immutable source packet claim returned no durable row");
+		}
+		return {
+			...packet,
+			...(row ?? {}),
+			id: row?.id ?? id,
+			seen_count: row?.seen_count ?? 1,
+			idempotent_replay: Boolean(row && (row.id !== id || Number(row.seen_count ?? 1) > 1)),
+			messages: packet.messages ?? [],
+			delivery: sourceDelivery(row ?? packet),
+		};
 	} catch (err) {
+		if (immutableIdempotency) throw err;
 		console.warn("source packet store failed:", err?.message ?? err);
 		return { ...packet, id: null, error: String(err?.message ?? err) };
 	}
 }
 
+export function sourceDelivery(sourcePacket) {
+	const direct = normalizeDeliveryMetadata(sourcePacket?.delivery);
+	if (direct) return direct;
+	try {
+		return normalizeDeliveryMetadata(JSON.parse(sourcePacket?.raw_meta_json ?? "{}")?.delivery);
+	} catch {
+		return null;
+	}
+}
+
 export function sourceMeta(sourcePacket) {
 	if (!sourcePacket) return {};
+	const delivery = sourceDelivery(sourcePacket);
 	return {
 		source_packet_id: sourcePacket.id ?? null,
 		source_content_hash: sourcePacket.content_hash ?? null,
@@ -269,6 +324,7 @@ export function sourceMeta(sourcePacket) {
 			app_id: sourcePacket.app_id,
 			agent_id: sourcePacket.agent_id,
 			session_id: sourcePacket.session_id,
+			conversation_id: sourcePacket.conversation_id,
 			thread_id: sourcePacket.thread_id,
 			topic: sourcePacket.topic,
 			source_scope: sourcePacket.source_scope,
@@ -276,9 +332,11 @@ export function sourceMeta(sourcePacket) {
 			project_name: sourcePacket.project_name,
 			source_type: sourcePacket.source_type,
 			source_mode: sourcePacket.source_mode,
+			delivery,
 		}),
 		project_id: sourcePacket.project_id ?? null,
 		project_name: sourcePacket.project_name ?? null,
+		delivery,
 	};
 }
 

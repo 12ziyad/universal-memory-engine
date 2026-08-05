@@ -13,7 +13,7 @@
  *     entity threshold (the light path)
  */
 
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { env, createExecutionContext, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import {
 	stageMcpConversation,
@@ -25,6 +25,8 @@ import {
 } from "../src/pipeline/mcp_engine.js";
 import { runDirectSaveCommand } from "../src/pipeline/commands.js";
 import { getConfig } from "../src/config.js";
+import { claimMemoryJob, MEMORY_JOB_ACTIVE_LIMIT } from "../src/lib/db.js";
+import worker from "../src/index.js";
 
 const T0 = Date.parse("2026-08-01T14:00:00Z");
 
@@ -56,11 +58,12 @@ const CANNED_EDGES = {
 };
 const CANNED_REFLEXION = { entities: [], facts: [], edges: [] };
 
-async function stage(userId, overrides = {}, messages = conv()) {
+async function stage(userId, overrides = {}, messages = conv(), input = {}) {
 	const ctx = createExecutionContext();
 	const res = await stageMcpConversation(env, ctx, userId, {
+		...input,
 		messages,
-		conversationId: `conv-${userId}`,
+		conversationId: input.conversationId ?? `conv-${userId}`,
 		testOverrides: {
 			llmResponse: CANNED_EXTRACTION,
 			edgeResponse: CANNED_EDGES,
@@ -73,8 +76,36 @@ async function stage(userId, overrides = {}, messages = conv()) {
 	return res;
 }
 
+async function ingestHttp(userId, idempotencyKey, messages, extra = {}) {
+	const ctx = createExecutionContext();
+	const response = await worker.fetch(new Request("http://example.com/v1/ingest", {
+		method: "POST",
+		headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+		body: JSON.stringify({ userId, idempotencyKey, messages, ...extra }),
+	}), env, ctx);
+	await waitOnExecutionContext(ctx);
+	return { status: response.status, body: await response.json() };
+}
+
+async function idempotencySnapshot(userId, idempotencyKey) {
+	const source = await env.DB.prepare(
+		`SELECT id, source_type, source_mode, content_hash, raw_meta_json, seen_count,
+			created_at, updated_at FROM source_packets
+		 WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
+	).bind(userId, idempotencyKey).first();
+	const jobs = await env.DB.prepare(
+		`SELECT id, type, status, source_packet_id, receipt_id, payload_json, created_at, updated_at
+		 FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? ORDER BY id`,
+	).bind(userId, idempotencyKey).all();
+	const receipts = await env.DB.prepare(
+		`SELECT id, source, outcome, summary, detail, created_at
+		 FROM receipts WHERE user_id = ? ORDER BY id`,
+	).bind(userId).all();
+	return { source, jobs: jobs.results ?? [], receipts: receipts.results ?? [] };
+}
+
 /** Drive the DO queue until every staged job resolved (bounded, no clock luck). */
-async function drainUntilSettled(userId, maxRounds = 30) {
+async function drainUntilSettled(userId, maxRounds = 30, { reset = true } = {}) {
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
 	for (let i = 0; i < maxRounds; i++) {
 		const res = await stub.drainMcpJobs(userId);
@@ -82,12 +113,38 @@ async function drainUntilSettled(userId, maxRounds = 30) {
 			// Drop DO state (including any re-armed alarm): D1 keeps everything
 			// these tests assert on, and a live alarm firing into the test
 			// pool's storage teardown reads as an "Isolated storage failed".
-			await stub.resetAll();
+			if (reset) await stub.resetAll();
 			return;
 		}
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 	throw new Error("mcp jobs did not settle");
+}
+
+async function mcpDurableState(userId) {
+	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+	return runInDurableObject(stub, async (_instance, state) => {
+		const entries = await state.storage.list({ prefix: "q:" });
+		const markers = await state.storage.list({ prefix: "mcp-handoff:v1:" });
+		const mcpEntries = [...entries.entries()].filter(([, entry]) => entry?.kind === "mcp");
+		return {
+			queueCount: mcpEntries.length,
+			queueJobIds: mcpEntries.map(([, entry]) => entry.job?.jobId ?? null),
+			markerCount: markers.size,
+			markers: [...markers.values()],
+		};
+	});
+}
+
+async function mcpArtifactCounts(userId, idempotencyKey) {
+	return env.DB.prepare(
+		`SELECT
+			(SELECT COUNT(*) FROM source_packets WHERE user_id = ? AND idempotency_key = ?) AS sources,
+			(SELECT COUNT(*) FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?) AS jobs,
+			(SELECT COUNT(*) FROM memory_pages WHERE user_id = ?) AS pages,
+			(SELECT COUNT(*) FROM receipts WHERE user_id = ?) AS receipts,
+			(SELECT COUNT(*) FROM staged_memories WHERE user_id = ?) AS staged`,
+	).bind(userId, idempotencyKey, userId, idempotencyKey, userId, userId, userId).first();
 }
 
 async function jobFor(userId) {
@@ -142,6 +199,9 @@ describe("staging (sync phase)", () => {
 		const userId = `dup-${crypto.randomUUID()}`;
 		const first = await stage(userId);
 		await drainUntilSettled(userId);
+		const receiptsBefore = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM receipts WHERE user_id = ?",
+		).bind(userId).first();
 		const again = await stage(userId);
 		expect(again.duplicate).toBe(true);
 		expect(again.page_id).toBe(first.page_id);
@@ -150,6 +210,210 @@ describe("staging (sync phase)", () => {
 			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND type = 'mcp_enrich'",
 		).bind(userId).first();
 		expect(jobs.n).toBe(1);
+		const receiptsAfter = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM receipts WHERE user_id = ?",
+		).bind(userId).first();
+		expect(receiptsAfter.n).toBe(receiptsBefore.n);
+	});
+
+	it("serializes concurrent exact MCP retries before page and receipt writes", async () => {
+		const userId = `mcp-concurrent-${crypto.randomUUID()}`;
+		const idempotencyKey = `mcp-concurrent-key-${crypto.randomUUID()}`;
+		const [left, right] = await Promise.all([
+			stage(userId, {}, conv(), { idempotencyKey }),
+			stage(userId, {}, conv(), { idempotencyKey }),
+		]);
+		expect([left.fired, right.fired].filter(Boolean)).toHaveLength(1);
+		expect([left.duplicate, right.duplicate].filter(Boolean)).toHaveLength(1);
+		const counts = await env.DB.prepare(
+			`SELECT
+				(SELECT COUNT(*) FROM source_packets WHERE user_id = ? AND idempotency_key = ?) AS sources,
+				(SELECT COUNT(*) FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?) AS jobs,
+				(SELECT COUNT(*) FROM memory_pages WHERE user_id = ?) AS pages,
+				(SELECT COUNT(*) FROM receipts WHERE user_id = ?) AS receipts`,
+		).bind(userId, idempotencyKey, userId, idempotencyKey, userId, userId).first();
+		expect(counts).toMatchObject({ sources: 1, jobs: 1, pages: 1, receipts: 1 });
+	});
+});
+
+describe("crash-safe MCP handoff", () => {
+	it("repairs an interruption after the D1 job claim and converges to one durable handoff", async () => {
+		const userId = `mcp-claim-crash-${crypto.randomUUID()}`;
+		const idempotencyKey = `mcp-claim-crash-key-${crypto.randomUUID()}`;
+		await expect(stage(userId, { _testMcpFault: "after_job_claim" }, conv(), { idempotencyKey }))
+			.rejects.toThrow("injected MCP interruption (after_job_claim)");
+		expect(await mcpArtifactCounts(userId, idempotencyKey)).toMatchObject({
+			sources: 1,
+			jobs: 1,
+			pages: 0,
+			receipts: 0,
+			staged: 0,
+		});
+		expect(await mcpDurableState(userId)).toMatchObject({ queueCount: 0, markerCount: 0 });
+
+		const retry = await stage(userId, {}, conv(), { idempotencyKey });
+		expect(retry).toMatchObject({ duplicate: true, processing: true, job_status: "staged" });
+		expect(await mcpArtifactCounts(userId, idempotencyKey)).toMatchObject({
+			sources: 1,
+			jobs: 1,
+			pages: 1,
+			receipts: 1,
+			staged: 2,
+		});
+		const accepted = await mcpDurableState(userId);
+		expect(accepted).toMatchObject({ queueCount: 1, markerCount: 1 });
+		expect(accepted.queueJobIds).toEqual([retry.job_id]);
+		expect(accepted.markers[0]).toMatchObject({
+			jobId: retry.job_id,
+			state: "queued",
+			contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
+
+		await drainUntilSettled(userId, 30, { reset: false });
+		expect((await jobFor(userId)).status).toBe("enriched");
+		const terminal = await mcpDurableState(userId);
+		expect(terminal).toMatchObject({ queueCount: 0, markerCount: 0 });
+		await env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId)).resetAll();
+	});
+
+	it("repairs a lost response after the atomic local enqueue without duplicating anything", async () => {
+		const userId = `mcp-enqueue-crash-${crypto.randomUUID()}`;
+		const idempotencyKey = `mcp-enqueue-crash-key-${crypto.randomUUID()}`;
+		await expect(stage(userId, { _testMcpFault: "after_local_enqueue" }, conv(), { idempotencyKey }))
+			.rejects.toThrow("injected MCP interruption (after_local_enqueue)");
+		expect(await mcpArtifactCounts(userId, idempotencyKey)).toMatchObject({
+			sources: 1,
+			jobs: 1,
+			pages: 1,
+			receipts: 1,
+			staged: 2,
+		});
+		const beforeRetry = await mcpDurableState(userId);
+		expect(beforeRetry).toMatchObject({ queueCount: 1, markerCount: 1 });
+
+		const retry = await stage(userId, {}, conv(), { idempotencyKey });
+		expect(retry).toMatchObject({ duplicate: true, processing: true, job_status: "staged" });
+		expect(await mcpArtifactCounts(userId, idempotencyKey)).toMatchObject({
+			sources: 1,
+			jobs: 1,
+			pages: 1,
+			receipts: 1,
+			staged: 2,
+		});
+		const afterRetry = await mcpDurableState(userId);
+		expect(afterRetry).toMatchObject({ queueCount: 1, markerCount: 1 });
+		expect(afterRetry.queueJobIds).toEqual([retry.job_id]);
+		expect(afterRetry.markers[0].queueKey).toBe(beforeRetry.markers[0].queueKey);
+
+		await drainUntilSettled(userId, 30, { reset: false });
+		expect((await jobFor(userId)).status).toBe("enriched");
+		const terminal = await mcpDurableState(userId);
+		expect(terminal).toMatchObject({ queueCount: 0, markerCount: 0 });
+		await env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId)).resetAll();
+	});
+});
+
+describe("account-wide idempotency ownership", () => {
+	it("rejects ingest-to-MCP key reuse without mutating the ingest packet, job, or receipt", async () => {
+		const userId = `ingest-to-mcp-${crypto.randomUUID()}`;
+		const idempotencyKey = `cross-lane-${crypto.randomUUID()}`;
+		const conversationId = `same-payload-${crypto.randomUUID()}`;
+		const messages = conv();
+		const ingest = await ingestHttp(userId, idempotencyKey, messages, {
+			conversationId,
+			_test: {
+				llmResponse: CANNED_EXTRACTION,
+				edgeResponse: CANNED_EDGES,
+				reflexionResponse: CANNED_REFLEXION,
+			},
+		});
+		expect(ingest.status).toBe(200);
+		const before = await idempotencySnapshot(userId, idempotencyKey);
+
+		const conflict = await stage(userId, {}, messages, { idempotencyKey, conversationId });
+		expect(conflict).toMatchObject({
+			ok: false,
+			idempotencyConflict: true,
+			error: "idempotency_conflict",
+			http_status: 409,
+			source_packet_id: before.source.id,
+		});
+		expect(await idempotencySnapshot(userId, idempotencyKey)).toEqual(before);
+	});
+
+	it("rejects MCP-to-ingest key reuse without mutating the MCP packet, job, or receipt", async () => {
+		const userId = `mcp-to-ingest-${crypto.randomUUID()}`;
+		const idempotencyKey = `cross-lane-${crypto.randomUUID()}`;
+		const conversationId = `same-payload-${crypto.randomUUID()}`;
+		const messages = conv();
+		const mcp = await stage(userId, {}, messages, { idempotencyKey, conversationId });
+		expect(mcp).toMatchObject({ fired: true, processing: true });
+		const before = await idempotencySnapshot(userId, idempotencyKey);
+
+		const conflict = await ingestHttp(userId, idempotencyKey, messages, { conversationId });
+		expect(conflict.status).toBe(409);
+		expect(conflict.body).toMatchObject({
+			error: "idempotency_conflict",
+			code: "idempotency_conflict",
+			source_packet_id: before.source.id,
+		});
+		expect(await idempotencySnapshot(userId, idempotencyKey)).toEqual(before);
+	});
+
+	it("treats different MCP content under the same key as a no-write conflict", async () => {
+		const userId = `mcp-content-conflict-${crypto.randomUUID()}`;
+		const idempotencyKey = `mcp-content-key-${crypto.randomUUID()}`;
+		await stage(userId, {}, conv(), { idempotencyKey });
+		const before = await idempotencySnapshot(userId, idempotencyKey);
+		const conflict = await stage(userId, {}, [
+			{ id: "changed", role: "user", content: "I moved to a different city." },
+		], { idempotencyKey });
+		expect(conflict).toMatchObject({
+			ok: false,
+			idempotencyConflict: true,
+			error: "idempotency_conflict",
+			http_status: 409,
+		});
+		expect(await idempotencySnapshot(userId, idempotencyKey)).toEqual(before);
+	});
+});
+
+describe("atomic active-job capacity", () => {
+	it("admits only one of two concurrent claims for the final slot and still returns existing keys", async () => {
+		const userId = `job-cap-${crypto.randomUUID()}`;
+		const now = Date.now();
+		await env.DB.prepare(
+			`WITH RECURSIVE seq(n) AS (
+				SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?
+			)
+			INSERT INTO memory_jobs
+				(id, user_id, type, status, idempotency_key, attempts, payload_json,
+				 run_after, created_at, updated_at)
+			SELECT 'job_cap_' || ? || '_' || n, ?, 'extract', 'queued',
+				'cap_key_' || ? || '_' || n, 0, '{}', ?, ?, ? FROM seq`,
+		).bind(MEMORY_JOB_ACTIVE_LIMIT - 1, userId, userId, userId, now, now, now).run();
+
+		const [left, right] = await Promise.all([
+			claimMemoryJob(env, userId, { idempotencyKey: `final-left-${userId}` }),
+			claimMemoryJob(env, userId, { idempotencyKey: `final-right-${userId}` }),
+		]);
+		expect([left, right].filter((result) => result.claimed)).toHaveLength(1);
+		const rejected = [left, right].find((result) => result.capacityExceeded);
+		expect(rejected).toMatchObject({
+			claimed: false,
+			capacityExceeded: true,
+			activeLimit: MEMORY_JOB_ACTIVE_LIMIT,
+		});
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')",
+		).bind(userId).first();
+		expect(count.n).toBe(MEMORY_JOB_ACTIVE_LIMIT);
+
+		const winner = [left, right].find((result) => result.claimed);
+		const winnerKey = winner === left ? `final-left-${userId}` : `final-right-${userId}`;
+		const replay = await claimMemoryJob(env, userId, { idempotencyKey: winnerKey });
+		expect(replay).toMatchObject({ claimed: false, id: winner.id });
+		expect(replay.capacityExceeded).toBeUndefined();
 	});
 });
 

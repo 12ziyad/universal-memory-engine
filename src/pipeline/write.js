@@ -12,10 +12,11 @@ import { newId } from "../lib/ids.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { upsertNodeVector } from "../lib/vectorize.js";
 
-export async function writeApproved(env, config, userId, plan = {}) {
+export async function writeApproved(env, config, userId, plan = {}, options = {}) {
 	const stmts = [];
 	const commitEffects = [];
 	const fallbackEffects = [];
+	let extractionCommitIndex = null;
 	const newNodes = plan.newNodes ?? [];
 	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
 	const nodeTouches = plan.nodeTouches ?? [];
@@ -1396,10 +1397,24 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	if (plan.testFailAtomicWrite === true) {
 		stmts.push(env.DB.prepare("INSERT INTO __manual_atomic_failure__ (id) VALUES ('fail')"));
 	}
+	if (options.extractionRunId) {
+		extractionCommitIndex = stmts.length;
+		stmts.push(env.DB.prepare(
+			`UPDATE extraction_runs
+			 SET status = 'wrote', updated_at = ?
+			 WHERE id = ? AND user_id = ? AND status = 'committing'`,
+		).bind(Date.now(), options.extractionRunId, userId));
+	}
 
 	const batchResults = stmts.length > 0
 		? await env.DB.batch(stmts) // atomic; throws on failure
 		: [];
+	if (
+		extractionCommitIndex != null
+		&& Number(batchResults[extractionCommitIndex]?.meta?.changes ?? 0) !== 1
+	) {
+		throw new Error("extraction run did not accept the atomic graph-commit marker");
+	}
 
 	// Reconcile from the atomic batch's own statement metadata. No database read
 	// occurs after commit, so a transient post-commit read cannot turn a successful

@@ -155,6 +155,15 @@ describe("Claude transcript message identity", () => {
 		expect(parsed.content).toBe("xxxxxxxx\u2026");
 	});
 
+	it("retains a long logical message and its conclusion for outbox segmentation by default", async () => {
+		const conclusion = "FINAL-CONCLUSION-MUST-SURVIVE";
+		const content = `${"🙂".repeat(4_100)}${conclusion}`;
+		const [parsed] = await parse([row(0, { message: { content } })]);
+
+		expect(parsed.content).toBe(content);
+		expect(parsed.content.endsWith(conclusion)).toBe(true);
+	});
+
 	it("replays identical IDs after a timeout or process restart", async () => {
 		const rows = Array.from({ length: 120 }, (_, index) => row(index, index % 3 === 0 ? { uuid: undefined, message: { content: `fallback ${index}` } } : {}));
 		const timedOutAttempt = await parse(rows);

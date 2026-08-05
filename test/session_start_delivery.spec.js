@@ -140,7 +140,8 @@ describe("SessionStart outbox delivery", () => {
 				baseUrl: service.url,
 			});
 			expect(queued).toMatchObject({ code: 0, output: { systemMessage: expect.stringContaining("queued locally") } });
-			expect(await outboxFiles(data.pluginData, "pending")).toHaveLength(1);
+			expect(await outboxFiles(data.pluginData, "staged")).toHaveLength(1);
+			expect(await outboxFiles(data.pluginData, "pending")).toHaveLength(0);
 
 			const started = await runHook(SESSION_START, {
 				payload: { cwd: data.payload.cwd, session_id: "next-session" },
@@ -153,6 +154,7 @@ describe("SessionStart outbox delivery", () => {
 			expect(started.output.hookSpecificOutput.additionalContext).toContain("Remember the accepted outbox delivery.");
 			expect(service.requests.map((request) => request.url)).toEqual(["/v1/ingest", "/v1/recall"]);
 			expect(service.requests[0].authorization).toBe(`Bearer ${API_KEY}`);
+			expect(await outboxFiles(data.pluginData, "staged")).toHaveLength(0);
 			expect(await outboxFiles(data.pluginData, "pending")).toHaveLength(0);
 			expect(await outboxFiles(data.pluginData, "done")).toHaveLength(1);
 

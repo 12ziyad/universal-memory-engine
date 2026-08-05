@@ -2562,7 +2562,7 @@ function installMethods() {
 					label: "Claude Code",
 					icon: ICON.terminal,
 					copyOnly: {
-						body: "Install the plugin, then select a trusted Node executable and configure your key in Claude's plugin prompts. The plugin loads project memory when a session starts and queues what it learned when it ends.",
+						body: "Install the plugin, then select a trusted Node executable and configure your key in Claude's plugin prompts. The plugin loads project memory when a session starts and queues captured, scrubbed content locally as ordered, idempotent batches when it ends.",
 						codeLabel: "terminal",
 						code: () => `${installSnippets().pluginMarketplace}\nclaude plugin install itsuki@itsuki-plugins`,
 						note:
@@ -2572,6 +2572,7 @@ function installMethods() {
 							`3. Run the two install commands above. In Claude's plugin configuration, select the absolute Node executable and paste the full <code>itsuki_live_…</code> key only into the masked key prompt; do not put it in a shell profile. Then run <code>/reload-plugins</code>.<br>` +
 							`4. In a Claude Code session, run <code>/itsuki:doctor</code>. It checks the trusted runtime, installed files, protected outbox, production REST door, and the MCP lifecycle.<br><br>` +
 							`That is everything — <b>one runtime path and one protected key</b>. There is no service URL to configure. ` +
+							`SessionStart attempts up to four due batches in order before recall. Local queueing, server acceptance, and terminal enrichment are distinct states; offline or retryable work remains protected. <a href="/docs/#/install/plugin">See delivery limits and semantics</a>.<br><br>` +
 							`If either setting is missing or the key is rejected, the plugin reports it instead of failing quietly.`,
 					},
 				},

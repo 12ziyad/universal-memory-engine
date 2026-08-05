@@ -48,7 +48,9 @@ async function messagesFromTranscript(path, sessionId) {
 	const tail = await readClaudeTranscriptTail(path, {
 		maxEvents: 80,
 		maxScannedBytes: 8 * 1024 * 1024,
-		maxScanMs: 200,
+		// Leave most of Claude's host budget for the single durable spool, while
+		// tolerating ordinary scheduler pauses before the first tail read.
+		maxScanMs: 400,
 		maxLineBytes: 256 * 1024,
 	});
 	return {
@@ -59,6 +61,19 @@ async function messagesFromTranscript(path, sessionId) {
 
 function notQueued(reason) {
 	return { systemMessage: `Itsuki: this session was NOT queued locally — ${reason}` };
+}
+
+function captureOmissionNote(metadata) {
+	const details = [];
+	if (metadata?.truncationReason === "max_events") details.push("at least one older eligible transcript record beyond the newest 80");
+	else if (metadata?.truncationReason === "max_bytes") details.push("older records beyond the bounded 8 MiB shutdown scan");
+	else if (metadata?.truncationReason === "max_time") details.push("older records not reached within the 400 ms shutdown scan budget");
+	if (Number(metadata?.oversizedLines ?? 0) > 0) details.push(`${metadata.oversizedLines} record${metadata.oversizedLines === 1 ? "" : "s"} larger than the 256 KiB line-safety limit`);
+	if (Number(metadata?.malformedLines ?? 0) > 0) details.push(`${metadata.malformedLines} malformed JSONL record${metadata.malformedLines === 1 ? "" : "s"}`);
+	if (metadata?.fileGrew) details.push("records appended after the snapshot boundary");
+	if (metadata?.fileShrank || metadata?.fileChangedDuringScan) details.push("records affected by a concurrent transcript rewrite");
+	if (!details.length) return "";
+	return ` The bounded shutdown snapshot omitted ${details.join(", ")}; the source transcript was not modified, and the omission reason is recorded with every batch.`;
 }
 
 async function main() {
@@ -88,12 +103,7 @@ async function main() {
 		}
 		return {};
 	}
-	const captureLimited = metadata?.truncationReason === "max_bytes"
-		|| metadata?.truncationReason === "max_time"
-		|| metadata?.oversizedLines > 0
-		|| metadata?.fileChangedDuringScan
-		|| metadata?.fileGrew
-		|| metadata?.fileShrank;
+	const omissionNote = captureOmissionNote(metadata);
 
 	const project = await resolveProjectIdentity(claudeProjectDirectory(payload.cwd));
 	try {
@@ -102,6 +112,10 @@ async function main() {
 			messages,
 			sessionId: payload.session_id,
 			memoryScope: projectMemoryScope(project),
+			captureMetadata: metadata,
+			// SessionEnd has a hard host budget. Persist one scrubbed aggregate now;
+			// SessionStart performs Unicode segmentation and wire batching later.
+			deferMaterialization: true,
 			credentialFingerprint: credentialFingerprint(API_KEY, BASE_URL),
 		});
 		if (queued.credentialMismatch) {
@@ -118,20 +132,21 @@ async function main() {
 					"Configure the plugin key/service and run /itsuki:doctor to bind and deliver it.",
 			};
 		}
-		if (queued.duplicate && (queued.state === "done" || queued.state === "accepted")) {
+		if (queued.duplicate && Number(queued.acceptedBatches ?? 0) === Number(queued.batchCount ?? 1)) {
 			return {
 				systemMessage: "Itsuki: this exact session was already accepted by the memory service; no duplicate was queued.",
 			};
 		}
-		if (queued.duplicate && queued.state === "failed") {
+		if (queued.duplicate && Number(queued.failedBatches ?? 0) > 0) {
 			return {
 				systemMessage: "Itsuki: this exact session remains protected locally and requires delivery intervention; run /itsuki:doctor.",
 			};
 		}
+		const batchText = Number(queued.batchCount) > 1 ? ` in ${queued.batchCount} ordered batches` : "";
 		return {
 			systemMessage: queued.duplicate
-				? "Itsuki: this session is already queued locally; the exact retry will not create another copy."
-				: `Itsuki: queued locally; delivery will be retried at the next session start.${captureLimited ? " The bounded shutdown snapshot may have omitted oversized, older, or concurrently appended transcript records; the source transcript was not modified." : ""}`,
+				? `Itsuki: this session is already queued locally${batchText}; the exact retry will not create another copy.`
+				: `Itsuki: queued locally${batchText}; delivery will be retried at the next session start.${omissionNote}`,
 		};
 	} catch (error) {
 		if (error instanceof OutboxCapacityError) {

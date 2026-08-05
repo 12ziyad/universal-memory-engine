@@ -5,7 +5,11 @@ import { createHash } from "node:crypto";
 // that use this versioned, stable identity scheme.
 export const CLAUDE_MESSAGE_ID_VERSION = "claude_msg_v1";
 export const DEFAULT_MAX_MESSAGES = 80;
-export const DEFAULT_MAX_CHARS_PER_MESSAGE = 4000;
+// SessionEnd must not discard the conclusion of a long logical message. The
+// protected outbox scrubs the full text first, then losslessly segments it to
+// the authoritative ingest contract. A finite override remains available for
+// focused callers/tests that explicitly want a preview.
+export const DEFAULT_MAX_CHARS_PER_MESSAGE = Number.POSITIVE_INFINITY;
 
 function sha256(value) {
 	return createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
@@ -94,7 +98,9 @@ export async function messagesFromClaudeTranscriptLines(lines, options = {}) {
 		messages.push({
 			id,
 			role,
-			content: text.length > maxCharsPerMessage ? `${text.slice(0, maxCharsPerMessage)}\u2026` : text,
+			content: Number.isFinite(maxCharsPerMessage) && text.length > maxCharsPerMessage
+				? `${text.slice(0, maxCharsPerMessage)}\u2026`
+				: text,
 			...(timestamp === null ? {} : { ts: timestamp }),
 		});
 		ordinal += 1;

@@ -26,27 +26,58 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+	INGEST_DELIVERY_SCHEMA,
+	INGEST_LIMITS,
+	normalizeDeliveryMetadata,
+	unicodeLength,
+	utf8Length,
+	validateIngestBody,
+} from "../src/lib/ingest_contract.mjs";
 import { scrubMessages, scrubText } from "../src/pipeline/scrub.js";
 
 export const OUTBOX_SCHEMA = "itsuki.outbox/v1";
 export const TOMBSTONE_SCHEMA = "itsuki.outbox-tombstone/v1";
 export const STATE_SCHEMA = "itsuki.outbox-state/v1";
+export const STAGED_GROUP_SCHEMA = "itsuki.outbox-staged-group/v1";
+export const GROUP_MANIFEST_SCHEMA = "itsuki.outbox-group-manifest/v1";
+const DELIVERY_SEQUENCE_SCHEMA = "itsuki.outbox-delivery-sequence/v1";
+// Persisted plans pin the segmentation/batching implementation. A future
+// implementation must keep a v1 reader/materializer until every v1 stage is
+// terminal; changing this number in place would strand crash-left prefixes.
+const MATERIALIZER_VERSION = 1;
 export const OUTBOX_LIMITS = Object.freeze({
 	maxEnvelopeBytes: 2 * 1024 * 1024,
+	// A SessionEnd snapshot can legitimately approach the bounded 8 MiB tail
+	// scan. It is spooled once, then expanded into wire-sized batches by the
+	// longer-lived SessionStart hook. The extra headroom covers JSON metadata and
+	// deterministic redaction placeholders without weakening the 64 MiB cap.
+	maxStagedGroupBytes: 16 * 1024 * 1024,
 	maxRawCount: 128,
 	maxRawBytes: 64 * 1024 * 1024,
+	// All enqueue paths retain one envelope slot/byte allowance. That reserve lets
+	// SessionStart materialize a staged prefix and lets explicit key rebinding
+	// copy-before-delete without ever exceeding the physical raw-data ceilings.
+	materializationReserveEntries: 1,
+	materializationReserveBytes: 16 * 1024 * 1024,
 	doneRetentionMs: 7 * 24 * 60 * 60 * 1000,
 	tmpRetentionMs: 24 * 60 * 60 * 1000,
 	staleLockMs: 10 * 60 * 1000,
 	maxDrainItems: 4,
+	// SessionStart may have only 15 seconds in the host. Bound each pass by both
+	// aggregate bytes and group count so several large snapshots cannot consume
+	// the whole hook before any already-materialized batch reaches the network.
+	maxMaterializationInputBytes: 8 * 1024 * 1024,
+	maxMaterializationGroups: 4,
 	drainBudgetMs: 3_500,
 	requestTimeoutMs: 2_500,
 });
 
 const DIRECTORY_NAMES = [
-	"tmp", "pending", "inflight", "accepted", "done", "failed", "state", "locks", "control",
+	"tmp", "staged", "groups", "pending", "inflight", "accepted", "done", "failed", "state", "locks", "control",
 ];
 const RAW_DIRECTORIES = ["pending", "inflight", "failed"];
+const CAPACITY_DIRECTORIES = ["staged", ...RAW_DIRECTORIES];
 const PROJECT_SCOPE_KEYS = new Set([
 	"projectId", "projectName", "workspaceId", "appId", "agentId", "sessionId", "threadId", "topic", "sourceScope",
 	"project_id", "project_name", "workspace_id", "app_id", "agent_id", "session_id", "thread_id", "source_scope",
@@ -450,9 +481,9 @@ async function syncFile(path) {
 	}
 }
 
-async function atomicJson(paths, platform, destination, value, { exclusive = false } = {}) {
+async function atomicJson(paths, platform, destination, value, { exclusive = false, serialized = null } = {}) {
 	if (!isWithin(paths.root, destination)) throw new OutboxSecurityError();
-	const bytes = Buffer.from(canonicalJson(value), "utf8");
+	const bytes = Buffer.isBuffer(serialized) ? serialized : Buffer.from(canonicalJson(value), "utf8");
 	const temporary = join(paths.tmp, `${randomUUID()}.tmp`);
 	let handle;
 	try {
@@ -509,19 +540,31 @@ export function sanitizeMemoryScope(scope) {
 	return out;
 }
 
-function cleanMessage(message) {
+function cleanMessage(message, index, sessionHash) {
+	const rawId = String(message?.id ?? "");
 	return {
-		id: String(message?.id ?? "").slice(0, 240),
+		id: !rawId.trim()
+			? `msg_${sha256(`itsuki-message-id:v1\0missing\0${sessionHash}\0${index}`).slice(0, 48)}`
+			: (rawId.length <= 200 ? rawId : `msg_${sha256(`itsuki-message-id:v1\0${rawId}`).slice(0, 48)}`),
 		role: message?.role === "assistant" ? "assistant" : "user",
 		content: String(message?.content ?? ""),
 		...(Number.isFinite(Number(message?.ts)) ? { ts: Number(message.ts) } : {}),
 	};
 }
 
-function envelopeSeed({ sessionId, memoryScope, messages }) {
+function sessionIdentity(sessionId) {
+	const raw = String(sessionId ?? "session");
 	return {
-		session: sha256(`claude-session:v1\0${String(sessionId ?? "session")}`),
+		sessionHash: sha256(`claude-session:v1\0${raw}`),
+		conversationId: `claude_session_v1_${sha256(raw).slice(0, 32)}`,
+	};
+}
+
+function envelopeSeed({ sessionHash, memoryScope, messages, capture }) {
+	return {
+		session: sessionHash,
 		project: memoryScope?.projectId ?? memoryScope?.project_id ?? null,
+		capture,
 		messages: messages.map((message) => ({
 			id: message.id,
 			role: message.role,
@@ -531,9 +574,205 @@ function envelopeSeed({ sessionId, memoryScope, messages }) {
 	};
 }
 
+function captureSummary(metadata) {
+	const rawReason = String(metadata?.truncationReason ?? "").trim();
+	const reason = /^[a-z_]{1,40}$/.test(rawReason) ? rawReason : null;
+	const captureTruncated = Boolean(
+		metadata?.scanTruncated
+		|| metadata?.oversizedLines > 0
+		|| metadata?.malformedLines > 0
+		|| metadata?.fileChangedDuringScan
+		|| metadata?.fileGrew
+		|| metadata?.fileShrank,
+	);
+	return {
+		captureTruncated,
+		truncationReason: captureTruncated ? (reason ?? "bounded_scan") : null,
+	};
+}
+
+function prepareSession({ messages, sessionId, memoryScope, captureMetadata = null }) {
+	const identity = sessionIdentity(sessionId);
+	const seenIds = new Set();
+	const cleaned = (messages ?? []).map((message, index) => {
+		const value = cleanMessage(message, index, identity.sessionHash);
+		if (!seenIds.has(value.id)) {
+			seenIds.add(value.id);
+			return value;
+		}
+		const stableDuplicateSeed = [
+			"itsuki-message-id:v1",
+			"duplicate",
+			identity.sessionHash,
+			value.id,
+			value.role,
+			value.ts ?? "",
+			sha256(value.content),
+		].join("\0");
+		let id = `msg_${sha256(stableDuplicateSeed).slice(0, 48)}`;
+		if (seenIds.has(id)) id = `msg_${sha256(`${stableDuplicateSeed}\0occurrence\0${index}`).slice(0, 48)}`;
+		seenIds.add(id);
+		return { ...value, id };
+	});
+	const scrubbed = scrubMessages(cleaned);
+	const safeMessages = scrubbed.messages.filter((message) => message.content.trim());
+	if (!safeMessages.length) throw new OutboxError("empty_envelope", "There are no messages to queue.");
+	const safeScope = sanitizeMemoryScope(memoryScope);
+	const capture = captureSummary(captureMetadata);
+	return {
+		...identity,
+		safeMessages,
+		safeScope,
+		capture,
+		redactions: scrubbed.redactions,
+	};
+}
+
+function graphemeUnits(text) {
+	if (typeof Intl?.Segmenter !== "function") return Array.from(text);
+	const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+	const units = [];
+	for (const item of segmenter.segment(text)) {
+		if (unicodeLength(item.segment) <= INGEST_LIMITS.maxMessageCharacters) units.push(item.segment);
+		else units.push(...Array.from(item.segment));
+	}
+	return units;
+}
+
+function naturalBoundary(units, start, hardEnd) {
+	const floor = start + Math.floor((hardEnd - start) * 0.7);
+	for (const rank of [4, 3, 2, 1]) {
+		for (let index = hardEnd; index > floor; index -= 1) {
+			const previous = units[index - 1] ?? "";
+			const before = units[index - 2] ?? "";
+			const next = units[index] ?? "";
+			const boundaryRank = previous === "\n" && before === "\n"
+				? 4
+				: previous === "\n"
+					? 3
+					: /[.!?]/u.test(previous) && /^\s/u.test(next)
+						? 2
+						: /\s/u.test(previous)
+							? 1
+							: 0;
+			if (boundaryRank !== rank) continue;
+			// Keep whitespace at the start of the following labeled segment. The
+			// server trims the complete message string; because the segment label
+			// precedes this whitespace, retaining it on the right preserves the
+			// original scrubbed content byte-for-byte after labels are removed.
+			if (rank === 4 && index - 2 > start) return index - 2;
+			if ((rank === 3 || rank === 1) && index - 1 > start) return index - 1;
+			return index;
+		}
+	}
+	return hardEnd;
+}
+
+function splitContent(text, maxCodePoints) {
+	const units = graphemeUnits(text);
+	const lengths = units.map((unit) => unicodeLength(unit));
+	const chunks = [];
+	let start = 0;
+	while (start < units.length) {
+		let hardEnd = start;
+		let count = 0;
+		while (hardEnd < units.length && count + lengths[hardEnd] <= maxCodePoints) {
+			count += lengths[hardEnd];
+			hardEnd += 1;
+		}
+		if (hardEnd === start) hardEnd += 1;
+		const end = hardEnd < units.length ? naturalBoundary(units, start, hardEnd) : hardEnd;
+		chunks.push(units.slice(start, end).join(""));
+		start = end;
+	}
+	return chunks;
+}
+
+function splitMessagesForIngest(messages) {
+	const output = [];
+	let splitSourceMessages = 0;
+	const contentCapacity = INGEST_LIMITS.maxMessageCharacters - 96;
+	if (contentCapacity < 1) throw new OutboxError("invalid_ingest_contract", "The ingest message limit cannot hold segment labels.");
+	for (const message of messages) {
+		if (unicodeLength(message.content) <= INGEST_LIMITS.maxMessageCharacters) {
+			output.push(message);
+			continue;
+		}
+		splitSourceMessages += 1;
+		const chunks = splitContent(message.content, contentCapacity);
+		const total = chunks.length;
+		for (let offset = 0; offset < total; offset += 1) {
+			const index = offset + 1;
+			const label = `[Itsuki segment ${index}/${total}; one original message, preserved in order]\n`;
+			const content = `${label}${chunks[offset]}`;
+			if (unicodeLength(content) > INGEST_LIMITS.maxMessageCharacters) {
+				throw new OutboxError("invalid_ingest_contract", "A labeled message segment exceeds the ingest character limit.");
+			}
+			output.push({
+				...message,
+				id: `segment_${sha256(`${message.id}\0${index}\0${total}\0${sha256(chunks[offset])}`).slice(0, 48)}`,
+				content,
+			});
+		}
+	}
+	return { messages: output, splitSourceMessages };
+}
+
+function deliveryFor({ groupId, batchIndex, batchCount, sourceMessageCount, segmentCount, splitSourceMessages, capture }) {
+	return {
+		schema: INGEST_DELIVERY_SCHEMA,
+		groupId,
+		batchIndex,
+		batchCount,
+		sourceMessageCount,
+		segmentCount,
+		splitSourceMessages,
+		captureTruncated: capture.captureTruncated,
+		truncationReason: capture.truncationReason,
+	};
+}
+
+function requestForBatch({ messages, conversationId, memoryScope, common, batchIndex, batchCount }) {
+	const delivery = deliveryFor({ ...common, batchIndex, batchCount });
+	const digest = sha256(canonicalJson({
+		schema: "itsuki.outbox-request/v2",
+		delivery,
+		messages: messages.map((message) => ({
+			id: message.id,
+			role: message.role,
+			ts: message.ts ?? null,
+			content_sha256: sha256(message.content),
+		})),
+	}));
+	return {
+		path: "/v1/ingest",
+		body: {
+			source: "plugin",
+			flush: true,
+			conversationId,
+			memoryScope,
+			idempotencyKey: `claude-outbox:v2:${digest}`,
+			delivery,
+			messages,
+		},
+	};
+}
+
+function requestFitsIngest(request) {
+	const bodyBytes = utf8Length(JSON.stringify(request.body));
+	return bodyBytes <= INGEST_LIMITS.maxRequestBytes
+		&& request.body.messages.length <= INGEST_LIMITS.maxMessages
+		&& request.body.messages.every((message) => unicodeLength(message.content) <= INGEST_LIMITS.maxMessageCharacters)
+		&& request.body.messages.reduce((total, message) => total + unicodeLength(message.content), 0) <= INGEST_LIMITS.maxTotalCharacters;
+}
+
 function contentDigestFromRequest(request) {
-	const match = /^claude-outbox:v1:([a-f0-9]{64})$/.exec(request?.body?.idempotencyKey ?? "");
+	const match = /^claude-outbox:v(?:1|2):([a-f0-9]{64})$/.exec(request?.body?.idempotencyKey ?? "");
 	return match?.[1] ?? null;
+}
+
+function requestVersion(request) {
+	return /^claude-outbox:v2:/.test(request?.body?.idempotencyKey ?? "") ? 2 : 1;
 }
 
 function queueIdFor(contentDigest, fingerprint) {
@@ -543,52 +782,275 @@ function queueIdFor(contentDigest, fingerprint) {
 	return `q_${sha256(`${contentDigest}\0${fingerprint ?? "unbound"}`).slice(0, 40)}`;
 }
 
-function buildEnvelope({ messages, sessionId, memoryScope, fingerprint, now = Date.now }) {
+function buildEnvelopes({
+	messages,
+	sessionId,
+	memoryScope,
+	fingerprint,
+	captureMetadata = null,
+	now = Date.now,
+	prepared = null,
+	createdAt: suppliedCreatedAt = null,
+	deliveryOrder = null,
+}) {
 	if (!validCredentialFingerprint(fingerprint)) {
 		throw new OutboxError(
 			"invalid_credential_fingerprint",
 			"The outbox credential binding must be a one-way fingerprint.",
 		);
 	}
-	const scrubbed = scrubMessages((messages ?? []).map(cleanMessage));
-	const safeMessages = scrubbed.messages.filter((message) => message.content.trim());
-	if (!safeMessages.length) throw new OutboxError("empty_envelope", "There are no messages to queue.");
-	const safeScope = sanitizeMemoryScope(memoryScope);
-	const digest = sha256(canonicalJson(envelopeSeed({ sessionId, memoryScope: safeScope, messages: safeMessages })));
-	const queueId = queueIdFor(digest, fingerprint);
-	const idempotencyKey = `claude-outbox:v1:${digest}`;
-	const conversationId = `claude_session_v1_${sha256(String(sessionId ?? "session")).slice(0, 32)}`;
-	const request = {
-		path: "/v1/ingest",
-		body: {
-			source: "plugin",
-			flush: true,
+	const material = prepared ?? prepareSession({ messages, sessionId, memoryScope, captureMetadata });
+	const {
+		safeMessages,
+		safeScope,
+		capture,
+		redactions,
+		sessionHash,
+		conversationId,
+	} = material;
+	const segmented = splitMessagesForIngest(safeMessages);
+	const groupDigest = sha256(canonicalJson(envelopeSeed({
+		sessionHash,
+		memoryScope: safeScope,
+		messages: segmented.messages,
+		capture,
+	})));
+	const groupId = `claude_delivery_v1_${groupDigest.slice(0, 40)}`;
+	const common = {
+		groupId,
+		sourceMessageCount: safeMessages.length,
+		segmentCount: segmented.messages.length,
+		splitSourceMessages: segmented.splitSourceMessages,
+		capture,
+	};
+	const batches = [];
+	let batch = [];
+	for (const message of segmented.messages) {
+		const candidate = [...batch, message];
+		const provisional = requestForBatch({
+			messages: candidate,
 			conversationId,
 			memoryScope: safeScope,
-			idempotencyKey,
-			messages: safeMessages,
+			common,
+			batchIndex: Math.min(batches.length, OUTBOX_LIMITS.maxRawCount - 1),
+			batchCount: OUTBOX_LIMITS.maxRawCount,
+		});
+		if (batch.length > 0 && !requestFitsIngest(provisional)) {
+			batches.push(batch);
+			batch = [message];
+			continue;
+		}
+		if (!requestFitsIngest(provisional)) {
+			throw new OutboxCapacityError("message_unbatchable", "One protected message segment cannot fit the ingest request limit.");
+		}
+		batch = candidate;
+	}
+	if (batch.length) batches.push(batch);
+	if (batches.length > OUTBOX_LIMITS.maxRawCount) {
+		throw new OutboxCapacityError("session_batch_count_full", "This session needs more ordered batches than the protected outbox can hold.");
+	}
+	const createdAt = suppliedCreatedAt === null ? Number(now()) : Number(suppliedCreatedAt);
+	const built = batches.map((batchMessages, batchIndex) => {
+		const request = requestForBatch({
+			messages: batchMessages,
+			conversationId,
+			memoryScope: safeScope,
+			common,
+			batchIndex,
+			batchCount: batches.length,
+		});
+		const violation = validateIngestBody(request.body, { requestBytes: utf8Length(JSON.stringify(request.body)) });
+		if (violation) throw new OutboxError("invalid_ingest_batch", "An ordered outbox batch violates the ingest contract.");
+		const digest = contentDigestFromRequest(request);
+		const queueId = queueIdFor(digest, fingerprint);
+		return {
+			envelope: {
+				schema: OUTBOX_SCHEMA,
+				queue_id: queueId,
+				created_at: createdAt,
+				...(Number.isSafeInteger(deliveryOrder) && deliveryOrder >= 0 ? { delivery_order: deliveryOrder } : {}),
+				credential_fingerprint: fingerprint ?? null,
+				request,
+				request_sha256: sha256(canonicalJson(request)),
+			},
+			bytes: Buffer.byteLength(canonicalJson({ request }), "utf8"),
+		};
+	});
+	return {
+		built,
+		redactions,
+		stats: {
+			batchCount: built.length,
+			sourceMessageCount: safeMessages.length,
+			segmentCount: segmented.messages.length,
+			splitSourceMessages: segmented.splitSourceMessages,
+			captureTruncated: capture.captureTruncated,
 		},
+	};
+}
+
+function validCaptureSummary(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	if (typeof value.captureTruncated !== "boolean") return false;
+	if (value.captureTruncated) return /^[a-z_]{1,40}$/.test(value.truncationReason ?? "");
+	return value.truncationReason === null;
+}
+
+function stagedGroupSeed({ sessionHash, conversationId, memoryScope, capture, messages }) {
+	return {
+		schema: STAGED_GROUP_SCHEMA,
+		sessionHash,
+		conversationId,
+		memoryScope,
+		capture,
+		messages: messages.map((message) => ({
+			id: message.id,
+			role: message.role,
+			ts: message.ts ?? null,
+			content_sha256: sha256(message.content),
+		})),
+	};
+}
+
+function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder = null }) {
+	if (!validCredentialFingerprint(fingerprint)) {
+		throw new OutboxError(
+			"invalid_credential_fingerprint",
+			"The outbox credential binding must be a one-way fingerprint.",
+		);
+	}
+	const digest = sha256(canonicalJson(stagedGroupSeed({
+		sessionHash: prepared.sessionHash,
+		conversationId: prepared.conversationId,
+		memoryScope: prepared.safeScope,
+		capture: prepared.capture,
+		messages: prepared.safeMessages,
+	})));
+	const queueId = queueIdFor(digest, fingerprint);
+	const value = {
+		schema: STAGED_GROUP_SCHEMA,
+		queue_id: queueId,
+		created_at: Number(now()),
+		...(Number.isSafeInteger(deliveryOrder) && deliveryOrder >= 0 ? { delivery_order: deliveryOrder } : {}),
+		credential_fingerprint: fingerprint ?? null,
+		content_digest: digest,
+		session_hash: prepared.sessionHash,
+		conversation_id: prepared.conversationId,
+		memory_scope: prepared.safeScope,
+		capture: prepared.capture,
+		messages: prepared.safeMessages,
 	};
 	return {
-		envelope: {
-			schema: OUTBOX_SCHEMA,
-			queue_id: queueId,
-			created_at: Number(now()),
-			credential_fingerprint: fingerprint ?? null,
-			request,
-			request_sha256: sha256(canonicalJson(request)),
+		value,
+		queueId,
+		redactions: prepared.redactions,
+		stats: {
+			staged: true,
+			batchCount: null,
+			sourceMessageCount: prepared.safeMessages.length,
+			segmentCount: null,
+			splitSourceMessages: null,
+			captureTruncated: prepared.capture.captureTruncated,
 		},
-		redactions: scrubbed.redactions,
 	};
+}
+
+function validateStagedGroup(value, queueId = value?.queue_id) {
+	if (!value || value.schema !== STAGED_GROUP_SCHEMA || !validQueueId(queueId) || value.queue_id !== queueId) return false;
+	if (!validFiniteTimestamp(value.created_at) || !validCredentialFingerprint(value.credential_fingerprint)) return false;
+	if (value.delivery_order != null && (!Number.isSafeInteger(value.delivery_order) || value.delivery_order < 0)) return false;
+	if (!/^[a-f0-9]{64}$/.test(value.content_digest ?? "")) return false;
+	if (!/^[a-f0-9]{64}$/.test(value.session_hash ?? "")) return false;
+	if (!/^claude_session_v1_[a-f0-9]{32}$/.test(value.conversation_id ?? "")) return false;
+	if (!validCaptureSummary(value.capture)) return false;
+	if (!value.memory_scope || typeof value.memory_scope !== "object" || Array.isArray(value.memory_scope)) return false;
+	if (canonicalJson(sanitizeMemoryScope(value.memory_scope)) !== canonicalJson(value.memory_scope)) return false;
+	if (!Array.isArray(value.messages) || value.messages.length < 1) return false;
+	const messageIds = new Set();
+	for (const message of value.messages) {
+		if (!message || typeof message !== "object" || Array.isArray(message)) return false;
+		if (
+			typeof message.id !== "string"
+			|| !message.id.trim()
+			|| message.id.length > 200
+			|| messageIds.has(message.id)
+		) return false;
+		messageIds.add(message.id);
+		if (!["user", "assistant"].includes(message.role) || typeof message.content !== "string" || !message.content.trim()) return false;
+		if (message.ts != null && (typeof message.ts !== "number" || !Number.isFinite(message.ts))) return false;
+	}
+	const digest = sha256(canonicalJson(stagedGroupSeed({
+		sessionHash: value.session_hash,
+		conversationId: value.conversation_id,
+		memoryScope: value.memory_scope,
+		capture: value.capture,
+		messages: value.messages,
+	})));
+	return digest === value.content_digest
+		&& queueId === queueIdFor(digest, value.credential_fingerprint);
+}
+
+function manifestFromMaterialized(staged, group, now = Date.now) {
+	const first = group.built[0]?.envelope;
+	return {
+		schema: GROUP_MANIFEST_SCHEMA,
+		materializer_version: MATERIALIZER_VERSION,
+		queue_id: staged.queue_id,
+		created_at: staged.created_at,
+		materialized_at: Number(now()),
+		...(staged.delivery_order == null ? {} : { delivery_order: staged.delivery_order }),
+		credential_fingerprint: staged.credential_fingerprint,
+		content_digest: staged.content_digest,
+		conversation_id: staged.conversation_id,
+		group_id: first?.request?.body?.delivery?.groupId ?? null,
+		batch_count: group.built.length,
+		queue_ids: group.built.map((item) => item.envelope.queue_id),
+		stats: group.stats,
+	};
+}
+
+function validateGroupManifest(value, queueId = value?.queue_id) {
+	return Boolean(
+		value
+		&& value.schema === GROUP_MANIFEST_SCHEMA
+		&& value.materializer_version === MATERIALIZER_VERSION
+		&& validQueueId(queueId)
+		&& value.queue_id === queueId
+		&& validFiniteTimestamp(value.created_at)
+		&& validFiniteTimestamp(value.materialized_at)
+		&& (value.delivery_order == null || (Number.isSafeInteger(value.delivery_order) && value.delivery_order >= 0))
+		&& validCredentialFingerprint(value.credential_fingerprint)
+		&& /^[a-f0-9]{64}$/.test(value.content_digest ?? "")
+		&& queueId === queueIdFor(value.content_digest, value.credential_fingerprint)
+		&& /^claude_session_v1_[a-f0-9]{32}$/.test(value.conversation_id ?? "")
+		&& /^claude_delivery_v1_[a-f0-9]{40}$/.test(value.group_id ?? "")
+		&& Number.isSafeInteger(value.batch_count)
+		&& value.batch_count >= 1
+		&& value.batch_count <= OUTBOX_LIMITS.maxRawCount
+		&& Array.isArray(value.queue_ids)
+		&& value.queue_ids.length === value.batch_count
+		&& new Set(value.queue_ids).size === value.queue_ids.length
+		&& value.queue_ids.every(validQueueId)
+		&& value.stats
+		&& Number(value.stats.batchCount) === value.batch_count,
+	);
 }
 
 function validateEnvelope(value) {
 	if (!value || value.schema !== OUTBOX_SCHEMA || !validQueueId(value.queue_id)) return false;
 	if (value.request?.path !== "/v1/ingest" || !Array.isArray(value.request?.body?.messages)) return false;
 	if (!validFiniteTimestamp(value.created_at)) return false;
+	if (value.delivery_order != null && (!Number.isSafeInteger(value.delivery_order) || value.delivery_order < 0)) return false;
 	if (!validCredentialFingerprint(value.credential_fingerprint)) return false;
 	const contentDigest = contentDigestFromRequest(value.request);
 	if (!contentDigest || value.queue_id !== queueIdFor(contentDigest, value.credential_fingerprint)) return false;
+	if (requestVersion(value.request) === 2) {
+		if (!normalizeDeliveryMetadata(value.request.body.delivery)) return false;
+		const violation = validateIngestBody(value.request.body, {
+			requestBytes: utf8Length(JSON.stringify(value.request.body)),
+		});
+		if (violation) return false;
+	}
 	return value.request_sha256 === sha256(canonicalJson(value.request));
 }
 
@@ -598,6 +1060,7 @@ function validateTombstone(value, queueId = value?.queue_id) {
 	const contentDigest = typeof value?.content_digest === "string" && /^[a-f0-9]{64}$/.test(value.content_digest)
 		? value.content_digest
 		: null;
+	const delivery = value?.delivery == null ? null : normalizeDeliveryMetadata(value.delivery);
 	return Boolean(
 		value
 		&& value.schema === TOMBSTONE_SCHEMA
@@ -610,6 +1073,15 @@ function validateTombstone(value, queueId = value?.queue_id) {
 		&& CREDENTIAL_FINGERPRINT_RE.test(value.credential_fingerprint ?? "")
 		&& contentDigest
 		&& queueId === queueIdFor(contentDigest, value.credential_fingerprint)
+		&& (value.delivery == null || delivery)
+		&& (value.delivery == null || (
+			(value.conversation_id == null && value.group_created_at == null)
+			|| (
+				/^claude_session_v1_[a-f0-9]{32}$/.test(value.conversation_id ?? "")
+				&& validFiniteTimestamp(value.group_created_at)
+			)
+		))
+		&& (value.delivery_order == null || (Number.isSafeInteger(value.delivery_order) && value.delivery_order >= 0))
 		&& (sourcePacketId || receiptId),
 	);
 }
@@ -643,8 +1115,26 @@ function validateAuthBlock(value) {
 	);
 }
 
+function validateDeliverySequence(value) {
+	return Boolean(
+		value
+		&& value.schema === DELIVERY_SEQUENCE_SCHEMA
+		&& Number.isSafeInteger(value.next_order)
+		&& value.next_order >= 0
+		&& validFiniteTimestamp(value.updated_at),
+	);
+}
+
 function validExpectedTemporary(value) {
-	if (validateEnvelope(value) || validateState(value) || validateTombstone(value) || validateAuthBlock(value)) {
+	if (
+		validateEnvelope(value)
+		|| validateStagedGroup(value)
+		|| validateGroupManifest(value)
+		|| validateState(value)
+		|| validateTombstone(value)
+		|| validateAuthBlock(value)
+		|| validateDeliverySequence(value)
+	) {
 		return true;
 	}
 	if (value?.schema === SECURITY_MARKER_SCHEMA) {
@@ -694,7 +1184,7 @@ async function lifecyclePath(paths, queueId) {
 async function rawUsage(paths) {
 	let count = 0;
 	let bytes = 0;
-	for (const name of RAW_DIRECTORIES) {
+	for (const name of CAPACITY_DIRECTORIES) {
 		for (const entry of await safeEntries(paths[name], paths.root, {
 			maxEntries: OUTBOX_LIMITS.maxRawCount - count,
 			rejectOverflow: true,
@@ -713,6 +1203,34 @@ async function rawUsage(paths) {
 		bytes += entry.info.size;
 	}
 	return { count, bytes };
+}
+
+async function claimDeliveryOrder(paths, platform, now = Date.now) {
+	const sequencePath = join(paths.control, "delivery-sequence.json");
+	const info = await pathKind(sequencePath);
+	if (info && (!info.isFile() || info.isSymbolicLink())) {
+		throw new OutboxSecurityError("The protected delivery sequence is not a regular file.");
+	}
+	const existing = info ? await readJson(sequencePath) : null;
+	if (info && !validateDeliverySequence(existing)) {
+		throw new OutboxSecurityError("The protected delivery sequence is corrupt.");
+	}
+	const observedAt = Number(now());
+	const timestamp = Number.isFinite(observedAt) && observedAt >= 0 ? observedAt : Date.now();
+	const clock = Math.floor(timestamp);
+	const initial = clock >= 0 && Number.isSafeInteger(clock * 1_000)
+		? clock * 1_000
+		: Math.floor(Date.now()) * 1_000;
+	const order = existing?.next_order ?? initial;
+	if (!Number.isSafeInteger(order) || order >= Number.MAX_SAFE_INTEGER) {
+		throw new OutboxCapacityError("delivery_sequence_full", "The protected delivery sequence is exhausted.");
+	}
+	await atomicJson(paths, platform, sequencePath, {
+		schema: DELIVERY_SEQUENCE_SCHEMA,
+		next_order: order + 1,
+		updated_at: timestamp,
+	});
+	return order;
 }
 
 async function acquireLock(paths, name, { waitMs = 0, staleMs = OUTBOX_LIMITS.staleLockMs } = {}) {
@@ -852,9 +1370,507 @@ function acquireMutationLock(paths, waitMs = 250) {
 	return acquireLock(paths, "mutation.lock", { waitMs });
 }
 
+function envelopeDelivery(envelope) {
+	return requestVersion(envelope?.request) === 2
+		? normalizeDeliveryMetadata(envelope?.request?.body?.delivery)
+		: null;
+}
+
+function orderingDelivery(envelope) {
+	const delivery = envelopeDelivery(envelope);
+	if (delivery) return delivery;
+	const conversationId = envelope?.request?.body?.conversationId;
+	if (
+		requestVersion(envelope?.request) === 1
+		&& typeof conversationId === "string"
+		&& conversationId.length > 0
+		&& conversationId.length <= 240
+	) {
+		return {
+			groupId: `legacy:${envelope.queue_id}`,
+			batchIndex: 0,
+			batchCount: 1,
+			legacy: true,
+		};
+	}
+	return null;
+}
+
+function deliveryLifecycleKey(groupId, credentialFingerprint) {
+	return `${groupId}\0${CREDENTIAL_FINGERPRINT_RE.test(credentialFingerprint ?? "") ? credentialFingerprint : "unbound"}`;
+}
+
+function lifecycleGroup(groups, delivery, credentialFingerprint) {
+	return delivery ? groups.get(deliveryLifecycleKey(delivery.groupId, credentialFingerprint)) : null;
+}
+
+async function activeDeliveryGroups(paths) {
+	const groups = new Set();
+	for (const entry of await safeEntries(paths.staged, paths.root)) {
+		if (!entry.info.isFile()) continue;
+		const queueId = entry.name.endsWith(".json") ? entry.name.slice(0, -5) : null;
+		if (!validQueueId(queueId)) continue;
+		const manifestPath = queuePath(paths, "groups", queueId);
+		const manifestInfo = await pathKind(manifestPath);
+		if (!manifestInfo) continue;
+		if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink()) {
+			throw new OutboxSecurityError("A staged delivery plan is not a regular file.");
+		}
+		const manifest = await readJson(manifestPath);
+		if (!validateGroupManifest(manifest, queueId)) {
+			throw new OutboxSecurityError("A staged delivery plan is corrupt.");
+		}
+		groups.add(manifest.group_id);
+	}
+	for (const directory of RAW_DIRECTORIES) {
+		for (const entry of await safeEntries(paths[directory], paths.root)) {
+			if (!entry.info.isFile()) continue;
+			const value = await readJson(entry.path);
+			const delivery = validateEnvelope(value) ? envelopeDelivery(value) : null;
+			if (delivery) groups.add(delivery.groupId);
+		}
+	}
+	return groups;
+}
+
+async function deliveryLifecycle(paths) {
+	const groups = new Map();
+	const add = (delivery, state, metadata = {}) => {
+		if (!delivery) return;
+		const key = deliveryLifecycleKey(delivery.groupId, metadata.credentialFingerprint);
+		let group = groups.get(key);
+		if (!group) {
+			group = {
+				groupId: delivery.groupId,
+				batchCount: delivery.batchCount,
+				states: new Map(),
+				inconsistent: false,
+				conversationId: metadata.conversationId ?? null,
+				createdAt: Number(metadata.createdAt ?? Number.MAX_SAFE_INTEGER),
+				deliveryOrder: Number.isSafeInteger(metadata.deliveryOrder) ? metadata.deliveryOrder : null,
+				acceptedFingerprints: new Set(),
+			};
+			groups.set(key, group);
+		}
+		if (group.batchCount !== delivery.batchCount) group.inconsistent = true;
+		if (metadata.conversationId && group.conversationId && metadata.conversationId !== group.conversationId) group.inconsistent = true;
+		if (metadata.conversationId && !group.conversationId) group.conversationId = metadata.conversationId;
+		if (Number.isFinite(Number(metadata.createdAt))) group.createdAt = Math.min(group.createdAt, Number(metadata.createdAt));
+		if (Number.isSafeInteger(metadata.deliveryOrder)) {
+			if (group.deliveryOrder != null && group.deliveryOrder !== metadata.deliveryOrder) group.inconsistent = true;
+			group.deliveryOrder = metadata.deliveryOrder;
+		}
+		const prior = group.states.get(delivery.batchIndex);
+		if (prior && prior !== state) group.inconsistent = true;
+		group.states.set(delivery.batchIndex, state);
+		if (
+			(state === "accepted" || state === "done")
+			&& CREDENTIAL_FINGERPRINT_RE.test(metadata.credentialFingerprint ?? "")
+		) group.acceptedFingerprints.add(metadata.credentialFingerprint);
+	};
+	for (const entry of await safeEntries(paths.staged, paths.root)) {
+		if (!entry.info.isFile()) continue;
+		const value = await readJson(entry.path);
+		if (!validateStagedGroup(value)) continue;
+		const manifestPath = queuePath(paths, "groups", value.queue_id);
+		const manifestInfo = await pathKind(manifestPath);
+		const manifest = manifestInfo ? await readJson(manifestPath) : null;
+		if (manifestInfo) {
+			if (
+				!manifestInfo.isFile()
+				|| manifestInfo.isSymbolicLink()
+				|| !validateGroupManifest(manifest, value.queue_id)
+				|| manifest.content_digest !== value.content_digest
+				|| manifest.conversation_id !== value.conversation_id
+			) throw new OutboxSecurityError("A staged delivery plan is corrupt or inconsistent.");
+			groups.set(deliveryLifecycleKey(manifest.group_id, value.credential_fingerprint), {
+				groupId: manifest.group_id,
+				batchCount: manifest.batch_count,
+				states: new Map(),
+				inconsistent: false,
+				conversationId: value.conversation_id,
+				createdAt: value.created_at,
+				deliveryOrder: Number.isSafeInteger(value.delivery_order) ? value.delivery_order : null,
+				acceptedFingerprints: new Set(),
+				stagedAnchor: true,
+				recoverablePlan: true,
+			});
+		} else {
+			const groupId = `staged:${value.queue_id}`;
+			groups.set(deliveryLifecycleKey(groupId, value.credential_fingerprint), {
+				groupId,
+				batchCount: 1,
+				states: new Map([[0, "staged"]]),
+				inconsistent: false,
+				conversationId: value.conversation_id,
+				createdAt: value.created_at,
+				deliveryOrder: Number.isSafeInteger(value.delivery_order) ? value.delivery_order : null,
+				acceptedFingerprints: new Set(),
+				stagedAnchor: true,
+				aggregateOnly: true,
+			});
+		}
+	}
+	for (const directory of RAW_DIRECTORIES) {
+		for (const entry of await safeEntries(paths[directory], paths.root)) {
+			if (!entry.info.isFile()) continue;
+			const value = await readJson(entry.path);
+			if (validateEnvelope(value)) add(orderingDelivery(value), directory, {
+				conversationId: value.request?.body?.conversationId,
+				createdAt: value.created_at,
+				deliveryOrder: value.delivery_order,
+				credentialFingerprint: value.credential_fingerprint,
+			});
+		}
+	}
+	for (const directory of ["accepted", "done"]) {
+		for (const entry of await safeEntries(paths[directory], paths.root)) {
+			if (!entry.info.isFile()) continue;
+			const value = await readJson(entry.path);
+			if (validateTombstone(value)) add(normalizeDeliveryMetadata(value.delivery), directory === "done" ? "done" : "accepted", {
+				conversationId: value.conversation_id,
+				createdAt: value.group_created_at,
+				deliveryOrder: value.delivery_order,
+				credentialFingerprint: value.credential_fingerprint,
+			});
+		}
+	}
+	return groups;
+}
+
+function groupIsNonterminal(group) {
+	// A permanent HTTP failure terminalizes the ordered group. Its protected raw
+	// files remain for operator intervention, but it must not disable every newer
+	// session in the same conversation forever.
+	if ([...group.states.values()].includes("failed")) return false;
+	return Boolean(group.stagedAnchor)
+		|| [...group.states.values()].some((state) => state === "staged" || state === "pending" || state === "inflight");
+}
+
+function compareGroupPosition(left, right) {
+	if (left.deliveryOrder != null && right.deliveryOrder != null && left.deliveryOrder !== right.deliveryOrder) {
+		return left.deliveryOrder - right.deliveryOrder;
+	}
+	// Any entry without a sequence predates sequence allocation. If its timestamp
+	// conflicts with newly sequenced work (including after wall-clock rollback),
+	// keep the migrated entry first.
+	if ((left.deliveryOrder == null) !== (right.deliveryOrder == null)) {
+		return left.deliveryOrder == null ? -1 : 1;
+	}
+	if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+	return left.groupId.localeCompare(right.groupId);
+}
+
+function groupPrecedes(left, right) {
+	return compareGroupPosition(left, right) < 0;
+}
+
+function deliveryReady(delivery, groups, credentialFingerprint) {
+	if (!delivery) return true;
+	const group = lifecycleGroup(groups, delivery, credentialFingerprint);
+	if (!group || group.inconsistent || group.batchCount !== delivery.batchCount) return false;
+	if ([...group.states.values()].includes("failed")) return false;
+	if (!group.states.has(delivery.batchIndex)) return false;
+	if (!group.recoverablePlan) {
+		for (let index = 0; index < delivery.batchCount; index += 1) {
+			if (!group.states.has(index)) return false;
+		}
+	}
+	for (let index = 0; index < delivery.batchIndex; index += 1) {
+		if (!["done", "accepted"].includes(group.states.get(index))) return false;
+	}
+	if (group.conversationId) {
+		for (const candidate of groups.values()) {
+			if (candidate === group || candidate.conversationId !== group.conversationId) continue;
+			if (groupIsNonterminal(candidate) && groupPrecedes(candidate, group)) return false;
+		}
+	}
+	return true;
+}
+
+function deliveryGroupKey(delivery, queueId) {
+	return delivery?.groupId ?? `legacy:${String(queueId ?? "unknown")}`;
+}
+
+function summarizeDeliveryGroups(groups) {
+	const summary = {
+		active: 0,
+		incomplete: 0,
+		waitingOnPredecessor: 0,
+		failed: 0,
+	};
+	for (const group of groups.values()) {
+		if (group.aggregateOnly) continue;
+		const states = [...group.states.values()];
+		if (!group.stagedAnchor && !states.some((state) => RAW_DIRECTORIES.includes(state))) continue;
+		summary.active += 1;
+		const terminalFailed = states.includes("failed");
+		const complete = !group.inconsistent
+			&& Array.from({ length: group.batchCount }, (_unused, index) => group.states.has(index)).every(Boolean);
+		if (!complete && !terminalFailed) summary.incomplete += 1;
+		if (terminalFailed) summary.failed += 1;
+		let waiting = !complete && !terminalFailed;
+		if (!terminalFailed && complete && !waiting) {
+			for (let index = 1; index < group.batchCount && !waiting; index += 1) {
+				if (!["pending", "inflight"].includes(group.states.get(index))) continue;
+				for (let prior = 0; prior < index; prior += 1) {
+					if (!["done", "accepted"].includes(group.states.get(prior))) {
+						waiting = true;
+						break;
+					}
+				}
+			}
+		}
+		if (!terminalFailed && !waiting && group.conversationId) {
+			for (const candidate of groups.values()) {
+				if (candidate === group || candidate.conversationId !== group.conversationId) continue;
+				if (groupIsNonterminal(candidate) && groupPrecedes(candidate, group)) {
+					waiting = true;
+					break;
+				}
+			}
+		}
+		if (waiting) summary.waitingOnPredecessor += 1;
+	}
+	return summary;
+}
+
+async function materializeStagedGroups(paths, platform, currentFingerprint, now = Date.now(), {
+	maxGroups = OUTBOX_LIMITS.maxMaterializationGroups,
+	maxInputBytes = OUTBOX_LIMITS.maxMaterializationInputBytes,
+} = {}) {
+	const groupLimit = Math.max(0, Math.min(
+		OUTBOX_LIMITS.maxRawCount,
+		Number.isFinite(Number(maxGroups)) ? Math.floor(Number(maxGroups)) : OUTBOX_LIMITS.maxMaterializationGroups,
+	));
+	const inputLimit = Math.max(1, Number.isFinite(Number(maxInputBytes))
+		? Math.floor(Number(maxInputBytes))
+		: OUTBOX_LIMITS.maxMaterializationInputBytes);
+	const result = { groups: 0, batches: 0, blocked: 0, deferred: 0, terminalFailed: 0, awaitingBinding: 0 };
+	const blockedConversations = new Set();
+	const stagedEntries = [];
+	let attemptedGroups = 0;
+	let attemptedBytes = 0;
+	for (const entry of await safeEntries(paths.staged, paths.root)) {
+		if (!entry.info.isFile()) throw new OutboxSecurityError("A staged delivery group is not a regular file.");
+		if (entry.info.size > OUTBOX_LIMITS.maxStagedGroupBytes) throw new OutboxSecurityError("A staged delivery group exceeds its protected size bound.");
+		const value = await readJson(entry.path);
+		if (!validateStagedGroup(value) || entry.name !== `${value.queue_id}.json`) {
+			throw new OutboxSecurityError("A staged delivery group is corrupt.");
+		}
+		stagedEntries.push({ entry, value });
+	}
+	stagedEntries.sort((left, right) => compareGroupPosition(
+		{
+			deliveryOrder: left.value.delivery_order,
+			createdAt: Number(left.value.created_at),
+			groupId: left.entry.name,
+		},
+		{
+			deliveryOrder: right.value.delivery_order,
+			createdAt: Number(right.value.created_at),
+			groupId: right.entry.name,
+		},
+	));
+
+	for (let stagedIndex = 0; stagedIndex < stagedEntries.length; stagedIndex += 1) {
+		const staged = stagedEntries[stagedIndex];
+		if (blockedConversations.has(staged.value.conversation_id)) {
+			result.blocked += 1;
+			continue;
+		}
+		if (!staged.value.credential_fingerprint || staged.value.credential_fingerprint !== currentFingerprint) {
+			result.awaitingBinding += 1;
+			blockedConversations.add(staged.value.conversation_id);
+			continue;
+		}
+		try {
+			const manifestPath = queuePath(paths, "groups", staged.value.queue_id);
+			const readCompatibleManifest = async (expectedQueueIds = null, expectedGroupId = null) => {
+				const info = await pathKind(manifestPath);
+				if (!info) return null;
+				if (!info.isFile() || info.isSymbolicLink()) throw new OutboxSecurityError("A delivery-group manifest is not a regular file.");
+				const value = await readJson(manifestPath);
+				if (!validateGroupManifest(value, staged.value.queue_id)) throw new OutboxSecurityError("A delivery-group manifest is corrupt.");
+				if (
+					value.content_digest !== staged.value.content_digest
+					|| value.conversation_id !== staged.value.conversation_id
+					|| value.credential_fingerprint !== staged.value.credential_fingerprint
+					|| Number(value.created_at) !== Number(staged.value.created_at)
+					|| (value.delivery_order ?? null) !== (staged.value.delivery_order ?? null)
+					|| (expectedGroupId && value.group_id !== expectedGroupId)
+					|| (expectedQueueIds && canonicalJson(value.queue_ids) !== canonicalJson(expectedQueueIds))
+				) throw new OutboxSecurityError("A staged delivery group conflicts with its materialized manifest.");
+				return value;
+			};
+			let manifest = await readCompatibleManifest();
+			if (manifest) {
+				let terminalFailed = false;
+				for (const queueId of manifest.queue_ids) {
+					if ((await lifecyclePath(paths, queueId))?.name === "failed") {
+						terminalFailed = true;
+						break;
+					}
+				}
+				if (terminalFailed) {
+					result.terminalFailed += 1;
+					continue;
+				}
+			}
+			if (
+				attemptedGroups >= groupLimit
+				|| (attemptedGroups > 0 && attemptedBytes + staged.entry.info.size > inputLimit)
+			) {
+				result.deferred += stagedEntries.length - stagedIndex;
+				break;
+			}
+			attemptedGroups += 1;
+			attemptedBytes += staged.entry.info.size;
+			const prepared = {
+				sessionHash: staged.value.session_hash,
+				conversationId: staged.value.conversation_id,
+				safeMessages: staged.value.messages,
+				safeScope: staged.value.memory_scope,
+				capture: staged.value.capture,
+				redactions: {},
+			};
+			const group = buildEnvelopes({
+				prepared,
+				fingerprint: staged.value.credential_fingerprint,
+				createdAt: staged.value.created_at,
+				deliveryOrder: staged.value.delivery_order,
+			});
+			const items = group.built.map((built) => ({
+				...built,
+				serializedBytes: Buffer.byteLength(canonicalJson(built.envelope), "utf8"),
+			}));
+			if (items.some((item) => item.serializedBytes > OUTBOX_LIMITS.maxEnvelopeBytes)) {
+				throw new OutboxCapacityError("envelope_too_large", "A materialized local envelope exceeds 2 MiB.");
+			}
+
+			const expectedQueueIds = items.map((item) => item.envelope.queue_id);
+			const expectedGroupId = items[0]?.envelope.request.body.delivery?.groupId ?? null;
+			manifest = await readCompatibleManifest(expectedQueueIds, expectedGroupId);
+			const missing = [];
+			for (const item of items) {
+				if (!await lifecyclePath(paths, item.envelope.queue_id)) missing.push(item);
+			}
+			missing.sort((left, right) =>
+				Number(left.envelope.request.body.delivery?.batchIndex ?? 0)
+				- Number(right.envelope.request.body.delivery?.batchIndex ?? 0));
+
+			// Make the immutable/versioned plan durable before the first envelope.
+			// This turns a partial materialization into an explicitly recoverable
+			// ordered prefix rather than an ambiguous collection of batch files.
+			const releasePlan = await acquireMutationLock(paths, 250);
+			if (!releasePlan) {
+				result.blocked += 1;
+				blockedConversations.add(staged.value.conversation_id);
+				continue;
+			}
+			try {
+				if (missing.length > 0) {
+					const usage = await rawUsage(paths);
+					if (usage.count + 1 > OUTBOX_LIMITS.maxRawCount) {
+						throw new OutboxCapacityError("outbox_count_full", "Materializing the next protected batch would exceed 128 raw entries.");
+					}
+					if (usage.bytes + missing[0].serializedBytes > OUTBOX_LIMITS.maxRawBytes) {
+						throw new OutboxCapacityError("outbox_bytes_full", "Materializing the next protected batch would exceed 64 MiB.");
+					}
+				}
+				manifest = await readCompatibleManifest(expectedQueueIds, expectedGroupId);
+				if (!manifest) {
+					manifest = manifestFromMaterialized(staged.value, group, now);
+					await atomicJson(paths, platform, manifestPath, manifest, { exclusive: true });
+				}
+			} finally {
+				await releasePlan();
+			}
+			// Leave a window longer than the lock waiter's 15 ms poll interval so a
+			// concurrent SessionEnd is guaranteed an opportunity to append.
+			await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+
+			let lockInterrupted = false;
+			for (const item of missing) {
+				const releaseBatch = await acquireMutationLock(paths, 250);
+				if (!releaseBatch) {
+					lockInterrupted = true;
+					break;
+				}
+				try {
+					if (await lifecyclePath(paths, item.envelope.queue_id)) continue;
+					const usage = await rawUsage(paths);
+					if (usage.count + 1 > OUTBOX_LIMITS.maxRawCount) {
+						throw new OutboxCapacityError("outbox_count_full", "Materializing the next protected batch would exceed 128 raw entries.");
+					}
+					if (usage.bytes + item.serializedBytes > OUTBOX_LIMITS.maxRawBytes) {
+						throw new OutboxCapacityError("outbox_bytes_full", "Materializing the next protected batch would exceed 64 MiB.");
+					}
+					await atomicJson(
+						paths,
+						platform,
+						queuePath(paths, "pending", item.envelope.queue_id),
+						item.envelope,
+						{ exclusive: true },
+					);
+					result.batches += 1;
+				} finally {
+					await releaseBatch();
+				}
+				await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+			}
+			if (lockInterrupted) {
+				result.blocked += 1;
+				blockedConversations.add(staged.value.conversation_id);
+				continue;
+			}
+
+			const releaseFinalize = await acquireMutationLock(paths, 250);
+			if (!releaseFinalize) {
+				result.blocked += 1;
+				blockedConversations.add(staged.value.conversation_id);
+				continue;
+			}
+			try {
+				await readCompatibleManifest(expectedQueueIds, expectedGroupId);
+				// All pre-existing siblings were validated before planning, and every
+				// missing sibling was either observed or durably written above while the
+				// drain lock excluded another materializer. The aggregate can now retire.
+				await unlink(staged.entry.path);
+				await syncDirectory(paths.staged, platform);
+				result.groups += 1;
+			} finally {
+				await releaseFinalize();
+			}
+		} catch (error) {
+			if (error instanceof OutboxCapacityError) {
+				result.blocked += 1;
+				blockedConversations.add(staged.value.conversation_id);
+				continue;
+			}
+			throw error;
+		}
+	}
+	return result;
+}
+
 async function gcOutbox(paths, now = Date.now()) {
+	const activeGroups = await activeDeliveryGroups(paths);
 	for (const entry of await safeEntries(paths.done, paths.root, { maxEntries: MAX_MAINTENANCE_ENTRIES })) {
-		if (entry.info.isFile() && now - entry.info.mtimeMs > OUTBOX_LIMITS.doneRetentionMs) await unlink(entry.path);
+		if (!entry.info.isFile() || now - entry.info.mtimeMs <= OUTBOX_LIMITS.doneRetentionMs) continue;
+		const tombstone = await readJson(entry.path);
+		const delivery = validateTombstone(tombstone) ? normalizeDeliveryMetadata(tombstone.delivery) : null;
+		if (delivery && activeGroups.has(delivery.groupId)) continue;
+		await unlink(entry.path);
+	}
+	for (const entry of await safeEntries(paths.groups, paths.root, { maxEntries: MAX_MAINTENANCE_ENTRIES })) {
+		if (!entry.info.isFile() || now - entry.info.mtimeMs <= OUTBOX_LIMITS.doneRetentionMs) continue;
+		const manifest = await readJson(entry.path);
+		if (!validateGroupManifest(manifest) || entry.name !== `${manifest.queue_id}.json`) {
+			throw new OutboxSecurityError("A delivery-group manifest is corrupt.");
+		}
+		if (activeGroups.has(manifest.group_id)) continue;
+		await unlink(entry.path);
 	}
 	for (const entry of await safeEntries(paths.tmp, paths.root, { maxEntries: MAX_MAINTENANCE_ENTRIES })) {
 		if (!entry.info.isFile()) throw new OutboxSecurityError();
@@ -866,12 +1882,119 @@ async function gcOutbox(paths, now = Date.now()) {
 	}
 }
 
+async function enqueueDeferredSession({
+	paths,
+	actualPlatform,
+	messages,
+	sessionId,
+	memoryScope,
+	captureMetadata,
+	fingerprint,
+	now,
+}) {
+	const prepared = prepareSession({ messages, sessionId, memoryScope, captureMetadata });
+	const staged = buildStagedGroup({ prepared, fingerprint, now });
+	let serializedBytes = 0;
+
+	const release = await acquireMutationLock(paths, 250);
+	if (!release) throw new OutboxError("outbox_busy", "Another hook is updating the local outbox.");
+	try {
+		const stagedPath = queuePath(paths, "staged", staged.queueId);
+		const manifestPath = queuePath(paths, "groups", staged.queueId);
+		const stagedInfo = await pathKind(stagedPath);
+		const manifestInfo = await pathKind(manifestPath);
+		let existingStaged = null;
+		let manifest = null;
+		if (stagedInfo) {
+			if (!stagedInfo.isFile() || stagedInfo.isSymbolicLink()) throw new OutboxSecurityError("A staged delivery group is not a regular file.");
+			existingStaged = await readJson(stagedPath);
+			if (!validateStagedGroup(existingStaged, staged.queueId)) throw new OutboxSecurityError("A staged delivery group is corrupt.");
+			if (existingStaged.content_digest !== staged.value.content_digest) throw new OutboxSecurityError("A staged delivery identity conflicts with different content.");
+		}
+		if (manifestInfo) {
+			if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink()) throw new OutboxSecurityError("A delivery-group manifest is not a regular file.");
+			manifest = await readJson(manifestPath);
+			if (!validateGroupManifest(manifest, staged.queueId)) throw new OutboxSecurityError("A delivery-group manifest is corrupt.");
+			if (manifest.content_digest !== staged.value.content_digest) throw new OutboxSecurityError("A delivery-group manifest conflicts with different content.");
+		}
+
+		const lifecycle = [];
+		for (const queueId of manifest?.queue_ids ?? []) lifecycle.push(await lifecyclePath(paths, queueId));
+		const missingMaterialized = manifest
+			? lifecycle.filter((entry) => !entry).length
+			: 0;
+		const needsStage = !existingStaged && (!manifest || missingMaterialized > 0);
+		if (needsStage) {
+			if (manifest) {
+				// A crash-repair aggregate resumes the immutable materialization plan;
+				// retry-time clocks must not create a second ordering identity.
+				staged.value.created_at = manifest.created_at;
+				if (manifest.delivery_order == null) delete staged.value.delivery_order;
+				else staged.value.delivery_order = manifest.delivery_order;
+			} else {
+				staged.value.delivery_order = await claimDeliveryOrder(paths, actualPlatform, now);
+			}
+			const serialized = Buffer.from(canonicalJson(staged.value), "utf8");
+			serializedBytes = serialized.length;
+			if (serializedBytes > OUTBOX_LIMITS.maxStagedGroupBytes) {
+				throw new OutboxCapacityError(
+					"staged_group_too_large",
+					"The protected shutdown snapshot exceeds the 16 MiB staged-group limit.",
+				);
+			}
+			const usage = await rawUsage(paths);
+			const deferredCountLimit = OUTBOX_LIMITS.maxRawCount - OUTBOX_LIMITS.materializationReserveEntries;
+			const deferredByteLimit = OUTBOX_LIMITS.maxRawBytes - OUTBOX_LIMITS.materializationReserveBytes;
+			if (usage.count + 1 > deferredCountLimit) {
+				throw new OutboxCapacityError("outbox_count_full", "The protected local outbox has filled its 127 deferred-entry slots; one delivery slot remains reserved for safe materialization.");
+			}
+			if (usage.bytes + serializedBytes > deferredByteLimit) {
+				throw new OutboxCapacityError("outbox_bytes_full", "The protected local outbox has filled its 48 MiB enqueue allowance; 16 MiB remains reserved for crash-safe staged-group mutation.");
+			}
+			await atomicJson(paths, actualPlatform, stagedPath, staged.value, { exclusive: true, serialized });
+			existingStaged = staged.value;
+		}
+
+		const states = lifecycle.filter(Boolean).map((entry) => entry.name);
+		const acceptedBatches = states.filter((state) => state === "accepted" || state === "done").length;
+		const failedBatches = states.filter((state) => state === "failed").length;
+		return {
+			queued: Boolean(existingStaged) || states.some((state) => state === "pending" || state === "inflight"),
+			duplicate: !needsStage,
+			state: existingStaged ? "staged" : (new Set(states).size === 1 ? states[0] : "mixed"),
+			queueId: staged.queueId,
+			queueIds: manifest?.queue_ids ?? [staged.queueId],
+			batchCount: manifest?.batch_count ?? null,
+			queuedBatches: needsStage ? 1 : 0,
+			duplicateBatches: needsStage ? 0 : (manifest?.batch_count ?? 1),
+			failedBatches,
+			acceptedBatches,
+			bytes: needsStage ? serializedBytes : 0,
+			bound: Boolean(fingerprint) && (existingStaged?.credential_fingerprint ?? manifest?.credential_fingerprint) === fingerprint,
+			credentialMismatch: false,
+			redactions: staged.redactions,
+			...staged.stats,
+			...(manifest?.stats ?? {}),
+			staged: Boolean(existingStaged),
+		};
+	} catch (error) {
+		if (error?.code === "ENOSPC" || error?.code === "EDQUOT") {
+			throw new OutboxCapacityError("outbox_disk_full", "The disk has no room for the protected local group.");
+		}
+		throw error;
+	} finally {
+		await release();
+	}
+}
+
 /** Atomically queue one scrubbed session. This function has no network path. */
 export async function enqueueSession({
 	pluginData,
 	messages,
 	sessionId,
 	memoryScope,
+	captureMetadata = null,
+	deferMaterialization = false,
 	credentialFingerprint: fingerprint = null,
 	now = Date.now,
 	platform,
@@ -882,50 +2005,112 @@ export async function enqueueSession({
 		securityRunner,
 		securityMode: "directories",
 	});
-	const built = buildEnvelope({ messages, sessionId, memoryScope, fingerprint, now });
-	const serializedBytes = Buffer.byteLength(canonicalJson(built.envelope), "utf8");
-	if (serializedBytes > OUTBOX_LIMITS.maxEnvelopeBytes) {
-		throw new OutboxCapacityError("envelope_too_large", "The protected local envelope exceeds 2 MiB.");
+	if (deferMaterialization) {
+		return enqueueDeferredSession({
+			paths,
+			actualPlatform,
+			messages,
+			sessionId,
+			memoryScope,
+			captureMetadata,
+			fingerprint,
+			now,
+		});
+	}
+	const group = buildEnvelopes({ messages, sessionId, memoryScope, fingerprint, captureMetadata, now });
+	const items = group.built.map((built) => ({
+		...built,
+		serializedBytes: Buffer.byteLength(canonicalJson(built.envelope), "utf8"),
+	}));
+	if (items.some((item) => item.serializedBytes > OUTBOX_LIMITS.maxEnvelopeBytes)) {
+		throw new OutboxCapacityError("envelope_too_large", "A protected local envelope exceeds 2 MiB.");
 	}
 
 	const release = await acquireMutationLock(paths, 250);
 	if (!release) throw new OutboxError("outbox_busy", "Another hook is updating the local outbox.");
 	try {
-		const existing = await lifecyclePath(paths, built.envelope.queue_id);
-		if (existing) {
+		const existing = [];
+		const missing = [];
+		for (const item of items) {
+			const lifecycle = await lifecyclePath(paths, item.envelope.queue_id);
+			if (!lifecycle) {
+				missing.push(item);
+				continue;
+			}
 			let existingFingerprint = null;
-			if (RAW_DIRECTORIES.includes(existing.name)) {
-				const envelope = await readJson(existing.path);
-				const state = await stateFor(paths, built.envelope.queue_id);
+			if (RAW_DIRECTORIES.includes(lifecycle.name)) {
+				const envelope = await readJson(lifecycle.path);
+				const state = await stateFor(paths, item.envelope.queue_id);
 				existingFingerprint = state.binding_fingerprint ?? envelope?.credential_fingerprint ?? null;
 			}
-			return {
-				queued: existing.name === "pending" || existing.name === "inflight",
-				duplicate: true,
-				state: existing.name,
-				queueId: built.envelope.queue_id,
-				bound: existing.name === "done" || existing.name === "accepted" || Boolean(existingFingerprint),
+			existing.push({
+				...lifecycle,
+				queueId: item.envelope.queue_id,
+				bound: lifecycle.name === "done" || lifecycle.name === "accepted" || Boolean(existingFingerprint),
 				credentialMismatch: Boolean(fingerprint && existingFingerprint && fingerprint !== existingFingerprint),
-				redactions: built.redactions,
-			};
+			});
+		}
+		const existingOrders = new Set(existing
+			.map((item) => item.value?.delivery_order)
+			.filter((value) => Number.isSafeInteger(value) && value >= 0));
+		if (existingOrders.size > 1) {
+			throw new OutboxSecurityError("An ordered delivery group has conflicting local sequence numbers.");
+		}
+		// Eager v2 callers remain supported. Give every wholly new group a durable
+		// enqueue order under the same mutation lock, and reuse a surviving sibling's
+		// order during partial repair. Pre-order envelopes keep their created-at
+		// fallback instead of being incorrectly promoted behind newer work.
+		const groupOrder = existingOrders.size === 1
+			? [...existingOrders][0]
+			: (existing.length === 0 && missing.length > 0
+				? await claimDeliveryOrder(paths, actualPlatform, now)
+				: null);
+		if (groupOrder != null) {
+			for (const item of missing) {
+				item.envelope = { ...item.envelope, delivery_order: groupOrder };
+				item.serializedBytes = Buffer.byteLength(canonicalJson(item.envelope), "utf8");
+			}
+		}
+		if (missing.some((item) => item.serializedBytes > OUTBOX_LIMITS.maxEnvelopeBytes)) {
+			throw new OutboxCapacityError("envelope_too_large", "A protected local envelope exceeds 2 MiB.");
 		}
 		const usage = await rawUsage(paths);
-		if (usage.count >= OUTBOX_LIMITS.maxRawCount) {
-			throw new OutboxCapacityError("outbox_count_full", "The protected local outbox already has 128 undelivered entries.");
+		const eagerCountLimit = OUTBOX_LIMITS.maxRawCount - OUTBOX_LIMITS.materializationReserveEntries;
+		const eagerByteLimit = OUTBOX_LIMITS.maxRawBytes - OUTBOX_LIMITS.materializationReserveBytes;
+		if (usage.count + missing.length > eagerCountLimit) {
+			throw new OutboxCapacityError("outbox_count_full", "The protected local outbox has filled its 127 enqueue slots; one slot remains reserved for crash-safe queue mutation.");
 		}
-		if (usage.bytes + serializedBytes > OUTBOX_LIMITS.maxRawBytes) {
-			throw new OutboxCapacityError("outbox_bytes_full", "The protected local outbox would exceed 64 MiB.");
+		const addedBytes = missing.reduce((sum, item) => sum + item.serializedBytes, 0);
+		if (usage.bytes + addedBytes > eagerByteLimit) {
+			throw new OutboxCapacityError("outbox_bytes_full", "The protected local outbox has filled its 48 MiB enqueue allowance; 16 MiB remains reserved for crash-safe staged-group mutation.");
 		}
-		const destination = queuePath(paths, "pending", built.envelope.queue_id);
-		await atomicJson(paths, actualPlatform, destination, built.envelope, { exclusive: true });
+		// Write the final batch first and batch zero (the commit marker) last. The
+		// drainer requires a complete 0..N-1 group, so a killed SessionEnd can
+		// never deliver a silently partial conversation.
+		for (const item of missing.slice().sort((left, right) =>
+			Number(right.envelope.request.body.delivery?.batchIndex ?? 0)
+			- Number(left.envelope.request.body.delivery?.batchIndex ?? 0))) {
+			const destination = queuePath(paths, "pending", item.envelope.queue_id);
+			await atomicJson(paths, actualPlatform, destination, item.envelope, { exclusive: true });
+		}
+		const states = [...existing.map((item) => item.name), ...missing.map(() => "pending")];
+		const distinctStates = [...new Set(states)];
 		return {
-			queued: true,
-			duplicate: false,
-			state: "pending",
-			queueId: built.envelope.queue_id,
-			bytes: serializedBytes,
-			bound: Boolean(fingerprint),
-			redactions: built.redactions,
+			queued: states.some((state) => state === "pending" || state === "inflight"),
+			duplicate: missing.length === 0,
+			state: distinctStates.length === 1 ? distinctStates[0] : "mixed",
+			queueId: items[0].envelope.queue_id,
+			queueIds: items.map((item) => item.envelope.queue_id),
+			batchCount: items.length,
+			queuedBatches: missing.length,
+			duplicateBatches: existing.length,
+			failedBatches: states.filter((state) => state === "failed").length,
+			acceptedBatches: states.filter((state) => state === "accepted" || state === "done").length,
+			bytes: addedBytes,
+			bound: Boolean(fingerprint) && existing.every((item) => item.bound),
+			credentialMismatch: existing.some((item) => item.credentialMismatch),
+			redactions: group.redactions,
+			...group.stats,
 		};
 	} catch (error) {
 		if (error?.code === "ENOSPC" || error?.code === "EDQUOT") {
@@ -941,13 +2126,29 @@ async function recoverTmp(paths) {
 	for (const entry of await safeEntries(paths.tmp, paths.root)) {
 		if (!entry.info.isFile()) throw new OutboxSecurityError();
 		const value = await readJson(entry.path);
-		if (!validateEnvelope(value)) continue;
-		const existing = await lifecyclePath(paths, value.queue_id);
-		if (existing) {
-			await unlink(entry.path);
+		if (validateStagedGroup(value)) {
+			const destination = queuePath(paths, "staged", value.queue_id);
+			if (await pathKind(destination)) await unlink(entry.path);
+			else await rename(entry.path, destination);
 			continue;
 		}
-		await rename(entry.path, queuePath(paths, "pending", value.queue_id));
+		if (validateGroupManifest(value)) {
+			const destination = queuePath(paths, "groups", value.queue_id);
+			if (await pathKind(destination)) await unlink(entry.path);
+			else await rename(entry.path, destination);
+			continue;
+		}
+		if (validateDeliverySequence(value)) {
+			const destination = join(paths.control, "delivery-sequence.json");
+			if (await pathKind(destination)) await unlink(entry.path);
+			else await rename(entry.path, destination);
+			continue;
+		}
+		if (validateEnvelope(value)) {
+			const existing = await lifecyclePath(paths, value.queue_id);
+			if (existing) await unlink(entry.path);
+			else await rename(entry.path, queuePath(paths, "pending", value.queue_id));
+		}
 	}
 }
 
@@ -1112,23 +2313,62 @@ export async function drainOutbox({
 	maxItems = OUTBOX_LIMITS.maxDrainItems,
 	maxDurationMs = OUTBOX_LIMITS.drainBudgetMs,
 	requestTimeoutMs = OUTBOX_LIMITS.requestTimeoutMs,
+	maxTotalDurationMs = Infinity,
+	maxMaterializationGroups = OUTBOX_LIMITS.maxMaterializationGroups,
+	maxMaterializationInputBytes = OUTBOX_LIMITS.maxMaterializationInputBytes,
 	now = Date.now,
 	platform,
 	securityRunner,
 } = {}) {
+	const wallStartedAt = Date.now();
+	const totalDuration = Number.isFinite(Number(maxTotalDurationMs))
+		? Math.max(1, Number(maxTotalDurationMs))
+		: Infinity;
+	const wallDeadline = totalDuration === Infinity ? Infinity : wallStartedAt + totalDuration;
 	const normalizedBaseUrl = normalizeDeliveryBaseUrl(baseUrl);
 	const currentFingerprint = credentialFingerprint(apiKey, normalizedBaseUrl);
 	const result = {
 		delivered: 0,
+		deliveredBatches: 0,
+		deliveredGroups: 0,
 		retried: 0,
+		retriedBatches: 0,
+		retriedGroups: 0,
 		permanentFailures: 0,
+		permanentFailureBatches: 0,
+		permanentFailureGroups: 0,
 		authBlocked: false,
 		bindingRequired: 0,
 		credentialMismatch: 0,
 		backoffSkipped: 0,
 		transportUnavailable: false,
 		busy: false,
+		orderBlocked: 0,
+		orderBlockedBatches: 0,
+		orderBlockedGroups: 0,
+		materializedGroups: 0,
+		materializedBatches: 0,
+		materializationBlocked: 0,
+		materializationDeferred: 0,
+		terminalFailedGroups: 0,
+		completedDeliveryGroups: 0,
 		accepted: [],
+	};
+	const outcomeGroups = {
+		delivered: new Set(),
+		retried: new Set(),
+		permanentFailure: new Set(),
+		orderBlocked: new Set(),
+	};
+	const completedGroups = new Set();
+	const markGroup = (outcome, delivery, queueId) => {
+		const groupField = `${outcome}Groups`;
+		const groups = outcomeGroups[outcome];
+		const key = deliveryGroupKey(delivery, queueId);
+		if (!groups.has(key)) {
+			groups.add(key);
+			result[groupField] += 1;
+		}
 	};
 	const { paths, platform: actualPlatform } = await ensureOutbox(pluginData, {
 		platform,
@@ -1143,6 +2383,7 @@ export async function drainOutbox({
 	};
 	try {
 		const pending = [];
+		let deliveryGroups = new Map();
 		const authBlockPath = join(paths.control, "auth-block.json");
 		const releaseInitialMutation = await acquireMutationLock(paths, 250);
 		if (!releaseInitialMutation) {
@@ -1156,7 +2397,7 @@ export async function drainOutbox({
 
 			if (!currentFingerprint) {
 				const health = await inspectOutbox({ pluginData, apiKey, baseUrl: normalizedBaseUrl, platform, securityRunner, _skipSecurity: true });
-				return { ...result, bindingRequired: health.counts.pending, health };
+				return { ...result, bindingRequired: health.bindingRequired, health };
 			}
 
 			const authBlockInfo = await pathKind(authBlockPath);
@@ -1179,22 +2420,80 @@ export async function drainOutbox({
 				await unlink(authBlockPath).catch(() => {});
 			}
 
-			for (const entry of await safeEntries(paths.pending, paths.root)) {
-				if (!entry.info.isFile()) throw new OutboxSecurityError();
-				const envelope = await readJson(entry.path);
-				pending.push({ entry, envelope, createdAt: Number(envelope?.created_at ?? entry.info.mtimeMs) });
-			}
 		} finally {
 			await releaseInitialMutation();
 		}
-		pending.sort((left, right) => left.createdAt - right.createdAt || left.entry.name.localeCompare(right.entry.name));
+
+		// Unicode segmentation and request construction can be the dominant work
+		// for an 8 MiB snapshot. Do it outside the short mutation critical section
+		// so a concurrent SessionEnd can still durably append its one staged file.
+		const materialized = await materializeStagedGroups(paths, actualPlatform, currentFingerprint, now, {
+			maxGroups: maxMaterializationGroups,
+			maxInputBytes: maxMaterializationInputBytes,
+		});
+		result.materializedGroups = materialized.groups;
+		result.materializedBatches = materialized.batches;
+		result.materializationBlocked = materialized.blocked;
+		result.materializationDeferred = materialized.deferred;
+		result.terminalFailedGroups = materialized.terminalFailed;
+		result.bindingRequired += materialized.awaitingBinding;
+
+		const releaseSnapshot = await acquireMutationLock(paths, 250);
+		if (!releaseSnapshot) {
+			return { ...result, busy: true, health: await inspectOutbox({ pluginData, apiKey, baseUrl: normalizedBaseUrl, platform, securityRunner, _skipSecurity: true }) };
+		}
+		try {
+			deliveryGroups = await deliveryLifecycle(paths);
+			for (const entry of await safeEntries(paths.pending, paths.root)) {
+				if (!entry.info.isFile()) throw new OutboxSecurityError();
+				const envelope = await readJson(entry.path);
+				pending.push({
+					entry,
+					envelope,
+					delivery: validateEnvelope(envelope) ? orderingDelivery(envelope) : null,
+					createdAt: Number(envelope?.created_at ?? entry.info.mtimeMs),
+					deliveryOrder: Number.isSafeInteger(envelope?.delivery_order) ? envelope.delivery_order : null,
+				});
+			}
+		} finally {
+			await releaseSnapshot();
+		}
+		const groupSortTimes = new Map();
+		for (const item of pending) {
+			if (!item.delivery) continue;
+			const prior = groupSortTimes.get(item.delivery.groupId);
+			groupSortTimes.set(item.delivery.groupId, prior === undefined ? item.createdAt : Math.min(prior, item.createdAt));
+		}
+		pending.sort((left, right) => {
+			const byGroup = compareGroupPosition(
+				{
+					deliveryOrder: left.deliveryOrder,
+					createdAt: left.delivery ? groupSortTimes.get(left.delivery.groupId) : left.createdAt,
+					groupId: left.delivery?.groupId ?? `legacy:${left.entry.name}`,
+				},
+				{
+					deliveryOrder: right.deliveryOrder,
+					createdAt: right.delivery ? groupSortTimes.get(right.delivery.groupId) : right.createdAt,
+					groupId: right.delivery?.groupId ?? `legacy:${right.entry.name}`,
+				},
+			);
+			if (byGroup) return byGroup;
+			return Number(left.delivery?.batchIndex ?? 0) - Number(right.delivery?.batchIndex ?? 0)
+				|| left.entry.name.localeCompare(right.entry.name);
+		});
 		// Local security/recovery work is not charged against the bounded network
 		// delivery window. The host-level SessionStart deadline still bounds both.
-		const deadline = Number(now()) + Math.max(1, maxDurationMs);
+		const wallRemaining = Math.max(0, wallDeadline - Date.now());
+		const networkBudget = Math.max(0, Math.min(Number(maxDurationMs), wallRemaining));
+		const deadline = Number(now()) + networkBudget;
 
 		let requests = 0;
 		for (const item of pending) {
-			if (requests >= Math.min(maxItems, OUTBOX_LIMITS.maxDrainItems) || Number(now()) >= deadline) break;
+			if (
+				requests >= Math.min(maxItems, OUTBOX_LIMITS.maxDrainItems)
+				|| Number(now()) >= deadline
+				|| Date.now() >= wallDeadline
+			) break;
 			const envelope = item.envelope;
 			if (!validateEnvelope(envelope) || item.entry.name !== `${envelope.queue_id}.json`) {
 				const quarantineName = `corrupt_${sha256(item.entry.name).slice(0, 16)}_${randomUUID()}.json`;
@@ -1203,8 +2502,11 @@ export async function drainOutbox({
 				try { await rename(item.entry.path, join(paths.failed, quarantineName)); }
 				finally { await releaseMutation(); }
 				result.permanentFailures += 1;
+				result.permanentFailureBatches += 1;
+				markGroup("permanentFailure", null, item.entry.name);
 				continue;
 			}
+			const delivery = item.delivery ?? orderingDelivery(envelope);
 			const state = await stateFor(paths, envelope.queue_id);
 			const effectiveFingerprint = state.binding_fingerprint ?? envelope.credential_fingerprint ?? null;
 			if (!effectiveFingerprint) {
@@ -1227,6 +2529,12 @@ export async function drainOutbox({
 				result.backoffSkipped += 1;
 				continue;
 			}
+			if (!deliveryReady(delivery, deliveryGroups, envelope.credential_fingerprint)) {
+				result.orderBlocked += 1;
+				result.orderBlockedBatches += 1;
+				markGroup("orderBlocked", delivery, envelope.queue_id);
+				continue;
+			}
 
 			const inflightPath = queuePath(paths, "inflight", envelope.queue_id);
 			const releaseClaim = await acquireMutationLock(paths, 250);
@@ -1242,7 +2550,7 @@ export async function drainOutbox({
 			let response;
 			let responseData = null;
 			let transportError = null;
-			const remaining = Math.max(1, deadline - Number(now()));
+			const remaining = Math.max(1, Math.min(deadline - Number(now()), wallDeadline - Date.now()));
 			try {
 				const fetched = await boundedFetch(fetchFn, `${normalizedBaseUrl}${envelope.request.path}`, {
 					method: "POST",
@@ -1270,6 +2578,8 @@ export async function drainOutbox({
 					});
 					await rename(inflightPath, queuePath(paths, "pending", envelope.queue_id));
 					result.retried += 1;
+					result.retriedBatches += 1;
+					markGroup("retried", delivery, envelope.queue_id);
 					result.transportUnavailable = true;
 					break;
 				}
@@ -1277,8 +2587,15 @@ export async function drainOutbox({
 				const accepted = response.ok ? safeAcceptance(responseData, response.status) : null;
 				if (accepted) {
 					const contentDigest = contentDigestFromRequest(envelope.request);
+					const wireDelivery = delivery?.legacy ? null : delivery;
 					const tombstone = {
 						...accepted,
+						...(wireDelivery ? { delivery: wireDelivery } : {}),
+						...(wireDelivery ? {
+							conversation_id: envelope.request.body.conversationId,
+							group_created_at: envelope.created_at,
+							...(envelope.delivery_order == null ? {} : { delivery_order: envelope.delivery_order }),
+						} : {}),
 						queue_id: envelope.queue_id,
 						credential_fingerprint: effectiveFingerprint,
 						content_digest: contentDigest,
@@ -1291,12 +2608,35 @@ export async function drainOutbox({
 					await syncFile(donePath);
 					await unlink(queuePath(paths, "state", envelope.queue_id)).catch(() => {});
 					result.delivered += 1;
+					result.deliveredBatches += 1;
+					markGroup("delivered", delivery, envelope.queue_id);
+					if (delivery) {
+						const group = lifecycleGroup(deliveryGroups, delivery, envelope.credential_fingerprint);
+						group?.states.set(delivery.batchIndex, "done");
+						if (
+							group
+							&& !group.inconsistent
+							&& group.states.size === group.batchCount
+							&& [...group.states.values()].every((state) => state === "done" || state === "accepted")
+							&& !completedGroups.has(delivery.groupId)
+						) {
+							completedGroups.add(delivery.groupId);
+							result.completedDeliveryGroups += 1;
+						}
+					} else {
+						const legacyGroup = deliveryGroupKey(null, envelope.queue_id);
+						if (!completedGroups.has(legacyGroup)) {
+							completedGroups.add(legacyGroup);
+							result.completedDeliveryGroups += 1;
+						}
+					}
 					result.accepted.push({
 						queueId: envelope.queue_id,
 						sourcePacketId: accepted.source_packet_id,
 						receiptId: accepted.receipt_id,
 						jobId: accepted.job_id,
 						status: accepted.status,
+						...(wireDelivery ? { delivery: wireDelivery } : {}),
 					});
 					continue;
 				}
@@ -1324,7 +2664,10 @@ export async function drainOutbox({
 						last_http_status: status, updated_at: Number(now()), binding_fingerprint: effectiveFingerprint,
 					});
 					await rename(inflightPath, queuePath(paths, "pending", envelope.queue_id));
+					if (delivery) lifecycleGroup(deliveryGroups, delivery, envelope.credential_fingerprint)?.states.set(delivery.batchIndex, "pending");
 					result.retried += 1;
+					result.retriedBatches += 1;
+					markGroup("retried", delivery, envelope.queue_id);
 					continue;
 				}
 
@@ -1334,7 +2677,10 @@ export async function drainOutbox({
 					last_http_status: status, updated_at: Number(now()), binding_fingerprint: effectiveFingerprint,
 				});
 				await rename(inflightPath, queuePath(paths, "failed", envelope.queue_id));
+				if (delivery) lifecycleGroup(deliveryGroups, delivery, envelope.credential_fingerprint)?.states.set(delivery.batchIndex, "failed");
 				result.permanentFailures += 1;
+				result.permanentFailureBatches += 1;
+				markGroup("permanentFailure", delivery, envelope.queue_id);
 				if (!TERMINAL_HTTP_ERRORS.has(status) && !response.ok) continue;
 			} finally {
 				await releaseCompletion();
@@ -1368,6 +2714,8 @@ export async function bindOutbox({
 	if (!releaseDrain) throw new OutboxError("outbox_busy", "Another hook is delivering the local outbox.");
 	let releaseMutation;
 	let bound = 0;
+	const reboundIds = new Map();
+	const reboundStagesByDigest = new Map();
 	try {
 		releaseMutation = await acquireMutationLock(paths, 250);
 		if (!releaseMutation) throw new OutboxError("outbox_busy", "Another hook is updating the local outbox.");
@@ -1375,66 +2723,291 @@ export async function bindOutbox({
 		await finalizeAccepted(paths, actualPlatform);
 		await recoverInflight(paths);
 		await gcOutbox(paths, Date.now());
+		// A staged aggregate and its materialized batches are one credential-bound
+		// delivery unit. Selecting either identity must rebind the whole unit;
+		// otherwise a crash-repair stage could point at a manifest whose remaining
+		// batch identities are still bound to the old credential.
+		const effectiveWanted = wanted ? new Set(wanted) : null;
+		const manifests = [];
+		const manifestsByQueueId = new Map();
+		for (const entry of await safeEntries(paths.groups, paths.root)) {
+			const manifest = await readJson(entry.path);
+			if (!validateGroupManifest(manifest) || entry.name !== `${manifest?.queue_id}.json`) {
+				throw new OutboxSecurityError("A delivery-group manifest is corrupt and cannot be rebound.");
+			}
+			manifests.push({ entry, manifest });
+			manifestsByQueueId.set(manifest.queue_id, manifest);
+			if (effectiveWanted) {
+				if (
+					effectiveWanted.has(manifest.queue_id)
+					|| manifest.queue_ids.some((queueId) => effectiveWanted.has(queueId))
+				) {
+					effectiveWanted.add(manifest.queue_id);
+					for (const queueId of manifest.queue_ids) effectiveWanted.add(queueId);
+				}
+			}
+		}
+		const rawItems = [];
+		const rawQueueIdsByGroup = new Map();
 		for (const directory of RAW_DIRECTORIES) {
 			for (const entry of await safeEntries(paths[directory], paths.root)) {
 				const envelope = await readJson(entry.path);
 				if (!validateEnvelope(envelope) || entry.name !== `${envelope?.queue_id}.json`) {
 					throw new OutboxSecurityError("An outbox envelope is corrupt and cannot be rebound.");
 				}
-				if (wanted && !wanted.has(envelope.queue_id)) continue;
-				const state = await stateFor(paths, envelope.queue_id);
-				const current = state.binding_fingerprint ?? envelope.credential_fingerprint ?? null;
-				if (!includeUnbound && !current) continue;
-				const digest = contentDigestFromRequest(envelope.request);
-				const reboundQueueId = queueIdFor(digest, fingerprint);
-				if (
-					current === fingerprint
-					&& envelope.credential_fingerprint === fingerprint
-					&& envelope.queue_id === reboundQueueId
-				) continue;
+				rawItems.push({ directory, entry, envelope });
+				const delivery = envelopeDelivery(envelope);
+				if (!delivery) continue;
+				const siblings = rawQueueIdsByGroup.get(delivery.groupId) ?? [];
+				siblings.push(envelope.queue_id);
+				rawQueueIdsByGroup.set(delivery.groupId, siblings);
+			}
+		}
+		if (effectiveWanted) {
+			for (const siblingQueueIds of rawQueueIdsByGroup.values()) {
+				if (!siblingQueueIds.some((queueId) => effectiveWanted.has(queueId))) continue;
+				for (const queueId of siblingQueueIds) effectiveWanted.add(queueId);
+			}
+		}
+		const inactiveManifests = new Set();
+		const credentialChangingGroups = new Set();
+		for (const { manifest } of manifests) {
+			if (
+				effectiveWanted
+				&& !effectiveWanted.has(manifest.queue_id)
+				&& !manifest.queue_ids.some((queueId) => effectiveWanted.has(queueId))
+			) continue;
+			const stageInfo = await pathKind(queuePath(paths, "staged", manifest.queue_id));
+			const lifecycles = [];
+			for (const queueId of manifest.queue_ids) lifecycles.push(await lifecyclePath(paths, queueId));
+			const hasRaw = lifecycles.some((lifecycle) => lifecycle && RAW_DIRECTORIES.includes(lifecycle.name));
+			if (!stageInfo && !hasRaw) {
+				inactiveManifests.add(manifest.queue_id);
+				continue;
+			}
+			if (
+				manifest.credential_fingerprint !== fingerprint
+				&& (includeUnbound || manifest.credential_fingerprint)
+			) credentialChangingGroups.add(manifest.group_id);
+		}
+		for (const { envelope } of rawItems) {
+			if (effectiveWanted && !effectiveWanted.has(envelope.queue_id)) continue;
+			const state = await stateFor(paths, envelope.queue_id);
+			const current = state.binding_fingerprint ?? envelope.credential_fingerprint ?? null;
+			if (current === fingerprint || (!includeUnbound && !current)) continue;
+			const delivery = envelopeDelivery(envelope);
+			if (delivery) credentialChangingGroups.add(delivery.groupId);
+		}
+		const unsafeGroups = new Set();
+		if (credentialChangingGroups.size > 0) {
+			const lifecycleGroups = await deliveryLifecycle(paths);
+			for (const groupId of credentialChangingGroups) {
+				const unsafeIncarnation = [...lifecycleGroups.values()]
+					.filter((group) => group.groupId === groupId)
+					.some((group) => {
+						const hasAcceptedPrefix = [...group.states.values()]
+							.some((state) => state === "accepted" || state === "done");
+						const acceptedByForeignCredential = hasAcceptedPrefix && (
+							group.acceptedFingerprints.size === 0
+							|| [...group.acceptedFingerprints].some((acceptedFingerprint) => acceptedFingerprint !== fingerprint)
+						);
+						return groupIsNonterminal(group) && acceptedByForeignCredential;
+					});
+				if (unsafeIncarnation) {
+					if (wanted) {
+						throw new OutboxError(
+							"partially_accepted_group",
+							"An ordered delivery group is already partly accepted by another credential and cannot be split across destinations.",
+						);
+					}
+					unsafeGroups.add(groupId);
+				}
+			}
+		}
+		for (const entry of await safeEntries(paths.staged, paths.root)) {
+			const staged = await readJson(entry.path);
+			if (!validateStagedGroup(staged) || entry.name !== `${staged?.queue_id}.json`) {
+				throw new OutboxSecurityError("A staged delivery group is corrupt and cannot be rebound.");
+			}
+			if (effectiveWanted && !effectiveWanted.has(staged.queue_id)) continue;
+			if (unsafeGroups.has(manifestsByQueueId.get(staged.queue_id)?.group_id)) continue;
+			const current = staged.credential_fingerprint ?? null;
+			if (!includeUnbound && !current) continue;
+			const reboundQueueId = queueIdFor(staged.content_digest, fingerprint);
+			const rebound = { ...staged, queue_id: reboundQueueId, credential_fingerprint: fingerprint };
+			if (!validateStagedGroup(rebound, reboundQueueId)) throw new OutboxSecurityError("The rebound staged-group identity is invalid.");
+			const targetPath = queuePath(paths, "staged", reboundQueueId);
+			const targetInfo = await pathKind(targetPath);
+			let retainedStage = rebound;
+			if (targetInfo) {
+				const target = await readJson(targetPath);
+				if (!validateStagedGroup(target, reboundQueueId) || target.content_digest !== staged.content_digest) {
+					throw new OutboxSecurityError("A rebound staged-group identity conflicts with different content.");
+				}
+				const sourceIsEarlier = compareGroupPosition(
+					{ deliveryOrder: rebound.delivery_order, createdAt: rebound.created_at, groupId: staged.queue_id },
+					{ deliveryOrder: target.delivery_order, createdAt: target.created_at, groupId: target.queue_id },
+				) < 0;
+				retainedStage = sourceIsEarlier ? rebound : target;
+				if (sourceIsEarlier && canonicalJson(target) !== canonicalJson(rebound)) {
+					await atomicJson(paths, actualPlatform, targetPath, rebound);
+				}
+			} else {
+				await atomicJson(paths, actualPlatform, targetPath, rebound, { exclusive: true });
+			}
+			reboundStagesByDigest.set(rebound.content_digest, retainedStage);
+			if (current === fingerprint && staged.queue_id === reboundQueueId) continue;
+			if (staged.queue_id !== reboundQueueId) {
+				await unlink(entry.path);
+				await syncDirectory(paths.staged, actualPlatform);
+			}
+			bound += 1;
+		}
+		// A batch-zero identity is the group rebind commit point. Rekey every later
+		// sibling first, so a crash can only leave an undeliverable mixed-key group;
+		// rerunning bind safely completes it before batch zero can be accepted.
+		const orderedRawItems = rawItems.slice().sort((left, right) =>
+			Number(envelopeDelivery(right.envelope)?.batchIndex ?? 0)
+			- Number(envelopeDelivery(left.envelope)?.batchIndex ?? 0));
+		for (const { directory, entry, envelope } of orderedRawItems) {
+			if (effectiveWanted && !effectiveWanted.has(envelope.queue_id)) continue;
+			if (unsafeGroups.has(envelopeDelivery(envelope)?.groupId)) continue;
+			const state = await stateFor(paths, envelope.queue_id);
+			const current = state.binding_fingerprint ?? envelope.credential_fingerprint ?? null;
+			if (!includeUnbound && !current) continue;
+			const digest = contentDigestFromRequest(envelope.request);
+			const reboundQueueId = queueIdFor(digest, fingerprint);
+			reboundIds.set(envelope.queue_id, reboundQueueId);
+			if (
+				current === fingerprint
+				&& envelope.credential_fingerprint === fingerprint
+				&& envelope.queue_id === reboundQueueId
+			) continue;
 
-				const reboundEnvelope = {
-					...envelope,
+			const reboundEnvelope = {
+				...envelope,
+				queue_id: reboundQueueId,
+				credential_fingerprint: fingerprint,
+			};
+			if (!validateEnvelope(reboundEnvelope)) throw new OutboxSecurityError("The rebound envelope identity is invalid.");
+			const target = await lifecyclePath(paths, reboundQueueId);
+			if (target && RAW_DIRECTORIES.includes(target.name)) {
+				if (target.value.request_sha256 !== envelope.request_sha256) {
+					throw new OutboxSecurityError("A rebound queue identity conflicts with different content.");
+				}
+				const delivery = envelopeDelivery(reboundEnvelope);
+				const sourceIsEarlier = compareGroupPosition(
+					{
+						deliveryOrder: reboundEnvelope.delivery_order,
+						createdAt: reboundEnvelope.created_at,
+						groupId: delivery?.groupId ?? `legacy:${reboundEnvelope.queue_id}`,
+					},
+					{
+						deliveryOrder: target.value.delivery_order,
+						createdAt: target.value.created_at,
+						groupId: delivery?.groupId ?? `legacy:${target.value.queue_id}`,
+					},
+				) < 0;
+				if (sourceIsEarlier && canonicalJson(target.value) !== canonicalJson(reboundEnvelope)) {
+					await atomicJson(paths, actualPlatform, target.path, reboundEnvelope);
+				}
+			} else if (!target) {
+				await atomicJson(
+					paths,
+					actualPlatform,
+					queuePath(paths, directory, reboundQueueId),
+					reboundEnvelope,
+					{ exclusive: true },
+				);
+			}
+
+			const targetNeedsState = !target || RAW_DIRECTORIES.includes(target.name);
+			const targetState = target && targetNeedsState ? await stateFor(paths, reboundQueueId) : null;
+			if (envelope.queue_id !== reboundQueueId) {
+				await unlink(entry.path);
+				await unlink(queuePath(paths, "state", envelope.queue_id)).catch(() => {});
+				await syncDirectory(paths[directory], actualPlatform);
+			}
+			if (targetNeedsState) {
+				// Once the target envelope is durable its embedded fingerprint is enough
+				// for crash recovery. Retire the source before the metadata temp write so
+				// copy-before-delete never consumes a second raw-entry reserve.
+				await writeState(paths, actualPlatform, reboundQueueId, {
+					...state,
+					...(targetState ?? {}),
+					attempts: Math.max(Number(state.attempts ?? 0), Number(targetState?.attempts ?? 0)),
+					binding_fingerprint: fingerprint,
+					binding_updated_at: Date.now(),
+					next_attempt_at: 0,
+				});
+			}
+			bound += 1;
+		}
+		for (const entry of await safeEntries(paths.groups, paths.root)) {
+			const manifest = await readJson(entry.path);
+			if (!validateGroupManifest(manifest) || entry.name !== `${manifest?.queue_id}.json`) {
+				throw new OutboxSecurityError("A delivery-group manifest is corrupt and cannot be rebound.");
+			}
+			if (
+				effectiveWanted
+				&& !effectiveWanted.has(manifest.queue_id)
+				&& !manifest.queue_ids.some((queueId) => effectiveWanted.has(queueId))
+			) continue;
+			if (inactiveManifests.has(manifest.queue_id)) continue;
+			if (unsafeGroups.has(manifest.group_id)) continue;
+			const reboundQueueId = queueIdFor(manifest.content_digest, fingerprint);
+			const reboundStage = reboundStagesByDigest.get(manifest.content_digest);
+			let rebound;
+			if (reboundStage) {
+				const group = buildEnvelopes({
+					prepared: {
+						sessionHash: reboundStage.session_hash,
+						conversationId: reboundStage.conversation_id,
+						safeMessages: reboundStage.messages,
+						safeScope: reboundStage.memory_scope,
+						capture: reboundStage.capture,
+						redactions: {},
+					},
+					fingerprint,
+					createdAt: reboundStage.created_at,
+					deliveryOrder: reboundStage.delivery_order,
+				});
+				rebound = manifestFromMaterialized(reboundStage, group, () => manifest.materialized_at);
+			} else {
+				rebound = {
+					...manifest,
 					queue_id: reboundQueueId,
 					credential_fingerprint: fingerprint,
+					queue_ids: manifest.queue_ids.map((queueId) => reboundIds.get(queueId) ?? queueId),
 				};
-				if (!validateEnvelope(reboundEnvelope)) throw new OutboxSecurityError("The rebound envelope identity is invalid.");
-				const target = await lifecyclePath(paths, reboundQueueId);
-				if (target && RAW_DIRECTORIES.includes(target.name)) {
-					if (target.value.request_sha256 !== envelope.request_sha256) {
-						throw new OutboxSecurityError("A rebound queue identity conflicts with different content.");
+			}
+			if (!validateGroupManifest(rebound, reboundQueueId)) throw new OutboxSecurityError("The rebound delivery-group manifest is invalid.");
+			const targetPath = queuePath(paths, "groups", reboundQueueId);
+			if (reboundQueueId === manifest.queue_id) {
+				if (canonicalJson(manifest) !== canonicalJson(rebound)) {
+					await atomicJson(paths, actualPlatform, targetPath, rebound);
+				}
+			} else {
+				const targetInfo = await pathKind(targetPath);
+				if (targetInfo) {
+					const target = await readJson(targetPath);
+					if (!validateGroupManifest(target, reboundQueueId) || target.group_id !== rebound.group_id) {
+						throw new OutboxSecurityError("A rebound delivery-group manifest conflicts with different content.");
 					}
-				} else if (!target) {
-					await atomicJson(
-						paths,
-						actualPlatform,
-						queuePath(paths, directory, reboundQueueId),
-						reboundEnvelope,
-						{ exclusive: true },
-					);
-				}
-
-				if (!target || RAW_DIRECTORIES.includes(target.name)) {
-					const targetState = target ? await stateFor(paths, reboundQueueId) : null;
-					await writeState(paths, actualPlatform, reboundQueueId, {
-						...state,
-						...(targetState ?? {}),
-						attempts: Math.max(Number(state.attempts ?? 0), Number(targetState?.attempts ?? 0)),
-						binding_fingerprint: fingerprint,
-						binding_updated_at: Date.now(),
-						next_attempt_at: 0,
-					});
-				}
-				if (envelope.queue_id !== reboundQueueId) {
-					await unlink(entry.path);
-					await unlink(queuePath(paths, "state", envelope.queue_id)).catch(() => {});
-					await syncDirectory(paths[directory], actualPlatform);
-				}
-				bound += 1;
+					if (canonicalJson(target) !== canonicalJson(rebound)) {
+						await atomicJson(paths, actualPlatform, targetPath, rebound);
+					}
+				} else await atomicJson(paths, actualPlatform, targetPath, rebound, { exclusive: true });
+				await unlink(entry.path);
+				await syncDirectory(paths.groups, actualPlatform);
 			}
 		}
 		await unlink(join(paths.control, "auth-block.json")).catch(() => {});
-		return { ok: true, bound };
+		return {
+			ok: true,
+			bound,
+			...(unsafeGroups.size > 0 ? { skippedPartiallyAcceptedGroups: unsafeGroups.size } : {}),
+		};
 	} finally {
 		await releaseMutation?.();
 		await releaseDrain();
@@ -1482,7 +3055,7 @@ export async function inspectOutbox({
 	let countsTruncated = false;
 	const fingerprint = credentialFingerprint(apiKey, normalizeDeliveryBaseUrl(baseUrl));
 	const entriesByName = {};
-	for (const name of ["tmp", "pending", "inflight", "accepted", "done", "failed"]) {
+	for (const name of ["tmp", "staged", "groups", "pending", "inflight", "accepted", "done", "failed"]) {
 		const entries = await safeEntries(paths[name], paths.root, {
 			maxEntries: name === "done" ? MAX_HEALTH_TOMBSTONES : Infinity,
 		});
@@ -1497,6 +3070,16 @@ export async function inspectOutbox({
 			if (name === "accepted" || name === "done") {
 				const value = await readJson(entry.path);
 				if (!validateTombstone(value) || entry.name !== `${value.queue_id}.json`) corruptEntries += 1;
+			} else if (name === "staged") {
+				const value = await readJson(entry.path);
+				if (
+					entry.info.size > OUTBOX_LIMITS.maxStagedGroupBytes
+					|| !validateStagedGroup(value)
+					|| entry.name !== `${value.queue_id}.json`
+				) corruptEntries += 1;
+			} else if (name === "groups") {
+				const value = await readJson(entry.path);
+				if (!validateGroupManifest(value) || entry.name !== `${value.queue_id}.json`) corruptEntries += 1;
 			} else if (RAW_DIRECTORIES.includes(name)) {
 				const value = await readJson(entry.path);
 				if (!validateEnvelope(value) || entry.name !== `${value.queue_id}.json`) corruptEntries += 1;
@@ -1505,12 +3088,22 @@ export async function inspectOutbox({
 				if (!validExpectedTemporary(value)) corruptEntries += 1;
 			}
 		}
-		if (name === "tmp" || RAW_DIRECTORIES.includes(name)) {
+		if (name === "tmp" || name === "staged" || RAW_DIRECTORIES.includes(name)) {
 			rawBytes += entries.reduce((sum, entry) => sum + (entry.info.isFile() ? entry.info.size : 0), 0);
 		}
-		if (!["tmp", "pending", "inflight"].includes(name)) continue;
+		if (!["tmp", "staged", "pending", "inflight"].includes(name)) continue;
 		for (const entry of entries) {
 			const envelope = await readJson(entry.path);
+			if (name === "staged") {
+				if (!validateStagedGroup(envelope) || entry.name !== `${envelope.queue_id}.json`) continue;
+				oldestPendingAt = oldestPendingAt === null ? Number(envelope.created_at) : Math.min(oldestPendingAt, Number(envelope.created_at));
+				const bound = envelope.credential_fingerprint ?? null;
+				if (!bound || !fingerprint || bound !== fingerprint) {
+					bindingRequired += 1;
+					if (bound && fingerprint && bound !== fingerprint) credentialMismatch += 1;
+				}
+				continue;
+			}
 			if (!validateEnvelope(envelope)) continue;
 			if (name !== "tmp" && entry.name !== `${envelope.queue_id}.json`) continue;
 			oldestPendingAt = oldestPendingAt === null ? Number(envelope.created_at) : Math.min(oldestPendingAt, Number(envelope.created_at));
@@ -1538,6 +3131,7 @@ export async function inspectOutbox({
 		&& (!fingerprint || !authBlock.credential_fingerprint || authBlock.credential_fingerprint === fingerprint),
 	);
 	const doneEntries = entriesByName.done;
+	const deliveryGroups = summarizeDeliveryGroups(await deliveryLifecycle(paths));
 	let lastAccepted = null;
 	for (const entry of doneEntries) {
 		const value = await readJson(entry.path);
@@ -1548,11 +3142,16 @@ export async function inspectOutbox({
 				sourcePacketId: value.source_packet_id ?? null,
 				receiptId: value.receipt_id ?? null,
 				status: safeIdentifier(value.status, 80) ?? "accepted",
+				...(value.delivery ? { delivery: normalizeDeliveryMetadata(value.delivery) } : {}),
 			};
 		}
 	}
 	return {
-		healthy: counts.failed === 0 && corruptEntries === 0 && !authBlocked && bindingRequired === 0,
+		healthy: counts.failed === 0
+			&& corruptEntries === 0
+			&& !authBlocked
+			&& bindingRequired === 0
+			&& deliveryGroups.incomplete === 0,
 		version: 1,
 		counts,
 		rawBytes,
@@ -1565,6 +3164,7 @@ export async function inspectOutbox({
 		corruptEntries,
 		countsTruncated,
 		nextAttemptAt,
+		deliveryGroups,
 		lastAccepted,
 	};
 }

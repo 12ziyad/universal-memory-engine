@@ -71,10 +71,12 @@ function buildUserPrompt(packet, shortlist) {
 	return JSON.stringify(
 		{
 			instructions: "Extract memory from new_slice only. Resolve references using bridge_context. Ignore assistant_context as a source.",
-			existing_nodes: shortlist,
-			new_slice: packet.new_slice,
 			bridge_context: packet.bridge_context,
 			assistant_context: packet.assistant_context,
+			existing_nodes: shortlist,
+			// Keep the authoritative source last. The central model-input guard
+			// preserves the useful tail when an unusually large prompt is bounded.
+			new_slice: packet.new_slice,
 		},
 		null,
 		2,

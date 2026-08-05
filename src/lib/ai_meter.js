@@ -10,9 +10,9 @@
  *
  * Two rules this module must never break:
  *
- *   1. It cannot change behaviour. `runAi` forwards arguments untouched and
- *      returns the binding's response as-is. Every accounting step is wrapped
- *      so a metering bug can never fail a save.
+ *   1. In-budget inputs are forwarded untouched. Over-budget chat inputs pass
+ *      through the deterministic model-input boundary before the binding, and
+ *      an unsafe fixed prompt is rejected explicitly before inference.
  *   2. `neurons` is only ever set from a number Workers AI actually returned.
  *      Converting tokens to neurons is a guess; a guess does not belong in a
  *      column named after the billed unit. Conversion, when needed, happens in
@@ -21,8 +21,22 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { newId } from "./ids.js";
+import { guardModelInput } from "./model_input.js";
 
 const meterStore = new AsyncLocalStorage();
+
+function logInputBoundary(event, model, task, boundary) {
+	try {
+		console.warn(JSON.stringify({
+			event,
+			model: String(model ?? "unknown"),
+			task: task == null ? null : String(task),
+			...boundary,
+		}));
+	} catch {
+		// Boundary enforcement must not depend on observability succeeding.
+	}
+}
 
 /** The meter for the work currently running, or null outside a metered scope. */
 export function currentMeter() {
@@ -75,7 +89,7 @@ export function readUsage(res) {
 }
 
 /**
- * THE call site. Forwards to the binding unchanged and records what it cost.
+ * THE call site. Enforces the shared chat-context boundary, then records cost.
  *
  * `options` is forwarded only when defined, so a model that rejects a third
  * argument behaves exactly as it did before this wrapper existed.
@@ -84,13 +98,24 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 	const startedAt = Date.now();
 	let res;
 	let ok = 1;
+	let inputBoundary = null;
 	try {
+		const guarded = guardModelInput(inputs, { model });
+		inputs = guarded.inputs;
+		inputBoundary = guarded.boundary;
+		if (inputBoundary?.bounded) {
+			logInputBoundary("ai_input_bounded", model, meta.task, inputBoundary);
+		}
 		res = options === undefined
 			? await env.AI.run(model, inputs)
 			: await env.AI.run(model, inputs, options);
 		return res;
 	} catch (error) {
 		ok = 0;
+		if (!inputBoundary && error?.code === "model_input_boundary") {
+			inputBoundary = error.metadata ?? null;
+			logInputBoundary("ai_input_blocked", model, meta.task, inputBoundary);
+		}
 		throw error;
 	} finally {
 		// Accounting must never be able to break a save.
@@ -108,6 +133,7 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 					duration_ms: Date.now() - startedAt,
 					ok,
 					raw_usage: usage.raw,
+					input_boundary: inputBoundary?.bounded || inputBoundary?.error ? inputBoundary : null,
 				});
 			}
 		} catch (meterError) {
@@ -158,7 +184,9 @@ export async function flushAiMeter(env, userId, meter) {
 			call.neurons,
 			call.duration_ms,
 			call.ok,
-			call.raw_usage ? JSON.stringify(call.raw_usage) : null,
+			call.input_boundary
+				? JSON.stringify({ provider: call.raw_usage, itsuki_input_boundary: call.input_boundary })
+				: call.raw_usage ? JSON.stringify(call.raw_usage) : null,
 			now,
 		)));
 	} catch (error) {

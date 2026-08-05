@@ -32,7 +32,13 @@
 import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
-import { activeJobDepth, createMemoryJob, storeReceipt, updateMemoryJob } from "../lib/db.js";
+import {
+	activeJobDepth,
+	claimMemoryJob,
+	MEMORY_JOB_ACTIVE_LIMIT,
+	storeReceipt,
+	updateMemoryJob,
+} from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { runExtraction } from "./extract.js";
@@ -43,13 +49,36 @@ import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.j
 import { classifyMessage } from "./trigger.js";
 import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
-import { settleStagedText, stageMemoryText } from "./staged_text.js";
+import { settleStagedText } from "./staged_text.js";
 import { runAi } from "../lib/ai_meter.js";
 import { responseText, extractJson } from "./llm.js";
 
 const SOURCE = "save_conversation";
 const SOURCE_MODE = "mcp_save";
 const JOB_TYPE = "mcp_enrich";
+const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
+
+async function mcpExtractionRunId(userId, jobId, attempt) {
+	const bytes = new TextEncoder().encode(`${userId}\u0000${jobId}\u0000${attempt}`);
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	return `run_mcp_${hex.slice(0, 48)}`;
+}
+
+function mcpTestFault(input) {
+	return input?.testOverrides?._testMcpFault ?? input?._testMcpFault ?? null;
+}
+
+function maybeInjectMcpFault(env, input, phase) {
+	if (
+		String(env.DO_WAKE_ALARMS ?? "true") === "false"
+		&& mcpTestFault(input) === phase
+	) {
+		const error = new Error(`injected MCP interruption (${phase})`);
+		error.code = "MCP_TEST_FAULT";
+		throw error;
+	}
+}
 
 function projectPayload(input) {
 	const scope = normalizeProjectScope(input);
@@ -295,7 +324,15 @@ function commandResult({ mode = "conversation_collect", ok = true, error = null,
 	};
 }
 
-async function storeStagedReceipt(env, userId, sourcePacket, { received, stagedFacts, pageId, title, jobId }) {
+async function storeStagedReceipt(env, userId, sourcePacket, {
+	received,
+	stagedFacts,
+	pageId,
+	title,
+	jobId,
+	receiptId: existingReceiptId = null,
+}) {
+	const receiptId = existingReceiptId ?? `receipt_mcp_stage_${jobId}`;
 	const receipt = emptyReceipt("staged", "captured — extracting facts and relationships in the background", {
 		source: SOURCE,
 		source_mode: SOURCE_MODE,
@@ -309,10 +346,48 @@ async function storeStagedReceipt(env, userId, sourcePacket, { received, stagedF
 	receipt.page_id = pageId;
 	receipt.page_title = title;
 	receipt.job_id = jobId;
+	receipt.id = receiptId;
 	const summary = `Staged ✓ "${title}" — ${stagedFacts} message(s) captured. Facts and relationships are being extracted now (~1 min); this save is final only when its page shows enriched.`;
-	const id = await storeReceipt(env, userId, SOURCE, receipt, summary);
-	if (id) receipt.id = id;
-	return { receipt, summary, receiptId: id ?? null };
+	const saved = receipt.saved ?? {};
+	await env.DB.prepare(
+		`INSERT INTO receipts
+			(id, user_id, source, outcome, summary, saved_total, saved_nodes, saved_slices,
+			 saved_events, saved_edges, saved_candidates, updated_nodes, skipped, received,
+			 digested, detail, created_at, saved_pages, source_packet_id, idempotency_key,
+			 scope_json, source_mode)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO NOTHING`,
+	).bind(
+		receiptId,
+		userId,
+		SOURCE,
+		receipt.outcome ?? "staged",
+		summary,
+		receipt.savedTotal ?? 0,
+		saved.nodes ?? 0,
+		saved.slices ?? 0,
+		saved.events ?? 0,
+		saved.edges ?? 0,
+		saved.candidates ?? 0,
+		saved.updatedNodes ?? 0,
+		receipt.skipped ?? 0,
+		receipt.received ?? received,
+		receipt.digested ?? null,
+		JSON.stringify(receipt),
+		receipt.created_at ?? Date.now(),
+		saved.pages ?? 0,
+		receipt.source_packet_id ?? null,
+		receipt.idempotency_key ?? null,
+		receipt.scope_json ?? null,
+		receipt.source_mode ?? SOURCE_MODE,
+	).run();
+	const stored = await env.DB.prepare(
+		"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(receiptId, userId).first();
+	if (!stored) throw new Error("MCP staged receipt could not be durably created");
+	let persisted = receipt;
+	try { persisted = JSON.parse(stored.detail ?? "null") ?? receipt; } catch {}
+	return { receipt: persisted, summary: stored.summary ?? summary, receiptId };
 }
 
 async function insertProvisionalPage(env, userId, { pageId, title, userLines, derivedLines, sourcePacket, receiptId, now }) {
@@ -322,7 +397,8 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 			(id, user_id, node_kind, source_mode, title, canonical_title, short_summary, full_markdown,
 			 source_conversation_id, source_packet_id, input_hash, idempotency_key, scope_json, receipt_id,
 			 created_at, updated_at, last_seen_at, heat_score, confidence, enrich_status, project_id, project_name)
-		 VALUES (?, ?, 'memory_page', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0.6, 'staged', ?, ?)`,
+		 VALUES (?, ?, 'memory_page', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0.6, 'staged', ?, ?)
+		 ON CONFLICT(id) DO NOTHING`,
 	).bind(
 		pageId,
 		userId,
@@ -343,6 +419,58 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 		meta.project_id ?? null,
 		meta.project_name ?? null,
 	).run();
+	const stored = await env.DB.prepare(
+		"SELECT id, user_id, source_packet_id, input_hash FROM memory_pages WHERE id = ? LIMIT 1",
+	).bind(pageId).first();
+	if (
+		!stored
+		|| stored.user_id !== userId
+		|| stored.source_packet_id !== sourcePacket?.id
+		|| stored.input_hash !== sourcePacket?.content_hash
+	) {
+		throw new Error("MCP provisional page ownership is inconsistent");
+	}
+	return stored;
+}
+
+async function stageMcpMemoryTextOnce(env, userId, {
+	jobId,
+	sourcePacketId,
+	messages,
+	projectId = null,
+	projectName = null,
+}) {
+	const rows = (messages ?? [])
+		.filter((message) => (message?.role ?? "user") === "user")
+		.map((message) => ({ id: message?.id ?? null, text: String(message?.content ?? "").trim() }))
+		.filter((message) => message.text)
+		.slice(0, 40);
+	if (!rows.length) return { staged: 0 };
+	const now = Date.now();
+	try {
+		await env.DB.batch(rows.map((message, index) => env.DB.prepare(
+			`INSERT INTO staged_memories
+				(id, user_id, job_id, source_packet_id, lane, message_id, text, created_at,
+				 settled_at, project_id, project_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+			 ON CONFLICT(id) DO NOTHING`,
+		).bind(
+			`staged_mcp_${jobId}_${index}`,
+			userId,
+			jobId,
+			sourcePacketId,
+			SOURCE_MODE,
+			message.id,
+			message.text.slice(0, 2000),
+			now,
+			projectId,
+			projectName,
+		)));
+		return { staged: rows.length };
+	} catch (error) {
+		console.warn("MCP staged text failed:", error?.message ?? error);
+		return { staged: 0, error: String(error?.message ?? error) };
+	}
 }
 
 /**
@@ -353,15 +481,111 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 async function findExistingJob(env, userId, idempotencyKey) {
 	if (!idempotencyKey) return null;
 	const job = await env.DB.prepare(
-		"SELECT id, status, payload_json FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? AND type = ? LIMIT 1",
-	).bind(userId, idempotencyKey, JOB_TYPE).first();
+		`SELECT id, status, type, payload_json, receipt_id, source_packet_id
+		 FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
+	).bind(userId, idempotencyKey).first();
 	if (!job) return null;
-	let pageId = null;
-	try { pageId = JSON.parse(job.payload_json ?? "{}")?.pageId ?? null; } catch {}
+	let payload = {};
+	try { payload = JSON.parse(job.payload_json ?? "{}") ?? {}; } catch {}
+	if (job.type !== JOB_TYPE) return { job, page: null, payload };
+	const pageId = payload.pageId ?? null;
 	const page = pageId
 		? await env.DB.prepare("SELECT id, title, enrich_status FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL").bind(pageId, userId).first()
 		: null;
-	return { job, page };
+	return { job, page, payload };
+}
+
+function idempotencyConflictResult(normalized, existingSourceId = null) {
+	const summary = "That idempotency key is already bound to different content or a different save lane. Send the original request or use a new key.";
+	return commandResult({
+		ok: false,
+		error: "idempotency_conflict",
+		httpStatus: 409,
+		fired: false,
+		processing: false,
+		summary,
+		sourcePacket: normalized.packet,
+		extra: {
+			idempotencyConflict: true,
+			idempotency_key: normalized.packet.idempotency_key,
+			source_packet_id: existingSourceId,
+			retryable: false,
+		},
+	});
+}
+
+async function duplicateMcpResult(env, userId, normalized, sourcePacket, existing) {
+	const status = existing.page?.enrich_status ?? existing.job.status ?? "staged";
+	const stillProcessing = ["queued", "staged", "processing"].includes(status);
+	const title = existing.page?.title ?? null;
+	let storedReceipt = null;
+	if (existing.job.receipt_id) {
+		const row = await env.DB.prepare(
+			"SELECT detail FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(existing.job.receipt_id, userId).first();
+		try { storedReceipt = JSON.parse(row?.detail ?? "null"); } catch {}
+	}
+	const receipt = storedReceipt
+		? { ...storedReceipt }
+		: emptyReceipt("duplicate", "this exact conversation was already accepted", {
+			source: SOURCE,
+			source_mode: SOURCE_MODE,
+			...sourceMeta(sourcePacket),
+			received: normalized.messages.length,
+		});
+	receipt.page_id = existing.page?.id ?? receipt.page_id ?? null;
+	receipt.page_title = title ?? receipt.page_title ?? null;
+	receipt.status = status;
+	receipt.processing = stillProcessing;
+	receipt.final = !stillProcessing;
+	receipt.duplicate = true;
+	const summary = title
+		? (stillProcessing
+			? `Already staged - "${title}" is still being enriched in the background.`
+			: `Already saved - "${title}" (${status}).`)
+		: `Already accepted - this exact conversation was staged earlier (${status}); its page is not currently present.`;
+	return commandResult({
+		fired: false,
+		processing: stillProcessing,
+		summary,
+		receipt,
+		receiptId: existing.job.receipt_id ?? receipt.id ?? null,
+		sourcePacket,
+		extra: {
+			page_id: existing.page?.id ?? null,
+			title,
+			staged_facts: null,
+			job_status: status,
+			job_id: existing.job.id,
+			duplicate: true,
+		},
+	});
+}
+
+function ignoredMcpReceiptId(sourcePacket) {
+	return sourcePacket?.id ? `receipt_mcp_ignored_${sourcePacket.id}` : null;
+}
+
+async function replayIgnoredMcpResult(env, userId, normalized, sourcePacket) {
+	const id = ignoredMcpReceiptId(sourcePacket);
+	if (!id) return null;
+	const row = await env.DB.prepare(
+		"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(id, userId).first();
+	if (!row) return null;
+	let receipt = null;
+	try { receipt = JSON.parse(row.detail ?? "null"); } catch {}
+	if (!receipt) return null;
+	receipt = { ...receipt, id, duplicate: true, final: true, processing: false };
+	return commandResult({
+		fired: false,
+		processing: false,
+		summary: row.summary ?? "Saved: 0. Reason: nothing durable here.",
+		receipt,
+		receiptId: id,
+		sourcePacket,
+		extra: { duplicate: true, job_status: "completed" },
+	});
 }
 
 /**
@@ -397,6 +621,12 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		scope: requestedScope,
 	});
 	const received = normalized.messages.length;
+	// Check the account-wide job namespace before source ownership is created.
+	// A colliding ingest/internal key is a clean 409 with zero mutation.
+	let existing = await findExistingJob(env, userId, normalized.packet.idempotency_key);
+	if (existing && existing.job.type !== JOB_TYPE) {
+		return idempotencyConflictResult(normalized, existing.job.source_packet_id ?? null);
+	}
 
 	// Size cap — a clear refusal beats a silent truncation.
 	const totalChars = normalized.messages.reduce((n, m) => n + m.content.length, 0);
@@ -419,43 +649,30 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		});
 	}
 
-	// Duplicate re-send → answer with what already exists, do nothing twice.
-	const existing = await findExistingJob(env, userId, normalized.packet.idempotency_key);
-	if (existing) {
-		const status = existing.page?.enrich_status ?? existing.job.status ?? "staged";
-		const stillProcessing = status === "staged";
-		const title = existing.page?.title ?? null;
-		const receipt = emptyReceipt("duplicate", "this exact conversation was already saved", {
-			source: SOURCE, source_mode: SOURCE_MODE, ...requestedProject, received,
-		});
-		receipt.page_id = existing.page?.id ?? null;
-		receipt.page_title = title;
-		receipt.status = status;
-		receipt.processing = stillProcessing;
-		receipt.final = !stillProcessing;
-		// No title means the page this job wrote is gone (deleted since). The
-		// acceptance still happened, so say that and not "already saved" — the
-		// saved thing may no longer exist.
-		const summary = title
-			? (stillProcessing
-				? `Already staged — "${title}" is still being enriched in the background.`
-				: `Already saved — "${title}" (${status}).`)
-			: `Already accepted — this exact conversation was staged earlier (${status}); its page is no longer present.`;
-		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
-		return commandResult({
-			fired: false,
-			processing: stillProcessing,
-			summary,
-			receipt,
-			receiptId,
-			sourcePacket: normalized.packet,
-			extra: { page_id: existing.page?.id ?? null, title, staged_facts: null, job_status: status, duplicate: true },
-		});
+	// The source packet is the account-wide, content-bound ownership record.
+	// source_type and source_mode participate in its hash, so a key cannot move
+	// between HTTP ingest and MCP (or between two different MCP payloads).
+	const sourcePacket = await storeSourcePacket(env, normalized.packet, { immutableIdempotency: true });
+	if (sourcePacket?.idempotency_conflict) {
+		return idempotencyConflictResult(normalized, sourcePacket.id ?? null);
 	}
+	const ignoredReplay = await replayIgnoredMcpResult(env, userId, normalized, sourcePacket);
+	if (ignoredReplay) return ignoredReplay;
+
+	// Terminal work is a pure replay. Active work continues through the repair
+	// path below: its D1 claim may exist while its receipt/page/DO enqueue does
+	// not, depending on where the first isolate stopped.
+	if (existing?.job.source_packet_id && existing.job.source_packet_id !== sourcePacket?.id) {
+		return idempotencyConflictResult(normalized, existing.job.source_packet_id);
+	}
+	if (existing && TERMINAL_JOB_STATES.has(existing.job.status)) {
+		return duplicateMcpResult(env, userId, normalized, sourcePacket, existing);
+	}
+	const recovering = Boolean(existing);
 
 	// 1.7 backpressure — every lane refuses clearly at the same depth cap.
 	const queueDepth = await activeJobDepth(env, userId);
-	if (queueDepth >= 200) {
+	if (!recovering && queueDepth >= MEMORY_JOB_ACTIVE_LIMIT) {
 		const receipt = emptyReceipt("queue_full", "too much unprocessed work — retry shortly", {
 			source: SOURCE, source_mode: SOURCE_MODE, ...requestedProject, received,
 		});
@@ -468,7 +685,6 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		});
 	}
 
-	const sourcePacket = await storeSourcePacket(env, normalized.packet);
 	const project = projectPayload(sourcePacket);
 	const durable = durableUserMessages(normalized.messages);
 
@@ -481,8 +697,9 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			received,
 		});
 		receipt.skipped = received;
+		receipt.id = ignoredMcpReceiptId(sourcePacket);
 		const summary = "Saved: 0. Reason: nothing durable here (chatter, questions, or instructions only).";
-		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
+		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary, { strict: true });
 		return commandResult({ fired: false, processing: false, summary, receipt, receiptId, sourcePacket });
 	}
 
@@ -501,33 +718,93 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			.slice(0, 40)
 		: [];
 	const lastTs = normalized.messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0) || now;
-	const title = provisionalTitle(userLines, lastTs);
-	const pageId = newId("page");
+	const proposedTitle = provisionalTitle(userLines, lastTs);
+	const proposedPageId = newId("page");
+	const proposedJobId = newId("job");
+	const proposedReceiptId = `receipt_mcp_stage_${proposedJobId}`;
+	let jobClaim = existing
+		? { claimed: false, id: existing.job.id, job: existing.job }
+		: await claimMemoryJob(env, userId, {
+			id: proposedJobId,
+			type: JOB_TYPE,
+			status: "staged",
+			idempotencyKey: sourcePacket?.idempotency_key ?? normalized.packet.idempotency_key,
+			sourcePacketId: sourcePacket?.id ?? null,
+			payload: {
+				pageId: proposedPageId,
+				title: proposedTitle,
+				stagedReceiptId: proposedReceiptId,
+				sourceContentHash: sourcePacket?.content_hash ?? null,
+				...project,
+			},
+		});
+	if (jobClaim.capacityExceeded) {
+		const summary = "Your memory queue is full - give it a moment to catch up, then retry this save.";
+		return commandResult({
+			ok: false,
+			error: "queue_full",
+			httpStatus: 429,
+			fired: false,
+			processing: false,
+			summary,
+			sourcePacket,
+			extra: {
+				backpressure: true,
+				queue_depth: jobClaim.activeLimit,
+				retry_after_s: 30,
+			},
+		});
+	}
+	if (!jobClaim.claimed) {
+		if (!jobClaim.job) throw new Error("MCP memory job claim was lost without an existing job");
+		if (
+			jobClaim.job.type !== JOB_TYPE
+			|| (jobClaim.job.source_packet_id && jobClaim.job.source_packet_id !== sourcePacket?.id)
+		) {
+			return idempotencyConflictResult(normalized, jobClaim.job.source_packet_id ?? sourcePacket?.id ?? null);
+		}
+		existing = await findExistingJob(env, userId, normalized.packet.idempotency_key);
+		if (!existing) throw new Error("MCP memory job claim returned an unreadable owner");
+		if (TERMINAL_JOB_STATES.has(existing.job.status)) {
+			return duplicateMcpResult(env, userId, normalized, sourcePacket, existing);
+		}
+	}
+	const jobId = jobClaim.id;
+	if (!jobId) throw new Error("MCP memory job row could not be created");
+	const ownerPayload = jobClaim.claimed
+		? {
+			pageId: proposedPageId,
+			title: proposedTitle,
+			stagedReceiptId: proposedReceiptId,
+			sourceContentHash: sourcePacket?.content_hash ?? null,
+			...project,
+		}
+		: existing?.payload ?? {};
+	if (ownerPayload.sourceContentHash && ownerPayload.sourceContentHash !== sourcePacket?.content_hash) {
+		return idempotencyConflictResult(normalized, sourcePacket?.id ?? null);
+	}
+	const pageId = ownerPayload.pageId;
+	const title = ownerPayload.title;
+	if (!pageId || !title) throw new Error("MCP memory job is missing its repair metadata");
+	maybeInjectMcpFault(env, input, "after_job_claim");
 
 	const { receipt, summary, receiptId } = await storeStagedReceipt(env, userId, sourcePacket, {
 		received,
 		stagedFacts: durable.length,
 		pageId,
 		title,
-		jobId: null,
+		jobId,
+		receiptId: existing?.job.receipt_id ?? ownerPayload.stagedReceiptId ?? `receipt_mcp_stage_${jobId}`,
 	});
 	await insertProvisionalPage(env, userId, { pageId, title, userLines, derivedLines, sourcePacket, receiptId, now });
-	const jobId = await createMemoryJob(env, userId, {
-		type: JOB_TYPE,
-		status: "staged",
-		idempotencyKey: sourcePacket?.idempotency_key ?? normalized.packet.idempotency_key,
-		sourcePacketId: sourcePacket?.id ?? null,
-		receiptId,
-		payload: { pageId, title, ...project },
-	});
+	if (receiptId) await updateMemoryJob(env, userId, jobId, { receiptId });
 
 	// 8.2 read-your-writes: every durable line is findable the moment this
 	// receipt returns — not just the first one via the page's short_summary
 	// (the gap the 0.3 trace measured on this exact lane).
-	await stageMemoryText(env, userId, {
+	await stageMcpMemoryTextOnce(env, userId, {
 		jobId,
 		sourcePacketId: sourcePacket?.id ?? null,
-		lane: SOURCE_MODE,
 		messages: durable.map((m) => ({ id: m.id, role: "user", content: m.content })),
 		projectId: project.project_id,
 		projectName: project.project_name,
@@ -536,9 +813,11 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	// Durable enqueue on the user's DO — the alarm drives enrichment even if
 	// this isolate dies the moment we return. The job entry carries everything
 	// the background phase needs; assistant turns ride only as context.
+	const { _testMcpFault: _discardMcpFault, ...jobTestOverrides } = input.testOverrides ?? {};
 	const job = {
 		jobId,
 		pageId,
+		title,
 		receiptId,
 		captureMode: capture,
 		derivedLines,
@@ -549,10 +828,20 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			.map((m) => ({ id: m.id, role: "assistant", content: clampLine(m.content, 1500), ts: m.ts })),
 		sourceMeta: { ...sourceMeta(sourcePacket), topic_filter: normalized.packet.topic ?? null },
 		lastTs,
-		testOverrides: input.testOverrides ?? null,
+		testOverrides: Object.keys(jobTestOverrides).length ? jobTestOverrides : null,
 	};
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
-	await stub.enqueueMcpJob(userId, job);
+	const handoff = await stub.enqueueMcpJobOnce(userId, job, {
+		handoffId: jobId,
+		contentHash: sourcePacket?.content_hash,
+		_testMcpFault: mcpTestFault(input),
+	});
+	if (handoff?._testMcpFault) maybeInjectMcpFault(env, input, handoff._testMcpFault);
+	if (!jobClaim.claimed) {
+		const repaired = await findExistingJob(env, userId, normalized.packet.idempotency_key);
+		if (!repaired) throw new Error("MCP repair completed without a readable job");
+		return duplicateMcpResult(env, userId, normalized, sourcePacket, repaired);
+	}
 
 	return commandResult({
 		fired: true,
@@ -561,55 +850,105 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		receipt,
 		receiptId,
 		sourcePacket,
-		extra: { page_id: pageId, title, staged_facts: durable.length, job_status: "staged", ...project },
+		extra: { page_id: pageId, title, staged_facts: durable.length, job_id: jobId, job_status: "staged", ...project },
 	});
 }
 
-async function markEnrichmentFailed(env, userId, job, reason, defer = null) {
+export async function markMcpEnrichmentFailed(env, userId, job, reason, defer = null) {
 	const project = projectPayload(job.sourceMeta);
+	const receipt = emptyReceipt("enrich_failed", "background processing hit a problem — it has been reported", {
+		source: SOURCE, source_mode: SOURCE_MODE, ...(job.sourceMeta ?? {}),
+	});
+	receipt.id = `receipt_mcp_failed_${job.jobId}`;
+	receipt.page_id = job.pageId;
+	receipt.status = "failed";
+	const summary = "This save could not finish processing. The staged page is kept, nothing was lost, and the problem has been reported automatically.";
+	await updateMemoryJob(env, userId, job.jobId, {
+		status: "failed",
+		receiptId: receipt.id,
+		error: String(reason ?? "unknown").slice(0, 400),
+		payload: {
+			pageId: job.pageId,
+			title: job.title ?? null,
+			reason: String(reason ?? "unknown").slice(0, 400),
+			...project,
+		},
+		completedAt: Date.now(),
+	});
+	const terminal = await env.DB.prepare(
+		"SELECT status FROM memory_jobs WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(job.jobId, userId).first();
+	if (terminal?.status !== "failed") {
+		throw new Error("MCP failure verdict is not durable");
+	}
+	// The D1 terminal verdict is written before repairable side effects so an
+	// isolate loss can never send this paid job back through inference. The
+	// stable receipt id makes the subsequent repair idempotent.
+	await storeReceipt(env, userId, SOURCE, receipt, summary, { strict: true });
 	try {
-		await updateMemoryJob(env, userId, job.jobId, {
-			status: "failed",
-			error: String(reason ?? "unknown").slice(0, 400),
-			payload: {
-				pageId: job.pageId,
-				title: job.title ?? null,
-				reason: String(reason ?? "unknown").slice(0, 400),
-				...project,
-			},
-			completedAt: Date.now(),
-		});
 		await env.DB.prepare(
 			"UPDATE memory_pages SET enrich_status = 'failed', updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL",
 		).bind(Date.now(), job.pageId, userId, project.project_id).run();
-		const receipt = emptyReceipt("enrich_failed", "background processing hit a problem — it has been reported", {
-			source: SOURCE, source_mode: SOURCE_MODE, ...(job.sourceMeta ?? {}),
-		});
-		receipt.page_id = job.pageId;
-		receipt.status = "failed";
-		const summary = "This save could not finish processing. The staged page is kept, nothing was lost, and the problem has been reported automatically.";
-		await storeReceipt(env, userId, SOURCE, receipt, summary);
 	} catch (error) {
-		console.warn("mcp enrich failure bookkeeping failed:", error?.message ?? error);
+		console.warn("mcp enrich failure side effects failed:", error?.message ?? error);
 	}
-	await reportServerError(env, "mcp_enrich", new Error(String(reason ?? "unknown")), userId);
+	await reportServerError(env, "mcp_enrich", new Error(String(reason ?? "unknown")), userId, {
+		reportId: `err_mcp_enrich_${job.jobId}`,
+	})
+		.catch((error) => console.warn("mcp enrich report failed:", error?.message ?? error));
 	// A failed enrichment is terminal too: the staged page is what the user
 	// has, and the job row says why. Staged text stops answering either way.
-	await settleStagedText(env, userId, [job.jobId]);
-	// Part 2.3: the job's terminal transition, announced exactly once.
-	if (defer) {
-		try {
-			await emitWebhookEvent(env, defer, userId, "memory.failed", {
-				job_id: job.jobId,
-				source_packet_id: job.sourceMeta?.source_packet_id ?? null,
-				status: "failed",
-				error: String(reason ?? "unknown").slice(0, 200),
-				...project,
+	await settleStagedText(env, userId, [job.jobId])
+		.catch((error) => console.warn("mcp staged-text settlement failed:", error?.message ?? error));
+}
+
+export async function announceMcpTerminal(env, userId, job, defer = null) {
+	if (!defer || !job?.jobId) return;
+	const row = await env.DB.prepare(
+		"SELECT status, source_packet_id, receipt_id, payload_json, error FROM memory_jobs WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(job.jobId, userId).first();
+	if (!row || !["enriched", "failed", "completed"].includes(row.status)) {
+		throw new Error("MCP terminal announcement has no durable job verdict");
+	}
+	let payload = {};
+	try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+	const project = projectPayload(payload);
+	let receipt = null;
+	if (row.receipt_id) {
+		const stored = await env.DB.prepare(
+			"SELECT detail FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(row.receipt_id, userId).first();
+		try { receipt = JSON.parse(stored?.detail ?? "null"); } catch {}
+	}
+	if (row.status !== "failed" && receipt) {
+		const saved = receipt.saved ?? {};
+		const added = Number(saved.nodes ?? 0) + Number(saved.slices ?? 0)
+			+ Number(saved.events ?? 0) + Number(saved.edges ?? 0) > 0;
+		if (added) {
+			await emitWebhookEvent(env, defer, userId, "memory.added", webhookDataFromReceipt(receipt), {
+				eventId: `receipt:${receipt.id}:memory.added:${userId}`,
+				strict: true,
 			});
-		} catch (error) {
-			console.warn("memory.failed webhook failed:", error?.message ?? error);
 		}
 	}
+	const status = row.status === "failed" ? "failed" : "enriched";
+	await emitWebhookEvent(env, defer, userId, `memory.${status}`, {
+		job_id: job.jobId,
+		source_packet_id: row.source_packet_id ?? job.sourceMeta?.source_packet_id ?? null,
+		receipt_id: row.receipt_id ?? null,
+		status,
+		...project,
+		counts: {
+			nodes: payload.nodes ?? receipt?.saved?.nodes ?? 0,
+			edges: payload.edges ?? receipt?.saved?.edges ?? 0,
+			slices: payload.slices ?? receipt?.saved?.slices ?? 0,
+			events: payload.events ?? receipt?.saved?.events ?? 0,
+		},
+		...(row.error ? { error: String(row.error).slice(0, 200) } : {}),
+	}, {
+		eventId: `job:${job.jobId}:${status}`,
+		strict: true,
+	});
 }
 
 /**
@@ -636,13 +975,39 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			},
 			...(job.testOverrides ?? {}),
 		};
-		const result = await runExtraction(env, userId, job.userMessages ?? [], job.contextMessages ?? [], overrides);
+		const attempt = Number(job.attempts ?? 0);
+		const result = await runExtraction(
+			env,
+			userId,
+			job.userMessages ?? [],
+			job.contextMessages ?? [],
+			overrides,
+			{ runId: await mcpExtractionRunId(userId, job.jobId, attempt) },
+		);
+
+		if (result.outcome === "in_progress") {
+			return { retry: true, inProgress: true, reason: "extraction already in progress" };
+		}
+		if (result.outcome === "interrupted_unknown") {
+			const reason = "extraction was interrupted after inference began; the model was not called again";
+			try {
+				await markMcpEnrichmentFailed(env, userId, job, reason, defer);
+				return { done: true, failed: true };
+			} catch (error) {
+				return { retry: true, terminalPending: true, reason, error: String(error?.message ?? error) };
+			}
+		}
 
 		if (result.outcome === "llm_failed" || result.outcome === "db_write_failed") {
 			const attempts = Number(job.attempts ?? 0);
 			if (attempts < 2) return { retry: true, reason: result.outcome };
-			await markEnrichmentFailed(env, userId, job, `${result.outcome} after ${attempts + 1} attempts`, defer);
-			return { done: true, failed: true };
+			const reason = `${result.outcome} after ${attempts + 1} attempts`;
+			try {
+				await markMcpEnrichmentFailed(env, userId, job, reason, defer);
+				return { done: true, failed: true };
+			} catch (error) {
+				return { retry: true, terminalPending: true, reason, error: String(error?.message ?? error) };
+			}
 		}
 
 		const plan = result.plan ?? {};
@@ -736,39 +1101,19 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		// stop answering recall.
 		await settleStagedText(env, userId, [job.jobId]);
 
-		// Announce like every other engine door: strictly after the fact,
-		// strictly async, never able to fail the save.
-		if (wroteSomething && receipt && defer) {
-			try {
-				const saved = receipt.saved ?? {};
-				const added = (saved.nodes ?? 0) + (saved.slices ?? 0) + (saved.events ?? 0) + (saved.edges ?? 0) > 0;
-				if (added) await emitWebhookEvent(env, defer, userId, "memory.added", webhookDataFromReceipt(receipt));
-			} catch (error) {
-				console.warn("mcp enrich webhook failed:", error?.message ?? error);
-			}
-		}
-		// Part 2.3: the job's terminal transition, announced exactly once.
-		if (defer) {
-			try {
-				await emitWebhookEvent(env, defer, userId, "memory.enriched", {
-					job_id: job.jobId,
-					source_packet_id: job.sourceMeta?.source_packet_id ?? null,
-					status: "enriched",
-					...project,
-					counts: {
-						nodes: receipt?.saved?.nodes ?? 0,
-						edges: receipt?.saved?.edges ?? 0,
-						slices: receipt?.saved?.slices ?? 0,
-						events: receipt?.saved?.events ?? 0,
-					},
-				});
-			} catch (error) {
-				console.warn("memory.enriched webhook failed:", error?.message ?? error);
-			}
-		}
 		return { done: true };
 	} catch (error) {
-		await markEnrichmentFailed(env, userId, job, error?.message ?? error, defer);
-		return { done: true, failed: true };
+		const reason = String(error?.message ?? error);
+		try {
+			await markMcpEnrichmentFailed(env, userId, job, reason, defer);
+			return { done: true, failed: true };
+		} catch (bookkeepingError) {
+			return {
+				retry: true,
+				terminalPending: true,
+				reason,
+				error: String(bookkeepingError?.message ?? bookkeepingError),
+			};
+		}
 	}
 }

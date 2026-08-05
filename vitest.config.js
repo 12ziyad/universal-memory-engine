@@ -36,6 +36,7 @@ export default defineWorkersConfig(async () => {
 							// test boundaries here, corrupting the pool's stacked
 							// storage. Tests drive drains explicitly instead.
 							DO_WAKE_ALARMS: "false",
+							ENABLE_TEST_OVERRIDES: "true",
 						},
 					},
 				},

@@ -61,14 +61,15 @@ function cleanUserTurns(turns, { dropUtility = false } = {}) {
 
 async function llmDigest(env, config, userLines, assistantLines, rules = null) {
 	if (!env.AI) return "";
-	const payload = [
-		"USER MESSAGES:",
-		...userLines.map((l, i) => `${i + 1}. ${l}`),
-	];
+	const payload = [];
 	if (assistantLines.length) {
-		payload.push("", "ASSISTANT MESSAGES (context only, never memorize these):");
+		payload.push("ASSISTANT MESSAGES (context only, never memorize these):");
 		payload.push(...assistantLines.slice(-6).map((l) => `- ${l}`));
+		payload.push("");
 	}
+	// Authoritative user/source material stays at the tail so a boundary keeps
+	// the newest facts before assistant-only context.
+	payload.push("USER MESSAGES:", ...userLines.map((l, i) => `${i + 1}. ${l}`));
 	const ruleLines = rulesPromptLines(rules);
 	const system = ruleLines.length ? `${DIGEST_SYSTEM}\n${ruleLines.join("\n")}` : DIGEST_SYSTEM;
 	try {

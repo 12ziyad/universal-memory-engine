@@ -205,13 +205,15 @@ async function main() {
 	const keyValid = validItsukiApiKey(API_KEY);
 	let bindOutcome = "not_requested";
 	let boundCount = 0;
+	let skippedPartialGroups = 0;
 	if (bindRequested) {
 		if (!keyValid) bindOutcome = "invalid_key";
 		else {
 			try {
 				const result = await bindOutbox({ pluginData, apiKey: API_KEY, baseUrl });
-				bindOutcome = "bound";
 				boundCount = result.bound;
+				skippedPartialGroups = Number(result.skippedPartiallyAcceptedGroups ?? 0);
+				bindOutcome = skippedPartialGroups > 0 ? "partial" : "bound";
 			} catch {
 				bindOutcome = "failed";
 			}
@@ -245,11 +247,17 @@ async function main() {
 	if (keyValid) pass("sensitive key", "trusted hook received a header-safe plugin credential (value hidden)");
 	else fail("sensitive key", "trusted hook did not receive a valid key; configure itsuki_api_key through /plugin and reload");
 	if (!health) fail("protected outbox", "metadata inspection failed; queued content was not deleted");
-	else if (health.corruptEntries > 0 || health.permanentFailures > 0) {
+	else if (Number(health.deliveryGroups?.incomplete ?? 0) > 0) {
+		fail("protected outbox", `${health.deliveryGroups.incomplete} ordered delivery group${health.deliveryGroups.incomplete === 1 ? " is a" : "s are"} recoverable incomplete prefix${health.deliveryGroups.incomplete === 1 ? "" : "es"}; content remains protected and later SessionStart runs resume it`);
+	} else if (health.corruptEntries > 0 || health.permanentFailures > 0) {
 		fail("protected outbox", `${health.corruptEntries} corrupt and ${health.permanentFailures} intervention entries; content remains protected`);
-	} else pass("protected outbox", `${health.counts.pending} pending, ${health.counts.inflight} inflight, ${health.counts.failed} failed, ${health.counts.tmp} temporary, ${health.rawBytes} raw bytes, no corrupt entries`);
+	} else pass("protected outbox", `${health.counts.staged ?? 0} staged, ${health.counts.pending} pending, ${health.counts.inflight} inflight, ${health.counts.failed} failed, ${health.counts.tmp} temporary, ${health.rawBytes} raw bytes, no corrupt entries`);
+	if (Number(health?.deliveryGroups?.waitingOnPredecessor ?? 0) > 0) {
+		warn("ordered delivery", `${health.deliveryGroups.waitingOnPredecessor} session group${health.deliveryGroups.waitingOnPredecessor === 1 ? " is" : "s are"} waiting on an earlier batch; later batches cannot overtake it`);
+	}
 	if (bindRequested) {
 		if (bindOutcome === "bound") pass("outbox binding", `${boundCount} exact queued entr${boundCount === 1 ? "y" : "ies"} rebound to the active key`);
+		else if (bindOutcome === "partial") fail("outbox binding", `${boundCount} safe queued entr${boundCount === 1 ? "y was" : "ies were"} rebound, but ${skippedPartialGroups} partly accepted ordered group${skippedPartialGroups === 1 ? " remains" : "s remain"} on its original credential to prevent a split destination`);
 		else fail("outbox binding", `${bindOutcome}; no unconfirmed fallback binding was attempted`);
 	} else if (health?.bindingRequired > 0) {
 		fail("outbox binding", `${health.bindingRequired} queued entr${health.bindingRequired === 1 ? "y needs" : "ies need"} confirmation; verify the account, then type /itsuki:doctor --bind-outbox`);

@@ -24,13 +24,16 @@ describe("UserMemory project-scope boundaries", () => {
 
 		await runInDurableObject(stub, async (instance, state) => {
 			const sharedId = "same-host-message-id";
-			// Noise finalizes immediately, putting the ID in A's checkpoint/seen
-			// without invoking extraction.
+			// Noise finalizes immediately. The human-readable checkpoint remains
+			// the host id, while the seen set stores the v2 content-bound identity.
 			await instance.addMessages(userId, [message(sharedId, "okay")], {
 				scopeKey: PROJECT_A,
 			});
 			expect(await state.storage.get(`checkpoint:${PROJECT_A}`)).toBe(sharedId);
-			expect(await state.storage.get(`seen:${PROJECT_A}`)).toContain(sharedId);
+			const projectASeen = await state.storage.get(`seen:${PROJECT_A}`);
+			expect(projectASeen).toHaveLength(1);
+			expect(projectASeen[0]).toMatch(/^message:v2:[a-f0-9]{64}$/);
+			expect(projectASeen).not.toContain(sharedId);
 
 			// The identical host ID is new inside B and must be held, not rejected
 			// by A's finalized-ID state.

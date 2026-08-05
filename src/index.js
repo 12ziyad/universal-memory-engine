@@ -11,7 +11,16 @@ import { createMcpHandler } from "agents/mcp";
 
 import { getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
+import { runAi } from "./lib/ai_meter.js";
 import { getUserReceipts } from "./lib/db.js";
+import {
+	INGEST_DELIVERY_SCHEMA,
+	INGEST_LIMITS,
+	LEGACY_CLAUDE_OUTBOX_LIMITS,
+	isLegacyClaudeOutboxBody,
+	normalizeDeliveryMetadata,
+	validateIngestBody,
+} from "./lib/ingest_contract.mjs";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
 import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
@@ -154,13 +163,88 @@ function json(data, status = 200, extraHeaders = {}) {
  * { body } or { response } — an unrecognised key never reaches the engine,
  * because a silently dropped `user_id` is a tenancy leak wearing an ok:true.
  */
-async function readBody(request, path) {
-	const raw = await request.json().catch(() => ({}));
+async function readBoundedBytes(request, path, { maxBytes = INGEST_LIMITS.maxRequestBytes } = {}) {
+	const declaredLength = Number(request.headers.get("content-length"));
+	if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+		return { response: bodyLimitResponse(path, declaredLength, maxBytes) };
+	}
+
+	const chunks = [];
+	let totalBytes = 0;
+	if (request.body) {
+		const reader = request.body.getReader();
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				totalBytes += value.byteLength;
+				if (totalBytes > maxBytes) {
+					await reader.cancel("request body limit exceeded").catch(() => {});
+					return { response: bodyLimitResponse(path, totalBytes, maxBytes) };
+				}
+				chunks.push(value);
+			}
+		} finally {
+			reader.releaseLock();
+		}
+	}
+
+	const bytes = new Uint8Array(totalBytes);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return { bytes, requestBytes: totalBytes };
+}
+
+async function readBody(request, path, { maxBytes = INGEST_LIMITS.maxRequestBytes } = {}) {
+	const bounded = await readBoundedBytes(request, path, { maxBytes });
+	if (bounded.response) return bounded;
+	const { bytes, requestBytes: totalBytes } = bounded;
+	let raw;
+	try {
+		const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+		raw = text ? JSON.parse(text) : {};
+	} catch {
+		return { response: json({ error: "invalid_json", message: "The request body must be valid UTF-8 JSON." }, 400) };
+	}
 	const checked = validateBody(path, raw);
 	if (checked.error) {
 		return { response: json({ error: checked.error, message: checked.message }, 400) };
 	}
-	return { body: checked.body };
+	return { body: checked.body, requestBytes: totalBytes };
+}
+
+function testOnlyOverrides(env, value) {
+	if (String(env?.ENABLE_TEST_OVERRIDES ?? "false") !== "true") return {};
+	return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function bodyLimitResponse(path, actual, limit) {
+	if (path === "/v1/ingest") {
+		const issue = validateIngestBody(null, { requestBytes: actual });
+		const { status, ...payload } = issue;
+		return json(payload, status);
+	}
+	if (path === "/mcp") {
+		return json({
+			jsonrpc: "2.0",
+			id: null,
+			error: {
+				code: -32001,
+				message: `The MCP request exceeds ${limit} UTF-8 bytes.`,
+				data: { error: "request_too_large", limit, actual, unit: "bytes" },
+			},
+		}, 413);
+	}
+	return json({
+		error: "request_too_large",
+		message: `The serialized request exceeds ${limit} UTF-8 bytes.`,
+		limit,
+		actual,
+		unit: "bytes",
+	}, 413);
 }
 
 async function isAuthorized(request, env) {
@@ -324,6 +408,14 @@ const BOT_UA_PATTERN = /bot|crawl|spider|slurp|headless|phantom|selenium|playwri
 
 const routes = {
 	"GET /health": () => json({ ok: true, service: "memory-engine", version: "0.1.0" }),
+	"GET /v1/ingest/limits": () => json({
+		ok: true,
+		schema: "itsuki.ingest-limits/v1",
+		limits: INGEST_LIMITS,
+		character_unit: "unicode_code_points",
+		request_encoding: "utf-8-json",
+		delivery_schema: INGEST_DELIVERY_SCHEMA,
+	}),
 
 	"GET /auth/me": async (request, env) => {
 		const auth = await getSessionUser(env, request);
@@ -418,7 +510,7 @@ const routes = {
 			return json({ error: "messages_required" }, 400);
 		}
 		const model = body.model || env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8";
-		const res = await env.AI.run(model, {
+		const res = await runAi(env, model, {
 			messages: body.messages,
 			temperature: body.temperature ?? 0,
 			max_tokens: body.max_tokens ?? 512,
@@ -426,14 +518,30 @@ const routes = {
 			// future eval that needs schema-constrained decoding).
 			...(body.response_format ? { response_format: body.response_format } : {}),
 			...(body.guided_json ? { guided_json: body.guided_json } : {}),
-		});
+		}, undefined, { task: "eval" });
 		return json({ text: responseText(res), model, raw_keys: Object.keys(res ?? {}), ...(body.debug_raw ? { raw: res } : {}) });
 	},
 
 	"POST /v1/ingest": async (request, env, ctx) => {
-		const parsed = await readBody(request, "/v1/ingest");
+		const parsed = await readBody(request, "/v1/ingest", {
+			maxBytes: LEGACY_CLAUDE_OUTBOX_LIMITS.maxRequestBytes,
+		});
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
+		const legacyClaudeOutbox = isLegacyClaudeOutboxBody(body);
+		const contractHeaders = legacyClaudeOutbox
+			? { "x-itsuki-ingest-contract": "legacy-claude-outbox-v1" }
+			: {};
+		if (legacyClaudeOutbox) {
+			// Content-free migration telemetry. Never log transcript, tenant, key,
+			// or packet identifiers from a protected local spool.
+			console.warn("legacy_claude_outbox_contract accepted_for_migration");
+		}
+		const contractViolation = validateIngestBody(body, { requestBytes: parsed.requestBytes });
+		if (contractViolation) {
+			const { status, ...payload } = contractViolation;
+			return json(payload, status, contractHeaders);
+		}
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
 			requiredScope: MEMORY_WRITE_SCOPE,
@@ -446,20 +554,22 @@ const routes = {
 		// Route through the shared command facade. Extraction runs in the
 		// background, so fired async requests return an accepted/processing receipt.
 		const door = await doorOverrides(env, auth, body);
+		const test = testOnlyOverrides(env, body._test);
 		const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
 			conversationId: body.conversationId,
 			threadId: body.threadId,
 			sourceId: body.sourceId,
 			idempotencyKey: body.idempotencyKey,
+			delivery: normalizeDeliveryMetadata(body.delivery),
 			memoryScope: auth.memoryScope,
 			source: body.source === "plugin" ? "plugin" : "ingest",
 			sourceMode: "ingest",
 			overrides: {
 				...door,
-				...(body._test ?? {}),
+				...test,
 				...(["dense", "standard"].includes(body.captureDensity)
-					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
+					? { settings: { ...(test.settings ?? {}), captureDensity: body.captureDensity } }
 					: {}),
 			},
 		});
@@ -467,10 +577,19 @@ const routes = {
 			return json(
 				{ error: "queue_full", message: result.summary, retry_after_s: result.retry_after_s, queue_depth: result.queue_depth },
 				429,
-				{ "retry-after": String(result.retry_after_s ?? 30) },
+				{ ...contractHeaders, "retry-after": String(result.retry_after_s ?? 30) },
 			);
 		}
-		return json(result);
+		if (result.idempotencyConflict) {
+			return json({
+				error: "idempotency_conflict",
+				code: "idempotency_conflict",
+				message: result.summary,
+				idempotency_key: result.idempotency_key,
+				source_packet_id: result.source_packet_id,
+			}, 409, contractHeaders);
+		}
+		return json(result, 200, contractHeaders);
 	},
 
 	"POST /v1/mcp/choose": async (request, env) => {
@@ -655,7 +774,7 @@ const routes = {
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
-		const t = body._test ?? {};
+		const t = testOnlyOverrides(env, body._test);
 		const overrides = await doorOverrides(env, auth, body);
 		if (t.llmResponse !== undefined) overrides.llmResponse = t.llmResponse;
 		if (t.settings !== undefined) overrides.settings = t.settings;
@@ -685,6 +804,15 @@ const routes = {
 					429,
 					{ "retry-after": String(res.retry_after_s ?? 30) },
 				);
+			}
+			if (res.idempotencyConflict) {
+				return json({
+					error: "idempotency_conflict",
+					code: "idempotency_conflict",
+					message: res.summary,
+					idempotency_key: res.idempotency_key,
+					source_packet_id: res.source_packet_id,
+				}, 409);
 			}
 		} else {
 			if (typeof content !== "string" || !content.trim()) {
@@ -1158,6 +1286,7 @@ const routes = {
 
 		let collect = { enabled: false };
 		if (rules.autoCollect && messages.length) {
+			const test = testOnlyOverrides(env, body._test);
 			const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 				conversationId: body.conversationId,
 				threadId: body.threadId,
@@ -1167,12 +1296,12 @@ const routes = {
 				source: body.source === "plugin" ? "plugin" : "ingest",
 				sourceMode: "turn",
 				overrides: {
-				...door,
-				rules,
-				...(body._test ?? {}),
-				...(["dense", "standard"].includes(body.captureDensity)
-					? { settings: { ...(body._test?.settings ?? {}), captureDensity: body.captureDensity } }
-					: {}),
+					...door,
+					rules,
+					...test,
+					...(["dense", "standard"].includes(body.captureDensity)
+						? { settings: { ...(test.settings ?? {}), captureDensity: body.captureDensity } }
+						: {}),
 			},
 			});
 			collect = { enabled: true, ...result };
@@ -1183,7 +1312,7 @@ const routes = {
 			recall,
 			collect,
 			rules: { autoCollect: rules.autoCollect, captureDefault: rules.captureDefault },
-		}, ok ? 200 : (collect.backpressure ? 429 : 400));
+		}, ok ? 200 : (collect.backpressure ? 429 : (collect.idempotencyConflict ? 409 : 400)));
 	},
 
 	// ---- Playground -------------------------------------------------------
@@ -1227,7 +1356,7 @@ const routes = {
 		return json(await playgroundTurn(env, ctx, auth.userId, {
 			message: body.message,
 			threadId: body.threadId,
-			overrides: body._test ?? {},
+			overrides: testOnlyOverrides(env, body._test),
 		}));
 	},
 
@@ -1579,7 +1708,9 @@ export default {
 	 */
 	async scheduled(controller, env, ctx) {
 		const { runReconciliationSweep } = await import("./pipeline/sweep.js");
+		const { retryPendingWebhookDeliveries } = await import("./pipeline/webhooks.js");
 		ctx.waitUntil(runReconciliationSweep(env));
+		ctx.waitUntil(retryPendingWebhookDeliveries(env, (promise) => ctx.waitUntil(promise)));
 	},
 
 	async fetch(request, env, ctx) {
@@ -1745,11 +1876,31 @@ function unauthorizedMcp(message) {
 	});
 }
 
-/** Build the server for an identity and hand the request to the transport. */
-function serveMcp(request, env, ctx, url, userId, scopes) {
+/** Build the server for an identity and hand a bounded request to the transport. */
+async function serveMcp(request, env, ctx, url, userId, scopes) {
 	const server = buildMemoryServer(env, ctx, userId, scopes ? { scopes } : undefined);
 	// Normalize the path to /mcp so the transport never depends on the token suffix.
-	const normalized = new Request(new URL("/mcp", url).toString(), request);
+	let normalized;
+	if (!["GET", "HEAD"].includes(request.method) && request.body) {
+		// The transport parses JSON internally, so bound the raw stream first and
+		// rebuild the Request. This protects chunked and lying-Content-Length
+		// requests without buffering more than one accepted MCP envelope.
+		const bounded = await readBoundedBytes(request, "/mcp", {
+			maxBytes: INGEST_LIMITS.maxRequestBytes,
+		});
+		if (bounded.response) return bounded.response;
+		const headers = new Headers(request.headers);
+		headers.delete("content-length");
+		normalized = new Request(new URL("/mcp", url).toString(), {
+			method: request.method,
+			headers,
+			body: bounded.bytes,
+			redirect: request.redirect,
+			signal: request.signal,
+		});
+	} else {
+		normalized = new Request(new URL("/mcp", url).toString(), request);
+	}
 	return createMcpHandler(server)(normalized, env, ctx);
 }
 

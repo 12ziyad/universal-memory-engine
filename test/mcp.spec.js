@@ -9,12 +9,29 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, it, expect } from "vitest";
 import worker from "../src";
 import { encodeMcpToken, decodeMcpToken } from "../src/mcp/server.js";
+import { INGEST_LIMITS } from "../src/lib/ingest_contract.mjs";
 
 async function mcp(token, body) {
 	const request = new Request(`http://example.com/mcp/${token}`, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
 		body: JSON.stringify(body),
+	});
+	const ctx = createExecutionContext();
+	const response = await worker.fetch(request, env, ctx);
+	await waitOnExecutionContext(ctx);
+	return response;
+}
+
+async function mcpRaw(token, body, extraHeaders = {}) {
+	const request = new Request(`http://example.com/mcp/${token}`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+			...extraHeaders,
+		},
+		body,
 	});
 	const ctx = createExecutionContext();
 	const response = await worker.fetch(request, env, ctx);
@@ -236,16 +253,92 @@ describe("/mcp header door", () => {
 
 describe("/mcp Streamable HTTP handler", () => {
 	const token = encodeMcpToken("mcp-user", env.API_KEY);
+	const initialize = {
+		jsonrpc: "2.0",
+		id: 1,
+		method: "initialize",
+		params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "vitest", version: "1" } },
+	};
 
 	it("initializes and reports the server identity", async () => {
-		const res = await mcp(token, {
-			jsonrpc: "2.0",
-			id: 1,
-			method: "initialize",
-			params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "vitest", version: "1" } },
-		});
+		const res = await mcp(token, initialize);
 		expect(res.status).toBe(200);
 		expect(await res.text()).toContain("itsuki-memory");
+	});
+
+	it("rejects an MCP body whose declared byte length exceeds the shared boundary", async () => {
+		const res = await mcpRaw(token, "{}", {
+			"content-length": String(INGEST_LIMITS.maxRequestBytes + 1),
+		});
+		expect(res.status).toBe(413);
+		expect(await res.json()).toMatchObject({
+			jsonrpc: "2.0",
+			id: null,
+			error: {
+				code: -32001,
+				data: {
+					error: "request_too_large",
+					limit: INGEST_LIMITS.maxRequestBytes,
+					unit: "bytes",
+				},
+			},
+		});
+	});
+
+	it("cancels a chunked MCP body as soon as its actual bytes cross the boundary", async () => {
+		let cancelled = false;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new Uint8Array(INGEST_LIMITS.maxRequestBytes));
+				controller.enqueue(new Uint8Array([0x20]));
+			},
+			cancel() { cancelled = true; },
+		});
+		const res = await mcpRaw(token, stream);
+		expect(res.status).toBe(413);
+		expect(cancelled).toBe(true);
+		const body = await res.json();
+		expect(body.error.data.actual).toBe(INGEST_LIMITS.maxRequestBytes + 1);
+	});
+
+	it("does not trust a small Content-Length when the streamed MCP body is larger", async () => {
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new Uint8Array(INGEST_LIMITS.maxRequestBytes));
+				controller.enqueue(new Uint8Array([0x20]));
+			},
+		});
+		const res = await mcpRaw(token, stream, { "content-length": "2" });
+		expect(res.status).toBe(413);
+		expect((await res.json()).error.data.actual).toBe(INGEST_LIMITS.maxRequestBytes + 1);
+	});
+
+	it("accepts exact-limit JSON and measures multibyte bodies as UTF-8 bytes", async () => {
+		const raw = JSON.stringify(initialize);
+		const rawBytes = new TextEncoder().encode(raw).byteLength;
+		const exact = `${raw}${" ".repeat(INGEST_LIMITS.maxRequestBytes - rawBytes)}`;
+		const accepted = await mcpRaw(token, exact);
+		expect(accepted.status).toBe(200);
+		expect(await accepted.text()).toContain("itsuki-memory");
+
+		const multibyte = JSON.stringify({
+			...initialize,
+			padding: "🙂".repeat(Math.ceil(INGEST_LIMITS.maxRequestBytes / 4)),
+		});
+		expect(multibyte.length).toBeLessThan(INGEST_LIMITS.maxRequestBytes);
+		expect(new TextEncoder().encode(multibyte).byteLength).toBeGreaterThan(INGEST_LIMITS.maxRequestBytes);
+		const rejected = await mcpRaw(token, multibyte);
+		expect(rejected.status).toBe(413);
+	});
+
+	it("preserves the MCP transport's normal parse error below the byte boundary", async () => {
+		const res = await mcpRaw(token, "{");
+		expect(res.status).not.toBe(413);
+		expect(await res.json()).toMatchObject({
+			jsonrpc: "2.0",
+			id: null,
+			error: { code: -32700 },
+		});
 	});
 
 	it("lists exactly the three manual memory-door tools", async () => {

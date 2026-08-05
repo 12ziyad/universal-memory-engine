@@ -9,7 +9,8 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, it, expect } from "vitest";
 import worker from "../src";
 import {
-	createWebhook, emitWebhookEvent, listDeliveries, signWebhookBody, webhookUrlProblem,
+	createWebhook, emitWebhookEvent, listDeliveries, retryPendingWebhookDeliveries,
+	signWebhookBody, webhookUrlProblem,
 } from "../src/pipeline/webhooks.js";
 
 async function sessionFor(prefix) {
@@ -173,6 +174,74 @@ describe("signing and payloads", () => {
 		});
 		await new Promise((r) => setTimeout(r, 50));
 		expect(calls).toBe(0);
+	});
+});
+
+describe("durable outbox", () => {
+	it("deduplicates concurrent emission of one logical event", async () => {
+		const { userId } = await sessionFor("wh-once");
+		const { webhook } = await createWebhook(env, userId, {
+			name: "once", url: "https://hooks.example.com/once", events: ["memory.enriched"],
+		});
+		const tasks = [];
+		let calls = 0;
+		const opts = {
+			eventId: `job:${crypto.randomUUID()}:enriched`,
+			fetchImpl: async () => { calls++; return new Response("ok"); },
+		};
+		await Promise.all(Array.from({ length: 8 }, () => emitWebhookEvent(
+			env,
+			(promise) => tasks.push(promise),
+			userId,
+			"memory.enriched",
+			{ job_id: "job-once", status: "enriched" },
+			opts,
+		)));
+		await Promise.all(tasks);
+
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM webhook_deliveries WHERE user_id = ? AND webhook_id = ?",
+		).bind(userId, webhook.id).first();
+		expect(count.n).toBe(1);
+		expect(calls).toBe(1);
+		expect((await listDeliveries(env, userId, webhook.id))[0].status).toBe("delivered");
+	});
+
+	it("reclaims and delivers a pending row left by an isolate interruption", async () => {
+		const { userId } = await sessionFor("wh-recover");
+		const { webhook } = await createWebhook(env, userId, {
+			name: "recover", url: "https://hooks.example.com/recover", events: ["memory.failed"],
+		});
+		const deliveryId = `whd_recover_${crypto.randomUUID()}`;
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO webhook_deliveries
+			 (id, user_id, webhook_id, event, status, attempts, payload_json, created_at, updated_at)
+			 VALUES (?, ?, ?, 'memory.failed', 'pending', 0, ?, ?, ?)`,
+		).bind(
+			deliveryId,
+			userId,
+			webhook.id,
+			JSON.stringify({ id: "evt-recover", event: "memory.failed", created_at: now, data: { job_id: "job-recover" } }),
+			now,
+			now,
+		).run();
+
+		const tasks = [];
+		let calls = 0;
+		const recovered = await retryPendingWebhookDeliveries(
+			env,
+			(promise) => tasks.push(promise),
+			{ fetchImpl: async () => { calls++; return new Response("ok"); } },
+		);
+		await Promise.all(tasks);
+
+		expect(recovered).toEqual({ dispatched: 1 });
+		expect(calls).toBe(1);
+		const row = await env.DB.prepare(
+			"SELECT status, attempts FROM webhook_deliveries WHERE id = ?",
+		).bind(deliveryId).first();
+		expect(row).toMatchObject({ status: "delivered", attempts: 1 });
 	});
 });
 

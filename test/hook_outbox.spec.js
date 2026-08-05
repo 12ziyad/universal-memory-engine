@@ -140,7 +140,7 @@ async function stateFor(data, queueId) {
 }
 
 function contentDigestFromEnvelope(envelope) {
-	const match = /^claude-outbox:v1:([a-f0-9]{64})$/.exec(envelope?.request?.body?.idempotencyKey ?? "");
+	const match = /^claude-outbox:v(?:1|2):([a-f0-9]{64})$/.exec(envelope?.request?.body?.idempotencyKey ?? "");
 	if (!match) throw new Error("test envelope does not contain a canonical content digest");
 	return match[1];
 }
@@ -307,9 +307,13 @@ describe("protected hook outbox", () => {
 		expect(done.value).toEqual({
 			accepted_at: FIXED_NOW,
 			content_digest: contentDigestFromEnvelope(queuedEnvelope),
+			conversation_id: queuedEnvelope.request.body.conversationId,
 			credential_fingerprint: credentialFingerprint(API_KEY, BASE_URL),
+			delivery: queuedEnvelope.request.body.delivery,
+			delivery_order: queuedEnvelope.delivery_order,
 			duplicate: false,
 			http_status: 202,
+			group_created_at: queuedEnvelope.created_at,
 			job_id: "job_33333333-3333-4333-8333-333333333333",
 			queue_id: queued.queueId,
 			receipt_id: "receipt_22222222-2222-4222-8222-222222222222",
@@ -1009,12 +1013,17 @@ describe("protected hook outbox", () => {
 		expect(await directoryFiles(join(data.outbox, "pending"))).toEqual([`${queued.queueId}.json`]);
 	});
 
-	it("rejects a single envelope over the 2 MiB cap", async () => {
+	it("segments a logical message larger than 2 MiB into individually bounded envelopes", async () => {
 		const data = await fixture();
-		await expect(enqueue(data, {
+		const queued = await enqueue(data, {
 			content: "x".repeat(OUTBOX_LIMITS.maxEnvelopeBytes + 1),
-		})).rejects.toMatchObject({ code: "envelope_too_large" });
-		expect(await directoryFiles(join(data.outbox, "pending"))).toEqual([]);
+		});
+		const files = await directoryFiles(join(data.outbox, "pending"));
+		expect(queued.batchCount).toBeGreaterThan(1);
+		expect(files).toHaveLength(queued.batchCount);
+		for (const file of files) {
+			expect((await stat(join(data.outbox, "pending", file))).size).toBeLessThanOrEqual(OUTBOX_LIMITS.maxEnvelopeBytes);
+		}
 	});
 
 	it("rejects enqueue when 128 raw files already occupy the outbox", async () => {

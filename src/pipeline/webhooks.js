@@ -32,6 +32,13 @@ const DELIVERY_TIMEOUT_MS = 10000;
 
 const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|.*\.localhost)$/i;
 
+async function deterministicDeliveryId(eventId, webhookId) {
+	const bytes = new TextEncoder().encode(`${eventId}\u0000${webhookId}`);
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	return `whd_${hex}`;
+}
+
 function isPrivateIpv4(host) {
 	const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
 	if (!m) return false;
@@ -230,8 +237,8 @@ async function deliver(env, hook, deliveryId, body, { fetchImpl = fetch } = {}) 
 			lastCode = res.status;
 			if (res.ok) {
 				await env.DB.prepare(
-					"UPDATE webhook_deliveries SET status = 'delivered', attempts = ?, response_code = ?, delivered_at = ? WHERE id = ?",
-				).bind(attempt, res.status, Date.now(), deliveryId).run();
+					"UPDATE webhook_deliveries SET status = 'delivered', attempts = ?, response_code = ?, delivered_at = ?, updated_at = ? WHERE id = ?",
+				).bind(attempt, res.status, Date.now(), Date.now(), deliveryId).run();
 				return;
 			}
 			lastError = `endpoint answered ${res.status}`;
@@ -239,12 +246,27 @@ async function deliver(env, hook, deliveryId, body, { fetchImpl = fetch } = {}) 
 			lastError = String(err?.message ?? err).slice(0, 200);
 		}
 		await env.DB.prepare(
-			"UPDATE webhook_deliveries SET attempts = ?, response_code = ?, error = ? WHERE id = ?",
-		).bind(attempt, lastCode, lastError, deliveryId).run();
+			"UPDATE webhook_deliveries SET attempts = ?, response_code = ?, error = ?, updated_at = ? WHERE id = ?",
+		).bind(attempt, lastCode, lastError, Date.now(), deliveryId).run();
 	}
 	await env.DB.prepare(
-		"UPDATE webhook_deliveries SET status = 'failed', response_code = ?, error = ? WHERE id = ?",
-	).bind(lastCode, lastError, deliveryId).run();
+		"UPDATE webhook_deliveries SET status = 'failed', response_code = ?, error = ?, updated_at = ? WHERE id = ?",
+	).bind(lastCode, lastError, Date.now(), deliveryId).run();
+}
+
+async function dispatchPendingDelivery(env, hook, deliveryId, body, waitUntil, opts = {}) {
+	const claimed = await env.DB.prepare(
+		`UPDATE webhook_deliveries SET status = 'dispatching', updated_at = ?
+		 WHERE id = ? AND status = 'pending'
+		 RETURNING id`,
+	).bind(Date.now(), deliveryId).first();
+	if (!claimed?.id) return false;
+	const task = deliver(env, hook, deliveryId, body, opts).catch((error) => {
+		console.warn("webhook delivery crashed:", error?.message ?? error);
+	});
+	if (typeof waitUntil === "function") waitUntil(task);
+	else await task;
+	return true;
 }
 
 /**
@@ -262,20 +284,54 @@ export async function emitWebhookEvent(env, waitUntil, userId, event, data, opts
 		for (const hook of hooks) {
 			const payload = payloadFor(hook, event, data);
 			const body = JSON.stringify(payload);
-			const deliveryId = newId("whd");
-			await env.DB.prepare(
-				`INSERT INTO webhook_deliveries (id, user_id, webhook_id, event, status, attempts, payload_json, created_at)
-				 VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`,
-			).bind(deliveryId, userId, hook.id, event, body, Date.now()).run();
-			const task = deliver(env, hook, deliveryId, body, opts).catch((err) => {
-				console.warn("webhook delivery crashed:", err?.message ?? err);
-			});
-			if (typeof waitUntil === "function") waitUntil(task);
+			const deliveryId = opts.eventId
+				? await deterministicDeliveryId(opts.eventId, hook.id)
+				: newId("whd");
+			const now = Date.now();
+			const inserted = await env.DB.prepare(
+				`INSERT INTO webhook_deliveries
+				 (id, user_id, webhook_id, event, status, attempts, payload_json, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+				 ON CONFLICT(id) DO NOTHING`,
+			).bind(deliveryId, userId, hook.id, event, body, now, now).run();
+			if (Number(inserted.meta?.changes ?? 0) > 0) {
+				await dispatchPendingDelivery(env, hook, deliveryId, body, waitUntil, opts);
+			}
 		}
 	} catch (err) {
+		if (opts.strict) throw err;
 		// Webhooks must never break the save that triggered them.
 		console.warn("webhook emit failed:", err?.message ?? err);
 	}
+}
+
+/** Recover an outbox row if an isolate died after its durable insert/claim. */
+export async function retryPendingWebhookDeliveries(env, waitUntil, { limit = 50, ...deliveryOpts } = {}) {
+	const now = Date.now();
+	await env.DB.prepare(
+		`UPDATE webhook_deliveries
+		 SET status = 'pending', updated_at = ?
+		 WHERE status = 'dispatching' AND updated_at < ?`,
+	).bind(now, now - 2 * 60 * 1000).run();
+	const { results } = await env.DB.prepare(
+		`SELECT d.id AS delivery_id, d.payload_json, w.*
+		 FROM webhook_deliveries d
+		 JOIN webhooks w ON w.id = d.webhook_id AND w.user_id = d.user_id
+		 WHERE d.status = 'pending' AND w.status = 'active'
+		 ORDER BY d.created_at ASC LIMIT ?`,
+	).bind(Math.max(1, Math.min(200, Number(limit) || 50))).all();
+	let dispatched = 0;
+	for (const row of results ?? []) {
+		if (await dispatchPendingDelivery(
+			env,
+			row,
+			row.delivery_id,
+			row.payload_json,
+			waitUntil,
+			deliveryOpts,
+		)) dispatched++;
+	}
+	return { dispatched };
 }
 
 /** What a save receipt looks like as webhook data (full mode). */

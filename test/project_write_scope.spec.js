@@ -106,6 +106,44 @@ describe("project-scoped writes", () => {
 		expect(alphaNewName.packet.project_name).toBe("Renamed Alpha");
 	});
 
+	it("returns persisted attribution on an immutable exact replay", async () => {
+		const userId = `canonical-source-${crypto.randomUUID()}`;
+		const idempotencyKey = `canonical-source-key-${crypto.randomUUID()}`;
+		const message = { id: "canonical-message", role: "user", content: "I use D1 for project Atlas." };
+		const original = await normalizeSourcePacket(userId, {
+			type: "message_batch",
+			sourceMode: "ingest",
+			messages: [message],
+			idempotencyKey,
+			receivedAt: 1_800_000_000_000,
+			scope: scope("atlas", "Original Atlas"),
+		});
+		const first = await storeSourcePacket(env, original.packet, { immutableIdempotency: true });
+
+		const renamed = await normalizeSourcePacket(userId, {
+			type: "message_batch",
+			sourceMode: "ingest",
+			messages: [message],
+			idempotencyKey,
+			receivedAt: 1_900_000_000_000,
+			scope: scope("atlas", "Renamed Atlas"),
+		});
+		expect(renamed.packet.content_hash).toBe(original.packet.content_hash);
+		const replay = await storeSourcePacket(env, renamed.packet, { immutableIdempotency: true });
+
+		expect(replay).toMatchObject({
+			id: first.id,
+			project_id: "atlas",
+			project_name: "Original Atlas",
+			received_at: 1_800_000_000_000,
+		});
+		expect(replay.messages).toEqual(renamed.packet.messages);
+		const row = await env.DB.prepare(
+			"SELECT project_name, received_at, seen_count FROM source_packets WHERE id = ? AND user_id = ?",
+		).bind(first.id, userId).first();
+		expect(row).toMatchObject({ project_name: "Original Atlas", received_at: 1_800_000_000_000, seen_count: 2 });
+	});
+
 	it("matches and reinforces only inside the exact project, with NULL reserved for global", async () => {
 		const userId = `scope-write-${crypto.randomUUID()}`;
 		await writeScopedFact(userId, scope(null, null), "global");
@@ -207,8 +245,9 @@ describe("project-scoped writes", () => {
 			ok: true,
 			duplicate: true,
 			memory_scope: { project_id: "alpha", project_name: "Alpha" },
-			receipt: { outcome: "duplicate", project_id: "alpha", project_name: "Alpha" },
+			receipt: { outcome: "staged", project_id: "alpha", project_name: "Alpha" },
 		});
+		expect(duplicate.receipt.id).toBe(staged.receipt.id);
 
 		const { results: pages } = await env.DB.prepare(
 			"SELECT source_mode, project_id, project_name FROM memory_pages WHERE user_id = ? ORDER BY source_mode, project_id",

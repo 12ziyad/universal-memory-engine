@@ -220,7 +220,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(await candidates(userId)).toHaveLength(0);
 	});
 
-	it("saving the same conversation twice skips the duplicate without another page", async () => {
+	it("replays the original conversation receipt without another page or receipt", async () => {
 		const userId = "m-conv-exact-duplicate";
 		const payload = {
 			userId,
@@ -240,21 +240,15 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 
 		expect(first.body.receipt).toMatchObject({ outcome: "wrote", page_action: "created", saved: { pages: 1 } });
 		expect(second.body.fired).toBe(false);
-		expect(second.body.summary).toContain("Skipped duplicate memory page");
-		expect(second.body.receipt).toMatchObject({
-			outcome: "skipped_duplicate",
-			page_action: "skipped_duplicate",
-			savedTotal: 0,
-			saved: { pages: 0 },
-			skippedReasons: { duplicate_memory_page: 1 },
-		});
+		expect(second.body.duplicate).toBe(true);
+		expect(second.body.receipt_id).toBe(first.body.receipt_id);
+		expect(second.body.receipt).toMatchObject({ outcome: "wrote", page_action: "created", saved: { pages: 1 } });
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
 		const r = await receipts(userId);
-		const duplicateReceipt = r.body.receipts.find((receipt) => receipt.outcome === "skipped_duplicate");
-		expect(duplicateReceipt).toBeTruthy();
-		expect(duplicateReceipt.saved_pages).toBe(0);
-		expect(p[0].receipt_id).toBe(duplicateReceipt.id);
+		const ownedReceipts = r.body.receipts.filter((receipt) => receipt.source_packet_id === first.body.source_packet_id);
+		expect(ownedReceipts).toHaveLength(1);
+		expect(p[0].receipt_id).toBe(first.body.receipt_id);
 	});
 
 	it("does not update an unrelated Itsuki page for a Microsoft SWE resume discussion", async () => {

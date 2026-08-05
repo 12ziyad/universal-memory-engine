@@ -154,7 +154,7 @@ describe("Claude hook project identity", () => {
 		expect(JSON.stringify(second.body)).not.toContain("synthetic-b");
 	});
 
-	it("sends identical project metadata from SessionEnd without userId or paths", async () => {
+	it("stages identical project metadata from SessionEnd without userId or paths", async () => {
 		const cwd = join(ROOT, "synthetic-a", "shared-name");
 		const stableEnv = { CLAUDE_PROJECT_DIR: cwd };
 		const start = await captureHookRequest("session-start.mjs", { cwd }, stableEnv);
@@ -199,22 +199,17 @@ describe("Claude hook project identity", () => {
 			child.stderr.on("data", (chunk) => { stderr += chunk; });
 			child.stdin.end(JSON.stringify(payload));
 			const [code] = await once(child, "exit");
-			const pending = await readdir(join(pluginData, "outbox", "v1", "pending"));
-			expect(pending).toHaveLength(1);
-			const envelope = JSON.parse(await readFile(join(pluginData, "outbox", "v1", "pending", pending[0]), "utf8"));
-			const endBody = envelope.request.body;
+			const staged = await readdir(join(pluginData, "outbox", "v1", "staged"));
+			expect(staged).toHaveLength(1);
+			const aggregate = JSON.parse(await readFile(join(pluginData, "outbox", "v1", "staged", staged[0]), "utf8"));
 
 			expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
 			expect(JSON.parse(stdout).systemMessage).toContain("queued locally");
-			expect(endBody.userId).toBeUndefined();
-			expect(endBody.memoryScope).toEqual(start.body.memoryScope);
-			expect(endBody).toMatchObject({
-				source: "plugin",
-				flush: true,
-			});
-			expect(endBody.conversationId).toMatch(/^claude_session_v1_[a-f0-9]{32}$/);
-			expect(JSON.stringify(endBody)).not.toContain("synthetic-a");
-			expect(JSON.stringify(endBody)).not.toContain("itsuki-project-identity-");
+			expect(aggregate.userId).toBeUndefined();
+			expect(aggregate.memory_scope).toEqual(start.body.memoryScope);
+			expect(aggregate.conversation_id).toMatch(/^claude_session_v1_[a-f0-9]{32}$/);
+			expect(JSON.stringify(aggregate)).not.toContain("synthetic-a");
+			expect(JSON.stringify(aggregate)).not.toContain("itsuki-project-identity-");
 		} finally {
 			await rm(temp, { recursive: true, force: true });
 		}

@@ -119,6 +119,8 @@ Signed in at `/app`:
 
 Use the stable `/mcp` endpoint with `Authorization: Bearer <key>` when the client supports
 headers. Generated MCP-link URLs keep identity in `/mcp/<token>` for headerless clients.
+The Streamable HTTP endpoint accepts at most 512 KiB of actual UTF-8 request bytes and
+returns a JSON-RPC `request_too_large` error before parsing a larger declared or chunked body.
 **Treat either credential as a secret** — generated links are shown once. Tokens minted before
 the rename (`uml_live_...`) keep working; a rename must never break someone's integration.
 
@@ -129,7 +131,8 @@ the rename (`uml_live_...`) keep working; a rename must never break someone's in
 | `/v1/save` | `POST` | Save a fact, or a conversation. |
 | `/v1/recall` | `POST` | Recall compact context for a query. |
 | `/v1/turn` | `POST` | One call per agent turn: recall + capture together. |
-| `/v1/ingest` | `POST` | Batch messages through the Durable Object. |
+| `/v1/ingest` | `POST` | Submit one bounded conversation batch with optional idempotency. |
+| `/v1/ingest/limits` | `GET` | Read the authoritative machine-readable ingest limits and delivery schema. |
 | `/v1/graph` | `GET` | The whole graph: nodes, slices, events, edges, candidates. |
 | `/v1/usage` | `GET` | Per-day activity rollups. |
 | `/v1/requests` | `GET` | Request metadata for the Requests page. |
@@ -165,23 +168,55 @@ make an automatic destructive merge unsafe.
 
 The plugin requires a maintained **Node 22 or 24 LTS** runtime. During installation, select that executable by its absolute
 path (for example, `(Get-Command node).Source` in PowerShell or `command -v node` on macOS/Linux); hooks never resolve
-`node` through a project-controlled `PATH`. SessionEnd does not use the network: it scrubs the
-captured messages and atomically places one protected envelope under Claude's persistent
-`${CLAUDE_PLUGIN_DATA}/outbox/v1` directory, then returns within Claude's shutdown budget.
-SessionStart delivers up to four pending envelopes before recall. Offline, DNS, timeout, 429,
-and server failures remain queued with idempotent backoff; a rejected key pauses delivery; a
-permanent request error remains available for `/itsuki:doctor` instead of being discarded.
+`node` through a project-controlled `PATH`. SessionEnd does not use the network. It takes a bounded snapshot of the newest
+80 eligible transcript records, scrubs them, and atomically queues one or more protected, ordered v2 batch envelopes under
+Claude's persistent `${CLAUDE_PLUGIN_DATA}/outbox/v1` directory before returning within Claude's shutdown budget.
 
-The outbox permits at most 128 raw envelopes, 64 MiB total, and 2 MiB per envelope. It never
-evicts undelivered content to make room. Raw content is removed as soon as `/v1/ingest`
-durably accepts it; body-free completion tombstones remain for seven days. Directories/files
-are protected as 0700/0600 on POSIX and with a verified current-user/SYSTEM/Administrators
-DACL on Windows. If that protection cannot be established, the hook fails closed and says
-that the session was **not queued**.
+Within that captured-and-scrubbed message set, batching does not silently drop content. A logical message that is too large
+is divided at a natural Unicode boundary where possible, each segment receives an explicit position label, and the segments
+remain in conversation order. Every batch carries a stable delivery group, batch index/count, source/segment counts, and
+capture-omission fields (`captureTruncated` / `truncationReason`). If the bounded snapshot misses older records, encounters an oversized or malformed record, or races
+a transcript rewrite, SessionEnd reports the omission and records its reason with every batch; it does not describe that
+snapshot as complete.
 
-"Queued locally" is not "delivered", and server acceptance is not terminal enrichment. The
-next SessionStart reports delivery/backlog state; packet status remains the authority for
-enrichment. Claude's SessionEnd budget can be tuned with
+SessionStart attempts at most four due batches before recall. It will not overtake an earlier batch in the same group.
+Offline, DNS, timeout, 429, and server failures remain queued with content-bound idempotent backoff; a rejected key pauses
+delivery; a permanent request error remains available for `/itsuki:doctor` instead of being discarded. Existing v1 spool
+files remain drainable under their former 2 MiB raw-envelope cap; the server retains their bounded request contract of up to
+80 messages, 4,001 Unicode code points per message, 320,080 total code points, and 2 MiB of serialized JSON. New plugin
+writes use ordered v2 batches. Legacy responses carry `x-itsuki-ingest-contract: legacy-claude-outbox-v1`, and the server
+emits content-free migration telemetry; this dual contract exists only so already-protected local data is not stranded.
+
+The current v2 `/v1/ingest` wire contract is authoritative on the server and returned by `GET /v1/ingest/limits`:
+
+| Boundary | Limit |
+|---|---:|
+| Messages per request | 30 |
+| Content per message | 4,000 Unicode code points |
+| Combined message content | 120,000 Unicode code points |
+| Complete serialized request body | 512 KiB of actual UTF-8 JSON |
+
+Separate downstream safeguards are internal engine boundaries, not fields returned by the limits endpoint:
+
+| Boundary | Limit |
+|---|---:|
+| Downstream extraction queue entry | 20 messages and 12,000 Unicode code points |
+| Complete serialized chat-model input | At most 24,576 UTF-8 bytes |
+
+The model-input ceiling is a conservative full-input guard, not a per-message character allowance. If bounding is needed,
+the engine labels omissions and preferentially preserves the newest/source tail; if fixed prompt/schema data cannot fit, it
+fails before inference. It accounts for the configured models' documented context windows: Qwen3 extraction is 32,768
+tokens, Llama 3.1 summary/digest is 32,000, and Llama 3.2 playground chat is 60,000. After output/template reserves and the
+global byte ceiling, their maximum serialized inputs are 24,576, 23,808, and 24,576 bytes respectively; unknown overrides
+use the conservative 32,000-token profile. The local outbox separately permits at most 128 raw batch envelopes, 64 MiB total, and 2 MiB per
+envelope. It never evicts undelivered content to make room. Raw content is removed as soon as `/v1/ingest` durably accepts
+it; body-free completion tombstones remain for seven days. Directories/files are protected as 0700/0600 on POSIX and with
+a verified current-user/SYSTEM/Administrators DACL on Windows. If that protection cannot be established, the hook fails
+closed and says that the session was **not queued**.
+
+"Queued locally" means only that the protected write completed. "Accepted" means the server durably created the source
+packet/job for a batch. Neither state means terminal enrichment: use packet/job status for `enriched` or `failed`. The next
+SessionStart reports delivery/backlog state. Claude's SessionEnd budget can be tuned with
 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS`, but correctness does not depend on changing it.
 Claude removes plugin data on final uninstall unless its `--keep-data` option is used.
 

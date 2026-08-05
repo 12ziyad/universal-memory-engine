@@ -45,7 +45,7 @@ const COMMON = [
 export const ENDPOINT_PARAMS = {
 	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope"],
 	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope"],
-	"/v1/ingest": [...COMMON, "messages", "flush"],
+	"/v1/ingest": [...COMMON, "messages", "flush", "delivery"],
 	"/v1/turn": [...COMMON, "messages", "query", "recallScope"],
 };
 
@@ -108,14 +108,14 @@ export function validateBody(path, raw) {
 		body[canonical] = value;
 	}
 
-	const oversize = tooLarge(body);
+	const oversize = tooLarge(body, path);
 	if (oversize) return { error: "payload_too_large", message: oversize };
 
 	return { body, renamed };
 }
 
 /** Say which field is too big and by how much, rather than failing later. */
-function tooLarge(body) {
+function tooLarge(body, path) {
 	const describe = (field, len) =>
 		`${field} is ${Math.round(len / 1000)}KB — the limit is ${MAX_CONTENT_CHARS / 1000}KB. Split it into separate saves, or send it as messages[].`;
 	if (typeof body.content === "string" && body.content.length > MAX_CONTENT_CHARS) {
@@ -124,7 +124,9 @@ function tooLarge(body) {
 	if (typeof body.query === "string" && body.query.length > 8000) {
 		return "query is too long — a recall query should be a question, not a document.";
 	}
-	if (Array.isArray(body.messages)) {
+	// /v1/ingest uses the shared byte/code-point-aware contract after aliases
+	// are normalized. Other legacy doors retain their existing 400 behavior.
+	if (path !== "/v1/ingest" && Array.isArray(body.messages)) {
 		const total = body.messages.reduce((n, m) => n + (typeof m?.content === "string" ? m.content.length : 0), 0);
 		if (total > MAX_CONTENT_CHARS) return describe("messages[]", total);
 	}
