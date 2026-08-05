@@ -1,7 +1,9 @@
 import { newId } from "../lib/ids.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 
 const PREVIEW_LIMIT = 900;
 const SNIPPET_LIMIT = 900;
+const SCOPED_IDEMPOTENCY_PREFIX = "itsuki-scope:v1:";
 
 function cleanText(value, fallback = "") {
 	const text = String(value ?? fallback).replace(/\s+/g, " ").trim();
@@ -40,6 +42,7 @@ export async function hashText(value) {
 
 export function resolveScope(userId, input = {}) {
 	const scope = input && typeof input === "object" ? input : {};
+	const project = normalizeProjectScope(scope);
 	const ownerUserId = cleanKey(scope.owner_user_id ?? scope.ownerUserId ?? scope.ownerId, userId);
 	const externalUserId = cleanKey(scope.external_user_id ?? scope.externalUserId ?? scope.endUserId ?? scope.userId, userId);
 	const sessionId = cleanKey(scope.session_id ?? scope.sessionId ?? scope.session ?? scope.threadId, null);
@@ -57,6 +60,8 @@ export function resolveScope(userId, input = {}) {
 		thread_id: threadId,
 		topic: cleanKey(scope.topic ?? scope.topic_filter ?? scope.topicFilter, null),
 		source_scope: cleanKey(scope.source_scope ?? scope.sourceScope ?? scope.name, null),
+		project_id: project.projectId,
+		project_name: project.projectName,
 	};
 }
 
@@ -99,13 +104,20 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		input.messages ?? (input.content ? [{ id: input.messageId, role: input.role ?? "user", content: input.content, ts: input.ts }] : []),
 		{ conversationId: conversationId ?? sessionId, sessionId },
 	);
+	// Keep the pre-project global hash byte-for-byte stable across this deploy.
+	// Project identity participates, but project_name is display-only and must
+	// never turn a rename into a second write of identical content.
+	const { project_id: hashProjectId, project_name: _hashProjectName, ...legacyHashScope } = scope;
+	const hashScope = hashProjectId
+		? { ...legacyHashScope, project_id: hashProjectId }
+		: legacyHashScope;
 	const hashPayload = {
 		sourceType,
 		sourceMode,
 		conversationId,
 		threadId,
 		topic,
-		scope,
+		scope: hashScope,
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
@@ -114,12 +126,20 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	};
 	const contentHash = await hashText(JSON.stringify(hashPayload));
 	const explicitSourceId = cleanKey(input.sourceId ?? input.source_id ?? input.id, null);
-	const idempotencyKey = cleanKey(
+	const baseIdempotencyKey = cleanKey(
 		input.idempotencyKey ?? input.idempotency_key,
 		explicitSourceId
 			? `${sourceType}:${sourceMode}:${scope.workspace_id}:${scope.app_id}:${explicitSourceId}`
 			: `${sourceType}:${sourceMode}:${scope.workspace_id}:${scope.app_id}:${conversationId ?? threadId ?? sessionId}:${contentHash}`,
 	);
+	// The D1 uniqueness boundary is (account, idempotency_key). Project writes
+	// therefore namespace even caller-supplied keys, while the legacy/global
+	// format remains byte-for-byte compatible for existing clients and replays.
+	const idempotencyKey = scope.project_id
+		? `${SCOPED_IDEMPOTENCY_PREFIX}p:${(await hashText(scope.project_id)).slice(0, 24)}:${baseIdempotencyKey}`
+		: baseIdempotencyKey.startsWith(SCOPED_IDEMPOTENCY_PREFIX)
+			? `${SCOPED_IDEMPOTENCY_PREFIX}g:${baseIdempotencyKey}`
+			: baseIdempotencyKey;
 	const preview = clamp(messages.map((m) => m.content).join("\n"));
 	const rawMeta = {
 		messages: messages.map((m) => ({
@@ -167,11 +187,11 @@ export async function storeSourcePacket(env, packet) {
 		const row = await env.DB.prepare(
 			`INSERT INTO source_packets
 				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
-				 workspace_id, app_id, agent_id, session_id, source_scope,
+				 workspace_id, app_id, agent_id, session_id, source_scope, project_id, project_name,
 				 source_type, source_mode, source_id, source_role, conversation_id, thread_id, topic,
 				 idempotency_key, content_hash, content_preview, message_count, raw_meta_json,
 				 seen_count, received_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, idempotency_key) DO UPDATE SET
 				memory_user_id = excluded.memory_user_id,
 				owner_user_id = excluded.owner_user_id,
@@ -182,6 +202,8 @@ export async function storeSourcePacket(env, packet) {
 				agent_id = excluded.agent_id,
 				session_id = excluded.session_id,
 				source_scope = excluded.source_scope,
+				project_id = excluded.project_id,
+				project_name = excluded.project_name,
 				source_mode = excluded.source_mode,
 				topic = excluded.topic,
 				content_hash = excluded.content_hash,
@@ -205,6 +227,8 @@ export async function storeSourcePacket(env, packet) {
 				packet.agent_id,
 				packet.session_id,
 				packet.source_scope,
+				packet.project_id,
+				packet.project_name,
 				packet.source_type,
 				packet.source_mode,
 				packet.source_id,
@@ -248,9 +272,13 @@ export function sourceMeta(sourcePacket) {
 			thread_id: sourcePacket.thread_id,
 			topic: sourcePacket.topic,
 			source_scope: sourcePacket.source_scope,
+			project_id: sourcePacket.project_id,
+			project_name: sourcePacket.project_name,
 			source_type: sourcePacket.source_type,
 			source_mode: sourcePacket.source_mode,
 		}),
+		project_id: sourcePacket.project_id ?? null,
+		project_name: sourcePacket.project_name ?? null,
 	};
 }
 

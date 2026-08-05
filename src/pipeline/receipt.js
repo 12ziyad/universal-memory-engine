@@ -129,6 +129,8 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		source_packet_id: meta.source_packet_id ?? meta.sourcePacketId ?? null,
 		idempotency_key: meta.idempotency_key ?? meta.idempotencyKey ?? null,
 		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
+		project_id: meta.project_id ?? meta.projectId ?? null,
+		project_name: meta.project_name ?? meta.projectName ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		// How long the memory work took. Metadata for the Requests page; null
@@ -172,6 +174,8 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		source_packet_id: meta.source_packet_id ?? meta.sourcePacketId ?? null,
 		idempotency_key: meta.idempotency_key ?? meta.idempotencyKey ?? null,
 		scope_json: meta.scope_json ?? meta.scopeJson ?? null,
+		project_id: meta.project_id ?? meta.projectId ?? null,
+		project_name: meta.project_name ?? meta.projectName ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,

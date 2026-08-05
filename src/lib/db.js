@@ -4,6 +4,7 @@
  */
 
 import { newId } from "./ids.js";
+import { hasProjectScopeOption, normalizeProjectScope } from "./project_scope.js";
 import { normalizeLabel } from "./text.js";
 
 function activeWhere(alias = "") {
@@ -11,19 +12,29 @@ function activeWhere(alias = "") {
 	return `(${p}deleted_at IS NULL) AND (${p}archived_at IS NULL) AND (${p}suppressed_at IS NULL)`;
 }
 
+function projectWhere(options = {}, alias = "") {
+	if (!hasProjectScopeOption(options)) return { sql: "", bindings: [] };
+	const p = alias ? `${alias}.` : "";
+	return {
+		sql: ` AND ${p}project_id IS ?`,
+		bindings: [normalizeProjectScope(options).projectId],
+	};
+}
+
 export function canonicalKey(value) {
 	return normalizeLabel(value);
 }
 
 /** All nodes for a user (id, label, category, state, summary). Small per user. */
-export async function getUserNodes(env, userId) {
+export async function getUserNodes(env, userId, options = {}) {
+	const project = projectWhere(options);
 	const { results } = await env.DB.prepare(
 		`SELECT id, label, category, role, state, summary, aliases_json, canonical_label,
 			mention_count, session_count, last_seen_at, heat_score, confidence,
-			health_state, importance_class, cluster
-		 FROM nodes WHERE user_id = ? AND ${activeWhere()}`,
+			health_state, importance_class, cluster, project_id, project_name
+			 FROM nodes WHERE user_id = ? AND ${activeWhere()}${project.sql}`,
 	)
-		.bind(userId)
+		.bind(userId, ...project.bindings)
 		.all();
 	return results ?? [];
 }
@@ -49,66 +60,98 @@ export async function getNodeEvents(env, userId, nodeId, limit = 20) {
 }
 
 /** A user's existing candidates, keyed by normalized label for quick lookup. */
-export async function getUserCandidates(env, userId) {
+export async function getUserCandidates(env, userId, options = {}) {
+	const project = projectWhere(options);
 	const { results } = await env.DB.prepare(
 		`SELECT id, label, strength, mentions, cluster_hint, label_guess, canonical_key,
 			 role_guess, cluster_guess, confidence, status, first_seen_at, last_seen_at,
 			 session_count, mention_count, evidence_json, possible_parent_id,
 			 possible_existing_node_id, expires_at, reason
 		 FROM candidates
-		 WHERE user_id = ?
-		   AND deleted_at IS NULL
-		   AND suppressed_at IS NULL
-		   AND COALESCE(status, 'pending') = 'pending'`,
+			 WHERE user_id = ?
+			   AND deleted_at IS NULL
+			   AND suppressed_at IS NULL
+			   AND COALESCE(status, 'pending') = 'pending'${project.sql}`,
 	)
-		.bind(userId)
+		.bind(userId, ...project.bindings)
 		.all();
 	return results ?? [];
 }
 
-export async function getUserEdges(env, userId) {
+export async function getUserEdges(env, userId, options = {}) {
+	const project = projectWhere(options);
 	const { results } = await env.DB.prepare(
-		"SELECT id, from_node, to_node, type, reinforcement_count, weight FROM edges WHERE user_id = ? AND deleted_at IS NULL",
+		`SELECT id, from_node, to_node, type, reinforcement_count, weight, invalid_at,
+			project_id, project_name
+		 FROM edges WHERE user_id = ? AND deleted_at IS NULL${project.sql}`,
 	)
-		.bind(userId)
+		.bind(userId, ...project.bindings)
 		.all();
 	return results ?? [];
 }
 
-export async function getUserPages(env, userId, { includeArchived = false } = {}) {
+export async function getUserPages(env, userId, options = {}) {
+	const { includeArchived = false } = options;
+	const project = projectWhere(options);
 	const archived = includeArchived ? "1 = 1" : "archived_at IS NULL";
 	const { results } = await env.DB.prepare(
 		`SELECT * FROM memory_pages
-		 WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL AND ${archived}
-		 ORDER BY updated_at DESC`,
+			 WHERE user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL AND ${archived}${project.sql}
+			 ORDER BY updated_at DESC`,
 	)
-		.bind(userId)
+		.bind(userId, ...project.bindings)
 		.all();
 	return results ?? [];
 }
 
-export async function getActiveSuppressions(env, userId) {
+export async function getActiveSuppressions(env, userId, options = {}) {
 	const now = Date.now();
+	const project = projectWhere(options);
 	const { results } = await env.DB.prepare(
 		`SELECT * FROM memory_suppressions
-		 WHERE user_id = ? AND (suppressed_until IS NULL OR suppressed_until > ?)`,
+			 WHERE user_id = ? AND (suppressed_until IS NULL OR suppressed_until > ?)${project.sql}`,
 	)
-		.bind(userId, now)
+		.bind(userId, now, ...project.bindings)
 		.all();
 	return results ?? [];
 }
 
-export async function addSuppression(env, userId, { kind, label, canonical_key, reason, source_object_id, suppressed_until }) {
+export async function addSuppression(env, userId, {
+	kind,
+	label,
+	canonical_key,
+	reason,
+	source_object_id,
+	suppressed_until,
+	projectId,
+	projectName,
+	project_id,
+	project_name,
+}) {
 	const now = Date.now();
 	const key = canonical_key ?? canonicalKey(label);
 	if (!kind || !key) return null;
 	const id = newId("suppress");
+	const project = normalizeProjectScope({ projectId: projectId ?? project_id, projectName: projectName ?? project_name });
 	await env.DB.prepare(
 		`INSERT INTO memory_suppressions
-			(id, user_id, kind, canonical_key, label, reason, source_object_id, suppressed_until, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				(id, user_id, kind, canonical_key, label, reason, source_object_id, suppressed_until, created_at,
+				 project_id, project_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
-		.bind(id, userId, kind, key, label ?? key, reason ?? null, source_object_id ?? null, suppressed_until ?? null, now)
+		.bind(
+			id,
+			userId,
+			kind,
+			key,
+			label ?? key,
+			reason ?? null,
+			source_object_id ?? null,
+			suppressed_until ?? null,
+			now,
+			project.projectId,
+			project.projectName,
+		)
 		.run();
 	return id;
 }
@@ -336,7 +379,7 @@ export async function settleMemoryJobs(env, userId, updates = []) {
 		if (!update?.jobId) continue;
 		try {
 			const row = await env.DB.prepare(
-				"SELECT id, status, attempts, payload_json, source_packet_id FROM memory_jobs WHERE id = ? AND user_id = ?",
+				"SELECT id, status, attempts, payload_json, source_packet_id, receipt_id FROM memory_jobs WHERE id = ? AND user_id = ?",
 			).bind(update.jobId, userId).first();
 			if (!row) continue;
 			if (["enriched", "failed", "completed"].includes(row.status)) continue; // terminal is terminal
@@ -360,7 +403,15 @@ export async function settleMemoryJobs(env, userId, updates = []) {
 					payload: { ...payload, remaining: [] },
 					completedAt: Date.now(),
 				});
-				transitions.push({ jobId: update.jobId, status: "failed", sourcePacketId: row.source_packet_id ?? null, error: update.error ?? null });
+				transitions.push({
+					jobId: update.jobId,
+					status: "failed",
+					sourcePacketId: row.source_packet_id ?? null,
+					receiptId: update.receiptId ?? row.receipt_id ?? null,
+					project_id: payload.project_id ?? null,
+					project_name: payload.project_name ?? null,
+					error: update.error ?? null,
+				});
 				continue;
 			}
 
@@ -381,7 +432,15 @@ export async function settleMemoryJobs(env, userId, updates = []) {
 				completedAt: terminal ? Date.now() : undefined,
 			});
 			if (terminal) {
-				transitions.push({ jobId: update.jobId, status: "enriched", sourcePacketId: row.source_packet_id ?? null, saved });
+				transitions.push({
+					jobId: update.jobId,
+					status: "enriched",
+					sourcePacketId: row.source_packet_id ?? null,
+					receiptId: update.receiptId ?? row.receipt_id ?? null,
+					project_id: payload.project_id ?? null,
+					project_name: payload.project_name ?? null,
+					saved,
+				});
 			}
 		} catch (err) {
 			console.warn("memory job settle failed:", err?.message ?? err);

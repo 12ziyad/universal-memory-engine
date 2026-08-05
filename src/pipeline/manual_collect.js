@@ -1,5 +1,6 @@
 import { getConfig } from "../config.js";
 import { createExtractionRun, storeReceipt, updateExtractionRun } from "../lib/db.js";
+import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeLabel } from "../lib/text.js";
 import { digestConversation } from "./digest.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
@@ -17,6 +18,8 @@ import { scrubMessages } from "./scrub.js";
  */
 export async function saveConversation(env, ctx, userId, rawMessages, opts = {}) {
 	const config = getConfig(env);
+	const memoryScope = canonicalMemoryScope(opts.memoryScope);
+	const projectScope = normalizeProjectScope(memoryScope);
 	// The digest model reads these messages directly — scrub before it can.
 	const messages = scrubMessages(rawMessages).messages;
 	const optOut = messagesContainMemoryOptOut(messages);
@@ -24,6 +27,8 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 		const received = (messages ?? []).filter((m) => (m?.role ?? "user") === "user").length;
 		const { receipt, summary } = await storeOptOutReceipt(env, userId, "save_conversation", {
 			source_mode: "manual_collect",
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
 			received,
 			skipped: received || 1,
 			opt_out_phrase: optOut.phrase,
@@ -38,7 +43,7 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 		threadId: opts.threadId,
 		sourceId: opts.sourceId,
 		idempotencyKey: opts.idempotencyKey,
-		scope: opts.memoryScope,
+		scope: memoryScope,
 	});
 	const sourcePacket = await storeSourcePacket(env, normalized.packet);
 	const source = sourceMeta(sourcePacket);

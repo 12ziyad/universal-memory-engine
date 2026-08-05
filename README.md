@@ -117,9 +117,10 @@ Signed in at `/app`:
 | `save_conversation` | Digest a batch of messages, then extract. |
 | `recall_memory` | Return compact, relevant context about the user. |
 
-Identity lives in the connector URL path (`/mcp/itsuki_live_...`). **Treat a generated MCP URL
-as a secret** — it is shown once. Tokens minted before the rename (`uml_live_...`) keep working
-forever; a rename must never break someone's integration.
+Use the stable `/mcp` endpoint with `Authorization: Bearer <key>` when the client supports
+headers. Generated MCP-link URLs keep identity in `/mcp/<token>` for headerless clients.
+**Treat either credential as a secret** — generated links are shown once. Tokens minted before
+the rename (`uml_live_...`) keep working; a rename must never break someone's integration.
 
 ## HTTP API
 
@@ -136,11 +137,29 @@ forever; a rename must never break someone's integration.
 | `/v1/receipts` | `GET` | Recent save receipts. |
 | `/v1/rules` | `GET` `PUT` | What to collect, and what never to. |
 | `/v1/export` | `GET` | Everything you own, streamed as one JSON file. |
-| `/mcp/<token>` | MCP | Streamable HTTP MCP endpoint. |
+| `/mcp` or `/mcp/<token>` | MCP | Streamable HTTP endpoint; Bearer auth is preferred, path tokens support generated links. |
 
 Auth is a session cookie (app), an `itsuki_live_` Bearer key (API/SDK), or the legacy
 `x-api-key` + explicit `userId` (admin/tools). Passing a `userId` different from the key owner
 creates an **isolated sub-tenant memory space** — that is how one key serves many end users.
+
+### Account, project, and recall scope
+
+`userId` remains a true end-user/sub-tenant boundary. A coding project is not another user:
+send it as `memoryScope: { projectId, projectName }`. Project rows stay in the authenticated
+account graph with explicit `project_id` / `project_name` provenance, so the dashboard, MCP,
+and SDK doors can discover the same memory without weakening account isolation.
+
+Recall is explicit:
+
+- omit `recallScope` (or use `global`) for the whole account memory, including every project;
+- use `project_only` with `memoryScope.projectId` for exactly one project;
+- use `project_then_global` for that project plus account-global rows, excluding other projects.
+
+The Claude plugin writes project metadata under the account and uses `project_then_global` at
+SessionStart. Older plugin versions wrote `project:<basename>` as isolated sub-tenants; the
+account graph reports those legacy spaces as read-only inventory because basename collisions
+make an automatic destructive merge unsafe.
 
 ## SDKs
 

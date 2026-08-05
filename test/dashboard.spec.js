@@ -240,7 +240,7 @@ describe("dashboard script", () => {
 		expect(script).toContain('class="key-warning"');
 		expect(script).toContain("won't be shown again.");
 		// Get started's create-link button opens the same modal.
-		expect(script).toContain('function createInstallKey() {\n\treturn openKeyModal("mcp");');
+		expect(script).toMatch(/function createInstallKey\(\) \{\r?\n\treturn openKeyModal\("mcp"\);/);
 		// The old inline panel is gone, so the secret has exactly one home.
 		expect(script).not.toContain("oneTimeSecretPanel");
 		// And the second create button on API Keys is gone with it.

@@ -13,12 +13,20 @@
  */
 
 import { newId } from "../lib/ids.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 
 const TEXT_CAP = 2000;
 const MAX_ROWS_PER_WRITE = 40;
 
 /** Stage the durable user text of one accepted write. Best-effort. */
-export async function stageMemoryText(env, userId, { jobId, sourcePacketId, lane, messages }) {
+export async function stageMemoryText(env, userId, {
+	jobId,
+	sourcePacketId,
+	lane,
+	messages,
+	projectId = null,
+	projectName = null,
+}) {
 	const rows = (messages ?? [])
 		.filter((m) => (m?.role ?? "user") === "user")
 		.map((m) => ({ id: m?.id ?? null, text: String(m?.content ?? "").trim() }))
@@ -26,11 +34,13 @@ export async function stageMemoryText(env, userId, { jobId, sourcePacketId, lane
 		.slice(0, MAX_ROWS_PER_WRITE);
 	if (!rows.length) return { staged: 0 };
 	const now = Date.now();
+	const project = normalizeProjectScope({ projectId, projectName });
 	try {
 		await env.DB.batch(rows.map((row) => env.DB.prepare(
 			`INSERT INTO staged_memories
-				(id, user_id, job_id, source_packet_id, lane, message_id, text, created_at, settled_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+				(id, user_id, job_id, source_packet_id, lane, message_id, text, created_at, settled_at,
+				 project_id, project_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
 		).bind(
 			newId("staged"),
 			userId,
@@ -40,6 +50,8 @@ export async function stageMemoryText(env, userId, { jobId, sourcePacketId, lane
 			row.id,
 			row.text.slice(0, TEXT_CAP),
 			now,
+			project.projectId,
+			project.projectName,
 		)));
 		return { staged: rows.length };
 	} catch (error) {
@@ -75,20 +87,37 @@ export async function settleStagedText(env, userId, jobIds = []) {
  * FTS cannot express. Only unsettled rows, only recent ones: staged text is
  * a bridge across the enrichment gap, not a second memory store.
  */
-export async function findStagedText(env, userId, queryTokens = [], { limit = 6, maxAgeMs = 30 * 60 * 1000 } = {}) {
+export async function findStagedText(env, userId, queryTokens = [], {
+	limit = 6,
+	maxAgeMs = 30 * 60 * 1000,
+	projectId = null,
+	recallScope = "global",
+} = {}) {
 	const terms = [...new Set((queryTokens ?? []).filter((t) => String(t).length > 1))].slice(0, 12);
 	if (!terms.length) return [];
 	const since = Date.now() - maxAgeMs;
+	const project = normalizeProjectScope({ projectId });
+	const scope = String(recallScope ?? "global").trim().toLowerCase();
+	let projectSql = "";
+	let projectBindings = [];
+	if (scope === "project_only") {
+		projectSql = project.projectId ? " AND s.project_id = ?" : " AND 1 = 0";
+		projectBindings = project.projectId ? [project.projectId] : [];
+	} else if (scope === "project_then_global") {
+		projectSql = project.projectId ? " AND (s.project_id = ? OR s.project_id IS NULL)" : " AND s.project_id IS NULL";
+		projectBindings = project.projectId ? [project.projectId] : [];
+	}
 	try {
 		const match = terms.map((t) => `"${String(t).replace(/"/g, "")}"`).join(" OR ");
 		const { results } = await env.DB.prepare(
-			`SELECT s.id, s.text, s.created_at, s.lane, s.job_id, s.source_packet_id
+			`SELECT s.id, s.text, s.created_at, s.lane, s.job_id, s.source_packet_id,
+				s.project_id, s.project_name
 			 FROM staged_memories_fts f
 			 JOIN staged_memories s ON s.rowid = f.rowid
 			 WHERE staged_memories_fts MATCH ?
-			   AND s.user_id = ? AND s.settled_at IS NULL AND s.created_at > ?
+			   AND s.user_id = ? AND s.settled_at IS NULL AND s.created_at > ?${projectSql}
 			 ORDER BY bm25(staged_memories_fts) LIMIT ?`,
-		).bind(match, userId, since, limit).all();
+		).bind(match, userId, since, ...projectBindings, limit).all();
 		if (results?.length) return results;
 	} catch (error) {
 		console.warn("staged text FTS lookup failed:", error?.message ?? error);
@@ -97,11 +126,12 @@ export async function findStagedText(env, userId, queryTokens = [], { limit = 6,
 	// small by construction (backpressure caps active jobs at 200).
 	try {
 		const { results } = await env.DB.prepare(
-			`SELECT id, text, created_at, lane, job_id, source_packet_id
-			 FROM staged_memories
-			 WHERE user_id = ? AND settled_at IS NULL AND created_at > ?
+			`SELECT s.id, s.text, s.created_at, s.lane, s.job_id, s.source_packet_id,
+				s.project_id, s.project_name
+			 FROM staged_memories s
+			 WHERE s.user_id = ? AND s.settled_at IS NULL AND s.created_at > ?${projectSql}
 			 ORDER BY created_at DESC LIMIT 200`,
-		).bind(userId, since).all();
+		).bind(userId, since, ...projectBindings).all();
 		const lowered = terms.map((t) => String(t).toLowerCase());
 		return (results ?? [])
 			.map((row) => ({

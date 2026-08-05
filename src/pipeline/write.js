@@ -9,6 +9,7 @@
 
 import { embed } from "../lib/embeddings.js";
 import { newId } from "../lib/ids.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 import { upsertNodeVector } from "../lib/vectorize.js";
 
 export async function writeApproved(env, config, userId, plan = {}) {
@@ -46,6 +47,11 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	const newPageIds = new Set(newPages.map((page) => page?.id).filter(Boolean));
 	const pageUpdateIds = new Set(pageUpdates.map((update) => update?.page?.id).filter(Boolean));
 	const newNodeById = new Map(newNodes.map((node) => [node?.id, node]).filter(([id]) => Boolean(id)));
+	const scopeSeed = plan.projectScope
+		?? [...newNodes, ...newSlices, ...newEvents, ...newEdges, ...newCandidates, ...newPages]
+			.find((item) => item && (item.project_id != null || item.projectId != null))
+		?? {};
+	const projectScope = normalizeProjectScope(scopeSeed);
 
 	function trackNext(effect) {
 		commitEffects.push({ statementIndex: stmts.length, ...effect });
@@ -89,11 +95,11 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		const clauses = [
 			`EXISTS (
 			 SELECT 1 FROM nodes
-			 WHERE id = ? AND user_id = ?
+			 WHERE id = ? AND user_id = ? AND project_id IS ?
 			  AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 			)`,
 		];
-		const bindings = [node.id, userId];
+		const bindings = [node.id, userId, projectScope.projectId];
 		if (node.identity_key) {
 			clauses.push(
 				`EXISTS (
@@ -120,13 +126,13 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			env.DB.prepare(
 				`INSERT INTO manual_fact_identities
 					(user_id, fact_key, object_kind, object_id, owner_node_id, related_node_id, created_at, updated_at)
-				 SELECT ?, ?, ?, ?, ?, ?, ?, ?
+					 SELECT ?, ?, ?, ?, ?, ?, ?, ?
 					 WHERE EXISTS (
-						 SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+						 SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 						 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					   )
 					   AND (? IS NULL OR EXISTS (
-						 SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+						 SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 						 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					   ))
 					   AND (? IS NULL OR EXISTS (
@@ -167,9 +173,11 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				now,
 				ownerNodeId,
 				userId,
+				projectScope.projectId,
 				relatedNodeId,
 				relatedNodeId,
 				userId,
+				projectScope.projectId,
 				item.manual_identity_key ?? null,
 				userId,
 				item.manual_identity_key ?? null,
@@ -195,11 +203,13 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			? `EXISTS (
 				 SELECT 1 FROM slices old_object
 				 WHERE old_object.id = ? AND old_object.user_id = ? AND old_object.node_id = ?
+				  AND old_object.project_id IS ?
 				  AND old_object.deleted_at IS NULL AND old_object.is_current = 1
 			   )`
 			: `EXISTS (
 				 SELECT 1 FROM edges old_object
 				 WHERE old_object.id = ? AND old_object.user_id = ? AND old_object.from_node = ?
+				  AND old_object.project_id IS ?
 				  AND old_object.deleted_at IS NULL
 			   )`;
 		trackNext({ kind: "correctionGuards", id: `${guard.guard_key}:${guard.token}`, requiresResult: true });
@@ -222,6 +232,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				guard.old_object_id,
 				userId,
 				guard.owner_node_id,
+				projectScope.projectId,
 			),
 		);
 	}
@@ -269,7 +280,10 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			n.health_state ?? "active",
 			n.importance_class ?? "ordinary",
 			n.cluster ?? null,
+			projectScope.projectId,
+			projectScope.projectName,
 		];
+		const placeholders = values.map(() => "?").join(", ");
 		if (guarded) values.push(userId, n.identity_key, n.id, ...correction.bindings);
 		// Track both guarded MCP nodes and ordinary API/AutoMode nodes. Otherwise a
 		// later tracked effect makes `committed` non-null and the embedding loop can
@@ -280,14 +294,14 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				`INSERT INTO nodes
 					(id, user_id, label, category, role, state, summary, created_at, updated_at,
 					 canonical_label, aliases_json, mention_count, session_count, last_seen_at,
-					 heat_score, confidence, health_state, importance_class, cluster)
+					 heat_score, confidence, health_state, importance_class, cluster, project_id, project_name)
 				 ${guarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ${placeholders}
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_node_identities
 						 WHERE user_id = ? AND canonical_key = ? AND node_id = ?
 					   ) ${correction.sql}`
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+					: `VALUES (${placeholders})`}`,
 			).bind(...values),
 		);
 	}
@@ -306,12 +320,16 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					(user_id, canonical_key, node_id, created_at, updated_at)
 				 SELECT ?, ?, ?, ?, ?
 				 WHERE EXISTS (
-					SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+					SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 					AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				 ) ${guard.sql}
 				 ON CONFLICT(user_id, canonical_key) DO UPDATE SET updated_at = excluded.updated_at
 				 WHERE manual_node_identities.node_id = excluded.node_id`,
-			).bind(userId, claim.canonical_key, claim.node_id, now, now, claim.node_id, userId, ...guard.bindings),
+			).bind(
+				userId, claim.canonical_key, claim.node_id, now, now,
+				claim.node_id, userId, projectScope.projectId,
+				...guard.bindings,
+			),
 		);
 	}
 
@@ -327,7 +345,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 mention_count = COALESCE(mention_count, 0) + 1,
 					 session_count = COALESCE(session_count, 0) + ?,
 					 heat_score = COALESCE(heat_score, 0) + 1
-				 WHERE id = ? AND user_id = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
@@ -340,6 +358,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				incrementSession,
 				u.id,
 				userId,
+				projectScope.projectId,
 				u.manual_identity_key ?? null,
 				userId,
 				u.manual_identity_key ?? null,
@@ -362,7 +381,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				 SET updated_at = ?, last_seen_at = ?, mention_count = COALESCE(mention_count, 0) + 1,
 					 session_count = COALESCE(session_count, 0) + ?,
 					 heat_score = COALESCE(heat_score, 0) + 1
-				 WHERE id = ? AND user_id = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
@@ -374,6 +393,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				incrementSession,
 				id,
 				userId,
+				projectScope.projectId,
 				touch?.manual_identity_key ?? null,
 				userId,
 				touch?.manual_identity_key ?? null,
@@ -395,14 +415,14 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE nodes SET aliases_json = ?, updated_at = ?
-				 WHERE id = ? AND user_id = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
 					 WHERE user_id = ? AND canonical_key = ? AND node_id = ?
 				   )) ${guard.sql}`,
 			).bind(
-				aliasesJson, Date.now(), update.id, userId,
+				aliasesJson, Date.now(), update.id, userId, projectScope.projectId,
 				update.identity_key ?? null, userId, update.identity_key ?? null, update.id,
 				...guard.bindings,
 			),
@@ -422,7 +442,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					CASE WHEN json_valid(aliases_json) THEN aliases_json ELSE '[]' END,
 					'$[#]', ?
 				 ), updated_at = ?
-				 WHERE id = ? AND user_id = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND EXISTS (
 					 SELECT 1 FROM manual_node_identities
@@ -433,7 +453,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE lower(trim(CAST(value AS TEXT))) = lower(trim(?))
 				   ) ${guard.sql}`,
 			).bind(
-				addition.alias, Date.now(), addition.id, userId,
+				addition.alias, Date.now(), addition.id, userId, projectScope.projectId,
 				userId, addition.identity_key, addition.id, addition.alias,
 				...guard.bindings,
 			),
@@ -463,6 +483,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			env.DB.prepare(
 				`UPDATE slices SET is_current = 0
 				 WHERE user_id = ? AND node_id = ? AND kind = ? AND is_current = 1
+				   AND project_id IS ?
 				   AND (? IS NULL OR id = ?)
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_fact_identities
@@ -476,6 +497,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				userId,
 				s.node_id,
 				s.kind,
+				projectScope.projectId,
 				s.id ?? null,
 				s.id ?? null,
 				guarded ? s.replacement_id : null,
@@ -492,23 +514,28 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	for (const s of newSlices) {
 		const factGuarded = manualFactGuards.get(s.id) === true;
 		const guarded = factGuarded || identityClaims.length > 0;
-		const values = [s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current, s.created_at, s.created_at, s.source_snippet ?? null];
+		const values = [
+			s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current,
+			s.created_at, s.created_at, s.source_snippet ?? null,
+			projectScope.projectId, projectScope.projectName,
+		];
 		if (factGuarded) values.push(userId, s.manual_fact_key, "slice", s.id);
-		else if (guarded) values.push(s.node_id, userId);
+		else if (guarded) values.push(s.node_id, userId, projectScope.projectId);
 		if (guarded) trackNext({ kind: "slices", id: s.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO slices
-					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at, source_snippet)
+					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at, source_snippet,
+					 project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -521,9 +548,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE id = (
 						 SELECT object_id FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'slice'
-					 ) AND user_id = ? AND id != ? ${guard.sql}
+					 ) AND user_id = ? AND project_id IS ? AND id != ? ${guard.sql}
 					 RETURNING id, node_id, kind`,
-				).bind(Date.now(), userId, s.manual_fact_key, userId, s.id, ...guard.bindings),
+				).bind(
+					Date.now(), userId, s.manual_fact_key, userId,
+					projectScope.projectId, s.id, ...guard.bindings,
+				),
 			);
 		}
 	}
@@ -534,13 +564,14 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE slices SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ?
-				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
 					 WHERE user_id = ? AND canonical_key = ? AND node_id = slices.node_id
 				   )) ${guard.sql}`,
 			).bind(
-				Date.now(), s.id, userId, s.manual_identity_key ?? null, userId, s.manual_identity_key ?? null,
+				Date.now(), s.id, userId, projectScope.projectId,
+				s.manual_identity_key ?? null, userId, s.manual_identity_key ?? null,
 				...guard.bindings,
 			),
 		);
@@ -554,24 +585,25 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
 			e.created_at, e.confidence ?? null,
 			e.valid_at ?? e.happened_at ?? null, e.invalid_at ?? null, e.source_snippet ?? null,
+			projectScope.projectId, projectScope.projectName,
 		];
 		if (factGuarded) values.push(userId, e.manual_fact_key, "event", e.id);
-		else if (guarded) values.push(e.node_id, userId);
+		else if (guarded) values.push(e.node_id, userId, projectScope.projectId);
 		if (guarded) trackNext({ kind: "events", id: e.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO events
 					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence,
-					 valid_at, invalid_at, source_snippet)
+					 valid_at, invalid_at, source_snippet, project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)"
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -584,9 +616,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE id = (
 						 SELECT object_id FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'event'
-					 ) AND user_id = ? AND id != ? ${guard.sql}
+					 ) AND user_id = ? AND project_id IS ? AND id != ? ${guard.sql}
 					 RETURNING id, node_id, action`,
-				).bind(Date.now(), userId, e.manual_fact_key, userId, e.id, ...guard.bindings),
+				).bind(
+					Date.now(), userId, e.manual_fact_key, userId,
+					projectScope.projectId, e.id, ...guard.bindings,
+				),
 			);
 		}
 	}
@@ -597,13 +632,14 @@ export async function writeApproved(env, config, userId, plan = {}) {
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE events SET reinforcement_count = COALESCE(reinforcement_count, 0) + 1, last_seen_at = ?
-				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
 					 WHERE user_id = ? AND canonical_key = ? AND node_id = events.node_id
 				   )) ${guard.sql}`,
 			).bind(
-				Date.now(), e.id, userId, e.manual_identity_key ?? null, userId, e.manual_identity_key ?? null,
+				Date.now(), e.id, userId, projectScope.projectId,
+				e.manual_identity_key ?? null, userId, e.manual_identity_key ?? null,
 				...guard.bindings,
 			),
 		);
@@ -623,20 +659,27 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				   AND replacement_claim.object_kind = 'edge' AND replacement_claim.object_id = ?
 				 ) OR EXISTS (
 				  SELECT 1 FROM edges replacement
-				  WHERE replacement.id = ? AND replacement.user_id = ? AND replacement.deleted_at IS NULL
+				  WHERE replacement.id = ? AND replacement.user_id = ? AND replacement.project_id IS ?
+				   AND replacement.deleted_at IS NULL
 				 )
 			   )`
 			: "";
 		const replacementBindings = edge.replacement_edge_id
-			? [userId, edge.replacement_fact_key ?? null, edge.replacement_edge_id, edge.replacement_edge_id, userId]
+			? [
+				userId, edge.replacement_fact_key ?? null, edge.replacement_edge_id,
+				edge.replacement_edge_id, userId, projectScope.projectId,
+			]
 			: [];
 		trackNext({ kind: "edgeSuperseded", id: edge.id });
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE edges SET deleted_at = ?, last_seen_at = ?
-				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
 				 ${guard.sql} ${replacementGuardSql}`,
-			).bind(Date.now(), Date.now(), edge.id, userId, ...guard.bindings, ...replacementBindings),
+			).bind(
+				Date.now(), Date.now(), edge.id, userId, projectScope.projectId,
+				...guard.bindings, ...replacementBindings,
+			),
 		);
 		stmts.push(
 			env.DB.prepare(
@@ -656,8 +699,8 @@ export async function writeApproved(env, config, userId, plan = {}) {
 	for (const closure of plan.edgeClosures ?? []) {
 		stmts.push(
 			env.DB.prepare(
-				"UPDATE edges SET invalid_at = ? WHERE id = ? AND user_id = ? AND invalid_at IS NULL",
-			).bind(closure.invalid_at, closure.id, userId),
+				"UPDATE edges SET invalid_at = ? WHERE id = ? AND user_id = ? AND project_id IS ? AND invalid_at IS NULL",
+			).bind(closure.invalid_at, closure.id, userId, projectScope.projectId),
 		);
 	}
 
@@ -669,26 +712,30 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			ed.id, ed.user_id, ed.from_node, ed.to_node, ed.type, ed.created_at, ed.created_at,
 			ed.weight ?? 1, ed.confidence ?? null, ed.evidence_count ?? 1,
 			ed.fact ?? null, ed.valid_at ?? null, ed.invalid_at ?? null, ed.source_snippet ?? null,
+			projectScope.projectId, projectScope.projectName,
 		];
 		if (factGuarded) values.push(userId, ed.manual_fact_key, "edge", ed.id);
-		else if (guarded) values.push(ed.from_node, userId, ed.to_node, userId);
+		else if (guarded) values.push(
+			ed.from_node, userId, projectScope.projectId,
+			ed.to_node, userId, projectScope.projectId,
+		);
 		if (guarded) trackNext({ kind: "edges", id: ed.id });
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO edges
 					(id, user_id, from_node, to_node, type, created_at, last_seen_at, weight, confidence, evidence_count,
-					 fact, valid_at, invalid_at, source_snippet)
+					 fact, valid_at, invalid_at, source_snippet, project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-					   WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)
-						 AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ?)`
-					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					   WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)
+						 AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)`
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -704,9 +751,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE id = (
 						 SELECT object_id FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = 'edge'
-					 ) AND user_id = ? AND id != ? ${guard.sql}
+					 ) AND user_id = ? AND project_id IS ? AND id != ? ${guard.sql}
 					 RETURNING id, from_node, to_node, type`,
-				).bind(Date.now(), userId, ed.manual_fact_key, userId, ed.id, ...guard.bindings),
+				).bind(
+					Date.now(), userId, ed.manual_fact_key, userId,
+					projectScope.projectId, ed.id, ...guard.bindings,
+				),
 			);
 		}
 	}
@@ -721,7 +771,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 weight = COALESCE(weight, 1) + 0.25,
 					 evidence_count = COALESCE(evidence_count, 0) + 1,
 					 last_seen_at = ?
-				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
 					 WHERE user_id = ? AND canonical_key = ? AND node_id = edges.from_node
@@ -731,7 +781,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE user_id = ? AND canonical_key = ? AND node_id = edges.to_node
 				   )) ${guard.sql}`,
 			).bind(
-				Date.now(), ed.id, userId,
+				Date.now(), ed.id, userId, projectScope.projectId,
 				ed.manual_identity_key ?? null, userId, ed.manual_identity_key ?? null,
 				ed.manual_related_identity_key ?? null, userId, ed.manual_related_identity_key ?? null,
 				...guard.bindings,
@@ -747,8 +797,9 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					(id, user_id, label, strength, mentions, cluster_hint, created_at,
 					 label_guess, canonical_key, role_guess, cluster_guess, confidence, status,
 					 first_seen_at, last_seen_at, session_count, mention_count, evidence_json,
-					 possible_parent_id, possible_existing_node_id, expires_at, reason)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 possible_parent_id, possible_existing_node_id, expires_at, reason,
+					 project_id, project_name)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			).bind(
 				c.id,
 				c.user_id,
@@ -772,6 +823,8 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				c.possible_existing_node_id ?? null,
 				c.expires_at ?? null,
 				c.reason ?? null,
+				projectScope.projectId,
+				projectScope.projectName,
 			),
 		);
 	}
@@ -789,7 +842,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 						WHEN ? IS NULL OR ? = '' THEN COALESCE(evidence_json, '[]')
 						ELSE json_insert(COALESCE(evidence_json, '[]'), '$[#]', json_object('text', ?, 'source', 'message', 'ts', ?))
 					 END
-				 WHERE id = ? AND user_id = ?`,
+				 WHERE id = ? AND user_id = ? AND project_id IS ?`,
 			).bind(
 				b.mentions,
 				b.mentions,
@@ -800,6 +853,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				b.now ?? Date.now(),
 				b.id,
 				userId,
+				projectScope.projectId,
 			),
 		);
 	}
@@ -815,9 +869,9 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				 SET status = ?, reviewed_at = ?,
 					 promoted_object_id = COALESCE(?, promoted_object_id),
 					 promoted_object_kind = COALESCE(?, promoted_object_kind)
-				 WHERE id = ? AND user_id = ? AND COALESCE(status, 'pending') = 'pending'
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND COALESCE(status, 'pending') = 'pending'
 				   AND (? IS NULL OR EXISTS (
-					 SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+					 SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 				   ))
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_node_identities
@@ -830,9 +884,11 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				resolution.node_kind ?? "node",
 				resolution.id,
 				userId,
+				projectScope.projectId,
 				resolution.node_id ?? null,
 				resolution.node_id ?? null,
 				userId,
+				projectScope.projectId,
 				resolution.verified_identity_key ?? null,
 				userId,
 				resolution.verified_identity_key ?? null,
@@ -854,7 +910,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				 (id, user_id, canonical_key, label, summary, confidence, created_at, updated_at)
 					 SELECT ?, ?, ?, ?, ?, ?, ?, ?
 					 WHERE EXISTS (
-					  SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+					  SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 					   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					 )
 					 AND (? IS NULL OR EXISTS (
@@ -870,7 +926,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				communityId, userId, membership.canonical_key,
 				membership.label ?? membership.canonical_key, membership.summary ?? null,
 				membership.confidence ?? null, now, now,
-				membership.node_id, userId,
+				membership.node_id, userId, projectScope.projectId,
 				membership.verified_identity_key ?? null, userId,
 				membership.verified_identity_key ?? null, membership.node_id,
 				...guard.bindings,
@@ -885,7 +941,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				 FROM topic_communities AS community
 				 WHERE community.user_id = ? AND community.canonical_key = ?
 				   AND EXISTS (
-					 SELECT 1 FROM nodes WHERE id = ? AND user_id = ?
+					 SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?
 					 AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   )
 				   AND (? IS NULL OR EXISTS (
@@ -899,7 +955,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			).bind(
 				userId, membership.node_id, membership.confidence ?? null,
 				membership.source_packet_id ?? null, now, now,
-				userId, membership.canonical_key, membership.node_id, userId,
+				userId, membership.canonical_key, membership.node_id, userId, projectScope.projectId,
 				membership.verified_identity_key ?? null, userId,
 				membership.verified_identity_key ?? null, membership.node_id,
 				...guard.bindings,
@@ -1004,6 +1060,8 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			page.importance_class ?? "ordinary",
 			page.cluster ?? null,
 			page.role_type ?? "container",
+			projectScope.projectId,
+			projectScope.projectName,
 		];
 		const placeholders = pageValues.map(() => "?").join(", ");
 		const values = guarded ? [...pageValues, ...insertGuardBindings] : pageValues;
@@ -1017,7 +1075,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
 					 receipt_id,
 					 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
-					 cluster, role_type)
+					 cluster, role_type, project_id, project_name)
 					 ${guarded
 					? `SELECT ${placeholders}
 					   WHERE ${insertGuards.join(" AND ")}`
@@ -1033,12 +1091,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 SELECT ?, ?, 0, NULL, ?
 					 WHERE EXISTS (
 						 SELECT 1 FROM memory_pages
-						 WHERE id = ? AND user_id = ?
+						 WHERE id = ? AND user_id = ? AND project_id IS ?
 						   AND source_mode = 'manual_collect'
 						   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					 )
 					 ON CONFLICT(user_id, page_id) DO NOTHING`,
-				).bind(userId, page.id, now, page.id, userId),
+				).bind(userId, page.id, now, page.id, userId, projectScope.projectId),
 			);
 		}
 		for (const claim of pageClaims.filter((item) =>
@@ -1052,7 +1110,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 SELECT ?, ?, ?, ?, ?
 					 WHERE EXISTS (
 					  SELECT 1 FROM memory_pages
-					  WHERE id = ? AND user_id = ? AND source_mode = 'manual_collect'
+					  WHERE id = ? AND user_id = ? AND project_id IS ? AND source_mode = 'manual_collect'
 					   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					 ) AND EXISTS (
 					  SELECT 1 FROM manual_page_write_epochs WHERE user_id = ? AND epoch = ?
@@ -1061,7 +1119,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					 WHERE manual_page_identities.page_id = excluded.page_id`,
 				).bind(
 					userId, claim.identity_key, page.id, claimNow, claimNow,
-					page.id, userId, userId, expectedWriteEpoch,
+					page.id, userId, projectScope.projectId, userId, expectedWriteEpoch,
 				),
 			);
 		}
@@ -1092,12 +1150,12 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				`INSERT INTO manual_page_versions
 					(user_id, page_id, revision, write_token, updated_at)
 				 SELECT ?, ?, 0, NULL, COALESCE(updated_at, created_at, ?)
-				 FROM memory_pages
-				 WHERE id = ? AND user_id = ?
+					 FROM memory_pages
+					 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND source_mode = 'manual_collect'
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				 ON CONFLICT(user_id, page_id) DO NOTHING`,
-			).bind(userId, page.id, now, page.id, userId),
+			).bind(userId, page.id, now, page.id, userId, projectScope.projectId),
 		);
 		stmts.push(
 			env.DB.prepare(
@@ -1110,7 +1168,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				   )
 				   AND EXISTS (
 					 SELECT 1 FROM memory_pages
-					 WHERE id = ? AND user_id = ?
+					 WHERE id = ? AND user_id = ? AND project_id IS ?
 					   AND source_mode = 'manual_collect'
 					   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					   AND ((? IS NULL AND updated_at IS NULL) OR updated_at = ?)
@@ -1127,6 +1185,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				expectedWriteEpoch,
 				page.id,
 				userId,
+				projectScope.projectId,
 				expectedUpdatedAt,
 				expectedUpdatedAt,
 				expectedInputHash,
@@ -1146,7 +1205,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 					extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
 					updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
 					confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
-					 WHERE id = ? AND user_id = ?
+					 WHERE id = ? AND user_id = ? AND project_id IS ?
 					   AND source_mode = 'manual_collect'
 					   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 					   AND ((? IS NULL AND updated_at IS NULL) OR updated_at = ?)
@@ -1182,6 +1241,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				page.cluster ?? null,
 				page.id,
 				userId,
+				projectScope.projectId,
 				expectedUpdatedAt,
 				expectedUpdatedAt,
 				expectedInputHash,
@@ -1262,14 +1322,14 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				    FROM (
 				     SELECT fact_text
 				     FROM (
-				      SELECT trim(text) AS fact_text, 0 AS source_rank, created_at AS fact_time, id
-				      FROM slices
-				      WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL
+					      SELECT trim(text) AS fact_text, 0 AS source_rank, created_at AS fact_time, id
+					      FROM slices
+					      WHERE user_id = ? AND node_id = ? AND project_id IS ? AND is_current = 1 AND deleted_at IS NULL
 				      UNION ALL
 				      SELECT trim(text) AS fact_text, 1 AS source_rank,
 				       COALESCE(happened_at, created_at) AS fact_time, id
-				      FROM events
-				      WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
+					      FROM events
+					      WHERE user_id = ? AND node_id = ? AND project_id IS ? AND deleted_at IS NULL
 				       AND COALESCE(action, '') <> 'updated'
 				     ) AS committed_facts
 				     WHERE fact_text <> ''
@@ -1281,7 +1341,7 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				   WHERE trim(fact_clause, ' .;,!?') <> ''
 				  ) AS summary_facts
 				 ), COALESCE(?, summary)), cluster = COALESCE(?, cluster), updated_at = ?
-				 WHERE id = ? AND user_id = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				  AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				  AND (? IS NULL OR EXISTS (
 				   SELECT 1 FROM manual_node_identities
@@ -1291,8 +1351,10 @@ export async function writeApproved(env, config, userId, plan = {}) {
 				label, label, label, label,
 				label, label, label, label,
 				label, label, label, label,
-				userId, update.id, userId, update.id,
+				userId, update.id, projectScope.projectId,
+				userId, update.id, projectScope.projectId,
 				update.summary ?? null, update.cluster ?? null, Date.now(), update.id, userId,
+				projectScope.projectId,
 				update.manual_identity_key ?? null, userId, update.manual_identity_key ?? null, update.id,
 				...guard.bindings,
 			),
@@ -1305,12 +1367,16 @@ export async function writeApproved(env, config, userId, plan = {}) {
 			env.DB.prepare(
 				`UPDATE nodes SET summary_sources_json = (
 					SELECT json_group_array(id) FROM (
-						SELECT id FROM slices WHERE user_id = ? AND node_id = ? AND is_current = 1 AND deleted_at IS NULL
+						SELECT id FROM slices WHERE user_id = ? AND node_id = ? AND project_id IS ? AND is_current = 1 AND deleted_at IS NULL
 						UNION ALL
-						SELECT id FROM events WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL AND COALESCE(action, '') <> 'updated'
+						SELECT id FROM events WHERE user_id = ? AND node_id = ? AND project_id IS ? AND deleted_at IS NULL AND COALESCE(action, '') <> 'updated'
 					)
-				) WHERE id = ? AND user_id = ?`,
-			).bind(userId, update.id, userId, update.id, update.id, userId),
+				) WHERE id = ? AND user_id = ? AND project_id IS ?`,
+			).bind(
+				userId, update.id, projectScope.projectId,
+				userId, update.id, projectScope.projectId,
+				update.id, userId, projectScope.projectId,
+			),
 		);
 	}
 

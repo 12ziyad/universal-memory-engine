@@ -31,8 +31,10 @@ function keywordScore(node, queryTokens, queryNorm) {
 	return score;
 }
 
-export async function shortlistNodes(env, config, userId, text) {
-	const nodes = await getUserNodes(env, userId);
+export async function shortlistNodes(env, config, userId, text, { projectId } = {}) {
+	// Write-time matching is deliberately exact: account-global writes may only
+	// reuse global nodes, and project writes may only reuse that project's nodes.
+	const nodes = await getUserNodes(env, userId, { projectId: projectId ?? null });
 	if (nodes.length === 0) return [];
 
 	const byId = new Map(nodes.map((n) => [n.id, n]));

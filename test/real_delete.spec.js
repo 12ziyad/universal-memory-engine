@@ -34,10 +34,11 @@ const canned = (label, sliceText) => ({
 	notes: "",
 });
 
-async function ingest(userId, id, content, llmResponse) {
+async function ingest(userId, id, content, llmResponse, memoryScope = undefined) {
 	return call("POST", "/v1/ingest", {
 		userId,
 		flush: true,
+		...(memoryScope ? { memoryScope } : {}),
 		messages: [{ id, role: "user", content }],
 		_test: { llmResponse },
 	});
@@ -180,7 +181,13 @@ describe("candidates are covered by delete-by-source (Part 9 finding)", () => {
 describe("single-object delete for API callers (3.1)", () => {
 	it("DELETE /v1/memories/:id cascades and tombstones; unknown id 404s", async () => {
 		const userId = `del-one-${crypto.randomUUID()}`;
-		await ingest(userId, "s1", "I am building project Nightjar this month", canned("Nightjar"));
+		await ingest(
+			userId,
+			"s1",
+			"I am building project Nightjar this month",
+			canned("Nightjar"),
+			{ projectId: "nightjar-project", projectName: "Nightjar" },
+		);
 		const node = await env.DB.prepare(
 			"SELECT id FROM nodes WHERE user_id = ? AND deleted_at IS NULL",
 		).bind(userId).first();
@@ -198,6 +205,16 @@ describe("single-object delete for API callers (3.1)", () => {
 			"SELECT COUNT(*) AS n FROM slices WHERE user_id = ? AND deleted_at IS NULL",
 		).bind(userId).first();
 		expect(slices.n).toBe(0);
+		const tombstoneRow = await env.DB.prepare(
+			"SELECT detail FROM receipts WHERE user_id = ? AND source = 'delete_memory' ORDER BY created_at DESC LIMIT 1",
+		).bind(userId).first();
+		const tombstone = JSON.parse(tombstoneRow.detail);
+		expect(tombstone).toMatchObject({
+			project_scope: "project",
+			project_id: "nightjar-project",
+			project_name: "Nightjar",
+			project_scopes: [{ project_id: "nightjar-project", project_name: "Nightjar" }],
+		});
 
 		const missing = await call("DELETE", `/v1/memories/node_does_not_exist?userId=${encodeURIComponent(userId)}`);
 		expect(missing.status).toBe(404);

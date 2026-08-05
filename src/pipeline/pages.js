@@ -11,6 +11,7 @@ import {
 	updateMemoryJob,
 } from "../lib/db.js";
 import { getConfig } from "../config.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeLabel, tokens } from "../lib/text.js";
 import { clusterForMemory } from "./clusters.js";
 import { runPass2 } from "./pass2.js";
@@ -500,6 +501,8 @@ function pageReceipt({ action, page, runId, received, digested, relatedCount, sk
 		source_packet_id: page.source_packet_id ?? null,
 		idempotency_key: page.idempotency_key ?? null,
 		scope_json: page.scope_json ?? null,
+		project_id: page.project_id ?? null,
+		project_name: page.project_name ?? null,
 		received,
 		digested,
 		saved: {
@@ -553,6 +556,7 @@ function pageSummary(action, page, receipt) {
 
 export async function saveMemoryPage(env, userId, { digest, messages, intent, received, keptLines, conversationId, sourcePacket = null }) {
 	const source = sourceMeta(sourcePacket);
+	const projectScope = normalizeProjectScope(source);
 	const runId = await createExtractionRun(env, userId, {
 		toolName: "save_conversation",
 		sourceMode: "manual_collect",
@@ -566,8 +570,11 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 	const draft = {
 		...buildPageDraft({ digest, messages, intent, conversationId, extractionRunId: runId, sourcePacket }),
 		scope_json: source.scope_json ?? null,
+		project_id: projectScope.projectId,
+		project_name: projectScope.projectName,
 	};
-	const suppressions = await getActiveSuppressions(env, userId);
+	const writeScope = { projectId: projectScope.projectId };
+	const suppressions = await getActiveSuppressions(env, userId, writeScope);
 	const suppression = suppressedBy(suppressions, "memory_page", draft.canonical_title)
 		?? (draft.topic_filter ? suppressedBy(suppressions, "memory_page", draft.topic_filter) : null);
 	if (suppression) {
@@ -590,7 +597,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 		return { fired: false, processing: false, summary, receipt };
 	}
 
-	const pages = await getUserPages(env, userId);
+	const pages = await getUserPages(env, userId, writeScope);
 	const match = findPageMatch(pages, draft, intent, conversationId);
 	const now = Date.now();
 	let action = "create";
@@ -621,8 +628,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 			const summary = pageSummary(action, page, receipt);
 			const receiptId = await storeReceipt(env, userId, "save_conversation", receipt, summary);
 			if (receiptId) {
-				await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ?")
-					.bind(receiptId, page.id, userId)
+				await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ? AND project_id IS ?")
+					.bind(receiptId, page.id, userId, projectScope.projectId)
 					.run();
 			}
 			return { fired: false, processing: false, summary, receipt };
@@ -636,7 +643,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				source_packet_id = ?, input_hash = ?, idempotency_key = ?,
 				extraction_run_id = ?, updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
 				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
-			 WHERE id = ? AND user_id = ?`,
+			 WHERE id = ? AND user_id = ? AND project_id IS ?`,
 		)
 			.bind(
 				page.title,
@@ -662,6 +669,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				page.cluster,
 				match.id,
 				userId,
+				projectScope.projectId,
 			)
 			.run();
 	} else {
@@ -672,8 +680,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				 next_steps_json, related_concepts_json, evidence_json, source_thread_id,
 				 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
 				 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
-				 cluster, role_type)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 cluster, role_type, project_id, project_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				page.id,
@@ -707,6 +715,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				page.importance_class,
 				page.cluster,
 				page.role_type,
+				projectScope.projectId,
+				projectScope.projectName,
 			)
 			.run();
 	}
@@ -729,14 +739,25 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 		idempotencyKey: `pass2:${runId}`,
 		sourcePacketId: page.source_packet_id ?? null,
 		extractionRunId: runId,
-		payload: { affectedNodeIds: [], pageId: page.id },
+		payload: {
+			affectedNodeIds: [],
+			pageId: page.id,
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
+		},
 	});
 	if (jobId) await updateExtractionRun(env, userId, runId, { jobId });
 	try {
 		const pass2 = await runPass2(env, getConfig(env), userId, [], { jobId });
 		await updateMemoryJob(env, userId, jobId, {
 			status: pass2?.ran ? "completed" : "skipped",
-			payload: { affectedNodeIds: [], pageId: page.id, pass2 },
+			payload: {
+				affectedNodeIds: [],
+				pageId: page.id,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
+				pass2,
+			},
 			completedAt: Date.now(),
 		});
 	} catch (err) {
@@ -749,8 +770,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 	const summary = pageSummary(action, page, receipt);
 	const receiptId = await storeReceipt(env, userId, "save_conversation", receipt, summary);
 	if (receiptId) {
-		await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ?")
-			.bind(receiptId, page.id, userId)
+		await env.DB.prepare("UPDATE memory_pages SET receipt_id = ? WHERE id = ? AND user_id = ? AND project_id IS ?")
+			.bind(receiptId, page.id, userId, projectScope.projectId)
 			.run();
 	}
 	return { fired: true, processing: false, summary, receipt };
@@ -763,6 +784,8 @@ export async function suppressPageKey(env, userId, page, reason = "deleted") {
 		canonical_key: page.canonical_title,
 		reason,
 		source_object_id: page.id,
+		project_id: page.project_id ?? null,
+		project_name: page.project_name ?? null,
 	});
 	if (page.topic_filter) {
 		await addSuppression(env, userId, {
@@ -771,6 +794,8 @@ export async function suppressPageKey(env, userId, page, reason = "deleted") {
 			canonical_key: page.topic_filter,
 			reason,
 			source_object_id: page.id,
+			project_id: page.project_id ?? null,
+			project_name: page.project_name ?? null,
 		});
 	}
 }

@@ -52,8 +52,19 @@ const LEASE_MS = 120_000;
 // Entries older than this get `drained_from_backlog` on their receipts so a
 // sudden burst of graph changes is explainable in the UI.
 const BACKLOG_AGE_MS = 10 * 60 * 1000;
+const GLOBAL_SCOPE_KEY = "global";
 
 const backoffMs = (attempts) => Math.min(5000 * 2 ** Math.max(0, attempts - 1), 600_000);
+
+function cleanScopeKey(value) {
+	const key = String(value ?? GLOBAL_SCOPE_KEY).trim();
+	return key && key.length <= 180 ? key : GLOBAL_SCOPE_KEY;
+}
+
+function scopedStorageKey(base, scopeKey) {
+	const key = cleanScopeKey(scopeKey);
+	return key === GLOBAL_SCOPE_KEY ? base : `${base}:${key}`;
+}
 
 /**
  * Overrides may carry function-valued test hooks (JSRPC passes them as
@@ -63,7 +74,8 @@ const backoffMs = (attempts) => Math.min(5000 * 2 ** Math.max(0, attempts - 1), 
  * wants the hooks honored right now.
  */
 function persistableOverrides(value) {
-	if (value === null || value === undefined) return value ?? {};
+	if (value === null) return null;
+	if (value === undefined) return undefined;
 	if (typeof value === "function") return undefined;
 	if (Array.isArray(value)) return value.map((v) => persistableOverrides(v)).filter((v) => v !== undefined);
 	if (typeof value === "object") {
@@ -78,13 +90,15 @@ function persistableOverrides(value) {
 }
 
 export class UserMemory extends DurableObject {
-	async #load() {
-		const [chunk, recent, checkpoint, userId, seen] = await Promise.all([
+	async #load(scopeKey = GLOBAL_SCOPE_KEY) {
+		const key = cleanScopeKey(scopeKey);
+		const [chunk, recent, checkpoint, userId, seen, chunkScopeKey] = await Promise.all([
 			this.ctx.storage.get("chunk"),
-			this.ctx.storage.get("recent"),
-			this.ctx.storage.get("checkpoint"),
+			this.ctx.storage.get(scopedStorageKey("recent", key)),
+			this.ctx.storage.get(scopedStorageKey("checkpoint", key)),
 			this.ctx.storage.get("userId"),
-			this.ctx.storage.get("seen"),
+			this.ctx.storage.get(scopedStorageKey("seen", key)),
+			this.ctx.storage.get("chunkScopeKey"),
 		]);
 		return {
 			chunk: chunk ?? [],
@@ -92,6 +106,8 @@ export class UserMemory extends DurableObject {
 			checkpoint: checkpoint ?? null,
 			userId: userId ?? null,
 			seen: seen ?? [],
+			scopeKey: key,
+			chunkScopeKey: cleanScopeKey(chunkScopeKey),
 		};
 	}
 
@@ -209,9 +225,10 @@ export class UserMemory extends DurableObject {
 	 * each entry is one small, retryable extraction. Splitting happens HERE, at
 	 * enqueue time — never inside a model call.
 	 */
-	async #enqueueFired(userId, { overrides = null } = {}) {
+	async #enqueueFired(userId, { overrides = null, scopeKey = null } = {}) {
 		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
 		if (chunk.length === 0) return 0;
+		const activeScopeKey = cleanScopeKey(scopeKey ?? (await this.ctx.storage.get("chunkScopeKey")));
 		const pendingOverrides = persistableOverrides(overrides ?? (await this.ctx.storage.get("pendingOverrides")) ?? {});
 
 		let batch = [];
@@ -236,6 +253,7 @@ export class UserMemory extends DurableObject {
 				messages: msgs.map(({ _settled, ...m }) => m),
 				jobByMessage: Object.fromEntries(msgs.filter((m) => m._job).map((m) => [m.id, m._job])),
 				overrides: pendingOverrides,
+				scopeKey: activeScopeKey,
 				attempts: 0,
 				runAfter: 0,
 				enqueuedAt: Date.now(),
@@ -259,7 +277,20 @@ export class UserMemory extends DurableObject {
 	 */
 	async addMessages(userId, messages, opts = {}) {
 		return this.ctx.blockConcurrencyWhile(async () => {
-			const state = await this.#load();
+			const requestedScopeKey = cleanScopeKey(opts.scopeKey);
+			let state = await this.#load(requestedScopeKey);
+			// A project switch is a hard batching boundary. Finish the prior held
+			// chunk under its own persisted metadata before any new-scope message
+			// can enter it. One account DO remains the coordinator; projects do not
+			// become unrelated Durable Object tenants.
+			if (state.chunk.length > 0 && state.chunkScopeKey !== requestedScopeKey) {
+				await this.#enqueueFired(userId, { scopeKey: state.chunkScopeKey });
+				state = await this.#load(requestedScopeKey);
+			}
+			if (state.chunkScopeKey !== requestedScopeKey) {
+				await this.ctx.storage.put("chunkScopeKey", requestedScopeKey);
+				state.chunkScopeKey = requestedScopeKey;
+			}
 			const chunk = state.chunk;
 			let recent = state.recent;
 			let checkpoint = state.checkpoint;
@@ -315,15 +346,15 @@ export class UserMemory extends DurableObject {
 			});
 
 			await this.ctx.storage.put("chunk", chunk);
-			await this.ctx.storage.put("recent", recent);
+			await this.ctx.storage.put(scopedStorageKey("recent", requestedScopeKey), recent);
 			await this.ctx.storage.put("userId", userId);
 			if (opts.overrides !== undefined) await this.ctx.storage.put("pendingOverrides", persistableOverrides(opts.overrides ?? {}));
 			if (checkpointChanged) {
-				await this.ctx.storage.put("checkpoint", checkpoint);
+				await this.ctx.storage.put(scopedStorageKey("checkpoint", requestedScopeKey), checkpoint);
 				await this.#mirrorCheckpoint(userId, checkpoint);
 			}
 			if (seen.size !== state.seen.length) {
-				await this.ctx.storage.put("seen", this.#capSeen([...seen]));
+				await this.ctx.storage.put(scopedStorageKey("seen", requestedScopeKey), this.#capSeen([...seen]));
 			}
 
 			// A message finalized at the door settles its slice of the job NOW —
@@ -338,7 +369,7 @@ export class UserMemory extends DurableObject {
 
 			let queued = 0;
 			if (fire) {
-				queued = await this.#enqueueFired(userId, { overrides: opts.overrides });
+				queued = await this.#enqueueFired(userId, { overrides: opts.overrides, scopeKey: requestedScopeKey });
 			}
 			// Every exit guarantees a wake while work exists — fired or held.
 			await this.#guaranteeWake();
@@ -509,7 +540,11 @@ export class UserMemory extends DurableObject {
 	 * canonical-match upserts, never duplicate rows.
 	 */
 	async #processExtractEntry(userId, key, entry, inlineOverrides = null) {
-		const recent = (await this.ctx.storage.get("recent")) ?? [];
+		// Queue entries keep the project that fired them. State used for
+		// extraction must follow that immutable entry, not whichever project most
+		// recently appended to this account's shared coordinator.
+		const scopeKey = cleanScopeKey(entry.scopeKey);
+		const recent = (await this.ctx.storage.get(scopedStorageKey("recent", scopeKey))) ?? [];
 		// The entry's own persisted overrides win (they carry the packet's true
 		// source attribution); inline values fill gaps — except function-valued
 		// test hooks, which can never be persisted and therefore always apply.
@@ -559,11 +594,12 @@ export class UserMemory extends DurableObject {
 				receiptId: result.receipt?.id ?? null,
 			})));
 			if (lastId) {
-				await this.ctx.storage.put("checkpoint", lastId);
+				await this.ctx.storage.put(scopedStorageKey("checkpoint", scopeKey), lastId);
 				await this.#mirrorCheckpoint(userId, lastId);
 			}
-			const seen = (await this.ctx.storage.get("seen")) ?? [];
-			await this.ctx.storage.put("seen", this.#capSeen([...new Set([...seen, ...processedIds])]));
+			const seenKey = scopedStorageKey("seen", scopeKey);
+			const seen = (await this.ctx.storage.get(seenKey)) ?? [];
+			await this.ctx.storage.put(seenKey, this.#capSeen([...new Set([...seen, ...processedIds])]));
 			await this.ctx.storage.delete(key);
 			return { kind: "extract", outcome: result.outcome, receipt: result.receipt ?? null, summary: result.summary ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
 		}
@@ -577,7 +613,26 @@ export class UserMemory extends DurableObject {
 				counts: { nodes: 0, slices: 0, events: 0, edges: 0 },
 				receiptId: result.receipt?.id ?? null,
 			})));
-			const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+			let chunk = (await this.ctx.storage.get("chunk")) ?? [];
+			const chunkScopeKey = cleanScopeKey(await this.ctx.storage.get("chunkScopeKey"));
+			let restoredIntoEmptyScope = chunk.length === 0;
+			if (chunk.length > 0 && chunkScopeKey !== scopeKey) {
+				// A no-write rescue buffer is still project-owned. If another
+				// project arrived while this entry was extracting, fire that held
+				// chunk first and restore this entry only under its original scope.
+				await this.#enqueueFired(userId, { scopeKey: chunkScopeKey });
+				chunk = [];
+				restoredIntoEmptyScope = true;
+			}
+			if (chunkScopeKey !== scopeKey) await this.ctx.storage.put("chunkScopeKey", scopeKey);
+			// When the rescued entry becomes the new held chunk, its own immutable
+			// attribution must become the pending attribution too. Otherwise a later
+			// fire can write project A's rescued text with project B's source metadata.
+			// If newer same-project messages are already held, keep their pending
+			// metadata; Stage 5 snapshots context per job rather than rewriting it here.
+			if (restoredIntoEmptyScope) {
+				await this.ctx.storage.put("pendingOverrides", persistableOverrides(entry.overrides ?? {}));
+			}
 			const chunkIds = new Set(chunk.map((m) => m.id));
 			const restored = messages.filter((m) => !chunkIds.has(m.id)).map((m) => ({ ...m, _settled: true }));
 			await this.ctx.storage.put("chunk", [...restored, ...chunk]);
@@ -601,8 +656,9 @@ export class UserMemory extends DurableObject {
 				userId,
 			);
 			// Poison messages are finalized (seen) so re-sends don't loop them.
-			const seen = (await this.ctx.storage.get("seen")) ?? [];
-			await this.ctx.storage.put("seen", this.#capSeen([...new Set([...seen, ...processedIds])]));
+			const seenKey = scopedStorageKey("seen", scopeKey);
+			const seen = (await this.ctx.storage.get(seenKey)) ?? [];
+			await this.ctx.storage.put(seenKey, this.#capSeen([...new Set([...seen, ...processedIds])]));
 			await this.ctx.storage.delete(key);
 			return { kind: "extract", outcome: "failed", receipt: result.receipt ?? null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
 		}
@@ -625,8 +681,11 @@ export class UserMemory extends DurableObject {
 			const data = {
 				job_id: t.jobId,
 				source_packet_id: t.sourcePacketId ?? null,
+				receipt_id: t.receiptId ?? null,
 				status: t.status,
 				counts: t.saved ?? null,
+				project_id: t.project_id ?? null,
+				project_name: t.project_name ?? null,
 				...(t.error ? { error: String(t.error).slice(0, 200) } : {}),
 			};
 			// Await the delivery-row insert (bounded D1 work); the HTTP attempt
@@ -729,7 +788,8 @@ export class UserMemory extends DurableObject {
 
 	/** Inspect held state — used by tests to assert chunk/queue retention. */
 	async getDebugState() {
-		const { chunk, checkpoint } = await this.#load();
+		const scopeKey = cleanScopeKey(await this.ctx.storage.get("chunkScopeKey"));
+		const { chunk, checkpoint } = await this.#load(scopeKey);
 		const entries = await this.ctx.storage.list({ prefix: "q:" });
 		let queuedMessages = 0;
 		for (const [, entry] of entries) queuedMessages += entry.kind === "extract" ? (entry.messages?.length ?? 0) : 0;
@@ -740,6 +800,7 @@ export class UserMemory extends DurableObject {
 			queuedEntries: entries.size,
 			queuedMessages,
 			checkpoint,
+			scopeKey,
 			leased: Boolean(lease && Number(lease.until) > Date.now()),
 		};
 	}

@@ -55,6 +55,58 @@ def test_sub_tenant_user_id_in_query_and_body():
     assert b"end-user-7" in seen[1].content
 
 
+def test_sub_tenant_receipts_preserves_limit_query():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"receipts": []})
+
+    m = make_client(handler, user_id="end-user-7")
+    m.receipts(limit=17)
+
+    assert seen[0].url.path == "/v1/receipts"
+    assert seen[0].url.params["limit"] == "17"
+    assert seen[0].url.params["userId"] == "end-user-7"
+
+
+def test_sub_tenant_usage_preserves_range_query():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"usage": []})
+
+    m = make_client(handler, user_id="end-user-7")
+    m.usage(range="90d")
+
+    assert seen[0].url.path == "/v1/usage"
+    assert seen[0].url.params["range"] == "90d"
+    assert seen[0].url.params["userId"] == "end-user-7"
+
+
+def test_project_memory_and_recall_scopes_use_wire_names_without_user_id():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    scope = {"projectId": "atlas", "projectName": "Atlas"}
+    m = make_client(handler)
+    m.add("Atlas deploys from main.", memory_scope=scope)
+    m.search(
+        "How does Atlas deploy?",
+        memory_scope=scope,
+        recall_scope="project_then_global",
+    )
+
+    assert seen[0].url.query == b""
+    assert b'"memoryScope"' in seen[0].content
+    assert b'"projectId":"atlas"' in seen[0].content
+    assert b'"recallScope":"project_then_global"' in seen[1].content
+
+
 def test_reads_retry_on_500():
     calls = {"n": 0}
 

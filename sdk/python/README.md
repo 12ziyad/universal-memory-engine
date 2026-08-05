@@ -18,6 +18,22 @@ print(memory.search("what am I learning?")["context"])
 - Sub-tenants: `MemoryClient(api_key, user_id="end-user-42")` gives each of your users an isolated memory space under one key
 - Safe retries: pass `idempotencyKey=MemoryClient.new_idempotency_key()` to writes
 
+Projects are metadata inside one memory space, not sub-tenants:
+
+```python
+scope = {"projectId": "atlas", "projectName": "Atlas"}
+memory.add("Atlas deploys from main.", memory_scope=scope)
+result = memory.search(
+    "How does this deploy?",
+    memory_scope=scope,
+    recall_scope="project_then_global",
+)
+```
+
+The default recall scope is `global` (all account-global and project rows). Use
+`project_only` for exactly one project, or `project_then_global` for that project plus
+rows without a project. Both project modes require `memoryScope.projectId`.
+
 Errors raise `MemoryAPIError` with `.status`, `.code`, and `.body`. Docs: your deployment's `/docs/`.
 
 ## Many end users, one API key

@@ -1,6 +1,7 @@
 import { getConfig } from "../config.js";
 import { addSuppression, getUserNodes, storeReceipt } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeLabel } from "../lib/text.js";
 import { clusterForMemory } from "./clusters.js";
 import { buildReceipt, formatReceipt } from "./receipt.js";
@@ -61,6 +62,8 @@ function rowToCandidate(row) {
 		confidence: row.confidence ?? null,
 		strength: row.strength ?? "weak",
 		status: row.status ?? "pending",
+		projectId: row.project_id ?? null,
+		projectName: row.project_name ?? null,
 		firstSeenAt: row.first_seen_at ?? row.created_at ?? null,
 		lastSeenAt: row.last_seen_at ?? row.created_at ?? null,
 		sessionCount: row.session_count ?? 1,
@@ -155,6 +158,8 @@ async function persistPromotion(env, userId, row, plan, status, object) {
 	});
 	const receipt = buildReceipt("promoted_from_candidate", plan, {
 		source: "candidate_review",
+		project_id: row.project_id ?? null,
+		project_name: row.project_name ?? null,
 	});
 	receipt.candidate_id = row.id;
 	const summary = `Promoted candidate: ${candidateLabel(row)}. ${formatReceipt(receipt)}`;
@@ -185,8 +190,10 @@ export async function promoteCandidate(env, userId, id, body = {}) {
 	if (!row) return { ok: false, error: "candidate not found", status: 404 };
 	if ((row.status ?? "pending") !== "pending") return { ok: false, error: "candidate is not pending", status: 409 };
 
-	const nodes = await getUserNodes(env, userId);
+	const projectScope = normalizeProjectScope(row);
+	const nodes = await getUserNodes(env, userId, { projectId: projectScope.projectId });
 	const plan = planBase();
+	plan.projectScope = projectScope;
 	const action = body.action ?? "promote_to_node";
 	const node = ensureNode(plan, userId, row, nodes, body);
 	const text = String((body.text ?? evidenceText(row)) || candidateLabel(row)).trim();
@@ -251,6 +258,8 @@ export async function rejectCandidate(env, userId, id, body = {}) {
 			canonical_key: row.canonical_key ?? normalizeLabel(candidateLabel(row)),
 			reason: body.reason ?? "candidate_review_suppress_similar",
 			source_object_id: row.id,
+			project_id: row.project_id ?? null,
+			project_name: row.project_name ?? null,
 		});
 	}
 	await markCandidate(env, userId, id, suppress ? "suppressed" : "rejected", {

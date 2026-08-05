@@ -18,6 +18,21 @@ const { context } = await memory.search("what am I learning?");
 - Sub-tenants: `new MemoryClient({ apiKey, userId: "end-user-42" })` gives each of your users an isolated memory space under one key
 - Safe retries: pass `idempotencyKey: memory.newIdempotencyKey()` to writes
 
+Projects are metadata inside one memory space, not sub-tenants:
+
+```js
+const memoryScope = { projectId: "atlas", projectName: "Atlas" };
+await memory.add("Atlas deploys from main.", { memoryScope });
+const result = await memory.search("How does this deploy?", {
+  memoryScope,
+  recallScope: "project_then_global",
+});
+```
+
+The default recall scope is `global` (all account-global and project rows). Use
+`project_only` for exactly one project, or `project_then_global` for that project plus
+rows without a project. Both project modes require `memoryScope.projectId`.
+
 Errors throw `MemoryAPIError` with `status`, `code`, and `body`. Docs: your deployment's `/docs/`.
 
 ## Many end users, one API key

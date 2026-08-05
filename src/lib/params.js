@@ -25,6 +25,7 @@ const ALIASES = {
 	tenant_id: "userId",
 	tenantId: "userId",
 	memory_scope: "memoryScope",
+	recall_scope: "recallScope",
 	source_scope: "sourceScope",
 	conversation_id: "conversationId",
 	thread_id: "threadId",
@@ -43,9 +44,9 @@ const COMMON = [
 
 export const ENDPOINT_PARAMS = {
 	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope"],
-	"/v1/recall": [...COMMON, "query", "topic", "limit"],
+	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope"],
 	"/v1/ingest": [...COMMON, "messages", "flush"],
-	"/v1/turn": [...COMMON, "messages", "query"],
+	"/v1/turn": [...COMMON, "messages", "query", "recallScope"],
 };
 
 // A save is a memory, not a file upload. Past this the extractor cannot do

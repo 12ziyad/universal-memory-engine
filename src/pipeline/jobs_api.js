@@ -23,6 +23,8 @@ function shapeJob(row) {
 		status: row.status,
 		type: row.type,
 		lane: payload.lane ?? (row.type === "mcp_enrich" ? "mcp_save" : null),
+		project_id: payload.project_id ?? null,
+		project_name: payload.project_name ?? null,
 		attempts: Number(row.attempts ?? 0),
 		created_at: row.created_at,
 		updated_at: row.updated_at,

@@ -257,6 +257,102 @@ describe("/mcp Streamable HTTP handler", () => {
 		]);
 	});
 
+	it("publishes and accepts the optional recall scope enum", async () => {
+		const listed = await mcp(token, { jsonrpc: "2.0", id: 201, method: "tools/list", params: {} });
+		expect(listed.status).toBe(200);
+		const listBody = await mcpJson(listed);
+		const recallTool = listBody.result.tools.find((tool) => tool.name === "recall_memory");
+		expect(recallTool.inputSchema.properties.recallScope).toMatchObject({
+			type: "string",
+			enum: ["global", "project_only", "project_then_global"],
+		});
+		expect(recallTool.inputSchema.required ?? []).not.toContain("recallScope");
+
+		const called = await mcp(token, {
+			jsonrpc: "2.0",
+			id: 202,
+			method: "tools/call",
+			params: {
+				name: "recall_memory",
+				arguments: {
+					query: "project decisions",
+					recallScope: "project_then_global",
+					memoryScope: { projectId: "mcp-project" },
+				},
+			},
+		});
+		expect(called.status).toBe(200);
+		expect((await mcpJson(called)).result.structuredContent).toMatchObject({
+			ok: true,
+			command_mode: "recall",
+		});
+	});
+
+	it("publishes only public scope fields and rejects forged tenant identity before persistence", async () => {
+		const listed = await mcp(token, { jsonrpc: "2.0", id: 204, method: "tools/list", params: {} });
+		const listBody = await mcpJson(listed);
+		for (const tool of listBody.result.tools) {
+			const schema = tool.inputSchema.properties.memoryScope;
+			expect(schema.additionalProperties).toBe(false);
+			expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining([
+				"projectId", "projectName", "workspaceId", "appId", "agentId", "sessionId", "threadId", "topic", "sourceScope",
+			]));
+			for (const internal of ["userId", "externalUserId", "ownerUserId", "memoryUserId"]) {
+				expect(schema.properties).not.toHaveProperty(internal);
+			}
+		}
+
+		const marker = `forged-${crypto.randomUUID()}`;
+		const before = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM source_packets WHERE user_id = 'mcp-user' AND source_id = ?",
+		).bind(marker).first();
+		const called = await mcp(token, {
+			jsonrpc: "2.0",
+			id: 205,
+			method: "tools/call",
+			params: {
+				name: "recall_memory",
+				arguments: {
+					query: "project decisions",
+					sourceId: marker,
+					memoryScope: { projectId: "safe-project", ownerUserId: "another-account" },
+				},
+			},
+		});
+		expect(called.status).toBe(200);
+		const body = await mcpJson(called);
+		expect(body.result.isError).toBe(true);
+		const after = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM source_packets WHERE user_id = 'mcp-user' AND source_id = ?",
+		).bind(marker).first();
+		expect(before.n).toBe(0);
+		expect(after.n).toBe(0);
+	});
+
+	it("reports an invalid project identity as a tool error instead of a server failure", async () => {
+		const called = await mcp(token, {
+			jsonrpc: "2.0",
+			id: 203,
+			method: "tools/call",
+			params: {
+				name: "recall_memory",
+				arguments: {
+					query: "project decisions",
+					recallScope: "project_only",
+					memoryScope: { projectId: "x".repeat(161) },
+				},
+			},
+		});
+		expect(called.status).toBe(200);
+		const body = await mcpJson(called);
+		expect(body.result.isError).toBe(true);
+		expect(body.result.structuredContent).toMatchObject({
+			ok: false,
+			code: "project_id_too_long",
+			http_status: 400,
+		});
+	});
+
 	it("save_memory refuses junk deterministically and still returns the full contract", async () => {
 		// "ok thanks" is noise. The engine-lane MCP door refuses it at the
 		// trigger — no model call, honest zero, receipt and packet ids intact.
@@ -279,6 +375,36 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(result.source_packet_id).toMatch(/^src_/);
 		expect(result.receipt_id).toMatch(/^receipt_/);
 		expect(body.result.content[0].text).toContain("Saved: 0");
+	});
+
+	it("marks an oversized conversation as a tool error with project provenance", async () => {
+		const res = await mcp(token, {
+			jsonrpc: "2.0",
+			id: 206,
+			method: "tools/call",
+			params: {
+				name: "save_conversation",
+				arguments: {
+					conversationId: `oversized-${crypto.randomUUID()}`,
+					memoryScope: { projectId: "oversized-project", projectName: "Oversized" },
+					messages: Array.from({ length: 201 }, (_, i) => ({
+						id: `oversized-${i}`,
+						role: "user",
+						content: `Durable project fact number ${i}.`,
+					})),
+				},
+			},
+		});
+		expect(res.status).toBe(200);
+		const body = await mcpJson(res);
+		expect(body.result.isError).toBe(true);
+		expect(body.result.structuredContent).toMatchObject({
+			ok: false,
+			code: "too_large",
+			http_status: 413,
+			memory_scope: { project_id: "oversized-project", project_name: "Oversized" },
+			receipt: { outcome: "too_large", project_id: "oversized-project", project_name: "Oversized" },
+		});
 	});
 
 	it("does not register observe_messages", async () => {

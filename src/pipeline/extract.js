@@ -34,6 +34,7 @@ import { createExtractionRun, createMemoryJob, updateExtractionRun, updateMemory
 import { messagesContainMemoryOptOut } from "./opt_out.js";
 import { getMemoryRules, rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
@@ -53,6 +54,7 @@ const SPLIT_RESCUE_BATCH = 4;
  * and why it stopped, so the receipt can say what this rescue really cost.
  */
 async function proposeSplit(env, config, userId, chunk, recent, overrides, limits = {}) {
+	const projectScope = normalizeProjectScope(overrides?.meta);
 	const maxCalls = Number.isFinite(limits.maxCalls) ? limits.maxCalls : Infinity;
 	const failFast = Number.isFinite(limits.failFast) ? limits.failFast : 3;
 	const stats = { calls: 0, failures: 0, aborted: null };
@@ -70,7 +72,7 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 		const parts = await Promise.all(batch.map(async (msg) => {
 			const singlePacket = buildPacket([msg], recent);
 			const singleText = chunkText([msg]);
-			const singleShortlist = await shortlistNodes(env, config, userId, singleText);
+			const singleShortlist = await shortlistNodes(env, config, userId, singleText, projectScope);
 			stats.calls += 1;
 			const single = await proposeMemory(env, config, { packet: singlePacket, shortlist: singleShortlist }, overrides);
 			if (!single._ok) {
@@ -119,6 +121,7 @@ const PRIMARY_SUBCHUNK = 8;
 const PRIMARY_SUBCHUNK_THRESHOLD = 10;
 
 async function proposePrimary(env, config, userId, chunk, recent, packet, shortlist, overrides) {
+	const projectScope = normalizeProjectScope(overrides?.meta);
 	if (chunk.length <= PRIMARY_SUBCHUNK_THRESHOLD) {
 		return proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides);
 	}
@@ -130,7 +133,7 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 	for (let i = 0; i < chunk.length; i += PRIMARY_SUBCHUNK) {
 		const sub = chunk.slice(i, i + PRIMARY_SUBCHUNK);
 		const subPacket = buildPacket(sub, recent);
-		const subShortlist = i === 0 ? shortlist : await shortlistNodes(env, config, userId, chunkText(sub));
+		const subShortlist = i === 0 ? shortlist : await shortlistNodes(env, config, userId, chunkText(sub), projectScope);
 		const part = await proposeWithSplitRescue(env, config, userId, sub, recent, subPacket, subShortlist, overrides);
 		if (part.rescueStats) {
 			rescuedAny = rescuedAny || part.rescued;
@@ -251,6 +254,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		source_mode: sourceMode,
 		...(overrides.meta ?? {}),
 	};
+	const projectScope = normalizeProjectScope(meta);
 	const optOut = messagesContainMemoryOptOut(chunk);
 	if (optOut.optedOut) {
 		const receipt = emptyReceipt("no_write", "user_opt_out", {
@@ -283,7 +287,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const updateMode = UPDATE_MODE_RE.test(text);
 
 	// E — shortlist (~10 existing nodes, keyword + semantic).
-	const shortlist = await shortlistNodes(env, config, userId, text);
+	const shortlist = await shortlistNodes(env, config, userId, text, projectScope);
 
 	// The user's memory rules, resolved ONCE: the prompt gets them as guidance
 	// and the gates get the same object for enforcement. A caller may hand in a
@@ -436,6 +440,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		lastTs,
 		rules,
 		profile,
+		projectScope,
 	});
 	// Rejections from the v2 passes (unknown entity ids, malformed relation
 	// types) surface on the receipt with everything the gates refused.
@@ -490,14 +495,23 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		idempotencyKey: `pass2:${extractionRunId}`,
 		sourcePacketId: meta.source_packet_id ?? null,
 		extractionRunId,
-		payload: { affectedNodeIds: result.affectedNodeIds },
+		payload: {
+			affectedNodeIds: result.affectedNodeIds,
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
+		},
 	});
 	if (jobId) await updateExtractionRun(env, userId, extractionRunId, { jobId });
 	try {
 		const pass2 = await runPass2(env, config, userId, result.affectedNodeIds, { jobId });
 		await updateMemoryJob(env, userId, jobId, {
 			status: pass2?.ran ? "completed" : "skipped",
-			payload: { affectedNodeIds: result.affectedNodeIds, pass2 },
+			payload: {
+				affectedNodeIds: result.affectedNodeIds,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
+				pass2,
+			},
 			completedAt: Date.now(),
 		});
 	} catch (err) {

@@ -13,11 +13,30 @@
  *      network really is the problem, name the underlying error code.
  */
 
-import { basename } from "node:path";
+import {
+	PROJECT_RECALL_SCOPE,
+	claudeProjectDirectory,
+	projectMemoryScope,
+	resolveProjectIdentity,
+} from "./project-identity.mjs";
 
 const API_KEY = process.env.ITSUKI_API_KEY;
 const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
 const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 8000;
+
+/** SessionStart includes the project cwd on stdin. Invalid or absent input
+ * falls back to the process cwd, preserving the hook's non-blocking behavior. */
+async function readStdin() {
+	const chunks = [];
+	for await (const chunk of process.stdin) chunks.push(chunk);
+	if (!chunks.length) return {};
+	try {
+		const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		return payload && typeof payload === "object" ? payload : {};
+	} catch {
+		return {};
+	}
+}
 
 /** The one stdout write. Claude Code parses a single JSON payload per hook. */
 function emit(payload) {
@@ -72,13 +91,15 @@ function describeNetworkError(error) {
 }
 
 async function main() {
-	const project = basename(process.cwd()) || "project";
-
 	const problem = keyProblem(API_KEY);
 	if (problem) {
 		unavailable(problem, SETUP_FIX);
 		return;
 	}
+
+	const payload = await readStdin();
+	const project = await resolveProjectIdentity(claudeProjectDirectory(payload?.cwd));
+	const memoryScope = projectMemoryScope(project);
 
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -93,11 +114,9 @@ async function main() {
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
-				// The project name selects an isolated project-scoped memory
-				// space (a sub-tenant of the key's account) — the plugin door
-				// gets project scope, personal chat memory stays out of repos.
-				userId: `project:${project}`,
-				query: `project decisions, conventions, architecture, and fixes for ${project}`,
+				query: `project decisions, conventions, architecture, and fixes for ${project.projectName}`,
+				memoryScope,
+				recallScope: PROJECT_RECALL_SCOPE,
 			}),
 		});
 	} catch (error) {
@@ -133,7 +152,7 @@ async function main() {
 		hookSpecificOutput: {
 			hookEventName: "SessionStart",
 			additionalContext:
-				`Itsuki project memory for ${project} (from previous sessions):\n${context}\n` +
+				`Itsuki project memory for ${project.projectName} (from previous sessions):\n${context}\n` +
 				`(Use this as established context. Durable new decisions from this session are saved automatically at session end.)`,
 		},
 	});

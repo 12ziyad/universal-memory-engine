@@ -64,6 +64,7 @@ describe("jobs ledger (2.2)", () => {
 		await call("POST", "/v1/ingest", {
 			userId,
 			flush: true,
+			memoryScope: { projectId: "osprey-project", projectName: "Osprey" },
 			messages: [{ id: "m1", role: "user", content: "I am building project Osprey this month" }],
 			_test: { llmResponse: canned("Osprey") },
 		});
@@ -89,6 +90,7 @@ describe("terminal webhooks (2.3)", () => {
 		await call("POST", "/v1/ingest", {
 			userId,
 			flush: true,
+			memoryScope: { projectId: "heron-project", projectName: "Heron" },
 			messages: [{ id: "m1", role: "user", content: "I am building project Heron this month" }],
 			_test: { llmResponse: canned("Heron") },
 		});
@@ -99,6 +101,9 @@ describe("terminal webhooks (2.3)", () => {
 		const payload = JSON.parse(results[0].payload_json);
 		expect(payload.data.status).toBe("enriched");
 		expect(payload.data.job_id).toBeTruthy();
+		expect(payload.data.source_packet_id).toMatch(/^src_/);
+		expect(payload.data.project_id).toBe("heron-project");
+		expect(payload.data.project_name).toBe("Heron");
 	});
 });
 

@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import html from "../public/index.html?raw";
 
-const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+const css = (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").replace(/\r\n/g, "\n");
 
 describe("app type scale", () => {
 	it("self-hosts Geist and Geist Mono and never reaches a font CDN", () => {

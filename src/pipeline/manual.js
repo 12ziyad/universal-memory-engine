@@ -168,7 +168,7 @@ async function saveSummaryMemory(env, config, userId, digest, { prefix, received
 	const now = Date.now();
 	const label = summaryLabelFor(text, { topic });
 	const category = summaryCategory(label, text);
-	const existing = await getUserNodes(env, userId);
+	const existing = await getUserNodes(env, userId, { projectId: null });
 	const match = existing.find((n) => normalizeLabel(n.label) === normalizeLabel(label));
 	const nodeId = match?.id ?? newId("node");
 	const sliceText = `User discussed/researched ${label}: ${text}`.slice(0, 1200);

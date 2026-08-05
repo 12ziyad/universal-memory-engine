@@ -186,6 +186,10 @@ function payloadFor(hook, event, data) {
 				source: data?.source ?? null,
 				counts: data?.counts ?? null,
 				receipt_id: data?.receipt_id ?? null,
+				job_id: data?.job_id ?? null,
+				source_packet_id: data?.source_packet_id ?? null,
+				status: data?.status ?? null,
+				project_id: data?.project_id ?? null,
 			},
 		};
 	}
@@ -280,6 +284,8 @@ export function webhookDataFromReceipt(receipt) {
 	return {
 		source: receipt?.source ?? null,
 		receipt_id: receipt?.id ?? null,
+		project_id: receipt?.project_id ?? null,
+		project_name: receipt?.project_name ?? null,
 		counts: {
 			nodes: saved.nodes ?? 0,
 			updated_nodes: saved.updatedNodes ?? 0,

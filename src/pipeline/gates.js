@@ -29,6 +29,7 @@ import {
 	ACTION_TO_STATE,
 } from "../config.js";
 import { newId } from "../lib/ids.js";
+import { normalizeProjectScope } from "../lib/project_scope.js";
 import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, getUserNodes } from "../lib/db.js";
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
 import { durablePlanFromText } from "./candidate_rules.js";
@@ -234,13 +235,14 @@ function matchExisting(label, matchesExistingId, existing, existingById, opts = 
 	return best;
 }
 
-async function recentEventMatch(env, userId, nodeId, action, now) {
+async function recentEventMatch(env, userId, nodeId, action, now, projectId) {
 	const row = await env.DB.prepare(
 		`SELECT id FROM events
-		 WHERE user_id = ? AND node_id = ? AND action = ? AND created_at >= ? AND deleted_at IS NULL
+		 WHERE user_id = ? AND node_id = ? AND project_id IS ?
+		   AND action = ? AND created_at >= ? AND deleted_at IS NULL
 		 ORDER BY created_at DESC LIMIT 1`,
 	)
-		.bind(userId, nodeId, action, now - EVENT_DEDUPE_MS)
+		.bind(userId, nodeId, projectId, action, now - EVENT_DEDUPE_MS)
 		.first();
 	return row?.id ?? null;
 }
@@ -252,13 +254,13 @@ async function recentEventMatch(env, userId, nodeId, action, now) {
  * felt like using that day. (Supersede handles contradiction; this handles
  * repetition.)
  */
-async function matchingSliceId(env, userId, nodeId, kind, text) {
+async function matchingSliceId(env, userId, nodeId, kind, text, projectId) {
 	const { results } = await env.DB.prepare(
 		`SELECT id, text, kind FROM slices
-		 WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL
+		 WHERE user_id = ? AND node_id = ? AND project_id IS ? AND deleted_at IS NULL
 		 ORDER BY created_at DESC LIMIT 80`,
 	)
-		.bind(userId, nodeId)
+		.bind(userId, nodeId, projectId)
 		.all();
 	const norm = normalizeLabel(text);
 	return (results ?? []).find((s) => normalizeLabel(s.text) === norm)?.id ?? null;
@@ -304,6 +306,7 @@ export async function applyGates(
 	opts = {},
 ) {
 	const now = Date.now();
+	const projectScope = normalizeProjectScope(opts.projectScope ?? opts);
 	// Path A (user-commanded save): keep anything durable, drop only obvious junk.
 	const manual = Boolean(opts.manual);
 	const updateMode = Boolean(opts.updateMode);
@@ -358,6 +361,7 @@ export async function applyGates(
 	if (opts.profile === "mcp") confMin = config.mcpConfidenceMin;
 
 	const plan = {
+		projectScope,
 		newNodes: [],
 		nodeStateUpdates: [],
 		nodeTouches: new Set(),
@@ -430,12 +434,13 @@ export async function applyGates(
 		return companionRefs.has(norm) || edgeRefs.has(norm);
 	};
 
-	const existing = await getUserNodes(env, userId);
+	const writeScope = { projectId: projectScope.projectId };
+	const existing = await getUserNodes(env, userId, writeScope);
 	const existingById = new Map(existing.map((n) => [n.id, n]));
-	const candidates = await getUserCandidates(env, userId);
+	const candidates = await getUserCandidates(env, userId, writeScope);
 	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
-	const existingEdges = await getUserEdges(env, userId);
-	const suppressions = await getActiveSuppressions(env, userId);
+	const existingEdges = await getUserEdges(env, userId, writeScope);
+	const suppressions = await getActiveSuppressions(env, userId, writeScope);
 	const suppressionByKindKey = new Set(suppressions.map((s) => `${s.kind}:${s.canonical_key}`));
 
 	// label(normalized) -> resolved node id, including nodes created in this batch.
@@ -463,10 +468,20 @@ export async function applyGates(
 			session_count: 1,
 			heat_score: 1,
 			cluster: clusterForMemory({ label, category: canonicalCategory }),
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
 		});
 		resolved.set(normalizeLabel(label), id);
-		existing.push({ id, label, category, state: "active" });
-		existingById.set(id, { id, label, category, state: "active" });
+		const created = {
+			id,
+			label,
+			category: canonicalCategory,
+			state: "active",
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
+		};
+		existing.push(created);
+		existingById.set(id, created);
 		plan.affectedNodeIds.add(id);
 		if (auto) plan.autoCreated.push(label);
 		return id;
@@ -519,7 +534,7 @@ export async function applyGates(
 		}
 		if (durable.type === "event") {
 			const action = valid(durable.action, ACTIONS, "other");
-			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now);
+			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
 			if (duplicateEventId) {
 				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
 				plan.affectedNodeIds.add(node.id);
@@ -535,6 +550,8 @@ export async function applyGates(
 				happened_at: parseProposedDate(durable.date, now) ?? opts.lastTs ?? now,
 				created_at: now,
 				confidence: durable.confidence,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
 			});
 			const newState = ACTION_TO_STATE[action];
 			if (newState) plan.nodeStateUpdates.push({ id: node.id, state: newState });
@@ -542,7 +559,7 @@ export async function applyGates(
 			return true;
 		}
 		const kind = valid(durable.sliceKind, SLICE_KINDS, "other");
-		const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, durable.text);
+		const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, durable.text, projectScope.projectId);
 		if (duplicateSliceId) {
 			plan.sliceTouches.push({ id: duplicateSliceId, node_id: node.id, kind });
 			plan.affectedNodeIds.add(node.id);
@@ -558,6 +575,8 @@ export async function applyGates(
 			is_current: 1,
 			created_at: now,
 			confidence: durable.confidence,
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
 		});
 		plan.affectedNodeIds.add(node.id);
 		return true;
@@ -614,6 +633,8 @@ export async function applyGates(
 			last_seen_at: now,
 			expires_at: meta.expiresAt ?? null,
 			created_at: now,
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
 		});
 	}
 
@@ -790,7 +811,7 @@ export async function applyGates(
 				reject(obj, "event_no_node");
 				continue;
 			}
-			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now);
+			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
 			if (duplicateEventId) {
 				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
 				plan.affectedNodeIds.add(node.id);
@@ -805,6 +826,8 @@ export async function applyGates(
 				importance: valid(obj.importance, IMPORTANCE, "ordinary"),
 				happened_at: parseProposedDate(obj.date, now) ?? opts.lastTs ?? now,
 				created_at: now,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
 			});
 			plan.affectedNodeIds.add(node.id);
 			// A lifecycle event also updates the node's state.
@@ -831,7 +854,7 @@ export async function applyGates(
 				continue;
 			}
 			const kind = valid(obj.kind_detail, SLICE_KINDS, "other");
-			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text);
+			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text, projectScope.projectId);
 			if (duplicateSliceId) {
 				plan.sliceTouches.push({ id: duplicateSliceId, node_id: node.id, kind });
 				plan.affectedNodeIds.add(node.id);
@@ -847,6 +870,8 @@ export async function applyGates(
 				kind,
 				is_current: 1,
 				created_at: now,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
 			});
 			plan.affectedNodeIds.add(node.id);
 			continue;
@@ -877,9 +902,16 @@ export async function applyGates(
 				continue;
 			}
 			const type = obj.type;
-			const existingEdge = existingEdges.find(
+			const exactEdges = existingEdges.filter(
 				(e) => e.from_node === from.id && e.to_node === to.id && e.type === type,
 			);
+			// A closed row is history, not the current relationship. If the same
+			// relationship recurs later, preserve the old validity window and write
+			// a fresh active row. Explicit end-dated proposals may still match an
+			// existing row so repeated evidence does not duplicate history.
+			const existingEdge = obj.invalid_at
+				? (exactEdges.find((e) => !e.invalid_at) ?? exactEdges[0])
+				: exactEdges.find((e) => !e.invalid_at || Number(e.invalid_at) > now);
 			if (existingEdge) {
 				plan.edgeTouches.push({ id: existingEdge.id, from_node: from.id, to_node: to.id, type });
 				// The model may have learned the relation ENDED — close, never delete.
@@ -924,6 +956,8 @@ export async function applyGates(
 				valid_at: isV2 ? (obj.valid_at ?? null) : null,
 				invalid_at: isV2 ? (obj.invalid_at ?? null) : null,
 				confidence: Number.isFinite(conf) ? conf : null,
+				project_id: projectScope.projectId,
+				project_name: projectScope.projectName,
 			});
 			plan.affectedNodeIds.add(from.id);
 			plan.affectedNodeIds.add(to.id);

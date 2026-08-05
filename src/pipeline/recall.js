@@ -20,6 +20,7 @@ const MAX_CONTEXT_NODES = 6;
 const MAX_CONTEXT_PAGES = 4;
 const MAX_LINE_ITEMS = 4;
 const MAX_CONTEXT_CHARS = 1800;
+const RECALL_SCOPES = new Set(["global", "project_only", "project_then_global"]);
 const NO_RECALL_RE =
 	/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|great|awesome|good morning|good night|what is \d+\s*[+\-*/]\s*\d+\??)$/i;
 const UPDATE_RE =
@@ -49,6 +50,50 @@ const IMPERSONAL_TASK_RE =
 // not. Everything bi-temporal filtering hides is behind this one gate.
 const PAST_INTENT_RE =
 	/\b(used to|before|previous(?:ly)?|back then|formerly|history|in the past|no longer|any ?more|earlier|old (?:job|home|place|city|team|employer)|last (?:year|job|place))\b|\bdid\b.*\b(?:live|work|use|train|study)\b/i;
+
+export class RecallScopeError extends Error {
+	constructor(code, message) {
+		super(message);
+		this.name = "RecallScopeError";
+		this.code = code;
+		this.status = 400;
+	}
+}
+
+function resolveRecallScope(userId, opts = {}) {
+	const recallScope = opts.recallScope ?? "global";
+	if (!RECALL_SCOPES.has(recallScope)) {
+		throw new RecallScopeError(
+			"invalid_recall_scope",
+			"recallScope must be global, project_only, or project_then_global",
+		);
+	}
+	const memoryScope = resolveScope(userId, opts.memoryScope ?? opts.scope);
+	if (recallScope !== "global" && !memoryScope.project_id) {
+		throw new RecallScopeError(
+			"project_id_required",
+			`memoryScope.projectId is required when recallScope is ${recallScope}`,
+		);
+	}
+	return { recallScope, memoryScope, projectId: memoryScope.project_id };
+}
+
+/** Validate recall coverage before a query source packet is persisted. */
+export function validateRecallScope(userId, opts = {}) {
+	return resolveRecallScope(userId, opts);
+}
+
+function projectPredicate(alias, recallScope) {
+	if (recallScope === "project_only") return ` AND ${alias}.project_id = ?`;
+	if (recallScope === "project_then_global") {
+		return ` AND (${alias}.project_id = ? OR ${alias}.project_id IS NULL)`;
+	}
+	return "";
+}
+
+function projectBindings(recallScope, projectId) {
+	return recallScope === "global" ? [] : [projectId];
+}
 
 /** Anything phrased as a question — the clearest possible request for memory. */
 function isQuestion(text) {
@@ -263,9 +308,11 @@ function dedupeEntries(entries) {
 	const out = [];
 	for (const entry of entries) {
 		const item = entry.item;
-		const key = entry.type === "node"
-			? `node:${normalizeLabel(item.label)}`
-			: `page:${normalizeLabel(item.title)}`;
+		const label = entry.type === "node" ? item.label : item.title;
+		// A label/title identifies an object only inside its project. Account-wide
+		// recall is deliberately allowed to surface the same fact from two
+		// projects, so cross-project objects must never dedupe each other.
+		const key = JSON.stringify([entry.type, item.project_id ?? null, normalizeLabel(label)]);
 		if (seen.has(key)) continue;
 		seen.add(key);
 		out.push(entry);
@@ -404,6 +451,8 @@ function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
 		state: node.state,
 		summary: node.summary,
 		cluster: node.cluster,
+		project_id: node.project_id ?? null,
+		project_name: node.project_name ?? null,
 		slices: slicesByNode.get(node.id) ?? [],
 		events: eventsByNode.get(node.id) ?? [],
 		relations,
@@ -418,6 +467,8 @@ function pageItem(page) {
 		topic_filter: page.topic_filter,
 		short_summary: page.short_summary,
 		cluster: page.cluster,
+		project_id: page.project_id ?? null,
+		project_name: page.project_name ?? null,
 		key_points: parseJsonArray(page.key_points_json).slice(0, 6),
 		related_concepts: parseJsonArray(page.related_concepts_json).slice(0, 8),
 	};
@@ -431,6 +482,8 @@ function itemSummary(entry) {
 			label: entry.item.label,
 			category: entry.item.category,
 			cluster: entry.item.cluster,
+			project_id: entry.item.project_id ?? null,
+			project_name: entry.item.project_name ?? null,
 			score: Number(entry.score.toFixed(4)),
 		};
 	}
@@ -439,6 +492,8 @@ function itemSummary(entry) {
 		id: entry.item.id,
 		title: entry.item.title,
 		cluster: entry.item.cluster ?? entry.item.topic_filter ?? null,
+		project_id: entry.item.project_id ?? null,
+		project_name: entry.item.project_name ?? null,
 		score: Number(entry.score.toFixed(4)),
 	};
 }
@@ -446,33 +501,45 @@ function itemSummary(entry) {
 export async function recall(env, config, userId, query, opts = {}) {
 	const q = String(query ?? "").trim();
 	const plan = recallGate(q, opts);
-	resolveScope(userId, opts.memoryScope ?? opts.scope);
+	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	if (plan.mode === "no_recall") return emptyRecall(plan);
+	const filteredByProject = recallScope !== "global";
+	const bindings = projectBindings(recallScope, projectId);
 
 	const [nodesRes, pagesRes, slicesRes, eventsRes, edgesRes, profileRes] = await env.DB.batch([
 		env.DB.prepare(
-			`SELECT id, label, category, state, summary, aliases_json, updated_at, last_seen_at,
-				 heat_score, cluster
-			 FROM nodes
-			 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
-		).bind(userId),
+			`SELECT n.id, n.label, n.category, n.state, n.summary, n.aliases_json, n.updated_at, n.last_seen_at,
+				 n.heat_score, n.cluster, n.project_id, n.project_name
+			 FROM nodes n
+			 WHERE n.user_id = ? AND n.deleted_at IS NULL AND n.archived_at IS NULL AND n.suppressed_at IS NULL${projectPredicate("n", recallScope)}`,
+		).bind(userId, ...bindings),
 		env.DB.prepare(
-			`SELECT id, title, topic_filter, short_summary, key_points_json, decisions_json,
-				 next_steps_json, related_concepts_json, updated_at, heat_score, source_mode, cluster
-			 FROM memory_pages
-			 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
-		).bind(userId),
+			`SELECT p.id, p.title, p.topic_filter, p.short_summary, p.key_points_json, p.decisions_json,
+				 p.next_steps_json, p.related_concepts_json, p.updated_at, p.heat_score, p.source_mode, p.cluster,
+				 p.project_id, p.project_name
+			 FROM memory_pages p
+			 WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.suppressed_at IS NULL${projectPredicate("p", recallScope)}`,
+		).bind(userId, ...bindings),
 		env.DB.prepare(
-			"SELECT id, node_id, text, kind, created_at FROM slices WHERE user_id = ? AND is_current = 1 AND deleted_at IS NULL",
-		).bind(userId),
+			`SELECT s.id, s.node_id, s.text, s.kind, s.created_at, s.project_id, s.project_name
+			 FROM slices s
+			 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
+		).bind(userId, ...bindings),
 		env.DB.prepare(
-			"SELECT id, node_id, action, text, importance, happened_at, created_at FROM events WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?",
-		).bind(userId, plan.eventScanLimit),
+			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
+				e.project_id, e.project_name
+			 FROM events e
+			 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
+			 ORDER BY e.created_at DESC LIMIT ?`,
+		).bind(userId, ...bindings, plan.eventScanLimit),
 		env.DB.prepare(
-			`SELECT id, from_node, to_node, type, weight, reinforcement_count, fact, valid_at, invalid_at
-			 FROM edges WHERE user_id = ? AND deleted_at IS NULL`,
-		).bind(userId),
-		env.DB.prepare("SELECT * FROM memory_profiles WHERE user_id = ?").bind(userId),
+			`SELECT e.id, e.from_node, e.to_node, e.type, e.weight, e.reinforcement_count, e.fact,
+				e.valid_at, e.invalid_at, e.project_id, e.project_name
+			 FROM edges e WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}`,
+		).bind(userId, ...bindings),
+		// memory_profiles is account-wide and has no project attribution. It may
+		// nudge account-wide results, but cannot safely influence a filtered rank.
+		env.DB.prepare("SELECT * FROM memory_profiles WHERE user_id = ? AND ? = 'global'").bind(userId, recallScope),
 	]);
 
 	const nodes = nodesRes.results ?? [];
@@ -482,7 +549,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// 8.2 read-your-writes: text accepted moments ago, before its enrichment
 	// landed. Consulted BEFORE the empty-graph exit — the very first save on a
 	// new account is exactly the case that must not answer "I know nothing".
-	const stagedRows = await findStagedText(env, userId, tokens(q));
+	const stagedRows = await findStagedText(env, userId, tokens(q), { recallScope, projectId });
 
 	if ((nodes.length === 0 && pages.length === 0) || q.length === 0) {
 		if (stagedRows.length && q.length > 0) {
@@ -545,27 +612,32 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// FTS catches the rare terms vectors blur; the keyword scan keeps objects
 	// that predate their search profile reachable.
 	let bm25Rank = [];
-	try {
-		const ftsMatch = queryTokens
-			.filter((t) => t.length > 1)
-			.slice(0, 12)
-			.map((t) => `"${t.replace(/"/g, "")}"`)
-			.join(" OR ");
-		if (ftsMatch) {
-			const { results } = await env.DB.prepare(
-				`SELECT p.object_kind, p.object_id
-				 FROM manual_search_fts f
-				 JOIN manual_search_profiles p ON p.rowid = f.rowid
-				 WHERE manual_search_fts MATCH ? AND p.user_id = ?
-				 ORDER BY bm25(manual_search_fts, 4.0, 1.5, 0.5)
-				 LIMIT 24`,
-			).bind(ftsMatch, userId).all();
-			bm25Rank = (results ?? [])
-				.filter((r) => (r.object_kind === "node" ? byId.has(r.object_id) : pageById.has(r.object_id)))
-				.map((r) => ({ key: `${r.object_kind}:${r.object_id}` }));
+	// Search profiles have no project column. Post-filtering a globally limited
+	// list would let another project starve the requested one, so scoped recall
+	// uses the already-filtered exact/keyword scan instead.
+	if (!filteredByProject) {
+		try {
+			const ftsMatch = queryTokens
+				.filter((t) => t.length > 1)
+				.slice(0, 12)
+				.map((t) => `"${t.replace(/"/g, "")}"`)
+				.join(" OR ");
+			if (ftsMatch) {
+				const { results } = await env.DB.prepare(
+					`SELECT p.object_kind, p.object_id
+					 FROM manual_search_fts f
+					 JOIN manual_search_profiles p ON p.rowid = f.rowid
+					 WHERE manual_search_fts MATCH ? AND p.user_id = ?
+					 ORDER BY bm25(manual_search_fts, 4.0, 1.5, 0.5)
+					 LIMIT 24`,
+				).bind(ftsMatch, userId).all();
+				bm25Rank = (results ?? [])
+					.filter((r) => (r.object_kind === "node" ? byId.has(r.object_id) : pageById.has(r.object_id)))
+					.map((r) => ({ key: `${r.object_kind}:${r.object_id}` }));
+			}
+		} catch (err) {
+			console.warn("bm25 recall signal failed:", err?.message ?? err);
 		}
-	} catch (err) {
-		console.warn("bm25 recall signal failed:", err?.message ?? err);
 	}
 	const inBm25 = new Set(bm25Rank.map((e) => e.key));
 	const keywordRank = [];
@@ -590,9 +662,15 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const lexicalRank = [...bm25Rank, ...keywordRank];
 
 	// ---- signal 3: vector (paraphrase) ---------------------------------------
-	const vector = await embed(env, config, q);
-	const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 6 });
-	const vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
+	let vectorRank = [];
+	// Existing vectors are namespaced per account but carry no project metadata.
+	// Disable this signal for filtered modes instead of post-filtering a top-K
+	// result that another project can fill before the requested project is seen.
+	if (!filteredByProject) {
+		const vector = await embed(env, config, q);
+		const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 6 });
+		vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
+	}
 
 	// ---- signal 4: graph expansion (fix round 1, Part 5) ---------------------
 	// Walk edges out from the seeds the other signals matched — the only way a

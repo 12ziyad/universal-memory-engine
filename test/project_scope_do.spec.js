@@ -1,0 +1,140 @@
+/**
+ * Stage 2 project-scope invariants inside the one per-account UserMemory DO.
+ * These tests stop at held/queued state: no drain means no model or network.
+ */
+
+import { env, runInDurableObject } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+
+const PROJECT_A = "project:local_alpha";
+const PROJECT_B = "project:local_beta";
+
+function message(id, content) {
+	return { id, role: "user", content, ts: Date.now() };
+}
+
+function stubFor(userId) {
+	return env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+}
+
+describe("UserMemory project-scope boundaries", () => {
+	it("does not deduplicate the same message ID across projects", async () => {
+		const userId = `project-dedupe-${crypto.randomUUID()}`;
+		const stub = stubFor(userId);
+
+		await runInDurableObject(stub, async (instance, state) => {
+			const sharedId = "same-host-message-id";
+			// Noise finalizes immediately, putting the ID in A's checkpoint/seen
+			// without invoking extraction.
+			await instance.addMessages(userId, [message(sharedId, "okay")], {
+				scopeKey: PROJECT_A,
+			});
+			expect(await state.storage.get(`checkpoint:${PROJECT_A}`)).toBe(sharedId);
+			expect(await state.storage.get(`seen:${PROJECT_A}`)).toContain(sharedId);
+
+			// The identical host ID is new inside B and must be held, not rejected
+			// by A's finalized-ID state.
+			const inProjectB = await instance.addMessages(userId, [message(
+				sharedId,
+				"Beta architecture keeps rendering separate from transport layers.",
+			)], { scopeKey: PROJECT_B });
+
+			expect(inProjectB).toMatchObject({ held: 1, skipped: 0, fired: false });
+			expect(await state.storage.get("chunkScopeKey")).toBe(PROJECT_B);
+			const chunk = await state.storage.get("chunk");
+			expect(chunk.map((item) => item.id)).toEqual([sharedId]);
+			expect(await state.storage.get(`seen:${PROJECT_B}`)).toBeUndefined();
+		});
+
+		await stub.resetAll();
+	}, 30_000);
+
+	it("turns every project switch into a hard queue/chunk boundary", async () => {
+		const userId = `project-boundary-${crypto.randomUUID()}`;
+		const stub = stubFor(userId);
+
+		await runInDurableObject(stub, async (instance, state) => {
+			const sharedId = "same-id-in-two-projects";
+			const alphaContent = "Alpha architecture keeps adapters separate from persistence layers.";
+			const betaContent = "Beta architecture keeps rendering separate from transport layers.";
+
+			const alpha = await instance.addMessages(userId, [message(sharedId, alphaContent)], {
+				scopeKey: PROJECT_A,
+			});
+			const beta = await instance.addMessages(userId, [message(sharedId, betaContent)], {
+				scopeKey: PROJECT_B,
+			});
+			const backToAlpha = await instance.addMessages(userId, [message(
+				"alpha-held-after-switch",
+				"The boundary regression leaves this final note held.",
+			)], { scopeKey: PROJECT_A });
+
+			expect(alpha).toMatchObject({ held: 1, skipped: 0, fired: false });
+			expect(beta).toMatchObject({ held: 1, skipped: 0, fired: false });
+			expect(backToAlpha).toMatchObject({ held: 1, skipped: 0, fired: false });
+
+			const queued = await state.storage.list({ prefix: "q:" });
+			const entries = [...queued.values()].filter((entry) => entry.kind === "extract");
+			expect(entries).toHaveLength(2);
+			expect(entries.map((entry) => entry.scopeKey).sort()).toEqual([PROJECT_A, PROJECT_B]);
+
+			const byScope = new Map(entries.map((entry) => [entry.scopeKey, entry]));
+			expect(byScope.get(PROJECT_A).messages).toEqual([
+				expect.objectContaining({ id: sharedId, content: alphaContent }),
+			]);
+			expect(byScope.get(PROJECT_B).messages).toEqual([
+				expect.objectContaining({ id: sharedId, content: betaContent }),
+			]);
+
+			// The third message stays in A's current chunk; it never co-batches
+			// with either queued project entry.
+			expect(await state.storage.get("chunkScopeKey")).toBe(PROJECT_A);
+			const chunk = await state.storage.get("chunk");
+			expect(chunk.map((item) => item.id)).toEqual(["alpha-held-after-switch"]);
+		});
+
+		await stub.resetAll();
+	}, 30_000);
+
+	it("restores a no-write rescue with its original project attribution", async () => {
+		const userId = `project-rescue-${crypto.randomUUID()}`;
+		const stub = stubFor(userId);
+
+		await runInDurableObject(stub, async (instance, state) => {
+			const alphaOverrides = {
+				llmResponse: { objects: [], notes: "nothing durable yet" },
+				meta: { project_id: "local_alpha", project_name: "Alpha" },
+			};
+			const betaOverrides = {
+				llmResponse: { objects: [], notes: "unused" },
+				meta: { project_id: "local_beta", project_name: "Beta" },
+			};
+
+			await instance.addMessages(userId, [message(
+				"alpha-rescue",
+				"Alpha has a brand new architecture idea that needs more context.",
+			)], { scopeKey: PROJECT_A, flush: true, overrides: alphaOverrides });
+			await instance.addMessages(userId, [message(
+				"beta-held",
+				"Beta keeps its rendering pipeline separate from storage.",
+			)], { scopeKey: PROJECT_B, overrides: betaOverrides });
+
+			await instance.drain({ userId, maxJobs: 1, ignoreBackoff: true });
+
+			const chunk = await state.storage.get("chunk");
+			expect(await state.storage.get("chunkScopeKey")).toBe(PROJECT_A);
+			expect(chunk.map((item) => item.id)).toEqual(["alpha-rescue"]);
+			expect(await state.storage.get("pendingOverrides")).toMatchObject({
+				meta: { project_id: "local_alpha", project_name: "Alpha" },
+			});
+
+			const queued = await state.storage.list({ prefix: "q:" });
+			const betaEntry = [...queued.values()].find((entry) => entry.scopeKey === PROJECT_B);
+			expect(betaEntry).toMatchObject({
+				overrides: { meta: { project_id: "local_beta", project_name: "Beta" } },
+			});
+		});
+
+		await stub.resetAll();
+	}, 30_000);
+});

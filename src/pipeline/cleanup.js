@@ -42,7 +42,7 @@ async function softDeleteByIds(env, userId, table, ids, now) {
 }
 
 async function suppressNode(env, userId, nodeId, reason) {
-	const node = await env.DB.prepare("SELECT id, label FROM nodes WHERE id = ? AND user_id = ?")
+	const node = await env.DB.prepare("SELECT id, label, project_id, project_name FROM nodes WHERE id = ? AND user_id = ?")
 		.bind(nodeId, userId)
 		.first();
 	if (!node) return;
@@ -52,6 +52,8 @@ async function suppressNode(env, userId, nodeId, reason) {
 		canonical_key: normalizeLabel(node.label),
 		reason,
 		source_object_id: node.id,
+		project_id: node.project_id ?? null,
+		project_name: node.project_name ?? null,
 	});
 }
 
@@ -69,16 +71,19 @@ function suppressionStatement(env, userId, {
 	canonicalKey,
 	reason,
 	sourceObjectId,
+	projectId = null,
+	projectName = null,
 }, now) {
 	const key = String(canonicalKey ?? "").trim();
 	if (!kind || !key) return null;
 	return env.DB.prepare(
 		`INSERT INTO memory_suppressions
-		 (id, user_id, kind, canonical_key, label, reason, source_object_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (id, user_id, kind, canonical_key, label, reason, source_object_id, created_at,
+		  project_id, project_name)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	).bind(
 		newId("suppress"), userId, kind, key, label ?? key,
-		reason ?? null, sourceObjectId ?? null, now,
+		reason ?? null, sourceObjectId ?? null, now, projectId, projectName,
 	);
 }
 
@@ -208,7 +213,7 @@ export async function deleteLastExtraction(env, userId) {
 	// a stray suppression from a half-completed delete-last request.
 	for (const pageId of pageIds) {
 		const page = await env.DB.prepare(
-			"SELECT id, title, canonical_title, topic_filter FROM memory_pages WHERE id = ? AND user_id = ?",
+			"SELECT id, title, canonical_title, topic_filter, project_id, project_name FROM memory_pages WHERE id = ? AND user_id = ?",
 		).bind(pageId, userId).first();
 		if (!page) continue;
 		const titleSuppression = suppressionStatement(env, userId, {
@@ -217,6 +222,8 @@ export async function deleteLastExtraction(env, userId) {
 			canonicalKey: page.canonical_title,
 			reason: "delete_last_extraction",
 			sourceObjectId: page.id,
+			projectId: page.project_id ?? null,
+			projectName: page.project_name ?? null,
 		}, now);
 		if (titleSuppression) canonicalDeletes.push(titleSuppression);
 		if (page.topic_filter) {
@@ -226,13 +233,15 @@ export async function deleteLastExtraction(env, userId) {
 				canonicalKey: page.topic_filter,
 				reason: "delete_last_extraction",
 				sourceObjectId: page.id,
+				projectId: page.project_id ?? null,
+				projectName: page.project_name ?? null,
 			}, now);
 			if (topicSuppression) canonicalDeletes.push(topicSuppression);
 		}
 	}
 	for (const nodeId of nodeIds) {
 		const node = await env.DB.prepare(
-			"SELECT id, label FROM nodes WHERE id = ? AND user_id = ?",
+			"SELECT id, label, project_id, project_name FROM nodes WHERE id = ? AND user_id = ?",
 		).bind(nodeId, userId).first();
 		if (!node) continue;
 		const nodeSuppression = suppressionStatement(env, userId, {
@@ -241,6 +250,8 @@ export async function deleteLastExtraction(env, userId) {
 			canonicalKey: normalizeLabel(node.label),
 			reason: "delete_last_extraction",
 			sourceObjectId: node.id,
+			projectId: node.project_id ?? null,
+			projectName: node.project_name ?? null,
 		}, now);
 		if (nodeSuppression) canonicalDeletes.push(nodeSuppression);
 	}
@@ -354,7 +365,19 @@ export async function regenerateDirtySummaries(env, userId, deletedIds = [], tou
 }
 
 /** Audit tombstone: what was deleted, when, by which credential. Best-effort. */
-export async function storeDeletionTombstone(env, userId, { kind, ids = [], by = null, source = "delete" }) {
+export async function storeDeletionTombstone(env, userId, {
+	kind,
+	ids = [],
+	by = null,
+	source = "delete",
+	projectScopes = [],
+}) {
+	const scopes = [...new Map((projectScopes ?? []).map((scope) => {
+		const projectId = scope?.project_id ?? scope?.projectId ?? null;
+		const projectName = scope?.project_name ?? scope?.projectName ?? null;
+		return [projectId ?? "__global__", { project_id: projectId, project_name: projectName }];
+	})).values()];
+	const singleScope = scopes.length === 1 ? scopes[0] : null;
 	const receipt = {
 		outcome: "deleted",
 		reason: "user-requested deletion",
@@ -363,6 +386,11 @@ export async function storeDeletionTombstone(env, userId, { kind, ids = [], by =
 		deleted_ids: ids.slice(0, 200),
 		deleted_count: ids.length,
 		deleted_by: by ?? null,
+		project_scope: scopes.length > 1 ? "mixed" : (singleScope?.project_id ? "project" : "global"),
+		project_id: singleScope?.project_id ?? null,
+		project_name: singleScope?.project_name ?? null,
+		project_scopes: scopes,
+		scope_json: singleScope ? JSON.stringify(singleScope) : null,
 		created_at: Date.now(),
 	};
 	await storeReceipt(env, userId, source, receipt, `Deleted ${ids.length} ${kind}(s).`);
@@ -799,7 +827,7 @@ export async function bulkDeleteBySource(env, userId, {
 		binds.push(afterMs);
 	}
 	const { results: runs } = await env.DB.prepare(
-		`SELECT id, source_mode, tool_name, created_nodes_json, created_pages_json,
+		`SELECT id, source_mode, tool_name, scope_json, created_nodes_json, created_pages_json,
 			created_slices_json, created_events_json, created_edges_json, created_candidates_json
 		 FROM extraction_runs WHERE ${clauses.join(" AND ")}`,
 	).bind(...binds).all();
@@ -809,7 +837,13 @@ export async function bulkDeleteBySource(env, userId, {
 		edges: new Set(), candidates: new Set(),
 	};
 	const labels = [];
+	const projectScopes = new Map();
 	for (const run of runs ?? []) {
+		let runScope = {};
+		try { runScope = JSON.parse(run.scope_json ?? "{}") ?? {}; } catch {}
+		const projectId = runScope.project_id ?? runScope.projectId ?? null;
+		const projectName = runScope.project_name ?? runScope.projectName ?? null;
+		projectScopes.set(projectId ?? "__global__", { project_id: projectId, project_name: projectName });
 		for (const item of parseJsonArray(run.created_nodes_json)) {
 			const id = item?.id ?? item;
 			if (id) ids.nodes.add(id);
@@ -911,6 +945,7 @@ export async function bulkDeleteBySource(env, userId, {
 		ids: [...ids.nodes, ...ids.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft, ...ids.candidates],
 		by,
 		source: "bulk_delete",
+		projectScopes: [...projectScopes.values()],
 	});
 
 	return { ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated };

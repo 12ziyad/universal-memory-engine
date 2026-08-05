@@ -10,10 +10,10 @@
  * acknowledgement, capped hard.
  */
 
-import { basename } from "node:path";
 import { createInterface } from "node:readline";
 import { createReadStream, existsSync } from "node:fs";
 import { messagesFromClaudeTranscriptLines } from "./claude-transcript.mjs";
+import { claudeProjectDirectory, projectMemoryScope, resolveProjectIdentity } from "./project-identity.mjs";
 
 const API_KEY = process.env.ITSUKI_API_KEY;
 const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
@@ -92,7 +92,8 @@ async function main() {
 	// Nothing worth sending is the normal quiet case, not a failure.
 	if (!messages.length) return;
 
-	const project = basename(payload?.cwd || process.cwd()) || "project";
+	const project = await resolveProjectIdentity(claudeProjectDirectory(payload?.cwd));
+	const memoryScope = projectMemoryScope(project);
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -106,10 +107,10 @@ async function main() {
 				"content-type": "application/json",
 			},
 			body: JSON.stringify({
-				userId: `project:${project}`,
 				source: "plugin",
 				flush: true,
 				conversationId: payload?.session_id ?? undefined,
+				memoryScope,
 				messages,
 			}),
 		});

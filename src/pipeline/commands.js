@@ -2,7 +2,7 @@ import { getConfig } from "../config.js";
 import { storeReceipt, updateMemoryJob } from "../lib/db.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
-import { recall } from "./recall.js";
+import { recall, RecallScopeError, validateRecallScope } from "./recall.js";
 import { emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
@@ -28,6 +28,19 @@ function receiptCounts(receipt, extras = {}) {
 		events: saved.events ?? 0,
 		edges: saved.edges ?? 0,
 		candidates: saved.candidates ?? 0,
+	};
+}
+
+function packetScope(sourcePacket, receipt = null) {
+	if (!sourcePacket && !receipt) return null;
+	let persisted = {};
+	try { persisted = JSON.parse(receipt?.scope_json ?? "{}") ?? {}; } catch {}
+	return {
+		project_id: sourcePacket?.project_id ?? sourcePacket?.projectId ?? receipt?.project_id ?? persisted.project_id ?? null,
+		project_name: sourcePacket?.project_name ?? sourcePacket?.projectName ?? receipt?.project_name ?? persisted.project_name ?? null,
+		workspace_id: sourcePacket?.workspace_id ?? sourcePacket?.workspaceId ?? persisted.workspace_id ?? null,
+		app_id: sourcePacket?.app_id ?? sourcePacket?.appId ?? persisted.app_id ?? null,
+		source_scope: sourcePacket?.source_scope ?? sourcePacket?.sourceScope ?? persisted.source_scope ?? null,
 	};
 }
 
@@ -57,6 +70,7 @@ function safeCommandResult({
 		receipt_id: finalReceiptId,
 		receipt,
 		counts: receiptCounts(receipt, counts),
+		...((sourcePacket || receipt) ? { memory_scope: packetScope(sourcePacket, receipt) } : {}),
 		...extra,
 	};
 }
@@ -341,6 +355,32 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 }
 
 export async function runRecallCommand(env, userId, query, input = {}) {
+	try {
+		validateRecallScope(userId, {
+			memoryScope: input.memoryScope,
+			recallScope: input.recallScope,
+		});
+	} catch (error) {
+		if (error instanceof RecallScopeError || error?.name === "RecallScopeError") {
+			const scope = packetScope(input.memoryScope ?? null);
+			return {
+				ok: false,
+				command_mode: "recall",
+				mode: "recall",
+				source: "recall",
+				error: error.code ?? "invalid_recall_scope",
+				code: error.code ?? "invalid_recall_scope",
+				http_status: Number(error.status ?? 400),
+				summary: String(error.message ?? "The requested memory scope is invalid."),
+				source_packet_id: null,
+				receipt_id: null,
+				receipt: null,
+				memory_scope: scope,
+				counts: { received: 1, items: 0, nodes: 0, pages: 0, savedTotal: 0 },
+			};
+		}
+		throw error;
+	}
 	// Per-user recall limit (fails open when the binding is absent). One
 	// scripted user must not burn a year of inference credit — and the refusal
 	// is a friendly message, never an error.
@@ -383,13 +423,37 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 	const startedAt = Date.now();
 	// Recall is metered separately from a save: it is the other half of "what
 	// does this cost", and it runs a different (much smaller) set of calls.
-	const { result, aiTotals } = await withAiMeter("recall", async (meter) => {
-		tagAiMeter(sourcePacket?.id ?? null);
-		const value = await recall(env, getConfig(env), userId, query, {
-			memoryScope: input.memoryScope,
+	let metered;
+	try {
+		metered = await withAiMeter("recall", async (meter) => {
+			tagAiMeter(sourcePacket?.id ?? null);
+			const value = await recall(env, getConfig(env), userId, query, {
+				memoryScope: input.memoryScope,
+				recallScope: input.recallScope,
+			});
+			return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 		});
-		return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
-	});
+	} catch (error) {
+		if (error instanceof RecallScopeError || error?.name === "RecallScopeError") {
+			return {
+				ok: false,
+				command_mode: "recall",
+				mode: "recall",
+				source: "recall",
+				error: error.code ?? "invalid_recall_scope",
+				code: error.code ?? "invalid_recall_scope",
+				http_status: Number(error.status ?? 400),
+				summary: String(error.message ?? "The requested memory scope is invalid."),
+				source_packet_id: sourcePacket?.id ?? null,
+				receipt_id: null,
+				receipt: null,
+				memory_scope: packetScope(sourcePacket),
+				counts: { received: 1, items: 0, nodes: 0, pages: 0, savedTotal: 0 },
+			};
+		}
+		throw error;
+	}
+	const { result, aiTotals } = metered;
 	const latencyMs = Date.now() - startedAt;
 
 	// Honest reads during async saves: if this user has a staged MCP save that
@@ -441,8 +505,9 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		receipt_id: stored.receipt_id,
 		sourcePacket,
 		counts: { received: 1 },
-		extra: {
+			extra: {
 			...recallDetails,
+			recall_scope: input.recallScope ?? "global",
 			processing_note: processingNote,
 			recall_mode: result.recall_mode,
 			recall_status: recallStatus,

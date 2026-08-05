@@ -276,6 +276,7 @@ describe("POST /v1/turn", () => {
 		const response = await httpFetch("/v1/turn", authedJson({
 			userId: id,
 			conversationId: "turn-1",
+			memoryScope: { projectId: "turn-project", projectName: "Turn Project" },
 			messages: [{ id: "t1", role: "user", content: "What do you know about my boxing?" }],
 		}));
 		expect(response.status).toBe(200);
@@ -283,6 +284,14 @@ describe("POST /v1/turn", () => {
 		expect(body.ok).toBe(true);
 		expect(body.recall.count).toBeGreaterThanOrEqual(1);
 		expect(body.collect.enabled).toBe(true);
+		expect(body.collect).toMatchObject({
+			ok: true,
+			command_mode: "observe_messages",
+			memory_scope: { project_id: "turn-project", project_name: "Turn Project" },
+		});
+		expect(body.collect.source_packet_id).toMatch(/^src_/);
+		expect(body.collect.receipt_id).toMatch(/^receipt_/);
+		expect(body.collect.job_id).toMatch(/^job_/);
 	});
 
 	it("skips collection when autoCollect is off", async () => {
@@ -296,6 +305,36 @@ describe("POST /v1/turn", () => {
 		const body = await response.json();
 		expect(body.collect.enabled).toBe(false);
 		expect(body.rules.autoCollect).toBe(false);
+	});
+
+	it("surfaces capture backpressure without discarding the recall result", async () => {
+		const id = userId("turn-full");
+		const now = Date.now();
+		const statements = Array.from({ length: 200 }, (_, i) => env.DB.prepare(
+			`INSERT INTO memory_jobs
+				(id, user_id, type, status, idempotency_key, payload_json, created_at, updated_at)
+			 VALUES (?, ?, 'extract', 'queued', ?, '{}', ?, ?)`,
+		).bind(`turn-full-job-${i}`, id, `turn-full-key-${i}`, now, now));
+		for (let i = 0; i < statements.length; i += 50) {
+			await env.DB.batch(statements.slice(i, i + 50));
+		}
+		const response = await httpFetch("/v1/turn", authedJson({
+			userId: id,
+			query: "anything relevant",
+			messages: [{ id: "t-full", role: "user", content: "I moved to Dubai last week." }],
+		}));
+		expect(response.status).toBe(429);
+		const body = await response.json();
+		expect(body.ok).toBe(false);
+		expect(body.recall).toMatchObject({ ok: true, command_mode: "recall" });
+		expect(body.collect).toMatchObject({
+			enabled: true,
+			ok: false,
+			backpressure: true,
+			error: "queue_full",
+			retry_after_s: 30,
+			queue_depth: 200,
+		});
 	});
 
 	it("requires messages or a query", async () => {

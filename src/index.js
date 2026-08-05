@@ -13,6 +13,7 @@ import { getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
 import { getUserReceipts } from "./lib/db.js";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
+import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
 	archiveObject,
 	bulkDeleteBySource,
@@ -216,8 +217,28 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 				return { response: json({ error: "forbidden", code: "insufficient_scope" }, 403) };
 			}
 		}
-		const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput);
-		return { auth, userId: scoped.userId, memoryScope: scoped.memoryScope };
+		try {
+			const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput);
+			const project = normalizeProjectScope(scoped.memoryScope);
+			return {
+				auth,
+				userId: scoped.userId,
+				memoryScope: {
+					...scoped.memoryScope,
+					projectId: project.projectId,
+					projectName: project.projectName,
+				},
+			};
+		} catch (error) {
+			if (error instanceof ProjectScopeError || error?.name === "ProjectScopeError") {
+				return { response: json({
+					error: error.code ?? "invalid_project_id",
+					code: error.code ?? "invalid_project_id",
+					message: String(error.message ?? "Invalid project scope."),
+				}, Number(error.status ?? 400)) };
+			}
+			throw error;
+		}
 	}
 	if (await isAuthorized(request, env)) {
 		return { response: json({ error: "userId is required" }, 400) };
@@ -241,7 +262,7 @@ function cleanScopeValue(value, fallback = null) {
 	return text || fallback;
 }
 
-async function scopedMemoryUserId(ownerUserId, externalUserId) {
+export async function scopedMemoryUserId(ownerUserId, externalUserId) {
 	if (!externalUserId || externalUserId === ownerUserId) return ownerUserId;
 	const digest = await sha256Hex(`uml-memory-scope:v1:${ownerUserId}:${externalUserId}`);
 	return `mem_${digest.slice(0, 32)}`;
@@ -479,7 +500,7 @@ const routes = {
 		// The whole brain for one user: nodes with ALL their slices (current + old,
 		// each carrying is_current) and their events newest-first, plus edges and
 		// the loose "maybe" candidates. The graph page renders all of it.
-		const [nodesResult, pagesResult, slicesResult, eventsResult, edgesResult, candidatesResult] = await env.DB.batch([
+		const [nodesResult, pagesResult, slicesResult, eventsResult, edgesResult, candidatesResult, legacyProjectsResult] = await env.DB.batch([
 			env.DB.prepare("SELECT * FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL").bind(userId),
 			env.DB.prepare("SELECT * FROM memory_pages WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL ORDER BY updated_at DESC").bind(userId),
 			env.DB.prepare("SELECT * FROM slices WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC").bind(userId),
@@ -491,6 +512,18 @@ const routes = {
 				   AND COALESCE(status, 'pending') = 'pending'
 				 ORDER BY COALESCE(last_seen_at, created_at) DESC`,
 			).bind(userId),
+			env.DB.prepare(
+				`SELECT sp.memory_user_id, sp.external_user_id, MAX(sp.project_name) AS project_name,
+					COUNT(*) AS source_packets, MAX(sp.updated_at) AS last_seen_at,
+					(SELECT COUNT(*) FROM nodes n WHERE n.user_id = sp.memory_user_id AND n.deleted_at IS NULL) AS nodes,
+					(SELECT COUNT(*) FROM memory_pages p WHERE p.user_id = sp.memory_user_id AND p.deleted_at IS NULL) AS pages
+				 FROM source_packets sp
+				 WHERE sp.owner_user_id = ? AND sp.memory_user_id != ?
+				   AND sp.external_user_id LIKE 'project:%'
+				 GROUP BY sp.memory_user_id, sp.external_user_id
+				 ORDER BY last_seen_at DESC
+				 LIMIT 100`,
+			).bind(userId, userId),
 		]);
 
 		const slicesByNode = new Map();
@@ -524,6 +557,50 @@ const routes = {
 			summary: null,
 		}));
 		const layout = buildGraphLayout(nodes, pages, candidates);
+		const projectMap = new Map();
+		const addProjectRows = (kind, rows) => {
+			for (const row of rows ?? []) {
+				if (!row.project_id) continue;
+				const nameAt = Number(row.updated_at ?? row.last_seen_at ?? row.created_at ?? 0);
+				const current = projectMap.get(row.project_id) ?? {
+					project_id: row.project_id,
+					project_name: null,
+					_name_at: -1,
+					nodes: 0,
+					pages: 0,
+					slices: 0,
+					events: 0,
+					edges: 0,
+					candidates: 0,
+				};
+				if (row.project_name && (
+					nameAt > current._name_at
+					|| (nameAt === current._name_at && String(row.project_name).localeCompare(String(current.project_name ?? "")) > 0)
+				)) {
+					current.project_name = row.project_name;
+					current._name_at = nameAt;
+				}
+				current[kind] += 1;
+				projectMap.set(row.project_id, current);
+			}
+		};
+		addProjectRows("nodes", nodesResult.results);
+		addProjectRows("pages", pagesResult.results);
+		addProjectRows("slices", slicesResult.results);
+		addProjectRows("events", eventsResult.results);
+		addProjectRows("edges", edgesResult.results);
+		addProjectRows("candidates", candidatesResult.results);
+		const projects = [...projectMap.values()]
+			.map(({ _name_at, ...project }) => project)
+			.sort((a, b) => String(a.project_name ?? a.project_id).localeCompare(String(b.project_name ?? b.project_id)));
+		const legacyProjects = [];
+		for (const row of legacyProjectsResult.results ?? []) {
+			// Source provenance was historically client-extensible. Verify the
+			// deterministic subtenant id before using it to expose aggregate counts,
+			// so a forged pre-fix row cannot point inventory at another account.
+			if (row.memory_user_id !== await scopedMemoryUserId(userId, row.external_user_id)) continue;
+			legacyProjects.push(row);
+		}
 
 		const config = getConfig(env);
 		const stats = {
@@ -542,6 +619,21 @@ const routes = {
 			clusters: layout.clusters,
 			edges: edgesResult.results,
 			candidates: layout.candidates,
+			projects,
+			legacy_project_scopes: legacyProjects.map((row) => ({
+				external_user_id: row.external_user_id,
+				project_name: row.project_name ?? (String(row.external_user_id ?? "").replace(/^project:/, "") || null),
+				source_packets: row.source_packets ?? 0,
+				nodes: row.nodes ?? 0,
+				pages: row.pages ?? 0,
+				last_seen_at: row.last_seen_at ?? null,
+				migration_status: "legacy_subtenant_read_only",
+			})),
+			scope_model: {
+				default_recall: "global",
+				project_recall: ["project_only", "project_then_global"],
+				global_rows_use_null_project_id: true,
+			},
 			stats,
 			model: config.llm.model,
 			models: EXTRACTION_MODELS,
@@ -1059,8 +1151,10 @@ const routes = {
 				conversationId: body.conversationId,
 				threadId: body.threadId,
 				memoryScope: auth.memoryScope,
+				recallScope: body.recallScope,
 			})
 			: { count: 0, summary: "No query.", packet: null };
+		if (recall?.ok === false) return json(recall, recall.http_status ?? 400);
 
 		let collect = { enabled: false };
 		if (rules.autoCollect && messages.length) {
@@ -1081,19 +1175,15 @@ const routes = {
 					: {}),
 			},
 			});
-			collect = {
-				enabled: true,
-				fired: result.fired ?? false,
-				held: result.held ?? 0,
-				summary: result.summary ?? null,
-			};
+			collect = { enabled: true, ...result };
 		}
+		const ok = collect.ok !== false;
 		return json({
-			ok: true,
+			ok,
 			recall,
 			collect,
 			rules: { autoCollect: rules.autoCollect, captureDefault: rules.captureDefault },
-		});
+		}, ok ? 200 : (collect.backpressure ? 429 : 400));
 	},
 
 	// ---- Playground -------------------------------------------------------
@@ -1355,8 +1445,9 @@ const routes = {
 			conversationId: body.conversationId,
 			topic: body.topic,
 			memoryScope: auth.memoryScope,
+			recallScope: body.recallScope,
 		});
-		return json(result);
+		return json(result, result?.ok === false ? (result.http_status ?? 400) : 200);
 	},
 
 	"GET /v1/usage": async (request, env) => {
@@ -1567,8 +1658,9 @@ async function handleRequestInner(request, env, ctx, url) {
 			return redirectTo(request, auth ? "/?app=1" : `/?view=${url.pathname.slice(1)}`);
 		}
 
-		// MCP door for supported clients. Identity + auth live in the URL path token,
-		// so this bypasses the x-api-key gate and authenticates the token itself.
+		// MCP door for supported clients. Prefer Bearer auth on /mcp; generated
+		// connector links and legacy clients may carry identity in the path token.
+		// This bypasses the x-api-key gate and authenticates the token itself.
 		if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
 			return handleMcp(request, env, ctx, url);
 		}
@@ -1791,11 +1883,17 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 				: kind === "slice" ? "slices"
 					: "candidates";
 		const exists = await env.DB.prepare(
-			`SELECT id FROM ${table} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+			`SELECT id, project_id, project_name FROM ${table} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 		).bind(id, auth.userId).first();
 		if (!exists) return json({ error: "not_found" }, 404);
 		const result = await deleteObject(env, auth.userId, { kind, id, suppress: url.searchParams.get("suppress") !== "false" });
-		await storeDeletionTombstone(env, auth.userId, { kind, ids: [id], by, source: "delete_memory" });
+		await storeDeletionTombstone(env, auth.userId, {
+			kind,
+			ids: [id],
+			by,
+			source: "delete_memory",
+			projectScopes: [{ project_id: exists.project_id ?? null, project_name: exists.project_name ?? null }],
+		});
 		return json({ ok: true, ...result });
 	}
 

@@ -134,11 +134,12 @@ describe("signing and payloads", () => {
 	it("metadata-only mode never ships content", async () => {
 		const { userId } = await sessionFor("wh-meta");
 		const { webhook } = await createWebhook(env, userId, {
-			name: "private", url: "https://hooks.example.com/meta", events: ["memory.added"], metadataOnly: true,
+			name: "private", url: "https://hooks.example.com/meta", events: ["memory.enriched"], metadataOnly: true,
 		});
 		const seen = [];
-		await emitWebhookEvent(env, (p) => p, userId, "memory.added", {
-			source: "ingest", receipt_id: "r2",
+		await emitWebhookEvent(env, (p) => p, userId, "memory.enriched", {
+			source: "ingest", receipt_id: "r2", job_id: "job-2", source_packet_id: "src-2",
+			status: "enriched", project_id: "local_opaque", project_name: "Deeply private project name",
 			counts: { nodes: 1 }, new_node_labels: ["Deeply private thing"],
 		}, { fetchImpl: async (url, init) => { seen.push(init.body); return new Response("ok"); } });
 		await new Promise((r) => setTimeout(r, 50));
@@ -148,6 +149,14 @@ describe("signing and payloads", () => {
 		const payload = JSON.parse(seen[0]);
 		expect(payload.metadata_only).toBe(true);
 		expect(payload.data.counts.nodes).toBe(1);
+		expect(payload.data).toMatchObject({
+			receipt_id: "r2",
+			job_id: "job-2",
+			source_packet_id: "src-2",
+			status: "enriched",
+			project_id: "local_opaque",
+		});
+		expect(payload.data).not.toHaveProperty("project_name");
 		// The stored log row is equally content-free.
 		const log = await listDeliveries(env, userId, webhook.id);
 		const { results } = await env.DB.prepare("SELECT payload_json FROM webhook_deliveries WHERE webhook_id = ?").bind(webhook.id).all();

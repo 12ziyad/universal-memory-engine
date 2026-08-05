@@ -6,17 +6,16 @@
  *   - save_conversation → isolated manual conversation engine
  *   - recall_memory     → existing recall engine
  *
- * Identity rides in the connector URL: /mcp/<token>, token = base64url("userId:key").
- * Both Claude and ChatGPT support no-auth (URL-only) remote MCP connectors, and
- * Claude rejects static bearer headers and ?query= tokens — so a per-user secret
- * in the path is the portable choice. The embedded key is the same global API_KEY
- * the HTTP routes use, so the MCP door is exactly as trusted as /v1/*.
+ * Preferred identity is a connection token in `Authorization: Bearer` at
+ * `/mcp`. Generated `/mcp/<token>` links remain for headerless clients and
+ * legacy base64url path tokens remain compatible with existing connectors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
+import { normalizeProjectScope, ProjectScopeError } from "../lib/project_scope.js";
 import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js";
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
 import { tokens } from "../lib/text.js";
@@ -70,7 +69,21 @@ export function decodeMcpToken(token) {
 	}
 }
 
-const looseScope = z.object({}).passthrough().optional();
+// MCP callers may attribute content to a project/application, but tenant
+// ownership is always derived from the authenticated connection. Keeping this
+// strict prevents forged owner/memory/external-user ids from entering source
+// provenance, webhook routing, or legacy-project inventory.
+const publicMemoryScopeSchema = z.object({
+	projectId: z.string().describe("Stable opaque project id. Required for project_only and project_then_global recall.").optional(),
+	projectName: z.string().describe("Optional human-readable project name; display metadata only.").optional(),
+	workspaceId: z.string().describe("Optional caller workspace attribution.").optional(),
+	appId: z.string().describe("Optional application attribution.").optional(),
+	agentId: z.string().describe("Optional agent attribution.").optional(),
+	sessionId: z.string().describe("Optional host session attribution.").optional(),
+	threadId: z.string().describe("Optional host thread attribution.").optional(),
+	topic: z.string().describe("Optional topic attribution.").optional(),
+	sourceScope: z.string().describe("Optional caller-defined source grouping.").optional(),
+}).strict().optional();
 const messageSchema = z.object({
 	id: z.string().optional(),
 	role: z.enum(["user", "assistant"]).optional().describe("Defaults to 'user'."),
@@ -91,6 +104,13 @@ function mcpResult(payload) {
 	// the model, so returning just a summary ("Found relevant memory.") handed
 	// the caller a receipt with nothing to read — recall looked broken even when
 	// the lookup succeeded. structuredContent still carries the full payload.
+	if (payload?.ok === false) {
+		return {
+			isError: true,
+			structuredContent: payload,
+			content: [{ type: "text", text: payload.summary || "The memory request was rejected." }],
+		};
+	}
 	if (payload.command_mode === "recall") {
 		const context = String(payload.context ?? "").trim();
 		const text = context
@@ -105,6 +125,31 @@ function mcpResult(payload) {
 		structuredContent: payload,
 		content: [{ type: "text", text: payload.summary || "Done." }],
 	};
+}
+
+function invalidProjectScope(memoryScope, mode, source) {
+	try {
+		normalizeProjectScope(memoryScope);
+		return null;
+	} catch (error) {
+		if (!(error instanceof ProjectScopeError) && error?.name !== "ProjectScopeError") throw error;
+		return mcpResult({
+			ok: false,
+			command_mode: mode,
+			mode,
+			source,
+			fired: false,
+			processing: false,
+			error: error.code ?? "invalid_project_id",
+			code: error.code ?? "invalid_project_id",
+			http_status: Number(error.status ?? 400),
+			summary: String(error.message ?? "Invalid project scope."),
+			source_packet_id: null,
+			receipt_id: null,
+			receipt: null,
+			counts: { savedTotal: 0 },
+		});
+	}
 }
 
 function mcpForbidden(mode, source, requiredScope) {
@@ -157,11 +202,13 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			threadId: z.string().optional().describe("Optional host/client thread id for source tracking."),
 			sourceId: z.string().optional().describe("Optional caller source id for idempotency/source tracking."),
 			idempotencyKey: z.string().optional().describe("Optional idempotency key for safe retries."),
-			memoryScope: looseScope.describe("Optional memory scope metadata such as appId, workspaceId, agentId, or externalUserId."),
+			memoryScope: publicMemoryScopeSchema,
 		},
 		async ({ content, recentContext, conversationId, threadId, sourceId, idempotencyKey, memoryScope }) => {
 			const forbidden = ensureScope(authz, "direct_save", "save_memory", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
+			const invalidScope = invalidProjectScope(memoryScope, "direct_save", "save_memory");
+			if (invalidScope) return invalidScope;
 			// The same Engine v2 lane every other door uses — with the MCP lens
 			// (stricter gate floor) and the light path: a single atomic fact
 			// skips the edge and reflexion passes it has nothing to feed.
@@ -198,11 +245,13 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			n: z.number().optional().describe("With scope=lastN: how many of the most recent messages to digest."),
 			topic: z.string().optional().describe("With scope=topic: keep only messages mentioning this."),
 			contentScope: contentScopeSchema.describe("Optional strict content selection, separate from tenancy metadata."),
-			memoryScope: looseScope.describe("Optional memory scope metadata such as appId, workspaceId, agentId, or externalUserId."),
+			memoryScope: publicMemoryScopeSchema,
 		},
 		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, contentScope, memoryScope }) => {
 			const forbidden = ensureScope(authz, "conversation_collect", "save_conversation", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
+			const invalidScope = invalidProjectScope(memoryScope, "conversation_collect", "save_conversation");
+			if (invalidScope) return invalidScope;
 			// Receipt-first: stage deterministically (no model calls), answer in
 			// under a second, and let the user's Durable Object run the full
 			// Engine v2 extraction in the background. contentScope is accepted
@@ -231,17 +280,24 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			sourceId: z.string().optional().describe("Optional caller source id for source tracking."),
 			idempotencyKey: z.string().optional().describe("Optional idempotency key for safe retries."),
 			topic: z.string().optional().describe("Optional topic hint for source tracking."),
-			memoryScope: looseScope.describe("Optional memory scope metadata such as appId, workspaceId, agentId, or externalUserId."),
+			recallScope: z
+				.enum(["global", "project_only", "project_then_global"])
+				.optional()
+				.describe("Optional recall coverage: global, project_only, or project_then_global. Project modes require memoryScope.projectId."),
+			memoryScope: publicMemoryScopeSchema,
 		},
-		async ({ query, conversationId, threadId, sourceId, idempotencyKey, topic, memoryScope }) => {
+		async ({ query, conversationId, threadId, sourceId, idempotencyKey, topic, recallScope, memoryScope }) => {
 			const forbidden = ensureScope(authz, "recall", "recall", MEMORY_READ_SCOPE);
 			if (forbidden) return forbidden;
+			const invalidScope = invalidProjectScope(memoryScope, "recall", "recall");
+			if (invalidScope) return invalidScope;
 			const res = await runRecallCommand(env, userId, query, {
 				conversationId,
 				threadId,
 				sourceId,
 				idempotencyKey,
 				topic,
+				recallScope,
 				memoryScope,
 			});
 			return mcpResult(res);

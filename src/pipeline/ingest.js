@@ -22,6 +22,7 @@ import { hashText, normalizeSourcePacket, sourceMeta, storeSourcePacket } from "
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { scrubMessages } from "./scrub.js";
 import { activeJobDepth, createMemoryJob } from "../lib/db.js";
+import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { stageMemoryText } from "./staged_text.js";
 
 // 1.7 backpressure: never accept unbounded work you can't see.
@@ -36,7 +37,7 @@ async function findRecentJob(env, userId, idempotencyKey) {
 	if (!idempotencyKey) return null;
 	try {
 		const job = await env.DB.prepare(
-			`SELECT id, status, receipt_id, created_at FROM memory_jobs
+			`SELECT id, status, receipt_id, source_packet_id, created_at FROM memory_jobs
 			 WHERE user_id = ? AND idempotency_key = ? AND type = 'extract'
 			   AND status != 'failed' AND created_at > ?
 			 LIMIT 1`,
@@ -66,7 +67,13 @@ async function findRecentJob(env, userId, idempotencyKey) {
 				try { receipt = JSON.parse(row.detail ?? "null"); } catch {}
 			}
 		}
-		return { job, receipt, summary };
+		let sourcePacket = null;
+		if (job.source_packet_id) {
+			sourcePacket = await env.DB.prepare(
+				"SELECT * FROM source_packets WHERE id = ? AND user_id = ? LIMIT 1",
+			).bind(job.source_packet_id, userId).first();
+		}
+		return { job, receipt, summary, sourcePacket };
 	} catch (err) {
 		console.warn("idempotent replay lookup failed:", err?.message ?? err);
 		return null;
@@ -75,6 +82,10 @@ async function findRecentJob(env, userId, idempotencyKey) {
 
 export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	const { flush = false, overrides = {}, waitBudgetMs = 0 } = opts;
+	// Validate and freeze attribution before any early return. Opt-out content is
+	// not stored, but its audit receipt must still say which project door saw it.
+	const memoryScope = canonicalMemoryScope(opts.memoryScope ?? overrides.meta);
+	const projectScope = normalizeProjectScope(memoryScope);
 	// Secrets are stripped BEFORE anything durable sees the text: the source
 	// packet row, the Durable Object's held chunk, the model, the vectors.
 	const scrubbed = scrubMessages(rawMessages);
@@ -92,6 +103,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		const received = (messages ?? []).filter((m) => (m?.role ?? "user") === "user").length;
 		const { receipt, receiptId, summary } = await storeOptOutReceipt(env, userId, source, {
 			source_mode: sourceMode,
+			project_id: projectScope.projectId,
+			project_name: projectScope.projectName,
 			received,
 			skipped: received || 1,
 			opt_out_phrase: optOut.phrase,
@@ -116,7 +129,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		threadId: opts.threadId,
 		sourceId: opts.sourceId,
 		idempotencyKey: opts.idempotencyKey,
-		scope: opts.memoryScope,
+		scope: memoryScope,
 	});
 
 	// 1.10 idempotent replay: identical accepted content inside the window
@@ -142,7 +155,10 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			receipt: replay.receipt,
 			receiptId: replay.receipt?.id ?? replay.job.receipt_id ?? null,
 			summary: replay.summary,
-			sourcePacket: { id: null, idempotency_key: normalized.packet.idempotency_key },
+			sourcePacket: replay.sourcePacket ?? {
+				...normalized.packet,
+				id: replay.job.source_packet_id ?? null,
+			},
 		};
 	}
 
@@ -153,6 +169,11 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	}
 
 	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	const projectId = sourcePacket?.project_id ?? normalized.packet.project_id ?? null;
+	const projectName = sourcePacket?.project_name ?? normalized.packet.project_name ?? null;
+	// One DO still owns the account, but held/recent/dedupe state is partitioned
+	// inside it. Project metadata must never become another physical tenant.
+	const scopeKey = projectId ? `project:${projectId}` : "global";
 	const extractionOverrides = {
 		...overrides,
 		meta: {
@@ -173,6 +194,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			lane: opts.sourceMode ?? overrides.source ?? "ingest",
 			message_ids: userMsgIds,
 			remaining: userMsgIds,
+			project_id: projectId,
+			project_name: projectName,
 		},
 	});
 	if (!jobId) {
@@ -186,12 +209,15 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		sourcePacketId: sourcePacket?.id ?? null,
 		lane: opts.sourceMode ?? overrides.source ?? "ingest",
 		messages: normalized.messages,
+		projectId,
+		projectName,
 	});
 
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
 	const { fired, held, skipped, queued } = await stub.addMessages(userId, normalized.messages, {
 		flush,
 		jobId,
+		scopeKey,
 		overrides: extractionOverrides,
 	});
 

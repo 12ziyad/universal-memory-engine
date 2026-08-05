@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
+import { configDefaults } from "vitest/config";
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,6 +11,13 @@ export default defineWorkersConfig(async () => {
 
 	return {
 		test: {
+			exclude: [
+				...configDefaults.exclude,
+				// These exercise host filesystem/process behavior and are covered by
+				// vitest.unit.config.js; the Workers isolate cannot import those APIs.
+				"test/migrations_append_only.spec.js",
+				"test/project_identity.spec.js",
+			],
 			setupFiles: ["./test/apply-migrations.js"],
 			poolOptions: {
 				workers: {

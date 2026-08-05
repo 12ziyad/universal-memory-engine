@@ -307,6 +307,11 @@ ${codeBlock(`POST /v1/save
 ${codeBlock(`POST /v1/recall
 { "query": "what am I learning?" }
 
+// one coding project plus account-global memory:
+{ "query": "how does this project deploy?",
+  "memoryScope": { "projectId": "atlas", "projectName": "Atlas" },
+  "recallScope": "project_then_global" }
+
 // response (abridged)
 { "count": 2,
   "context": "Kotlin (skill, state: active) - started learning this week…",
@@ -330,6 +335,8 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>idempotencyKey</code></td><td>Safe retries: the same key is processed at most once.</td></tr>
 <tr><td><code>conversationId</code>, <code>threadId</code>, <code>sourceId</code></td><td>Provenance tracking; also used for de-duplication of re-sent chats.</td></tr>
 <tr><td><code>userId</code></td><td><b>Sub-tenant selector.</b> Omit it to use the key owner's own memory. Pass any string to read/write a separate memory space derived from it — useful when your app serves multiple end users under one key.</td></tr>
+<tr><td><code>memoryScope.projectId</code>, <code>projectName</code></td><td><b>Project metadata, not tenancy.</b> Project memories remain in the authenticated account graph with explicit provenance. Omit <code>projectId</code> for account-global writes.</td></tr>
+<tr><td><code>recallScope</code></td><td><code>global</code> (default) searches the whole account; <code>project_only</code> searches exactly <code>memoryScope.projectId</code>; <code>project_then_global</code> searches that project plus rows without a project. Project modes never include another project.</td></tr>
 </table>
 <h2>Rate limits</h2>
 <p>Writes (<code>/v1/save</code>, <code>/v1/turn</code>, <code>/v1/ingest</code>): 60/minute per user — a <code>429</code> includes a friendly message; honor <code>Retry-After</code> style backoff. Reads are not currently rate limited.</p>
@@ -370,7 +377,7 @@ PAGES["/api/mcp"] = { title: "MCP tools", html: `
 <h3>save_conversation</h3>
 <p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Only user-stated facts enter the graph; assistant content becomes notes, never facts, unless the user explicitly adopted it.</p>
 <h3>recall_memory</h3>
-<p>Input: <code>query</code>. The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
+<p>Input: <code>query</code>, optional <code>memoryScope</code> project metadata, and optional <code>recallScope</code> (<code>global</code> | <code>project_only</code> | <code>project_then_global</code>). The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
 <h2>Design guarantees</h2>
 <ul>
 <li>No write is ever claimed without a receipt.</li>
@@ -393,6 +400,11 @@ memory.turn([{"role": "user", "content": "We picked Postgres."}])
 
 # safe retries on writes
 memory.add("Big decision", idempotencyKey=MemoryClient.new_idempotency_key())
+
+# projects are metadata inside this account, not separate user IDs
+scope = {"projectId": "atlas", "projectName": "Atlas"}
+memory.add("Atlas deploys from main.", memory_scope=scope)
+memory.search("How does Atlas deploy?", memory_scope=scope, recall_scope="project_then_global")
 
 # one key, many end users of YOUR app (isolated memory spaces)
 alice = MemoryClient(api_key="YOUR_API_KEY", user_id="alice")`)}
@@ -423,6 +435,11 @@ await memory.turn([{ role: "user", content: "We picked Postgres." }]);
 
 // safe retries on writes
 await memory.add("Big decision", { idempotencyKey: memory.newIdempotencyKey() });
+
+// projects are metadata inside this account, not separate user IDs
+const scope = { projectId: "atlas", projectName: "Atlas" };
+await memory.add("Atlas deploys from main.", { memoryScope: scope });
+await memory.search("How does Atlas deploy?", { memoryScope: scope, recallScope: "project_then_global" });
 
 // one key, many end users of YOUR app (isolated memory spaces)
 const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "alice" });`)}

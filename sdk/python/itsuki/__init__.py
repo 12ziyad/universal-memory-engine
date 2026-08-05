@@ -13,6 +13,7 @@ import random
 import time
 import uuid
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
@@ -210,6 +211,7 @@ class MemoryClient:
         "idempotency_key": "idempotencyKey",
         "capture_density": "captureDensity",
         "memory_scope": "memoryScope",
+        "recall_scope": "recallScope",
         "content_scope": "contentScope",
     }
 
@@ -228,8 +230,15 @@ class MemoryClient:
                  params: Optional[dict] = None) -> dict:
         body = self._to_wire(body)
         # httpx REPLACES a URL's own query string when params= is given, so
-        # every query parameter must come through this dict — never the path.
-        params = {k: v for k, v in (params or {}).items() if v is not None}
+        # merge an endpoint's embedded query into params before adding userId.
+        # Explicit params win if the same key appears in both places.
+        path_parts = urlsplit(path)
+        path = path_parts._replace(query="").geturl()
+        path_params = dict(parse_qsl(path_parts.query, keep_blank_values=True))
+        params = {
+            **path_params,
+            **{k: v for k, v in (params or {}).items() if v is not None},
+        }
         if self.user_id:
             params.setdefault("userId", self.user_id)
             if body is not None and "userId" not in body:

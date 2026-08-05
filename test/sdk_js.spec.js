@@ -51,6 +51,20 @@ describe("MemoryClient", () => {
 		expect(JSON.parse(calls[1].init.body).userId).toBe("end-user-7");
 	});
 
+	it("passes project memory and recall scopes without turning them into userId", async () => {
+		const m = client();
+		const memoryScope = { projectId: "atlas", projectName: "Atlas" };
+		await m.add("Atlas deploys from main.", { memoryScope });
+		await m.search("How does Atlas deploy?", { memoryScope, recallScope: "project_then_global" });
+		expect(JSON.parse(calls[0].init.body)).toMatchObject({ content: "Atlas deploys from main.", memoryScope });
+		expect(JSON.parse(calls[1].init.body)).toEqual({
+			query: "How does Atlas deploy?",
+			memoryScope,
+			recallScope: "project_then_global",
+		});
+		expect(calls[0].url).not.toContain("userId=");
+	});
+
 	it("retries GETs on 500 then succeeds", async () => {
 		stubFetch([{ status: 500, body: { error: "boom" } }, { status: 200, body: { ok: true, nodes: 1 } }]);
 		const res = await client().status();

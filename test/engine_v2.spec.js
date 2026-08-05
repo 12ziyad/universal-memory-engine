@@ -124,7 +124,7 @@ describe("the three-call save", () => {
 		expect(edges.some((e) => e.type === "IRRELEVANT_LINK" && e.to_label === "Code review timing")).toBe(true);
 	});
 
-	it("a later save closes an earlier functional edge (cross-batch contradiction)", async () => {
+	it("later functional changes close history and a former relationship can recur", async () => {
 		const userId = `v2-close-${crypto.randomUUID()}`;
 		const first = await runExtraction(env, userId, msgs(["Ziyad here — I live in Porto these days"]), [], {
 			llmResponse: { objects: [
@@ -160,6 +160,31 @@ describe("the three-call save", () => {
 		expect(lives).toHaveLength(2);
 		expect(lives.find((e) => e.to_label === "Porto").invalid_at).toBe(Date.parse("2026-06-01T00:00:00Z"));
 		expect(lives.find((e) => e.to_label === "Braga").invalid_at).toBeNull();
+
+		const third = await runExtraction(env, userId, msgs(["We moved back to Porto in August"]), [], {
+			llmResponse: { objects: [
+				{ kind: "node", label: "Ziyad", category: "identity", confidence: 0.9 },
+				{ kind: "node", label: "Porto", category: "place", confidence: 0.9 },
+				{ kind: "slice", on: "Porto", text: "Moved back to Porto in August", kind_detail: "other", confidence: 0.9 },
+			] },
+			edgeResponse: ({ entities }) => {
+				const person = entities.find((e) => e.label === "Ziyad");
+				const porto = entities.find((e) => e.label === "Porto");
+				return { edges: [{ source_entity_id: person.n, target_entity_id: porto.n, relation_type: "LIVES_IN", fact: "Lives in Porto again", valid_at: "2026-08-01", invalid_at: null }] };
+			},
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+		expect(third.outcome).toBe("wrote");
+
+		const { results: recurring } = await env.DB.prepare(
+			"SELECT e.fact, e.invalid_at, nt.label AS to_label FROM edges e JOIN nodes nt ON nt.id = e.to_node WHERE e.user_id = ? AND e.type = 'LIVES_IN'",
+		).bind(userId).all();
+		expect(recurring).toHaveLength(3);
+		const portoEdges = recurring.filter((e) => e.to_label === "Porto");
+		expect(portoEdges).toHaveLength(2);
+		expect(portoEdges.find((e) => e.fact === "Lives in Porto").invalid_at).toBe(Date.parse("2026-06-01T00:00:00Z"));
+		expect(portoEdges.find((e) => e.fact === "Lives in Porto again").invalid_at).toBeNull();
+		expect(recurring.find((e) => e.to_label === "Braga").invalid_at).toBe(Date.parse("2026-08-01T00:00:00Z"));
 	});
 
 	it("malformed edge output: the save lands on call 1 alone, refusal named", async () => {
