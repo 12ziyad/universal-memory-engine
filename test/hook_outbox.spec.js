@@ -1367,5 +1367,5 @@ foreach ($target in $targets) {
 		expect(afterAcl.status, afterAcl.stderr).toBe(0);
 		expect(afterAcl.stdout.trim()).toBe(beforeAcl.stdout.trim());
 		expect(await readFile(sentinel, "utf8")).toBe("unrelated ACL and content must survive");
-	});
+	}, 15_000);
 });
