@@ -29,8 +29,10 @@ describe("UserMemory project-scope boundaries", () => {
 			await instance.addMessages(userId, [message(sharedId, "okay")], {
 				scopeKey: PROJECT_A,
 			});
-			expect(await state.storage.get(`checkpoint:${PROJECT_A}`)).toBe(sharedId);
-			const projectASeen = await state.storage.get(`seen:${PROJECT_A}`);
+			const [projectAContext] = await state.storage.get("contextIndex:v1");
+			expect(projectAContext.contextKey).toMatch(/^context:v1:[a-f0-9]{64}$/);
+			expect(await state.storage.get(`checkpoint:${projectAContext.contextKey}`)).toBe(sharedId);
+			const projectASeen = await state.storage.get(`seen:${projectAContext.contextKey}`);
 			expect(projectASeen).toHaveLength(1);
 			expect(projectASeen[0]).toMatch(/^message:v2:[a-f0-9]{64}$/);
 			expect(projectASeen).not.toContain(sharedId);
@@ -46,7 +48,9 @@ describe("UserMemory project-scope boundaries", () => {
 			expect(await state.storage.get("chunkScopeKey")).toBe(PROJECT_B);
 			const chunk = await state.storage.get("chunk");
 			expect(chunk.map((item) => item.id)).toEqual([sharedId]);
-			expect(await state.storage.get(`seen:${PROJECT_B}`)).toBeUndefined();
+			const projectBContext = await state.storage.get("chunkContextKey");
+			expect(projectBContext).not.toBe(projectAContext.contextKey);
+			expect(await state.storage.get(`seen:${projectBContext}`)).toBeUndefined();
 		});
 
 		await stub.resetAll();

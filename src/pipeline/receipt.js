@@ -42,6 +42,94 @@ const REASON_PHRASE = {
 	unknown_kind: "unrecognized",
 };
 
+const CONTEXT_TRACE_SCHEMA = "itsuki.extract-context-trace/v1";
+const CONTEXT_TRACE_MODES = new Set(["accepted_snapshot", "legacy_empty", "invalid_empty"]);
+const SHA256_HEX = /^[a-f0-9]{64}$/i;
+const MAX_CONTEXT_TRACE_MESSAGES = 10;
+const MAX_CONTEXT_TRACE_ROLE_MESSAGES = 5;
+const MAX_CONTEXT_TRACE_SERIALIZED_BYTES = 16 * 1024;
+const MAX_CONTEXT_TRACE_OMITTED = 1_000_000;
+const MAX_CONTEXT_TRACE_TIMESTAMP = 8_640_000_000_000_000;
+
+function boundedTraceInteger(value, max) {
+	if (!Number.isSafeInteger(value) || value < 0 || value > max) return null;
+	return value;
+}
+
+function traceHash(value) {
+	if (typeof value !== "string" || !SHA256_HEX.test(value)) return null;
+	return value.toLowerCase();
+}
+
+function traceTimestamp(value) {
+	let timestamp = value;
+	if (typeof timestamp === "string") {
+		// Accept only a canonical UTC timestamp, never an arbitrary label that
+		// could smuggle source or message text into an otherwise content-free trace.
+		if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(timestamp)) return null;
+		timestamp = Date.parse(timestamp);
+	}
+	return boundedTraceInteger(timestamp, MAX_CONTEXT_TRACE_TIMESTAMP);
+}
+
+/**
+ * Rebuild extraction-context tracing from a strict, content-free allowlist.
+ *
+ * The trace is persisted and can outlive the messages that produced it, so it
+ * must never retain snippets, message ids, scope labels, or caller-provided
+ * metadata. Invalid audit data is omitted as a unit instead of being partly
+ * preserved with misleading counts. Empty compatibility modes may lack a
+ * context hash because legacy/corrupt queue entries do not always have one;
+ * accepted snapshots must identify both their logical context and contents.
+ */
+export function normalizeContextTrace(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	if (value.schema !== CONTEXT_TRACE_SCHEMA || !CONTEXT_TRACE_MODES.has(value.mode)) return null;
+
+	const contextHash = value.context_hash == null ? null : traceHash(value.context_hash);
+	const snapshotHash = value.snapshot_hash == null ? null : traceHash(value.snapshot_hash);
+	if (value.context_hash != null && !contextHash) return null;
+	if (value.snapshot_hash != null && !snapshotHash) return null;
+	if (value.mode === "accepted_snapshot" && (!contextHash || !snapshotHash)) return null;
+
+	const messages = boundedTraceInteger(value.messages, MAX_CONTEXT_TRACE_MESSAGES);
+	const userMessages = boundedTraceInteger(value.user_messages, MAX_CONTEXT_TRACE_ROLE_MESSAGES);
+	const assistantMessages = boundedTraceInteger(value.assistant_messages, MAX_CONTEXT_TRACE_ROLE_MESSAGES);
+	const serializedBytes = boundedTraceInteger(value.serialized_bytes, MAX_CONTEXT_TRACE_SERIALIZED_BYTES);
+	const omittedMessages = boundedTraceInteger(value.omitted_messages, MAX_CONTEXT_TRACE_OMITTED);
+	const truncatedMessages = boundedTraceInteger(value.truncated_messages, MAX_CONTEXT_TRACE_MESSAGES);
+	const capturedAt = traceTimestamp(value.captured_at);
+	if (
+		messages == null ||
+		userMessages == null ||
+		assistantMessages == null ||
+		serializedBytes == null ||
+		omittedMessages == null ||
+		truncatedMessages == null ||
+		capturedAt == null ||
+		messages !== userMessages + assistantMessages
+	) return null;
+
+	return {
+		schema: CONTEXT_TRACE_SCHEMA,
+		mode: value.mode,
+		...(contextHash ? { context_hash: contextHash } : {}),
+		...(snapshotHash ? { snapshot_hash: snapshotHash } : {}),
+		messages,
+		user_messages: userMessages,
+		assistant_messages: assistantMessages,
+		serialized_bytes: serializedBytes,
+		omitted_messages: omittedMessages,
+		truncated_messages: truncatedMessages,
+		captured_at: capturedAt,
+	};
+}
+
+function contextTraceFields(meta = {}) {
+	const trace = normalizeContextTrace(meta.context_trace) ?? normalizeContextTrace(meta.contextTrace);
+	return trace ? { context_trace: trace } : {};
+}
+
 function phraseFor(reason) {
 	return REASON_PHRASE[reason] ?? reason ?? "skipped";
 }
@@ -134,6 +222,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		delivery: meta.delivery ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
+		...contextTraceFields(meta),
 		// How long the memory work took. Metadata for the Requests page; null
 		// when the caller did not measure it.
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
@@ -180,6 +269,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		delivery: meta.delivery ?? null,
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
+		...contextTraceFields(meta),
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
 		...splitRescueFields(meta),

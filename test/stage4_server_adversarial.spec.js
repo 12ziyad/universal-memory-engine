@@ -396,14 +396,22 @@ describe("content- and conversation-bound message deduplication", () => {
 			expect(overlap).toMatchObject({ held: 0, skipped: 1, fired: false });
 			expect(otherConversation).toMatchObject({ held: 1, skipped: 0, fired: false });
 			const chunk = await state.storage.get("chunk");
-			expect(chunk).toHaveLength(3);
-			expect(new Set(chunk.map((message) => message._dedupe)).size).toBe(3);
-			expect(chunk.every((message) => String(message._dedupe).startsWith("message:v2:"))).toBe(true);
+			const queued = [...(await state.storage.list({ prefix: "q:" })).values()]
+				.filter((entry) => entry.kind === "extract");
+			expect(queued).toHaveLength(2);
+			expect(queued.flatMap((entry) => entry.messages)).toHaveLength(2);
+			expect(chunk).toHaveLength(1);
+			const identities = [
+				...queued.flatMap((entry) => Object.values(entry.dedupeByMessage ?? {})),
+				...chunk.map((message) => message._dedupe),
+			];
+			expect(new Set(identities).size).toBe(3);
+			expect(identities.every((identity) => String(identity).startsWith("message:v2:"))).toBe(true);
 		});
 		await stub.resetAll();
 	});
 
-	it("honors a legacy raw seen id only when recent evidence binds the same content", async () => {
+	it("fails legacy project-wide seen state open once context isolation is active", async () => {
 		const userId = `dedupe-legacy-${crypto.randomUUID()}`;
 		const stub = stubFor(userId);
 		await runInDurableObject(stub, async (instance, state) => {
@@ -425,18 +433,26 @@ describe("content- and conversation-bound message deduplication", () => {
 				[meaningfulMessage(id, original)],
 				{ overrides: dedupeOverrides("legacy-conversation") },
 			);
+			const contextReplay = await instance.addMessages(
+				userId,
+				[meaningfulMessage(id, original)],
+				{ overrides: dedupeOverrides("legacy-conversation") },
+			);
 			const changedReplay = await instance.addMessages(
 				userId,
 				[meaningfulMessage(id, changed)],
 				{ overrides: dedupeOverrides("legacy-conversation") },
 			);
 
-			expect(exactReplay).toMatchObject({ held: 0, skipped: 1, fired: false });
+			expect(exactReplay).toMatchObject({ held: 1, skipped: 0, fired: false });
+			expect(contextReplay).toMatchObject({ held: 0, skipped: 1, fired: false });
 			expect(changedReplay).toMatchObject({ held: 1, skipped: 0, fired: false });
 			const chunk = await state.storage.get("chunk");
 			expect(chunk).toEqual([
+				expect.objectContaining({ id, content: original, _dedupe: expect.stringMatching(/^message:v2:/) }),
 				expect.objectContaining({ id, content: changed, _dedupe: expect.stringMatching(/^message:v2:/) }),
 			]);
+			expect(await state.storage.get("seen")).toEqual([id]);
 		});
 		await stub.resetAll();
 	});

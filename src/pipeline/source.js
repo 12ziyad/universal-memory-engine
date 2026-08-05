@@ -5,6 +5,7 @@ import { normalizeProjectScope } from "../lib/project_scope.js";
 const PREVIEW_LIMIT = 900;
 const SNIPPET_LIMIT = 900;
 const SCOPED_IDEMPOTENCY_PREFIX = "itsuki-scope:v1:";
+const EXTRACTION_CONTEXT_SCHEMA = "itsuki.extract-context/v1";
 
 function cleanText(value, fallback = "") {
 	const text = String(value ?? fallback).replace(/\s+/g, " ").trim();
@@ -14,6 +15,154 @@ function cleanText(value, fallback = "") {
 function cleanKey(value, fallback = null) {
 	const text = cleanText(value);
 	return text || fallback;
+}
+
+function record(value) {
+	return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function parseRecord(value) {
+	if (typeof value !== "string" || !value.trim()) return {};
+	try {
+		return record(JSON.parse(value));
+	} catch {
+		return {};
+	}
+}
+
+function firstKey(records, keys, fallback = null) {
+	for (const candidate of records) {
+		for (const key of keys) {
+			if (!Object.prototype.hasOwnProperty.call(candidate, key)) continue;
+			const value = cleanKey(candidate[key], null);
+			if (value !== null) return value;
+		}
+	}
+	return fallback;
+}
+
+function firstBoolean(records, keys) {
+	for (const candidate of records) {
+		for (const key of keys) {
+			if (!Object.prototype.hasOwnProperty.call(candidate, key)) continue;
+			const value = candidate[key];
+			if (value === true || value === 1 || value === "true") return true;
+			if (value === false || value === 0 || value === "false") return false;
+		}
+	}
+	return null;
+}
+
+function sourceContextRecords(input = {}) {
+	const direct = record(input);
+	const nestedSourcePacket = record(direct.sourcePacket ?? direct.packet);
+	const directIsSourcePacket = !Object.keys(nestedSourcePacket).length && Boolean(
+		direct.raw_meta_json
+			?? direct.rawMetaJson
+			?? direct.idempotency_key
+			?? direct.idempotencyKey
+			?? direct.source_type
+			?? direct.sourceType,
+	);
+	const sourcePacket = directIsSourcePacket ? direct : nestedSourcePacket;
+	const scope = record(direct.scope);
+	const meta = record(direct.meta);
+	const directScopeJson = parseRecord(direct.scope_json ?? direct.scopeJson);
+	const metaScopeJson = parseRecord(meta.scope_json ?? meta.scopeJson);
+	const packetScopeJson = parseRecord(sourcePacket.scope_json ?? sourcePacket.scopeJson);
+	const rawMeta = parseRecord(sourcePacket.raw_meta_json ?? sourcePacket.rawMetaJson);
+	return {
+		direct,
+		sourcePacket,
+		directIsSourcePacket,
+		// Explicit call-site fields take precedence. Packet fields remain a
+		// canonical fallback for delayed work reconstructed from D1.
+		records: [direct, scope, directScopeJson, meta, metaScopeJson, sourcePacket, packetScopeJson, rawMeta],
+	};
+}
+
+function explicitSessionId(context, memoryUserId) {
+	// A normalized source packet always has session_id, even when the caller did
+	// not supply one. Never infer explicitness from that fallback field alone.
+	const explicitRecords = context.directIsSourcePacket ? [] : context.records.slice(0, 2);
+	const explicitSession = firstKey(explicitRecords, ["session_id", "sessionId", "session"]);
+	const explicitMarker = firstBoolean(explicitRecords, ["session_id_explicit", "sessionIdExplicit"]);
+	if (explicitSession && explicitMarker !== false) return explicitSession;
+
+	const persistedRecords = context.records.slice(2);
+	const persistedSession = firstKey(persistedRecords, ["session_id", "sessionId", "session"]);
+	const persistedMarker = firstBoolean(persistedRecords, ["session_id_explicit", "sessionIdExplicit"]);
+	if (
+		persistedSession
+		&& persistedMarker !== false
+		&& (persistedMarker === true || persistedSession !== memoryUserId)
+	) return persistedSession;
+	return null;
+}
+
+/**
+ * Canonical extraction-context descriptor. Project is attribution, while the
+ * conversation/thread/session source is the actual context boundary. The
+ * caller must provide an acceptance id when no stronger durable identity is
+ * available; silently falling back to the account would mix conversations.
+ */
+export function sourceContextDescriptor(memoryUserId, input = {}) {
+	const context = sourceContextRecords(input);
+	const memoryId = cleanKey(
+		memoryUserId ?? firstKey(context.records, ["memory_user_id", "memoryUserId", "user_id", "userId"]),
+		null,
+	);
+	if (!memoryId) throw new TypeError("memoryUserId is required for extraction context identity");
+
+	const projectId = normalizeProjectScope({
+		projectId: firstKey(context.records, ["project_id", "projectId"]),
+	}).projectId;
+	const workspaceId = firstKey(context.records, ["workspace_id", "workspaceId"], "default");
+	const appId = firstKey(context.records, ["app_id", "appId"], "uml");
+	const agentId = firstKey(context.records, ["agent_id", "agentId"]);
+	const sourceScope = firstKey(context.records, ["source_scope", "sourceScope"]);
+
+	const conversationId = firstKey(context.records, ["conversation_id", "conversationId"]);
+	const threadId = firstKey(context.records, ["thread_id", "threadId"]);
+	const sessionId = explicitSessionId(context, memoryId);
+	const sourcePacketId = firstKey(context.records, ["source_packet_id", "sourcePacketId"])
+		?? cleanKey(context.sourcePacket.id, null);
+	const jobId = firstKey(context.records, ["job_id", "jobId"]);
+	const handoffId = firstKey(context.records, ["handoff_id", "handoffId"]);
+	const acceptanceId = firstKey([context.direct], ["acceptance_id", "acceptanceId"]);
+	const primary = [
+		["conversation", conversationId],
+		["thread", threadId],
+		["session", sessionId],
+		["source_packet", sourcePacketId],
+		["job", jobId],
+		["handoff", handoffId],
+		["acceptance", acceptanceId],
+	].find(([, id]) => id);
+	if (!primary) {
+		throw new TypeError("acceptanceId is required when extraction context has no durable source identity");
+	}
+
+	return [
+		EXTRACTION_CONTEXT_SCHEMA,
+		memoryId,
+		projectId,
+		workspaceId,
+		appId,
+		agentId,
+		sourceScope,
+		primary[0],
+		primary[1],
+	];
+}
+
+export async function sourceContextIdentity(memoryUserId, input = {}) {
+	const descriptor = sourceContextDescriptor(memoryUserId, input);
+	const digest = await hashText(JSON.stringify(descriptor));
+	return {
+		contextKey: `context:v1:${digest}`,
+		descriptor,
+	};
 }
 
 function safeRole(role) {
@@ -93,12 +242,26 @@ export async function normalizeMessages(messages = [], opts = {}) {
 }
 
 export async function normalizeSourcePacket(userId, input = {}) {
-	const scope = resolveScope(userId, input.scope);
+	const rawScope = record(input.scope);
+	const explicitSession = cleanKey(
+		input.sessionId
+			?? input.session_id
+			?? rawScope.session_id
+			?? rawScope.sessionId
+			?? rawScope.session,
+			null,
+	);
+	// Top-level session aliases are accepted by several internal callers. Fold
+	// them into the canonical scope so content hashes and idempotency ownership
+	// cannot collapse otherwise-distinct explicit sessions.
+	const scope = resolveScope(userId, explicitSession
+		? { ...rawScope, session_id: explicitSession }
+		: rawScope);
 	const sourceType = cleanKey(input.sourceType ?? input.type, input.content ? "message" : "message_batch");
 	const sourceMode = cleanKey(input.sourceMode ?? input.mode, "ingest");
 	const conversationId = cleanKey(input.conversationId ?? input.conversation_id, null);
 	const threadId = cleanKey(input.threadId ?? input.thread_id ?? scope.thread_id, null);
-	const sessionId = scope.session_id ?? conversationId ?? threadId ?? userId;
+	const sessionId = explicitSession ?? scope.session_id ?? conversationId ?? threadId ?? userId;
 	const sourceRole = cleanKey(input.sourceRole ?? input.role, null);
 	const topic = cleanKey(input.topic ?? scope.topic, null);
 	const delivery = normalizeDeliveryMetadata(input.delivery);
@@ -146,6 +309,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const preview = clamp(messages.map((m) => m.content).join("\n"));
 	const rawMeta = {
 		delivery,
+		session_id_explicit: Boolean(explicitSession),
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
@@ -165,6 +329,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			owner_user_id: scope.owner_user_id,
 			external_user_id: scope.external_user_id,
 			session_id: sessionId,
+			session_id_explicit: Boolean(explicitSession),
 			source_type: sourceType,
 			source_mode: sourceMode,
 			source_id: explicitSourceId,
@@ -311,6 +476,21 @@ export function sourceDelivery(sourcePacket) {
 export function sourceMeta(sourcePacket) {
 	if (!sourcePacket) return {};
 	const delivery = sourceDelivery(sourcePacket);
+	const rawMeta = parseRecord(sourcePacket.raw_meta_json ?? sourcePacket.rawMetaJson);
+	const storedSessionMarker = firstBoolean(
+		[sourcePacket, rawMeta],
+		["session_id_explicit", "sessionIdExplicit"],
+	);
+	const storedMemoryUserId = cleanKey(
+		sourcePacket.memory_user_id ?? sourcePacket.memoryUserId ?? sourcePacket.user_id ?? sourcePacket.userId,
+		null,
+	);
+	const storedSessionId = cleanKey(sourcePacket.session_id ?? sourcePacket.sessionId, null);
+	const sessionIdExplicit = storedSessionMarker === true || (
+		storedSessionMarker === null
+		&& storedSessionId !== null
+		&& storedSessionId !== storedMemoryUserId
+	);
 	return {
 		source_packet_id: sourcePacket.id ?? null,
 		source_content_hash: sourcePacket.content_hash ?? null,
@@ -324,6 +504,7 @@ export function sourceMeta(sourcePacket) {
 			app_id: sourcePacket.app_id,
 			agent_id: sourcePacket.agent_id,
 			session_id: sourcePacket.session_id,
+			session_id_explicit: sessionIdExplicit,
 			conversation_id: sourcePacket.conversation_id,
 			thread_id: sourcePacket.thread_id,
 			topic: sourcePacket.topic,

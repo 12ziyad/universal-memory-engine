@@ -24,16 +24,24 @@ import { DurableObject } from "cloudflare:workers";
 import { classifyMessage, shouldFire, meaningfulCount } from "../pipeline/trigger.js";
 import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
 import { announceMcpTerminal, enrichMcpConversation, markMcpEnrichmentFailed } from "../pipeline/mcp_engine.js";
-import { formatReceipt } from "../pipeline/receipt.js";
+import { formatReceipt, normalizeContextTrace } from "../pipeline/receipt.js";
 import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt, settleMemoryJobs } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
 import { settleStagedText } from "../pipeline/staged_text.js";
-import { sourceMeta } from "../pipeline/source.js";
+import { sourceContextIdentity, sourceMeta } from "../pipeline/source.js";
 import { DIALS } from "../config.js";
 
 const RECENT_LIMIT = 20;
+const RECENT_BYTES_LIMIT = 32 * 1024;
+const CONTEXT_SNAPSHOT_BYTES_LIMIT = 16 * 1024;
+const CONTEXT_ROLE_LIMIT = 5;
+const CONTEXT_INDEX_KEY = "contextIndex:v1";
+const CONTEXT_INDEX_LIMIT = 32;
+const CONTEXT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CONTEXT_KEY_RE = /^context:v1:([a-f0-9]{64})$/;
+const CONTEXT_TRACE_SCHEMA = "itsuki.extract-context-trace/v1";
 
 // 1.6 chunk caps: a queue entry never exceeds either bound, whichever first.
 // ~4 chars/token puts 12k chars near the 3k-token input budget that keeps one
@@ -104,6 +112,133 @@ function scopedStorageKey(base, scopeKey) {
 	return key === GLOBAL_SCOPE_KEY ? base : `${base}:${key}`;
 }
 
+function contextStorageKey(base, contextKey) {
+	return `${base}:${contextKey}`;
+}
+
+function utf8Bytes(value) {
+	return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function publicContextMessage(message) {
+	if (message?.role !== "user" && message?.role !== "assistant") return null;
+	return {
+		id: String(message?.id ?? ""),
+		role: message.role,
+		content: String(message?.content ?? ""),
+		ts: Number.isFinite(message?.ts) ? message.ts : Date.now(),
+	};
+}
+
+function modelContextFromSnapshot(snapshot) {
+	return {
+		bridge_context: snapshot
+			.filter((message) => message.role === "user")
+			.map(({ id, content, ts }) => ({ id, content, ts })),
+		assistant_context: snapshot
+			.filter((message) => message.role === "assistant")
+			.map(({ id, content, ts }) => ({ id, content, ts })),
+	};
+}
+
+function truncateMessageToBudget(message, budget, wrapper) {
+	const points = [...String(message.content ?? "")];
+	if (points.length === 0) return null;
+	let low = 0;
+	let high = points.length;
+	let best = null;
+	while (low <= high) {
+		const keep = Math.floor((low + high) / 2);
+		const head = Math.ceil(keep / 3);
+		const tail = keep - head;
+		const omitted = Math.max(0, points.length - keep);
+		const marker = omitted > 0 ? `\u2026[${omitted} chars omitted]\u2026` : "";
+		const candidate = {
+			...message,
+			content: omitted > 0
+				? `${points.slice(0, head).join("")}${marker}${tail > 0 ? points.slice(-tail).join("") : ""}`
+				: points.join(""),
+		};
+		if (utf8Bytes(wrapper(candidate)) <= budget) {
+			best = candidate;
+			low = keep + 1;
+		} else {
+			high = keep - 1;
+		}
+	}
+	return best;
+}
+
+function boundRecentMessages(messages) {
+	let bounded = (messages ?? []).map(publicContextMessage).filter(Boolean).slice(-RECENT_LIMIT);
+	while (bounded.length > 1 && utf8Bytes(bounded) > RECENT_BYTES_LIMIT) bounded.shift();
+	if (bounded.length === 1 && utf8Bytes(bounded) > RECENT_BYTES_LIMIT) {
+		const truncated = truncateMessageToBudget(
+			bounded[0],
+			RECENT_BYTES_LIMIT,
+			(message) => [message],
+		);
+		bounded = truncated ? [truncated] : [];
+	}
+	return bounded;
+}
+
+async function captureContextSnapshot(recent, contextKey, excludedUserIds = new Set(), capturedAt = Date.now()) {
+	const eligible = (recent ?? [])
+		.map((message, index) => {
+			const normalized = publicContextMessage(message);
+			if (normalized?.role === "user" && excludedUserIds.has(normalized.id)) return null;
+			return normalized ? { ...normalized, _index: index } : null;
+		})
+		.filter(Boolean);
+	const selected = [
+		...eligible.filter((message) => message.role === "user").slice(-CONTEXT_ROLE_LIMIT),
+		...eligible.filter((message) => message.role === "assistant").slice(-CONTEXT_ROLE_LIMIT),
+	].sort((a, b) => a._index - b._index)
+		.map(({ _index, ...message }) => message);
+	let snapshot = selected;
+	let omittedMessages = Math.max(0, eligible.length - selected.length);
+	let truncatedMessages = 0;
+	while (snapshot.length > 1 && utf8Bytes(modelContextFromSnapshot(snapshot)) > CONTEXT_SNAPSHOT_BYTES_LIMIT) {
+		snapshot.shift();
+		omittedMessages++;
+	}
+	if (snapshot.length === 1 && utf8Bytes(modelContextFromSnapshot(snapshot)) > CONTEXT_SNAPSHOT_BYTES_LIMIT) {
+		const original = snapshot[0];
+		const truncated = truncateMessageToBudget(
+			original,
+			CONTEXT_SNAPSHOT_BYTES_LIMIT,
+			(message) => modelContextFromSnapshot([message]),
+		);
+		if (truncated) {
+			snapshot = [truncated];
+			truncatedMessages = truncated.content === original.content ? 0 : 1;
+		} else {
+			snapshot = [];
+			omittedMessages++;
+		}
+	}
+	const serializedBytes = utf8Bytes(modelContextFromSnapshot(snapshot));
+	const contextMatch = CONTEXT_KEY_RE.exec(String(contextKey ?? ""));
+	const snapshotHash = await sha256Hex(JSON.stringify(snapshot));
+	return {
+		snapshot,
+		trace: normalizeContextTrace({
+			schema: CONTEXT_TRACE_SCHEMA,
+			mode: "accepted_snapshot",
+			context_hash: contextMatch?.[1] ?? null,
+			snapshot_hash: snapshotHash,
+			messages: snapshot.length,
+			user_messages: snapshot.filter((message) => message.role === "user").length,
+			assistant_messages: snapshot.filter((message) => message.role === "assistant").length,
+			serialized_bytes: serializedBytes,
+			omitted_messages: omittedMessages,
+			truncated_messages: truncatedMessages,
+			captured_at: capturedAt,
+		}),
+	};
+}
+
 function messageDedupeNamespace(scopeKey, overrides = {}) {
 	let scope = {};
 	try { scope = JSON.parse(overrides?.meta?.scope_json ?? "{}") ?? {}; } catch {}
@@ -125,6 +260,90 @@ async function messageDedupeIdentity(scopeKey, overrides, message) {
 	return {
 		contentHash,
 		identity: `message:v2:${await sha256Hex(`${namespace}\u0000${message?.id ?? ""}\u0000${contentHash}`)}`,
+	};
+}
+
+async function requestedContextIdentity(userId, opts = {}, acceptanceId = null) {
+	const supplied = String(opts.contextKey ?? "");
+	if (supplied) {
+		if (!CONTEXT_KEY_RE.test(supplied)) {
+			throw codedError("CONTEXT_KEY_INVALID", "extraction context identity is invalid");
+		}
+		return supplied;
+	}
+	const meta = opts.overrides?.meta ?? {};
+	const { contextKey } = await sourceContextIdentity(userId, {
+		meta,
+		sourcePacketId: meta.source_packet_id ?? null,
+		jobId: opts.jobId ?? null,
+		handoffId: opts.handoffId ?? opts._handoffMarker?.handoffId ?? null,
+		acceptanceId,
+	});
+	return contextKey;
+}
+
+function contextTraceHash(contextKey) {
+	return CONTEXT_KEY_RE.exec(String(contextKey ?? ""))?.[1] ?? null;
+}
+
+async function emptyContextTrace(mode, contextKey = null, capturedAt = Date.now()) {
+	return normalizeContextTrace({
+		schema: CONTEXT_TRACE_SCHEMA,
+		mode,
+		...(contextTraceHash(contextKey) ? { context_hash: contextTraceHash(contextKey) } : {}),
+		snapshot_hash: await sha256Hex("[]"),
+		messages: 0,
+		user_messages: 0,
+		assistant_messages: 0,
+		serialized_bytes: 0,
+		omitted_messages: 0,
+		truncated_messages: 0,
+		captured_at: capturedAt,
+	});
+}
+
+async function validatedEntryContext(entry) {
+	if (!Object.prototype.hasOwnProperty.call(entry ?? {}, "contextSnapshot")) {
+		return {
+			snapshot: [],
+			trace: await emptyContextTrace("legacy_empty", entry?.contextKey),
+		};
+	}
+	const snapshot = entry.contextSnapshot;
+	const trace = normalizeContextTrace(entry.contextTrace ?? entry.context_trace);
+	const validMessages = Array.isArray(snapshot)
+		&& snapshot.length <= CONTEXT_ROLE_LIMIT * 2
+		&& snapshot.every((message) => (
+			message
+			&& typeof message === "object"
+			&& !Array.isArray(message)
+			&& typeof message.id === "string"
+			&& (message.role === "user" || message.role === "assistant")
+			&& typeof message.content === "string"
+			&& Number.isFinite(message.ts)
+		));
+	if (validMessages && trace?.mode === "accepted_snapshot" && CONTEXT_KEY_RE.test(String(entry.contextKey ?? ""))) {
+		const userMessages = snapshot.filter((message) => message.role === "user").length;
+		const assistantMessages = snapshot.filter((message) => message.role === "assistant").length;
+		const serializedBytes = utf8Bytes(modelContextFromSnapshot(snapshot));
+		const snapshotHash = await sha256Hex(JSON.stringify(snapshot));
+		if (
+			userMessages <= CONTEXT_ROLE_LIMIT
+			&& assistantMessages <= CONTEXT_ROLE_LIMIT
+			&& serializedBytes <= CONTEXT_SNAPSHOT_BYTES_LIMIT
+			&& trace.context_hash === contextTraceHash(entry.contextKey)
+			&& trace.snapshot_hash === snapshotHash
+			&& trace.messages === snapshot.length
+			&& trace.user_messages === userMessages
+			&& trace.assistant_messages === assistantMessages
+			&& trace.serialized_bytes === serializedBytes
+		) {
+			return { snapshot, trace };
+		}
+	}
+	return {
+		snapshot: [],
+		trace: await emptyContextTrace("invalid_empty", entry?.contextKey),
 	};
 }
 
@@ -154,6 +373,7 @@ function persistableOverrides(value) {
 /** Content-free, bounded receipt fields safe to retain in a retry record. */
 function compactTerminalReceipt(receipt, id) {
 	if (!receipt || typeof receipt !== "object") return null;
+	const contextTrace = normalizeContextTrace(receipt.context_trace ?? receipt.contextTrace);
 	const saved = receipt.saved && typeof receipt.saved === "object"
 		? Object.fromEntries(
 			["pages", "nodes", "slices", "events", "edges", "candidates", "updatedNodes", "supersededSlices"]
@@ -184,6 +404,7 @@ function compactTerminalReceipt(receipt, id) {
 		ai_input_tokens: Number.isFinite(receipt.ai_input_tokens) ? receipt.ai_input_tokens : null,
 		ai_output_tokens: Number.isFinite(receipt.ai_output_tokens) ? receipt.ai_output_tokens : null,
 		ai_neurons: Number.isFinite(receipt.ai_neurons) ? receipt.ai_neurons : null,
+		...(contextTrace ? { context_trace: contextTrace } : {}),
 	};
 	return compact;
 }
@@ -235,11 +456,16 @@ export class UserMemory extends DurableObject {
 	 * alone because an overlapping packet may legitimately reuse them.
 	 */
 	async #handoffOwnership(jobId) {
-		if (!jobId) return { owned: false, held: 0, queued: 0, heldIds: [], queuedIds: [] };
+		if (!jobId) return { owned: false, held: 0, queued: 0, heldIds: [], queuedIds: [], contextKeys: [] };
 		const chunk = await this.ctx.storage.get("chunk");
+		const acceptStates = (await this.ctx.storage.get("chunkAcceptState")) ?? {};
 		const heldIds = new Set();
+		const contextKeys = new Set();
 		for (const message of chunk ?? []) {
-			if (message?._job === jobId && message.id) heldIds.add(message.id);
+			if (message?._job !== jobId) continue;
+			if (message.id) heldIds.add(message.id);
+			const contextKey = message._accept ? acceptStates[message._accept]?.contextKey : null;
+			if (contextKey) contextKeys.add(contextKey);
 		}
 		let queued = 0;
 		const queuedIds = new Set();
@@ -254,6 +480,7 @@ export class UserMemory extends DurableObject {
 			const mapped = mappedIds.length > 0;
 			const tagged = taggedIds.length > 0;
 			if (mapped || tagged) queued++;
+			if ((mapped || tagged) && entry.contextKey) contextKeys.add(entry.contextKey);
 			for (const messageId of [...mappedIds, ...taggedIds]) queuedIds.add(messageId);
 			return true;
 		});
@@ -263,6 +490,7 @@ export class UserMemory extends DurableObject {
 			queued,
 			heldIds: [...heldIds],
 			queuedIds: [...queuedIds],
+			contextKeys: [...contextKeys],
 		};
 	}
 
@@ -288,6 +516,12 @@ export class UserMemory extends DurableObject {
 	async #recoverOwnedHandoff(userId, marker) {
 		return this.ctx.blockConcurrencyWhile(async () => {
 			let ownership = await this.#handoffOwnership(marker.jobId);
+			if (
+				marker.contextKey
+				&& ownership.contextKeys.some((contextKey) => contextKey !== marker.contextKey)
+			) {
+				throw codedError("HANDOFF_CONTEXT_INVALID", "handoff owns work under another extraction context");
+			}
 			if (ownership.held > 0 && ownership.queued > 0) {
 				// Legacy enqueue wrote queue entries one by one, then cleared the
 				// chunk. A crash between those steps can leave both copies. Remove
@@ -313,6 +547,7 @@ export class UserMemory extends DurableObject {
 				if (fire) {
 					await this.#enqueueFired(userId, {
 						scopeKey: marker.scopeKey,
+						contextKey: marker.contextKey,
 					});
 				}
 				ownership = await this.#handoffOwnership(marker.jobId);
@@ -386,6 +621,7 @@ export class UserMemory extends DurableObject {
 		const {
 			settledMessageIds: _settledMessageIds,
 			checkpointToMirror: _checkpointToMirror,
+			behavior: _behavior,
 			...stableMarker
 		} = marker;
 		const accepted = {
@@ -404,6 +640,14 @@ export class UserMemory extends DurableObject {
 			? String(opts.jobId)
 			: handoffId.startsWith("job_") ? handoffId : null;
 		const requestedScopeKey = cleanScopeKey(opts.scopeKey);
+		const requestedContextKey = String(opts.contextKey);
+		const behavior = {
+			flush: Boolean(opts.flush),
+			scopeKey: requestedScopeKey,
+			contextKey: requestedContextKey,
+			overrides: persistableOverrides(opts.overrides ?? {}),
+		};
+		const behaviorHash = await sha256Hex(JSON.stringify(behavior));
 		const userMessages = (messages ?? []).filter((message) => message && (message.role ?? "user") === "user");
 		const meaningful = userMessages.filter((message) => {
 			const cls = classifyMessage(message.content);
@@ -418,16 +662,40 @@ export class UserMemory extends DurableObject {
 		let created = false;
 		let marker = await this.ctx.storage.transaction(async (txn) => {
 			const existing = await txn.get(markerKey);
-			if (existing) return existing;
+			if (existing) {
+				if (
+					existing.version === 1
+					&& existing.state === "pending"
+					&& !existing.behavior
+					&& existing.handoffId === handoffId
+					&& existing.requestHash === requestHash
+					&& existing.userId === userId
+				) {
+					const upgraded = {
+						...existing,
+						context_schema: 1,
+						contextKey: requestedContextKey,
+						behaviorHash,
+						behavior,
+					};
+					await txn.put(markerKey, upgraded);
+					return upgraded;
+				}
+				return existing;
+			}
 			const pending = {
 				version: 1,
+				context_schema: 1,
 				state: "pending",
 				handoffId,
 				requestHash,
 				userId,
 				jobId,
 				scopeKey: requestedScopeKey,
+				contextKey: requestedContextKey,
 				flush: Boolean(opts.flush),
+				behaviorHash,
+				behavior,
 				fallback,
 				createdAt: Date.now(),
 			};
@@ -461,7 +729,8 @@ export class UserMemory extends DurableObject {
 		const ownership = await this.#handoffOwnership(jobId);
 		if (ownership.owned) {
 			const result = await this.#recoverOwnedHandoff(userId, marker);
-			marker = { ...marker, state: "applied", result, appliedAt: Date.now() };
+			const { behavior: _behavior, ...stableMarker } = marker;
+			marker = { ...stableMarker, state: "applied", result, appliedAt: Date.now() };
 			await this.ctx.storage.put(markerKey, marker);
 			this.#maybeInjectHandoffFault(opts, "after_applied");
 			return this.#finishAppliedHandoff(markerKey, marker, true, opts);
@@ -472,7 +741,8 @@ export class UserMemory extends DurableObject {
 		const priorJob = await this.#memoryJobState(userId, jobId);
 		if (priorJob && TERMINAL_JOB_STATES.has(priorJob.status)) {
 			const result = this.#recoveredHandoffResult(marker);
-			marker = { ...marker, state: "applied", result, appliedAt: Date.now() };
+			const { behavior: _behavior, ...stableMarker } = marker;
+			marker = { ...stableMarker, state: "applied", result, appliedAt: Date.now() };
 			await this.ctx.storage.put(markerKey, marker);
 			this.#maybeInjectHandoffFault(opts, "after_applied");
 			return this.#finishAppliedHandoff(markerKey, marker, true, opts);
@@ -481,10 +751,13 @@ export class UserMemory extends DurableObject {
 		// A pending marker binds the behavior as well as the content. A retry may
 		// carry different transport options, but it must complete the original
 		// scope/flush decision rather than silently changing durable behavior.
+		const boundBehavior = marker.behavior ?? behavior;
 		const effectiveOpts = {
 			...opts,
-			flush: Boolean(marker.flush),
-			scopeKey: cleanScopeKey(marker.scopeKey),
+			flush: Boolean(boundBehavior.flush ?? marker.flush),
+			scopeKey: cleanScopeKey(boundBehavior.scopeKey ?? marker.scopeKey),
+			contextKey: String(boundBehavior.contextKey ?? marker.contextKey ?? requestedContextKey),
+			overrides: boundBehavior.overrides ?? opts.overrides ?? {},
 		};
 		const {
 			handoffId: _handoffId,
@@ -506,9 +779,12 @@ export class UserMemory extends DurableObject {
 		this.#maybeInjectHandoffFault(opts, "after_add");
 
 		const applied = await this.ctx.storage.get(markerKey);
-		marker = applied?.state === "applied"
-			? applied
-			: { ...marker, state: "applied", result, appliedAt: Date.now() };
+		if (applied?.state === "applied") {
+			marker = applied;
+		} else {
+			const { behavior: _behavior, ...stableMarker } = marker;
+			marker = { ...stableMarker, state: "applied", result, appliedAt: Date.now() };
+		}
 		if (applied?.state !== "applied") await this.ctx.storage.put(markerKey, marker);
 		this.#maybeInjectHandoffFault(opts, "after_applied");
 		// A marker-only retry performed the first real local application in this
@@ -532,6 +808,8 @@ export class UserMemory extends DurableObject {
 			throw codedError("HANDOFF_HASH_INVALID", "handoff request hash is invalid");
 		}
 		validateQueueableMessages(messages);
+		const acceptanceId = String(opts.jobId ?? handoffId);
+		const contextKey = await requestedContextIdentity(userId, opts, acceptanceId);
 
 		const markerKey = await this.#handoffMarkerKey(handoffId);
 		const running = this.#handoffsInFlight.get(markerKey);
@@ -543,7 +821,7 @@ export class UserMemory extends DurableObject {
 			return { ...result, handoffDuplicate: true };
 		}
 
-		const normalizedOpts = { ...opts, handoffId, requestHash };
+		const normalizedOpts = { ...opts, handoffId, requestHash, contextKey, acceptanceId };
 		const promise = this.#acceptMessagesOnce(userId, messages, normalizedOpts, markerKey);
 		this.#handoffsInFlight.set(markerKey, { requestHash, promise });
 		try {
@@ -554,16 +832,27 @@ export class UserMemory extends DurableObject {
 		}
 	}
 
-	async #load(scopeKey = GLOBAL_SCOPE_KEY) {
+	async #load(scopeKey = GLOBAL_SCOPE_KEY, contextKey = null) {
 		const key = cleanScopeKey(scopeKey);
-		const [chunk, recent, checkpoint, checkpointIdentity, userId, seen, chunkScopeKey] = await Promise.all([
+		const activeContextKey = CONTEXT_KEY_RE.test(String(contextKey ?? "")) ? String(contextKey) : null;
+		const [
+			chunk,
+			recent,
+			checkpoint,
+			checkpointIdentity,
+			userId,
+			seen,
+			chunkScopeKey,
+			chunkContextKey,
+		] = await Promise.all([
 			this.ctx.storage.get("chunk"),
-			this.ctx.storage.get(scopedStorageKey("recent", key)),
-			this.ctx.storage.get(scopedStorageKey("checkpoint", key)),
-			this.ctx.storage.get(scopedStorageKey("checkpointIdentity", key)),
+			activeContextKey ? this.ctx.storage.get(contextStorageKey("recent", activeContextKey)) : null,
+			activeContextKey ? this.ctx.storage.get(contextStorageKey("checkpoint", activeContextKey)) : null,
+			activeContextKey ? this.ctx.storage.get(contextStorageKey("checkpointIdentity", activeContextKey)) : null,
 			this.ctx.storage.get("userId"),
-			this.ctx.storage.get(scopedStorageKey("seen", key)),
+			activeContextKey ? this.ctx.storage.get(contextStorageKey("seen", activeContextKey)) : null,
 			this.ctx.storage.get("chunkScopeKey"),
+			this.ctx.storage.get("chunkContextKey"),
 		]);
 		return {
 			chunk: chunk ?? [],
@@ -574,7 +863,60 @@ export class UserMemory extends DurableObject {
 			seen: seen ?? [],
 			scopeKey: key,
 			chunkScopeKey: cleanScopeKey(chunkScopeKey),
+			contextKey: activeContextKey,
+			chunkContextKey: CONTEXT_KEY_RE.test(String(chunkContextKey ?? "")) ? String(chunkContextKey) : null,
 		};
+	}
+
+	async #touchContextIndex(txn, contextKey, now = Date.now()) {
+		const stored = await txn.get(CONTEXT_INDEX_KEY);
+		const existing = Array.isArray(stored) ? stored : [];
+		const byKey = new Map();
+		for (const item of existing) {
+			if (!CONTEXT_KEY_RE.test(String(item?.contextKey ?? ""))) continue;
+			const lastTouchedAt = Number(item.lastTouchedAt ?? 0);
+			if (!Number.isFinite(lastTouchedAt)) continue;
+			byKey.set(item.contextKey, Math.max(lastTouchedAt, byKey.get(item.contextKey) ?? 0));
+		}
+		byKey.set(contextKey, now);
+		const ordered = [...byKey.entries()]
+			.map(([key, lastTouchedAt]) => ({ contextKey: key, lastTouchedAt }))
+			.sort((a, b) => a.lastTouchedAt - b.lastTouchedAt);
+		const retained = ordered
+			.filter((item) => item.contextKey === contextKey || now - item.lastTouchedAt <= CONTEXT_TTL_MS)
+			.slice(-CONTEXT_INDEX_LIMIT);
+		if (!retained.some((item) => item.contextKey === contextKey)) {
+			retained.shift();
+			retained.push({ contextKey, lastTouchedAt: now });
+		}
+		const kept = new Set(retained.map((item) => item.contextKey));
+		for (const item of ordered) {
+			if (kept.has(item.contextKey)) continue;
+			for (const base of ["recent", "seen", "checkpoint", "checkpointIdentity"]) {
+				await txn.delete(contextStorageKey(base, item.contextKey));
+			}
+		}
+		await txn.put(CONTEXT_INDEX_KEY, retained);
+	}
+
+	async #pruneContextIndex(now = Date.now()) {
+		await this.ctx.storage.transaction(async (txn) => {
+			const stored = await txn.get(CONTEXT_INDEX_KEY);
+			const existing = Array.isArray(stored) ? stored : [];
+			const retained = existing
+				.filter((item) => CONTEXT_KEY_RE.test(String(item?.contextKey ?? "")))
+				.filter((item) => now - Number(item.lastTouchedAt ?? 0) <= CONTEXT_TTL_MS)
+				.sort((a, b) => Number(a.lastTouchedAt ?? 0) - Number(b.lastTouchedAt ?? 0))
+				.slice(-CONTEXT_INDEX_LIMIT);
+			const kept = new Set(retained.map((item) => item.contextKey));
+			for (const item of existing) {
+				if (!CONTEXT_KEY_RE.test(String(item?.contextKey ?? "")) || kept.has(item.contextKey)) continue;
+				for (const base of ["recent", "seen", "checkpoint", "checkpointIdentity"]) {
+					await txn.delete(contextStorageKey(base, item.contextKey));
+				}
+			}
+			await txn.put(CONTEXT_INDEX_KEY, retained);
+		});
 	}
 
 	/**
@@ -723,15 +1065,21 @@ export class UserMemory extends DurableObject {
 	 * each entry is one small, retryable extraction. Splitting happens HERE, at
 	 * enqueue time — never inside a model call.
 	 */
-	async #enqueueChunkInTransaction(txn, userId, chunk, { overrides = {}, scopeKey = null } = {}) {
+	async #enqueueChunkInTransaction(txn, userId, chunk, { overrides = {}, scopeKey = null, contextKey = null } = {}) {
 		if (chunk.length === 0) return 0;
 		const activeScopeKey = cleanScopeKey(scopeKey ?? (await txn.get("chunkScopeKey")));
+		const storedContextKey = contextKey ?? (await txn.get("chunkContextKey"));
+		const activeContextKey = CONTEXT_KEY_RE.test(String(storedContextKey ?? ""))
+			? String(storedContextKey)
+			: null;
 		const pendingOverrides = persistableOverrides(overrides ?? {});
 		const overridesByJob = (await txn.get("chunkOverridesByJob")) ?? {};
+		const acceptStates = (await txn.get("chunkAcceptState")) ?? {};
 
 		let batch = [];
 		let chars = 0;
 		let batchJobId = null;
+		let batchAcceptRef = null;
 		const batches = [];
 		for (const msg of chunk) {
 			const len = unicodeLength(msg.content);
@@ -742,10 +1090,12 @@ export class UserMemory extends DurableObject {
 				throw codedError("MESSAGE_TOO_LARGE", "held message exceeds the Durable Object queue-entry limit");
 			}
 			const messageJobId = msg?._job ?? null;
+			const messageAcceptRef = msg?._accept ?? null;
 			if (
 				batch.length > 0
 				&& (
 					messageJobId !== batchJobId
+					|| messageAcceptRef !== batchAcceptRef
 					|| batch.length >= MAX_ENTRY_MSGS
 					|| chars + len > MAX_ENTRY_CHARS
 				)
@@ -754,8 +1104,12 @@ export class UserMemory extends DurableObject {
 				batch = [];
 				chars = 0;
 				batchJobId = null;
+				batchAcceptRef = null;
 			}
-			if (batch.length === 0) batchJobId = messageJobId;
+			if (batch.length === 0) {
+				batchJobId = messageJobId;
+				batchAcceptRef = messageAcceptRef;
+			}
 			batch.push(msg);
 			chars += len;
 		}
@@ -767,16 +1121,29 @@ export class UserMemory extends DurableObject {
 			seq++;
 			const suffix = crypto.randomUUID().slice(0, 8);
 			const jobId = msgs[0]?._job ?? null;
+			const acceptRef = msgs[0]?._accept ?? null;
+			const acceptState = acceptRef ? acceptStates[acceptRef] : null;
 			const batchOverrides = persistableOverrides(
-				(jobId && overridesByJob[jobId]) ?? pendingOverrides,
+				acceptState?.overrides ?? (jobId && overridesByJob[jobId]) ?? pendingOverrides,
 			);
+			const batchContextKey = CONTEXT_KEY_RE.test(String(acceptState?.contextKey ?? activeContextKey ?? ""))
+				? String(acceptState?.contextKey ?? activeContextKey)
+				: null;
+			const contextSnapshot = Array.isArray(acceptState?.contextSnapshot)
+				? acceptState.contextSnapshot
+				: undefined;
+			const contextTrace = normalizeContextTrace(acceptState?.contextTrace);
 			await txn.put(`q:${String(seq).padStart(10, "0")}-${suffix}`, {
 				kind: "extract",
-				messages: msgs.map(({ _settled, _job, _cls, _dedupe, ...message }) => message),
+				messages: msgs.map(({ _settled, _job, _cls, _dedupe, _accept, ...message }) => message),
 				jobByMessage: Object.fromEntries(msgs.filter((m) => m._job).map((m) => [m.id, m._job])),
 				dedupeByMessage: Object.fromEntries(msgs.filter((m) => m._dedupe).map((m) => [m.id, m._dedupe])),
 				overrides: batchOverrides,
-				scopeKey: activeScopeKey,
+				scopeKey: cleanScopeKey(acceptState?.scopeKey ?? activeScopeKey),
+				...(batchContextKey ? { contextKey: batchContextKey } : {}),
+				...(contextSnapshot ? { contextSnapshot } : {}),
+				...(contextTrace ? { contextTrace } : {}),
+				...(acceptState?.rescuedFromNoWrite ? { rescuedFromNoWrite: true } : {}),
 				attempts: 0,
 				runAfter: 0,
 				enqueuedAt,
@@ -785,17 +1152,20 @@ export class UserMemory extends DurableObject {
 		await txn.put("qseq", seq);
 		await txn.put("chunk", []);
 		await txn.delete("chunkOverridesByJob");
+		await txn.delete("chunkAcceptState");
+		await txn.delete("chunkContextKey");
 		await txn.put("userId", userId);
 		return batches.length;
 	}
 
-	async #enqueueFired(userId, { overrides = null, scopeKey = null } = {}) {
+	async #enqueueFired(userId, { overrides = null, scopeKey = null, contextKey = null } = {}) {
 		return this.ctx.storage.transaction(async (txn) => {
 			const chunk = (await txn.get("chunk")) ?? [];
 			const pendingOverrides = overrides ?? (await txn.get("pendingOverrides")) ?? {};
 			return this.#enqueueChunkInTransaction(txn, userId, chunk, {
 				overrides: pendingOverrides,
 				scopeKey,
+				contextKey,
 			});
 		});
 	}
@@ -813,23 +1183,40 @@ export class UserMemory extends DurableObject {
 	 */
 	async addMessages(userId, messages, opts = {}) {
 		validateQueueableMessages(messages);
+		const rawAcceptanceRef = String(
+			opts.acceptanceId
+			?? opts.jobId
+			?? opts._handoffMarker?.handoffId
+			?? crypto.randomUUID(),
+		);
+		const acceptanceRef = `accept:v1:${await sha256Hex(rawAcceptanceRef)}`;
+		const requestedContextKey = await requestedContextIdentity(userId, opts, rawAcceptanceRef);
 		return this.ctx.blockConcurrencyWhile(async () => {
 			const requestedScopeKey = cleanScopeKey(opts.scopeKey);
 			const persistedOverrides = opts.overrides !== undefined
 				? persistableOverrides(opts.overrides ?? {})
 				: undefined;
-			let state = await this.#load(requestedScopeKey);
-			// A project switch is a hard batching boundary. Finish the prior held
-			// chunk under its own persisted metadata before any new-scope message
-			// can enter it. One account DO remains the coordinator; projects do not
-			// become unrelated Durable Object tenants.
-			if (state.chunk.length > 0 && state.chunkScopeKey !== requestedScopeKey) {
-				await this.#enqueueFired(userId, { scopeKey: state.chunkScopeKey });
-				state = await this.#load(requestedScopeKey);
+			let state = await this.#load(requestedScopeKey, requestedContextKey);
+			// Project attribution and model context are separate boundaries. Finish
+			// any prior held chunk before a different conversation/agent can enter,
+			// even when both belong to the same project and account coordinator.
+			if (
+				state.chunk.length > 0
+				&& (
+					state.chunkScopeKey !== requestedScopeKey
+					|| state.chunkContextKey !== requestedContextKey
+				)
+			) {
+				await this.#enqueueFired(userId, {
+					scopeKey: state.chunkScopeKey,
+					contextKey: state.chunkContextKey,
+				});
+				state = await this.#load(requestedScopeKey, requestedContextKey);
 			}
 			if (state.chunkScopeKey !== requestedScopeKey) {
 				state.chunkScopeKey = requestedScopeKey;
 			}
+			state.chunkContextKey = requestedContextKey;
 			const chunk = state.chunk;
 			let recent = state.recent;
 			let checkpoint = state.checkpoint;
@@ -839,20 +1226,9 @@ export class UserMemory extends DurableObject {
 				chunk.filter((message) => message?._dedupe).map((message) => [message._dedupe, message._job ?? null]),
 			);
 			const seen = new Set(state.seen);
-			// Lazy v1 -> v2 compatibility. Old state used raw ids; trust one only
-			// when old recent/chunk evidence binds it to the same content hash.
-			const legacySeenIds = new Set(
-				state.seen.filter((value) => !String(value).startsWith("message:v2:")),
-			);
-			const legacyContentById = new Map();
-			for (const previous of recent) {
-				if (!previous?.id) continue;
-				const hash = CONTENT_HASH_RE.test(String(previous.content_hash ?? "").toLowerCase())
-					? String(previous.content_hash).toLowerCase()
-					: await sha256Hex(previous.content ?? "");
-				if (!legacyContentById.has(previous.id)) legacyContentById.set(previous.id, new Set());
-				legacyContentById.get(previous.id).add(hash);
-			}
+			// Legacy project/global raw seen state has no conversation provenance.
+			// Leave it untouched for rollback, but fail open once context:v1 is
+			// active: one safe re-extraction is preferable to cross-session loss.
 			const legacyHeld = new Set();
 			for (const previous of chunk) {
 				if (!previous?.id || previous._dedupe) continue;
@@ -870,7 +1246,7 @@ export class UserMemory extends DurableObject {
 			for (const msg of messages ?? []) {
 				if (!msg || !msg.id) continue;
 				const { contentHash, identity: dedupeIdentity } = await messageDedupeIdentity(
-					requestedScopeKey,
+					requestedContextKey,
 					persistedOverrides ?? {},
 					msg,
 				);
@@ -888,14 +1264,9 @@ export class UserMemory extends DurableObject {
 				// De-dup re-sends: already held, the current checkpoint, or already
 				// processed in a prior fire. Lets save_conversation safely re-send
 				// overlapping batches — only genuinely new messages get processed.
-				const legacySeenMatch = (
-					(legacySeenIds.has(norm.id) || (!checkpointIdentity && checkpoint === norm.id))
-					&& legacyContentById.get(norm.id)?.has(contentHash)
-				);
 				if (
 					chunkIdentities.has(dedupeIdentity)
 					|| legacyHeld.has(`${norm.id}\u0000${contentHash}`)
-					|| legacySeenMatch
 					|| dedupeIdentity === checkpointIdentity
 					|| seen.has(dedupeIdentity)
 				) {
@@ -929,14 +1300,25 @@ export class UserMemory extends DurableObject {
 					continue;
 				}
 
-				chunk.push({ ...norm, _cls: cls, ...(opts.jobId ? { _job: opts.jobId } : {}) });
+				chunk.push({
+					...norm,
+					_cls: cls,
+					_accept: acceptanceRef,
+					...(opts.jobId ? { _job: opts.jobId } : {}),
+				});
 				chunkIdentities.add(dedupeIdentity);
 				chunkIdentityOwners.set(dedupeIdentity, opts.jobId ?? null);
 				held++;
 				if (cls === "signal") lastSignal = true;
 			}
 
-			if (recent.length > RECENT_LIMIT) recent = recent.slice(-RECENT_LIMIT);
+			const acceptedUserIds = new Set(chunk
+				.filter((message) => message._accept === acceptanceRef && message.role === "user")
+				.map((message) => message.id));
+			const captured = held > 0
+				? await captureContextSnapshot(recent, requestedContextKey, acceptedUserIds)
+				: null;
+			recent = boundRecentMessages(recent);
 
 			const { fire } = shouldFire(chunk.filter((m) => !m._settled), {
 				flush: Boolean(opts.flush),
@@ -972,7 +1354,7 @@ export class UserMemory extends DurableObject {
 					transactionFault = "after_chunk_write";
 					return;
 				}
-				await txn.put(scopedStorageKey("recent", requestedScopeKey), recent);
+				await txn.put(contextStorageKey("recent", requestedContextKey), recent);
 				if (this.#shouldInjectHandoffFault(opts, "after_recent_write")) {
 					txn.rollback();
 					transactionFault = "after_recent_write";
@@ -980,6 +1362,8 @@ export class UserMemory extends DurableObject {
 				}
 				await txn.put("userId", userId);
 				await txn.put("chunkScopeKey", requestedScopeKey);
+				if (chunk.length > 0) await txn.put("chunkContextKey", requestedContextKey);
+				await this.#touchContextIndex(txn, requestedContextKey);
 				if (persistedOverrides !== undefined) {
 					await txn.put("pendingOverrides", persistedOverrides);
 					if (opts.jobId && held > 0) {
@@ -988,17 +1372,29 @@ export class UserMemory extends DurableObject {
 						await txn.put("chunkOverridesByJob", overridesByJob);
 					}
 				}
+				if (captured && held > 0) {
+					const acceptStates = (await txn.get("chunkAcceptState")) ?? {};
+					acceptStates[acceptanceRef] = {
+						jobId: opts.jobId ?? null,
+						scopeKey: requestedScopeKey,
+						contextKey: requestedContextKey,
+						contextSnapshot: captured.snapshot,
+						contextTrace: captured.trace,
+						overrides: persistedOverrides ?? {},
+					};
+					await txn.put("chunkAcceptState", acceptStates);
+				}
 				if (this.#shouldInjectHandoffFault(opts, "after_overrides_write")) {
 					txn.rollback();
 					transactionFault = "after_overrides_write";
 					return;
 				}
 				if (checkpointChanged) {
-					await txn.put(scopedStorageKey("checkpoint", requestedScopeKey), checkpoint);
-					await txn.put(scopedStorageKey("checkpointIdentity", requestedScopeKey), checkpointIdentity);
+					await txn.put(contextStorageKey("checkpoint", requestedContextKey), checkpoint);
+					await txn.put(contextStorageKey("checkpointIdentity", requestedContextKey), checkpointIdentity);
 				}
 				if (seen.size !== state.seen.length) {
-					await txn.put(scopedStorageKey("seen", requestedScopeKey), this.#capSeen([...seen]));
+					await txn.put(contextStorageKey("seen", requestedContextKey), this.#capSeen([...seen]));
 				}
 
 				let queued = 0;
@@ -1007,13 +1403,17 @@ export class UserMemory extends DurableObject {
 					queued = await this.#enqueueChunkInTransaction(txn, userId, chunk, {
 						overrides: queueOverrides,
 						scopeKey: requestedScopeKey,
+						contextKey: requestedContextKey,
 					});
 				}
 				result = { fired: fire, held, skipped, queued };
 				if (current) {
+					const { behavior: _behavior, ...stableCurrent } = current;
 					await txn.put(opts._handoffMarker.key, {
-						...current,
+						...stableCurrent,
 						state: "applied",
+						context_schema: 1,
+						contextKey: requestedContextKey,
 						// Versioned proof that the marker and all local acceptance state
 						// committed in this same Durable Object transaction. Job-less
 						// diagnostic callers cannot be attributed through `_job`, so this
@@ -1508,6 +1908,12 @@ export class UserMemory extends DurableObject {
 		if (!sourcePacket) {
 			throw codedError("EXTRACT_SOURCE_MISSING", "extract queue entry has no immutable source packet");
 		}
+		if (entry.contextKey) {
+			const authoritativeContext = await sourceContextIdentity(userId, { sourcePacket });
+			if (authoritativeContext.contextKey !== entry.contextKey) {
+				throw codedError("EXTRACT_CONTEXT_OWNERSHIP_INVALID", "extract queue context does not match its immutable source packet");
+			}
+		}
 		let payload = {};
 		try { payload = JSON.parse(job.payload_json ?? "{}") ?? {}; } catch {}
 		return {
@@ -1606,13 +2012,19 @@ export class UserMemory extends DurableObject {
 
 	async #finalizeExtractQueueState(userId, key, entry, terminal) {
 		const scopeKey = cleanScopeKey(entry.scopeKey);
+		const contextKey = CONTEXT_KEY_RE.test(String(entry.contextKey ?? "")) ? entry.contextKey : null;
 		const markerKeys = await this.#terminalHandoffMarkerKeys(entry);
 		if (terminal.action === "rescue") {
+			const rescueAcceptRef = `accept:v1:${await sha256Hex(`rescue\u0000${key}`)}`;
 			await this.ctx.blockConcurrencyWhile(async () => {
 				let chunk = (await this.ctx.storage.get("chunk")) ?? [];
 				const chunkScopeKey = cleanScopeKey(await this.ctx.storage.get("chunkScopeKey"));
-				if (chunk.length > 0 && chunkScopeKey !== scopeKey) {
-					await this.#enqueueFired(userId, { scopeKey: chunkScopeKey });
+				const chunkContextKey = await this.ctx.storage.get("chunkContextKey");
+				if (
+					chunk.length > 0
+					&& (chunkScopeKey !== scopeKey || String(chunkContextKey ?? "") !== String(contextKey ?? ""))
+				) {
+					await this.#enqueueFired(userId, { scopeKey: chunkScopeKey, contextKey: chunkContextKey });
 					chunk = [];
 				}
 				await this.ctx.storage.transaction(async (txn) => {
@@ -1624,14 +2036,27 @@ export class UserMemory extends DurableObject {
 							...message,
 							_settled: true,
 							_cls: "meaningful",
+							_accept: rescueAcceptRef,
 							...(entry.jobByMessage?.[message.id] ? { _job: entry.jobByMessage[message.id] } : {}),
 							...(entry.dedupeByMessage?.[message.id] ? { _dedupe: entry.dedupeByMessage[message.id] } : {}),
 						}));
 					await txn.put("chunk", [...restored, ...chunk]);
 					await txn.put("chunkScopeKey", scopeKey);
+					if (contextKey) await txn.put("chunkContextKey", contextKey);
 					if (chunk.length === 0) {
 						await txn.put("pendingOverrides", persistableOverrides(entry.overrides ?? {}));
 					}
+					const acceptStates = (await txn.get("chunkAcceptState")) ?? {};
+					acceptStates[rescueAcceptRef] = {
+						jobId: this.#extractJobIds(entry)[0] ?? null,
+						scopeKey,
+						contextKey,
+						...(Array.isArray(entry.contextSnapshot) ? { contextSnapshot: entry.contextSnapshot } : {}),
+						...(normalizeContextTrace(entry.contextTrace) ? { contextTrace: normalizeContextTrace(entry.contextTrace) } : {}),
+						overrides: persistableOverrides(entry.overrides ?? {}),
+						rescuedFromNoWrite: true,
+					};
+					await txn.put("chunkAcceptState", acceptStates);
 					const jobIds = this.#extractJobIds(entry);
 					if (jobIds.length === 1) {
 						const overridesByJob = (await txn.get("chunkOverridesByJob")) ?? {};
@@ -1647,12 +2072,20 @@ export class UserMemory extends DurableObject {
 
 		await this.ctx.storage.transaction(async (txn) => {
 			if (terminal.action === "complete" && terminal.lastId) {
-				await txn.put(scopedStorageKey("checkpoint", scopeKey), terminal.lastId);
+				await txn.put(
+					contextKey ? contextStorageKey("checkpoint", contextKey) : scopedStorageKey("checkpoint", scopeKey),
+					terminal.lastId,
+				);
 				if (terminal.lastIdentity) {
-					await txn.put(scopedStorageKey("checkpointIdentity", scopeKey), terminal.lastIdentity);
+					await txn.put(
+						contextKey
+							? contextStorageKey("checkpointIdentity", contextKey)
+							: scopedStorageKey("checkpointIdentity", scopeKey),
+						terminal.lastIdentity,
+					);
 				}
 			}
-			const seenKey = scopedStorageKey("seen", scopeKey);
+			const seenKey = contextKey ? contextStorageKey("seen", contextKey) : scopedStorageKey("seen", scopeKey);
 			const seen = (await txn.get(seenKey)) ?? [];
 			await txn.put(seenKey, this.#capSeen([
 				...new Set([...seen, ...(terminal.processedIdentities ?? [])]),
@@ -1782,7 +2215,7 @@ export class UserMemory extends DurableObject {
 			return { kind: "extract", outcome: "split_mixed_ownership", jobIds: [] };
 		}
 		const ownedJobs = this.#extractJobIds(entry);
-		if (ownedJobs.length > 0) {
+		if (ownedJobs.length > 0 && !entry.rescuedFromNoWrite) {
 			const states = await Promise.all(ownedJobs.map((jobId) => this.#memoryJobState(userId, jobId)));
 			if (states.every((state) => state && TERMINAL_JOB_STATES.has(state.status))) {
 				const markerKeys = await this.#terminalHandoffMarkerKeys(entry);
@@ -1793,11 +2226,11 @@ export class UserMemory extends DurableObject {
 				return { kind: "extract", outcome: "recovered_terminal", jobIds: ownedJobs };
 			}
 		}
-		// Queue entries keep the project that fired them. State used for
-		// extraction must follow that immutable entry, not whichever project most
-		// recently appended to this account's shared coordinator.
+		// Queue entries own an immutable acceptance-time context snapshot. Legacy
+		// work drains with empty context; corrupt snapshots fail closed to empty.
 		const scopeKey = cleanScopeKey(entry.scopeKey);
-		const recent = (await this.ctx.storage.get(scopedStorageKey("recent", scopeKey))) ?? [];
+		const context = await validatedEntryContext(entry);
+		const recent = context.snapshot;
 		// The entry's own persisted overrides win (they carry the packet's true
 		// source attribution); inline values fill gaps — except function-valued
 		// test hooks, which can never be persisted and therefore always apply.
@@ -1806,10 +2239,18 @@ export class UserMemory extends DurableObject {
 			if (typeof v === "function") overrides[k] = v;
 		}
 		overrides = await this.#authoritativeExtractOverrides(userId, entry, overrides);
+		overrides.meta = {
+			...(overrides.meta ?? {}),
+			context_trace: context.trace,
+		};
 		const dedupeByMessage = { ...(entry.dedupeByMessage ?? {}) };
 		for (const message of entry.messages ?? []) {
 			if (!dedupeByMessage[message.id]) {
-				dedupeByMessage[message.id] = (await messageDedupeIdentity(scopeKey, overrides, message)).identity;
+				dedupeByMessage[message.id] = (await messageDedupeIdentity(
+					entry.contextKey ?? scopeKey,
+					overrides,
+					message,
+				)).identity;
 			}
 		}
 		entry.dedupeByMessage = dedupeByMessage;
@@ -2072,6 +2513,7 @@ export class UserMemory extends DurableObject {
 	async kick(userId) {
 		if (userId) await this.ctx.storage.put("userId", userId);
 		if (userId) await this.#pruneTerminalHandoffMarkers(userId);
+		await this.#pruneContextIndex();
 		await this.#armAlarm(Date.now() + 50);
 		const chunk = (await this.ctx.storage.get("chunk")) ?? [];
 		const jobIds = new Set();
@@ -2105,7 +2547,9 @@ export class UserMemory extends DurableObject {
 	/** Inspect held state — used by tests to assert chunk/queue retention. */
 	async getDebugState() {
 		const scopeKey = cleanScopeKey(await this.ctx.storage.get("chunkScopeKey"));
-		const { chunk, checkpoint } = await this.#load(scopeKey);
+		const contextKey = await this.ctx.storage.get("chunkContextKey");
+		const { chunk, checkpoint } = await this.#load(scopeKey, contextKey);
+		const contextIndex = (await this.ctx.storage.get(CONTEXT_INDEX_KEY)) ?? [];
 		let queuedMessages = 0;
 		const queueScan = await this.#scanQueue((_key, entry) => {
 			queuedMessages += entry.kind === "extract" ? (entry.messages?.length ?? 0) : 0;
@@ -2119,6 +2563,8 @@ export class UserMemory extends DurableObject {
 			queuedMessages,
 			checkpoint,
 			scopeKey,
+			contextKey: CONTEXT_KEY_RE.test(String(contextKey ?? "")) ? contextKey : null,
+			activeContexts: Array.isArray(contextIndex) ? contextIndex.length : 0,
 			leased: Boolean(lease && Number(lease.until) > Date.now()),
 		};
 	}

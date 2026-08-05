@@ -354,7 +354,7 @@ describe("Durable Object ingest handoff", () => {
 			});
 			const rolledBack = await runInDurableObject(stub, async (_instance, state) => ({
 				chunk: (await state.storage.get("chunk")) ?? [],
-				recent: (await state.storage.get("recent")) ?? [],
+				recent: [...(await state.storage.list({ prefix: "recent:context:v1:" })).values()],
 				pendingOverrides: await state.storage.get("pendingOverrides"),
 				queueSize: (await state.storage.list({ prefix: "q:" })).size,
 			}));
@@ -367,7 +367,11 @@ describe("Durable Object ingest handoff", () => {
 			expect(entries).toHaveLength(1);
 			expect(entries[0].messages.map((item) => item.id)).toEqual(["m-atomic"]);
 			expect(entries[0].overrides).toEqual(overrides);
-			const recent = await runInDurableObject(stub, async (_instance, state) => state.storage.get("recent"));
+			const recent = await runInDurableObject(stub, async (_instance, state) => {
+				const contexts = [...(await state.storage.list({ prefix: "recent:context:v1:" })).values()];
+				expect(contexts).toHaveLength(1);
+				return contexts[0];
+			});
 			expect(recent.map((item) => item.id)).toEqual(["a-context", "m-atomic"]);
 			expect((await storedHandoffMarkers(stub))[0].state).toBe("accepted");
 			await stub.resetAll();

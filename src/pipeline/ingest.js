@@ -18,7 +18,13 @@
  *     receipt so the tool can show "Saved: …", but NEVER past it.
  */
 
-import { hashText, normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
+import {
+	hashText,
+	normalizeSourcePacket,
+	sourceContextIdentity,
+	sourceMeta,
+	storeSourcePacket,
+} from "./source.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { scrubMessages } from "./scrub.js";
 import { activeJobDepth, claimIngestMemoryJob } from "../lib/db.js";
@@ -217,6 +223,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// One DO still owns the account, but held/recent/dedupe state is partitioned
 	// inside it. Project metadata must never become another physical tenant.
 	const scopeKey = projectId ? `project:${projectId}` : "global";
+	const { contextKey } = await sourceContextIdentity(userId, { sourcePacket });
 	const extractionOverrides = {
 		...pipelineOverrides,
 		meta: {
@@ -302,6 +309,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		handoffId: jobId,
 		requestHash: normalized.packet.content_hash,
 		scopeKey,
+		contextKey,
 		overrides: extractionOverrides,
 		...(handoffFault ? { _testHandoffFault: handoffFault } : {}),
 	});
