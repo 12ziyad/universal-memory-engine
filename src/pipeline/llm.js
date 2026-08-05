@@ -18,6 +18,7 @@
 import { CATEGORIES, ACTIONS, IMPORTANCE, EDGE_TYPES, SLICE_KINDS } from "../config.js";
 import { rulesPromptLines } from "./rules.js";
 import { runAi } from "../lib/ai_meter.js";
+import { normalizePersistedSourceEvent } from "../lib/source_event.mjs";
 
 const SYSTEM_PROMPT = `You extract durable, long-term MEMORY about the USER from their chat messages. You ONLY propose; a backend decides what is actually saved.
 
@@ -212,8 +213,16 @@ const GENEROUS_ADDENDUM = "\n\nSTANCE: when in doubt, EXTRACT — a backend gate
 const PROFILE_ADDENDA = {
 	mcp: "\n\nLENS: personal memory. Focus on people, preferences, plans, decisions, and life events. Discard phatic turns (greetings, acknowledgements, banter) entirely.",
 	sdk: "\n\nLENS: application memory. The caller's own rules (below, if any) take priority over these defaults — extract what THEY define as durable for their users.",
-	plugin: "\n\nLENS: coding session. Durable memory here is: decisions and their reasons, conventions and preferences, error→fix pairs (what broke and what resolved it), architecture and component relationships, repeated commands/workflows. File paths are only ever an attribute inside a decision or component fact, never their own object. Raw stack traces are only durable as part of an error→fix pair. Diffs and tool output are never memory.",
+	plugin: "\n\nLENS: coding session. Durable memory here is: decisions and their reasons, conventions and preferences, error→fix pairs (what broke and what resolved it), architecture and component relationships, repeated commands/workflows, reported test/build outcomes, commits, and deployments. Coding-event text and metadata are bounded caller-supplied summaries, not authenticated proof that a host command ran or succeeded. Apply the same skepticism and confidence rules used for every other new_slice claim. Never invent omitted details. File paths are only ever an attribute inside a decision or component fact, never their own object. Raw commands, diffs, stack traces, and tool logs are never memory; the capture adapter intentionally excludes them.",
 };
+
+export const STRUCTURED_SOURCE_EVENT_ADDENDUM = "\n\nSTRUCTURED CALLER EVIDENCE: canonical source_event metadata is a bounded, scrubbed, caller-supplied classification and opaque trace identifier. It can help interpret the adjacent new_slice claim, but it does not authenticate host execution, authorship, or outcome. Never infer success from the metadata or [Claude coding event/v1] header alone.";
+
+export function hasStructuredSourceEvent(packet) {
+	return (packet?.new_slice ?? []).some((item) => (
+		normalizePersistedSourceEvent(item?.source_event) !== null
+	));
+}
 
 async function callModel(env, config, packet, shortlist, { dense = false, rules = null, profile = null } = {}) {
 	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false };
@@ -225,6 +234,9 @@ async function callModel(env, config, packet, shortlist, { dense = false, rules 
 	let base = SYSTEM_PROMPT + GENEROUS_ADDENDUM;
 	if (dense) base += DENSE_ADDENDUM;
 	if (PROFILE_ADDENDA[profile]) base += PROFILE_ADDENDA[profile];
+	if (profile === "plugin" || hasStructuredSourceEvent(packet)) {
+		base += STRUCTURED_SOURCE_EVENT_ADDENDUM;
+	}
 	const messages = [
 		{ role: "system", content: ruleLines.length ? `${base}\n\n${ruleLines.join("\n")}` : base },
 		{ role: "user", content: buildUserPrompt(packet, shortlist) },

@@ -1,6 +1,33 @@
 import { open } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
+import {
+	claudeCaptureExclusionEvidence,
+	isClaudeCaptureCorrelationRow,
+	isClaudeCaptureEligibleRow,
+	selectClaudeCaptureTailRows,
+} from "./claude-capture.mjs";
+
+const CAPTURE_EXCLUSION_KEYS = Object.freeze([
+	"inputRows",
+	"ineligibleRows",
+	"ignoredThinkingBlocks",
+	"ignoredMetaRows",
+	"ignoredToolEvents",
+	"ignoredRecallEvents",
+	"ignoredRecallEchoEvents",
+	"ignoredUnprotectedAssistantEvents",
+	"ignoredNoiseEvents",
+]);
+
+function emptyCaptureExclusions() {
+	return Object.fromEntries(CAPTURE_EXCLUSION_KEYS.map((key) => [key, 0]));
+}
+
+function mergeCaptureExclusions(target, source) {
+	for (const key of CAPTURE_EXCLUSION_KEYS) target[key] += Number(source?.[key] ?? 0);
+}
+
 export const DEFAULT_CLAUDE_TAIL_MAX_EVENTS = 80;
 export const DEFAULT_CLAUDE_TAIL_MAX_SCANNED_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_CLAUDE_TAIL_MAX_SCAN_MS = 500;
@@ -23,18 +50,8 @@ function positiveNumber(value, fallback, name) {
 	return resolved;
 }
 
-function textualEvent(row) {
-	if (row?.type !== "user" && row?.type !== "assistant") return false;
-	const content = row?.message?.content;
-	if (typeof content === "string") return content.trim().length > 0;
-	if (!Array.isArray(content)) return false;
-	return content.some((part) => part?.type === "text"
-		&& typeof part.text === "string"
-		&& part.text.trim().length > 0);
-}
-
 /**
- * Read a bounded snapshot of the newest textual Claude transcript events.
+ * Read a bounded snapshot of the newest Claude capture-candidate events.
  *
  * `lines` is directly consumable by `messagesFromClaudeTranscriptLines`.
  * `records` contains the same strings together with absolute byte ranges from
@@ -82,6 +99,7 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 	let fileChangedDuringScan = false;
 	let stopReason = "start_of_file";
 	const newestFirst = [];
+	const preselectionCaptureExclusions = emptyCaptureExclusions();
 	const startedAt = performance.now();
 
 	try {
@@ -157,10 +175,13 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 				malformedLines += 1;
 				return;
 			}
-			if (!textualEvent(row)) {
+			const captureExclusions = claudeCaptureExclusionEvidence(row, options);
+			if (!isClaudeCaptureCorrelationRow(row, options)) {
+				mergeCaptureExclusions(preselectionCaptureExclusions, captureExclusions);
 				ineligibleLines += 1;
 				return;
 			}
+			if (!isClaudeCaptureEligibleRow(row, options)) ineligibleLines += 1;
 
 			newestFirst.push({
 				raw,
@@ -174,7 +195,7 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 			});
 		}
 
-		while (cursor > lowerBound && newestFirst.length < maxEvents) {
+		while (cursor > lowerBound) {
 			if (timedOut()) {
 				stopReason = "max_time";
 				stopped = true;
@@ -203,11 +224,6 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 				const newlineOffset = requestedStart + newlineIndex;
 				finishLine(newlineOffset + 1);
 				resetLine(newlineOffset);
-				if (newestFirst.length >= maxEvents) {
-					stopReason = "max_events";
-					stopped = true;
-					break;
-				}
 				segmentEnd = newlineIndex;
 				if (timedOut()) {
 					stopReason = "max_time";
@@ -239,7 +255,24 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 	}
 
 	newestFirst.reverse();
-	const records = newestFirst;
+	// max_events is a logical post-selection cap, not a missing transcript
+	// prefix. Physical byte/time/change stops require exact host correlation.
+	const correlationPrefixIncomplete = stopReason !== "start_of_file"
+		|| partialLineSkipped
+		|| fileChangedDuringScan
+		|| malformedLines > 0
+		|| oversizedLines > 0;
+	const selection = selectClaudeCaptureTailRows(newestFirst, {
+		...options,
+		maxEvents,
+		prefixTruncated: correlationPrefixIncomplete,
+	});
+	const records = selection.rows;
+	const captureExclusions = { ...preselectionCaptureExclusions };
+	mergeCaptureExclusions(captureExclusions, selection.metadata.excludedCaptureEvidence);
+	if (stopReason === "start_of_file" && selection.metadata.capturableOutcomeRows > maxEvents) {
+		stopReason = "max_events";
+	}
 	const grewByBytes = Math.max(0, observedFileBytes - snapshotBytes);
 	const shrankByBytes = Math.max(0, snapshotBytes - observedFileBytes);
 	const scanTruncated = stopReason !== "start_of_file";
@@ -256,12 +289,32 @@ export async function readClaudeTranscriptTail(filePath, options = {}) {
 			maxScanMs,
 			maxLineBytes,
 			readChunkBytes,
-			returnedEvents: records.length,
+			returnedEvents: selection.metadata.selectedOutcomeRows,
+			returnedRows: records.length,
+			companionRows: selection.metadata.companionRows,
+			maxCompanionRows: selection.metadata.maxCompanionRows,
+			companionClosureRows: selection.metadata.companionClosureRows,
+			companionClosureLimitReached: selection.metadata.companionClosureLimitReached,
+			companionLimitRejectedOutcomeRows: selection.metadata.companionLimitRejectedOutcomeRows,
+			closureEventLimitRejectedOutcomeRows: selection.metadata.closureEventLimitRejectedOutcomeRows,
+			capturableOutcomeRows: selection.metadata.capturableOutcomeRows,
+			ambiguousOutcomeRows: selection.metadata.ambiguousOutcomeRows,
+			exactSourceMatches: selection.metadata.exactSourceMatches,
+			exactParentMatches: selection.metadata.exactParentMatches,
+			fifoMatches: selection.metadata.fifoMatches,
+			ambiguousToolResults: selection.metadata.ambiguousToolResults,
+			invalidExactLinkResults: selection.metadata.invalidExactLinkResults,
+			reusedIdResultsRejected: selection.metadata.reusedIdResultsRejected,
+			incompletePrefixResultsRejected: selection.metadata.incompletePrefixResultsRejected,
+			unmatchedToolResults: selection.metadata.unmatchedToolResults,
+			correlationRowsScanned: newestFirst.length,
+			captureExclusions,
 			oversizedLines,
 			malformedLines,
 			ineligibleLines,
 			emptyLines,
 			partialLineSkipped,
+			correlationPrefixIncomplete,
 			fileChangedDuringScan,
 			fileGrew: grewByBytes > 0,
 			grewByBytes,

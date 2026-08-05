@@ -169,7 +169,8 @@ make an automatic destructive merge unsafe.
 The plugin requires a maintained **Node 22 or 24 LTS** runtime. During installation, select that executable by its absolute
 path (for example, `(Get-Command node).Source` in PowerShell or `command -v node` on macOS/Linux); hooks never resolve
 `node` through a project-controlled `PATH`. SessionEnd does not use the network. It takes a bounded snapshot of the newest
-80 eligible transcript records, scrubs them, and atomically queues one or more protected, ordered v2 batch envelopes under
+80 completed durable coding outcomes plus any tool-call rows required to interpret them, scrubs them, and atomically queues
+one or more protected, ordered v2 batch envelopes under
 Claude's persistent `${CLAUDE_PLUGIN_DATA}/outbox/v1` directory before returning within Claude's shutdown budget.
 
 Within that captured-and-scrubbed message set, batching does not silently drop content. A logical message that is too large
@@ -178,6 +179,13 @@ remain in conversation order. Every batch carries a stable delivery group, batch
 capture-omission fields (`captureTruncated` / `truncationReason`). If the bounded snapshot misses older records, encounters an oversized or malformed record, or races
 a transcript rewrite, SessionEnd reports the omission and records its reason with every batch; it does not describe that
 snapshot as complete.
+
+Capture counters are content-free evidence about the bounded local scan, not part of a batch's semantic identity. A retry
+with the same messages therefore reuses the same staged delivery plan even if its later scan observes different counters;
+the first successfully staged evidence remains immutable and is the evidence reported for that delivery. The server applies
+the same rule to replay identity while still validating and returning the accepted evidence in delivery receipts. If a
+later duplicate scan observes an additional omission, SessionEnd reports that current omission in its hook status without
+rewriting the evidence attached to the original queued snapshot.
 
 SessionStart attempts at most four due batches before recall. It will not overtake an earlier batch in the same group.
 Offline, DNS, timeout, 429, and server failures remain queued with content-bound idempotent backoff; a rejected key pauses

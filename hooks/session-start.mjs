@@ -9,6 +9,7 @@ import {
 	drainOutbox,
 	inspectOutbox,
 	normalizeDeliveryBaseUrl,
+	persistRecallEchoGuard,
 	pluginDataFromArgs,
 	sanitizeMemoryScope,
 	validItsukiApiKey,
@@ -19,6 +20,7 @@ import {
 	projectMemoryScope,
 	resolveProjectIdentity,
 } from "./project-identity.mjs";
+import { formatItsukiRecallContext, sanitizeItsukiRecallContextText } from "./claude-capture.mjs";
 
 const API_KEY = process.env.CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY;
 function explicitServiceUrl(argv = process.argv.slice(2)) {
@@ -156,6 +158,11 @@ async function main() {
 
 	if (!pluginData) {
 		system.push("Itsuki: Claude did not provide a protected plugin-data directory; local delivery is unavailable. Run /itsuki:doctor.");
+		unavailable = {
+			reason: "Claude did not provide a protected plugin-data directory",
+			fix: "Run /itsuki:doctor before relying on project memory.",
+		};
+		skipRecall = true;
 	} else if (BASE_URL) {
 		try {
 			const drained = await drainOutbox({
@@ -248,23 +255,53 @@ async function main() {
 			if (recalled.unavailable) unavailable = { reason: recalled.unavailable, fix: recalled.fix };
 		}
 	}
+	context = sanitizeItsukiRecallContextText(context);
+	let echoGuard = null;
+	try {
+		if (pluginData && payload.session_id) {
+			echoGuard = await persistRecallEchoGuard({
+				pluginData,
+				sessionId: payload.session_id,
+				context,
+				allowCreate: payload.source === "startup" || payload.source === "clear",
+			});
+		}
+	} catch {
+		// SessionEnd treats a missing/corrupt guard as fail-closed for assistant
+		// prose. Recalled text itself is never injected after persistence failure.
+	}
+	if (context) {
+		const echoProtectionReady = echoGuard?.persisted === true
+			&& echoGuard.coverageComplete === true
+			&& ["armed", "no_context"].includes(echoGuard.status);
+		if (!echoProtectionReady) {
+			context = "";
+			unavailable = {
+				reason: "recalled memory could not be protected against transcript echo capture",
+				fix: "Run /itsuki:doctor; recall will retry on a later session.",
+			};
+			system.push("Itsuki: recalled project memory was not injected because its protected echo filter could not be persisted.");
+		}
+	}
 
 	const output = {};
 	if (system.length) output.systemMessage = system.join(" ");
 	if (context) {
 		output.hookSpecificOutput = {
 			hookEventName: "SessionStart",
-			additionalContext:
+			additionalContext: formatItsukiRecallContext(
 				`Itsuki project memory for ${project.projectName} (from previous sessions):\n${context}\n` +
 				"(Use this as established context. New durable outcomes are queued locally at SessionEnd and delivered on a later SessionStart.)",
+			),
 		};
 	} else if (unavailable) {
 		output.systemMessage = `${output.systemMessage ? `${output.systemMessage} ` : ""}Itsuki: ${unavailable.reason}. Project memory is OFF for this session. ${unavailable.fix}`;
 		output.hookSpecificOutput = {
 			hookEventName: "SessionStart",
-			additionalContext:
+			additionalContext: formatItsukiRecallContext(
 				`Itsuki project memory is unavailable this session (${unavailable.reason}). ` +
 				`Do not claim memory of previous sessions. If asked, say: ${unavailable.fix}`,
+			),
 		};
 	}
 	return output;
@@ -277,7 +314,9 @@ catch {
 		systemMessage: "Itsuki: an unexpected startup hook error occurred. The coding session continues normally; run /itsuki:doctor.",
 		hookSpecificOutput: {
 			hookEventName: "SessionStart",
-			additionalContext: "Itsuki project memory is unavailable this session. Do not claim memory of previous sessions.",
+			additionalContext: formatItsukiRecallContext(
+				"Itsuki project memory is unavailable this session. Do not claim memory of previous sessions.",
+			),
 		},
 	};
 }

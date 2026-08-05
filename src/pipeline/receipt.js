@@ -1,3 +1,7 @@
+import { normalizeSourceEventTrace } from "../lib/source_event.mjs";
+
+export { normalizeSourceEventTrace };
+
 /**
  * Receipts (Priority 5) — turn a gate plan + write result into BOTH:
  *   - a structured record we persist (so the UI "Saves" page can show exactly
@@ -130,6 +134,12 @@ function contextTraceFields(meta = {}) {
 	return trace ? { context_trace: trace } : {};
 }
 
+function sourceEventTraceFields(meta = {}) {
+	const trace = normalizeSourceEventTrace(meta.source_event_trace)
+		?? normalizeSourceEventTrace(meta.sourceEventTrace);
+	return trace ? { source_event_trace: trace } : {};
+}
+
 function phraseFor(reason) {
 	return REASON_PHRASE[reason] ?? reason ?? "skipped";
 }
@@ -223,6 +233,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		...contextTraceFields(meta),
+		...sourceEventTraceFields(meta),
 		// How long the memory work took. Metadata for the Requests page; null
 		// when the caller did not measure it.
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
@@ -270,6 +281,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		received: meta.received ?? null,
 		digested: meta.digested ?? null,
 		...contextTraceFields(meta),
+		...sourceEventTraceFields(meta),
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
 		...splitRescueFields(meta),

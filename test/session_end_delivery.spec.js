@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -9,13 +9,63 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_DELIVERY_BASE_URL, credentialFingerprint } from "../hooks/outbox.mjs";
+import {
+	ITSUKI_LEGACY_RECALL_PREFIXES,
+	formatItsukiRecallContext,
+} from "../hooks/claude-transcript.mjs";
+import {
+	DEFAULT_DELIVERY_BASE_URL,
+	credentialFingerprint,
+	persistRecallEchoGuard,
+	readRecallEchoGuard,
+} from "../hooks/outbox.mjs";
+import {
+	RECALL_ECHO_MAX_SESSIONS,
+	RECALL_ECHO_STORE_FILENAME,
+	RECALL_ECHO_STORE_SCHEMA,
+	updateRecallEchoStore,
+} from "../hooks/recall-echo.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SESSION_END = join(ROOT, "hooks", "session-end.mjs");
 const CLAUDE_SESSION_END_BUDGET_MS = 1_500;
 
-async function fixture({ transcriptContents } = {}) {
+function seedSecurityRunner(root, mode) {
+	if (process.platform !== "win32") {
+		return Promise.resolve({ ok: true, protected: true, guard_trusted: true });
+	}
+	return new Promise((resolvePromise, reject) => {
+		const systemRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+		const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+		const helper = join(ROOT, "hooks", "outbox-security.ps1");
+		const child = spawn(powershell, [
+			"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+			"-File", helper, "-Path", root, "-Mode", mode,
+		], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => { stdout += chunk; });
+		child.stderr.on("data", (chunk) => { stderr += chunk; });
+		const timer = setTimeout(() => child.kill(), 8_000);
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			if (code !== 0) {
+				reject(new Error(`test ACL seed failed: ${stderr.trim() || `exit ${code}`}`));
+				return;
+			}
+			try { resolvePromise(JSON.parse(stdout)); }
+			catch (error) { reject(error); }
+		});
+	});
+}
+
+async function fixture({ transcriptContents, seedNoContext = true } = {}) {
 	const root = await mkdtemp(join(tmpdir(), "itsuki-session-end-delivery-"));
 	const configRoot = join(root, "claude-config");
 	const pluginData = join(configRoot, "plugins", "data", "itsuki");
@@ -28,9 +78,21 @@ async function fixture({ transcriptContents } = {}) {
 			type: "user",
 			uuid: "host-event-durable-decision",
 			timestamp: "2026-08-05T00:00:00.000Z",
-			message: { content: "Keep the durable session-end decision even when the network is unavailable." },
+			message: { content: "I decided to keep the durable session-end outcome even when the network is unavailable." },
 		})}\n`, "utf8"),
 	]);
+	if (seedNoContext) {
+		const guard = await persistRecallEchoGuard({
+			pluginData,
+			sessionId: "session-end-delivery-regression",
+			context: "",
+			allowCreate: true,
+			securityRunner: seedSecurityRunner,
+		});
+		if (guard.status !== "no_context" || guard.persisted !== true) {
+			throw new Error("failed to seed the explicit no-context SessionEnd guard");
+		}
+	}
 	return {
 		root,
 		configRoot,
@@ -160,14 +222,310 @@ async function unusedLocalEndpoint() {
 	return url;
 }
 
+function assistantDecisionTranscript(content) {
+	return `${JSON.stringify({
+		type: "assistant",
+		uuid: "assistant-recall-guard-regression",
+		timestamp: "2026-08-05T00:00:00.000Z",
+		message: { content },
+	})}\n`;
+}
+
 describe("SessionEnd host-budget delivery", () => {
-	it("spools a near-8 MiB valid capture once without eager segmentation or dozens of fsyncs", async () => {
+	it("allows assistant durable prose only when a fresh explicit no-context guard exists", async () => {
+		const content = "Architecture decision: keep the explicit no-context capture path enabled.";
+		const data = await fixture({ transcriptContents: assistantDecisionTranscript(content) });
+		try {
+			expect(await readRecallEchoGuard({
+				pluginData: data.pluginData,
+				sessionId: data.payload.session_id,
+			})).toEqual({ status: "no_context", fingerprints: [] });
+
+			const result = await runSessionEnd({
+				baseUrl: await unusedLocalEndpoint(),
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+			const staged = await readStagedGroup(data.pluginData);
+
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			expect(staged.messages).toEqual([
+				expect.objectContaining({
+					role: "user",
+					content: expect.stringContaining(content),
+				}),
+			]);
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 10_000);
+
+	it.each(["missing", "deleted", "evicted"])(
+		"fails closed for assistant prose when the session guard is %s",
+		async (condition) => {
+			const content = `Architecture decision: ${condition} recall guards must fail closed.`;
+			const data = await fixture({
+				transcriptContents: assistantDecisionTranscript(content),
+				seedNoContext: condition !== "missing",
+			});
+			const sidecarPath = join(
+				data.pluginData,
+				"outbox",
+				"v1",
+				"control",
+				RECALL_ECHO_STORE_FILENAME,
+			);
+			try {
+				if (condition === "deleted") {
+					await rm(sidecarPath, { force: true });
+				} else if (condition === "evicted") {
+					let store = { schema: RECALL_ECHO_STORE_SCHEMA, sessions: [] };
+					store = updateRecallEchoStore(store, {
+						sessionId: data.payload.session_id,
+						status: "no_context",
+					});
+					for (let index = 0; index < RECALL_ECHO_MAX_SESSIONS; index += 1) {
+						store = updateRecallEchoStore(store, {
+							sessionId: `newer-session-${index}`,
+							status: "no_context",
+						});
+					}
+					expect(store.sessions).toHaveLength(RECALL_ECHO_MAX_SESSIONS);
+					await writeFile(sidecarPath, JSON.stringify(store), "utf8");
+					expect(await readRecallEchoGuard({
+						pluginData: data.pluginData,
+						sessionId: data.payload.session_id,
+					})).toEqual({ status: "missing", fingerprints: [] });
+				}
+
+				const result = await runSessionEnd({
+					baseUrl: await unusedLocalEndpoint(),
+					payload: data.payload,
+					pluginData: data.pluginData,
+				});
+
+				expect(result).toMatchObject({ code: 0, hostTerminated: false });
+				expect(JSON.parse(result.stdout).systemMessage).toContain("assistant-authored prose was excluded");
+				expect(await stagedGroups(data.pluginData)).toEqual([]);
+			} finally {
+				await rm(data.root, { recursive: true, force: true });
+			}
+		},
+		10_000,
+	);
+
+	it.runIf(process.platform === "win32")(
+		"fails closed for assistant prose after repairing recall-guard ACL drift",
+		async () => {
+			const content = "Architecture decision: a drifted guard must never authorize assistant prose.";
+			const data = await fixture({ transcriptContents: assistantDecisionTranscript(content) });
+			const guardPath = join(
+				data.pluginData,
+				"outbox",
+				"v1",
+				"control",
+				RECALL_ECHO_STORE_FILENAME,
+			);
+			try {
+				const broadened = spawnSync("icacls.exe", [guardPath, "/grant", "*S-1-1-0:(F)"], {
+					encoding: "utf8",
+					windowsHide: true,
+				});
+				expect(broadened.status, broadened.stderr || broadened.stdout).toBe(0);
+
+				const result = await runSessionEnd({
+					baseUrl: await unusedLocalEndpoint(),
+					payload: data.payload,
+					pluginData: data.pluginData,
+				});
+
+				expect(result).toMatchObject({ code: 0, hostTerminated: false });
+				expect(JSON.parse(result.stdout).systemMessage).toContain("assistant-authored prose was excluded");
+				expect(await stagedGroups(data.pluginData)).toEqual([]);
+			} finally {
+				await rm(data.root, { recursive: true, force: true });
+			}
+		},
+		10_000,
+	);
+
+	it("reports an all-orphan tool outcome as explicitly not queued", async () => {
+		const transcriptContents = JSON.stringify({
+			type: "user",
+			uuid: "orphan-session-end-result",
+			message: { content: [{ type: "tool_result", tool_use_id: "missing-session-end-call", content: "done" }] },
+		});
+		const data = await fixture({ transcriptContents });
+		try {
+			const result = await runSessionEnd({
+				baseUrl: await unusedLocalEndpoint(),
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			const output = JSON.parse(result.stdout);
+			expect(output.systemMessage).toContain("NOT queued locally");
+			expect(output.systemMessage).toContain("call identity or dependency closure was not safe");
+			expect(await stagedGroups(data.pluginData)).toEqual([]);
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 10_000);
+
+	it("records ambiguity evidence when another durable event is queued", async () => {
+		const toolUseId = "toolu_mixed_ambiguous_session_end";
+		const decision = "I decided to keep the safe mixed-capture outcome.";
+		const transcriptContents = [
+			JSON.stringify({
+				type: "assistant",
+				uuid: "mixed-ambiguous-call-one",
+				message: { content: [{ type: "tool_use", id: toolUseId, name: "Write", input: { file_path: "src/one.ts" } }] },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				uuid: "mixed-ambiguous-call-two",
+				message: { content: [{ type: "tool_use", id: toolUseId, name: "Write", input: { file_path: "src/two.ts" } }] },
+			}),
+			JSON.stringify({
+				type: "user",
+				uuid: "mixed-ambiguous-result",
+				message: { content: [{ type: "tool_result", tool_use_id: toolUseId, content: "done" }] },
+			}),
+			JSON.stringify({
+				type: "user",
+				uuid: "mixed-safe-decision",
+				message: { content: decision },
+			}),
+		].join("\n");
+		const data = await fixture({ transcriptContents });
+		try {
+			const result = await runSessionEnd({
+				baseUrl: await unusedLocalEndpoint(),
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+			const output = JSON.parse(result.stdout);
+			const staged = await readStagedGroup(data.pluginData);
+
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			expect(output.systemMessage).toContain("excluded because its call identity was ambiguous");
+			expect(staged.messages).toEqual([
+				expect.objectContaining({ content: expect.stringContaining(decision) }),
+			]);
+			expect(staged.capture).toMatchObject({
+				captureTruncated: true,
+				truncationReason: "ambiguous_tool_result",
+				captureEvidence: expect.objectContaining({ ambiguousOutcomeRows: 1 }),
+			});
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 10_000);
+
+	it("reports a newly omitted orphan outcome when the safe payload is already queued", async () => {
+		const decision = "I decided to keep duplicate snapshots content-stable.";
+		const safeRow = JSON.stringify({
+			type: "user",
+			uuid: "duplicate-omission-safe-decision",
+			timestamp: "2026-08-05T00:00:00.000Z",
+			message: { content: decision },
+		});
+		const orphanRow = JSON.stringify({
+			type: "user",
+			uuid: "duplicate-omission-orphan-result",
+			message: { content: [{ type: "tool_result", tool_use_id: "missing-duplicate-call", content: "done" }] },
+		});
+		const data = await fixture({ transcriptContents: `${safeRow}\n` });
+		try {
+			const baseUrl = await unusedLocalEndpoint();
+			const first = await runSessionEnd({
+				baseUrl,
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+			expect(first).toMatchObject({ code: 0, hostTerminated: false });
+			expect(JSON.parse(first.stdout).systemMessage).toContain("queued locally");
+
+			await writeFile(
+				data.payload.transcript_path,
+				`${safeRow}\n${orphanRow}\n`,
+				"utf8",
+			);
+			const replay = await runSessionEnd({
+				baseUrl,
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+			const output = JSON.parse(replay.stdout);
+			const staged = await readStagedGroup(data.pluginData);
+
+			expect(replay).toMatchObject({ code: 0, hostTerminated: false });
+			expect(output.systemMessage).toContain("already queued locally");
+			expect(output.systemMessage).toContain("excluded because its call identity was ambiguous");
+			expect(staged.messages).toEqual([
+				expect.objectContaining({ content: expect.stringContaining(decision) }),
+			]);
+			// Capture evidence describes the immutable first queued snapshot. The
+			// current run's later omission is surfaced in the hook status above.
+			expect(staged.capture).toMatchObject({
+				captureTruncated: false,
+				truncationReason: null,
+				captureEvidence: expect.objectContaining({ ambiguousOutcomeRows: 0 }),
+			});
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("queues nothing when the transcript contains only recalled context and ineligible private/meta rows", async () => {
+		const transcriptContents = [
+			JSON.stringify({
+				type: "user",
+				uuid: "plugin-recall-current",
+				message: { content: formatItsukiRecallContext("Private recalled project context must not feed back.") },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				uuid: "plugin-recall-legacy",
+				message: { content: `${ITSUKI_LEGACY_RECALL_PREFIXES[0]}legacy project: do not feed back` },
+			}),
+			JSON.stringify({
+				type: "assistant",
+				uuid: "private-thinking-only",
+				message: { content: [{ type: "thinking", thinking: "unsupported private reasoning" }] },
+			}),
+			JSON.stringify({ type: "system", message: { content: "host system context" } }),
+			JSON.stringify({ type: "meta", message: { content: "plugin metadata" } }),
+			JSON.stringify({
+				type: "assistant",
+				uuid: "unknown-block-only",
+				message: { content: [{ type: "future_unknown", value: "unknown payload" }] },
+			}),
+		].join("\n");
+		const data = await fixture({ transcriptContents });
+		try {
+			const result = await runSessionEnd({
+				baseUrl: await unusedLocalEndpoint(),
+				payload: data.payload,
+				pluginData: data.pluginData,
+			});
+
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			expect(JSON.parse(result.stdout)).toEqual({});
+			expect(await stagedGroups(data.pluginData)).toEqual([]);
+		} finally {
+			await rm(data.root, { recursive: true, force: true });
+		}
+	}, 5_000);
+
+	it("derives one bounded event spool from a near-8 MiB transcript without retaining raw prose", async () => {
 		const rows = Array.from({ length: 32 }, (_, index) => JSON.stringify({
-			type: index % 2 === 0 ? "user" : "assistant",
+			type: "assistant",
 			uuid: `host-event-near-limit-${index}`,
 			timestamp: `2026-08-05T00:00:${String(index).padStart(2, "0")}.000Z`,
 			message: {
-				content: `${String(index).padStart(2, "0")}:${"x".repeat((250 * 1024) - 64)}:FINAL-OUTCOME-${index}`,
+				content: `Architecture decision ${String(index).padStart(2, "0")}: ${"x".repeat((250 * 1024) - 96)}:FINAL-OUTCOME-${index}`,
 			},
 		}));
 		const transcriptContents = `${rows.join("\n")}\n`;
@@ -180,15 +538,17 @@ describe("SessionEnd host-budget delivery", () => {
 				payload: data.payload,
 				pluginData: data.pluginData,
 			});
+			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			expect(result.elapsedMs).toBeLessThan(CLAUDE_SESSION_END_BUDGET_MS);
 			const staged = await readStagedGroup(data.pluginData);
 			const pending = await readdir(join(data.pluginData, "outbox", "v1", "pending"));
 			const manifests = await readdir(join(data.pluginData, "outbox", "v1", "groups"));
-
-			expect(result).toMatchObject({ code: 0, hostTerminated: false });
-			expect(result.elapsedMs).toBeLessThan(CLAUDE_SESSION_END_BUDGET_MS);
-			expect(staged.schema).toBe("itsuki.outbox-staged-group/v1");
+			expect(staged.schema).toBe("itsuki.outbox-staged-group/v2");
 			expect(staged.messages).toHaveLength(32);
+			expect(staged.messages.every((message) => Array.from(message.content).length <= 1_200)).toBe(true);
+			expect(staged.messages.every((message) => message.source_event?.truncated === true)).toBe(true);
 			expect(staged.messages.at(-1).content).toContain("FINAL-OUTCOME-31");
+			expect(Buffer.byteLength(JSON.stringify(staged), "utf8")).toBeLessThan(64 * 1024);
 			expect(JSON.stringify(staged)).not.toContain("[Itsuki segment ");
 			expect(pending).toEqual([]);
 			expect(manifests).toEqual([]);
@@ -199,7 +559,7 @@ describe("SessionEnd host-budget delivery", () => {
 
 	it("queues the final durable event from behind a huge early line within the 1.5s host budget", async () => {
 		const hugeEarlyMarker = "HUGE_EARLY_PROGRESS_MUST_NOT_BE_QUEUED";
-		const finalContent = "Keep the final durable event even when an early transcript row is enormous.";
+		const finalContent = "I decided to keep the final durable event even when an early transcript row is enormous.";
 		const hugeEarlyLine = JSON.stringify({
 			type: "progress",
 			payload: `${hugeEarlyMarker}:${"x".repeat((8 * 1024 * 1024) + (512 * 1024))}`,
@@ -225,7 +585,14 @@ describe("SessionEnd host-budget delivery", () => {
 			expect(result.elapsedMs).toBeLessThan(CLAUDE_SESSION_END_BUDGET_MS);
 			expect(endpoint.requestCount()).toBe(0);
 			expect(envelope.messages).toEqual([
-				expect.objectContaining({ role: "user", content: finalContent }),
+				expect.objectContaining({
+					role: "user",
+					content: expect.stringContaining(finalContent),
+					source_event: expect.objectContaining({
+						schema: "itsuki.source-event/v1",
+						kind: "decision",
+					}),
+				}),
 			]);
 			expect(JSON.stringify(envelope)).not.toContain(hugeEarlyMarker);
 			expect(output.systemMessage).toContain("The bounded shutdown snapshot omitted older records");
@@ -299,9 +666,8 @@ describe("SessionEnd host-budget delivery", () => {
 				pluginKey: null,
 				legacyKey,
 			});
-			const envelope = await readStagedGroup(data.pluginData);
-
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			const envelope = await readStagedGroup(data.pluginData);
 			expect(JSON.parse(result.stdout).systemMessage).toContain("not bound to a valid key");
 			expect(envelope.credential_fingerprint).toBeNull();
 			expect(JSON.stringify(envelope)).not.toContain(legacyKey);
@@ -320,9 +686,8 @@ describe("SessionEnd host-budget delivery", () => {
 				pluginData: data.pluginData,
 				explicitService: false,
 			});
-			const envelope = await readStagedGroup(data.pluginData);
-
 			expect(result).toMatchObject({ code: 0, hostTerminated: false });
+			const envelope = await readStagedGroup(data.pluginData);
 			expect(endpoint.requestCount()).toBe(0);
 			expect(envelope.credential_fingerprint).toBe(credentialFingerprint(
 				"itsuki_live_session_end_regression",

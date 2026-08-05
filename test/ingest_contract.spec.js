@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	INGEST_CAPTURE_EVIDENCE_SCHEMA,
 	INGEST_DELIVERY_SCHEMA,
 	INGEST_LIMITS,
 	INGEST_MESSAGE_ID_MAX_CHARACTERS,
 	LEGACY_CLAUDE_OUTBOX_LIMITS,
 	isLegacyClaudeOutboxBody,
+	normalizeCaptureEvidence,
 	normalizeDeliveryMetadata,
 	unicodeLength,
 	utf8Length,
@@ -14,6 +16,37 @@ import {
 
 const message = (content, id = "m") => ({ id, role: "user", content });
 const groupId = `claude_delivery_v1_${"a".repeat(40)}`;
+
+function captureEvidence(overrides = {}) {
+	return {
+		schema: INGEST_CAPTURE_EVIDENCE_SCHEMA,
+		inputRows: 12,
+		capturedEvents: 4,
+		returnedEvents: 3,
+		omittedEvents: 1,
+		malformedRows: 1,
+		ineligibleRows: 2,
+		ignoredThinkingBlocks: 3,
+		ignoredMetaRows: 1,
+		ignoredToolEvents: 2,
+		ignoredRecallEvents: 1,
+		ignoredRecallEchoEvents: 1,
+		ignoredUnprotectedAssistantEvents: 1,
+		ignoredNoiseEvents: 2,
+		ambiguousOutcomeRows: 1,
+		companionLimitRejectedOutcomeRows: 1,
+		closureEventLimitRejectedOutcomeRows: 1,
+		truncatedEvents: 1,
+		redactions: { api_key: 1, named_secret: 2 },
+		tailReturnedRecords: 12,
+		tailScannedBytes: 4096,
+		tailOversizedLines: 0,
+		tailMalformedLines: 1,
+		tailIneligibleLines: 2,
+		tailEmptyLines: 0,
+		...overrides,
+	};
+}
 
 function delivery(overrides = {}) {
 	return {
@@ -159,6 +192,25 @@ describe("authoritative ingest contract", () => {
 				field: "delivery",
 			});
 		}
+	});
+
+	it("accepts only fixed, content-free, bounded capture evidence", () => {
+		const evidence = captureEvidence();
+		expect(normalizeCaptureEvidence(evidence)).toEqual(evidence);
+		expect(normalizeDeliveryMetadata(delivery({ captureTruncated: true, truncationReason: "max_capture_events", captureEvidence: evidence })))
+			.toEqual(delivery({ captureTruncated: true, truncationReason: "max_capture_events", captureEvidence: evidence }));
+		for (const invalid of [
+			{ ...evidence, rawCommand: "must never cross the wire" },
+			{ ...evidence, capturedEvents: "4" },
+			{ ...evidence, omittedEvents: 0 },
+			{ ...evidence, ineligibleRows: evidence.inputRows + 1 },
+			{ ...evidence, ignoredMetaRows: evidence.inputRows + 1 },
+			{ ...evidence, ignoredNoiseEvents: evidence.inputRows + 1 },
+			{ ...evidence, tailReturnedRecords: evidence.inputRows + 1 },
+			{ ...evidence, tailIneligibleLines: evidence.inputRows + 1 },
+			{ ...evidence, tailScannedBytes: 64 * 1024 * 1024 + 1 },
+			{ ...evidence, redactions: { secret_value: 1 } },
+		]) expect(normalizeCaptureEvidence(invalid)).toBeNull();
 	});
 
 	it("keeps only already-spooled v1 Claude envelopes on their former bounded shape", () => {

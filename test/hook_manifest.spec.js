@@ -63,7 +63,7 @@ describe("Claude hook installation contract", () => {
 	it("ships the outbox change as a new plugin version without ignored setup metadata", async () => {
 		const manifest = await json(".claude-plugin/plugin.json");
 
-		expect(manifest).toMatchObject({ name: "itsuki", version: "0.5.0" });
+		expect(manifest).toMatchObject({ name: "itsuki", version: "0.6.0" });
 		expect(manifest.userConfig).toMatchObject({
 			node_executable: { type: "file", required: true },
 			itsuki_api_key: { type: "string", sensitive: true, required: true },
@@ -81,7 +81,7 @@ describe("Claude hook installation contract", () => {
 
 		const mutations = [
 			["legacy root MCP config", (value) => { value.legacyMcpPresent = true; }],
-			["plugin version", ({ manifest: value }) => { value.version = "0.5.1"; }],
+			["plugin version", ({ manifest: value }) => { value.version = "0.6.1"; }],
 			["key type", ({ manifest: value }) => { value.userConfig.itsuki_api_key.type = "file"; }],
 			["key sensitivity", ({ manifest: value }) => { value.userConfig.itsuki_api_key.sensitive = false; }],
 			["node type", ({ manifest: value }) => { value.userConfig.node_executable.type = "string"; }],

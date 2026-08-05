@@ -1,6 +1,14 @@
 import { newId } from "../lib/ids.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import {
+	canonicalizeSourceEvent,
+	normalizeSourceEventTrace,
+	neutralizeReservedSourcePrefix,
+	sourceEventFromMessage,
+	sourceEventIdFromServerSeed,
+	sourceEventTraceFromMessages,
+} from "../lib/source_event.mjs";
 
 const PREVIEW_LIMIT = 900;
 const SNIPPET_LIMIT = 900;
@@ -21,6 +29,10 @@ function record(value) {
 	return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function own(value, key) {
+	return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function parseRecord(value) {
 	if (typeof value !== "string" || !value.trim()) return {};
 	try {
@@ -28,6 +40,21 @@ function parseRecord(value) {
 	} catch {
 		return {};
 	}
+}
+
+function deliveryContentIdentity(delivery) {
+	if (!delivery) return null;
+	// Capture evidence describes one bounded local scan, not the semantic
+	// contents or ordered position of this packet. A retry may observe different
+	// counters while carrying the exact same messages; keep that telemetry on the
+	// packet/receipt without turning it into an idempotency conflict.
+	const {
+		captureEvidence: _captureEvidence,
+		captureTruncated: _captureTruncated,
+		truncationReason: _truncationReason,
+		...identity
+	} = delivery;
+	return identity;
 }
 
 function firstKey(records, keys, fallback = null) {
@@ -220,25 +247,89 @@ export async function stableSourceMessageId(namespace, role, content) {
 	return `msg_${hash.slice(0, 24)}`;
 }
 
-export async function normalizeMessages(messages = [], opts = {}) {
+async function normalizeMessageBatch(messages = [], opts = {}) {
 	const conversationId = opts.conversationId ?? opts.sessionId ?? opts.namespace ?? "source";
-	const out = [];
+	const prepared = [];
+	let droppedSourceEvents = 0;
 	for (const raw of messages ?? []) {
 		const role = safeRole(typeof raw === "string" ? "user" : raw?.role);
 		const content = typeof raw === "string" ? raw : raw?.content;
-		const text = String(content ?? "").trim();
+		const sourceEvent = sourceEventFromMessage(raw);
+		const text = neutralizeReservedSourcePrefix(
+			String(content ?? "").trim(),
+			Boolean(sourceEvent.event),
+		);
 		if (!text) continue;
+		if (sourceEvent.provided && !sourceEvent.event) droppedSourceEvents += 1;
 		const contentHash = await hashText(text);
 		const id = raw?.id ?? await stableSourceMessageId(conversationId, role, text);
-		out.push({
+		prepared.push({
 			id,
 			role,
 			content: text,
 			ts: numberOrNow(raw?.ts),
 			content_hash: contentHash,
+			_raw_source_event: sourceEvent.event,
 		});
 	}
-	return out;
+
+	// Caller IDs are used only transiently to link events inside this accepted
+	// batch. Persisted IDs derive from the stable message identity, never from a
+	// caller event ID or from the message's batch-local position. This keeps IDs
+	// stable as a transcript tail moves, distinguishes repeated outcomes carried
+	// by different messages, and prevents dictionary recovery of a low-entropy
+	// caller event ID from its stored opaque replacement.
+	const rawIdCounts = new Map();
+	for (const message of prepared) {
+		const rawId = message._raw_source_event?.event_id;
+		if (rawId) rawIdCounts.set(rawId, (rawIdCounts.get(rawId) ?? 0) + 1);
+	}
+	const canonicalByRawId = new Map();
+	const eventSeeds = prepared.map((message) => (
+		`itsuki.source-event-message/v1\0${conversationId}\0${String(message.id)}\0${message.role}\0${message.content_hash}`
+	));
+	const canonicalByIndex = await Promise.all(prepared.map(async (message, index) => {
+		const event = message._raw_source_event;
+		if (!event) return null;
+		const canonical = await canonicalizeSourceEvent(event, {
+			eventIdSeed: eventSeeds[index],
+		});
+		if (canonical && rawIdCounts.get(event.event_id) === 1) {
+			canonicalByRawId.set(event.event_id, canonical.event_id);
+		}
+		return canonical;
+	}));
+	// An absent parent cannot be safely assigned a cross-message identity without
+	// either persisting or deterministically hashing its caller-controlled ID.
+	// Give the child a stable, opaque parent slot derived from that child's safe
+	// message namespace instead. When the parent event is present and unique in
+	// this batch, the exact canonical parent ID below is used instead.
+	const orphanParentByIndex = await Promise.all(prepared.map(async (message, index) => {
+		const parent = message._raw_source_event?.parent_event_id;
+		if (!parent || rawIdCounts.has(parent)) return null;
+		return sourceEventIdFromServerSeed(`itsuki.source-event-parent-for-message/v1\0${eventSeeds[index]}`);
+	}));
+	const out = prepared.map((message, index) => {
+		const { _raw_source_event: rawEvent, ...safe } = message;
+		const canonical = canonicalByIndex[index];
+		if (!canonical) return safe;
+		const rawParent = rawEvent?.parent_event_id;
+		const parent = rawParent && rawIdCounts.get(rawParent) !== 1
+			? (rawIdCounts.has(rawParent) ? null : orphanParentByIndex[index])
+			: canonicalByRawId.get(rawParent);
+		return {
+			...safe,
+			source_event: {
+				...canonical,
+				...(parent ? { parent_event_id: parent } : {}),
+			},
+		};
+	});
+	return { messages: out, droppedSourceEvents };
+}
+
+export async function normalizeMessages(messages = [], opts = {}) {
+	return (await normalizeMessageBatch(messages, opts)).messages;
 }
 
 export async function normalizeSourcePacket(userId, input = {}) {
@@ -265,10 +356,22 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const sourceRole = cleanKey(input.sourceRole ?? input.role, null);
 	const topic = cleanKey(input.topic ?? scope.topic, null);
 	const delivery = normalizeDeliveryMetadata(input.delivery);
-	const messages = await normalizeMessages(
-		input.messages ?? (input.content ? [{ id: input.messageId, role: input.role ?? "user", content: input.content, ts: input.ts }] : []),
+	const singleMessage = input.content ? [{
+		id: input.messageId,
+		role: input.role ?? "user",
+		content: input.content,
+		ts: input.ts,
+		...(own(input, "source_event") ? { source_event: input.source_event } : {}),
+		...(own(input, "sourceEvent") ? { sourceEvent: input.sourceEvent } : {}),
+	}] : [];
+	const normalizedMessages = await normalizeMessageBatch(
+		input.messages ?? singleMessage,
 		{ conversationId: conversationId ?? sessionId, sessionId },
 	);
+	const messages = normalizedMessages.messages;
+	const sourceEventTrace = sourceEventTraceFromMessages(messages, {
+		droppedEvents: normalizedMessages.droppedSourceEvents,
+	});
 	// Keep the pre-project global hash byte-for-byte stable across this deploy.
 	// Project identity participates, but project_name is display-only and must
 	// never turn a rename into a second write of identical content.
@@ -276,6 +379,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const hashScope = hashProjectId
 		? { ...legacyHashScope, project_id: hashProjectId }
 		: legacyHashScope;
+	const deliveryIdentity = deliveryContentIdentity(delivery);
 	const hashPayload = {
 		sourceType,
 		sourceMode,
@@ -283,11 +387,12 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		threadId,
 		topic,
 		scope: hashScope,
-		...(delivery ? { delivery } : {}),
+		...(deliveryIdentity ? { delivery: deliveryIdentity } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
 			content_hash: m.content_hash,
+			...(m.source_event ? { source_event: m.source_event } : {}),
 		})),
 	};
 	const contentHash = await hashText(JSON.stringify(hashPayload));
@@ -316,7 +421,9 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			ts: m.ts,
 			content_hash: m.content_hash,
 			snippet: clamp(m.content, 240),
+			...(m.source_event ? { source_event: m.source_event } : {}),
 		})),
+		...(sourceEventTrace ? { source_event_trace: sourceEventTrace } : {}),
 	};
 
 	return {
@@ -477,6 +584,27 @@ export function sourceMeta(sourcePacket) {
 	if (!sourcePacket) return {};
 	const delivery = sourceDelivery(sourcePacket);
 	const rawMeta = parseRecord(sourcePacket.raw_meta_json ?? sourcePacket.rawMetaJson);
+	const storedSourceEventTrace = normalizeSourceEventTrace(
+		rawMeta.source_event_trace ?? rawMeta.sourceEventTrace,
+	);
+	const provenanceMessages = Array.isArray(rawMeta.messages)
+		? rawMeta.messages
+		: Array.isArray(sourcePacket.messages)
+			? sourcePacket.messages
+			: null;
+	let sourceEventTrace = null;
+	if (provenanceMessages) {
+		const recomputed = sourceEventTraceFromMessages(provenanceMessages, {
+			droppedEvents: storedSourceEventTrace?.dropped_events ?? 0,
+		});
+		// The per-message canonical events are the evidence. A mismatched stored
+		// aggregate cannot manufacture provenance; rebuild from those events and
+		// discard its unprovable dropped count instead.
+		sourceEventTrace = storedSourceEventTrace
+			&& JSON.stringify(recomputed) !== JSON.stringify(storedSourceEventTrace)
+			? sourceEventTraceFromMessages(provenanceMessages)
+			: recomputed;
+	}
 	const storedSessionMarker = firstBoolean(
 		[sourcePacket, rawMeta],
 		["session_id_explicit", "sessionIdExplicit"],
@@ -518,6 +646,7 @@ export function sourceMeta(sourcePacket) {
 		project_id: sourcePacket.project_id ?? null,
 		project_name: sourcePacket.project_name ?? null,
 		delivery,
+		...(sourceEventTrace ? { source_event_trace: sourceEventTrace } : {}),
 	};
 }
 

@@ -18,7 +18,12 @@
  */
 
 import { runAi } from "../lib/ai_meter.js";
-import { responseText, extractJson } from "./llm.js";
+import {
+	STRUCTURED_SOURCE_EVENT_ADDENDUM,
+	extractJson,
+	hasStructuredSourceEvent,
+	responseText,
+} from "./llm.js";
 import { normalizeLabel } from "../lib/text.js";
 import { canonicalizeCategory } from "./gates.js";
 
@@ -168,6 +173,12 @@ function messagesBlock(packet) {
 	return JSON.stringify(packet.new_slice ?? [], null, 1);
 }
 
+function secondarySystemPrompt(base, packet, overrides) {
+	return overrides?.profile === "plugin" || hasStructuredSourceEvent(packet)
+		? base + STRUCTURED_SOURCE_EVENT_ADDENDUM
+		: base;
+}
+
 const EDGE_SYSTEM_PROMPT = `You extract RELATIONSHIPS between known entities from a user's chat messages. Entities are given as a numbered list; you may ONLY reference entities by their list number. Never invent a number that is not on the list.
 
 Reply with EXACTLY ONE JSON object, nothing else:
@@ -265,7 +276,7 @@ export async function proposeEdges(env, config, packet, entities, overrides = {}
 			config.llm.model,
 			{
 				messages: [
-					{ role: "system", content: EDGE_SYSTEM_PROMPT },
+					{ role: "system", content: secondarySystemPrompt(EDGE_SYSTEM_PROMPT, packet, overrides) },
 					{
 						role: "user",
 						content: `ENTITIES:\n${entityListLines(entities)}\n\nMESSAGES:\n${messagesBlock(packet)}${noThink(config)}`,
@@ -417,7 +428,7 @@ export async function proposeReflexion(env, config, packet, entities, foundSumma
 			config.llm.model,
 			{
 				messages: [
-					{ role: "system", content: REFLEXION_SYSTEM_PROMPT },
+					{ role: "system", content: secondarySystemPrompt(REFLEXION_SYSTEM_PROMPT, packet, overrides) },
 					{
 						role: "user",
 						content:

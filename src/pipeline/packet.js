@@ -1,3 +1,8 @@
+import {
+	neutralizeReservedSourcePrefix,
+	normalizePersistedSourceEvent,
+} from "../lib/source_event.mjs";
+
 /**
  * Build the extraction packet handed to the model. Three clearly separated parts:
  *
@@ -13,7 +18,15 @@ const ASSISTANT_LIMIT = 5;
 export function buildPacket(chunk, recent = []) {
 	const chunkIds = new Set(chunk.map((m) => m.id));
 
-	const newSlice = chunk.map((m) => ({ id: m.id, content: m.content, ts: m.ts }));
+	const newSlice = chunk.map((m) => {
+		const sourceEvent = normalizePersistedSourceEvent(m.source_event ?? m.sourceEvent);
+		return {
+			id: m.id,
+			content: neutralizeReservedSourcePrefix(m.content, Boolean(sourceEvent)),
+			ts: m.ts,
+			...(sourceEvent ? { source_event: sourceEvent } : {}),
+		};
+	});
 
 	const bridgeContext = recent
 		.filter((m) => m.role === "user" && !chunkIds.has(m.id))

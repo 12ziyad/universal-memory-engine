@@ -20,12 +20,18 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function captureHookRequest(script, payload, env = {}) {
+	const temp = await mkdtemp(join(tmpdir(), "itsuki-project-hook-request-"));
+	const configRoot = join(temp, "claude-config");
+	const pluginData = join(configRoot, "plugins", "data", "itsuki");
+	await mkdir(pluginData, { recursive: true });
 	let resolveRequest;
+	let receivedBody = null;
 	const requestReceived = new Promise((resolve) => { resolveRequest = resolve; });
 	const server = createServer(async (request, response) => {
 		const chunks = [];
 		for await (const chunk of request) chunks.push(chunk);
-		resolveRequest(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+		receivedBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+		resolveRequest(receivedBody);
 		response.writeHead(200, { "content-type": "application/json" });
 		response.end(JSON.stringify({ context: "" }));
 	});
@@ -33,27 +39,43 @@ async function captureHookRequest(script, payload, env = {}) {
 	await once(server, "listening");
 	const { port } = server.address();
 
-	const child = spawn(process.execPath, [
-		join(ROOT, "hooks", script),
-		"--service-url-for-test", `http://127.0.0.1:${port}`,
-	], {
-		cwd: ROOT,
-		env: {
-			...process.env,
-			CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY: "itsuki_live_synthetic_test",
-			ITSUKI_API_KEY: "",
-			ITSUKI_BASE_URL: `http://127.0.0.1:${port}`,
-			ITSUKI_PROJECT_ID: "",
-			CLAUDE_PROJECT_DIR: "",
-			...env,
-		},
-		stdio: ["pipe", "pipe", "pipe"],
-	});
-	child.stdin.end(JSON.stringify(payload));
-	const [code] = await once(child, "exit");
-	const body = await requestReceived;
-	await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-	return { body, code };
+	try {
+		const child = spawn(process.execPath, [
+			join(ROOT, "hooks", script),
+			"--service-url-for-test", `http://127.0.0.1:${port}`,
+		], {
+			cwd: ROOT,
+			env: {
+				...process.env,
+				CLAUDE_PLUGIN_OPTION_ITSUKI_API_KEY: "itsuki_live_synthetic_test",
+				CLAUDE_PLUGIN_DATA: pluginData,
+				CLAUDE_CONFIG_DIR: configRoot,
+				ITSUKI_API_KEY: "",
+				ITSUKI_BASE_URL: `http://127.0.0.1:${port}`,
+				ITSUKI_PROJECT_ID: "",
+				CLAUDE_PROJECT_DIR: "",
+				...env,
+			},
+			stdio: ["pipe", "pipe", "pipe"],
+			windowsHide: true,
+		});
+		child.stdin.end(JSON.stringify({
+			source: "startup",
+			session_id: "project-identity-hook-request",
+			...payload,
+		}));
+		const [code] = await once(child, "exit");
+		if (!receivedBody) {
+			await Promise.race([
+				requestReceived,
+				new Promise((_, reject) => setTimeout(() => reject(new Error("hook exited without a recall request")), 100)),
+			]);
+		}
+		return { body: receivedBody, code };
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		await rm(temp, { recursive: true, force: true });
+	}
 }
 
 describe("Claude hook project identity", () => {
@@ -167,7 +189,7 @@ describe("Claude hook project identity", () => {
 			type: "user",
 			uuid: "synthetic-event-id",
 			timestamp: "2026-08-05T00:00:00.000Z",
-			message: { content: "synthetic project decision" },
+			message: { content: "I decided to keep the synthetic project boundary." },
 		})}\n`, "utf8");
 
 		try {

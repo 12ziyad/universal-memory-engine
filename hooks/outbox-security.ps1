@@ -35,17 +35,24 @@ function New-FileAcl([System.Security.Principal.SecurityIdentifier[]]$Allowed) {
 	return $acl
 }
 
-function Assert-Acl([string]$Target, [string[]]$AllowedSids, [string]$RequiredOwner, [bool]$Directory) {
+function Assert-Acl(
+	[string]$Target,
+	[string[]]$AllowedSids,
+	[string]$RequiredOwner,
+	[bool]$Directory,
+	[bool]$AllowInherited = $false
+) {
 	$acl = Get-Acl -LiteralPath $Target
-	if (-not $acl.AreAccessRulesProtected) { throw "ACL inheritance is still enabled" }
+	if (-not $AllowInherited -and -not $acl.AreAccessRulesProtected) { throw "ACL inheritance is still enabled" }
 	$ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
 	if ($ownerSid -ne $RequiredOwner) { throw "ACL owner is not the current user" }
 	$seen = New-Object System.Collections.Generic.HashSet[string]
-	$rules = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))
+	$rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 	if ($rules.Count -ne $AllowedSids.Count) { throw "ACL rule count is not exact" }
+	$expectedInherited = $AllowInherited -and -not $acl.AreAccessRulesProtected
 	foreach ($rule in $rules) {
 		$sid = $rule.IdentityReference.Value
-		if ($rule.IsInherited) { throw "An inherited ACL entry remains" }
+		if ($rule.IsInherited -ne $expectedInherited) { throw "ACL inheritance is inconsistent" }
 		if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { throw "A non-Allow ACL entry remains" }
 		if ($AllowedSids -notcontains $sid) { throw "An unexpected ACL principal remains" }
 		if ($rule.FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { throw "An ACL entry is not FullControl" }
@@ -106,6 +113,12 @@ try {
 	$directories += $lockDirectories
 	$items = @($directories)
 	$activeFiles = @()
+	$guardFiles = @()
+	$guardPath = Join-Path (Join-Path $v1 "control") "recall-echo.json"
+	if (Test-Path -LiteralPath $guardPath -PathType Leaf) {
+		$guardFiles = @((Get-Item -LiteralPath $guardPath -Force))
+		$items += $guardFiles
+	}
 	if ($Mode -eq "EnsureAll") {
 		# Accepted completion tombstones contain no transcript body and may grow
 		# throughout the seven-day retention window. Verify only active/sensitive
@@ -131,19 +144,33 @@ try {
 	}
 	# All shape and bound checks finish before the first ACL mutation. Only the
 	# dedicated v1 root and its known children are ever touched.
+	$guardTrusted = $true
 	foreach ($item in $items) {
 		if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Outbox contains a reparse point" }
 		if ($item.PSIsContainer) {
-			try { Assert-Acl $item.FullName $allowedText $current.Value $true }
-			catch { Set-Acl -LiteralPath $item.FullName -AclObject (New-DirectoryAcl $allowed) }
-		} elseif ($Mode -eq "EnsureAll") {
-			try { Assert-Acl $item.FullName $allowedText $current.Value $false }
-			catch { Set-Acl -LiteralPath $item.FullName -AclObject (New-FileAcl $allowed) }
+			$allowInherited = $item.FullName -ne $v1
+			$repaired = $false
+			try { Assert-Acl $item.FullName $allowedText $current.Value $true $allowInherited }
+			catch {
+				Set-Acl -LiteralPath $item.FullName -AclObject (New-DirectoryAcl $allowed)
+				$repaired = $true
+			}
+			if ($repaired -and ($item.FullName -eq $v1 -or $item.Name -eq "control")) { $guardTrusted = $false }
+			if ($repaired) { Assert-Acl $item.FullName $allowedText $current.Value $true $allowInherited }
+		} elseif ($Mode -eq "EnsureAll" -or $item.Name -eq "recall-echo.json") {
+			$repaired = $false
+			$allowGuardInherited = $Mode -eq "EnsureDirectories" -and $item.Name -eq "recall-echo.json"
+			try { Assert-Acl $item.FullName $allowedText $current.Value $false $allowGuardInherited }
+			catch {
+				Set-Acl -LiteralPath $item.FullName -AclObject (New-FileAcl $allowed)
+				$repaired = $true
+			}
+			if ($repaired -and $item.Name -eq "recall-echo.json") { $guardTrusted = $false }
+			if ($repaired) { Assert-Acl $item.FullName $allowedText $current.Value $false }
 		}
 	}
 
-	foreach ($item in $items) { Assert-Acl $item.FullName $allowedText $current.Value $item.PSIsContainer }
-	@{ ok = $true; protected = $true; principals = 3; directories = $directories.Count; files = $activeFiles.Count } | ConvertTo-Json -Compress
+	@{ ok = $true; protected = $true; principals = 3; directories = $directories.Count; files = $activeFiles.Count; guard_trusted = $guardTrusted } | ConvertTo-Json -Compress
 	exit 0
 } catch {
 	[Console]::Error.WriteLine("Itsuki outbox ACL verification failed.")

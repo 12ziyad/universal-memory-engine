@@ -12,6 +12,7 @@ export default defineConfig({
 		include: [
 			"test/ingest_contract.spec.js",
 			"test/hook_batching.spec.js",
+			"test/claude_capture.spec.js",
 			"test/claude_transcript.spec.js",
 			"test/claude_transcript_tail.spec.js",
 			"test/doctor.spec.js",

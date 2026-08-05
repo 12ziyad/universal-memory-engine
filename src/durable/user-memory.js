@@ -24,13 +24,21 @@ import { DurableObject } from "cloudflare:workers";
 import { classifyMessage, shouldFire, meaningfulCount } from "../pipeline/trigger.js";
 import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
 import { announceMcpTerminal, enrichMcpConversation, markMcpEnrichmentFailed } from "../pipeline/mcp_engine.js";
-import { formatReceipt, normalizeContextTrace } from "../pipeline/receipt.js";
+import {
+	formatReceipt,
+	normalizeContextTrace,
+	normalizeSourceEventTrace,
+} from "../pipeline/receipt.js";
 import { runExport as runExportJob } from "../pipeline/exports.js";
 import { storeReceipt, settleMemoryJobs } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
 import { settleStagedText } from "../pipeline/staged_text.js";
 import { sourceContextIdentity, sourceMeta } from "../pipeline/source.js";
+import {
+	neutralizeReservedSourcePrefix,
+	persistedSourceEventFromMessage,
+} from "../lib/source_event.mjs";
 import { DIALS } from "../config.js";
 
 const RECENT_LIMIT = 20;
@@ -374,6 +382,9 @@ function persistableOverrides(value) {
 function compactTerminalReceipt(receipt, id) {
 	if (!receipt || typeof receipt !== "object") return null;
 	const contextTrace = normalizeContextTrace(receipt.context_trace ?? receipt.contextTrace);
+	const sourceEventTrace = normalizeSourceEventTrace(
+		receipt.source_event_trace ?? receipt.sourceEventTrace,
+	);
 	const saved = receipt.saved && typeof receipt.saved === "object"
 		? Object.fromEntries(
 			["pages", "nodes", "slices", "events", "edges", "candidates", "updatedNodes", "supersededSlices"]
@@ -405,6 +416,7 @@ function compactTerminalReceipt(receipt, id) {
 		ai_output_tokens: Number.isFinite(receipt.ai_output_tokens) ? receipt.ai_output_tokens : null,
 		ai_neurons: Number.isFinite(receipt.ai_neurons) ? receipt.ai_neurons : null,
 		...(contextTrace ? { context_trace: contextTrace } : {}),
+		...(sourceEventTrace ? { source_event_trace: sourceEventTrace } : {}),
 	};
 	return compact;
 }
@@ -1245,17 +1257,26 @@ export class UserMemory extends DurableObject {
 
 			for (const msg of messages ?? []) {
 				if (!msg || !msg.id) continue;
+				const sourceEvent = persistedSourceEventFromMessage(msg);
+				const content = neutralizeReservedSourcePrefix(
+					msg.content ?? "",
+					Boolean(sourceEvent.event),
+				);
+				const dedupeMessage = content === (msg.content ?? "")
+					? msg
+					: { ...msg, content, content_hash: null };
 				const { contentHash, identity: dedupeIdentity } = await messageDedupeIdentity(
 					requestedContextKey,
 					persistedOverrides ?? {},
-					msg,
+					dedupeMessage,
 				);
 				const norm = {
 					id: msg.id,
 					role: msg.role ?? "user",
-					content: msg.content ?? "",
+					content,
 					ts: msg.ts ?? Date.now(),
 					content_hash: contentHash,
+					...(sourceEvent.event ? { source_event: sourceEvent.event } : {}),
 					_dedupe: dedupeIdentity,
 				};
 				recent.push(norm);

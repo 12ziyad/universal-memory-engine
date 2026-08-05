@@ -28,6 +28,7 @@ import {
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { scrubMessages } from "./scrub.js";
 import { activeJobDepth, claimIngestMemoryJob } from "../lib/db.js";
+import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { stageMemoryText } from "./staged_text.js";
 
@@ -133,6 +134,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// not stored, but its audit receipt must still say which project door saw it.
 	const memoryScope = canonicalMemoryScope(opts.memoryScope ?? overrides.meta);
 	const projectScope = normalizeProjectScope(memoryScope);
+	const delivery = normalizeDeliveryMetadata(opts.delivery);
 	// Secrets are stripped BEFORE anything durable sees the text: the source
 	// packet row, the Durable Object's held chunk, the model, the vectors.
 	const scrubbed = scrubMessages(rawMessages);
@@ -152,6 +154,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			source_mode: sourceMode,
 			project_id: projectScope.projectId,
 			project_name: projectScope.projectName,
+			delivery,
 			received,
 			skipped: received || 1,
 			opt_out_phrase: optOut.phrase,
@@ -176,7 +179,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		threadId: opts.threadId,
 		sourceId: opts.sourceId,
 		idempotencyKey: opts.idempotencyKey,
-		delivery: opts.delivery,
+		delivery,
 		scope: memoryScope,
 	});
 

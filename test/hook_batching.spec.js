@@ -20,7 +20,12 @@ import {
 	drainOutbox,
 	enqueueSession,
 } from "../hooks/outbox.mjs";
-import { INGEST_LIMITS, unicodeLength, utf8Length } from "../src/lib/ingest_contract.mjs";
+import {
+	INGEST_CAPTURE_EVIDENCE_SCHEMA,
+	INGEST_LIMITS,
+	unicodeLength,
+	utf8Length,
+} from "../src/lib/ingest_contract.mjs";
 
 const API_KEY = "itsuki_live_stage4_batching_test_key";
 const ROTATED_API_KEY = "itsuki_live_stage4_batching_rotated_key";
@@ -179,6 +184,42 @@ function sha256(value) {
 	return createHash("sha256").update(String(value), "utf8").digest("hex");
 }
 
+async function rewriteOnlyStageAsLegacyV1(data, capture = {
+	captureTruncated: false,
+	truncationReason: null,
+}) {
+	const [name] = await jsonFiles(join(data.outbox, "staged"));
+	const path = join(data.outbox, "staged", name);
+	const current = JSON.parse(await readFile(path, "utf8"));
+	const messages = current.messages.map(({ source_event: _sourceEvent, ...message }) => message);
+	const digest = sha256(canonicalJson({
+		schema: "itsuki.outbox-staged-group/v1",
+		sessionHash: current.session_hash,
+		conversationId: current.conversation_id,
+		memoryScope: current.memory_scope,
+		capture,
+		messages: messages.map((message) => ({
+			id: message.id,
+			role: message.role,
+			ts: message.ts ?? null,
+			content_sha256: sha256(message.content),
+		})),
+	}));
+	const queueId = `q_${sha256(`${digest}\0${current.credential_fingerprint ?? "unbound"}`).slice(0, 40)}`;
+	const legacy = {
+		...current,
+		schema: "itsuki.outbox-staged-group/v1",
+		queue_id: queueId,
+		content_digest: digest,
+		capture,
+		messages,
+	};
+	const legacyPath = join(data.outbox, "staged", `${queueId}.json`);
+	await writeFile(legacyPath, canonicalJson(legacy), { encoding: "utf8", mode: 0o600 });
+	if (legacyPath !== path) await unlink(path);
+	return { queueId, value: legacy };
+}
+
 function expectOptionalNumericCount(result, names, expected) {
 	for (const name of names) {
 		if (Object.prototype.hasOwnProperty.call(result, name)) expect(result[name]).toBe(expected);
@@ -222,6 +263,250 @@ describe("ordered Claude outbox batching", () => {
 		const replay = await enqueue(data, messages, { deferMaterialization: true, now: () => FIXED_NOW + 60_000 });
 		expect(replay).toMatchObject({ duplicate: true, batchCount: 3, acceptedBatches: 3, staged: false });
 		expect(await jsonFiles(join(data.outbox, "staged"))).toEqual([]);
+	});
+
+	it("preserves only canonical content-free source-event provenance", async () => {
+		const data = await fixture();
+		const forbidden = "RAW_COMMAND_DIFF_REASONING_MUST_NOT_REACH_THE_OUTBOX";
+		const canonical = {
+			schema: "itsuki.source-event/v1",
+			kind: "test_result",
+			event_id: "claude_event_v1_test_7",
+			parent_event_id: "claude_event_v1_call_6",
+			tool_name: "Bash",
+			outcome: "success",
+			exit_code: 0,
+			sequence: 7,
+			truncated: false,
+		};
+		const messages = [
+			{
+				id: "stage6-event-valid",
+				role: "user",
+				content: "[Claude coding event/v1]\nTest result: 42 tests passed.",
+				ts: FIXED_NOW,
+				sourceEvent: {
+					...canonical,
+					command: forbidden,
+					diff: forbidden,
+					reasoning: forbidden,
+					output: forbidden,
+				},
+			},
+			{
+				id: "stage6-event-invalid",
+				role: "user",
+				content: "[Claude coding event/v1]\nMalformed provenance is optional metadata.",
+				ts: FIXED_NOW + 1,
+				source_event: { ...canonical, event_id: "bad id with spaces", output: forbidden },
+			},
+		];
+
+		await enqueue(data, messages, { sessionId: "stage6-source-event" });
+		const entries = await envelopesIn(data);
+		expect(entries).toHaveLength(1);
+		const wireMessages = entries[0].value.request.body.messages;
+		expect(wireMessages[0].source_event).toEqual(canonical);
+		expect(wireMessages[1]).not.toHaveProperty("source_event");
+		expect(JSON.stringify(entries[0].value)).not.toContain(forbidden);
+
+		const replay = await enqueue(data, [
+			{ ...messages[0], sourceEvent: undefined, source_event: canonical },
+			messages[1],
+		], { sessionId: "stage6-source-event", now: () => FIXED_NOW + 1_000 });
+		expect(replay.duplicate).toBe(true);
+		expect(await envelopesIn(data)).toHaveLength(1);
+	});
+
+	it("carries bounded capture evidence from a staged snapshot onto wire delivery", async () => {
+		const data = await fixture();
+		const forbidden = "RAW_CAPTURE_METADATA_MUST_NOT_REACH_DELIVERY";
+		const captureMetadata = {
+			returnedEvents: 10,
+			scannedBytes: 4_096,
+			oversizedLines: 1,
+			malformedLines: 2,
+			ineligibleLines: 3,
+			emptyLines: 4,
+			scanTruncated: true,
+			truncationReason: "max_bytes",
+			capture: {
+				schema: "itsuki.claude-capture/v1",
+				inputRows: 10,
+				malformedRows: 0,
+				ineligibleRows: 1,
+				capturedEvents: 6,
+				returnedEvents: 5,
+				omittedEvents: 1,
+				ignoredThinkingBlocks: 2,
+				ignoredMetaRows: 1,
+				ignoredToolEvents: 3,
+				ignoredRecallEvents: 1,
+				ignoredRecallEchoEvents: 1,
+				ignoredUnprotectedAssistantEvents: 1,
+				ignoredNoiseEvents: 2,
+				truncatedEvents: 1,
+				redactions: { api_key: 2, named_secret: 1, [forbidden]: forbidden },
+				rawCommand: forbidden,
+			},
+		};
+		const expectedEvidence = {
+			schema: INGEST_CAPTURE_EVIDENCE_SCHEMA,
+			inputRows: 10,
+			capturedEvents: 6,
+			returnedEvents: 5,
+			omittedEvents: 1,
+			malformedRows: 0,
+			ineligibleRows: 1,
+			ignoredThinkingBlocks: 2,
+			ignoredMetaRows: 1,
+			ignoredToolEvents: 3,
+			ignoredRecallEvents: 1,
+			ignoredRecallEchoEvents: 1,
+			ignoredUnprotectedAssistantEvents: 1,
+			ignoredNoiseEvents: 2,
+			ambiguousOutcomeRows: 0,
+			companionLimitRejectedOutcomeRows: 0,
+			closureEventLimitRejectedOutcomeRows: 0,
+			truncatedEvents: 1,
+			redactions: { api_key: 2, named_secret: 1 },
+			tailReturnedRecords: 10,
+			tailScannedBytes: 4_096,
+			tailOversizedLines: 1,
+			tailMalformedLines: 2,
+			tailIneligibleLines: 3,
+			tailEmptyLines: 4,
+		};
+
+		await enqueue(data, [fixedSizeMessages(1, 80)[0]], {
+			sessionId: "stage6-capture-evidence",
+			deferMaterialization: true,
+			captureMetadata,
+		});
+		const stagedFiles = await jsonFiles(join(data.outbox, "staged"));
+		const staged = JSON.parse(await readFile(join(data.outbox, "staged", stagedFiles[0]), "utf8"));
+		expect(staged.capture.captureEvidence).toEqual(expectedEvidence);
+		expect(JSON.stringify(staged.capture)).not.toContain(forbidden);
+
+		let wireDelivery;
+		await drain(data, {
+			fetchFn: async (_url, init) => {
+				const body = JSON.parse(init.body);
+				wireDelivery = body.delivery;
+				return acceptedResponse(body.delivery.batchIndex);
+			},
+		});
+		expect(wireDelivery.captureEvidence).toEqual(expectedEvidence);
+		expect(JSON.stringify(wireDelivery)).not.toContain(forbidden);
+		const done = await envelopesIn(data, "done");
+		expect(done[0].value.delivery.captureEvidence).toEqual(expectedEvidence);
+	});
+
+	it("keeps semantic queue identity stable when only volatile capture evidence changes", async () => {
+		const data = await fixture();
+		const messages = [fixedSizeMessages(1, 80)[0]];
+		const captureMetadata = (scannedBytes, ignoredNoiseEvents) => ({
+			scannedBytes,
+			capture: {
+				schema: "itsuki.claude-capture/v1",
+				inputRows: 8,
+				capturedEvents: 1,
+				returnedEvents: 1,
+				ignoredNoiseEvents,
+			},
+		});
+		const first = await enqueue(data, messages, {
+			sessionId: "stage6-immutable-first-evidence",
+			deferMaterialization: true,
+			captureMetadata: captureMetadata(1_024, 1),
+		});
+		const second = await enqueue(data, messages, {
+			sessionId: "stage6-immutable-first-evidence",
+			deferMaterialization: true,
+			captureMetadata: captureMetadata(8_192, 7),
+			now: () => FIXED_NOW + 1_000,
+		});
+
+		expect(second).toMatchObject({ duplicate: true, queueId: first.queueId });
+		const stagedFiles = await jsonFiles(join(data.outbox, "staged"));
+		expect(stagedFiles).toHaveLength(1);
+		const staged = JSON.parse(await readFile(join(data.outbox, "staged", stagedFiles[0]), "utf8"));
+		expect(staged.capture.captureEvidence).toMatchObject({
+			tailScannedBytes: 1_024,
+			ignoredNoiseEvents: 1,
+		});
+	});
+
+	it("reuses a protected v1 stage when upgraded capture counters drift", async () => {
+		const data = await fixture();
+		const messages = [fixedSizeMessages(1, 80)[0]];
+		await enqueue(data, messages, {
+			sessionId: "stage6-v1-staged-replay",
+			deferMaterialization: true,
+		});
+		const legacy = await rewriteOnlyStageAsLegacyV1(data);
+
+		const replay = await enqueue(data, messages, {
+			sessionId: "stage6-v1-staged-replay",
+			deferMaterialization: true,
+			captureMetadata: {
+				scannedBytes: 8_192,
+				capture: {
+					schema: "itsuki.claude-capture/v1",
+					inputRows: 1,
+					capturedEvents: 1,
+					returnedEvents: 1,
+					ignoredNoiseEvents: 1,
+				},
+			},
+			now: () => FIXED_NOW + 1_000,
+		});
+
+		expect(replay).toMatchObject({ duplicate: true, queueId: legacy.queueId, state: "staged" });
+		expect(await jsonFiles(join(data.outbox, "staged"))).toEqual([`${legacy.queueId}.json`]);
+		const persisted = JSON.parse(await readFile(
+			join(data.outbox, "staged", `${legacy.queueId}.json`),
+			"utf8",
+		));
+		expect(persisted.capture).toEqual({ captureTruncated: false, truncationReason: null });
+		expect(persisted.messages[0]).not.toHaveProperty("source_event");
+	});
+
+	it("finds a completed v1 plan from its immutable tombstone capture summary", async () => {
+		const data = await fixture();
+		const messages = [fixedSizeMessages(1, 80)[0]];
+		await enqueue(data, messages, {
+			sessionId: "stage6-v1-manifest-replay",
+			deferMaterialization: true,
+		});
+		const legacy = await rewriteOnlyStageAsLegacyV1(data);
+		const delivered = await drain(data);
+		expect(delivered).toMatchObject({ delivered: 1, completedDeliveryGroups: 1 });
+		expect(await jsonFiles(join(data.outbox, "staged"))).toEqual([]);
+
+		const replay = await enqueue(data, messages, {
+			sessionId: "stage6-v1-manifest-replay",
+			deferMaterialization: true,
+			captureMetadata: {
+				scannedBytes: 16_384,
+				capture: {
+					schema: "itsuki.claude-capture/v1",
+					inputRows: 1,
+					capturedEvents: 1,
+					returnedEvents: 1,
+				},
+			},
+			now: () => FIXED_NOW + 2_000,
+		});
+
+		expect(replay).toMatchObject({
+			duplicate: true,
+			queueId: legacy.queueId,
+			staged: false,
+			acceptedBatches: 1,
+		});
+		expect(await jsonFiles(join(data.outbox, "staged"))).toEqual([]);
+		expect(await jsonFiles(join(data.outbox, "groups"))).toEqual([`${legacy.queueId}.json`]);
 	});
 
 	it("re-stages an exact aggregate to repair a crash-left missing materialized batch", async () => {

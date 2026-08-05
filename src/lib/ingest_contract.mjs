@@ -14,6 +14,7 @@ export const INGEST_LIMITS = Object.freeze({
 });
 
 export const INGEST_DELIVERY_SCHEMA = "itsuki.ingest.delivery/v1";
+export const INGEST_CAPTURE_EVIDENCE_SCHEMA = "itsuki.capture-evidence/v1";
 export const INGEST_MESSAGE_ID_MAX_CHARACTERS = 200;
 
 const INGEST_MESSAGE_ROLES = new Set(["user", "assistant", "system", "tool"]);
@@ -41,7 +42,45 @@ const DELIVERY_KEYS = new Set([
 	"splitSourceMessages",
 	"captureTruncated",
 	"truncationReason",
+	"captureEvidence",
 ]);
+const CAPTURE_EVIDENCE_KEYS = new Set([
+	"schema",
+	"inputRows",
+	"capturedEvents",
+	"returnedEvents",
+	"omittedEvents",
+	"malformedRows",
+	"ineligibleRows",
+	"ignoredThinkingBlocks",
+	"ignoredMetaRows",
+	"ignoredToolEvents",
+	"ignoredRecallEvents",
+	"ignoredRecallEchoEvents",
+	"ignoredUnprotectedAssistantEvents",
+	"ignoredNoiseEvents",
+	"ambiguousOutcomeRows",
+	"companionLimitRejectedOutcomeRows",
+	"closureEventLimitRejectedOutcomeRows",
+	"truncatedEvents",
+	"redactions",
+	"tailReturnedRecords",
+	"tailScannedBytes",
+	"tailOversizedLines",
+	"tailMalformedLines",
+	"tailIneligibleLines",
+	"tailEmptyLines",
+]);
+const CAPTURE_REDACTION_KEYS = new Set([
+	"private_key",
+	"connection_credentials",
+	"query_secret",
+	"api_key",
+	"bearer_token",
+	"high_entropy",
+	"named_secret",
+]);
+const MAX_CAPTURE_EVIDENCE_COUNTER = 64 * 1024 * 1024;
 const DELIVERY_GROUP_ID = /^claude_delivery_v1_[a-f0-9]{40}$/;
 const TRUNCATION_REASON = /^[a-z_]{1,40}$/;
 const MAX_DELIVERY_BATCHES = 128;
@@ -61,6 +100,78 @@ export function utf8Length(value) {
 
 function nonnegativeSafeInteger(value) {
 	return Number.isSafeInteger(value) && value >= 0;
+}
+
+function boundedCaptureCounter(value) {
+	return nonnegativeSafeInteger(value) && value <= MAX_CAPTURE_EVIDENCE_COUNTER;
+}
+
+/**
+ * Validate the bounded, content-free capture evidence carried to receipts.
+ * Every key is fixed by the schema; arbitrary strings, labels, paths, commands,
+ * or raw transcript values cannot cross this metadata boundary.
+ */
+export function normalizeCaptureEvidence(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	if (Object.keys(value).length !== CAPTURE_EVIDENCE_KEYS.size) return null;
+	if (Object.keys(value).some((key) => !CAPTURE_EVIDENCE_KEYS.has(key))) return null;
+	if (value.schema !== INGEST_CAPTURE_EVIDENCE_SCHEMA) return null;
+	for (const key of CAPTURE_EVIDENCE_KEYS) {
+		if (key === "schema" || key === "redactions") continue;
+		if (!boundedCaptureCounter(value[key])) return null;
+	}
+	if (value.returnedEvents > value.capturedEvents) return null;
+	if (value.omittedEvents !== value.capturedEvents - value.returnedEvents) return null;
+	if (value.malformedRows > value.inputRows) return null;
+	// These counters are each incremented at most once per parsed input row, or
+	// describe a subset of those rows. Block/line-level counters such as thinking,
+	// tools, recall, and redactions may legitimately exceed the row count.
+	for (const key of [
+		"ineligibleRows",
+		"ignoredMetaRows",
+		"ignoredNoiseEvents",
+		"ambiguousOutcomeRows",
+		"companionLimitRejectedOutcomeRows",
+		"closureEventLimitRejectedOutcomeRows",
+		"tailReturnedRecords",
+		"tailIneligibleLines",
+	]) {
+		if (value[key] > value.inputRows) return null;
+	}
+	if (!value.redactions || typeof value.redactions !== "object" || Array.isArray(value.redactions)) return null;
+	if (Object.keys(value.redactions).some((key) => !CAPTURE_REDACTION_KEYS.has(key))) return null;
+	const redactions = {};
+	for (const [key, count] of Object.entries(value.redactions)) {
+		if (!boundedCaptureCounter(count) || count < 1) return null;
+		redactions[key] = count;
+	}
+	return {
+		schema: INGEST_CAPTURE_EVIDENCE_SCHEMA,
+		inputRows: value.inputRows,
+		capturedEvents: value.capturedEvents,
+		returnedEvents: value.returnedEvents,
+		omittedEvents: value.omittedEvents,
+		malformedRows: value.malformedRows,
+		ineligibleRows: value.ineligibleRows,
+		ignoredThinkingBlocks: value.ignoredThinkingBlocks,
+		ignoredMetaRows: value.ignoredMetaRows,
+		ignoredToolEvents: value.ignoredToolEvents,
+		ignoredRecallEvents: value.ignoredRecallEvents,
+		ignoredRecallEchoEvents: value.ignoredRecallEchoEvents,
+		ignoredUnprotectedAssistantEvents: value.ignoredUnprotectedAssistantEvents,
+		ignoredNoiseEvents: value.ignoredNoiseEvents,
+		ambiguousOutcomeRows: value.ambiguousOutcomeRows,
+		companionLimitRejectedOutcomeRows: value.companionLimitRejectedOutcomeRows,
+		closureEventLimitRejectedOutcomeRows: value.closureEventLimitRejectedOutcomeRows,
+		truncatedEvents: value.truncatedEvents,
+		redactions,
+		tailReturnedRecords: value.tailReturnedRecords,
+		tailScannedBytes: value.tailScannedBytes,
+		tailOversizedLines: value.tailOversizedLines,
+		tailMalformedLines: value.tailMalformedLines,
+		tailIneligibleLines: value.tailIneligibleLines,
+		tailEmptyLines: value.tailEmptyLines,
+	};
 }
 
 /**
@@ -88,6 +199,10 @@ export function normalizeDeliveryMetadata(value) {
 	} else if (reason) {
 		return null;
 	}
+	const captureEvidence = value.captureEvidence == null
+		? null
+		: normalizeCaptureEvidence(value.captureEvidence);
+	if (value.captureEvidence != null && !captureEvidence) return null;
 
 	return {
 		schema: INGEST_DELIVERY_SCHEMA,
@@ -99,6 +214,7 @@ export function normalizeDeliveryMetadata(value) {
 		splitSourceMessages: value.splitSourceMessages,
 		captureTruncated: value.captureTruncated,
 		truncationReason: reason,
+		...(captureEvidence ? { captureEvidence } : {}),
 	};
 }
 

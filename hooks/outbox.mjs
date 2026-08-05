@@ -8,7 +8,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
 	chmod,
 	lstat,
@@ -27,19 +27,34 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { fileURLToPath } from "node:url";
 
 import {
+	INGEST_CAPTURE_EVIDENCE_SCHEMA,
 	INGEST_DELIVERY_SCHEMA,
 	INGEST_LIMITS,
+	normalizeCaptureEvidence,
 	normalizeDeliveryMetadata,
 	unicodeLength,
 	utf8Length,
 	validateIngestBody,
 } from "../src/lib/ingest_contract.mjs";
+import { normalizeSourceEvent } from "../src/lib/source_event.mjs";
 import { scrubMessages, scrubText } from "../src/pipeline/scrub.js";
+import {
+	RECALL_ECHO_MAX_STORE_BYTES,
+	RECALL_ECHO_STORE_FILENAME,
+	RECALL_ECHO_STORE_SCHEMA,
+	RECALL_ECHO_MAX_FINGERPRINTS,
+	deriveRecallEchoCoverage,
+	normalizeRecallEchoStore,
+	recallEchoGuardForSession,
+	recallEchoSessionKey,
+	updateRecallEchoStore,
+} from "./recall-echo.mjs";
 
 export const OUTBOX_SCHEMA = "itsuki.outbox/v1";
 export const TOMBSTONE_SCHEMA = "itsuki.outbox-tombstone/v1";
 export const STATE_SCHEMA = "itsuki.outbox-state/v1";
-export const STAGED_GROUP_SCHEMA = "itsuki.outbox-staged-group/v1";
+export const STAGED_GROUP_SCHEMA = "itsuki.outbox-staged-group/v2";
+const LEGACY_STAGED_GROUP_SCHEMA = "itsuki.outbox-staged-group/v1";
 export const GROUP_MANIFEST_SCHEMA = "itsuki.outbox-group-manifest/v1";
 const DELIVERY_SEQUENCE_SCHEMA = "itsuki.outbox-delivery-sequence/v1";
 // Persisted plans pin the segmentation/batching implementation. A future
@@ -88,6 +103,7 @@ const AUTH_PAUSE_MS = 5 * 60 * 1000;
 const CREDENTIAL_FINGERPRINT_RE = /^sha256:[a-f0-9]{64}$/;
 const SECURITY_MARKER_SCHEMA = "itsuki.outbox-security/v1";
 const SECURITY_MARKER_NAME = "security.json";
+const SECURITY_VERIFICATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_MAINTENANCE_ENTRIES = 256;
 const MAX_HEALTH_TOMBSTONES = 512;
 export const DEFAULT_DELIVERY_BASE_URL = "https://itsuki.app";
@@ -336,64 +352,134 @@ async function directoryIdentity(paths) {
 	return identity;
 }
 
-async function validSecurityMarker(paths) {
+async function readValidSecurityMarker(paths) {
 	const markerPath = securityMarkerPath(paths);
 	const info = await pathKind(markerPath);
-	if (!info) return false;
+	if (!info) return null;
 	if (!info.isFile() || info.isSymbolicLink()) throw new OutboxSecurityError("The outbox security marker is not a regular file.");
 	const marker = await readJson(markerPath);
 	if (
 		marker?.schema !== SECURITY_MARKER_SCHEMA
 		|| marker.path_sha256 !== sha256(resolve(paths.pluginData).toLowerCase())
+		|| !SECURITY_VERIFICATION_ID_RE.test(marker.verification_id ?? "")
+		|| typeof marker.guard_trusted !== "boolean"
+		|| !Number.isSafeInteger(marker.verified_at)
+		|| marker.verified_at < 1
 		|| !marker.directories
-	) return false;
+	) return null;
 	const current = await directoryIdentity(paths);
-	return canonicalJson(current) === canonicalJson(marker.directories);
+	return canonicalJson(current) === canonicalJson(marker.directories) ? marker : null;
 }
 
-async function writeSecurityMarker(paths, platform) {
+async function writeSecurityMarker(paths, platform, attestation = {}) {
+	const marker = {
+		schema: SECURITY_MARKER_SCHEMA,
+		path_sha256: sha256(resolve(paths.pluginData).toLowerCase()),
+		directories: await directoryIdentity(paths),
+		verification_id: randomUUID(),
+		guard_trusted: attestation.guard_trusted !== false,
+		verified_at: Date.now(),
+	};
 	try {
-		await atomicJson(paths, platform, securityMarkerPath(paths), {
-			schema: SECURITY_MARKER_SCHEMA,
-			path_sha256: sha256(resolve(paths.pluginData).toLowerCase()),
-			directories: await directoryIdentity(paths),
-			verified_at: Date.now(),
-		});
+		await atomicJson(paths, platform, securityMarkerPath(paths), marker);
+		return marker;
 	} catch (error) {
 		// Two first-use hooks may finish the same idempotent ACL verification
 		// together. A concurrently durable marker for these exact directories is
 		// equivalent to our write; any other failure still fails closed.
-		if (!await validSecurityMarker(paths).catch(() => false)) throw error;
+		const concurrent = await readValidSecurityMarker(paths).catch(() => null);
+		if (!concurrent) throw error;
+		return concurrent;
 	}
 }
 
-function defaultWindowsSecurityRunner(root, mode) {
+function runWindowsSecurityHelper(command, args, { env, timeout }) {
+	return new Promise((resolvePromise) => {
+		const child = spawn(command, args, {
+			windowsHide: true,
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		let spawnError = null;
+		let timedOut = false;
+		let outputOverflow = false;
+		const append = (current, chunk) => {
+			const next = current + String(chunk ?? "");
+			if (Buffer.byteLength(next, "utf8") > 4_096) {
+				outputOverflow = true;
+				child.kill();
+				return current;
+			}
+			return next;
+		};
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk); });
+		child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk); });
+		child.once("error", (error) => { spawnError = error; });
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill();
+		}, timeout);
+		child.once("close", (status, signal) => {
+			clearTimeout(timer);
+			resolvePromise({
+				status,
+				signal,
+				stdout,
+				stderr,
+				error: outputOverflow
+					? { code: "EOVERFLOW" }
+					: timedOut
+						? { code: "ETIMEDOUT" }
+						: spawnError,
+			});
+		});
+	});
+}
+
+async function defaultWindowsSecurityRunner(root, mode) {
 	const helper = fileURLToPath(new URL("./outbox-security.ps1", import.meta.url));
 	const systemRoot = resolve(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows");
 	const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-	const result = spawnSync(powershell, [
+	const result = await runWindowsSecurityHelper(powershell, [
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 		"-File", helper, "-Path", root, "-Mode", mode,
 	], {
-		encoding: "utf8",
 		env: {
 			SystemRoot: systemRoot,
 			WINDIR: systemRoot,
 			TEMP: process.env.TEMP,
 			TMP: process.env.TMP,
 		},
-		windowsHide: true,
-		timeout: mode === "EnsureDirectories" ? 1_000 : 8_000,
+		timeout: mode === "EnsureDirectories" ? 1_200 : 8_000,
 	});
-	if (result.error || result.status !== 0) {
-		throw new OutboxSecurityError("Windows could not apply and verify the private outbox ACL.");
-	}
+	const parsed = verifiedWindowsSecurityAttestation(result);
+	if (!parsed) throw new OutboxSecurityError("Windows did not verify the private outbox ACL.");
+	return parsed;
+}
+
+/** Validate the ACL helper's final, content-free post-verification record. */
+export function verifiedWindowsSecurityAttestation(result) {
 	let parsed;
 	try { parsed = JSON.parse(String(result.stdout ?? "").trim()); } catch {}
-	if (!parsed?.ok || parsed?.protected !== true) {
-		throw new OutboxSecurityError("Windows did not verify the private outbox ACL.");
-	}
-	return parsed;
+	// On Windows, the bounded child can reach its timer a few milliseconds after
+	// helper has already emitted its final attestation and is entering `exit 0`.
+	// Accept only that exact boundary race; a killed helper without the complete
+	// post-verification JSON, any other signal/error, or a non-zero exit fails.
+	const verifiedExit = result.status === 0 || (
+		result.status === null
+		&& result.signal === "SIGTERM"
+		&& result.error?.code === "ETIMEDOUT"
+	);
+	return verifiedExit
+		&& parsed?.ok === true
+		&& parsed?.protected === true
+		&& typeof parsed?.guard_trusted === "boolean"
+		? parsed
+		: null;
 }
 
 async function ensureOutbox(pluginData, options = {}) {
@@ -418,17 +504,77 @@ async function ensureOutbox(pluginData, options = {}) {
 	await ensurePlainDirectory(paths.root, { platform });
 	for (const name of DIRECTORY_NAMES) await ensurePlainDirectory(paths[name], { platform });
 
+	let securityMarker = null;
 	if (platform === "win32") {
 		const runner = options.securityRunner ?? defaultWindowsSecurityRunner;
-		const fastVerified = options.securityMode !== "all" && await validSecurityMarker(paths);
+		const initialMarker = await readValidSecurityMarker(paths);
+		const requireFresh = options.requireFreshSecurity === true;
+		const fastVerified = options.securityMode !== "all" && !requireFresh && Boolean(initialMarker);
+		securityMarker = initialMarker;
 		if (!fastVerified) {
-			await runner(paths.root, options.securityMode === "all" ? "EnsureAll" : "EnsureDirectories");
-			await writeSecurityMarker(paths, platform);
+			// Serialize first-use DACL mutation. Concurrent hooks may create the
+			// directory tree together, but two Set-Acl passes must not race.
+			const release = await acquireLock(paths, "security.lock", {
+				waitMs: options.securityMode === "all" ? 8_000 : 1_300,
+				// Must exceed the longest 8s helper plus marker fsync; otherwise a
+				// live cross-process EnsureAll verifier could be reaped mid-Set-Acl.
+				staleMs: 12_000,
+			});
+			if (!release) {
+				const concurrent = await readValidSecurityMarker(paths).catch(() => null);
+				const acceptable = concurrent && (!requireFresh || concurrent.verification_id !== initialMarker?.verification_id);
+				if (!acceptable) {
+					throw new OutboxSecurityError("The outbox security verifier is busy.");
+				}
+				securityMarker = concurrent;
+			} else {
+				try {
+					const concurrent = await readValidSecurityMarker(paths).catch(() => null);
+					const siblingFresh = requireFresh
+						&& concurrent
+						&& concurrent.verification_id !== initialMarker?.verification_id;
+					if (options.securityMode === "all" || (!siblingFresh && (requireFresh || !concurrent))) {
+						let attestation;
+						try {
+							attestation = await runner(paths.root, options.securityMode === "all" ? "EnsureAll" : "EnsureDirectories");
+						} catch (error) {
+							throw error;
+						}
+						securityMarker = await writeSecurityMarker(paths, platform, attestation);
+					} else {
+						securityMarker = concurrent;
+					}
+				} finally {
+					await release();
+				}
+			}
 		}
 	} else {
 		for (const name of DIRECTORY_NAMES) await ensurePlainDirectory(paths[name], { platform });
 	}
-	return { paths, platform };
+	return {
+		paths,
+		platform,
+		security: {
+			guardTrusted: platform !== "win32" || securityMarker?.guard_trusted === true,
+			verificationId: securityMarker?.verification_id ?? null,
+		},
+	};
+}
+
+/** Start the bounded directory-only protection pass used by SessionEnd. */
+export async function prepareProtectedOutbox({
+	pluginData,
+	platform,
+	securityRunner,
+} = {}) {
+	const opened = await ensureOutbox(pluginData, {
+		platform,
+		securityRunner,
+		securityMode: "directories",
+		requireFreshSecurity: true,
+	});
+	return { protected: true, guardTrusted: opened.security.guardTrusted };
 }
 
 async function safeEntries(directory, root, { maxEntries = Infinity, rejectOverflow = false } = {}) {
@@ -509,6 +655,108 @@ async function atomicJson(paths, platform, destination, value, { exclusive = fal
 	return bytes.length;
 }
 
+function recallEchoStorePath(paths) {
+	const target = join(paths.control, RECALL_ECHO_STORE_FILENAME);
+	if (!isWithin(paths.root, target)) throw new OutboxSecurityError();
+	return target;
+}
+
+async function readRecallEchoStore(paths) {
+	const target = recallEchoStorePath(paths);
+	const info = await pathKind(target);
+	if (!info) return { schema: RECALL_ECHO_STORE_SCHEMA, sessions: [] };
+	if (!info.isFile() || info.isSymbolicLink() || info.size > RECALL_ECHO_MAX_STORE_BYTES) {
+		throw new OutboxSecurityError("The protected recall-echo sidecar is invalid.");
+	}
+	const value = normalizeRecallEchoStore(await readJson(target));
+	if (!value) throw new OutboxSecurityError("The protected recall-echo sidecar is corrupt.");
+	return value;
+}
+
+/**
+ * Persist an explicit, content-free recall guard. Raw recalled text is consumed
+ * transiently by the hashing helper and never enters a JSON value. A resumed
+ * session may update an existing guard, but only a proven fresh startup may
+ * create one from absence.
+ */
+export async function persistRecallEchoGuard({
+	pluginData,
+	sessionId,
+	context,
+	allowCreate = false,
+	platform,
+	securityRunner,
+} = {}) {
+	const sessionKey = recallEchoSessionKey(sessionId);
+	const coverage = deriveRecallEchoCoverage(context, { sessionKey });
+	if (!sessionKey) {
+		return { persisted: false, status: "missing", coverageComplete: false, fingerprintCount: 0, reason: "invalid_session" };
+	}
+	const opened = await ensureOutbox(pluginData, { platform, securityRunner });
+	const release = await acquireMutationLock(opened.paths, 250);
+	if (!release) throw new OutboxSecurityError("The protected recall-echo sidecar is busy.");
+	try {
+		const current = await readRecallEchoStore(opened.paths);
+		const previous = recallEchoGuardForSession(current, sessionId);
+		if (previous.status === "missing" && allowCreate !== true) {
+			return { persisted: false, status: "missing", coverageComplete: false, fingerprintCount: 0, reason: "missing_guard" };
+		}
+
+		let coverageComplete = coverage.complete;
+		let reason = coverage.reason;
+		let status = coverage.complete && coverage.fingerprints.length > 0 ? "armed" : "no_context";
+		let fingerprints = coverage.complete ? coverage.fingerprints : [];
+		if (previous.status === "armed" && status === "armed") {
+			const union = [...new Set([...previous.fingerprints, ...fingerprints])];
+			if (union.length > RECALL_ECHO_MAX_FINGERPRINTS) {
+				coverageComplete = false;
+				reason = "fingerprint_limit";
+				status = "no_context";
+				fingerprints = [];
+			}
+		}
+
+		const next = updateRecallEchoStore(current, { sessionId, status, fingerprints });
+		const serialized = Buffer.from(canonicalJson(next), "utf8");
+		if (serialized.length > RECALL_ECHO_MAX_STORE_BYTES) {
+			throw new OutboxCapacityError("recall_echo_full", "The protected recall-echo sidecar reached its size bound.");
+		}
+		await atomicJson(
+			opened.paths,
+			opened.platform,
+			recallEchoStorePath(opened.paths),
+			next,
+			{ serialized },
+		);
+		const persistedGuard = recallEchoGuardForSession(next, sessionId);
+		return {
+			persisted: persistedGuard.status !== "missing",
+			status: persistedGuard.status,
+			coverageComplete,
+			fingerprintCount: persistedGuard.fingerprints.length,
+			reason,
+		};
+	} finally {
+		await release();
+	}
+}
+
+/** Read one session's explicit guard without exposing any other session key. */
+export async function readRecallEchoGuard({
+	pluginData,
+	sessionId,
+	platform,
+	securityRunner,
+} = {}) {
+	if (!recallEchoSessionKey(sessionId)) return { status: "missing", fingerprints: [] };
+	// Absence is an explicit fail-closed state. If a file exists, verify the full
+	// protected root before reading any byte from it.
+	const preliminary = pathsFor(pluginData, platform ?? process.platform);
+	if (!await pathKind(recallEchoStorePath(preliminary))) return { status: "missing", fingerprints: [] };
+	const opened = await ensureOutbox(pluginData, { platform, securityRunner });
+	return recallEchoGuardForSession(await readRecallEchoStore(opened.paths), sessionId);
+}
+
 const SAFE_DERIVED_PROJECT_ID_RE = /^local_[a-f0-9]{32}$/;
 
 /** Keep both hook doors on exactly the same scrubbed scope identity. */
@@ -542,6 +790,7 @@ export function sanitizeMemoryScope(scope) {
 
 function cleanMessage(message, index, sessionHash) {
 	const rawId = String(message?.id ?? "");
+	const sourceEvent = normalizeSourceEvent(message?.source_event ?? message?.sourceEvent);
 	return {
 		id: !rawId.trim()
 			? `msg_${sha256(`itsuki-message-id:v1\0missing\0${sessionHash}\0${index}`).slice(0, 48)}`
@@ -549,6 +798,29 @@ function cleanMessage(message, index, sessionHash) {
 		role: message?.role === "assistant" ? "assistant" : "user",
 		content: String(message?.content ?? ""),
 		...(Number.isFinite(Number(message?.ts)) ? { ts: Number(message.ts) } : {}),
+		...(sourceEvent ? { source_event: sourceEvent } : {}),
+	};
+}
+
+function messageDigestSeed(message) {
+	return {
+		id: message.id,
+		role: message.role,
+		ts: message.ts ?? null,
+		content_sha256: sha256(message.content),
+		...(message.source_event ? { source_event: message.source_event } : {}),
+	};
+}
+
+// Persisted v1 staged groups and their materialized request identities predate
+// source_event metadata. Keep this exact historical digest shape until every
+// protected v1 group has reached a terminal state.
+function legacyMessageDigestSeed(message) {
+	return {
+		id: message.id,
+		role: message.role,
+		ts: message.ts ?? null,
+		content_sha256: sha256(message.content),
 	};
 }
 
@@ -560,34 +832,107 @@ function sessionIdentity(sessionId) {
 	};
 }
 
-function envelopeSeed({ sessionHash, memoryScope, messages, capture }) {
+function envelopeSeed({ sessionHash, memoryScope, messages }) {
+	return {
+		session: sessionHash,
+		project: memoryScope?.projectId ?? memoryScope?.project_id ?? null,
+		messages: messages.map(messageDigestSeed),
+	};
+}
+
+function legacyEnvelopeSeed({ sessionHash, memoryScope, messages, capture }) {
 	return {
 		session: sessionHash,
 		project: memoryScope?.projectId ?? memoryScope?.project_id ?? null,
 		capture,
-		messages: messages.map((message) => ({
-			id: message.id,
-			role: message.role,
-			ts: message.ts ?? null,
-			content_sha256: sha256(message.content),
-		})),
+		messages: messages.map(legacyMessageDigestSeed),
 	};
 }
 
+const CAPTURE_REDACTION_KEYS = new Set([
+	"private_key",
+	"connection_credentials",
+	"query_secret",
+	"api_key",
+	"bearer_token",
+	"high_entropy",
+	"named_secret",
+]);
+const MAX_CAPTURE_EVIDENCE_COUNTER = 64 * 1024 * 1024;
+
+function captureCounter(value) {
+	return Number.isSafeInteger(value) && value >= 0 && value <= MAX_CAPTURE_EVIDENCE_COUNTER ? value : 0;
+}
+
+function captureEvidenceSummary(metadata) {
+	const capture = metadata?.capture;
+	if (!capture || capture.schema !== "itsuki.claude-capture/v1") return null;
+	const capturedEvents = captureCounter(capture.capturedEvents);
+	const returnedEvents = capture.returnedEvents == null
+		? capturedEvents
+		: Math.min(capturedEvents, captureCounter(capture.returnedEvents));
+	const redactions = {};
+	for (const [key, value] of Object.entries(capture.redactions ?? {})) {
+		const count = captureCounter(value);
+		if (CAPTURE_REDACTION_KEYS.has(key) && count > 0) redactions[key] = count;
+	}
+	return normalizeCaptureEvidence({
+		schema: INGEST_CAPTURE_EVIDENCE_SCHEMA,
+		inputRows: captureCounter(capture.inputRows),
+		capturedEvents,
+		returnedEvents,
+		omittedEvents: capturedEvents - returnedEvents,
+		malformedRows: Math.min(captureCounter(capture.malformedRows), captureCounter(capture.inputRows)),
+		ineligibleRows: captureCounter(capture.ineligibleRows),
+		ignoredThinkingBlocks: captureCounter(capture.ignoredThinkingBlocks),
+		ignoredMetaRows: captureCounter(capture.ignoredMetaRows),
+		ignoredToolEvents: captureCounter(capture.ignoredToolEvents),
+		ignoredRecallEvents: captureCounter(capture.ignoredRecallEvents),
+		ignoredRecallEchoEvents: captureCounter(capture.ignoredRecallEchoEvents),
+		ignoredUnprotectedAssistantEvents: captureCounter(capture.ignoredUnprotectedAssistantEvents),
+		ignoredNoiseEvents: captureCounter(capture.ignoredNoiseEvents),
+		ambiguousOutcomeRows: captureCounter(metadata?.ambiguousOutcomeRows),
+		companionLimitRejectedOutcomeRows: captureCounter(metadata?.companionLimitRejectedOutcomeRows),
+		closureEventLimitRejectedOutcomeRows: captureCounter(metadata?.closureEventLimitRejectedOutcomeRows),
+		truncatedEvents: captureCounter(capture.truncatedEvents),
+		redactions,
+		tailReturnedRecords: captureCounter(metadata?.returnedRows ?? metadata?.returnedEvents),
+		tailScannedBytes: captureCounter(metadata?.scannedBytes),
+		tailOversizedLines: captureCounter(metadata?.oversizedLines),
+		tailMalformedLines: captureCounter(metadata?.malformedLines),
+		tailIneligibleLines: captureCounter(metadata?.ineligibleLines),
+		tailEmptyLines: captureCounter(metadata?.emptyLines),
+	});
+}
+
 function captureSummary(metadata) {
+	const captureEvidence = captureEvidenceSummary(metadata);
 	const rawReason = String(metadata?.truncationReason ?? "").trim();
-	const reason = /^[a-z_]{1,40}$/.test(rawReason) ? rawReason : null;
+	let reason = /^[a-z_]{1,40}$/.test(rawReason) ? rawReason : null;
+	if (!reason && Number(captureEvidence?.ambiguousOutcomeRows ?? 0) > 0) reason = "ambiguous_tool_result";
+	if (!reason && Number(captureEvidence?.companionLimitRejectedOutcomeRows ?? 0) > 0) reason = "companion_limit";
+	if (!reason && Number(captureEvidence?.closureEventLimitRejectedOutcomeRows ?? 0) > 0) reason = "closure_event_limit";
+	if (!reason && Number(captureEvidence?.omittedEvents ?? 0) > 0) reason = "max_capture_events";
+	if (!reason && Number(captureEvidence?.truncatedEvents ?? 0) > 0) reason = "capture_abbreviated";
+	if (!reason && metadata?.recallEchoProtectionUnavailable) reason = "recall_echo_unavailable";
 	const captureTruncated = Boolean(
 		metadata?.scanTruncated
 		|| metadata?.oversizedLines > 0
 		|| metadata?.malformedLines > 0
 		|| metadata?.fileChangedDuringScan
 		|| metadata?.fileGrew
-		|| metadata?.fileShrank,
+		|| metadata?.fileShrank
+		|| metadata?.recallEchoProtectionUnavailable
+		|| captureEvidence?.ambiguousOutcomeRows > 0
+		|| captureEvidence?.companionLimitRejectedOutcomeRows > 0
+		|| captureEvidence?.closureEventLimitRejectedOutcomeRows > 0
+		|| captureEvidence?.omittedEvents > 0
+		|| captureEvidence?.truncatedEvents > 0,
 	);
 	return {
 		captureTruncated,
 		truncationReason: captureTruncated ? (reason ?? "bounded_scan") : null,
+		...(captureEvidence ? { captureEvidence } : {}),
 	};
 }
 
@@ -729,20 +1074,35 @@ function deliveryFor({ groupId, batchIndex, batchCount, sourceMessageCount, segm
 		splitSourceMessages,
 		captureTruncated: capture.captureTruncated,
 		truncationReason: capture.truncationReason,
+		...(capture.captureEvidence ? { captureEvidence: capture.captureEvidence } : {}),
 	};
 }
 
-function requestForBatch({ messages, conversationId, memoryScope, common, batchIndex, batchCount }) {
+function deliveryIdentity(delivery) {
+	return {
+		schema: delivery.schema,
+		groupId: delivery.groupId,
+		batchIndex: delivery.batchIndex,
+		batchCount: delivery.batchCount,
+		sourceMessageCount: delivery.sourceMessageCount,
+		segmentCount: delivery.segmentCount,
+		splitSourceMessages: delivery.splitSourceMessages,
+	};
+}
+
+const CAPTURE_DELIVERY_RESERVE_BYTES = 4 * 1024;
+
+function requestForBatch({ messages, conversationId, memoryScope, common, batchIndex, batchCount, legacyCaptureIdentity = false }) {
 	const delivery = deliveryFor({ ...common, batchIndex, batchCount });
+	const identityDelivery = legacyCaptureIdentity ? delivery : deliveryIdentity(delivery);
+	if (
+		!legacyCaptureIdentity
+		&& utf8Length(JSON.stringify(delivery)) - utf8Length(JSON.stringify(identityDelivery)) > CAPTURE_DELIVERY_RESERVE_BYTES
+	) throw new OutboxError("capture_evidence_too_large", "Capture evidence exceeds its reserved wire bound.");
 	const digest = sha256(canonicalJson({
 		schema: "itsuki.outbox-request/v2",
-		delivery,
-		messages: messages.map((message) => ({
-			id: message.id,
-			role: message.role,
-			ts: message.ts ?? null,
-			content_sha256: sha256(message.content),
-		})),
+		delivery: identityDelivery,
+		messages: messages.map(legacyCaptureIdentity ? legacyMessageDigestSeed : messageDigestSeed),
 	}));
 	return {
 		path: "/v1/ingest",
@@ -758,8 +1118,12 @@ function requestForBatch({ messages, conversationId, memoryScope, common, batchI
 	};
 }
 
-function requestFitsIngest(request) {
-	const bodyBytes = utf8Length(JSON.stringify(request.body));
+function requestFitsIngest(request, { legacyCaptureIdentity = false } = {}) {
+	const identityBody = legacyCaptureIdentity
+		? request.body
+		: { ...request.body, delivery: deliveryIdentity(request.body.delivery) };
+	const bodyBytes = utf8Length(JSON.stringify(identityBody))
+		+ (legacyCaptureIdentity ? 0 : CAPTURE_DELIVERY_RESERVE_BYTES);
 	return bodyBytes <= INGEST_LIMITS.maxRequestBytes
 		&& request.body.messages.length <= INGEST_LIMITS.maxMessages
 		&& request.body.messages.every((message) => unicodeLength(message.content) <= INGEST_LIMITS.maxMessageCharacters)
@@ -792,6 +1156,7 @@ function buildEnvelopes({
 	prepared = null,
 	createdAt: suppliedCreatedAt = null,
 	deliveryOrder = null,
+	legacyCaptureIdentity = false,
 }) {
 	if (!validCredentialFingerprint(fingerprint)) {
 		throw new OutboxError(
@@ -809,7 +1174,7 @@ function buildEnvelopes({
 		conversationId,
 	} = material;
 	const segmented = splitMessagesForIngest(safeMessages);
-	const groupDigest = sha256(canonicalJson(envelopeSeed({
+	const groupDigest = sha256(canonicalJson((legacyCaptureIdentity ? legacyEnvelopeSeed : envelopeSeed)({
 		sessionHash,
 		memoryScope: safeScope,
 		messages: segmented.messages,
@@ -834,13 +1199,14 @@ function buildEnvelopes({
 			common,
 			batchIndex: Math.min(batches.length, OUTBOX_LIMITS.maxRawCount - 1),
 			batchCount: OUTBOX_LIMITS.maxRawCount,
+			legacyCaptureIdentity,
 		});
-		if (batch.length > 0 && !requestFitsIngest(provisional)) {
+		if (batch.length > 0 && !requestFitsIngest(provisional, { legacyCaptureIdentity })) {
 			batches.push(batch);
 			batch = [message];
 			continue;
 		}
-		if (!requestFitsIngest(provisional)) {
+		if (!requestFitsIngest(provisional, { legacyCaptureIdentity })) {
 			throw new OutboxCapacityError("message_unbatchable", "One protected message segment cannot fit the ingest request limit.");
 		}
 		batch = candidate;
@@ -858,6 +1224,7 @@ function buildEnvelopes({
 			common,
 			batchIndex,
 			batchCount: batches.length,
+			legacyCaptureIdentity,
 		});
 		const violation = validateIngestBody(request.body, { requestBytes: utf8Length(JSON.stringify(request.body)) });
 		if (violation) throw new OutboxError("invalid_ingest_batch", "An ordered outbox batch violates the ingest contract.");
@@ -891,44 +1258,56 @@ function buildEnvelopes({
 
 function validCaptureSummary(value) {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	if (Object.keys(value).some((key) => !["captureTruncated", "truncationReason", "captureEvidence"].includes(key))) return false;
 	if (typeof value.captureTruncated !== "boolean") return false;
+	if (value.captureEvidence != null && !normalizeCaptureEvidence(value.captureEvidence)) return false;
 	if (value.captureTruncated) return /^[a-z_]{1,40}$/.test(value.truncationReason ?? "");
 	return value.truncationReason === null;
 }
 
-function stagedGroupSeed({ sessionHash, conversationId, memoryScope, capture, messages }) {
+function stagedGroupSeed({ sessionHash, conversationId, memoryScope, messages }) {
 	return {
 		schema: STAGED_GROUP_SCHEMA,
 		sessionHash,
 		conversationId,
 		memoryScope,
-		capture,
-		messages: messages.map((message) => ({
-			id: message.id,
-			role: message.role,
-			ts: message.ts ?? null,
-			content_sha256: sha256(message.content),
-		})),
+		messages: messages.map(messageDigestSeed),
 	};
 }
 
-function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder = null }) {
+function legacyStagedGroupSeed({ sessionHash, conversationId, memoryScope, capture, messages }) {
+	return {
+		schema: LEGACY_STAGED_GROUP_SCHEMA,
+		sessionHash,
+		conversationId,
+		memoryScope,
+		capture,
+		messages: messages.map(legacyMessageDigestSeed),
+	};
+}
+
+function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder = null, legacyCaptureIdentity = false }) {
 	if (!validCredentialFingerprint(fingerprint)) {
 		throw new OutboxError(
 			"invalid_credential_fingerprint",
 			"The outbox credential binding must be a one-way fingerprint.",
 		);
 	}
-	const digest = sha256(canonicalJson(stagedGroupSeed({
+	const seed = legacyCaptureIdentity ? legacyStagedGroupSeed : stagedGroupSeed;
+	const schema = legacyCaptureIdentity ? LEGACY_STAGED_GROUP_SCHEMA : STAGED_GROUP_SCHEMA;
+	const persistedMessages = legacyCaptureIdentity
+		? prepared.safeMessages.map(({ source_event: _sourceEvent, ...message }) => message)
+		: prepared.safeMessages;
+	const digest = sha256(canonicalJson(seed({
 		sessionHash: prepared.sessionHash,
 		conversationId: prepared.conversationId,
 		memoryScope: prepared.safeScope,
 		capture: prepared.capture,
-		messages: prepared.safeMessages,
+		messages: persistedMessages,
 	})));
 	const queueId = queueIdFor(digest, fingerprint);
 	const value = {
-		schema: STAGED_GROUP_SCHEMA,
+		schema,
 		queue_id: queueId,
 		created_at: Number(now()),
 		...(Number.isSafeInteger(deliveryOrder) && deliveryOrder >= 0 ? { delivery_order: deliveryOrder } : {}),
@@ -938,7 +1317,7 @@ function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder
 		conversation_id: prepared.conversationId,
 		memory_scope: prepared.safeScope,
 		capture: prepared.capture,
-		messages: prepared.safeMessages,
+		messages: persistedMessages,
 	};
 	return {
 		value,
@@ -947,7 +1326,7 @@ function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder
 		stats: {
 			staged: true,
 			batchCount: null,
-			sourceMessageCount: prepared.safeMessages.length,
+			sourceMessageCount: persistedMessages.length,
 			segmentCount: null,
 			splitSourceMessages: null,
 			captureTruncated: prepared.capture.captureTruncated,
@@ -956,7 +1335,17 @@ function buildStagedGroup({ prepared, fingerprint, now = Date.now, deliveryOrder
 }
 
 function validateStagedGroup(value, queueId = value?.queue_id) {
-	if (!value || value.schema !== STAGED_GROUP_SCHEMA || !validQueueId(queueId) || value.queue_id !== queueId) return false;
+	if (
+		!value
+		|| ![STAGED_GROUP_SCHEMA, LEGACY_STAGED_GROUP_SCHEMA].includes(value.schema)
+		|| !validQueueId(queueId)
+		|| value.queue_id !== queueId
+	) return false;
+	const topLevelKeys = new Set([
+		"schema", "queue_id", "created_at", "delivery_order", "credential_fingerprint",
+		"content_digest", "session_hash", "conversation_id", "memory_scope", "capture", "messages",
+	]);
+	if (Object.keys(value).some((key) => !topLevelKeys.has(key))) return false;
 	if (!validFiniteTimestamp(value.created_at) || !validCredentialFingerprint(value.credential_fingerprint)) return false;
 	if (value.delivery_order != null && (!Number.isSafeInteger(value.delivery_order) || value.delivery_order < 0)) return false;
 	if (!/^[a-f0-9]{64}$/.test(value.content_digest ?? "")) return false;
@@ -969,6 +1358,10 @@ function validateStagedGroup(value, queueId = value?.queue_id) {
 	const messageIds = new Set();
 	for (const message of value.messages) {
 		if (!message || typeof message !== "object" || Array.isArray(message)) return false;
+		const messageKeys = new Set(value.schema === LEGACY_STAGED_GROUP_SCHEMA
+			? ["id", "role", "content", "ts"]
+			: ["id", "role", "content", "ts", "source_event"]);
+		if (Object.keys(message).some((key) => !messageKeys.has(key))) return false;
 		if (
 			typeof message.id !== "string"
 			|| !message.id.trim()
@@ -978,8 +1371,14 @@ function validateStagedGroup(value, queueId = value?.queue_id) {
 		messageIds.add(message.id);
 		if (!["user", "assistant"].includes(message.role) || typeof message.content !== "string" || !message.content.trim()) return false;
 		if (message.ts != null && (typeof message.ts !== "number" || !Number.isFinite(message.ts))) return false;
+		if (value.schema === LEGACY_STAGED_GROUP_SCHEMA && message.source_event != null) return false;
+		if (message.source_event != null) {
+			const sourceEvent = normalizeSourceEvent(message.source_event);
+			if (!sourceEvent || canonicalJson(sourceEvent) !== canonicalJson(message.source_event)) return false;
+		}
 	}
-	const digest = sha256(canonicalJson(stagedGroupSeed({
+	const seed = value.schema === LEGACY_STAGED_GROUP_SCHEMA ? legacyStagedGroupSeed : stagedGroupSeed;
+	const digest = sha256(canonicalJson(seed({
 		sessionHash: value.session_hash,
 		conversationId: value.conversation_id,
 		memoryScope: value.memory_scope,
@@ -1134,6 +1533,7 @@ function validExpectedTemporary(value) {
 		|| validateTombstone(value)
 		|| validateAuthBlock(value)
 		|| validateDeliverySequence(value)
+		|| normalizeRecallEchoStore(value)
 	) {
 		return true;
 	}
@@ -1394,6 +1794,125 @@ function orderingDelivery(envelope) {
 		};
 	}
 	return null;
+}
+
+function stagedCaptureFromDelivery(value) {
+	const delivery = normalizeDeliveryMetadata(value);
+	if (!delivery) return null;
+	const capture = {
+		captureTruncated: delivery.captureTruncated,
+		truncationReason: delivery.truncationReason,
+		...(delivery.captureEvidence ? { captureEvidence: delivery.captureEvidence } : {}),
+	};
+	return validCaptureSummary(capture) ? capture : null;
+}
+
+function legacyReplayDigest(prepared, capture) {
+	return sha256(canonicalJson(legacyStagedGroupSeed({
+		sessionHash: prepared.sessionHash,
+		conversationId: prepared.conversationId,
+		memoryScope: prepared.safeScope,
+		capture,
+		messages: prepared.safeMessages,
+	})));
+}
+
+async function manifestCaptureSummary(paths, manifest) {
+	const summaries = [];
+	for (const [batchIndex, queueId] of manifest.queue_ids.entries()) {
+		const lifecycle = await lifecyclePath(paths, queueId);
+		if (!lifecycle) continue;
+		const tombstone = lifecycle.name === "accepted" || lifecycle.name === "done";
+		const delivery = tombstone
+			? normalizeDeliveryMetadata(lifecycle.value.delivery)
+			: envelopeDelivery(lifecycle.value);
+		const conversationId = tombstone
+			? lifecycle.value.conversation_id
+			: lifecycle.value.request?.body?.conversationId;
+		if (
+			!delivery
+			|| delivery.groupId !== manifest.group_id
+			|| delivery.batchCount !== manifest.batch_count
+			|| delivery.batchIndex !== batchIndex
+			|| conversationId !== manifest.conversation_id
+			|| lifecycle.value.credential_fingerprint !== manifest.credential_fingerprint
+		) {
+			throw new OutboxSecurityError("A delivery-group manifest cross-links inconsistent lifecycle metadata.");
+		}
+		const capture = stagedCaptureFromDelivery(delivery);
+		if (capture) summaries.push(capture);
+	}
+	if (!summaries.length) return null;
+	const first = canonicalJson(summaries[0]);
+	if (summaries.some((summary) => canonicalJson(summary) !== first)) {
+		throw new OutboxSecurityError("A delivery group's persisted capture summaries disagree.");
+	}
+	return summaries[0];
+}
+
+/**
+ * Locate a shipped-v1 delivery whose immutable non-capture payload matches the
+ * current retry. The candidate's own persisted capture summary is supplied to
+ * the historical digest, so volatile scan counters may drift without a second
+ * local group being created. All scans are bounded by the physical outbox cap
+ * and run under the mutation lock.
+ */
+async function findLegacyReplay(paths, prepared) {
+	const matches = new Map();
+	for (const entry of await safeEntries(paths.staged, paths.root, {
+		maxEntries: OUTBOX_LIMITS.maxRawCount,
+		rejectOverflow: true,
+	})) {
+		if (!entry.info.isFile() || !entry.name.endsWith(".json")) {
+			throw new OutboxSecurityError("A staged delivery group entry is invalid.");
+		}
+		const queueId = entry.name.slice(0, -5);
+		const value = await readJson(entry.path);
+		if (!validateStagedGroup(value, queueId)) {
+			throw new OutboxSecurityError("A staged delivery group is corrupt.");
+		}
+		if (value.schema !== LEGACY_STAGED_GROUP_SCHEMA) continue;
+		if (legacyReplayDigest(prepared, value.capture) !== value.content_digest) continue;
+		matches.set(queueId, {
+			queueId,
+			capture: value.capture,
+			credentialFingerprint: value.credential_fingerprint,
+			createdAt: value.created_at,
+			deliveryOrder: value.delivery_order ?? null,
+		});
+	}
+
+	for (const entry of await safeEntries(paths.groups, paths.root, {
+		maxEntries: OUTBOX_LIMITS.maxRawCount,
+		rejectOverflow: true,
+	})) {
+		if (!entry.info.isFile() || !entry.name.endsWith(".json")) {
+			throw new OutboxSecurityError("A delivery-group manifest entry is invalid.");
+		}
+		const queueId = entry.name.slice(0, -5);
+		const manifest = await readJson(entry.path);
+		if (!validateGroupManifest(manifest, queueId)) {
+			throw new OutboxSecurityError("A delivery-group manifest is corrupt.");
+		}
+		const capture = await manifestCaptureSummary(paths, manifest);
+		if (!capture || legacyReplayDigest(prepared, capture) !== manifest.content_digest) continue;
+		const prior = matches.get(queueId);
+		if (prior && canonicalJson(prior.capture) !== canonicalJson(capture)) {
+			throw new OutboxSecurityError("A v1 staged group and manifest disagree about capture evidence.");
+		}
+		matches.set(queueId, prior ?? {
+			queueId,
+			capture,
+			credentialFingerprint: manifest.credential_fingerprint,
+			createdAt: manifest.created_at,
+			deliveryOrder: manifest.delivery_order ?? null,
+		});
+	}
+
+	return [...matches.values()].sort((left, right) => (
+		Number(left.deliveryOrder ?? left.createdAt) - Number(right.deliveryOrder ?? right.createdAt)
+		|| left.queueId.localeCompare(right.queueId)
+	))[0] ?? null;
 }
 
 function deliveryLifecycleKey(groupId, credentialFingerprint) {
@@ -1739,6 +2258,7 @@ async function materializeStagedGroups(paths, platform, currentFingerprint, now 
 				fingerprint: staged.value.credential_fingerprint,
 				createdAt: staged.value.created_at,
 				deliveryOrder: staged.value.delivery_order,
+				legacyCaptureIdentity: staged.value.schema === LEGACY_STAGED_GROUP_SCHEMA,
 			});
 			const items = group.built.map((built) => ({
 				...built,
@@ -1893,16 +2413,48 @@ async function enqueueDeferredSession({
 	now,
 }) {
 	const prepared = prepareSession({ messages, sessionId, memoryScope, captureMetadata });
-	const staged = buildStagedGroup({ prepared, fingerprint, now });
+	let staged = buildStagedGroup({ prepared, fingerprint, now });
+	const legacyStaged = buildStagedGroup({ prepared, fingerprint, now, legacyCaptureIdentity: true });
 	let serializedBytes = 0;
 
 	const release = await acquireMutationLock(paths, 250);
 	if (!release) throw new OutboxError("outbox_busy", "Another hook is updating the local outbox.");
 	try {
-		const stagedPath = queuePath(paths, "staged", staged.queueId);
-		const manifestPath = queuePath(paths, "groups", staged.queueId);
-		const stagedInfo = await pathKind(stagedPath);
-		const manifestInfo = await pathKind(manifestPath);
+		let stagedPath = queuePath(paths, "staged", staged.queueId);
+		let manifestPath = queuePath(paths, "groups", staged.queueId);
+		let stagedInfo = await pathKind(stagedPath);
+		let manifestInfo = await pathKind(manifestPath);
+		if (!stagedInfo && !manifestInfo && legacyStaged.queueId !== staged.queueId) {
+			const legacyStagedPath = queuePath(paths, "staged", legacyStaged.queueId);
+			const legacyManifestPath = queuePath(paths, "groups", legacyStaged.queueId);
+			const legacyStagedInfo = await pathKind(legacyStagedPath);
+			const legacyManifestInfo = await pathKind(legacyManifestPath);
+			if (legacyStagedInfo || legacyManifestInfo) {
+				staged = legacyStaged;
+				stagedPath = legacyStagedPath;
+				manifestPath = legacyManifestPath;
+				stagedInfo = legacyStagedInfo;
+				manifestInfo = legacyManifestInfo;
+			}
+		}
+		if (!stagedInfo && !manifestInfo) {
+			const legacyReplay = await findLegacyReplay(paths, prepared);
+			if (legacyReplay) {
+				staged = buildStagedGroup({
+					prepared: { ...prepared, capture: legacyReplay.capture },
+					fingerprint: legacyReplay.credentialFingerprint,
+					now,
+					legacyCaptureIdentity: true,
+				});
+				if (staged.queueId !== legacyReplay.queueId) {
+					throw new OutboxSecurityError("A v1 replay candidate failed its historical identity check.");
+				}
+				stagedPath = queuePath(paths, "staged", staged.queueId);
+				manifestPath = queuePath(paths, "groups", staged.queueId);
+				stagedInfo = await pathKind(stagedPath);
+				manifestInfo = await pathKind(manifestPath);
+			}
+		}
 		let existingStaged = null;
 		let manifest = null;
 		if (stagedInfo) {
@@ -1971,7 +2523,11 @@ async function enqueueDeferredSession({
 			acceptedBatches,
 			bytes: needsStage ? serializedBytes : 0,
 			bound: Boolean(fingerprint) && (existingStaged?.credential_fingerprint ?? manifest?.credential_fingerprint) === fingerprint,
-			credentialMismatch: false,
+			credentialMismatch: Boolean(
+				fingerprint
+				&& (existingStaged?.credential_fingerprint ?? manifest?.credential_fingerprint)
+				&& (existingStaged?.credential_fingerprint ?? manifest?.credential_fingerprint) !== fingerprint
+			),
 			redactions: staged.redactions,
 			...staged.stats,
 			...(manifest?.stats ?? {}),

@@ -330,7 +330,13 @@ describe("the backlog cannot strand", () => {
 		// and nothing is held or queued anywhere.
 		const debug = await stub.getDebugState();
 		expect(debug.chunkSize).toBe(0);
-		expect(debug.checkpoint).toBe("late-1");
+		// Once an isolated context is idle, chunkContextKey is deliberately
+		// cleared, so the generic debug view has no active checkpoint to report.
+		// The mirrored D1 checkpoint is the durable cross-context proof.
+		const checkpoint = await env.DB.prepare(
+			"SELECT last_processed_msg_id FROM checkpoints WHERE user_id = ?",
+		).bind(userId).first();
+		expect(checkpoint?.last_processed_msg_id).toBe("late-1");
 	});
 });
 

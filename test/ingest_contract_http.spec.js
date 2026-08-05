@@ -2,7 +2,11 @@ import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext
 import { describe, expect, it } from "vitest";
 
 import worker from "../src";
-import { INGEST_DELIVERY_SCHEMA, INGEST_LIMITS } from "../src/lib/ingest_contract.mjs";
+import {
+	INGEST_CAPTURE_EVIDENCE_SCHEMA,
+	INGEST_DELIVERY_SCHEMA,
+	INGEST_LIMITS,
+} from "../src/lib/ingest_contract.mjs";
 import { runObserveMessagesCommand } from "../src/pipeline/commands.js";
 import { normalizeSourcePacket, storeSourcePacket } from "../src/pipeline/source.js";
 
@@ -41,6 +45,37 @@ function orderedDelivery(overrides = {}) {
 		splitSourceMessages: 1,
 		captureTruncated: true,
 		truncationReason: "bounded_scan",
+		...overrides,
+	};
+}
+
+function captureEvidence(overrides = {}) {
+	return {
+		schema: INGEST_CAPTURE_EVIDENCE_SCHEMA,
+		inputRows: 4,
+		capturedEvents: 2,
+		returnedEvents: 2,
+		omittedEvents: 0,
+		malformedRows: 0,
+		ineligibleRows: 1,
+		ignoredThinkingBlocks: 1,
+		ignoredMetaRows: 0,
+		ignoredToolEvents: 0,
+		ignoredRecallEvents: 1,
+		ignoredRecallEchoEvents: 1,
+		ignoredUnprotectedAssistantEvents: 0,
+		ignoredNoiseEvents: 0,
+		ambiguousOutcomeRows: 0,
+		companionLimitRejectedOutcomeRows: 0,
+		closureEventLimitRejectedOutcomeRows: 0,
+		truncatedEvents: 0,
+		redactions: { api_key: 1 },
+		tailReturnedRecords: 4,
+		tailScannedBytes: 1_024,
+		tailOversizedLines: 0,
+		tailMalformedLines: 0,
+		tailIneligibleLines: 0,
+		tailEmptyLines: 0,
 		...overrides,
 	};
 }
@@ -244,9 +279,65 @@ describe("POST /v1/ingest contract", () => {
 		});
 	});
 
+	it("treats capture-evidence drift as an exact idempotent replay", async () => {
+		const userId = `delivery-evidence-replay-${crypto.randomUUID()}`;
+		const idempotencyKey = `delivery-evidence-replay-${crypto.randomUUID()}`;
+		const firstDelivery = orderedDelivery({
+			captureEvidence: captureEvidence({ tailScannedBytes: 1_024 }),
+		});
+		const retryDelivery = orderedDelivery({
+			captureTruncated: true,
+			truncationReason: "max_time",
+			captureEvidence: captureEvidence({ tailScannedBytes: 2_048 }),
+		});
+		const first = await call(bodyFor(userId, idempotencyKey, "ok thanks", {
+			source: "plugin",
+			delivery: firstDelivery,
+		}));
+		const retry = await call(bodyFor(userId, idempotencyKey, "ok thanks", {
+			source: "plugin",
+			delivery: retryDelivery,
+		}));
+
+		expect([first.status, retry.status]).toEqual([200, 200]);
+		expect(retry.body).toMatchObject({
+			duplicate: true,
+			source_packet_id: first.body.source_packet_id,
+			receipt: { delivery: firstDelivery },
+		});
+		const counts = await env.DB.prepare(
+			`SELECT COUNT(*) AS packets,
+				(SELECT COUNT(*) FROM memory_jobs WHERE user_id = ?) AS jobs
+			 FROM source_packets WHERE user_id = ?`,
+		).bind(userId, userId).first();
+		expect(counts).toMatchObject({ packets: 1, jobs: 1 });
+	});
+
+	it("retains normalized delivery evidence on an opt-out receipt", async () => {
+		const userId = `delivery-opt-out-${crypto.randomUUID()}`;
+		const delivery = orderedDelivery({ captureEvidence: captureEvidence() });
+		const response = await call(bodyFor(
+			userId,
+			`delivery-opt-out-${crypto.randomUUID()}`,
+			"Please do not remember this.",
+			{ source: "plugin", delivery },
+		));
+
+		expect(response.status).toBe(200);
+		expect(response.body.receipt).toMatchObject({
+			outcome: "no_write",
+			opt_out: true,
+			delivery,
+		});
+		const stored = await env.DB.prepare(
+			"SELECT detail FROM receipts WHERE id = ? AND user_id = ?",
+		).bind(response.body.receipt_id, userId).first();
+		expect(JSON.parse(stored.detail).delivery).toEqual(delivery);
+	});
+
 	it("preserves the full successful extraction receipt while retry state stays compact", async () => {
 		const userId = `delivery-write-${crypto.randomUUID()}`;
-		const delivery = orderedDelivery({ batchIndex: 1 });
+		const delivery = orderedDelivery({ batchIndex: 1, captureEvidence: captureEvidence() });
 		const label = `Receipt Atlas ${crypto.randomUUID().slice(0, 8)}`;
 		const response = await call(bodyFor(
 			userId,

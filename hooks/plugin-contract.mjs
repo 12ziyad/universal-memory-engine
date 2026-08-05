@@ -48,7 +48,7 @@ export function validatePluginContract({ manifest, registered, legacyMcpPresent 
 	const mcp = servers?.itsuki;
 	const registrations = registered?.hooks;
 
-	if (legacyMcpPresent || manifest?.name !== "itsuki" || manifest?.version !== "0.5.0") return false;
+	if (legacyMcpPresent || manifest?.name !== "itsuki" || manifest?.version !== "0.6.0") return false;
 	if (!hasExactKeys(userConfig, ["itsuki_api_key", "node_executable"])) return false;
 	if (!hasExactKeys(nodeConfig, ["description", "required", "title", "type"])
 		|| nodeConfig.type !== "file" || nodeConfig.required !== true) return false;

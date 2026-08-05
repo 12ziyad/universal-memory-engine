@@ -28,7 +28,9 @@ import {
 	enqueueSession,
 	inspectOutbox,
 	pluginDataFromArgs,
+	prepareProtectedOutbox,
 	sanitizeMemoryScope,
+	verifiedWindowsSecurityAttestation,
 } from "../hooks/outbox.mjs";
 
 const API_KEY = "itsuki_live_outbox_test_key_123456";
@@ -159,6 +161,29 @@ function drain(data, overrides = {}) {
 	});
 }
 
+function grantEveryoneFullControl(path, { directory = false } = {}) {
+	const permission = directory ? "*S-1-1-0:(OI)(CI)(F)" : "*S-1-1-0:(F)";
+	const result = spawnSync("icacls.exe", [path, "/grant", permission], {
+		encoding: "utf8",
+		windowsHide: true,
+	});
+	expect(result.status, result.stderr || result.stdout).toBe(0);
+}
+
+function accessRuleSids(path) {
+	const result = spawnSync("powershell.exe", [
+		"-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+		"@((Get-Acl -LiteralPath $env:ITSUKI_TEST_ACL_TARGET).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }) | ConvertTo-Json -Compress",
+	], {
+		encoding: "utf8",
+		windowsHide: true,
+		env: { ...process.env, ITSUKI_TEST_ACL_TARGET: path },
+	});
+	expect(result.status, result.stderr).toBe(0);
+	const parsed = JSON.parse(result.stdout);
+	return Array.isArray(parsed) ? parsed : [parsed];
+}
+
 describe("protected hook outbox", () => {
 	it("rejects broad, reserved, or contradictory plugin-data paths before filesystem mutation", () => {
 		const configRoot = join(tmpdir(), "itsuki-plugin-data-validation", "claude-config");
@@ -207,6 +232,83 @@ describe("protected hook outbox", () => {
 
 		expect(securityRunner).toHaveBeenCalledWith(join(data.pluginData, "outbox", "v1"), "EnsureDirectories");
 	});
+
+	it("accepts only a complete Windows ACL attestation at the timeout exit boundary", () => {
+		const stdout = JSON.stringify({ ok: true, protected: true, principals: 3, guard_trusted: true });
+		expect(verifiedWindowsSecurityAttestation({ status: 0, signal: null, stdout })).toMatchObject({
+			ok: true,
+			protected: true,
+		});
+		expect(verifiedWindowsSecurityAttestation({
+			status: null,
+			signal: "SIGTERM",
+			error: { code: "ETIMEDOUT" },
+			stdout,
+		})).toMatchObject({ ok: true, protected: true });
+
+		for (const result of [
+			{ status: null, signal: "SIGTERM", error: { code: "ETIMEDOUT" }, stdout: "" },
+			{ status: null, signal: "SIGKILL", error: { code: "ETIMEDOUT" }, stdout },
+			{ status: null, signal: "SIGTERM", error: { code: "EACCES" }, stdout },
+			{ status: 1, signal: null, stdout },
+			{ status: 0, signal: null, stdout: JSON.stringify({ ok: true, protected: false }) },
+			{ status: 0, signal: null, stdout: JSON.stringify({ ok: true, protected: true }) },
+		]) expect(verifiedWindowsSecurityAttestation(result)).toBeNull();
+	});
+
+	it.runIf(process.platform === "win32")("serializes concurrent first-use Windows ACL protection", async () => {
+		const data = await fixture();
+		const results = await Promise.allSettled([
+			prepareProtectedOutbox({ pluginData: data.pluginData }),
+			prepareProtectedOutbox({ pluginData: data.pluginData }),
+		]);
+		expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+	});
+
+	it.runIf(process.platform === "win32")("repairs a broadened active-directory DACL before returning protected", async () => {
+		const data = await fixture();
+		await prepareProtectedOutbox({ pluginData: data.pluginData });
+		const staged = join(data.outbox, "staged");
+		grantEveryoneFullControl(staged, { directory: true });
+		expect(accessRuleSids(staged)).toContain("S-1-1-0");
+
+		const protectedOutbox = await prepareProtectedOutbox({ pluginData: data.pluginData });
+
+		expect(protectedOutbox).toEqual({ protected: true, guardTrusted: true });
+		expect(accessRuleSids(staged)).not.toContain("S-1-1-0");
+	});
+
+	it.runIf(process.platform === "win32")("repairs guard ACL drift and marks the prior guard untrusted", async () => {
+		const data = await fixture();
+		await prepareProtectedOutbox({ pluginData: data.pluginData });
+		const guard = join(data.outbox, "control", "recall-echo.json");
+		await writeFile(guard, JSON.stringify({ schema: "itsuki.recall-echo/v2", sessions: {} }), "utf8");
+		grantEveryoneFullControl(guard);
+		expect(accessRuleSids(guard)).toContain("S-1-1-0");
+
+		const protectedOutbox = await prepareProtectedOutbox({ pluginData: data.pluginData });
+
+		expect(protectedOutbox).toEqual({ protected: true, guardTrusted: false });
+		expect(accessRuleSids(guard)).not.toContain("S-1-1-0");
+	});
+
+	it.runIf(process.platform === "win32")("coalesces concurrent fresh ACL checks within the SessionEnd host budget", async () => {
+		const data = await fixture();
+		await prepareProtectedOutbox({ pluginData: data.pluginData });
+		const startedAt = Date.now();
+		const results = await Promise.all([
+			prepareProtectedOutbox({ pluginData: data.pluginData }),
+			prepareProtectedOutbox({ pluginData: data.pluginData }),
+			prepareProtectedOutbox({ pluginData: data.pluginData }),
+		]);
+
+		expect(results).toEqual([
+			{ protected: true, guardTrusted: true },
+			{ protected: true, guardTrusted: true },
+			{ protected: true, guardTrusted: true },
+		]);
+		expect(Date.now() - startedAt).toBeLessThan(1_500);
+	}, 4_000);
 
 	it("persists only scrubbed content and one-way transport metadata", async () => {
 		const data = await fixture();
