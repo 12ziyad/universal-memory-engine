@@ -4,16 +4,22 @@ build-backend = "hatchling.build"
 
 [project]
 name = "itsuki"
-version = "0.2.0"
-description = "Itsuki — one private memory for every AI. Official Python SDK."
+version = "0.2.1"
+description = "Python client for the Itsuki memory API."
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = ["httpx>=0.24"]
 keywords = ["memory", "ai", "llm", "mcp", "agents", "itsuki"]
 
 [project.urls]
 Repository = "https://github.com/12ziyad/universal-memory-engine"
+Documentation = "https://itsuki.app/docs/"
+Issues = "https://github.com/12ziyad/universal-memory-engine/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["itsuki"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/itsuki", "/LICENSE", "/README.md", "/pyproject.toml"]

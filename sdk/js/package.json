@@ -1,13 +1,21 @@
 {
 	"name": "itsuki",
-	"version": "0.2.0",
-	"description": "Itsuki — one private memory for every AI. Official JavaScript SDK.",
+	"version": "0.2.1",
+	"description": "Server-side JavaScript client for the Itsuki memory API.",
 	"type": "module",
 	"main": "index.js",
-	"exports": { ".": "./index.js" },
+	"types": "index.d.ts",
+	"exports": {
+		".": {
+			"types": "./index.d.ts",
+			"import": "./index.js",
+			"default": "./index.js"
+		}
+	},
+	"sideEffects": false,
 	"engines": { "node": ">=18" },
 	"keywords": ["memory", "ai", "llm", "mcp", "agents", "itsuki"],
 	"license": "Apache-2.0",
 	"repository": { "type": "git", "url": "git+https://github.com/12ziyad/universal-memory-engine.git", "directory": "sdk/js" },
-	"files": ["index.js", "README.md"]
+	"files": ["index.js", "index.d.ts", "README.md", "LICENSE"]
 }

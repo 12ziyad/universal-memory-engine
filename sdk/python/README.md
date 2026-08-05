@@ -1,27 +1,111 @@
 # itsuki (Python SDK)
 
-One private memory for every AI. Thin synchronous client for the Itsuki memory API.
+Python client for the Itsuki memory API. It is typed, synchronous, and supports
+Python 3.9 and newer.
+
+```bash
+pip install itsuki
+```
 
 ```python
+import os
+
 from itsuki import MemoryClient
 
-memory = MemoryClient(api_key="itsuki_live_...")
+memory = MemoryClient(api_key=os.environ["ITSUKI_API_KEY"])
 
-memory.add("I started learning Kotlin this week.")
+receipt = memory.add(
+    "I started learning Kotlin this week.",
+    idempotency_key=MemoryClient.new_idempotency_key(),
+)
 print(memory.search("what am I learning?")["context"])
 ```
 
-- `add(content)` / `add_conversation(messages)` — write memory, returns a receipt
-- `search(query)` — `result["context"]` is the prompt-ready block
-- `turn(messages)` — recall + auto-capture in one call
-- `graph()`, `status()`, `usage()`, `receipts()`, `get_rules()`, `set_rules()`, `export_all()`
-- Sub-tenants: `MemoryClient(api_key, user_id="end-user-42")` gives each of your users an isolated memory space under one key
-- Safe retries: pass `idempotencyKey=MemoryClient.new_idempotency_key()` to writes
+Keep API keys on the server. Itsuki sends them as Bearer credentials. Legacy
+`uml_live_...` keys remain accepted by the API, while new keys use
+`itsuki_live_...`.
 
-Projects are metadata inside one memory space, not sub-tenants:
+Custom `base_url` values must be bare HTTPS origins without credentials, a
+path, query, or fragment. Plain HTTP is accepted only for loopback development
+(`localhost`, `127.0.0.0/8`, or `::1`), so a Bearer key cannot be sent to an
+arbitrary cleartext host.
+
+## Core operations
+
+| Python | API | Result |
+|---|---|---|
+| `add(content)` | `POST /v1/save` | Durable-write receipt |
+| `add_conversation(messages)` | `POST /v1/save` | Durable-write receipt |
+| `turn(messages)` | `POST /v1/turn` | Recall plus optional auto-capture |
+| `search(query)` / `recall(query)` | `POST /v1/recall` | Prompt-ready `context` |
+| `ingest(messages)` | `POST /v1/ingest` | Bounded bulk-ingest receipt |
+| `packet_status(id)` | `GET /v1/packets/:id/status` | One job snapshot |
+| `jobs()` | `GET /v1/jobs` | Accepted-write ledger |
+| `wait_for(id)` | packet status polling | Terminal job snapshot |
+| `delete(id)` | `DELETE /v1/memories/:id` | One-memory deletion |
+| `delete_by_source(...)` | `DELETE /v1/memories` | Dry-run or confirmed bulk deletion |
+
+`graph()`, `status()`, `receipts()`, `usage()`, `get_rules()`, `set_rules()`,
+and `export_all()` expose the remaining account endpoints.
+`usage(range=...)` accepts exactly `1d`, `7d`, `30d`, or `all`.
+
+Conversation messages are oldest first:
 
 ```python
-scope = {"projectId": "atlas", "projectName": "Atlas"}
+from itsuki import Message
+
+messages: list[Message] = [
+    {"role": "user", "content": "My preferred editor is Helix."},
+    {"role": "assistant", "content": "Noted."},
+]
+
+receipt = memory.add_conversation(
+    messages,
+    conversation_id="onboarding-42",
+    idempotency_key=MemoryClient.new_idempotency_key(),
+)
+turn = memory.turn(messages, thread_id="support-42")
+```
+
+`add()` and `search()` require non-empty strings, and
+`add_conversation()` requires at least one message. `turn([])` is valid only
+when accompanied by a non-empty `query`; `ingest([])` remains valid so a caller
+can flush held context. Method-owned fields such as `content`, `messages`,
+`mode`, and `query` cannot be replaced through extra options.
+
+Writes are not automatically retried unless they contain an
+`idempotency_key`. Reads are retried for transient transport, rate-limit, and
+server failures according to `max_retries`, which defaults to `2` and accepts
+values from `0` through `10`. The client's `timeout` bounds the complete
+request, including retry backoff and every attempt, and request/poll timers
+cannot exceed `2_147_483.647` seconds.
+
+## Tenant and project scope
+
+Your API key selects an account. `user_id` optionally selects one isolated
+end-user memory inside that account:
+
+```python
+memory = MemoryClient(api_key=os.environ["ITSUKI_API_KEY"], user_id="ada")
+memory.add("My depot is in Porto.")
+
+# A per-call value overrides the constructor default.
+memory.search("where is my depot?", user_id="grace")
+
+# Explicit None selects the API-key owner's memory for this call.
+memory.status(user_id=None)
+```
+
+Per-call `user_id` works on writes, recall, graph/status reads, packet/job
+status, rules, exports, and deletes. An empty or whitespace-padded value is
+rejected locally so it cannot silently fall back to another memory space.
+
+Projects are metadata within a memory space, not tenants:
+
+```python
+from itsuki import MemoryScope
+
+scope: MemoryScope = {"project_id": "atlas", "project_name": "Atlas"}
 memory.add("Atlas deploys from main.", memory_scope=scope)
 result = memory.search(
     "How does this deploy?",
@@ -30,72 +114,70 @@ result = memory.search(
 )
 ```
 
-The default recall scope is `global` (all account-global and project rows). Use
-`project_only` for exactly one project, or `project_then_global` for that project plus
-rows without a project. Both project modes require `memoryScope.projectId`.
+The default recall scope is `global`. `project_only` searches exactly one
+project. `project_then_global` searches that project plus account-global rows.
+Both project-specific modes require `memory_scope.project_id` (camel-case
+`projectId` is also accepted).
 
-Errors raise `MemoryAPIError` with `.status`, `.code`, and `.body`. Docs: your deployment's `/docs/`.
+## Background status and deletion
 
-## Many end users, one API key
+Every accepted write exposes a `source_packet_id` for its asynchronous work:
 
-Your API key is your account. `user_id` selects an
-**isolated memory space inside it** — one per end user of your app. Nothing
-saved for one value is reachable from another, on save or on recall.
-
-```
-memory.add("Ada's depot is in Porto.", user_id="ada")
-memory.add("Grace's depot is in Faro.", user_id="grace")
-
-memory.search("where is my depot?", user_id="ada")   # -> Porto, never Faro
-```
-
-Pass it per call, or fix it for the life of a client with
-`MemoryClient(api_key=..., user_id="ada")`. Omit it entirely and the memory
-belongs to the key's owner.
-
-The value is yours to choose — a user id, a tenant slug, an email. It is
-hashed with your account id before it becomes a storage key, so two different
-API keys using the same string still get different spaces.
-
-**Unknown parameters are rejected**, not ignored: a misspelled `usr_id`
-returns `400` naming the offending key rather than silently writing to the
-wrong space.
-
-## Background processing, visibly
-
-Writes are accepted instantly and enriched in the background. The
-`source_packet_id` on every response is the public handle for that work:
-
-```
+```python
 receipt = memory.ingest(messages, flush=True)
-done = memory.wait_for(receipt["source_packet_id"])   # polls until terminal
-# done["status"] is "enriched" or "failed" — never silently neither.
+packet_id = receipt["source_packet_id"]
+
+current = memory.packet_status(packet_id)
+terminal = memory.wait_for(packet_id, timeout=60, interval=1.5)
+failed = memory.jobs(status="failed", limit=20)
 ```
 
-`memory.packet_status(id)` answers once; `memory.jobs(status="failed")` lists
-every accepted write and where it is. Webhooks can subscribe to
-`memory.enriched` and `memory.failed` for push instead of poll.
+Job status filters accept `queued`, `staged`, `processing`, `enriched`,
+`failed`, or `completed`; `since` and `limit` must be positive finite values,
+and `limit` must be an integer.
 
-**Idempotent replay:** re-sending identical content (or reusing an
-`idempotency_key`) within 24 hours returns the ORIGINAL receipt and enqueues
-nothing — client retries after a timeout cannot double-ingest.
+`wait_for()` performs one immediate check, then polls until `enriched`,
+`failed`, or compatibility status `completed`. If its polling deadline expires,
+it returns the last snapshot with `timed_out=True`; a polling timeout is not
+reported as a processing failure.
 
-## Changelog note — add_conversation now builds the graph
+Bulk deletion is a dry run unless `confirm=True` is explicit:
 
-`add_conversation()` previously condensed the conversation into one flat
-memory page. It now runs the same extraction engine as every other write:
-entities, facts, relationships, bi-temporal history. Expect richer results
-from the same call — nodes AND edges where you used to get a page.
+```python
+preview = memory.delete_by_source(source="ingest", after=started_at)
+deleted = memory.delete_by_source(
+    source="ingest",
+    after=started_at,
+    confirm=True,
+)
+```
 
-## Version skew (read this if a method is missing)
+When supplied, `source` must be a non-empty identifier and `before`/`after`
+must be finite numbers greater than or equal to `1`.
 
-The **source in this repo is 0.2.0**; the published PyPI package may still be
-**0.1.1** until the next release is pushed. 0.1.1 predates the background-status
-and delete helpers, so on the published wheel these are absent:
+## Errors and types
 
-`wait_for` · `packet_status` · `jobs` · `delete` · `delete_by_source`
+Non-success responses and transport failures raise `MemoryAPIError` with:
 
-The REST endpoints they call (`/v1/packets/:id/status`, `/v1/jobs`,
-`DELETE /v1/memories`) are live regardless — call them directly, or install
-from source (`pip install -e sdk/python`) until the publish lands. The npm
-package tracks 0.2.0.
+- `status`: HTTP status, or `0` for a transport/local error;
+- `code`: stable API/local error code when one is available;
+- `body`: parsed response JSON, including non-object JSON;
+- `retry_after`: parsed `Retry-After` delay in seconds, including HTTP-date values.
+
+The package includes a `py.typed` marker and exports inline types for messages,
+memory scopes, option dictionaries, write/recall/turn/delete results, packets,
+jobs, counts, source-event metadata, recall scopes, capture density, and job
+statuses.
+
+## 0.2.1 release preparation
+
+The source and artifacts prepared from this directory are version `0.2.1`.
+PyPI `0.1.1` predates per-call read/delete tenant scope, packet/job helpers,
+`wait_for`, and the typed surface. Confirm the installed version when upgrading:
+
+```python
+from itsuki import VERSION
+print(VERSION)
+```
+
+Full API documentation is available at <https://itsuki.app/docs/>.
