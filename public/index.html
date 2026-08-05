@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Itsuki — personal memory for every AI</title>
+<title>Itsuki — structured memory for AI applications</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
 <link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
@@ -1011,8 +1011,8 @@
 	<section class="landing-section hero reveal">
 		<div class="hero-copy">
 			<div class="product-kicker"><img src="/assets/uml-icon.png?v=2" alt="" /> Universal Memory Layer</div>
-			<h1>Tell it once. Every AI remembers.</h1>
-			<p>Itsuki is one private memory graph shared by Claude, your agents, and your apps — you can see it, edit it, and own it.</p>
+			<h1>One memory service. Multiple ways to connect.</h1>
+			<p>Itsuki gives supported tools and your own apps a private, structured memory API that you can inspect, edit, and export.</p>
 			<div class="hero-actions">
 				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
 				<a class="cta-secondary" href="#how-it-works">See how it works</a>
@@ -1044,26 +1044,26 @@
 				<div class="flow-num">2</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2M5.6 18.4l2.2-2.2m8.4-8.4 2.2-2.2"/><circle cx="12" cy="12" r="3.2"/></svg></div>
 				<h3>Itsuki organizes it</h3>
-				<p>AI extracts the durable facts. The backend verifies them and writes real structure — never a raw chat dump.</p>
+				<p>AI proposes durable facts. Backend gates verify evidence and either write structured memory or report why a proposal was skipped.</p>
 			</div>
 			<div class="flow-step">
 				<div class="flow-num">3</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="17" r="2.4"/><circle cx="18.5" cy="17.5" r="2.4"/><path d="M8 7.2 15.7 8m-8.9 8.2L7 8.3m4.3 9.6 4.8-.3"/></svg></div>
 				<h3>You can see it</h3>
-				<p>Open the dashboard: a living graph, timelines, organized pages — and a receipt for every single save.</p>
+				<p>Open the dashboard to inspect the graph, timelines, organized pages, receipts, and asynchronous job status.</p>
 			</div>
 			<div class="flow-step">
 				<div class="flow-num">4</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.2-2.6 5.5-.9.9-1.4 1.6-1.4 2.5v1H9v-1c0-.9-.5-1.6-1.4-2.5C6.2 13.2 5 11.4 5 9a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg></div>
-				<h3>Every tool remembers</h3>
-				<p>Claude, Cursor, your own agent — all connect to the same private memory. Save once, recall everywhere.</p>
+				<h3>Connect supported tools</h3>
+				<p>MCP clients and your own agents can address the same account-scoped service. Each host still decides when to call its tools.</p>
 			</div>
 		</div>
 	</section>
 
 	<section class="landing-section reveal" id="connect">
-		<div class="section-kicker">Connect in 2 minutes</div>
-		<h2 class="section-title">Pick your tool. Paste one link. Done.</h2>
+		<div class="section-kicker">Supported connections</div>
+		<h2 class="section-title">Choose an interface and follow its setup.</h2>
 		<p class="public-note">Sign up, create your private memory link in the Connect tab, then paste it into any MCP-capable client — or call the API from your own app.</p>
 		<div class="connect-setup-note"><b>Set up on a computer, not your phone.</b> Neither Claude nor ChatGPT lets you add a connector from their mobile apps — do it once in a computer browser and it syncs to your phone automatically.</div>
 		<div class="connect-terminal">
@@ -1078,18 +1078,18 @@
 				<div class="terminal-chrome"><span></span><span></span><span></span><em>itsuki &middot; connect</em></div>
 				<div class="term-pane active" data-pane="claude">
 					<div class="term-step"><b>1</b><span>Sign up free &rarr; open <i>Connect</i> &rarr; <i>Create MCP link</i></span></div>
-					<div class="term-step"><b>2</b><span>On a computer, open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai &rarr; Settings &rarr; Connectors &rarr; Add custom connector</a> (that link opens it directly)</span></div>
+					<div class="term-step"><b>2</b><span>On a computer, open Claude &rarr; <i>Customize</i> &rarr; <i>Connectors</i> &rarr; <i>+</i> &rarr; <i>Add custom connector</i></span></div>
 					<div class="term-step"><b>3</b><span>Name it <i>itsuki</i>, paste your private link, click Add:</span></div>
 					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
 					<div class="term-step"><b>4</b><span>In a chat, tap the <b>+</b> (bottom-left) &rarr; <i>Connectors</i> &rarr; switch on <i>itsuki</i></span></div>
-					<div class="term-note">Custom connectors need a paid Claude plan. Once it is set up it syncs to mobile automatically. Then say <i>"save this to itsuki"</i> or <i>"what do you know about me?"</i></div>
+					<div class="term-note">Remote custom connectors are currently in beta on all Claude plans; Free is limited to one, and organization plans require an owner to add it. Then explicitly ask Claude to use the Itsuki tool.</div>
 				</div>
 				<div class="term-pane" data-pane="chatgpt">
-					<div class="term-step"><b>1</b><span>On a computer: ChatGPT &rarr; Settings &rarr; <i>Connectors</i> (called <i>Plugins</i> in some builds) &rarr; <i>Advanced</i> &rarr; turn on <b>Developer mode</b>. Nothing MCP-related appears until this is on.</span></div>
-					<div class="term-step"><b>2</b><span>Back in Connectors &rarr; <i>Create</i>. Name: <i>itsuki</i>. Description: <i>Personal memory &mdash; save and recall facts about me across chats.</i> URL:</span></div>
+					<div class="term-step"><b>1</b><span>On ChatGPT web, a Business or Enterprise/Edu workspace admin enables Developer mode under <i>Apps</i> and starts a custom MCP app.</span></div>
+					<div class="term-step"><b>2</b><span>Name the app <i>itsuki</i>, review its write tools and permissions, and use this URL:</span></div>
 					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
-					<div class="term-step"><b>3</b><span>In a new chat, enable Developer mode / <i>Add sources</i> and pick <i>itsuki</i> &mdash; a saved connector stays off until you switch it on in the chat</span></div>
-					<div class="term-note">Needs a paid ChatGPT plan (Plus/Pro/Business) &mdash; Free can't add custom connectors. Mobile can use it after setup, with some limits.</div>
+					<div class="term-step"><b>3</b><span>Publish or approve it for the workspace, then enable it in a new web chat. ChatGPT may ask for confirmation before a save.</span></div>
+					<div class="term-note">Full MCP write actions currently require Business or Enterprise/Edu on the web. Pro custom apps are read/fetch only.</div>
 				</div>
 				<div class="term-pane" data-pane="claude-code">
 					<div class="term-step"><b>1</b><span>Create your MCP link in the Connect tab, then run:</span></div>
@@ -1099,25 +1099,25 @@
 				<div class="term-pane" data-pane="cursor">
 					<div class="term-step"><b>1</b><span>Add Itsuki to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
 					<div class="term-code"><code data-connect="cursor"></code><button class="copy-btn" data-copy-key="cursor">Copy</button></div>
-					<div class="term-note">Works the same in any MCP-capable editor or agent host.</div>
+					<div class="term-note">Uses a standard Streamable HTTP MCP configuration; tool discovery and invocation still depend on the host.</div>
 				</div>
 				<div class="term-pane" data-pane="api">
 					<div class="term-step"><b>1</b><span>One call: recall relevant memory <i>and</i> auto-save the turn:</span></div>
 					<div class="term-code"><code data-connect="api"></code><button class="copy-btn" data-copy-key="api">Copy</button></div>
-					<div class="term-note">Plus <i>/v1/save</i>, <i>/v1/recall</i>, <i>/v1/graph</i>, <i>/v1/rules</i>, <i>/v1/export</i> — same private graph.</div>
+					<div class="term-note">Plus <i>/v1/save</i>, <i>/v1/recall</i>, <i>/v1/graph</i>, <i>/v1/rules</i>, and <i>/v1/export</i> under the selected account and scope.</div>
 				</div>
 			</div>
 		</div>
 		<div class="product-card contact-card" style="margin-top:16px" id="api-sdk-mcp">
 			<h3>Honest MCP note</h3>
-			<p>When Itsuki is connected through an MCP-capable AI client, Itsuki provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn capture or recall, use the Itsuki API or SDK inside your app or agent runtime.</p>
+			<p>When Itsuki is connected through an MCP-capable AI client, Itsuki provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn API invocation, call Itsuki from your own app or agent runtime and inspect the resulting receipt and packet status.</p>
 		</div>
 	</section>
 
 	<section class="landing-section reveal" id="structured-memory">
 		<div class="section-kicker">Why a graph</div>
 		<h2 class="section-title">Structured memory, not transcript replay.</h2>
-		<p class="public-note">Itsuki turns useful context from chats, events, documents, tools, and workflows into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
+		<p class="public-note">Itsuki turns context submitted through its supported save, conversation, ingest, and MCP interfaces into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
 		<div class="how-grid" style="margin-top:18px">
 			<div class="product-card"><h3>Chat history is not memory.</h3><p>Messages are source material. Itsuki keeps the durable meaning that should survive beyond a single exchange.</p></div>
 			<div class="product-card"><h3>Memory is structured meaning.</h3><p>Itsuki stores verified entities, facts, events, relationships, rollups, and receipts so systems can reason over them later.</p></div>
@@ -1137,13 +1137,13 @@
 			</div>
 			<div class="feature-card">
 				<div class="feature-icon" style="--fc:#3fb950"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg></div>
-				<h3>Latest truth wins</h3>
-				<p>Say "actually, that changed" — the old fact is superseded and kept as visible history on a timeline, not deleted, not duplicated.</p>
+				<h3>Supersession with history</h3>
+				<p>When new evidence is classified as an update to the same fact, the prior value can be superseded and retained as timeline history.</p>
 			</div>
 			<div class="feature-card">
 				<div class="feature-icon" style="--fc:#f2cc60"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22z"/><path d="M9.5 8h5M9.5 12h5"/></svg></div>
 				<h3>Receipts for every save</h3>
-				<p>Each write returns proof: what was saved, updated, or refused — with source and timestamp. No silent writes, ever.</p>
+				<p>Write responses include a receipt describing what was saved, updated, or refused; asynchronous work also exposes packet and job status.</p>
 			</div>
 			<div class="feature-card">
 				<div class="feature-icon" style="--fc:#bc8cff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5.5v5.7c0 4.6 3.2 8.6 8 9.8 4.8-1.2 8-5.2 8-9.8V5.5z"/><path d="M8.5 11.5h7M8.5 15h4"/></svg></div>
@@ -1154,18 +1154,18 @@
 	</section>
 
 	<section class="landing-section reveal" id="inputs">
-		<div class="section-kicker">One graph, many inputs</div>
+		<div class="section-kicker">One graph, supported inputs</div>
 		<h2 class="section-title">Chat is one input. Not the whole product.</h2>
-		<p class="public-note">Itsuki can ingest useful context from tools, apps, agents, docs, events, workflows, and custom schemas.</p>
+		<p class="public-note">Applications can submit chat, document, tool-result, event, and workflow-state context through Itsuki's supported APIs and connectors.</p>
 		<div class="input-chip-grid" style="margin-top:18px">
 			<span>Chat turns</span><span>Manual saves</span><span>Documents</span><span>Tool outputs</span><span>App events</span>
-			<span>Support tickets</span><span>Meeting notes</span><span>Project rules</span><span>Workflow state</span><span>Custom schemas</span>
+			<span>Support tickets</span><span>Meeting notes</span><span>Project rules</span><span>Workflow state</span><span>API events</span>
 		</div>
 	</section>
 
 	<section class="landing-section reveal" id="privacy-policy">
 		<div class="section-kicker">Private by default</div>
-		<h2 class="section-title">Your memory belongs to you. Provably.</h2>
+		<h2 class="section-title">Your memory stays under your control.</h2>
 		<p class="public-note">No ads. No trackers. No selling data. No training on your memory. Export everything as JSON or delete it all — any time, one click.</p>
 		<div class="policy-grid" style="margin-top:18px">
 			<div class="product-card">
@@ -1182,7 +1182,7 @@
 	</section>
 
 	<section class="landing-section reveal final-cta-band" id="final-cta">
-		<h2 class="section-title">Build memory once. Use it everywhere work continues.</h2>
+		<h2 class="section-title">Build structured memory into the tools where work continues.</h2>
 		<p class="public-note">Free early access — founding users keep the Pro tier free when paid plans launch.</p>
 		<div class="hero-actions" style="justify-content:center">
 			<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
@@ -2389,16 +2389,6 @@ console.log(context);`,
 		// only other lever. One copy-paste block, same wording for every host.
 		autoInstructions: `You have an ${PRODUCT.name} memory tool. At the start of each conversation, call recall_memory to load what you already know about me. When I share something durable — a decision, preference, plan, person, or project — call save_memory without being asked. When a conversation produces lasting decisions or plans, call save_conversation with the relevant turns. Prefer sending my own words over your paraphrase. Never say you saved something unless you got the receipt back.`,
 		pluginMarketplace: `claude plugin marketplace add 12ziyad/universal-memory-engine`,
-		codexMarketplace: `{
-  "name": "${PRODUCT.name.toLowerCase()}-plugins",
-  "interface": { "displayName": "${PRODUCT.name}" },
-  "plugins": [{
-    "name": "${PRODUCT.name.toLowerCase()}",
-    "source": { "source": "git", "url": "https://github.com/12ziyad/universal-memory-engine" },
-    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-    "category": "Productivity"
-  }]
-}`,
 		pluginInstall: `/plugin install ${PRODUCT.name.toLowerCase()}`,
 		pythonTurn: `# one call per agent turn: recall + capture together
 result = memory.turn([
@@ -2466,10 +2456,10 @@ function installMethods() {
 				claude: {
 					label: "Claude",
 					icon: ICON.spark,
-					hint: "Needs a paid Claude plan.",
+					hint: "Beta on all Claude plans; Free is limited to one custom connector.",
 					steps: [
 						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add it to Claude", body: "Desktop only. Syncs to your phone after.",
+						{ title: "Add it to Claude", body: "Customize → Connectors → + → Add custom connector.",
 							// The one-click path to the exact settings screen, kept as an
 							// icon on the title so it costs no line of prose.
 							titleHref: "https://claude.ai/settings/connectors?modal=add-custom-connector",
@@ -2477,24 +2467,23 @@ function installMethods() {
 							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
 						{ title: "Turn it on", body: `Tap +, choose Connectors, enable ${name}.`,
 							codeLabel: "say this", code: () => `save this to ${name}` },
-						{ title: "Make it automatic", body: "Paste into Claude → Settings → Profile (preferences box), or a Project's instructions. Claude then recalls and saves without being asked.",
+						{ title: "Ask for proactive tool use", body: "Paste into Claude → Settings → Profile (preferences box), or a Project's instructions. This requests proactive recall and save calls; the host still controls tool use.",
 							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
 				chatgpt: {
 					label: "ChatGPT",
 					icon: ICON.hex,
-					hint: "Needs a paid ChatGPT plan, on the web.",
+					hint: "Full save + recall currently needs Business or Enterprise/Edu on the web.",
 					steps: [
-						{ title: "Open apps and connectors", body: "Settings → Apps & connectors." },
-						{ title: "Turn on Developer mode", body: "Advanced settings, at the bottom. Leave it on." },
-						{ title: "Go back one screen", body: "A Create button appears." },
-						{ title: "Create the connector", body: `Name it ${name}, paste the URL, authentication None.`,
+						{ title: "Open workspace Apps", body: "A workspace admin uses ChatGPT on the web." },
+						{ title: "Enable Developer mode", body: "Settings → Apps → Advanced settings, subject to workspace policy." },
+						{ title: "Create a custom MCP app", body: `Name it ${name}, review its tools and write permissions, then use the URL.`,
 							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
-						{ title: "Open a new chat", body: "The tools menu only refreshes on a new one." },
-						{ title: "Turn it on", body: `Click + → More → Developer tools, pick ${name}.`,
+						{ title: "Publish and approve it", body: "Make the reviewed app available to the workspace." },
+						{ title: "Use a new web chat", body: `Enable ${name}; write actions may require confirmation.`,
 							codeLabel: "say this", code: () => `save this to ${name}` },
-						{ title: "Make it automatic", body: "Paste into Settings → Personalization → Custom instructions. ChatGPT then recalls and saves without being asked.",
+						{ title: "Ask for proactive tool use", body: "Paste into Settings → Personalization → Custom instructions. This requests proactive recall and save calls; the host still controls tool use.",
 							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
@@ -2574,16 +2563,6 @@ function installMethods() {
 							`That is everything — <b>one runtime path and one protected key</b>. There is no service URL to configure. ` +
 							`SessionStart attempts up to four due batches in order before recall. Local queueing, server acceptance, and terminal enrichment are distinct states; offline or retryable work remains protected. <a href="/docs/#/install/plugin">See delivery limits and semantics</a>.<br><br>` +
 							`If either setting is missing or the key is rejected, the plugin reports it instead of failing quietly.`,
-					},
-				},
-				codex: {
-					label: "Codex",
-					icon: ICON.chevron,
-					copyOnly: {
-						body: "Paste this into .agents/plugins/marketplace.json in your repo (or ~/.agents/plugins/ for every project), then install from Codex's plugin list.",
-						codeLabel: ".agents/plugins/marketplace.json",
-						code: (key) => installSnippets(key).codexMarketplace,
-						note: "Honestly: the Codex path is rougher than the Claude Code one — a hand-pasted manifest, and Codex's plugin surface is still settling. It works, with more ceremony.",
 					},
 				},
 			},
@@ -2681,7 +2660,7 @@ function viewInstall(v) {
 	wrap.innerHTML = `
 		<div class="install-intro page-head">
 			<h2 class="page-title">Get started with ${PRODUCT.name}</h2>
-			<p class="page-sub">Three ways in. All of them read and write the same memory.</p>
+			<p class="page-sub">Three supported setup paths, all routed through the same account and scope model.</p>
 		</div>
 		<div class="method-cards">
 			${Object.entries(doors).map(([id, m]) => `
@@ -3890,7 +3869,7 @@ function renderRulesSummary(rules) {
 function viewRules(v) {
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="box" style="max-width:920px"><h3>What to remember</h3>
-		<div class="help">Decide what Itsuki should and shouldn’t remember. This applies everywhere — every connected AI tool and app. “Never save” always wins.</div>
+		<div class="help">Decide what Itsuki should and shouldn’t remember. The same rules govern supported writes accepted under your account. “Never save” wins when rules conflict.</div>
 		<div id="rules-active" class="help" style="margin-top:6px;font-style:italic">Loading current rules…</div></div>`;
 	const form = el("div","action-box");
 	form.style.maxWidth = "920px";
@@ -3983,7 +3962,7 @@ function viewHelp(v) {
 	const topics = [
 		["How Itsuki works", "Connected tools save durable context into pages, nodes, slices, events, edges, and clusters. Recall asks that memory for compact context."],
 		["Connect Claude/MCP clients", "Generate an MCP token, copy the MCP URL, then add it in the client's connector or MCP server settings."],
-		["Connect Cursor/Codex", "Use the Connect tab's MCP setup if your coding assistant supports MCP or tool servers."],
+		["Connect an MCP coding assistant", "Use the Connect tab's MCP setup when your coding assistant supports Streamable HTTP MCP or tool servers."],
 		["ChatGPT-style/custom assistants", "Use connectors, MCP, tools, or API actions when available. If not, connect through your own app or agent."],
 		["How tokens work", "Tokens identify one account and one tool. The full token is shown once, then only a masked version remains."],
 		["Rotate or revoke", "Generate a new token to rotate. Revoke stops that tool immediately."],

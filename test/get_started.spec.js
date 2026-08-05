@@ -106,6 +106,11 @@ describe("one config, one state, one renderer", () => {
 		expect((script.match(/class="step-num"/g) ?? [])).toHaveLength(1);
 		expect((script.match(/class="method-card /g) ?? [])).toHaveLength(1);
 	});
+
+	it("does not advertise Codex before its clean save/recall proof passes", () => {
+		expect(script).not.toContain("codexMarketplace");
+		expect(script).not.toContain('label: "Codex"');
+	});
 });
 
 describe("Claude tab", () => {
@@ -114,7 +119,7 @@ describe("Claude tab", () => {
 	it("uses the short step copy, one line each", () => {
 		for (const [title, body] of [
 			["Create your link", '"Shown once. Save it."'],
-			["Add it to Claude", '"Desktop only. Syncs to your phone after."'],
+			["Add it to Claude", '"Customize → Connectors → + → Add custom connector."'],
 			["Turn it on", "`Tap +, choose Connectors, enable ${name}.`"],
 		]) {
 			expect(script, title).toContain(`{ title: "${title}", body: ${body},`);
@@ -125,7 +130,7 @@ describe("Claude tab", () => {
 	});
 
 	it("states the plan requirement as one muted line, not a banner", () => {
-		expect(script).toContain('hint: "Needs a paid Claude plan."');
+		expect(script).toContain('hint: "Beta on all Claude plans; Free is limited to one custom connector."');
 		expect(script).toContain('class="install-hint"');
 		// The amber callout is gone entirely.
 		expect(script).not.toContain('class="install-callout"');
@@ -147,12 +152,11 @@ describe("Claude tab", () => {
 describe("ChatGPT tab", () => {
 	it("keeps the full click path in order, with Developer mode as its own step", () => {
 		const order = [
-			"Settings → Apps & connectors.",
-			"Advanced settings, at the bottom. Leave it on.",
-			"A Create button appears.",
-			"authentication None",
-			"The tools menu only refreshes on a new one.",
-			"Click + → More → Developer tools",
+			"A workspace admin uses ChatGPT on the web.",
+			"Settings → Apps → Advanced settings, subject to workspace policy.",
+			"review its tools and write permissions",
+			"Make the reviewed app available to the workspace.",
+			"write actions may require confirmation",
 		];
 		let cursor = -1;
 		for (const phrase of order) {
@@ -160,11 +164,11 @@ describe("ChatGPT tab", () => {
 			expect(at, phrase).toBeGreaterThan(cursor);
 			cursor = at;
 		}
-		expect(script).toContain('{ title: "Turn on Developer mode"');
+		expect(script).toContain('{ title: "Enable Developer mode"');
 	});
 
 	it("says the plan requirement once, muted", () => {
-		expect(script).toContain('hint: "Needs a paid ChatGPT plan, on the web."');
+		expect(script).toContain('hint: "Full save + recall currently needs Business or Enterprise/Edu on the web."');
 	});
 
 	it("never invents a ChatGPT settings deep link", () => {

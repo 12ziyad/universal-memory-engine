@@ -138,16 +138,16 @@ const PAGES = {};
 
 PAGES["/"] = { title: "What is Itsuki?", html: `
 <h1>What is Itsuki?</h1>
-<p class="lede">One private memory, shared by every AI you use. Tell it once — Claude, ChatGPT, your editor, and your own apps all remember.</p>
+<p class="lede">A private, structured memory service that supported tools can save to and recall from through MCP, REST, and the dashboard.</p>
 <p>Itsuki (樹, "tree") is a personal memory engine. Tools you connect can <b>save</b> durable facts about you and <b>recall</b> them later. Memory is stored as a structured graph — memories, details, events, and the connections between them — that you can see, edit, and delete from your dashboard. Nothing is hidden inside an app you don't control.</p>
-<h2>One engine, three doors</h2>
+<h2>One service, three interfaces</h2>
 <table>
 <tr><th>Door</th><th>Who it's for</th><th>How</th></tr>
 <tr><td><b>MCP</b></td><td>AI chats &amp; editors (Claude, ChatGPT, Cursor…)</td><td>One private URL pasted into the client's connector settings</td></tr>
 <tr><td><b>REST API</b></td><td>Your own apps, agents, and scripts</td><td>Bearer key + two main endpoints: save and recall</td></tr>
 <tr><td><b>Dashboard</b></td><td>You</td><td>See the graph, review suggestions, set rules, read receipts</td></tr>
 </table>
-<p>All three doors read and write the <b>same</b> memory. There is exactly one engine behind them.</p>
+<p>All three interfaces route through the same account and scope model. The connected client or host model decides when to call MCP tools, so an installed connector is not by itself proof of a save or recall.</p>
 <h2>What makes it different</h2>
 <ul>
 <li><b>You can see it.</b> Your memory is a living graph in your dashboard, not a black box.</li>
@@ -170,7 +170,7 @@ ${codeBlock(`curl -X POST ${ORIGIN}/v1/save \\
   -H "authorization: Bearer YOUR_API_KEY" \\
   -H "content-type: application/json" \\
   -d '{"content": "I started learning Kotlin this week."}'`)}
-<p>The response is a <b>receipt</b> — what was saved and why. Extraction finishes in the background within a few seconds.</p>
+<p>The response distinguishes acceptance from background enrichment and includes a packet handle when work continues asynchronously. Inspect packet/job status before treating enrichment as terminal.</p>
 <h2>4 · Recall it</h2>
 ${codeBlock(`curl -X POST ${ORIGIN}/v1/recall \\
   -H "authorization: Bearer YOUR_API_KEY" \\
@@ -194,18 +194,18 @@ different spaces.</p>
 <code>usr_id</code> returns <code>400</code> naming the offending key. Silently dropping it is how
 somebody ships a multi-tenant app believing isolation worked.</div>
 <h2>5 · Connect an AI chat</h2>
-<p>Follow the guide for <a href="#/install/claude">Claude</a> or <a href="#/install/chatgpt">ChatGPT</a> — one URL, two minutes. After that, saying <i>"save this to ${PRODUCT.name.toLowerCase()}"</i> or asking <i>"what do you know about me?"</i> just works.</p>
+<p>Follow the guide for <a href="#/install/claude">Claude</a> or <a href="#/install/chatgpt">ChatGPT</a>. You can then explicitly ask the host to save or recall through the connector; actual tool selection remains controlled by that host.</p>
 <div class="note">Prefer clicking to curling? The <b>Playground</b> in the app does steps 3–4 with buttons.</div>
 ` };
 
 PAGES["/install/claude"] = { title: "Connect Claude", html: `
 <h1>Connect Claude</h1>
-<p class="lede">Claude (claude.ai) supports custom connectors on every plan, including free.</p>
+<p class="lede">Claude remote custom connectors are currently a beta on Free, Pro, Max, Team, and Enterprise. Free accounts are limited to one custom connector.</p>
 <div class="note"><b>Set up on a computer, not your phone.</b> The Claude mobile apps can't add connectors — configure once in a computer browser and it syncs to your phone automatically.</div>
 <h2>Steps</h2>
 <ol>
 <li>In the Itsuki app, open <b>API Keys → Create MCP link</b> and copy your private URL (shown once): <code>${ORIGIN}/mcp/${PRODUCT.tokenPrefix}…</code></li>
-<li>Open <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">claude.ai → Settings → Connectors → Add custom connector</a> (this link opens the dialog directly).</li>
+<li>Open Claude's <b>Customize → Connectors</b>, click <b>+</b>, then <b>Add custom connector</b>. This <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">direct link</a> may open the same dialog. On Team or Enterprise, an Owner or Primary Owner must add it for the organization.</li>
 <li>Name it <code>${PRODUCT.name.toLowerCase()}</code>, paste the URL, click <b>Add</b>.</li>
 <li>In any chat: click the <b>+</b> (bottom-left) → <b>Connectors</b> → switch on <code>${PRODUCT.name.toLowerCase()}</code>. A saved connector stays off until you enable it in a chat — this step is the one everyone misses.</li>
 </ol>
@@ -215,25 +215,27 @@ PAGES["/install/claude"] = { title: "Connect Claude", html: `
 <ul>
 <li><b>Connector missing in a chat</b> — enable it via <b>+</b> → Connectors (per-chat switch).</li>
 <li><b>"Unauthorized"</b> — the key was revoked or rotated; create a fresh MCP link and update the URL.</li>
-<li><b>Claude doesn't save automatically</b> — by design. The model decides when to call tools; ask it explicitly, or use the API for guaranteed capture.</li>
+<li><b>Claude doesn't save automatically</b> — by design. The model decides when to call tools; ask it explicitly, or call the API from your own runtime and inspect the receipt and packet status.</li>
 </ul>
+<p>Plan and UI details can change while the feature is in beta; verify them in <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp" target="_blank" rel="noopener">Anthropic's current custom-connector guide</a>.</p>
 ` };
 
 PAGES["/install/chatgpt"] = { title: "Connect ChatGPT", html: `
 <h1>Connect ChatGPT</h1>
-<p class="lede">ChatGPT supports custom MCP connectors on paid plans (Plus/Pro/Business), behind Developer mode.</p>
-<div class="note">Set up on a computer. Nothing MCP-related appears anywhere until Developer mode is on.</div>
+<p class="lede">Itsuki needs full MCP write actions for save and recall. OpenAI currently limits that beta to ChatGPT Business and Enterprise/Edu on the web; Pro custom apps are read/fetch only.</p>
+<div class="note">This is a workspace-admin flow on the web. Availability, UI, and permissions may change during the beta.</div>
 <h2>Steps</h2>
 <ol>
-<li>ChatGPT → <b>Settings → Connectors</b> (called <i>Plugins</i> in some builds) → <b>Advanced</b> → turn on <b>Developer mode</b>.</li>
-<li>Back in Connectors, click <b>Create</b>. Name: <code>${PRODUCT.name.toLowerCase()}</code>. Description: <i>Personal memory — save and recall facts about me across chats.</i> (the model reads this when deciding to use it). URL: your MCP link from <b>API Keys → Create MCP link</b>.</li>
-<li>In a new chat, enable Developer mode / <b>Add sources</b> and pick <code>${PRODUCT.name.toLowerCase()}</code> — a saved connector is off until selected in the chat.</li>
+<li>A Business admin/owner enables Developer mode from <b>Settings → Apps → Advanced settings</b> or starts at <b>Workspace settings → Apps → Create</b>. Enterprise/Edu admins first grant developer access under Permissions &amp; Roles.</li>
+<li>Create a custom MCP app. Name it <code>${PRODUCT.name.toLowerCase()}</code> and use the MCP link from <b>API Keys → Create MCP link</b>. Review the server's three tools and write permissions before publishing it to the workspace.</li>
+<li>After the workspace approves/publishes the app, enable it in a new web chat. The host may request confirmation before a save action.</li>
 </ol>
 <h2>Limits worth knowing</h2>
 <ul>
-<li>Free ChatGPT accounts can't add custom connectors at all.</li>
-<li>Mobile can use the connector after desktop setup, with some write limits on OpenAI's side.</li>
+<li>Full MCP write actions are not currently available to Free, Plus, or Pro accounts.</li>
+<li>Custom MCP apps are currently web-only. Agent mode does not use them.</li>
 </ul>
+<p>Follow <a href="https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta" target="_blank" rel="noopener">OpenAI's current developer-mode and full-MCP guide</a>; it is the authority for plan and workspace controls.</p>
 ` };
 
 PAGES["/install/claude-code"] = { title: "Claude Code (MCP)", html: `
@@ -254,7 +256,7 @@ ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORI
 
 PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
 <h1>Claude Code plugin</h1>
-<p class="lede">Install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
+<p class="lede">Lifecycle hooks attempt bounded recall at session start and queue scrubbed durable outcomes locally at session end.</p>
 <h2>1. Install</h2>
 <p>Claude Code itself can run without Node, but Itsuki's lifecycle hooks require a maintained <b>Node 22 or 24 LTS</b> runtime. Find its absolute executable path with <code>(Get-Command node).Source</code> in PowerShell or <code>command -v node</code> on macOS/Linux, and create an API key in <b>API Keys</b>.</p>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
@@ -393,13 +395,13 @@ PAGES["/api/mcp"] = { title: "MCP tools", html: `
 <h3>save_memory</h3>
 <p>Saves exactly one explicitly submitted durable fact. Input: <code>content</code> (required, the user's words), optional <code>recentContext</code> for resolving references like "it". Returns a final receipt — <i>Saved: 1 memory (Kotlin)…</i> — only after the write completes.</p>
 <h3>save_conversation</h3>
-<p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Only user-stated facts enter the graph; assistant content becomes notes, never facts, unless the user explicitly adopted it.</p>
+<p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Attribution rules require user adoption or supported request/outcome evidence; unsupported assistant prose is not treated as a user fact.</p>
 <h3>recall_memory</h3>
 <p>Input: <code>query</code>, optional <code>memoryScope</code> project metadata, and optional <code>recallScope</code> (<code>global</code> | <code>project_only</code> | <code>project_then_global</code>). The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
 <h2>Design guarantees</h2>
 <ul>
-<li>No write is ever claimed without a receipt.</li>
-<li>The host model decides <i>when</i> to call tools — if you need guaranteed per-turn capture, use <code>POST /v1/turn</code> from your own code instead.</li>
+<li>Itsuki's write responses distinguish locally queued work, server acceptance, and a backend receipt; asynchronous enrichment has separate packet status.</li>
+<li>The host model decides <i>when</i> to call tools — if you need guaranteed per-turn invocation, call <code>POST /v1/turn</code> from your own code and inspect its collect receipt and packet status.</li>
 </ul>
 ` };
 
@@ -410,14 +412,16 @@ ${codeBlock(`from itsuki import MemoryClient
 
 memory = MemoryClient(api_key="YOUR_API_KEY", base_url="${ORIGIN}")
 
-memory.add("I started learning Kotlin this week.")
+receipt = memory.add(
+    "I started learning Kotlin this week.",
+    idempotency_key=MemoryClient.new_idempotency_key(),
+)
+if receipt.get("source_packet_id"):
+    memory.wait_for(receipt["source_packet_id"])
 print(memory.search("what am I learning?")["context"])
 
 # recall + auto-capture in one call
 memory.turn([{"role": "user", "content": "We picked Postgres."}])
-
-# safe retries on writes
-memory.add("Big decision", idempotencyKey=MemoryClient.new_idempotency_key())
 
 # projects are metadata inside this account, not separate user IDs
 scope = {"projectId": "atlas", "projectName": "Atlas"}
@@ -432,10 +436,12 @@ alice = MemoryClient(api_key="YOUR_API_KEY", user_id="alice")`)}
 <tr><td><code>add(content)</code> / <code>add_conversation(messages)</code></td><td>POST /v1/save</td></tr>
 <tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
 <tr><td><code>turn(messages)</code> · <code>ingest(messages, flush=True)</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
+<tr><td><code>packet_status(id)</code> · <code>jobs()</code> · <code>wait_for(id)</code></td><td>GET /v1/packets/:id/status · /v1/jobs</td></tr>
+<tr><td><code>delete(id)</code> · <code>delete_by_source(...)</code></td><td>DELETE /v1/memories/*</td></tr>
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>export_all()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>get_rules()</code> · <code>set_rules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
 </table>
-<p>Errors raise <code>MemoryAPIError</code> (<code>.status</code>, <code>.code</code>, <code>.body</code>). Reads retry on 429/5xx with backoff; writes retry only when you pass <code>idempotencyKey</code>. If the package isn't on PyPI yet (publishing is rolling out), the <a href="#/quickstart">cURL quickstart</a> works identically today.</p>
+<p>Errors raise <code>MemoryAPIError</code> with <code>.status</code>, <code>.code</code>, <code>.body</code>, and parsed <code>.retry_after</code>. Reads retry transient failures; POST writes retry only with <code>idempotency_key</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). This checkout prepares <code>0.2.1</code>; registry installation resolves the currently published version, so inspect <code>itsuki.VERSION</code> before relying on the new helpers.</p>
 ` };
 
 PAGES["/sdk/js"] = { title: "JavaScript SDK", html: `
@@ -445,14 +451,14 @@ ${codeBlock(`import { MemoryClient } from "itsuki";
 
 const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, baseUrl: "${ORIGIN}" });
 
-await memory.add("I started learning Kotlin this week.");
+const receipt = await memory.add("I started learning Kotlin this week.", {
+  idempotencyKey: memory.newIdempotencyKey(),
+});
+if (receipt.source_packet_id) await memory.waitFor(receipt.source_packet_id);
 const { context } = await memory.search("what am I learning?");
 
 // recall + auto-capture in one call
 await memory.turn([{ role: "user", content: "We picked Postgres." }]);
-
-// safe retries on writes
-await memory.add("Big decision", { idempotencyKey: memory.newIdempotencyKey() });
 
 // projects are metadata inside this account, not separate user IDs
 const scope = { projectId: "atlas", projectName: "Atlas" };
@@ -467,10 +473,12 @@ const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "al
 <tr><td><code>add(content, opts)</code> / <code>addConversation(messages)</code></td><td>POST /v1/save</td></tr>
 <tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
 <tr><td><code>turn(messages)</code> · <code>ingest(messages, { flush: true })</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
+<tr><td><code>packetStatus(id)</code> · <code>jobs()</code> · <code>waitFor(id)</code></td><td>GET /v1/packets/:id/status · /v1/jobs</td></tr>
+<tr><td><code>delete(id)</code> · <code>deleteBySource(...)</code></td><td>DELETE /v1/memories/*</td></tr>
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>exportAll()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>getRules()</code> · <code>setRules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
 </table>
-<p>Errors throw <code>MemoryAPIError</code> (<code>status</code>, <code>code</code>, <code>body</code>). Reads retry on 429/5xx with backoff honoring Retry-After; writes retry only when you pass <code>idempotencyKey</code>. Server-side use — keep keys out of browsers. If the package isn't on npm yet (publishing is rolling out), the <a href="#/quickstart">cURL quickstart</a> works identically today.</p>
+<p>Errors throw <code>MemoryAPIError</code> with <code>status</code>, <code>code</code>, <code>body</code>, and <code>retryAfterMs</code>. Reads retry transient failures; POST writes retry only with <code>idempotencyKey</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). The package includes TypeScript declarations. This checkout prepares <code>0.2.1</code>; registry installation resolves the currently published version, so inspect <code>VERSION</code> before relying on the new helpers. Keep keys out of browsers.</p>
 ` };
 
 PAGES["/concepts/memory"] = { title: "How memory works", html: `
@@ -482,7 +490,7 @@ PAGES["/concepts/memory"] = { title: "How memory works", html: `
 <li><b>Extraction</b> — a model proposes durable facts from what you said. Small talk, questions, and noise are skipped.</li>
 <li><b>Grounding</b> — every proposed fact must be traceable to your actual words. Facts the model can't ground are rejected, not stored.</li>
 <li><b>The graph</b> — facts land as <b>memories</b> (things: Kotlin, Sarah, your project) with <b>details</b> (current truths) and <b>events</b> (things that happened), connected by edges and clustered by life area.</li>
-<li><b>Latest truth wins</b> — new information supersedes old instead of piling up; superseded details stay in history.</li>
+<li><b>Supersession with history</b> — when new information resolves to the same fact, the prior detail can be superseded and retained in history.</li>
 <li><b>Recall</b> — a query pulls the most relevant slice of the graph as a compact context block, bounded so it never floods a prompt.</li>
 </ol>
 <h2>Suggestions</h2>
@@ -495,7 +503,7 @@ PAGES["/concepts/receipts"] = { title: "Receipts & rules", html: `
 <h1>Receipts &amp; rules</h1>
 <p class="lede">Trust needs proof and control. Receipts are the proof; rules are the control.</p>
 <h2>Receipts</h2>
-<p>Every save attempt produces a receipt: what was written, what was updated, what was skipped and why. They live in <b>History</b> and come back on every API save. A tool can never claim "saved!" without one — receipts are generated by the backend, not the model.</p>
+<p>Authenticated, valid save commands return either an error or a backend receipt describing what was written, updated, or skipped. Receipts live in <b>History</b>; accepted asynchronous work also exposes a packet/job state. Itsuki's own tool responses do not report a completed save based only on model prose.</p>
 ${codeBlock(`{ "summary": "Saved: 1 memory (Kotlin), 1 detail. Skipped: 1 (question).",
   "receipt_id": "receipt_1a2b…",
   "receipt": { "outcome": "wrote", "saved": { "nodes": 1, "slices": 1 }, "skipped": 1 } }`)}

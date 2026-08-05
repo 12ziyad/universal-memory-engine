@@ -2,11 +2,11 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**One private memory graph, shared by every AI you use.**
+**A structured memory service for AI applications and coding agents.**
 
-Tell it once. Claude remembers. ChatGPT remembers. Your agent remembers. Itsuki (樹, "tree")
-stores the durable parts of what you say as a structured graph you can open, search, edit,
-and export — not a hidden blob, and not a chat log replayed back at you.
+Itsuki (樹, "tree") stores durable context as a structured graph you can open, search, edit,
+and export — not a hidden blob, and not a chat log replayed back at you. It exposes that
+service through MCP, REST, server-side SDKs, a dashboard, and a Claude Code plugin.
 
 Live at **https://itsuki.app** · Apache-2.0 · built entirely on Cloudflare.
 
@@ -14,11 +14,11 @@ Live at **https://itsuki.app** · Apache-2.0 · built entirely on Cloudflare.
 
 ## What makes it different
 
-Most memory tools onboard *developer* tools — an IDE, a coding agent, a CLI. Itsuki connects
-**claude.ai and ChatGPT directly**. A non-technical person pastes one link into their chat
-app's connector settings and their assistant starts remembering them. No SDK, no terminal.
+Most memory tools onboard *developer* tools — an IDE, a coding agent, a CLI. Itsuki also
+exposes a Streamable HTTP MCP endpoint for supported chat-app connectors. The client or host
+model still decides whether and when to call a memory tool.
 
-The same memory is reachable four ways, and they are all the same engine:
+Itsuki provides four interfaces to one account- and scope-aware backend:
 
 | Door | Who uses it |
 | --- | --- |
@@ -27,8 +27,9 @@ The same memory is reachable four ways, and they are all the same engine:
 | **SDKs** | `itsuki` for Node and Python |
 | **The app itself** | dashboard, graph, and a Playground that captures as you talk |
 
-One engine, many doors. A new door is never a new engine — the Playground you can try in the
-browser runs the same extraction and writes the same receipts a connected Claude does.
+These interfaces route through the same server-side authentication, scope, extraction, and
+receipt code paths. End-to-end behavior still depends on each client's configuration and tool
+use; the repository does not treat an available connector as proof that a host called it.
 
 ## What it stores
 
@@ -55,10 +56,14 @@ cannot save what you told it not to.
 ## Honest limits
 
 - Through MCP, the **host model decides** when to call a memory tool. Itsuki provides the
-  tools; it cannot force a call. For guaranteed per-turn capture, use the API or SDK inside
-  your own app.
-- Custom connectors need a **paid plan** on both Claude and ChatGPT, and must be added from a
-  computer — neither phone app can add one.
+  tools; it cannot force a call. For guaranteed per-turn invocation, call the API or SDK
+  inside your own app and inspect the receipt and terminal packet status.
+- Claude remote custom connectors are currently a beta on Free, Pro, Max, Team, and Enterprise;
+  Free is limited to one, and organization plans require an owner to add the connector. ChatGPT's
+  full MCP write actions — required for Itsuki save as well as recall — are currently limited to
+  Business and Enterprise/Edu on the web; Pro custom apps are read/fetch only. Check the current
+  [Claude connector guide](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
+  and [ChatGPT MCP availability](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta) before setup.
 - Itsuki does not sell data, run third-party trackers, or train on your memory. Fonts are
   self-hosted for the same reason: a font CDN would see every visitor's IP.
 
@@ -102,9 +107,9 @@ Signed in at `/app`:
 - **Get started** walks you through connecting Claude, ChatGPT, or Cursor. Before you create a
   link, no code block is copyable — the copy button *is* the create-link button, so you can
   never copy a URL that cannot work.
-- **Playground** is a real conversation with a live Memories panel. Everything it captures is
-  genuinely saved, by the same pipeline, with a receipt. Per-thread settings change what gets
-  captured, and they feed the real rules system.
+- **Playground** submits conversations through the same extraction pipeline and displays the
+  resulting receipts and memory panel. Rules and gates may save, update, or skip a proposal.
+  Per-thread settings feed the account rules system.
 - **Requests** shows every call that reached your memory — type, entities, event, latency,
   status. Metadata only: the query never selects a column that could contain your words.
 - **Memory exports** builds a full JSON copy as a background job in your Durable Object.
@@ -151,7 +156,8 @@ creates an **isolated sub-tenant memory space** — that is how one key serves m
 `userId` remains a true end-user/sub-tenant boundary. A coding project is not another user:
 send it as `memoryScope: { projectId, projectName }`. Project rows stay in the authenticated
 account graph with explicit `project_id` / `project_name` provenance, so the dashboard, MCP,
-and SDK doors can discover the same memory without weakening account isolation.
+and SDK doors query the same account graph, subject to their explicit project and recall scopes,
+without weakening account isolation.
 
 Recall is explicit:
 
@@ -245,6 +251,10 @@ Claude removes plugin data on final uninstall unless its `--keep-data` option is
 
 ## SDKs
 
+This checkout prepares matching Node and Python `0.2.1` source packages. Registry installation
+resolves whatever version is currently published; inspect the exported `VERSION` before relying
+on the packet, jobs, polling, or deletion helpers.
+
 ```bash
 npm install itsuki      # Node 18+, zero dependencies
 pip install itsuki      # httpx
@@ -252,9 +262,12 @@ pip install itsuki      # httpx
 
 ```js
 import { MemoryClient } from "itsuki";
-const memory = new MemoryClient({ apiKey: process.env.ITSUKI_KEY });
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY });
 
-await memory.add("I started learning Kotlin this week.");
+const receipt = await memory.add("I started learning Kotlin this week.", {
+  idempotencyKey: memory.newIdempotencyKey(),
+});
+if (receipt.source_packet_id) await memory.waitFor(receipt.source_packet_id);
 const { context } = await memory.search("what am I learning?");
 ```
 

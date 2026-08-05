@@ -114,10 +114,11 @@ describe("Claude hook installation contract", () => {
 			text("public/docs/index.html"),
 			text("hooks/outbox-security.ps1"),
 		]);
-		const pluginPanel = landing.slice(
-			landing.indexOf('"claude-code": {'),
-			landing.indexOf("\n\t\t\t\tcodex:", landing.indexOf('"claude-code": {')),
-		);
+		const pluginPanelStart = landing.indexOf('"claude-code": {');
+		const pluginPanelEnd = landing.indexOf("\n\t\t\t\t},", pluginPanelStart);
+		expect(pluginPanelStart).toBeGreaterThan(-1);
+		expect(pluginPanelEnd).toBeGreaterThan(pluginPanelStart);
+		const pluginPanel = landing.slice(pluginPanelStart, pluginPanelEnd);
 
 		expect(command).toContain("disable-model-invocation: true");
 		expect(command).toContain("must intercept every user-typed");

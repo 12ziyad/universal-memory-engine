@@ -27,6 +27,18 @@ describe("dashboard script", () => {
 		expect(() => new Function(script)).not.toThrow();
 	});
 
+	it("keeps the public documentation script syntactically valid", () => {
+		const script = docsHtml.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(script).not.toBe("");
+		expect(() => new Function(script)).not.toThrow();
+		expect(docsHtml).toContain("idempotency_key=MemoryClient.new_idempotency_key()");
+		expect(docsHtml).not.toContain("idempotencyKey=MemoryClient.new_idempotency_key()");
+		expect(docsHtml).toContain("packet_status(id)");
+		expect(docsHtml).toContain("packetStatus(id)");
+		expect(docsHtml).toContain("delete_by_source(...)");
+		expect(docsHtml).toContain("deleteBySource(...)");
+	});
+
 	it("uses procedural graph hulls instead of fixed DOM cluster rectangles", () => {
 		expect(html).not.toContain("cluster-layer");
 		expect(html).not.toContain("cluster-region");
@@ -37,9 +49,9 @@ describe("dashboard script", () => {
 	it("renders the public Itsuki platform landing shell", () => {
 		expect((html.match(/<section class="landing-section/g) || []).length).toBeGreaterThanOrEqual(8);
 		expect(html).toContain("Universal Memory Layer");
-		expect(html).toContain("Tell it once. Every AI remembers.");
-		expect(html).toContain("one private memory graph shared by Claude, your agents, and your apps");
-		expect(html).toContain("Itsuki turns useful context from chats, events, documents, tools, and workflows into structured memory");
+		expect(html).toContain("One memory service. Multiple ways to connect.");
+		expect(html).toContain("supported tools and your own apps a private, structured memory API");
+		expect(html).toContain("Itsuki turns context submitted through its supported save, conversation, ingest, and MCP interfaces into structured memory objects");
 		expect(html).toContain("Start free");
 		expect(html).toContain("See how it works");
 		expect(html).toContain("Works with API, SDK, dashboard, and MCP-linked clients.");
@@ -49,10 +61,10 @@ describe("dashboard script", () => {
 		// How-it-works flow, written for a first-time visitor.
 		expect(html).toContain("Four steps. Simple enough to explain to anyone.");
 		expect(html).toContain("Itsuki organizes it");
-		expect(html).toContain("Every tool remembers");
+		expect(html).toContain("Connect supported tools");
 		// Connect terminal with per-client tabs; URLs are built from
 		// location.origin at runtime so no deploy domain leaks into the shell.
-		expect(html).toContain("Pick your tool. Paste one link. Done.");
+		expect(html).toContain("Choose an interface and follow its setup.");
 		expect(html).toContain("data-connect");
 		expect(html).toContain("YOUR_PRIVATE_TOKEN");
 		expect(html).toContain("connectSnippets");
@@ -61,12 +73,12 @@ describe("dashboard script", () => {
 		expect(html).toContain("Backend is the authority, not the LLM.");
 		expect(html).toContain("A graph that can update, not just append.");
 		expect(html).toContain("A memory you can see");
-		expect(html).toContain("Latest truth wins");
+		expect(html).toContain("Supersession with history");
 		expect(html).toContain("Receipts for every save");
 		expect(html).toContain("Your rules");
 		expect(html).toContain("When Itsuki is connected through an MCP-capable AI client");
 		expect(html).toContain("The client or host model decides when to call them.");
-		expect(html).toContain("If you need guaranteed per-turn capture or recall, use the Itsuki API or SDK inside your app or agent runtime.");
+		expect(html).toContain("If you need guaranteed per-turn API invocation");
 		expect(html).toContain("Itsuki does not sell user data");
 		expect(html).toContain("or use user memory for unrelated purposes");
 		expect(html).toContain("User memory belongs to the account that created it.");
@@ -91,6 +103,8 @@ describe("dashboard script", () => {
 			"Just works",
 			"Seamlessly",
 			"Itsuki saves every message",
+			"Tell it once. Every AI remembers.",
+			"Save once, recall everywhere.",
 		]) {
 			expect(html).not.toContain(forbidden);
 		}
@@ -154,7 +168,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("function setInstallMethod(");
 		expect(script).toContain('class="method-card');
 		expect(script).toContain('class="step-num"');
-		expect(script).toContain("Three ways in. All of them read and write the same memory.");
+		expect(script).toContain("Three supported setup paths, all routed through the same account and scope model.");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [
