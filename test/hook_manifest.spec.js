@@ -127,8 +127,10 @@ describe("Claude hook installation contract", () => {
 		expect(command).not.toMatch(/(^|\n)node\s+"\$\{CLAUDE_PLUGIN_ROOT\}/);
 		expect(pluginPanel).toContain("absolute Node executable");
 		expect(pluginPanel).toContain("masked key prompt");
+		expect(pluginPanel).toContain("/plugin configure itsuki@itsuki-plugins");
 		expect(pluginPanel).not.toContain("ITSUKI_API_KEY");
 		expect(pluginPanel).not.toContain("setx ");
+		expect(docs).toContain("/plugin configure ${PRODUCT.pkg}@itsuki-plugins");
 		expect(docs).toContain("workspace-controlled <code>PATH</code>");
 		expect(securityHelper).not.toMatch(/Get-ChildItem[^\r\n]*-Recurse/i);
 	});

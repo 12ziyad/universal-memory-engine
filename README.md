@@ -166,9 +166,24 @@ make an automatic destructive merge unsafe.
 
 ### Claude Code plugin delivery
 
-The plugin requires a maintained **Node 22 or 24 LTS** runtime. During installation, select that executable by its absolute
-path (for example, `(Get-Command node).Source` in PowerShell or `command -v node` on macOS/Linux); hooks never resolve
-`node` through a project-controlled `PATH`. SessionEnd does not use the network. It takes a bounded snapshot of the newest
+Claude Code itself can run without Node, but Itsuki's three lifecycle hooks require a maintained **Node 22 or 24 LTS**
+runtime. Install the public plugin, then configure its two required options explicitly:
+
+```powershell
+claude plugin marketplace add 12ziyad/universal-memory-engine
+claude plugin install itsuki@itsuki-plugins
+```
+
+In a Claude Code session, run `/plugin configure itsuki@itsuki-plugins`, select Node by its absolute path (for example,
+`(Get-Command node).Source` in PowerShell or `command -v node` on macOS/Linux), and paste the full API key into the masked
+prompt. Then run `/reload-plugins` and `/itsuki:doctor`. Claude stores the sensitive key in its credential store,
+interpolates it into the bundled MCP header, and exposes it to plugin subprocesses as plugin-scoped configuration. Do not
+put the key in a shell profile or set `ITSUKI_API_KEY`;
+the reviewed plugin configuration is authoritative. Using the interactive configuration flow also avoids command-line
+quoting differences for Windows executable paths containing spaces. Hooks never resolve `node` through a
+project-controlled `PATH`.
+
+SessionEnd does not use the network. It takes a bounded snapshot of the newest
 80 completed durable coding outcomes plus any tool-call rows required to interpret them, scrubs them, and atomically queues
 one or more protected, ordered v2 batch envelopes under
 Claude's persistent `${CLAUDE_PLUGIN_DATA}/outbox/v1` directory before returning within Claude's shutdown budget.

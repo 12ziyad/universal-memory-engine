@@ -256,10 +256,10 @@ PAGES["/install/plugin"] = { title: "Claude Code plugin", html: `
 <h1>Claude Code plugin</h1>
 <p class="lede">Install once, get memory across every session with lifecycle hooks — no manual tool calls.</p>
 <h2>1. Install</h2>
-<p>Install a maintained <b>Node 22 or 24 LTS</b> runtime first. Find its absolute executable path with <code>(Get-Command node).Source</code> in PowerShell or <code>command -v node</code> on macOS/Linux. Create an API key in <b>API Keys</b>; Claude will request both the executable file and the key through the plugin configuration prompt when the plugin is enabled.</p>
+<p>Claude Code itself can run without Node, but Itsuki's lifecycle hooks require a maintained <b>Node 22 or 24 LTS</b> runtime. Find its absolute executable path with <code>(Get-Command node).Source</code> in PowerShell or <code>command -v node</code> on macOS/Linux, and create an API key in <b>API Keys</b>.</p>
 ${codeBlock(`claude plugin marketplace add 12ziyad/universal-memory-engine
 claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
-<p>Select the absolute Node executable, paste the full <code>${PRODUCT.tokenPrefix}…</code> value only into the masked key prompt, then run <code>/reload-plugins</code>. You do not need to put the key in a shell profile or settings file, and hooks never resolve Node through a workspace-controlled <code>PATH</code>.</p>
+<p>In a Claude Code session, run <code>/plugin configure ${PRODUCT.pkg}@itsuki-plugins</code>. Select the absolute Node executable and paste the full <code>${PRODUCT.tokenPrefix}…</code> value only into the masked key prompt, then run <code>/reload-plugins</code>. You do not need to put the key in a shell profile or settings file, and hooks never resolve Node through a workspace-controlled <code>PATH</code>. The interactive configuration flow also avoids command-line quoting differences for Windows executable paths containing spaces.</p>
 <h2>2. Verify</h2>
 <p>In any Claude Code session, run <code>/itsuki:doctor</code>. It checks the installed files and hook configuration, protected local outbox, key, network path, REST door, and real MCP tools, then prints the exact fix for whichever fails.</p>
 <h2>What you get</h2>
