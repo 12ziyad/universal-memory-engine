@@ -177,6 +177,8 @@ describe("authoritative ingest contract", () => {
 
 	it("normalizes complete ordered-delivery metadata and rejects malformed ordering", () => {
 		expect(normalizeDeliveryMetadata(delivery({ batchIndex: 2, batchCount: 3 }))).toEqual(delivery({ batchIndex: 2, batchCount: 3 }));
+		const codex = delivery({ groupId: `codex_delivery_v1_${"d".repeat(40)}` });
+		expect(normalizeDeliveryMetadata(codex)).toEqual(codex);
 		for (const invalid of [
 			delivery({ groupId: "wrong" }),
 			delivery({ batchIndex: 3, batchCount: 3 }),

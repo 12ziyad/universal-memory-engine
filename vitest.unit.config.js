@@ -5,11 +5,19 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		environment: "node",
+		env: process.platform === "win32" ? {
+			ITSUKI_SYSTEM_POWERSHELL: `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+		} : {},
 		// Windows integration specs launch the real ACL verifier. Bounding file
 		// concurrency keeps those host-budget tests representative instead of
 		// turning PowerShell process-start contention into suite-only flakes.
-		maxWorkers: 4,
+		maxWorkers: process.platform === "win32" ? 1 : 4,
 		include: [
+			"test/codex_hook_manifest.spec.js",
+			"test/codex_outbox.spec.js",
+			"test/codex_session_end.spec.js",
+			"test/codex_session_start.spec.js",
+			"test/codex_transcript.spec.js",
 			"test/ingest_contract.spec.js",
 			"test/hook_batching.spec.js",
 			"test/claude_capture.spec.js",

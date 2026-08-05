@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "itsuki": {
+      "url": "https://itsuki.app/mcp",
+      "bearer_token_env_var": "ITSUKI_API_KEY",
+      "enabled_tools": ["save_memory", "save_conversation", "recall_memory"],
+      "default_tools_approval_mode": "writes",
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 60
+    }
+  }
+}

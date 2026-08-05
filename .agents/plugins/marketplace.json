@@ -1,13 +1,20 @@
 {
-	"name": "itsuki-plugins",
-	"interface": { "displayName": "Itsuki" },
-	"plugins": [
-		{
-			"name": "itsuki",
-			"source": { "source": "git", "url": "https://github.com/12ziyad/universal-memory-engine" },
-			"policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-			"category": "Productivity",
-			"description": "One private memory for every AI: save durable facts and decisions, recall them in any future session."
-		}
-	]
+  "name": "itsuki-plugins",
+  "interface": {
+    "displayName": "Itsuki"
+  },
+  "plugins": [
+    {
+      "name": "itsuki",
+      "source": {
+        "source": "local",
+        "path": "./plugins/itsuki"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
 }

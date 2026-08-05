@@ -1,0 +1,34 @@
+{
+  "description": "Itsuki protected local memory lifecycle for Codex",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear|compact)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"$PLUGIN_ROOT/hooks/codex-launch.sh\" SessionStart",
+            "commandWindows": "$itsukiPluginRoot = [Environment]::GetEnvironmentVariable('PLUGIN_ROOT', 'Process'); if ([string]::IsNullOrWhiteSpace($itsukiPluginRoot) -or -not [IO.Path]::IsPathRooted($itsukiPluginRoot)) { throw 'Codex did not provide an absolute PLUGIN_ROOT.' }; $itsukiPluginRoot = [IO.Path]::GetFullPath($itsukiPluginRoot); & ([IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\\v1.0\\powershell.exe')) -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ([IO.Path]::Combine($itsukiPluginRoot, 'hooks\\codex-launch.ps1')) -Hook SessionStart",
+            "timeout": 5,
+            "statusMessage": "Delivering and recalling Itsuki memory",
+            "additionalContextLimit": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "^other$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"$PLUGIN_ROOT/hooks/codex-launch.sh\" SessionEnd",
+            "commandWindows": "$itsukiPluginRoot = [Environment]::GetEnvironmentVariable('PLUGIN_ROOT', 'Process'); if ([string]::IsNullOrWhiteSpace($itsukiPluginRoot) -or -not [IO.Path]::IsPathRooted($itsukiPluginRoot)) { throw 'Codex did not provide an absolute PLUGIN_ROOT.' }; $itsukiPluginRoot = [IO.Path]::GetFullPath($itsukiPluginRoot); & ([IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\\v1.0\\powershell.exe')) -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ([IO.Path]::Combine($itsukiPluginRoot, 'hooks\\codex-launch.ps1')) -Hook SessionEnd",
+            "timeout": 3,
+            "statusMessage": "Protecting durable Itsuki memory"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -15,8 +15,21 @@ export default defineWorkersConfig(async () => {
 				...configDefaults.exclude,
 				// These exercise host filesystem/process behavior and are covered by
 				// vitest.unit.config.js; the Workers isolate cannot import those APIs.
+				"test/claude_transcript_tail.spec.js",
+				"test/codex_hook_manifest.spec.js",
+				"test/codex_outbox.spec.js",
+				"test/codex_session_end.spec.js",
+				"test/codex_session_start.spec.js",
+				"test/codex_transcript.spec.js",
+				"test/doctor.spec.js",
+				"test/hook_batching.spec.js",
+				"test/hook_manifest.spec.js",
+				"test/hook_outbox.spec.js",
 				"test/migrations_append_only.spec.js",
 				"test/project_identity.spec.js",
+				"test/sdk_js.spec.js",
+				"test/session_end_delivery.spec.js",
+				"test/session_start_delivery.spec.js",
 			],
 			setupFiles: ["./test/apply-migrations.js"],
 			poolOptions: {

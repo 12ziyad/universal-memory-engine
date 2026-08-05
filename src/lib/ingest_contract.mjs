@@ -81,7 +81,7 @@ const CAPTURE_REDACTION_KEYS = new Set([
 	"named_secret",
 ]);
 const MAX_CAPTURE_EVIDENCE_COUNTER = 64 * 1024 * 1024;
-const DELIVERY_GROUP_ID = /^claude_delivery_v1_[a-f0-9]{40}$/;
+const DELIVERY_GROUP_ID = /^(?:claude|codex)_delivery_v1_[a-f0-9]{40}$/;
 const TRUNCATION_REASON = /^[a-z_]{1,40}$/;
 const MAX_DELIVERY_BATCHES = 128;
 const MAX_TRUNCATION_REASON_CHARACTERS = 160;

@@ -1,0 +1,30 @@
+{
+  "name": "itsuki",
+  "version": "0.1.0",
+  "description": "Connect Codex to Itsuki's private memory tools over MCP.",
+  "author": {
+    "name": "Itsuki",
+    "url": "https://github.com/12ziyad"
+  },
+  "homepage": "https://itsuki.app/docs/",
+  "repository": "https://github.com/12ziyad/universal-memory-engine",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "mcp", "codex", "productivity"],
+  "interface": {
+    "displayName": "Itsuki Memory",
+    "shortDescription": "Private memory tools for Codex",
+    "longDescription": "Save durable facts and decisions, capture conversations, and recall account or project context through Itsuki's hosted MCP server.",
+    "developerName": "Itsuki",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://itsuki.app",
+    "privacyPolicyURL": "https://itsuki.app/privacy",
+    "termsOfServiceURL": "https://itsuki.app/terms",
+    "defaultPrompt": [
+      "Recall what Itsuki knows about this project.",
+      "Save this decision to Itsuki."
+    ],
+    "brandColor": "#6D5EF5"
+  },
+  "mcpServers": "./.mcp.json"
+}
