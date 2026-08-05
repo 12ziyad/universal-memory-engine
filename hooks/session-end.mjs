@@ -13,12 +13,11 @@
 import { basename } from "node:path";
 import { createInterface } from "node:readline";
 import { createReadStream, existsSync } from "node:fs";
+import { messagesFromClaudeTranscriptLines } from "./claude-transcript.mjs";
 
 const API_KEY = process.env.ITSUKI_API_KEY;
 const BASE_URL = (process.env.ITSUKI_BASE_URL || "https://itsuki.app").replace(/\/+$/, "");
 const TIMEOUT_MS = Number(process.env.ITSUKI_TIMEOUT_MS) > 0 ? Number(process.env.ITSUKI_TIMEOUT_MS) : 10000;
-const MAX_MESSAGES = 80;
-const MAX_CHARS_PER_MESSAGE = 4000;
 
 /** Read the hook payload Claude Code pipes in on stdin. Null means the
  * payload was unreadable — which must be REPORTED, not treated as an empty
@@ -39,30 +38,10 @@ async function readStdin() {
  * payload; the server's plugin gates would drop them anyway, but not sending
  * them keeps the request small and the memory clean.
  */
-async function messagesFromTranscript(path) {
+async function messagesFromTranscript(path, sessionId) {
 	if (!path || !existsSync(path)) return [];
-	const out = [];
 	const rl = createInterface({ input: createReadStream(path, "utf8"), crlfDelay: Infinity });
-	for await (const line of rl) {
-		let row;
-		try { row = JSON.parse(line); } catch { continue; }
-		if (row?.type !== "user" && row?.type !== "assistant") continue;
-		const message = row.message ?? {};
-		const content = message.content;
-		let text = "";
-		if (typeof content === "string") text = content;
-		else if (Array.isArray(content)) {
-			text = content.filter((p) => p?.type === "text" && typeof p.text === "string").map((p) => p.text).join("\n");
-		}
-		text = String(text ?? "").trim();
-		if (!text) continue;
-		out.push({
-			role: row.type === "assistant" ? "assistant" : "user",
-			content: text.length > MAX_CHARS_PER_MESSAGE ? `${text.slice(0, MAX_CHARS_PER_MESSAGE)}…` : text,
-			ts: Date.parse(row.timestamp ?? "") || Date.now(),
-		});
-	}
-	return out.slice(-MAX_MESSAGES);
+	return messagesFromClaudeTranscriptLines(rl, { sessionId, transcriptId: path });
 }
 
 /** Tell the user nothing was saved, and why. Always paired with exit 0. */
@@ -109,7 +88,7 @@ async function main() {
 		notSaved("the session transcript file was not found.", "Nothing to fix in your setup — if this repeats, report it.");
 		return;
 	}
-	const messages = await messagesFromTranscript(payload.transcript_path);
+	const messages = await messagesFromTranscript(payload.transcript_path, payload?.session_id);
 	// Nothing worth sending is the normal quiet case, not a failure.
 	if (!messages.length) return;
 
@@ -131,7 +110,7 @@ async function main() {
 				source: "plugin",
 				flush: true,
 				conversationId: payload?.session_id ?? undefined,
-				messages: messages.map((m, i) => ({ id: `${payload?.session_id ?? "sess"}-${i}`, ...m })),
+				messages,
 			}),
 		});
 	} catch (error) {
