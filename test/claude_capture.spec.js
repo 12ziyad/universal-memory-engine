@@ -522,7 +522,13 @@ describe("deterministic Claude coding-event capture", () => {
 
 		expect(result.messages[0].content).toContain("Tests: 1 failed, 9 passed, 10 total.");
 		expect(serialized).not.toMatch(/RAW_(?:DESCRIPTION_PAYLOAD|DIFF_PAYLOAD|REMOVED_DIFF|LOG_PAYLOAD)|hunter2/);
-		expect(result.metadata.redactions.named_secret).toBe(1);
+		// The shared scrubber now covers labeled secrets too (campaign SEC-01), so
+		// `password=hunter2` may be counted there instead of by this hook's own
+		// named-secret net. Either counter proves the redaction was recorded; both
+		// layers are kept deliberately, so assert on the total.
+		const secretRedactions = (result.metadata.redactions.named_secret ?? 0)
+			+ (result.metadata.redactions.labeled_secret ?? 0);
+		expect(secretRedactions).toBe(1);
 	});
 
 	it("derives failure from structured status without null-timeout or success contradictions", () => {

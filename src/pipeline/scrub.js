@@ -60,6 +60,31 @@ const BEARER_RE = /\b(bearer\s+)([A-Za-z0-9._~+/=-]{12,})/gi;
 // commit hashes people paste in stack traces — must NOT match; see looksSecret.
 const LONG_TOKEN_RE = /[A-Za-z0-9+/=_-]{32,}/g;
 
+// The shape people actually paste: a LABEL and its value. `.env` and config
+// lines (DATABASE_PASSWORD=…, api_key: '…') and prose ("my password is …").
+// Neither the key-prefix families nor the entropy net catch these — a
+// passphrase is low-entropy per character and a short password is short.
+//
+// The value must be contiguous, at least 6 characters, and carry a digit or
+// symbol. That is what keeps ordinary English intact: "my password is stored
+// in 1Password", "the token is expired", "the secret is that I like tidepools"
+// all describe a secret without being one, and memory exists to keep prose.
+const SECRET_LABEL = "(?:pass(?:word|phrase|wd)?|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|token)";
+const LABELED_SECRET_ASSIGN_RE = new RegExp(
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s*[:=]\\s*)(["']?)([^\\s"']{6,256})\\3`,
+	"gi",
+);
+const LABELED_SECRET_PROSE_RE = new RegExp(
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s+(?:is|was)\\s+)(["']?)([^\\s"']{6,256})\\3`,
+	"gi",
+);
+
+/** A label's value is only redacted when it could actually be a credential. */
+function looksLikeSecretValue(value) {
+	if (value.length < 6 || value.startsWith("[REDACTED")) return false;
+	return /[0-9]/.test(value) || /[^A-Za-z0-9]/.test(value);
+}
+
 function shannonBitsPerChar(s) {
 	const counts = new Map();
 	for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
@@ -128,6 +153,16 @@ export function scrubText(input) {
 		hit("high_entropy");
 		return "[REDACTED:secret]";
 	});
+
+	// Last: the label→value forms. Runs after the shape families so an already
+	// redacted value is left alone, and keeps the LABEL (it carries the meaning).
+	for (const re of [LABELED_SECRET_ASSIGN_RE, LABELED_SECRET_PROSE_RE]) {
+		text = text.replace(re, (match, label, separator, quote, value) => {
+			if (!looksLikeSecretValue(value)) return match;
+			hit("labeled_secret");
+			return `${label}${separator}[REDACTED:secret]`;
+		});
+	}
 
 	return { text, redactions };
 }
