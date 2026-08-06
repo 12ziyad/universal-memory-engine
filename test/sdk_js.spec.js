@@ -345,6 +345,30 @@ describe("retries and typed failures", () => {
 		expect(error).toMatchObject({ status: 0, code: "transport_error", message: "request failed: socket closed" });
 	});
 
+	it("uses redirect error mode and never follows a cross-origin redirect", async () => {
+		calls = [];
+		let redirectTargetReached = false;
+		globalThis.fetch = vi.fn(async (url, init) => {
+			calls.push({ url: String(url), init });
+			if (new URL(url).origin === "https://redirect.example") {
+				redirectTargetReached = true;
+				return new Response(JSON.stringify({ ok: true }), { status: 200 });
+			}
+			if (init.redirect !== "error") {
+				return globalThis.fetch("https://redirect.example/credential-target", init);
+			}
+			throw new TypeError("redirect mode is set to error");
+		});
+
+		const error = await client().status().catch((value) => value);
+
+		expect(error).toMatchObject({ status: 0, code: "transport_error" });
+		expect(calls).toHaveLength(1);
+		expect(calls[0].url).toBe("https://api.example/v1/status");
+		expect(calls[0].init.redirect).toBe("error");
+		expect(redirectTargetReached).toBe(false);
+	});
+
 	it("wraps total request-budget timeouts with a machine-readable code", async () => {
 		calls = [];
 		globalThis.fetch = vi.fn((url, init) => {
@@ -415,6 +439,29 @@ describe("status polling and local validation", () => {
 		const result = await client({ timeoutMs: 500 }).waitFor("src_1", { timeoutMs: 20, intervalMs: 10 });
 		expect(result).toMatchObject({ status: "unknown", timed_out: true });
 		expect(Date.now() - started).toBeLessThan(250);
+		expect(calls).toHaveLength(1);
+	});
+
+	it("marks a terminal response received after a positive polling deadline timed out", async () => {
+		vi.useFakeTimers();
+		calls = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			calls.push({ url: String(url), init });
+			return new Promise((resolve) => {
+				setTimeout(() => resolve(new Response(JSON.stringify({
+					ok: true,
+					status: "enriched",
+				}))), 21);
+			});
+		});
+
+		const pending = client({ timeoutMs: 500 }).waitFor("src_1", {
+			timeoutMs: 20,
+			intervalMs: 10,
+		});
+		await vi.advanceTimersByTimeAsync(21);
+
+		await expect(pending).resolves.toMatchObject({ status: "enriched", timed_out: true });
 		expect(calls).toHaveLength(1);
 	});
 

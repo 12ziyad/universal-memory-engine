@@ -661,6 +661,7 @@ class MemoryClient:
         self._client = httpx.Client(
             base_url=base_url,
             timeout=timeout,
+            follow_redirects=False,
             headers={
                 "authorization": f"Bearer {api_key}",
                 "content-type": "application/json",
@@ -1057,13 +1058,13 @@ class MemoryClient:
                     raise
                 break
             if last.get("status") in TERMINAL_JOB_STATUSES:
-                return last
+                if timeout == 0 or time.monotonic() < deadline:
+                    return last
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             time.sleep(min(interval, remaining))
-        if last and last.get("status") in TERMINAL_JOB_STATUSES:
-            return last
         timeout_snapshot: Dict[str, Any] = dict(last) if last is not None else {"status": "unknown"}
         out = cast(TimedOutPacketStatus, timeout_snapshot)
         out["timed_out"] = True

@@ -346,7 +346,10 @@ export class MemoryClient {
 					|| Date.now() < deadline) throw error;
 				break;
 			}
-			if (last && TERMINAL_JOB_STATUSES.has(last.status)) return last;
+			if (last && TERMINAL_JOB_STATUSES.has(last.status)) {
+				if (timeoutMs === 0 || Date.now() < deadline) return last;
+				break;
+			}
 			const remainingMs = deadline - Date.now();
 			if (remainingMs <= 0) break;
 			await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remainingMs)));
@@ -433,6 +436,7 @@ export class MemoryClient {
 					headers,
 					body: payload,
 					signal: controller.signal,
+					redirect: "error",
 				});
 				const data = await response.json().catch(() => null);
 				if (response.ok) return data;

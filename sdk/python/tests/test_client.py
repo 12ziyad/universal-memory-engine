@@ -46,6 +46,38 @@ def test_requires_api_key():
         MemoryClient("   ")
 
 
+def test_client_explicitly_rejects_cross_origin_redirects(monkeypatch):
+    seen = []
+    client_options = []
+    real_client = httpx.Client
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.host != "api.example":
+            pytest.fail("redirect target must not be requested")
+        return httpx.Response(
+            302,
+            headers={"location": "https://redirect.example/credential-target"},
+        )
+
+    def recording_client(*args, **kwargs):
+        client_options.append(kwargs.copy())
+        return real_client(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr("itsuki.httpx.Client", recording_client)
+    with MemoryClient(
+        "itsuki_live_test",
+        base_url="https://api.example",
+        max_retries=0,
+    ) as client:
+        with pytest.raises(MemoryAPIError) as excinfo:
+            client.status()
+
+    assert client_options[0]["follow_redirects"] is False
+    assert excinfo.value.status == 302
+    assert seen == ["https://api.example/v1/status"]
+
+
 def test_prepared_release_version():
     assert VERSION == "0.2.1"
     assert TERMINAL_JOB_STATUSES == {"enriched", "failed", "completed"}
@@ -453,6 +485,28 @@ def test_wait_for_bounds_a_slow_status_request_to_remaining_budget():
     assert len(observed_timeouts) == 1
     assert 0 < observed_timeouts[0] <= 0.020001
     assert elapsed < 1.0
+
+
+def test_wait_for_marks_terminal_response_after_positive_deadline_timed_out(monkeypatch):
+    now = [100.0]
+
+    def handler(request):
+        now[0] = 101.1
+        return httpx.Response(200, json={"ok": True, "status": "enriched"})
+
+    monkeypatch.setattr("itsuki.time.monotonic", lambda: now[0])
+    result = make_client(handler).wait_for("packet-1", timeout=1, interval=0.1)
+
+    assert result == {"ok": True, "status": "enriched", "timed_out": True}
+
+
+def test_wait_for_zero_timeout_can_return_immediate_terminal_success():
+    def handler(request):
+        return httpx.Response(200, json={"ok": True, "status": "enriched"})
+
+    result = make_client(handler).wait_for("packet-1", timeout=0)
+
+    assert result == {"ok": True, "status": "enriched"}
 
 
 def test_wait_for_zero_timeout_still_checks_once_and_forwards_user_id():
