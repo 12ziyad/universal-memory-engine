@@ -197,6 +197,43 @@ describe("v1 routes (with a valid api key)", () => {
 		expect(body.summary).toContain("Saved:");
 	});
 
+	it("POST /v1/save returns the command's 409 for a direct idempotency conflict", async () => {
+		const userId = `abc-save-conflict-${crypto.randomUUID()}`;
+		const idempotencyKey = `save-conflict-${crypto.randomUUID()}`;
+		const original = {
+			userId,
+			idempotencyKey,
+			content: "The deployment target is Lisbon.",
+			_test: {
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "Deployment target", category: "project", confidence: 0.95 },
+						{ kind: "slice", on: "Deployment target", text: "The deployment target is Lisbon", confidence: 0.95 },
+					],
+				},
+			},
+		};
+		const save = (body) => fetch("/v1/save", {
+			method: "POST",
+			headers: { ...headers, "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+
+		expect((await save(original)).status).toBe(200);
+		const replay = await save(original);
+		expect(replay.status).toBe(200);
+		expect((await replay.json()).duplicate).toBe(true);
+
+		const conflict = await save({ ...original, content: "The deployment target is Porto." });
+		expect(conflict.status).toBe(409);
+		expect(await conflict.json()).toMatchObject({
+			ok: false,
+			idempotencyConflict: true,
+			error: "idempotency_conflict",
+			http_status: 409,
+		});
+	});
+
 	it("GET /v1/graph returns an empty graph", async () => {
 		const response = await fetch("/v1/graph?userId=abc", { headers });
 		expect(response.status).toBe(200);

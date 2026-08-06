@@ -15,6 +15,16 @@ export const EXPORT_TABLES = [
 	"nodes", "slices", "events", "edges", "memory_pages", "candidates", "receipts", "memory_rules",
 ];
 
+const SOFT_DELETABLE_EXPORT_TABLES = new Set([
+	"nodes", "slices", "events", "edges", "memory_pages", "candidates",
+]);
+
+/** Prepare the shared live-row selection used by both export surfaces. */
+export function prepareExportRows(env, userId, table) {
+	const liveOnly = SOFT_DELETABLE_EXPORT_TABLES.has(table) ? " AND deleted_at IS NULL" : "";
+	return env.DB.prepare(`SELECT * FROM ${table} WHERE user_id = ?${liveOnly}`).bind(userId);
+}
+
 /** A row bigger than this cannot be stored or served from D1. */
 export function exportMaxBytes(env) {
 	const value = Number(env?.EXPORT_MAX_BYTES ?? 1_500_000);
@@ -58,8 +68,7 @@ export async function runExport(env, userId, exportId) {
 	await env.DB.prepare("UPDATE memory_exports SET status = 'running', started_at = ? WHERE id = ? AND user_id = ?")
 		.bind(started, exportId, userId).run();
 	try {
-		const results = await env.DB.batch(EXPORT_TABLES.map((table) =>
-			env.DB.prepare(`SELECT * FROM ${table} WHERE user_id = ?`).bind(userId)));
+		const results = await env.DB.batch(EXPORT_TABLES.map((table) => prepareExportRows(env, userId, table)));
 		const payload = {
 			format: "itsuki-export",
 			version: 1,

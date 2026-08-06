@@ -46,7 +46,7 @@ const { context } = await memory.search("What am I learning?");
 | `delete(id)` | `DELETE /v1/memories/:id` | Delete one node, page, slice, or candidate. |
 | `deleteBySource()` | `DELETE /v1/memories` | Dry-run or confirm a bulk source/time-window cleanup. |
 | `graph()`, `status()`, `receipts()`, `usage()` | read endpoints | Inspect the current memory space. |
-| `getRules()`, `setRules()` | `GET/PUT /v1/rules` | Read or update capture rules. |
+| `getRules()`, `setRules()` | `GET/PUT /v1/rules` | Read or update account-wide capture rules. |
 | `exportAll()` | `GET /v1/export` | Export the selected memory space. |
 
 Every network method returns a promise; invalid arguments can throw synchronously before a request begins. Writes can be accepted before background enrichment finishes. A successful write response is therefore not the same as terminal enrichment: use its `source_packet_id` with `packetStatus()` or `waitFor()`.
@@ -67,7 +67,7 @@ await adaMemory.add("Ada's depot is in Porto.");
 await adaMemory.search("Where is my depot?");
 ```
 
-Or select it per call. Per-call selection works on writes, reads, packet/job status, rules, exports, and deletion:
+Or select it per call. Per-call selection works on writes, memory reads, packet/job status, exports, and deletion:
 
 ```js
 await memory.add("Grace's depot is in Faro.", { userId: "grace" });
@@ -76,6 +76,8 @@ await memory.jobs({ userId: "grace", status: "failed" });
 ```
 
 A per-call `userId` overrides the constructor default. Pass `userId: null` explicitly to select the account root from a client that normally targets a sub-tenant. A typo in a GET/delete option is rejected locally instead of silently selecting the wrong memory space; unknown write-body parameters are rejected by the API.
+
+Capture rules are account-wide. `getRules()` and `setRules()` govern every end-user memory under the API key, even when the client has a default `userId` or a call supplies one.
 
 Projects are metadata within one account or end-user memory space, not separate tenants:
 

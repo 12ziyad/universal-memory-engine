@@ -63,7 +63,14 @@ import {
 	reconcileExtractions,
 } from "./pipeline/playground.js";
 import { normalizeThreadSettings } from "./pipeline/playground_settings.js";
-import { createExport, exportFileName, getExport, listExports } from "./pipeline/exports.js";
+import {
+	createExport,
+	EXPORT_TABLES,
+	exportFileName,
+	getExport,
+	listExports,
+	prepareExportRows,
+} from "./pipeline/exports.js";
 import {
 	changePassword,
 	ACCEPTED_TOKEN_PREFIXES,
@@ -830,7 +837,7 @@ const routes = {
 				waitBudgetMs: t.waitBudgetMs,
 			});
 		}
-		return json(res);
+		return json(res, res?.ok === false ? (res.http_status ?? 400) : 200);
 	},
 
 	"POST /v1/beacon": async (request, env) => {
@@ -1031,9 +1038,8 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
-		const tables = ["nodes", "slices", "events", "edges", "memory_pages", "candidates", "receipts", "memory_rules"];
-		const results = await env.DB.batch(tables.map((table) =>
-			env.DB.prepare(`SELECT * FROM ${table} WHERE user_id = ?`).bind(userId)));
+		const tables = EXPORT_TABLES;
+		const results = await env.DB.batch(tables.map((table) => prepareExportRows(env, userId, table)));
 		const payload = {
 			format: "uml-export",
 			version: 1,
@@ -1226,7 +1232,8 @@ const routes = {
 			requiredScope: MEMORY_READ_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		return json({ ok: true, rules: await getMemoryRules(env, auth.userId) });
+		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		return json({ ok: true, rules: await getMemoryRules(env, ownerUserId) });
 	},
 
 	"PUT /v1/rules": async (request, env) => {
@@ -1235,7 +1242,8 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const rules = await saveMemoryRules(env, auth.userId, body.rules ?? body);
+		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
 		return json({ ok: true, rules });
 	},
 
@@ -1246,7 +1254,8 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const rules = await saveMemoryRules(env, auth.userId, body.rules ?? body);
+		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
 		return json({ ok: true, rules });
 	},
 

@@ -97,7 +97,9 @@ memory.status(user_id=None)
 ```
 
 Per-call `user_id` works on writes, recall, graph/status reads, packet/job
-status, rules, exports, and deletes. An empty or whitespace-padded value is
+status, exports, and deletes. Capture rules are account-wide: `get_rules()` and
+`set_rules()` govern every end-user memory under the API key even when a client
+or call supplies `user_id`. An empty or whitespace-padded value is
 rejected locally so it cannot silently fall back to another memory space.
 
 Projects are metadata within a memory space, not tenants:

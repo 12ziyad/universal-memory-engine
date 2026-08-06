@@ -181,6 +181,57 @@ describe("credential mistakes say what is actually wrong", () => {
 });
 
 describe("account rules govern every tenant under the key", () => {
+	it("GET, PUT, and POST target the key owner even with a tenant selector", async () => {
+		const { key, ownerId, cookie } = await bearerKey("rule-routes");
+		const headers = { "content-type": "application/json", authorization: `Bearer ${key}` };
+
+		const put = await call("/v1/rules", {
+			method: "PUT",
+			headers,
+			body: JSON.stringify({ userId: "tenant-put", rules: { excludes: ["salary"] } }),
+		});
+		expect(put.status).toBe(200);
+		expect(put.body.rules.excludes).toEqual(["salary"]);
+
+		const get = await call("/v1/rules?userId=tenant-get", { headers });
+		expect(get.status).toBe(200);
+		expect(get.body.rules.excludes).toEqual(["salary"]);
+
+		const post = await call("/v1/rules", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ userId: "tenant-post", rules: { excludes: ["classified"] } }),
+		});
+		expect(post.status).toBe(200);
+		expect(post.body.rules.excludes).toEqual(["classified"]);
+
+		const owner = await call("/v1/rules", { headers: { cookie } });
+		expect(owner.body.rules.excludes).toEqual(["classified"]);
+		expect(await env.DB.prepare("SELECT user_id FROM memory_rules WHERE user_id = ?")
+			.bind(ownerId).first()).toEqual({ user_id: ownerId });
+
+		const save = await call("/v1/save", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				content: "The classified detail is hidden, and I moved to Aveiro.",
+				userId: "tenant-save",
+				_test: { ...canned, llmResponse: { objects: [
+					{ kind: "node", label: "Classified", category: "other", confidence: 0.9 },
+					{ kind: "slice", on: "Classified", text: "Classified detail", kind_detail: "other", confidence: 0.9 },
+					{ kind: "node", label: "Aveiro", category: "place", confidence: 0.9 },
+					{ kind: "slice", on: "Aveiro", text: "Moved to Aveiro", kind_detail: "other", confidence: 0.9 },
+				] } },
+			}),
+		});
+		const memoryUserId = scopeOf(save.body).memory_user_id;
+		const { results } = await env.DB.prepare("SELECT label FROM nodes WHERE user_id = ? AND deleted_at IS NULL")
+			.bind(memoryUserId).all();
+		expect(results.map((row) => row.label)).toEqual(["Aveiro"]);
+		expect(await env.DB.prepare("SELECT user_id FROM memory_rules WHERE user_id = ?")
+			.bind(memoryUserId).first()).toBeNull();
+	});
+
 	it("an exclusion set on the account applies to a sub-tenant save", async () => {
 		// Found by attacking production: rules were looked up under the SCOPED
 		// memory id (mem_…), which is derived and owns no rules row — so an

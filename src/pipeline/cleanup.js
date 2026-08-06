@@ -810,7 +810,7 @@ export async function bulkDeleteBySource(env, userId, {
 	confirm = false,
 	by = null,
 } = {}) {
-	const clauses = ["user_id = ?"];
+	const clauses = ["user_id = ?", "(status IS NULL OR status != 'deleted')"];
 	const binds = [userId];
 	if (source) {
 		clauses.push("(source_mode = ? OR tool_name = ?)");
@@ -947,6 +947,15 @@ export async function bulkDeleteBySource(env, userId, {
 		source: "bulk_delete",
 		projectScopes: [...projectScopes.values()],
 	});
+	// Keep the extraction ledger (and its source packet/job links) for audit,
+	// but retire exactly the runs consumed by this successful cleanup so a
+	// repeated preview is an honest zero.
+	for (let offset = 0; offset < (runs ?? []).length; offset += 50) {
+		await env.DB.batch((runs ?? []).slice(offset, offset + 50).map((run) =>
+			env.DB.prepare(
+				"UPDATE extraction_runs SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?",
+			).bind(now, run.id, userId)));
+	}
 
 	return { ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated };
 }

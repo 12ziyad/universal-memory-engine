@@ -21,6 +21,7 @@ export { saveConversation } from "./manual_collect.js";
 
 /** Shape the ingest result into a tool-ready { fired, summary, receipt, processing }. */
 function finalize(res, { prefix = "", processingNote }) {
+	if (res.idempotencyConflict) return res;
 	if (res.optedOut) {
 		return {
 			fired: false,

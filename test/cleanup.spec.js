@@ -17,6 +17,14 @@ async function call(path, body) {
 	return { status: response.status, body: await response.json() };
 }
 
+async function deleteCall(path) {
+	const request = new Request(`http://example.com${path}`, { method: "DELETE", headers });
+	const ctx = createExecutionContext();
+	const response = await worker.fetch(request, env, ctx);
+	await waitOnExecutionContext(ctx);
+	return { status: response.status, body: await response.json() };
+}
+
 async function graph(userId) {
 	const request = new Request(`http://example.com/v1/graph?userId=${userId}`, { headers });
 	const ctx = createExecutionContext();
@@ -305,6 +313,66 @@ describe("delete-last atomicity", () => {
 			.bind(userId).first()).toMatchObject({ count: 0 });
 		expect(await env.DB.prepare("SELECT status FROM extraction_runs WHERE id = ? AND user_id = ?")
 			.bind("rollback-run", userId).first()).toMatchObject({ status: "wrote" });
+	});
+});
+
+describe("bulk source cleanup ledger", () => {
+	it("retires only selected runs and makes a repeated preview zero", async () => {
+		const suffix = crypto.randomUUID();
+		const userId = `cleanup-bulk-${suffix}`;
+		const source = `acceptance-${suffix}`;
+		const runId = `run-selected-${suffix}`;
+		const otherRunId = `run-other-${suffix}`;
+		const sourcePacketId = `src-selected-${suffix}`;
+		const jobId = `job-selected-${suffix}`;
+		const now = Date.now();
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO source_packets
+				 (id, user_id, scope_user_id, source_type, source_mode, idempotency_key,
+				  content_hash, created_at, updated_at)
+				 VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?)`,
+			).bind(sourcePacketId, userId, userId, source, `packet-key-${suffix}`, `packet-hash-${suffix}`, now, now),
+			env.DB.prepare(
+				`INSERT INTO memory_jobs
+				 (id, user_id, type, status, idempotency_key, source_packet_id,
+				  extraction_run_id, payload_json, created_at, updated_at)
+				 VALUES (?, ?, 'extract', 'completed', ?, ?, ?, '{}', ?, ?)`,
+			).bind(jobId, userId, `job-key-${suffix}`, sourcePacketId, runId, now, now),
+			env.DB.prepare(
+				`INSERT INTO extraction_runs
+				 (id, user_id, status, source_mode, source_packet_id, job_id, created_at, updated_at)
+				 VALUES (?, ?, 'wrote', ?, ?, ?, ?, ?)`,
+			).bind(runId, userId, source, sourcePacketId, jobId, now, now),
+			env.DB.prepare(
+				`INSERT INTO extraction_runs
+				 (id, user_id, status, source_mode, created_at, updated_at)
+				 VALUES (?, ?, 'wrote', 'unrelated-source', ?, ?)`,
+			).bind(otherRunId, userId, now, now),
+		]);
+
+		const query = `userId=${encodeURIComponent(userId)}&source=${encodeURIComponent(source)}`;
+		const preview = await deleteCall(`/v1/memories?${query}`);
+		expect(preview.body).toMatchObject({ dry_run: true, would_delete: { runs: 1 } });
+
+		const confirmed = await deleteCall(`/v1/memories?${query}&confirm=true&dry_run=false`);
+		expect(confirmed.body).toMatchObject({ dry_run: false, deleted: { runs: 1 } });
+
+		const repeated = await deleteCall(`/v1/memories?${query}`);
+		expect(repeated.body.would_delete).toEqual({
+			runs: 0, nodes: 0, pages: 0, slices: 0, events: 0, edges: 0, candidates: 0,
+		});
+		expect(await env.DB.prepare("SELECT status FROM extraction_runs WHERE id = ?").bind(runId).first())
+			.toEqual({ status: "deleted" });
+		expect(await env.DB.prepare("SELECT status FROM extraction_runs WHERE id = ?").bind(otherRunId).first())
+			.toEqual({ status: "wrote" });
+		expect(await env.DB.prepare("SELECT id FROM source_packets WHERE id = ?").bind(sourcePacketId).first())
+			.toEqual({ id: sourcePacketId });
+		expect(await env.DB.prepare("SELECT id FROM memory_jobs WHERE id = ?").bind(jobId).first())
+			.toEqual({ id: jobId });
+		expect(await env.DB.prepare(
+			"SELECT id FROM receipts WHERE user_id = ? AND source = 'bulk_delete' AND outcome = 'deleted'",
+		).bind(userId).first()).toBeTruthy();
 	});
 });
 

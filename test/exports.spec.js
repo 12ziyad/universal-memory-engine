@@ -52,11 +52,74 @@ async function createFor(userId) {
 	return (await res.json()).export;
 }
 
+async function seedSoftDeletedExportRows(userId, memoryMarker, auditMarker) {
+	const now = Date.now();
+	const suffix = crypto.randomUUID();
+	await env.DB.batch([
+		env.DB.prepare(
+			"INSERT INTO nodes (id, user_id, label, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
+		).bind(`node-export-${suffix}`, userId, memoryMarker, now, now, now),
+		env.DB.prepare(
+			"INSERT INTO slices (id, user_id, text, created_at, deleted_at) VALUES (?, ?, ?, ?, ?)",
+		).bind(`slice-export-${suffix}`, userId, memoryMarker, now, now),
+		env.DB.prepare(
+			"INSERT INTO events (id, user_id, text, created_at, deleted_at) VALUES (?, ?, ?, ?, ?)",
+		).bind(`event-export-${suffix}`, userId, memoryMarker, now, now),
+		env.DB.prepare(
+			"INSERT INTO edges (id, user_id, type, created_at, deleted_at) VALUES (?, ?, ?, ?, ?)",
+		).bind(`edge-export-${suffix}`, userId, memoryMarker, now, now),
+		env.DB.prepare(
+			`INSERT INTO memory_pages
+			 (id, user_id, title, canonical_title, created_at, updated_at, deleted_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).bind(`page-export-${suffix}`, userId, memoryMarker, memoryMarker.toLowerCase(), now, now, now),
+		env.DB.prepare(
+			"INSERT INTO candidates (id, user_id, label, created_at, deleted_at) VALUES (?, ?, ?, ?, ?)",
+		).bind(`candidate-export-${suffix}`, userId, memoryMarker, now, now),
+		env.DB.prepare(
+			`INSERT INTO receipts (id, user_id, source, outcome, summary, created_at)
+			 VALUES (?, ?, 'save_memory', 'wrote', ?, ?)`,
+		).bind(`receipt-export-${suffix}`, userId, auditMarker, now),
+		env.DB.prepare(
+			`INSERT INTO memory_rules (user_id, custom_instructions, created_at, updated_at)
+			 VALUES (?, ?, ?, ?)`,
+		).bind(userId, auditMarker, now, now),
+	]);
+}
+
+function expectSoftDeletedMemoryAbsent(payload, memoryMarker, auditMarker) {
+	for (const table of ["nodes", "slices", "events", "edges", "memory_pages", "candidates"]) {
+		expect(payload[table]).toEqual([]);
+		expect(JSON.stringify(payload[table])).not.toContain(memoryMarker);
+	}
+	expect(payload.receipts.some((row) => row.summary === auditMarker)).toBe(true);
+	expect(payload.memory_rules.some((row) => row.custom_instructions === auditMarker)).toBe(true);
+}
+
 async function listFor(userId) {
 	return (await (await request(`/v1/exports?userId=${userId}`, KEY)).json()).exports;
 }
 
 describe("export jobs", () => {
+	it("omits soft-deleted memory objects from synchronous and job exports", async () => {
+		const userId = `ex-deleted-${crypto.randomUUID()}`;
+		const memoryMarker = `SOFT_DELETED_MEMORY_${crypto.randomUUID()}`;
+		const auditMarker = `AUDIT_ROW_${crypto.randomUUID()}`;
+		await seedSoftDeletedExportRows(userId, memoryMarker, auditMarker);
+
+		const synchronous = await request(`/v1/export?userId=${encodeURIComponent(userId)}`, KEY);
+		expect(synchronous.status).toBe(200);
+		expectSoftDeletedMemoryAbsent(await synchronous.json(), memoryMarker, auditMarker);
+
+		const job = await createFor(userId);
+		const download = await request(
+			`/v1/exports/download?userId=${encodeURIComponent(userId)}&id=${encodeURIComponent(job.id)}`,
+			KEY,
+		);
+		expect(download.status).toBe(200);
+		expectSoftDeletedMemoryAbsent(await download.json(), memoryMarker, auditMarker);
+	});
+
 	it("creates, builds in the Durable Object, and downloads", async () => {
 		const userId = `ex-run-${crypto.randomUUID()}`;
 		await seed(userId);
