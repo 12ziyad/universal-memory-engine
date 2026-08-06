@@ -14,11 +14,18 @@
 
 import { newId } from "../lib/ids.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import { getMemoryRules, rulesAllowText } from "./rules.js";
 
 const TEXT_CAP = 2000;
 const MAX_ROWS_PER_WRITE = 40;
 
-/** Stage the durable user text of one accepted write. Best-effort. */
+/**
+ * Stage the durable user text of one accepted write. Best-effort.
+ *
+ * Recall reads this index, so the user's include/exclude rules must gate it
+ * exactly as they gate the extraction pass — otherwise excluded content is
+ * recallable through the staging bridge until the job settles.
+ */
 export async function stageMemoryText(env, userId, {
 	jobId,
 	sourcePacketId,
@@ -26,13 +33,27 @@ export async function stageMemoryText(env, userId, {
 	messages,
 	projectId = null,
 	projectName = null,
+	rules,
 }) {
-	const rows = (messages ?? [])
+	// Fail closed: if rules cannot be resolved, stage nothing rather than risk
+	// staging content the user asked never to keep. Staging is only a bridge —
+	// losing it costs seconds of read-your-writes, never durable memory.
+	let effectiveRules = rules;
+	if (effectiveRules === undefined) {
+		try { effectiveRules = await getMemoryRules(env, userId); }
+		catch (error) {
+			console.warn("stage text rules load failed:", error?.message ?? error);
+			return { staged: 0, ruleFiltered: 0, rulesUnavailable: true };
+		}
+	}
+	const eligible = (messages ?? [])
 		.filter((m) => (m?.role ?? "user") === "user")
 		.map((m) => ({ id: m?.id ?? null, text: String(m?.content ?? "").trim() }))
-		.filter((m) => m.text)
-		.slice(0, MAX_ROWS_PER_WRITE);
-	if (!rows.length) return { staged: 0 };
+		.filter((m) => m.text);
+	const allowed = eligible.filter((row) => rulesAllowText(effectiveRules, row.text));
+	const ruleFiltered = eligible.length - allowed.length;
+	const rows = allowed.slice(0, MAX_ROWS_PER_WRITE);
+	if (!rows.length) return { staged: 0, ruleFiltered };
 	const now = Date.now();
 	const project = normalizeProjectScope({ projectId, projectName });
 	try {
@@ -53,10 +74,10 @@ export async function stageMemoryText(env, userId, {
 			project.projectId,
 			project.projectName,
 		)));
-		return { staged: rows.length };
+		return { staged: rows.length, ruleFiltered };
 	} catch (error) {
 		console.warn("stage text failed:", error?.message ?? error);
-		return { staged: 0, error: String(error?.message ?? error) };
+		return { staged: 0, ruleFiltered, error: String(error?.message ?? error) };
 	}
 }
 
