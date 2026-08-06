@@ -18,6 +18,7 @@ export default defineWorkersConfig(async () => {
 				"test/claude_transcript_tail.spec.js",
 				"test/codex_hook_manifest.spec.js",
 				"test/codex_outbox.spec.js",
+				"test/codex_outbox_recovery.spec.js",
 				"test/codex_session_end.spec.js",
 				"test/codex_session_start.spec.js",
 				"test/codex_transcript.spec.js",

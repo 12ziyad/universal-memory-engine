@@ -746,7 +746,15 @@ describe("permanent ingest idempotency", () => {
 		expect(after.jobs).toBe(before.jobs);
 	});
 
-	it("returns the original terminal failure without silently resetting the job", async () => {
+	it("repairs a terminally failed job on replay instead of echoing a phantom acceptance", async () => {
+		// This case previously asserted that a replay returned the failed job's
+		// original acceptance-shaped duplicate. Live production evidence
+		// (campaign 2026-08-07, defect SRV-02) showed that answer causes silent
+		// accepted-data loss: outbox callers release their durable local copy on
+		// acceptance, and no memory had been written. A failed job is a verdict
+		// about one processing attempt, not about the content, so an exact replay
+		// re-queues the SAME job. The bounded-refusal contract lives in
+		// test/failed_replay_repair.spec.js.
 		const userId = `failed-retry-${crypto.randomUUID()}`;
 		const body = bodyFor(userId, `failed-retry-key-${crypto.randomUUID()}`, "ok thanks");
 		const first = await call(body);
@@ -757,7 +765,6 @@ describe("permanent ingest idempotency", () => {
 
 		const retry = await call(body);
 		expect(retry.status).toBe(200);
-		expect(retry.body.duplicate).toBe(true);
 		expect(retry.body).toMatchObject({
 			job_id: first.body.job_id,
 			source_packet_id: first.body.source_packet_id,
@@ -765,9 +772,16 @@ describe("permanent ingest idempotency", () => {
 		const job = await env.DB.prepare(
 			"SELECT status, error, completed_at FROM memory_jobs WHERE id = ? AND user_id = ?",
 		).bind(first.body.job_id, userId).first();
-		expect(job.status).toBe("failed");
-		expect(job.error).toBe("synthetic failure");
-		expect(job.completed_at).not.toBeNull();
+		// Repaired: the dead verdict is cleared and the work is live again on the
+		// same row — no duplicate job, no duplicate packet.
+		expect(job.status).not.toBe("failed");
+		expect(job.error).toBeNull();
+		const counts = await env.DB.prepare(
+			`SELECT COUNT(*) AS packets,
+				(SELECT COUNT(*) FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?) AS jobs
+			 FROM source_packets WHERE user_id = ?`,
+		).bind(userId, body.idempotencyKey, userId).first();
+		expect(counts).toMatchObject({ packets: 1, jobs: 1 });
 	});
 
 	it("returns 409 without mutating the packet, job, receipt, or checkpoint", async () => {
