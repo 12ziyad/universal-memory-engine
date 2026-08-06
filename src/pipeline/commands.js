@@ -315,6 +315,18 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			source_packet_id: res.sourcePacketId ?? null,
 		};
 	}
+	// SRV-02: a replay of permanently failed extraction must never look like an
+	// acceptance — callers rely on acceptance to release their durable local copy.
+	if (res.extractionFailedTerminal) {
+		return {
+			ok: false,
+			extractionFailedTerminal: true,
+			error: "extraction_failed_terminal",
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
 
 	let receipt = res.receipt ?? null;
 	let summary = res.summary ?? null;

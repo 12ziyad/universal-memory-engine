@@ -596,6 +596,18 @@ const routes = {
 				source_packet_id: result.source_packet_id,
 			}, 409, contractHeaders);
 		}
+		if (result.extractionFailedTerminal) {
+			// 422: this exact content's extraction failed permanently after its
+			// bounded repairs. Deliberately NOT acceptance-shaped so outbox-style
+			// callers quarantine their durable copy instead of deleting it.
+			return json({
+				error: "extraction_failed_terminal",
+				code: "extraction_failed_terminal",
+				message: result.summary,
+				job_id: result.job_id,
+				source_packet_id: result.source_packet_id,
+			}, 422, contractHeaders);
+		}
 		return json(result, 200, contractHeaders);
 	},
 

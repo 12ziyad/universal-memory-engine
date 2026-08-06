@@ -35,6 +35,13 @@ import { stageMemoryText } from "./staged_text.js";
 // 1.7 backpressure: never accept unbounded work you can't see.
 const MAX_QUEUE_DEPTH = 200;
 const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
+// A failed extract job is not a verdict about the content — it is a verdict
+// about one processing attempt (a lost handoff, a model fault). An exact
+// replay is the caller explicitly asking again, so it re-queues the SAME job
+// rather than echoing the dead outcome as an acceptance-shaped duplicate;
+// content-keyed callers (the plugins) cannot mint a fresh key. Bounded so a
+// genuinely unprocessable payload cannot cycle queued->failed forever.
+const MAX_FAILED_REPLAY_REPAIRS = 5;
 
 function maybeInjectIngestFault(env, fault, phase) {
 	// Test-only interruption points make the two cross-store crash windows
@@ -55,7 +62,7 @@ async function findIdempotencyState(env, userId, idempotencyKey, contentHash) {
 			"SELECT * FROM source_packets WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
 		).bind(userId, idempotencyKey).first(),
 		env.DB.prepare(
-			`SELECT id, status, type, receipt_id, source_packet_id, created_at FROM memory_jobs
+			`SELECT id, status, type, receipt_id, source_packet_id, attempts, created_at FROM memory_jobs
 			 WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
 		).bind(userId, idempotencyKey).first(),
 	]);
@@ -198,6 +205,26 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			sourcePacketId: replay.sourcePacket?.id ?? replay.job?.source_packet_id ?? null,
 			summary: "That idempotency key is already bound to different content or a different save lane. Send the original request or use a new key.",
 		};
+	}
+	if (replay?.job?.status === "failed" && replay.job.type === "extract") {
+		// SRV-02: never answer a replay of failed work with an acceptance-shaped
+		// duplicate — the caller would discard its durable local copy while no
+		// memory was ever written. Either repair the job or refuse honestly.
+		if (Number(replay.job.attempts ?? 0) >= MAX_FAILED_REPLAY_REPAIRS) {
+			return {
+				extractionFailedTerminal: true,
+				jobId: replay.job.id,
+				jobStatus: "failed",
+				sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+				summary: "Extraction for this exact content failed permanently after its bounded repair attempts. Keep your copy; review the job error, then resubmit as new content or contact support.",
+			};
+		}
+		// Compare-and-set on status so concurrent replays perform one reset;
+		// losers observe a non-terminal job and take the normal recovery path.
+		await env.DB.prepare(
+			"UPDATE memory_jobs SET status = 'queued', error = NULL, completed_at = NULL, run_after = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'failed'",
+		).bind(Date.now(), Date.now(), replay.job.id, userId).run();
+		replay.job.status = "queued";
 	}
 	if (replay?.job && TERMINAL_JOB_STATES.has(replay.job.status)) {
 		return recordReplay(env, userId, normalized, replay);
