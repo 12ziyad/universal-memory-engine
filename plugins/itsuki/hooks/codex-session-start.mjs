@@ -85,12 +85,15 @@ async function main() {
 				maxDurationMs: Math.min(1_600, Math.max(1, TOTAL_BUDGET_MS - (Date.now() - startedAt) - 1_100)),
 				prepared,
 			});
-			if (drained.delivered > 0) statuses.push(`delivered ${drained.delivered} protected local capture${drained.delivered === 1 ? "" : "s"}`);
+			if (drained.delivered > 0) {
+				const packets = (drained.accepted ?? []).map((entry) => entry.sourcePacketId).filter(Boolean);
+				statuses.push(`delivered ${drained.delivered} protected local capture${drained.delivered === 1 ? "" : "s"}${packets.length ? ` (packet${packets.length === 1 ? "" : "s"}: ${packets.join(", ")})` : ""}`);
+			}
+			if (drained.quarantined > 0) statuses.push(`${drained.quarantined} capture${drained.quarantined === 1 ? " was" : "s were"} permanently rejected by the service and moved to the protected quarantine for review`);
+			if (drained.bindingMismatch > 0) statuses.push(`${drained.bindingMismatch} capture${drained.bindingMismatch === 1 ? " is" : "s are"} bound to a different API key or service origin and remain${drained.bindingMismatch === 1 ? "s" : ""} preserved`);
 			if (drained.preserved > 0) statuses.push(`${drained.preserved} local capture${drained.preserved === 1 ? " remains" : "s remain"} protected for retry`);
 			if (drained.status === "auth") statuses.push("delivery is paused because the API key was rejected");
-			else if (["retryable", "budget_exhausted", "busy", "cleanup_busy"].includes(drained.status)) statuses.push("bounded delivery will retry later");
-			else if (drained.status === "rejected") statuses.push("a queued delivery was rejected and remains protected for review");
-			else if (drained.status === "binding_mismatch") statuses.push("queued captures are bound to a different API key or service origin and were not sent");
+			else if (["retryable", "budget_exhausted", "busy", "cleanup_busy", "backoff"].includes(drained.status)) statuses.push("bounded delivery will retry later");
 		} catch {
 			statuses.push("the protected local queue could not be inspected; queued content was preserved");
 		}

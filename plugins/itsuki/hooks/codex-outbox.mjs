@@ -48,7 +48,13 @@ export const CODEX_OUTBOX_LIMITS = Object.freeze({
 	maxDeliveryEntries: 4,
 });
 
-const OUTBOX_DIRECTORIES = Object.freeze(["tmp", "staged", "locks", "control"]);
+const OUTBOX_DIRECTORIES = Object.freeze(["tmp", "staged", "failed", "state", "locks", "control"]);
+// A permanently rejected envelope moves to failed/ (quarantine) instead of
+// blocking the queue; a retryable envelope quarantines after this many
+// attempts so a poison item cannot retry forever (campaign invariant I13).
+export const CODEX_RETRY_QUARANTINE_ATTEMPTS = 16;
+const OUTBOX_STATE_SCHEMA = "itsuki.codex-outbox-state/v1";
+const QUEUE_ENTRY_PATTERN = /^codex_[a-f0-9]{64}\.json$/;
 const TEMPORARY_FILE_PATTERN = /^\.(?:codex|recall-guard|stale-lock)-[a-f0-9-]{36}\.tmp$/i;
 const LOCK_FILE_PATTERN = /^[a-z-]+\.lock$/;
 const STALE_ACTIVE_FILE_MS = 60_000;
@@ -230,6 +236,8 @@ function outboxPaths(pluginData) {
 		root,
 		tmp: join(root, "tmp"),
 		staged: join(root, "staged"),
+		failed: join(root, "failed"),
+		state: join(root, "state"),
 		locks: join(root, "locks"),
 		control: join(root, "control"),
 	};
@@ -312,6 +320,8 @@ async function verifyKnownDirectories(paths) {
 async function verifyBoundedActiveFiles(paths, platform, ensureModes = false) {
 	const groups = [
 		{ path: paths.tmp, max: 8, pattern: TEMPORARY_FILE_PATTERN, maxBytes: CODEX_OUTBOX_LIMITS.maxEnvelopeBytes },
+		{ path: paths.failed, max: CODEX_OUTBOX_LIMITS.maxEntries + 1, pattern: QUEUE_ENTRY_PATTERN, maxBytes: CODEX_OUTBOX_LIMITS.maxEnvelopeBytes },
+		{ path: paths.state, max: 2 * CODEX_OUTBOX_LIMITS.maxEntries + 2, pattern: QUEUE_ENTRY_PATTERN, maxBytes: 4 * 1024 },
 		{ path: paths.locks, max: 3, pattern: LOCK_FILE_PATTERN, maxBytes: 512 },
 		{ path: paths.control, max: 1, pattern: /^recall-guard\.json$/, maxBytes: 64 * 1024 },
 	];
@@ -405,17 +415,21 @@ export async function prepareCodexOutbox({ pluginData, platform = process.platfo
 	return { paths, protected: true };
 }
 
-async function boundedStagedEntries(paths) {
-	const entries = await readdir(paths.staged, { withFileTypes: true });
+async function boundedQueueEntries(paths, directory) {
+	const entries = await readdir(paths[directory], { withFileTypes: true });
 	if (entries.length > CODEX_OUTBOX_LIMITS.maxEntries + 1) {
 		throw new CodexOutboxError("outbox_full", "The protected queue has reached its entry bound.");
 	}
 	for (const entry of entries) {
-		if (!entry.isFile() || entry.isSymbolicLink() || !/^codex_[a-f0-9]{64}\.json$/.test(entry.name)) {
-			throw new CodexOutboxError("outbox_insecure", "The protected queue contains an unexpected staged entry.");
+		if (!entry.isFile() || entry.isSymbolicLink() || !QUEUE_ENTRY_PATTERN.test(entry.name)) {
+			throw new CodexOutboxError("outbox_insecure", `The protected queue contains an unexpected ${directory} entry.`);
 		}
 	}
 	return entries;
+}
+
+async function boundedStagedEntries(paths) {
+	return boundedQueueEntries(paths, "staged");
 }
 
 async function acquireLock(paths, name) {
@@ -768,15 +782,98 @@ async function atomicEnvelope(paths, envelope, platform = process.platform) {
 }
 
 async function queueUsage(paths) {
+	// Quarantined envelopes still occupy protected local space: both staged and
+	// failed entries count toward the queue's entry/byte bounds so quarantine
+	// can never become an unbounded bypass of the documented limits.
 	const entries = await boundedStagedEntries(paths);
+	const failedEntries = await boundedQueueEntries(paths, "failed");
 	let bytes = 0;
-	for (const entry of entries) {
-		const info = await lstat(join(paths.staged, entry.name));
-		if (!info.isFile() || info.isSymbolicLink()) throw new CodexOutboxError("outbox_insecure", "A queued envelope is not a plain file.");
-		bytes += info.size;
-		if (bytes > CODEX_OUTBOX_LIMITS.maxBytes) throw new CodexOutboxError("outbox_full", "The protected queue has reached its byte bound.");
+	for (const [directory, list] of [["staged", entries], ["failed", failedEntries]]) {
+		for (const entry of list) {
+			const info = await lstat(join(paths[directory], entry.name)).catch((error) => {
+				if (error?.code === "ENOENT") return null;
+				throw error;
+			});
+			if (!info) continue;
+			if (!info.isFile() || info.isSymbolicLink()) throw new CodexOutboxError("outbox_insecure", "A queued envelope is not a plain file.");
+			bytes += info.size;
+			if (bytes > CODEX_OUTBOX_LIMITS.maxBytes) throw new CodexOutboxError("outbox_full", "The protected queue has reached its byte bound.");
+		}
 	}
-	return { entries, bytes };
+	return { entries, failedEntries, bytes };
+}
+
+function codexBackoffMs(queueId, attempts) {
+	const base = Math.min(5_000 * (2 ** Math.max(0, attempts - 1)), 60 * 60 * 1000);
+	const unit = Number.parseInt(hash(`${queueId}:${attempts}`).slice(0, 8), 16) / 0xffffffff;
+	return Math.round(base * (0.8 + unit * 0.4));
+}
+
+function retryAfterMs(response, now = Date.now()) {
+	const raw = response?.headers?.get?.("retry-after");
+	if (!raw) return null;
+	let milliseconds;
+	if (/^\d+(?:\.\d+)?$/.test(raw.trim())) milliseconds = Number(raw) * 1_000;
+	else {
+		const parsed = Date.parse(raw);
+		milliseconds = Number.isFinite(parsed) ? parsed - now : NaN;
+	}
+	if (!Number.isFinite(milliseconds)) return null;
+	return Math.max(1_000, Math.min(milliseconds, 24 * 60 * 60 * 1000));
+}
+
+function freshEnvelopeState() {
+	return { schema: OUTBOX_STATE_SCHEMA, attempts: 0, next_attempt_at: 0, updated_at: 0 };
+}
+
+async function readEnvelopeState(paths, queueId) {
+	const path = join(paths.state, `${queueId}.json`);
+	let info;
+	try { info = await lstat(path); }
+	catch (error) {
+		if (error?.code === "ENOENT") return freshEnvelopeState();
+		throw error;
+	}
+	if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024) return freshEnvelopeState();
+	try {
+		const value = JSON.parse(await readFile(path, "utf8"));
+		if (value?.schema !== OUTBOX_STATE_SCHEMA
+			|| !Number.isSafeInteger(value.attempts) || value.attempts < 0
+			|| !Number.isFinite(Number(value.next_attempt_at ?? 0))) {
+			return freshEnvelopeState();
+		}
+		return { ...freshEnvelopeState(), ...value };
+	} catch {
+		// A corrupt sidecar must never strand its envelope: treat as fresh.
+		return freshEnvelopeState();
+	}
+}
+
+async function writeEnvelopeState(paths, queueId, value, platform = process.platform) {
+	const serialized = `${JSON.stringify({ ...value, schema: OUTBOX_STATE_SCHEMA })}\n`;
+	if (Buffer.byteLength(serialized, "utf8") > 4 * 1024) throw new CodexOutboxError("outbox_full", "An envelope state record exceeds its bound.");
+	const temporary = join(paths.tmp, `.codex-${randomUUID()}.tmp`);
+	const target = join(paths.state, `${queueId}.json`);
+	let handle;
+	try {
+		handle = await open(temporary, "wx", 0o600);
+		await handle.writeFile(serialized, "utf8");
+		await handle.sync();
+		await handle.close();
+		handle = null;
+		await chmod(temporary, 0o600).catch((error) => { if (platform !== "win32") throw error; });
+		await rename(temporary, target);
+	} catch (error) {
+		if (handle) await handle.close().catch(() => {});
+		await unlink(temporary).catch(() => {});
+		throw error;
+	}
+}
+
+async function clearEnvelopeState(paths, queueId) {
+	await unlink(join(paths.state, `${queueId}.json`)).catch((error) => {
+		if (error?.code !== "ENOENT") throw error;
+	});
 }
 
 export async function enqueueCodexCapture({
@@ -802,18 +899,32 @@ export async function enqueueCodexCapture({
 	if (!release) throw new CodexOutboxError("outbox_busy", "Another Codex hook is updating the protected queue.");
 	try {
 		const usage = await queueUsage(opened.paths);
-		let duplicate = false;
+		// Captures bound to a different key/origin are preserved for that
+		// credential's return (or an explicit rebind); they never block new work.
+		let stagedDuplicate = null;
 		for (const entry of usage.entries) {
 			const queueId = entry.name.slice(0, -5);
-			const existingEnvelope = await readEnvelope(join(opened.paths.staged, entry.name), queueId);
-			if (existingEnvelope.credentialBinding !== activeBinding) {
-				throw new CodexOutboxError("credential_binding_mismatch", "The protected queue contains a capture bound to a different credential or service origin.");
+			if (queueId === envelope.queueId) {
+				stagedDuplicate = await readEnvelope(join(opened.paths.staged, entry.name), queueId);
 			}
-			if (queueId === envelope.queueId) duplicate = true;
 		}
-		if (duplicate) return { queued: true, duplicate: true, queueId: envelope.queueId };
+		if (stagedDuplicate) {
+			if (stagedDuplicate.credentialBinding !== activeBinding) {
+				// Identical content just re-captured under the ACTIVE credential:
+				// re-keying the preserved copy is exactly what the user asked for.
+				await atomicEnvelope(opened.paths, { ...stagedDuplicate, credentialBinding: activeBinding, createdAt: stagedDuplicate.createdAt }, actualPlatform);
+				return { queued: true, duplicate: true, rebound: true, queueId: envelope.queueId };
+			}
+			return { queued: true, duplicate: true, queueId: envelope.queueId };
+		}
+		if (usage.failedEntries.some((entry) => entry.name === `${envelope.queueId}.json`)) {
+			// The same content was permanently rejected before. Do not silently
+			// re-stage a known-poison capture; the quarantined copy stays visible.
+			return { queued: false, duplicate: true, quarantined: true, queueId: envelope.queueId };
+		}
 		const bytes = Buffer.byteLength(`${JSON.stringify(envelope)}\n`, "utf8");
-		if (usage.entries.length >= CODEX_OUTBOX_LIMITS.maxEntries || usage.bytes + bytes > CODEX_OUTBOX_LIMITS.maxBytes) {
+		if (usage.entries.length + usage.failedEntries.length >= CODEX_OUTBOX_LIMITS.maxEntries
+			|| usage.bytes + bytes > CODEX_OUTBOX_LIMITS.maxBytes) {
 			throw new CodexOutboxError("outbox_full", "The protected queue is full; no existing capture was removed.");
 		}
 		await atomicEnvelope(opened.paths, envelope, actualPlatform);
@@ -855,6 +966,10 @@ async function readLimitedJson(response, controller, maxBytes = 64 * 1024) {
 	try { return JSON.parse(Buffer.concat(chunks, bytes).toString("utf8")); } catch { return null; }
 }
 
+function safeServerId(value, prefix) {
+	return typeof value === "string" && value.length <= 200 && value.startsWith(`${prefix}_`) ? value : null;
+}
+
 async function deliverEnvelope(envelope, { apiKey, baseUrl, fetchImpl, timeoutMs }) {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
@@ -866,18 +981,41 @@ async function deliverEnvelope(envelope, { apiKey, baseUrl, fetchImpl, timeoutMs
 			headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
 			body: JSON.stringify(envelope.request.body),
 		});
-		if (response.status === 401 || response.status === 403) {
+		const status = response.status;
+		if (status === 401 || status === 403) {
 			await response.body?.cancel().catch(() => {});
-			return "auth";
+			return { outcome: "auth", httpStatus: status };
 		}
-		if (!response.ok || String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+		if (status === 429) {
+			const retryMs = retryAfterMs(response);
 			await response.body?.cancel().catch(() => {});
-			return response.status === 429 || response.status >= 500 ? "retryable" : "rejected";
+			return { outcome: "ratelimited", httpStatus: status, retryMs };
+		}
+		if (!response.ok) {
+			await response.body?.cancel().catch(() => {});
+			return status === 408 || status === 425 || status >= 500
+				? { outcome: "retryable", httpStatus: status }
+				: { outcome: "rejected", httpStatus: status, reason: `http_${status}` };
+		}
+		if (String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+			await response.body?.cancel().catch(() => {});
+			return { outcome: "rejected", httpStatus: status, reason: "invalid_acceptance" };
 		}
 		const receipt = await readLimitedJson(response, controller);
-		return receipt?.ok === true ? "accepted" : "rejected";
+		if (receipt?.ok !== true) return { outcome: "rejected", httpStatus: status, reason: "invalid_acceptance" };
+		const acceptance = {
+			sourcePacketId: safeServerId(receipt.source_packet_id, "src"),
+			jobId: safeServerId(receipt.job_id, "job"),
+			receiptId: safeServerId(receipt.receipt_id, "receipt") ?? safeServerId(receipt.receipt?.id, "receipt"),
+		};
+		// An ok:true body with no correlatable durable identity is not durable
+		// evidence of acceptance — a proxy/error wrapper can emit it.
+		if (!acceptance.sourcePacketId && !acceptance.receiptId) {
+			return { outcome: "rejected", httpStatus: status, reason: "invalid_acceptance" };
+		}
+		return { outcome: "accepted", httpStatus: status, acceptance };
 	} catch {
-		return "retryable";
+		return { outcome: "transport", httpStatus: null };
 	} finally {
 		clearTimeout(timer);
 	}
@@ -899,14 +1037,15 @@ export async function drainCodexOutbox({
 	const activeBinding = credentialBindingFor(apiKey, normalizedBase);
 	if (typeof fetchImpl !== "function") return { delivered: 0, preserved: 0, status: "transport_unavailable" };
 	const opened = prepared ?? await prepareCodexOutbox({ pluginData, platform, securityRunner, mode: "EnsureAll" });
+	const actualPlatform = platform ?? process.platform;
 	const release = await acquireLock(opened.paths, "drain.lock");
-	if (!release) return { delivered: 0, preserved: 0, status: "busy" };
+	if (!release) return { delivered: 0, preserved: 0, quarantined: 0, retried: 0, bindingMismatch: 0, backoffSkipped: 0, accepted: [], status: "busy" };
 	const deadline = Date.now() + Math.max(1, maxDurationMs);
-	let delivered = 0;
-	let status = "empty";
+	const result = { delivered: 0, preserved: 0, quarantined: 0, retried: 0, bindingMismatch: 0, backoffSkipped: 0, accepted: [], status: "empty" };
+	let interrupted = null;
 	try {
 		const snapshotRelease = await acquireLock(opened.paths, QUEUE_MUTATION_LOCK);
-		if (!snapshotRelease) return { delivered: 0, preserved: 0, status: "busy" };
+		if (!snapshotRelease) return { ...result, status: "busy" };
 		const envelopes = [];
 		try {
 			const usage = await queueUsage(opened.paths);
@@ -921,33 +1060,95 @@ export async function drainCodexOutbox({
 			const byTime = Date.parse(left.envelope.createdAt) - Date.parse(right.envelope.createdAt);
 			return byTime || left.entry.name.localeCompare(right.entry.name);
 		});
-		if (envelopes.length && envelopes[0].envelope.credentialBinding !== activeBinding) {
-			return { delivered: 0, preserved: envelopes.length, status: "binding_mismatch" };
-		}
-		const boundedCount = Math.max(0, Math.min(CODEX_OUTBOX_LIMITS.maxDeliveryEntries, Number(maxEntries) || 0));
-		for (const item of envelopes.slice(0, boundedCount)) {
-			if (item.envelope.credentialBinding !== activeBinding) {
-				status = "binding_mismatch";
-				break;
+		const quarantine = async (item, state, reason, httpStatus) => {
+			const releaseMutation = await acquireLock(opened.paths, QUEUE_MUTATION_LOCK);
+			if (!releaseMutation) return false;
+			try {
+				await writeEnvelopeState(opened.paths, item.envelope.queueId, {
+					...state,
+					quarantined_at: Date.now(),
+					quarantined_reason: reason,
+					...(httpStatus == null ? {} : { last_http_status: httpStatus }),
+					updated_at: Date.now(),
+				}, actualPlatform);
+				await rename(join(opened.paths.staged, item.entry.name), join(opened.paths.failed, item.entry.name));
+				return true;
+			} finally {
+				await releaseMutation();
 			}
+		};
+		const boundedCount = Math.max(0, Math.min(CODEX_OUTBOX_LIMITS.maxDeliveryEntries, Number(maxEntries) || 0));
+		let attempted = 0;
+		for (const item of envelopes) {
+			if (attempted >= boundedCount) break;
 			const remaining = deadline - Date.now();
 			if (remaining <= 20) {
-				status = "budget_exhausted";
+				interrupted = "budget_exhausted";
 				break;
 			}
-			const outcome = await deliverEnvelope(item.envelope, {
+			if (item.envelope.credentialBinding !== activeBinding) {
+				// Preserved for that credential's return or an explicit rebind;
+				// never a reason to stop delivering the active credential's work.
+				result.bindingMismatch += 1;
+				continue;
+			}
+			const state = await readEnvelopeState(opened.paths, item.envelope.queueId);
+			if (Number(state.next_attempt_at ?? 0) > Date.now()) {
+				result.backoffSkipped += 1;
+				continue;
+			}
+			attempted += 1;
+			const attempts = Number(state.attempts ?? 0) + 1;
+			const delivery = await deliverEnvelope(item.envelope, {
 				apiKey,
 				baseUrl: normalizedBase,
 				fetchImpl,
 				timeoutMs: Math.min(700, remaining),
 			});
-			if (outcome !== "accepted") {
-				status = outcome;
+			if (delivery.outcome === "transport") {
+				await writeEnvelopeState(opened.paths, item.envelope.queueId, {
+					attempts, next_attempt_at: Date.now() + codexBackoffMs(item.envelope.queueId, attempts),
+					last_error: "network", updated_at: Date.now(),
+				}, actualPlatform);
+				result.retried += 1;
+				interrupted = "retryable";
 				break;
 			}
+			if (delivery.outcome === "auth") {
+				interrupted = "auth";
+				break;
+			}
+			if (delivery.outcome === "ratelimited") {
+				await writeEnvelopeState(opened.paths, item.envelope.queueId, {
+					attempts, next_attempt_at: Date.now() + (delivery.retryMs ?? codexBackoffMs(item.envelope.queueId, attempts)),
+					last_error: "http_429", updated_at: Date.now(),
+				}, actualPlatform);
+				result.retried += 1;
+				interrupted = "retryable";
+				break;
+			}
+			if (delivery.outcome === "retryable") {
+				if (attempts >= CODEX_RETRY_QUARANTINE_ATTEMPTS) {
+					if (await quarantine(item, { attempts }, "retry_exhausted", delivery.httpStatus)) result.quarantined += 1;
+					else { interrupted = "cleanup_busy"; break; }
+				} else {
+					await writeEnvelopeState(opened.paths, item.envelope.queueId, {
+						attempts, next_attempt_at: Date.now() + codexBackoffMs(item.envelope.queueId, attempts),
+						last_error: `http_${delivery.httpStatus}`, updated_at: Date.now(),
+					}, actualPlatform);
+					result.retried += 1;
+				}
+				continue;
+			}
+			if (delivery.outcome === "rejected") {
+				if (await quarantine(item, { attempts }, delivery.reason ?? `http_${delivery.httpStatus}`, delivery.httpStatus)) result.quarantined += 1;
+				else { interrupted = "cleanup_busy"; break; }
+				continue;
+			}
+			// accepted
 			const cleanupRelease = await acquireLock(opened.paths, QUEUE_MUTATION_LOCK);
 			if (!cleanupRelease) {
-				status = "cleanup_busy";
+				interrupted = "cleanup_busy";
 				break;
 			}
 			try {
@@ -959,13 +1160,23 @@ export async function drainCodexOutbox({
 					throw new CodexOutboxError("credential_binding_mismatch", "An accepted queue envelope changed credential binding before cleanup.");
 				}
 				await unlink(join(opened.paths.staged, item.entry.name));
+				await clearEnvelopeState(opened.paths, item.envelope.queueId);
 			} finally {
 				await cleanupRelease();
 			}
-			delivered += 1;
-			status = "delivered";
+			result.delivered += 1;
+			result.accepted.push({ queueId: item.envelope.queueId, ...delivery.acceptance });
 		}
-		return { delivered, preserved: envelopes.length - delivered, status };
+		result.preserved = envelopes.length - result.delivered - result.quarantined;
+		result.status = interrupted
+			?? (result.delivered > 0 ? "delivered"
+				: result.quarantined > 0 ? "quarantined"
+					: result.retried > 0 ? "retryable"
+						: result.backoffSkipped > 0 ? "backoff"
+							: result.bindingMismatch > 0 ? "binding_mismatch"
+								: envelopes.length ? "budget_exhausted" : "empty");
+		if (interrupted && result.delivered > 0 && interrupted === "budget_exhausted") result.status = "delivered";
+		return result;
 	} finally {
 		await release();
 	}
@@ -1144,8 +1355,61 @@ export async function readCodexRecallGuard({ pluginData, sessionId, platform, se
 	return entry ? { state: entry.state, fingerprints: entry.fingerprints } : { state: "missing", fingerprints: [] };
 }
 
-export async function inspectCodexOutbox({ pluginData, platform, securityRunner } = {}) {
+export async function inspectCodexOutbox({ pluginData, apiKey, baseUrl = DEFAULT_ITSUKI_BASE_URL, platform, securityRunner } = {}) {
 	const opened = await prepareCodexOutbox({ pluginData, platform, securityRunner, mode: "EnsureAll" });
 	const usage = await queueUsage(opened.paths);
-	return { count: usage.entries.length, bytes: usage.bytes, root: opened.paths.root };
+	let activeBinding = null;
+	try { activeBinding = validItsukiApiKey(apiKey) ? credentialBindingFor(apiKey, normalizeServiceBaseUrl(baseUrl)) : null; }
+	catch { activeBinding = null; }
+	let bindingMismatch = 0;
+	let oldestPendingAt = null;
+	for (const entry of usage.entries) {
+		try {
+			const envelope = await readEnvelope(join(opened.paths.staged, entry.name), entry.name.slice(0, -5));
+			const created = Date.parse(envelope.createdAt);
+			if (Number.isFinite(created)) oldestPendingAt = oldestPendingAt === null ? created : Math.min(oldestPendingAt, created);
+			if (activeBinding && envelope.credentialBinding !== activeBinding) bindingMismatch += 1;
+		} catch {
+			// A corrupt staged entry is reported by count difference; drain has
+			// its own handling and prepare bounds the damage.
+		}
+	}
+	return {
+		count: usage.entries.length,
+		quarantined: usage.failedEntries.length,
+		bytes: usage.bytes,
+		bindingMismatch: activeBinding === null ? null : bindingMismatch,
+		oldestPendingAt,
+		root: opened.paths.root,
+	};
+}
+
+/**
+ * Explicit operator action after a key/origin change: re-key every preserved
+ * staged capture to the ACTIVE credential. Never automatic — captures made
+ * under one credential must not silently deliver to another account.
+ * Quarantined envelopes are not touched.
+ */
+export async function rebindCodexOutbox({ pluginData, apiKey, baseUrl = DEFAULT_ITSUKI_BASE_URL, platform, securityRunner, prepared } = {}) {
+	const normalizedBase = normalizeServiceBaseUrl(baseUrl);
+	if (!validItsukiApiKey(apiKey)) throw new CodexOutboxError("invalid_api_key", "A valid API key is required to rebind the protected queue.");
+	const activeBinding = credentialBindingFor(apiKey, normalizedBase);
+	const actualPlatform = platform ?? process.platform;
+	const opened = prepared ?? await prepareCodexOutbox({ pluginData, platform: actualPlatform, securityRunner, mode: "EnsureAll" });
+	const release = await acquireLockUntil(opened.paths, QUEUE_MUTATION_LOCK, ENQUEUE_LOCK_WAIT_MS);
+	if (!release) throw new CodexOutboxError("outbox_busy", "Another Codex hook is updating the protected queue.");
+	try {
+		const usage = await queueUsage(opened.paths);
+		let rebound = 0;
+		for (const entry of usage.entries) {
+			const queueId = entry.name.slice(0, -5);
+			const envelope = await readEnvelope(join(opened.paths.staged, entry.name), queueId);
+			if (envelope.credentialBinding === activeBinding) continue;
+			await atomicEnvelope(opened.paths, { ...envelope, credentialBinding: activeBinding }, actualPlatform);
+			rebound += 1;
+		}
+		return { rebound, examined: usage.entries.length };
+	} finally {
+		await release();
+	}
 }

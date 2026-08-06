@@ -109,7 +109,7 @@ describe("Codex protected outbox", () => {
 
 	it("deletes only a syntactically successful accepted delivery", async () => {
 		await enqueue();
-		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, packetId: "safe-receipt" }), {
+		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" }), {
 			status: 202,
 			headers: { "content-type": "application/json" },
 		}));
@@ -135,7 +135,7 @@ describe("Codex protected outbox", () => {
 		const fetchImpl = vi.fn(async () => {
 			markFetchStarted();
 			await fetchGate;
-			return new Response(JSON.stringify({ ok: true, packetId: "accepted-original" }), {
+			return new Response(JSON.stringify({ ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" }), {
 				status: 202,
 				headers: { "content-type": "application/json" },
 			});
@@ -171,7 +171,7 @@ describe("Codex protected outbox", () => {
 		const fetchImpl = vi.fn(async () => {
 			markFetchStarted();
 			await fetchGate;
-			return new Response(JSON.stringify({ ok: true }), {
+			return new Response(JSON.stringify({ ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" }), {
 				status: 202,
 				headers: { "content-type": "application/json" },
 			});
@@ -196,7 +196,7 @@ describe("Codex protected outbox", () => {
 			pluginData,
 			apiKey: API_KEY,
 			baseUrl: BASE_URL,
-			fetchImpl: vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+			fetchImpl: vi.fn(async () => new Response(JSON.stringify({ ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" }), {
 				status: 202,
 				headers: { "content-type": "application/json" },
 			})),
@@ -220,14 +220,18 @@ describe("Codex protected outbox", () => {
 		expect((await inspectCodexOutbox({ pluginData, ...SECURITY })).count).toBe(1);
 	});
 
-	it("refuses to mix captures bound to different credentials in one queue", async () => {
+	it("keeps queuing new captures after a key rotation while preserving old-binding captures", async () => {
+		// Campaign contract (invariant I14): rotating the API key must never
+		// disable capture. Old-binding envelopes stay preserved for their
+		// credential's return or an explicit rebind; new work queues normally.
 		await enqueue({ now: new Date("2030-01-01T00:00:00.000Z") });
-		await expect(enqueue({
+		const rotated = await enqueue({
 			apiKey: "itsuki_live_rotated_codex_key_654321",
 			sessionId: "rotated-session",
 			now: new Date("2030-01-02T00:00:00.000Z"),
-		})).rejects.toMatchObject({ code: "credential_binding_mismatch" });
-		expect((await inspectCodexOutbox({ pluginData, ...SECURITY })).count).toBe(1);
+		});
+		expect(rotated).toMatchObject({ queued: true, duplicate: false });
+		expect((await inspectCodexOutbox({ pluginData, ...SECURITY })).count).toBe(2);
 	});
 
 	it("checks every envelope binding before delivery and preserves the first mismatch", async () => {
@@ -243,7 +247,7 @@ describe("Codex protected outbox", () => {
 		envelopes[1].value.credentialBinding = `sha256:${"a".repeat(64)}`;
 		await writeFile(join(health.root, "staged", envelopes[1].name), JSON.stringify(envelopes[1].value), "utf8");
 
-		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" }), {
 			status: 202,
 			headers: { "content-type": "application/json" },
 		}));
@@ -254,16 +258,21 @@ describe("Codex protected outbox", () => {
 			fetchImpl,
 			...SECURITY,
 		});
-		expect(drained).toMatchObject({ delivered: 1, preserved: 1, status: "binding_mismatch" });
+		// The mismatched envelope is skipped and preserved; it no longer stops
+		// the drain, so the delivered active-binding work defines the status.
+		expect(drained).toMatchObject({ delivered: 1, preserved: 1, bindingMismatch: 1, status: "delivered" });
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		expect((await inspectCodexOutbox({ pluginData, ...SECURITY })).count).toBe(1);
 	});
 
 	it.each([
-		[503, "text/plain", "retryable"],
-		[422, "application/json", "rejected"],
-		[202, "application/json", "rejected"],
-	])("preserves the envelope after HTTP %i or an invalid receipt", async (status, contentType, expected) => {
+		// Retryable failures stay staged with persisted backoff; permanent
+		// rejections quarantine to failed/ (durable, observable) instead of
+		// blocking the queue head forever (campaign invariant I13).
+		[503, "text/plain", "retryable", { staged: 1, quarantined: 0 }],
+		[422, "application/json", "quarantined", { staged: 0, quarantined: 1 }],
+		[202, "application/json", "quarantined", { staged: 0, quarantined: 1 }],
+	])("preserves the envelope after HTTP %i or an invalid receipt", async (status, contentType, expected, counts) => {
 		await enqueue();
 		const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: false, private: "SERVER_BODY_MUST_NOT_SURFACE" }), {
 			status,
@@ -276,9 +285,11 @@ describe("Codex protected outbox", () => {
 			fetchImpl,
 			...SECURITY,
 		});
-		expect(drained).toMatchObject({ delivered: 0, preserved: 1, status: expected });
+		expect(drained).toMatchObject({ delivered: 0, status: expected });
 		expect(JSON.stringify(drained)).not.toContain("SERVER_BODY");
-		expect((await inspectCodexOutbox({ pluginData, ...SECURITY })).count).toBe(1);
+		const health = await inspectCodexOutbox({ pluginData, ...SECURITY });
+		expect(health.count).toBe(counts.staged);
+		expect(health.quarantined).toBe(counts.quarantined);
 	});
 
 	it("sanitizes and bounds recalled context before formatting developer context", async () => {
@@ -394,7 +405,7 @@ describe("Codex protected outbox", () => {
 	it("delivers and recalls with a legacy uml_live key", async () => {
 		await enqueue({ apiKey: LEGACY_API_KEY });
 		const fetchImpl = vi.fn(async (url) => new Response(JSON.stringify(
-			String(url).endsWith("/v1/recall") ? { ok: true, context: "Legacy-key recall works." } : { ok: true },
+			String(url).endsWith("/v1/recall") ? { ok: true, context: "Legacy-key recall works." } : { ok: true, source_packet_id: "src_codex_test", job_id: "job_codex_test", receipt_id: "receipt_codex_test" },
 		), { status: String(url).endsWith("/v1/recall") ? 200 : 202, headers: { "content-type": "application/json" } }));
 		const drained = await drainCodexOutbox({
 			pluginData,

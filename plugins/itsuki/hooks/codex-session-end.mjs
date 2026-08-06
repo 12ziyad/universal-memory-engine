@@ -117,15 +117,18 @@ async function main() {
 			prepared,
 			credentialBinding,
 		});
+		if (queued.quarantined) {
+			return status("this exact capture was previously rejected permanently by the memory service and remains quarantined; it was not re-queued.");
+		}
+		if (queued.rebound) {
+			return status("this exact capture was already protected locally and is now bound to the active API key for delivery.");
+		}
 		return status(queued.duplicate
 			? "this exact scrubbed Codex capture is already protected locally; no duplicate was added."
 			: "scrubbed durable Codex outcomes were queued in the protected local outbox for the next SessionStart.");
 	} catch (error) {
 		if (error instanceof CodexOutboxError && error.code === "outbox_full") {
 			return status("the protected local outbox is full; no existing capture was removed and this snapshot was not queued.");
-		}
-		if (error instanceof CodexOutboxError && error.code === "credential_binding_mismatch") {
-			return status("the protected local outbox contains captures bound to a different API key or service origin; restore that configuration to deliver them before queuing this snapshot.");
 		}
 		return status("the scrubbed snapshot could not be written to the protected local outbox; nothing was queued.");
 	}

@@ -63,7 +63,7 @@ try {
 	if ((Split-Path -Leaf $full) -ne "v1" -or (Split-Path -Leaf (Split-Path -Parent $full)) -ne "codex-outbox") {
 		throw "The ACL helper only accepts a codex-outbox/v1 directory"
 	}
-	$names = @("tmp", "staged", "locks", "control")
+	$names = @("tmp", "staged", "failed", "state", "locks", "control")
 	$directories = @((Get-Item -LiteralPath $full -Force))
 	foreach ($name in $names) {
 		$child = Join-Path $full $name
@@ -87,6 +87,20 @@ try {
 	foreach ($item in $tmp) {
 		if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Name -notmatch '^\.(codex|recall-guard|stale-lock)-[a-f0-9-]{36}\.tmp$' -or $item.Length -gt 524288) {
 			throw "The temporary queue contains an unexpected entry"
+		}
+	}
+	$failed = @(Get-ChildItem -LiteralPath (Join-Path $full "failed") -Force)
+	if ($failed.Count -gt 65) { throw "The queue exceeds its quarantine bound" }
+	foreach ($item in $failed) {
+		if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Name -notmatch '^codex_[a-f0-9]{64}\.json$') {
+			throw "The quarantine directory contains an unexpected entry"
+		}
+	}
+	$state = @(Get-ChildItem -LiteralPath (Join-Path $full "state") -Force)
+	if ($state.Count -gt 130) { throw "The queue exceeds its state bound" }
+	foreach ($item in $state) {
+		if ($item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.Name -notmatch '^codex_[a-f0-9]{64}\.json$' -or $item.Length -gt 4096) {
+			throw "The state directory contains an unexpected entry"
 		}
 	}
 	$locks = @(Get-ChildItem -LiteralPath (Join-Path $full "locks") -Force)
@@ -115,7 +129,7 @@ try {
 		Assert-PrivateAcl $directory.FullName $allowedText $current.Value $true
 	}
 	if ($Mode -eq "EnsureAll") {
-		foreach ($item in @($staged + $locks + $control + $tmp)) {
+		foreach ($item in @($staged + $failed + $state + $locks + $control + $tmp)) {
 			# Another hook may complete an atomic rename, release a lock, or
 			# remove an accepted staged envelope after enumeration. Only skip a
 			# path that is actually gone; every surviving file is still repaired

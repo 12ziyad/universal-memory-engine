@@ -70,19 +70,45 @@ scrubs eligible durable outcomes before atomically writing them to Codex's
 protected `PLUGIN_DATA/codex-outbox/v1` subdirectory. Failed delivery remains
 queued for a later start.
 
-The local outbox is deliberately finite: at most 64 staged envelopes, 16 MiB
-in total, and 512 KiB per envelope. Each SessionStart attempts at most four
-envelopes in oldest-first order. Captures do not expire automatically and the
-plugin never evicts an existing capture to make room. A rejected oldest
-envelope therefore remains first in line and prevents later envelopes from
-being attempted; the SessionStart status reports that condition. This release
-does not include an outbox review/removal command. Before touching outbox files,
-disable the hooks and make a private backup of the complete
-`codex-outbox/v1` directory. Remove only a specifically identified regular
-`.json` envelope from its `staged` directory after reviewing it and deciding
-that permanent data loss is acceptable; never remove the whole plugin-data or
-outbox directory. Restore the matching API key/origin instead of removing files
-when the reported problem is authentication or credential binding.
+The local outbox is deliberately finite: at most 64 envelopes (staged and
+quarantined combined), 16 MiB in total, and 512 KiB per envelope. Each
+SessionStart attempts at most four envelopes in oldest-first order. Captures do
+not expire automatically and the plugin never evicts an existing capture to
+make room.
+
+Failure handling is per-envelope. A capture the service permanently rejects
+(for example HTTP 413/422, or a response that is not a durable acceptance) is
+moved to the outbox's `failed` quarantine directory with a machine-readable
+reason in `state/`; it is preserved verbatim, reported by the SessionStart
+status, and never blocks later valid captures. Transient failures (offline,
+HTTP 5xx/429) stay staged with a persisted attempt count and deterministic
+backoff; an envelope whose transient retries exhaust their bound (16 attempts)
+is quarantined the same way instead of retrying forever. Delivery receipts
+retain the service packet identity, and SessionStart reports accepted packet
+ids so a capture can be correlated with its job status.
+
+Rotating the API key or service origin never disables capture. New captures
+queue under the active credential; captures bound to a previous credential are
+skipped and preserved — they deliver again when that credential returns, or
+when you explicitly re-key them. Rebinding is deliberately explicit (a capture
+made under one credential must never silently deliver to another account):
+
+```sh
+node -e "import(String.raw`PLUGIN_ROOT/hooks/codex-outbox.mjs`.replace(/\\/g,'/')).then(m => m.rebindCodexOutbox({ pluginData: process.env.CODEX_PLUGIN_DATA, apiKey: process.env.ITSUKI_API_KEY }).then(r => console.log(r)))"
+```
+
+replacing `PLUGIN_ROOT` with the installed plugin root and `CODEX_PLUGIN_DATA`
+with the plugin-data directory Codex assigns the plugin. Review quarantined
+envelopes before deciding anything is lost: each `failed/*.json` file is the
+complete scrubbed capture. To retire one permanently, remove that single
+reviewed `.json` file (and its `state/` sidecar) after making a private backup
+of the complete `codex-outbox/v1` directory with the hooks disabled; never
+remove the whole plugin-data or outbox directory. Quarantined envelopes count
+toward the outbox entry bound, so an unreviewed quarantine eventually applies
+visible backpressure rather than growing without limit. Note that upgrading to
+this outbox layout is automatic, but an older plugin version will refuse (fail
+closed, without data loss) to open an outbox that already contains the newer
+`failed`/`state` directories.
 
 Automatic lifecycle capture covers the main Codex thread only. Codex does not
 emit `SessionEnd` for subagents, and this plugin does not install a
