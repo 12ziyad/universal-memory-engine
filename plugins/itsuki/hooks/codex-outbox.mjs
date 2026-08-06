@@ -1026,7 +1026,7 @@ export async function drainCodexOutbox({
 	apiKey,
 	baseUrl = DEFAULT_ITSUKI_BASE_URL,
 	maxEntries = CODEX_OUTBOX_LIMITS.maxDeliveryEntries,
-	maxDurationMs = 1_600,
+	maxDurationMs = 2_600,
 	fetchImpl = globalThis.fetch,
 	platform,
 	securityRunner,
@@ -1099,11 +1099,15 @@ export async function drainCodexOutbox({
 			}
 			attempted += 1;
 			const attempts = Number(state.attempts ?? 0) + 1;
+			// Measured production /v1/ingest acceptance regularly exceeds 700 ms
+			// end-to-end on real links; a sub-second cap aborted every delivery
+			// (recorded as "network") while the server had already accepted the
+			// packet. 2 s fits the SessionStart drain window and real latency.
 			const delivery = await deliverEnvelope(item.envelope, {
 				apiKey,
 				baseUrl: normalizedBase,
 				fetchImpl,
-				timeoutMs: Math.min(700, remaining),
+				timeoutMs: Math.min(2_000, remaining),
 			});
 			if (delivery.outcome === "transport") {
 				await writeEnvelopeState(opened.paths, item.envelope.queueId, {

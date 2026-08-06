@@ -12,7 +12,9 @@ import {
 } from "./codex-outbox.mjs";
 
 const MAX_STDIN_BYTES = 64 * 1024;
-const TOTAL_BUDGET_MS = 3_500;
+// Bounded well below the 10 s host hook timeout (hooks.json), leaving margin
+// for PowerShell/Node launcher startup before this budget starts counting.
+const TOTAL_BUDGET_MS = 3_800;
 
 async function readBoundedStdin() {
 	const chunks = [];
@@ -82,7 +84,7 @@ async function main() {
 				apiKey,
 				baseUrl,
 				maxEntries: 4,
-				maxDurationMs: Math.min(1_600, Math.max(1, TOTAL_BUDGET_MS - (Date.now() - startedAt) - 1_100)),
+				maxDurationMs: Math.min(2_600, Math.max(1, TOTAL_BUDGET_MS - (Date.now() - startedAt) - 1_100)),
 				prepared,
 			});
 			if (drained.delivered > 0) {

@@ -254,6 +254,28 @@ describe("credential rotation (CDX-02)", () => {
 	});
 });
 
+describe("realistic delivery latency (CDX-06)", () => {
+	it("delivers within real-world production latency instead of aborting at a sub-second cap", async () => {
+		// Live reproduction: production /v1/ingest acceptance regularly needs
+		// more than 700 ms end-to-end; the old per-request cap aborted every
+		// delivery on real links, recorded "network", and livelocked the queue
+		// until quarantine — while the server had already accepted the packet.
+		await enqueueUnique("slow-link-session", "Capture delivered over a realistic-latency link.");
+		const fetchImpl = vi.fn((url, init) => new Promise((resolve, reject) => {
+			const timer = setTimeout(() => resolve(jsonResponse(ACCEPTANCE, 202)), 1_200);
+			init.signal?.addEventListener("abort", () => {
+				clearTimeout(timer);
+				reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+			});
+		}));
+
+		const drained = await drain({ fetchImpl, maxDurationMs: 3_000 });
+
+		expect(drained.delivered).toBe(1);
+		expect(drained.retried).toBe(0);
+	});
+});
+
 describe("acceptance provenance (CDX-04)", () => {
 	it("returns packet, job, and receipt identity for every accepted delivery", async () => {
 		const item = await enqueueUnique("provenance-session", "Capture whose acceptance identity must be retained.");

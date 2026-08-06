@@ -50,7 +50,10 @@ describe("Codex-native lifecycle hook contract", () => {
 			type: "command",
 			command: "/bin/sh \"$PLUGIN_ROOT/hooks/codex-launch.sh\" SessionStart",
 			commandWindows: expect.stringContaining("[Environment]::SystemDirectory"),
-			timeout: 5,
+			// 10 s host kill timeout: the hook self-bounds at 3.8 s internally, but
+			// launcher (PowerShell + Node) startup happens before that budget
+			// starts counting, and delivery now uses realistic 2 s request caps.
+			timeout: 10,
 			additionalContextLimit: 5000,
 		});
 		expect(end).toMatchObject({
