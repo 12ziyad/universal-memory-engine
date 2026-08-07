@@ -622,6 +622,15 @@ ${codeBlock(`{
 ${codeBlock(`GET /v1/jobs?cancelled=true    # only work your own erasure cancelled
 GET /v1/jobs?cancelled=false   # only work that actually failed`)}
 
+<h2>Which route to use</h2>
+<p>There are two ways to erase, and they are for different callers:</p>
+<table>
+<tr><th>Route</th><th>Who</th><th>Behaviour</th></tr>
+<tr><td><code>DELETE /v1/memories</code></td><td>API keys and sessions</td><td>Preview-first, addresses any memory space you own including a single sub-tenant, and carries the erasure barrier described above. <b>This is the route to build on.</b></td></tr>
+<tr><td><code>POST /v1/actions/delete-all</code></td><td>Signed-in sessions only</td><td>The dashboard's danger-zone button. It deliberately refuses API keys with <code>token_not_allowed</code>.</td></tr>
+</table>
+<p>The split is intentional rather than an oversight. A confirmed unscoped <code>DELETE /v1/memories</code> already gives a key holder everything <code>delete-all</code> does, with a preview step first and the barrier semantics above — so opening the second route to keys would add a less careful path to the same outcome and no new capability.</p>
+
 <h2>What is kept</h2>
 <p>Erasure removes your memory. It retains the bookkeeping that proves the deletion happened — deletion records, job and receipt history, and the timestamps above. That audit trail carries no memory content, and it is what lets a later preview honestly answer "nothing left".</p>
 ` };
