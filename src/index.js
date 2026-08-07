@@ -47,6 +47,7 @@ import {
 	runObserveMessagesCommand,
 	runRecallCommand,
 } from "./pipeline/commands.js";
+import { resolveAdmissionRules } from "./pipeline/admission.js";
 import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
 import { credentialShapeHint, validateBody } from "./lib/params.js";
 import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
@@ -1293,7 +1294,7 @@ const routes = {
 		const door = await doorOverrides(env, auth, body);
 		// The SDK profile's layered rules govern this door end to end — the
 		// autoCollect decision included, so a key's rules can turn capture off.
-		const rules = door.rules ?? await getMemoryRules(env, auth.userId);
+		const rules = await resolveAdmissionRules(env, auth.userId, door.rules);
 
 		const recall = query
 			? await runRecallCommand(env, auth.userId, query, {

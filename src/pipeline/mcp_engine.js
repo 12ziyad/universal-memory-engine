@@ -40,7 +40,8 @@ import {
 	updateMemoryJob,
 } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
-import { getMemoryRules, rulesAllowText } from "./rules.js";
+import { resolveAdmissionRules } from "./admission.js";
+import { rulesAllowText } from "./rules.js";
 import { runExtraction } from "./extract.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
@@ -707,7 +708,10 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	// The user's memory rules apply to PAGE CONTENT here (an excluded topic
 	// must never appear on a notes page); graph enforcement stays in the
 	// engine's gates, where each refusal is named on the receipt.
-	const rules = await getMemoryRules(env, userId);
+	// The MCP door only ever serves the key owner's root identity (handleMcp),
+	// so a self-load here IS the account's rules — the admission boundary makes
+	// that explicit.
+	const rules = await resolveAdmissionRules(env, userId);
 	const capture = captureRequested(normalized.messages) && rules.captureDefault !== "graph_only";
 	const userLines = durable.map((m) => m.content).filter((line) => rulesAllowText(rules, line));
 	const derivedLines = capture
@@ -960,7 +964,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 	const config = getConfig(env);
 	const project = projectPayload(job.sourceMeta);
 	try {
-		const rules = await getMemoryRules(env, userId);
+		const rules = await resolveAdmissionRules(env, userId);
 		const overrides = {
 			manual: true,
 			source: SOURCE,

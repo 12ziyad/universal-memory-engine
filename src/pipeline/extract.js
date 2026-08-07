@@ -38,7 +38,8 @@ import {
 	updateMemoryJob,
 } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
-import { getMemoryRules, rulesAllowText } from "./rules.js";
+import { resolveAdmissionRules } from "./admission.js";
+import { rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
@@ -485,7 +486,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// and the gates get the same object for enforcement. A caller may hand in a
 	// pre-merged set (the Playground layers thread settings over the account's,
 	// and an SDK caller's per-request rules arrive the same way).
-	const rules = overrides.rules ?? await getMemoryRules(env, userId);
+	const rules = await resolveAdmissionRules(env, userId, overrides.rules);
 	// Which rules were actually in force for this save. Without this, a rule
 	// that never loaded and a rule that matched nothing look identical on the
 	// receipt — which is exactly how unenforced excludes stayed invisible.

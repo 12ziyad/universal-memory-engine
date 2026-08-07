@@ -34,7 +34,8 @@ import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, g
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
 import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
-import { getMemoryRules, rulesRejection } from "./rules.js";
+import { resolveAdmissionRules } from "./admission.js";
+import { rulesRejection } from "./rules.js";
 import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
@@ -404,7 +405,7 @@ export async function applyGates(
 
 	// Per-user memory rules (includes/excludes) — deterministic enforcement for
 	// every auto-lane save, whatever the model proposed.
-	const rules = opts.rules ?? await getMemoryRules(env, userId);
+	const rules = await resolveAdmissionRules(env, userId, opts.rules);
 	// Per-user density preference (Settings → exhaustive) lowers the floor too;
 	// a per-request setting always wins when present.
 	if (!manual && (settings?.captureDensity ?? null) === null && rules.captureDensity === "dense") {

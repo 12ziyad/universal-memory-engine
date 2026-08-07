@@ -14,7 +14,8 @@
 
 import { newId } from "../lib/ids.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
-import { getMemoryRules, rulesAllowText } from "./rules.js";
+import { resolveAdmissionRules } from "./admission.js";
+import { rulesAllowText } from "./rules.js";
 
 const TEXT_CAP = 2000;
 const MAX_ROWS_PER_WRITE = 40;
@@ -38,13 +39,11 @@ export async function stageMemoryText(env, userId, {
 	// Fail closed: if rules cannot be resolved, stage nothing rather than risk
 	// staging content the user asked never to keep. Staging is only a bridge —
 	// losing it costs seconds of read-your-writes, never durable memory.
-	let effectiveRules = rules;
-	if (effectiveRules === undefined) {
-		try { effectiveRules = await getMemoryRules(env, userId); }
-		catch (error) {
-			console.warn("stage text rules load failed:", error?.message ?? error);
-			return { staged: 0, ruleFiltered: 0, rulesUnavailable: true };
-		}
+	let effectiveRules;
+	try { effectiveRules = await resolveAdmissionRules(env, userId, rules); }
+	catch (error) {
+		console.warn("stage text rules load failed:", error?.message ?? error);
+		return { staged: 0, ruleFiltered: 0, rulesUnavailable: true };
 	}
 	const eligible = (messages ?? [])
 		.filter((m) => (m?.role ?? "user") === "user")
