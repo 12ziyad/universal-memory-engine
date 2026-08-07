@@ -58,6 +58,9 @@ const SOURCE = "save_conversation";
 const SOURCE_MODE = "mcp_save";
 const JOB_TYPE = "mcp_enrich";
 const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
+// A failed extract is a verdict about one processing attempt, not the content
+// (shared contract with the ingest lane's SRV-02 repair). Bounded identically.
+const MAX_FAILED_REPLAY_REPAIRS = 5;
 
 async function mcpExtractionRunId(userId, jobId, attempt) {
 	const bytes = new TextEncoder().encode(`${userId}\u0000${jobId}\u0000${attempt}`);
@@ -482,7 +485,7 @@ async function stageMcpMemoryTextOnce(env, userId, {
 async function findExistingJob(env, userId, idempotencyKey) {
 	if (!idempotencyKey) return null;
 	const job = await env.DB.prepare(
-		`SELECT id, status, type, payload_json, receipt_id, source_packet_id
+		`SELECT id, status, type, attempts, payload_json, receipt_id, source_packet_id
 		 FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
 	).bind(userId, idempotencyKey).first();
 	if (!job) return null;
@@ -660,13 +663,54 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	const ignoredReplay = await replayIgnoredMcpResult(env, userId, normalized, sourcePacket);
 	if (ignoredReplay) return ignoredReplay;
 
-	// Terminal work is a pure replay. Active work continues through the repair
-	// path below: its D1 claim may exist while its receipt/page/DO enqueue does
-	// not, depending on where the first isolate stopped.
+	// Terminal SUCCESS is a pure replay. Active work continues through the
+	// repair path below: its D1 claim may exist while its receipt/page/DO
+	// enqueue does not, depending on where the first isolate stopped.
 	if (existing?.job.source_packet_id && existing.job.source_packet_id !== sourcePacket?.id) {
 		return idempotencyConflictResult(normalized, existing.job.source_packet_id);
 	}
-	if (existing && TERMINAL_JOB_STATES.has(existing.job.status)) {
+	let repairedReplay = false;
+	if (existing?.job.status === "failed") {
+		// SRV-05, the lane mirror of SRV-02: MCP keys default to content
+		// derivation, so a caller re-sending the same conversation cannot mint
+		// a fresh key — the replay IS the user explicitly asking again. Repair
+		// the SAME job row (bounded) or refuse honestly; never answer
+		// "Already saved" over dead work.
+		const repairGeneration = Number(existing.payload?.repair_generation ?? 0);
+		if (repairGeneration >= MAX_FAILED_REPLAY_REPAIRS || Number(existing.job.attempts ?? 0) >= MAX_FAILED_REPLAY_REPAIRS) {
+			const summary = "Extraction for this exact conversation failed permanently after its bounded repair attempts. Review the job error, rephrase or split the conversation, or contact support.";
+			const receipt = emptyReceipt("extraction_failed_terminal", summary, {
+				source: SOURCE, source_mode: SOURCE_MODE, ...sourceMeta(sourcePacket), received,
+			});
+			receipt.duplicate = false;
+			receipt.final = true;
+			receipt.status = "failed";
+			return commandResult({
+				ok: false,
+				error: "extraction_failed_terminal",
+				httpStatus: 422,
+				fired: false,
+				processing: false,
+				summary,
+				receipt,
+				receiptId: existing.job.receipt_id ?? null,
+				sourcePacket,
+				extra: { job_id: existing.job.id, job_status: "failed", retryable: false },
+			});
+		}
+		// Compare-and-set so concurrent replays perform one reset; losers see a
+		// non-terminal job and take the normal recovery path below. The bumped
+		// repair generation gives the re-run FRESH extraction run identity —
+		// the run ledger's idempotency would otherwise replay the recorded
+		// failed outcomes without ever calling the model again.
+		const repairedPayload = { ...(existing.payload ?? {}), repair_generation: repairGeneration + 1 };
+		await env.DB.prepare(
+			"UPDATE memory_jobs SET status = 'staged', error = NULL, completed_at = NULL, run_after = ?, updated_at = ?, payload_json = ? WHERE id = ? AND user_id = ? AND status = 'failed'",
+		).bind(Date.now(), Date.now(), JSON.stringify(repairedPayload), existing.job.id, userId).run();
+		existing.job.status = "staged";
+		existing.payload = repairedPayload;
+		repairedReplay = true;
+	} else if (existing && TERMINAL_JOB_STATES.has(existing.job.status)) {
 		return duplicateMcpResult(env, userId, normalized, sourcePacket, existing);
 	}
 	const recovering = Boolean(existing);
@@ -832,6 +876,7 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			.map((m) => ({ id: m.id, role: "assistant", content: clampLine(m.content, 1500), ts: m.ts })),
 		sourceMeta: { ...sourceMeta(sourcePacket), topic_filter: normalized.packet.topic ?? null },
 		lastTs,
+		repairGeneration: Number(ownerPayload.repair_generation ?? 0),
 		testOverrides: Object.keys(jobTestOverrides).length ? jobTestOverrides : null,
 	};
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
@@ -842,9 +887,30 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	});
 	if (handoff?._testMcpFault) maybeInjectMcpFault(env, input, handoff._testMcpFault);
 	if (!jobClaim.claimed) {
-		const repaired = await findExistingJob(env, userId, normalized.packet.idempotency_key);
-		if (!repaired) throw new Error("MCP repair completed without a readable job");
-		return duplicateMcpResult(env, userId, normalized, sourcePacket, repaired);
+		const owner = await findExistingJob(env, userId, normalized.packet.idempotency_key);
+		if (!owner) throw new Error("MCP repair completed without a readable job");
+		if (repairedReplay) {
+			// A repair is a fresh promise, not a duplicate: the earlier attempt
+			// FAILED, and this replay re-staged the same job for enrichment.
+			// "Already saved" wording here would be the SRV-05 defect again.
+			const repairSummary = "Retrying this save - the earlier processing attempt failed, so it was re-staged and is being enriched in the background.";
+			const repairReceipt = emptyReceipt("staged", "re-staged after a failed processing attempt", {
+				source: SOURCE, source_mode: SOURCE_MODE, ...sourceMeta(sourcePacket), received,
+			});
+			repairReceipt.page_id = owner.payload?.pageId ?? null;
+			repairReceipt.status = owner.job.status;
+			repairReceipt.processing = true;
+			return commandResult({
+				fired: true,
+				processing: true,
+				summary: repairSummary,
+				receipt: repairReceipt,
+				receiptId: owner.job.receipt_id ?? null,
+				sourcePacket,
+				extra: { page_id: owner.payload?.pageId ?? null, job_id: owner.job.id, job_status: owner.job.status, repaired: true },
+			});
+		}
+		return duplicateMcpResult(env, userId, normalized, sourcePacket, owner);
 	}
 
 	return commandResult({
@@ -980,13 +1046,17 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			...(job.testOverrides ?? {}),
 		};
 		const attempt = Number(job.attempts ?? 0);
+		// A repaired job (SRV-05) runs under a fresh generation so its run ids
+		// never collide with the failed generation's ledger records.
+		const generation = Number(job.repairGeneration ?? 0);
+		const runKey = generation > 0 ? `${job.jobId}#g${generation}` : job.jobId;
 		const result = await runExtraction(
 			env,
 			userId,
 			job.userMessages ?? [],
 			job.contextMessages ?? [],
 			overrides,
-			{ runId: await mcpExtractionRunId(userId, job.jobId, attempt) },
+			{ runId: await mcpExtractionRunId(userId, runKey, attempt) },
 		);
 
 		if (result.outcome === "in_progress") {
