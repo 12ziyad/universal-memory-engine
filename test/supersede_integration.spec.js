@@ -279,6 +279,75 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(circle.every((e) => e.invalid_at === null), "the CircleCI relation must stay current").toBe(true);
 	});
 
+	it("closes a fact-null legacy relation the correction obsoletes (production S1 shape)", async () => {
+		// Measured live on aaeeac77 (a5-supersede-battery-v2.1786110506677): the
+		// model emits a LEGACY edge alongside the v2 one — from/type/to only,
+		// fact null — and the closure pass skipped every edge without fact text,
+		// so "Deploy runner --uses--> Jenkins" stayed current after the
+		// correction and recall still rendered Jenkins. The relation's assertion
+		// IS its triple: from-label + type + to-label.
+		const userId = `supersede-factnull-${crypto.randomUUID()}`;
+		const rel = (to, fact) => ({
+			objects: [
+				{ kind: "node", label: "Deploy runner", category: "other", confidence: 0.9 },
+				{ kind: "node", label: to, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Deploy runner", text: `pipeline runs on ${to}`, kind_detail: "technical_detail", confidence: 0.9 },
+				// the legacy edge: closed lowercase vocabulary, never carries fact
+				{ kind: "edge", from: "Deploy runner", to, type: "uses", confidence: 0.9 },
+				// the v2 edge the model emits in parallel
+				{ kind: "edge", _v2: true, from: "Deploy runner", to, type: "USES", fact, confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "I decided the deploy runner uses Jenkins for its pipeline.",
+			rel("Jenkins", "Deploy runner uses Jenkins"), `f1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Correction: the deploy runner now uses CircleCI, not Jenkins.",
+			rel("CircleCI", "Deploy runner uses CircleCI"), `f2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.fact, e.type, e.invalid_at, e.deleted_at, tn.label AS to_label
+			 FROM edges e JOIN nodes tn ON tn.id = e.to_node
+			 WHERE e.user_id = ? ORDER BY e.created_at`,
+		).bind(userId).all();
+		console.error("SUPERSEDE-FACTNULL", JSON.stringify((results ?? []).map((e) => ({ t: e.type, to: e.to_label, f: e.fact !== null, inv: e.invalid_at !== null }))));
+		const factNullJenkins = (results ?? []).filter((e) => e.fact === null && /jenkins/i.test(String(e.to_label)));
+		expect(factNullJenkins.length).toBeGreaterThan(0);
+		expect(factNullJenkins.every((e) => e.invalid_at !== null), "the fact-null Jenkins relation must be closed").toBe(true);
+		expect(factNullJenkins.every((e) => e.deleted_at === null), "closed, not deleted — history stays queryable").toBe(true);
+		const factNullCircle = (results ?? []).filter((e) => e.fact === null && /circleci/i.test(String(e.to_label)));
+		expect(factNullCircle.every((e) => e.invalid_at === null), "the fact-null CircleCI relation must stay current").toBe(true);
+	});
+
+	it("fact-null negative control: an additive statement never closes a fact-null relation", async () => {
+		// "uses D1" and "uses Vectorize" co-exist as legacy triples too — the
+		// triple resolution must not widen what a non-correction can retire.
+		const userId = `supersede-factnull-neg-${crypto.randomUUID()}`;
+		const rel = (to, fact) => ({
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "node", label: to, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine", text: `uses ${to}`, kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", from: "Engine", to, type: "uses", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Engine", to, type: "USES", fact, confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The engine uses D1 for storage.", rel("D1", "Engine uses D1"), `g1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "The engine also uses Vectorize for embeddings.", rel("Vectorize", "Engine uses Vectorize"), `g2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.fact, e.invalid_at, tn.label AS to_label
+			 FROM edges e JOIN nodes tn ON tn.id = e.to_node
+			 WHERE e.user_id = ? AND e.fact IS NULL ORDER BY e.created_at`,
+		).bind(userId).all();
+		expect((results ?? []).length).toBeGreaterThanOrEqual(2);
+		expect((results ?? []).every((e) => e.invalid_at === null), "both fact-null relations must remain current").toBe(true);
+	});
+
 	it("leaves legitimately co-existing facts current", async () => {
 		const userId = `supersede-int-multi-${crypto.randomUUID()}`;
 		const multi = (text, kind) => ({

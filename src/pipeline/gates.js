@@ -494,6 +494,16 @@ export async function applyGates(
 		...existing.map((n) => ({ id: n.id, label: n.label })),
 		...plan.newNodes.map((n) => ({ id: n.id, label: n.label })),
 	];
+	// The assertion carried by an edge with no fact text: its triple, resolved
+	// from authoritative graph data only (endpoint labels + relation type).
+	// Null when an endpoint cannot be resolved — such an edge asserts nothing
+	// checkable and must never be closed on a guess.
+	const edgeTripleText = (e) => {
+		const label = (id) => existingById.get(id)?.label ?? plan.newNodes.find((n) => n.id === id)?.label ?? null;
+		const fromLabel = label(e.from_node);
+		const toLabel = label(e.to_node);
+		return fromLabel && toLabel ? `${fromLabel} ${e.type} ${toLabel}` : null;
+	};
 	const candidates = await getUserCandidates(env, userId, writeScope);
 	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
 	const existingEdges = await getUserEdges(env, userId, writeScope);
@@ -1031,8 +1041,17 @@ export async function applyGates(
 				const conflictSources = [obj.fact, updateMode ? sourceText : null].filter(Boolean);
 				for (const e of existingEdges) {
 					if (e.from_node !== from.id || e.invalid_at || e.deleted_at) continue;
-					if (!e.fact) continue;
-					if (!conflictSources.some((t) => supersedesValue({ text: t }, { text: e.fact }))) continue;
+					// A relation with no fact text still asserts durable content —
+					// its triple: from-label + type + to-label. Legacy edges never
+					// carry fact, so every correction left them current and recall
+					// kept rendering the obsolete relation (measured live: the
+					// fact-null "uses Jenkins" edge survived while its textual twin
+					// was closed). Mem0's graph memory serializes triples into this
+					// text shape for its contradiction decision; Graphiti requires
+					// fact text on every edge. Same invariant, deterministic.
+					const assertion = e.fact ?? edgeTripleText(e);
+					if (!assertion) continue;
+					if (!conflictSources.some((t) => supersedesValue({ text: t }, { text: assertion }))) continue;
 					plan.edgeClosures.push({ id: e.id, invalid_at: obj.valid_at ?? now });
 				}
 			}
