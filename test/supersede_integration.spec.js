@@ -423,6 +423,75 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(memcached.every((e) => e.invalid_at === null), "the Memcached relations must stay current").toBe(true);
 	});
 
+	it("S3 production shape: a copula FACT edge closes whatever its relation type is", async () => {
+		// Measured live on c9cfe8f4 (a5-supersede-battery-v2.1786117832707):
+		// the fact-null "uses redis" edge closed, but the fact edge "The <tag>
+		// cache backend is Redis" survived — its model-chosen SCREAMING type is
+		// not in the value-bearing set, and the open vocabulary means no type
+		// list can cover fact edges. A fact-bearing relation is scoreable AS
+		// TEXT: the same double-copula standard as slices.
+		const userId = `supersede-s3fact-${crypto.randomUUID()}`;
+		const rel = (to, fact) => ({
+			objects: [
+				{ kind: "node", label: "588860 cache backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: to, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "588860 cache backend", text: `backend evaluated against ${to}`, kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "588860 cache backend", to, type: "CONFIGURED_AS", fact, confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "I decided the 588860 cache backend is Redis.",
+			rel("Redis", "The 588860 cache backend is Redis"), `z1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Correction: the 588860 cache backend is now Memcached.",
+			rel("Memcached", "The 588860 cache backend is Memcached"), `z2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.type, e.fact, e.invalid_at FROM edges e WHERE e.user_id = ? ORDER BY e.created_at`,
+		).bind(userId).all();
+		console.error("SUPERSEDE-S3FACT", JSON.stringify((results ?? []).map((e) => ({ t: e.type, f: String(e.fact ?? "").slice(0, 36), inv: e.invalid_at !== null }))));
+		const redis = (results ?? []).filter((e) => /redis/i.test(String(e.fact ?? "")));
+		expect(redis.length).toBeGreaterThan(0);
+		expect(redis.every((e) => e.invalid_at !== null), "a copula fact edge must close whatever its type").toBe(true);
+		const memcached = (results ?? []).filter((e) => /memcached/i.test(String(e.fact ?? "")));
+		expect(memcached.every((e) => e.invalid_at === null), "the new value's relation must stay current").toBe(true);
+	});
+
+	it("S3 fact-edge guard: a non-copula fact edge never closes on an attribute change", async () => {
+		// "Engine uses D1" as a fact edge must survive "the engine storage
+		// backend is now Vectorize" — the existing side is not a copula.
+		const userId = `supersede-s3fact-neg-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Engine storage backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "D1", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine storage backend", text: "uses D1 alongside other stores", kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Engine storage backend", to: "D1", type: "RELIES_ON", fact: "Engine storage backend relies on D1", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "Engine storage backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Vectorize", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine storage backend", text: "storage backend is now Vectorize", kind_detail: "decision", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The engine storage backend relies on D1.", v1, `zz1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the engine storage backend is now Vectorize.", v2, `zz2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.fact, e.invalid_at FROM edges e WHERE e.user_id = ? AND e.fact IS NOT NULL ORDER BY e.created_at`,
+		).bind(userId).all();
+		const d1 = (results ?? []).filter((e) => /\bD1\b/i.test(String(e.fact)));
+		expect(d1.length).toBeGreaterThan(0);
+		expect(d1.every((e) => e.invalid_at === null), "a non-copula fact edge must survive").toBe(true);
+	});
+
 	it("S3 mirror: a slice-only copula correction still closes the value-bearing relations", async () => {
 		// The correction's extraction may emit no edges at all — closure must
 		// not depend on it (the same asymmetry S2 exposed for slices).

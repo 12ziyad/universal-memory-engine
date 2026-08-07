@@ -527,11 +527,26 @@ export async function applyGates(
 	const VALUE_BEARING_EDGE_TYPES = new Set(["IS", "USES", "uses"]);
 	const attributeEdgeClosures = (text) => {
 		if (updateMode !== true) return;
-		const assertion = [text, sourceText].filter(Boolean).map(attributeAssertion).find(Boolean);
+		const attrSources = [text, sourceText].filter(Boolean);
+		const assertion = attrSources.map(attributeAssertion).find(Boolean);
 		if (!assertion) return;
 		const newValueTerms = new Set(assertion.value.split(" ").filter(Boolean));
 		for (const e of existingEdges) {
 			if (e.invalid_at || e.deleted_at) continue;
+			// A fact-bearing relation is scoreable AS TEXT, whatever its
+			// model-chosen type (the open SCREAMING vocabulary means no type
+			// list can cover it — measured live: "The cache backend is Redis"
+			// survived as CONFIGURED_AS-class while its fact-null twin closed).
+			// Same double-copula standard as slices: both sides must parse as
+			// attribute assertions on a related attribute, values differing.
+			if (typeof e.fact === "string" && e.fact.trim() !== "") {
+				if (attrSources.some((t) => replacesAttributeValue({ text: t }, { text: e.fact }))) {
+					plan.edgeClosures.push({ id: e.id, invalid_at: now });
+				}
+				continue;
+			}
+			// Fact-null: the triple is the assertion — measured value-bearing
+			// types only, structural relations are never touched.
 			if (!VALUE_BEARING_EDGE_TYPES.has(e.type)) continue;
 			const fromLabel = nodeLabel(e.from_node);
 			const toLabel = nodeLabel(e.to_node);
