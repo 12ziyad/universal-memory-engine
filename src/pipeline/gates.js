@@ -35,6 +35,7 @@ import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from 
 import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
 import { resolveAdmissionRules } from "./admission.js";
+import { obsoletedValues, supersedesValue } from "./corrections.js";
 import { rulesRejection } from "./rules.js";
 import { isBadTitle } from "./title.js";
 
@@ -255,6 +256,28 @@ async function recentEventMatch(env, userId, nodeId, action, now, projectId) {
  * felt like using that day. (Supersede handles contradiction; this handles
  * repetition.)
  */
+/**
+ * Current slices on this node that the incoming correction makes obsolete.
+ *
+ * Retirement used to be keyed on slice KIND, so a correction the extractor
+ * filed under a different kind than the original never retired it and memory
+ * kept both values current (SUPERSEDE-01, measured 3/3 stale). Conflict is a
+ * property of the VALUE, not the classification: this returns only rows that
+ * assert something the correction explicitly marks obsolete, which is what
+ * keeps legitimately co-existing facts ("uses D1", "uses Vectorize") alive.
+ */
+async function conflictingSliceIds(env, userId, nodeId, text, projectId) {
+	if (!obsoletedValues(text).size) return [];
+	const { results } = await env.DB.prepare(
+		`SELECT id, text, kind FROM slices
+		 WHERE user_id = ? AND node_id = ? AND project_id IS ? AND deleted_at IS NULL AND is_current = 1
+		 ORDER BY created_at DESC LIMIT 80`,
+	).bind(userId, nodeId, projectId).all();
+	return (results ?? [])
+		.filter((s) => supersedesValue({ text }, { text: s.text }))
+		.map((s) => ({ id: s.id, kind: s.kind }));
+}
+
 async function matchingSliceId(env, userId, nodeId, kind, text, projectId) {
 	const { results } = await env.DB.prepare(
 		`SELECT id, text, kind FROM slices
@@ -567,6 +590,12 @@ export async function applyGates(
 			return true;
 		}
 		if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+		// SUPERSEDE-01: retire whatever this correction makes obsolete, whatever
+		// kind it was filed under. Kind-keyed retirement alone left contradictory
+		// facts current in 3 of 3 measured correction shapes.
+		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId)) {
+			plan.sliceSupersede.push({ node_id: node.id, kind: conflict.kind, id: conflict.id });
+		}
 		plan.newSlices.push({
 			id: newId("slice"),
 			user_id: userId,
@@ -863,6 +892,11 @@ export async function applyGates(
 			}
 			// Supersede an older single-valued slice (mark is_current = 0) before append.
 			if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+			// SUPERSEDE-01: plus anything this correction explicitly obsoletes,
+			// regardless of the kind it was originally filed under.
+			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId)) {
+				plan.sliceSupersede.push({ node_id: node.id, kind: conflict.kind, id: conflict.id });
+			}
 			plan.newSlices.push({
 				id: newId("slice"),
 				user_id: userId,

@@ -39,6 +39,7 @@ import {
 } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
 import { resolveAdmissionRules } from "./admission.js";
+import { detectUpdateMode } from "./corrections.js";
 import { rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
@@ -477,7 +478,12 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// D — packet (three separated parts).
 	const packet = buildPacket(chunk, recent);
 	const text = chunkText(chunk);
-	const updateMode = UPDATE_MODE_RE.test(text);
+	// SUPERSEDE-01: the local regex missed "changed X from A to B" and a bare
+	// "X is now B", so those corrections never widened the supersede set and
+	// could not retire anything. One shared detector now decides this for the
+	// whole pipeline (src/pipeline/corrections.js), tested against the
+	// correction shapes measured stale.
+	const updateMode = detectUpdateMode(text) || UPDATE_MODE_RE.test(text);
 
 	// E — shortlist (~10 existing nodes, keyword + semantic).
 	const shortlist = await shortlistNodes(env, config, userId, text, projectScope);
