@@ -385,6 +385,117 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(after.filter((s) => /memcached/i.test(s.text)).some((s) => s.is_current === 1)).toBe(true);
 	});
 
+	it("S3 production shape: a copula change closes value-bearing RELATIONS asserting the old value", async () => {
+		// Measured live on 83d837f1 (a5-supersede-battery-v2.1786116692521):
+		// v1 landed as EDGES only — "cache backend --uses--> redis" (fact null)
+		// and "The cache backend is Redis" — and the copula correction retired
+		// slices only, so both Redis relations stayed current beside Memcached.
+		// A copula re-assertion declares the attribute single-valued; the
+		// value-bearing relations carrying its old value must close too.
+		const userId = `supersede-s3edges-${crypto.randomUUID()}`;
+		const rel = (to, fact) => ({
+			objects: [
+				{ kind: "node", label: "588860 cache backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: to, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "588860 cache backend", text: `backend evaluated against ${to}`, kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", from: "588860 cache backend", to, type: "uses", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "588860 cache backend", to, type: "IS", fact, confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "I decided the 588860 cache backend is Redis.",
+			rel("Redis", "The 588860 cache backend is Redis"), `v1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the 588860 cache backend is now Memcached.",
+			rel("Memcached", "The 588860 cache backend is Memcached"), `v2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.type, e.fact, e.invalid_at, tn.label AS to_label
+			 FROM edges e JOIN nodes tn ON tn.id = e.to_node
+			 WHERE e.user_id = ? ORDER BY e.created_at`,
+		).bind(userId).all();
+		console.error("SUPERSEDE-S3EDGES", JSON.stringify((results ?? []).map((e) => ({ t: e.type, to: e.to_label, inv: e.invalid_at !== null }))));
+		const redis = (results ?? []).filter((e) => /redis/i.test(String(e.to_label)));
+		expect(redis.length).toBeGreaterThanOrEqual(2);
+		expect(redis.every((e) => e.invalid_at !== null), "every Redis relation must be closed by the copula change").toBe(true);
+		const memcached = (results ?? []).filter((e) => /memcached/i.test(String(e.to_label)));
+		expect(memcached.every((e) => e.invalid_at === null), "the Memcached relations must stay current").toBe(true);
+	});
+
+	it("S3 mirror: a slice-only copula correction still closes the value-bearing relations", async () => {
+		// The correction's extraction may emit no edges at all — closure must
+		// not depend on it (the same asymmetry S2 exposed for slices).
+		const userId = `supersede-s3mirror-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "588860 cache backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Redis", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "588860 cache backend", text: "backend evaluated against Redis", kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", from: "588860 cache backend", to: "Redis", type: "uses", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "588860 cache backend", to: "Redis", type: "IS", fact: "The 588860 cache backend is Redis", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "588860 cache backend", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "588860 cache backend", text: "now Memcached", kind_detail: "decision", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "I decided the 588860 cache backend is Redis.", v1, `w1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the 588860 cache backend is now Memcached.", v2, `w2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.invalid_at, tn.label AS to_label FROM edges e JOIN nodes tn ON tn.id = e.to_node
+			 WHERE e.user_id = ? ORDER BY e.created_at`,
+		).bind(userId).all();
+		console.error("SUPERSEDE-S3MIRROR", JSON.stringify((results ?? []).map((e) => ({ to: e.to_label, inv: e.invalid_at !== null }))));
+		const redis = (results ?? []).filter((e) => /redis/i.test(String(e.to_label)));
+		expect(redis.length).toBeGreaterThanOrEqual(2);
+		expect(redis.every((e) => e.invalid_at !== null), "a slice-only copula correction must still close the old-value relations").toBe(true);
+	});
+
+	it("S3 edges guard: a one-token from-label never lets a copula change close relations", async () => {
+		// "the engine storage is now Vectorize" must NOT close "Engine uses D1"
+		// — the from-label "Engine" is a single generic token, below the
+		// attributesRelated standard.
+		const userId = `supersede-s3edges-neg-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "D1", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine", text: "uses D1 for storage", kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", from: "Engine", to: "D1", type: "uses", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Engine", to: "D1", type: "USES", fact: "Engine uses D1", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Vectorize", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine", text: "storage is now Vectorize", kind_detail: "decision", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The engine uses D1 for storage.", v1, `y1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the engine storage is now Vectorize.", v2, `y2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			`SELECT e.invalid_at, tn.label AS to_label FROM edges e JOIN nodes tn ON tn.id = e.to_node
+			 WHERE e.user_id = ? ORDER BY e.created_at`,
+		).bind(userId).all();
+		const d1 = (results ?? []).filter((e) => /^D1$/i.test(String(e.to_label)));
+		expect(d1.length).toBeGreaterThanOrEqual(2);
+		expect(d1.every((e) => e.invalid_at === null), "a generic one-token subject must not close relations").toBe(true);
+	});
+
 	it("S3 split guard: the same attribute on an UNRELATED node survives an attribute change", async () => {
 		// The reason widening was same-node-only: a same-worded attribute on a
 		// DIFFERENT subject is ambiguous. Identity-relation is the boundary —

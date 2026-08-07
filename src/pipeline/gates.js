@@ -35,7 +35,7 @@ import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from 
 import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
 import { resolveAdmissionRules } from "./admission.js";
-import { attributeAssertion, identityRelatedLabels, obsoletedValues, replacesAttributeValue, supersedesValue } from "./corrections.js";
+import { attributeAssertion, attributesRelated, identityRelatedLabels, obsoletedValues, replacesAttributeValue, significantTerms, supersedesValue } from "./corrections.js";
 import { rulesRejection } from "./rules.js";
 import { isBadTitle } from "./title.js";
 
@@ -504,15 +504,45 @@ export async function applyGates(
 		...existing.map((n) => ({ id: n.id, label: n.label })),
 		...plan.newNodes.map((n) => ({ id: n.id, label: n.label })),
 	];
+	const nodeLabel = (id) => existingById.get(id)?.label ?? plan.newNodes.find((n) => n.id === id)?.label ?? null;
 	// The assertion carried by an edge with no fact text: its triple, resolved
 	// from authoritative graph data only (endpoint labels + relation type).
 	// Null when an endpoint cannot be resolved — such an edge asserts nothing
 	// checkable and must never be closed on a guess.
 	const edgeTripleText = (e) => {
-		const label = (id) => existingById.get(id)?.label ?? plan.newNodes.find((n) => n.id === id)?.label ?? null;
-		const fromLabel = label(e.from_node);
-		const toLabel = label(e.to_node);
+		const fromLabel = nodeLabel(e.from_node);
+		const toLabel = nodeLabel(e.to_node);
 		return fromLabel && toLabel ? `${fromLabel} ${e.type} ${toLabel}` : null;
+	};
+	// S3 via edges: a copula re-assertion ("the cache backend is now
+	// Memcached") declares its attribute single-valued, and the OLD value can
+	// live as a value-bearing RELATION rather than a slice (measured live:
+	// "cache backend --uses--> redis" and "The cache backend is Redis" both
+	// stayed current beside Memcached). Close such relations under the same
+	// evidence standard as the slice widening: update mode + copula in the
+	// extract or the user's words + attribute-related from-label (multi-token,
+	// so a generic "Engine" is never enough) + a target that does not restate
+	// the new value. Only the measured value-bearing types are eligible —
+	// structural relations (part_of, depends_on, …) are never touched.
+	const VALUE_BEARING_EDGE_TYPES = new Set(["IS", "USES", "uses"]);
+	const attributeEdgeClosures = (text) => {
+		if (updateMode !== true) return;
+		const assertion = [text, sourceText].filter(Boolean).map(attributeAssertion).find(Boolean);
+		if (!assertion) return;
+		const newValueTerms = new Set(assertion.value.split(" ").filter(Boolean));
+		for (const e of existingEdges) {
+			if (e.invalid_at || e.deleted_at) continue;
+			if (!VALUE_BEARING_EDGE_TYPES.has(e.type)) continue;
+			const fromLabel = nodeLabel(e.from_node);
+			const toLabel = nodeLabel(e.to_node);
+			if (!fromLabel || !toLabel) continue;
+			if (!attributesRelated(assertion.attribute, significantTerms(fromLabel).join(" "))) continue;
+			const targetTerms = significantTerms(toLabel);
+			// Any overlap with the asserted new value means this relation may be
+			// restating the new truth — conservative: leave it current.
+			if (!targetTerms.length || targetTerms.some((t) => newValueTerms.has(t))) continue;
+			plan.edgeClosures.push({ id: e.id, invalid_at: now });
+		}
 	};
 	const candidates = await getUserCandidates(env, userId, writeScope);
 	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
@@ -649,6 +679,7 @@ export async function applyGates(
 		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 			plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 		}
+		attributeEdgeClosures(durable.text);
 		plan.newSlices.push({
 			id: newId("slice"),
 			user_id: userId,
@@ -950,6 +981,7 @@ export async function applyGates(
 			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 				plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 			}
+			attributeEdgeClosures(text);
 			plan.newSlices.push({
 				id: newId("slice"),
 				user_id: userId,
@@ -1072,6 +1104,7 @@ export async function applyGates(
 				for (const conflict of await conflictingSliceIds(env, userId, from.id, obj.fact ?? "", projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 					plan.sliceSupersede.push({ node_id: conflict.node_id ?? from.id, kind: conflict.kind, id: conflict.id });
 				}
+				attributeEdgeClosures(obj.fact);
 			}
 			plan.newEdges.push({
 				id: newId("edge"),

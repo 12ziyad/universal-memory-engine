@@ -63,7 +63,7 @@ const STOPWORDS = new Set([
 	"runs", "run", "set", "sets", "keep", "keeps", "still", "any", "more", "than", "then",
 ]);
 
-function significantTerms(text) {
+export function significantTerms(text) {
 	return String(text ?? "")
 		.toLowerCase()
 		.split(/[^a-z0-9+#.-]+/i)
@@ -151,7 +151,7 @@ export function attributeAssertion(text) {
  * a real multi-word attribute — a single generic token ("retention") must not
  * reach every qualified attribute ("archive retention") on the node.
  */
-function attributesRelated(a, b) {
+export function attributesRelated(a, b) {
 	if (a === b) return true;
 	const left = String(a ?? "").split(" ").filter(Boolean);
 	const right = String(b ?? "").split(" ").filter(Boolean);
