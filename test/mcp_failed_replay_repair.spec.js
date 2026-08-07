@@ -69,7 +69,9 @@ async function jobFor(userId) {
 }
 
 describe("MCP failed-terminal replay repairs instead of dead-ending", () => {
-	it("repairs a failed MCP job when the same conversation is saved again", async () => {
+	// Generous budgets: the failure phase burns real retry backoff before the
+	// terminal verdict, which can exceed the default 5s under full-suite load.
+	it("repairs a failed MCP job when the same conversation is saved again", { timeout: 30_000 }, async () => {
 		const userId = `mcp-repair-${crypto.randomUUID()}`;
 		await stage(userId, { llmResponse: "%% not json at all %%" });
 		await drainUntilSettled(userId);
@@ -92,7 +94,7 @@ describe("MCP failed-terminal replay repairs instead of dead-ending", () => {
 		expect(node.n).toBeGreaterThan(0);
 	});
 
-	it("refuses honestly past the repair bound - never acceptance-shaped", async () => {
+	it("refuses honestly past the repair bound - never acceptance-shaped", { timeout: 30_000 }, async () => {
 		const userId = `mcp-repair-bound-${crypto.randomUUID()}`;
 		await stage(userId, { llmResponse: "%% not json at all %%" });
 		await drainUntilSettled(userId);

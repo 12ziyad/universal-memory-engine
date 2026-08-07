@@ -883,12 +883,35 @@ export async function bulkDeleteBySource(env, userId, {
 		candidates: ids.candidates.size,
 	};
 
+	// Accepted work still processing will land AFTER this delete (the server
+	// owns its liveness). Saying so is the difference between an honest zero
+	// and a user who deleted "everything" and then watches memory reappear.
+	const pending = await env.DB.prepare(
+		"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status NOT IN ('enriched', 'failed', 'completed')",
+	).bind(userId).first();
+	const pendingJobs = Number(pending?.n ?? 0);
+	const pendingNote = pendingJobs > 0
+		? `${pendingJobs} accepted save(s) are still processing and will finish AFTER this delete; preview again afterwards to remove their output.`
+		: undefined;
+
 	if (dryRun || !confirm) {
-		return { ok: true, dry_run: true, would_delete: counts, sample_labels: labels };
+		return {
+			ok: true, dry_run: true, would_delete: counts, sample_labels: labels,
+			pending_jobs: pendingJobs, ...(pendingNote ? { note: pendingNote } : {}),
+		};
 	}
 
 	const now = Date.now();
 	const config = getConfig(env);
+
+	// The read-your-writes staging bridge answers recall until its rows settle,
+	// so a confirmed delete must retire them too — deleted content staying
+	// recallable for the enrichment window is the SRV-03 leak wearing a
+	// deletion coat (SRV-06). Over-settling is the safe direction: staging is
+	// a seconds-long bridge, never durable memory.
+	const stagedSettled = await env.DB.prepare(
+		"UPDATE staged_memories SET settled_at = ? WHERE user_id = ? AND settled_at IS NULL",
+	).bind(now, userId).run();
 
 	// Nodes first: their cascade also removes their remaining slices/events/
 	// edges, FTS rows, vectors, and regenerates neighbour summaries.
@@ -957,5 +980,9 @@ export async function bulkDeleteBySource(env, userId, {
 			).bind(now, run.id, userId)));
 	}
 
-	return { ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated };
+	return {
+		ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated,
+		staged_settled: stagedSettled.meta?.changes ?? 0,
+		pending_jobs: pendingJobs, ...(pendingNote ? { note: pendingNote } : {}),
+	};
 }
