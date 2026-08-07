@@ -980,6 +980,20 @@ export async function applyGates(
 					}
 				}
 			}
+			// SUPERSEDE-01 (edge half): a correction also obsoletes RELATION
+			// facts, and relations LEAD the recall context — so retiring only
+			// slices left "uses blue-green cutover" headlining the answer even
+			// after its slice went non-current (measured: slices correct, 2/3
+			// still stale via edges). Close the validity window rather than
+			// deleting: recall already honors invalid_at and renders it as
+			// "(until …)", so history stays queryable.
+			if (isV2 && obj.fact) {
+				for (const e of existingEdges) {
+					if (e.from_node !== from.id || e.invalid_at || e.deleted_at) continue;
+					if (!e.fact || !supersedesValue({ text: obj.fact }, { text: e.fact })) continue;
+					plan.edgeClosures.push({ id: e.id, invalid_at: obj.valid_at ?? now });
+				}
+			}
 			plan.newEdges.push({
 				id: newId("edge"),
 				user_id: userId,

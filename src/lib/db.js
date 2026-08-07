@@ -83,7 +83,10 @@ export async function getUserCandidates(env, userId, options = {}) {
 export async function getUserEdges(env, userId, options = {}) {
 	const project = projectWhere(options);
 	const { results } = await env.DB.prepare(
-		`SELECT id, from_node, to_node, type, reinforcement_count, weight, invalid_at,
+		// `fact` is needed to decide whether a correction obsoletes an existing
+		// relation (SUPERSEDE-01): without it the conflict check compares against
+		// undefined and silently never matches.
+		`SELECT id, from_node, to_node, type, reinforcement_count, weight, invalid_at, fact,
 			project_id, project_name
 		 FROM edges WHERE user_id = ? AND deleted_at IS NULL${project.sql}`,
 	)
