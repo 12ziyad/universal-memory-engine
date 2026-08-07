@@ -8,6 +8,14 @@ import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 
 const ACCEPT_TIME_TYPES = ["extract", "mcp_enrich"];
 
+// SRV-08/SRV-09: work cancelled by a confirmed erasure settles as terminal
+// `failed` with the cancellation named in `error`. The status STAYS `failed`
+// on purpose — A10 proved that a new terminal word would hang the poller in
+// every shipped 0.2.1 SDK, whose TERMINAL_JOB_STATUSES set is closed. So the
+// distinction is published as its own field instead of a new state.
+const CANCELLED_BY_DELETE = "cancelled_by_delete";
+const cancelledByDelete = (row) => String(row?.error ?? "").startsWith(CANCELLED_BY_DELETE);
+
 function shapeJob(row) {
 	let payload = {};
 	try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
@@ -35,6 +43,10 @@ function shapeJob(row) {
 		receipt_id: row.receipt_id ?? null,
 		counts,
 		remaining_messages: Array.isArray(payload.remaining) ? payload.remaining.length : null,
+		// Machine-readable reason, so "was this cancelled by my own delete?" is a
+		// field lookup rather than a substring hunt over an error string.
+		cancelled_by_delete: cancelledByDelete(row),
+		outcome_reason: cancelledByDelete(row) ? CANCELLED_BY_DELETE : null,
 		...(row.error ? { error: row.error } : {}),
 	};
 }
@@ -50,14 +62,20 @@ export async function packetStatus(env, userId, sourcePacketId) {
 	return row ? shapeJob(row) : null;
 }
 
-/** Jobs listing for integrators: ?status=&since=&limit= (scoped to the caller). */
-export async function listJobs(env, userId, { status, since, limit } = {}) {
+/** Jobs listing for integrators: ?status=&since=&limit=&cancelled= (scoped to the caller). */
+export async function listJobs(env, userId, { status, since, limit, cancelled } = {}) {
 	const clauses = ["user_id = ?", `type IN (${ACCEPT_TIME_TYPES.map(() => "?").join(",")})`];
 	const binds = [userId, ...ACCEPT_TIME_TYPES];
 	if (status) {
 		clauses.push("status = ?");
 		binds.push(String(status));
 	}
+	// `cancelled` separates the two things that both land on `failed`: work the
+	// user's own erasure cancelled, and work that actually went wrong. An
+	// operator triaging failures needs to exclude the first; someone auditing an
+	// erasure needs exactly the first.
+	if (cancelled === true) clauses.push(`error LIKE '${CANCELLED_BY_DELETE}%'`);
+	if (cancelled === false) clauses.push(`(error IS NULL OR error NOT LIKE '${CANCELLED_BY_DELETE}%')`);
 	const sinceMs = Number(since);
 	if (Number.isFinite(sinceMs) && sinceMs > 0) {
 		clauses.push("created_at >= ?");

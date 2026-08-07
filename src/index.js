@@ -52,6 +52,7 @@ import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/r
 import { credentialShapeHint, validateBody } from "./lib/params.js";
 import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
 import { listJobs, packetStatus, queueCounters } from "./pipeline/jobs_api.js";
+import { operatorOverview } from "./pipeline/ops.js";
 import {
 	createThread,
 	deleteThread,
@@ -1486,12 +1487,50 @@ const routes = {
 			requiredScope: MEMORY_READ_SCOPE,
 		});
 		if (auth.response) return auth.response;
+		// `cancelled` separates the two outcomes that both settle as `failed`:
+		// work a confirmed erasure cancelled, and work that actually failed.
+		const cancelledParam = url.searchParams.get("cancelled");
 		const jobs = await listJobs(env, auth.userId, {
 			status: url.searchParams.get("status") || undefined,
 			since: url.searchParams.get("since") || undefined,
 			limit: url.searchParams.get("limit") || undefined,
+			cancelled: cancelledParam === null ? undefined : cancelledParam === "true",
 		});
 		return json({ ok: true, jobs, count: jobs.length });
+	},
+
+	"GET /v1/ops/overview": async (request, env) => {
+		// OPS-02. Account-wide operator view: every other read route is scoped to
+		// ONE memory user, so an integrator running sub-tenants had nowhere to see
+		// backlog, stuck work, cancellations or erasures across their account.
+		// METADATA ONLY — counts, states, timestamps, latency; never content.
+		const url = new URL(request.url);
+		// Deliberately resolved WITHOUT a userId: this is the account's own view,
+		// not a sub-tenant's, and the owner id is what scopes every query below.
+		const auth = await requireMemoryUser(request, env, null, {
+			requiredScope: MEMORY_READ_SCOPE,
+			allowLegacy: false,
+		});
+		// The legacy x-api-key lane writes under RAW external ids and has no
+		// owner/sub-tenant relationship to aggregate (architecture.md §4). A
+		// valid legacy key here deserves that answer, not the generic
+		// "userId is required" — which would send an operator off to add a
+		// userId that still could not work.
+		const accountScopeRequired = () => json({
+			error: "account_scope_required",
+			code: "account_scope_required",
+			message: "The operator overview needs an account-scoped credential: a Bearer API token or a signed-in session. The legacy x-api-key lane writes under raw external ids and has no sub-tenant relationship to aggregate.",
+		}, 400);
+		if (auth.response) {
+			if (await isAuthorized(request, env)) return accountScopeRequired();
+			return auth.response;
+		}
+		const ownerUserId = auth.memoryScope?.ownerUserId;
+		if (!ownerUserId || ownerUserId === "legacy") return accountScopeRequired();
+		return json(await operatorOverview(env, ownerUserId, {
+			range: url.searchParams.get("range") ?? "7d",
+			limit: url.searchParams.get("limit") ?? undefined,
+		}));
 	},
 
 	"GET /v1/receipts": async (request, env) => {
