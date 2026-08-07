@@ -91,6 +91,25 @@ async function receiptFromExtractionRun(env, userId, row) {
 	}
 }
 
+/**
+ * When was this work ACCEPTED? The source packet's creation time for every
+ * packet-carrying lane (ingest/save/MCP); the DO queue entry's acceptance time
+ * as fallback. Null means the lane has no acceptance record (interactive
+ * playground/manual paths) — those are live user actions, not deferred work,
+ * and are not barrier-fenced (SRV-08 design §7).
+ */
+async function workAcceptedAt(env, userId, sourcePacketId, meta) {
+	if (sourcePacketId) {
+		const row = await env.DB.prepare(
+			"SELECT created_at FROM source_packets WHERE id = ? AND (user_id = ? OR memory_user_id = ?)",
+		).bind(sourcePacketId, userId, userId).first();
+		const created = Number(row?.created_at);
+		if (Number.isFinite(created) && created > 0) return created;
+	}
+	const fallback = Number(meta?.accepted_at);
+	return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+}
+
 async function extractionRunResult(env, userId, row, chunk, meta, {
 	markInterrupted = false,
 	error = null,
@@ -159,6 +178,25 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		receipt.created_at = Number(current.created_at ?? Date.now());
 		receipt.recovered_from_extraction_run = true;
 		return { outcome, error: storedError, receipt, recovered: true };
+	}
+	// SRV-08: a confirmed erasure cancelled this run (or, for legacy rows, an
+	// old delete marked it 'deleted' while in flight). Terminal, honest, and
+	// never retried — the barrier would cancel the retry anyway.
+	if (current.status === "cancelled_by_delete" || current.status === "deleted") {
+		const receipt = emptyReceipt(
+			"cancelled_by_delete",
+			"a confirmed delete erased this scope while the save was processing; the save was cancelled",
+			recoveredMeta,
+		);
+		receipt.durable = false;
+		receipt.created_at = Number(current.created_at ?? Date.now());
+		receipt.recovered_from_extraction_run = true;
+		return {
+			outcome: "cancelled_by_delete",
+			error: String(current.error ?? "cancelled_by_delete"),
+			receipt,
+			recovered: true,
+		};
 	}
 	throw new Error(`extraction run ${current?.id ?? "unknown"} has an unsupported status`);
 }
@@ -475,6 +513,32 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// Attribute every model call in this run to it, now that the id exists.
 	tagAiMeter(extractionRunId);
 
+	// SRV-08 pre-flight: if a confirmed erasure's barrier already covers this
+	// work's ACCEPTANCE, cancel now — before spending a model call. Acceptance
+	// is the source packet's creation (retries and replays mint fresh runs and
+	// fresh queue entries, but never a fresh packet), with the queue entry's
+	// acceptance time as fallback for packet-less lanes.
+	const acceptedAt = await workAcceptedAt(env, userId, runOwner.sourcePacketId, meta);
+	if (acceptedAt != null) {
+		const barrier = await env.DB.prepare(
+			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
+		).bind(userId).first();
+		if (barrier && Number(barrier.barrier_at) > acceptedAt) {
+			await updateExtractionRun(env, userId, extractionRunId, {
+				status: "cancelled_by_delete",
+				error: "cancelled_by_delete: a confirmed delete erased this scope after this save was accepted",
+				expectStatus: "running",
+			});
+			const receipt = emptyReceipt(
+				"cancelled_by_delete",
+				"a confirmed delete erased this scope after this save was accepted; the save was cancelled",
+				{ ...meta, latency_ms: elapsed() },
+			);
+			receipt.durable = false;
+			return { outcome: "cancelled_by_delete", error: "cancelled_by_delete", receipt };
+		}
+	}
+
 	// D — packet (three separated parts).
 	const packet = buildPacket(chunk, recent);
 	const text = chunkText(chunk);
@@ -667,22 +731,53 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// H — write (atomic). Publish the recovery lists before committing, then
 	// move the run to `wrote` in the same D1 batch as the graph. A retry can
 	// therefore settle from this run without invoking the model again.
+	//
+	// SRV-08: the transition is GUARDED — only a run still 'running' may enter
+	// 'committing'. A concurrent erasure that cancelled this run mid-model-call
+	// wins here, and the whole save resolves as cancelled instead of publishing
+	// rows the user just deleted.
 	let result;
-	await updateExtractionRun(env, userId, extractionRunId, {
+	const entered = await updateExtractionRun(env, userId, extractionRunId, {
 		status: "committing",
 		...runListsFromPlan(plan),
+		expectStatus: "running",
 	});
+	if (Number(entered?.changes ?? 0) !== 1) {
+		const row = await env.DB.prepare(
+			"SELECT * FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(extractionRunId, userId).first();
+		return extractionRunResult(env, userId, row, chunk, meta);
+	}
 	try {
-		result = await writeApproved(env, config, userId, plan, { extractionRunId });
+		result = await writeApproved(env, config, userId, plan, { extractionRunId, acceptedAt });
 	} catch (err) {
-		console.error(`extraction db_write_failed user=${userId}:`, err?.message ?? err);
+		const message = String(err?.message ?? err);
+		// The commit fence rolled the batch back: a confirmed erasure superseded
+		// this save between acceptance and commit. Terminal and honest — never a
+		// retryable storage error (the barrier would cancel the retry anyway).
+		if (/fence_guard/i.test(message)) {
+			console.warn(`extraction cancelled_by_delete at commit user=${userId}`);
+			await updateExtractionRun(env, userId, extractionRunId, {
+				status: "cancelled_by_delete",
+				error: "cancelled_by_delete: a confirmed delete erased this scope while the save was committing",
+				expectStatus: "committing",
+			});
+			const receipt = emptyReceipt(
+				"cancelled_by_delete",
+				"a confirmed delete erased this scope while the save was processing; the save was cancelled",
+				{ ...meta, latency_ms: elapsed() },
+			);
+			receipt.durable = false;
+			return { outcome: "cancelled_by_delete", error: "cancelled_by_delete", receipt };
+		}
+		console.error(`extraction db_write_failed user=${userId}:`, message);
 		await updateExtractionRun(env, userId, extractionRunId, {
 			status: "failed",
-			error: `db_write_failed: ${String(err?.message ?? err)}`,
+			error: `db_write_failed: ${message}`,
 		});
 		return {
 			outcome: "db_write_failed",
-			error: String(err?.message ?? err),
+			error: message,
 			receipt: emptyReceipt("db_write_failed", "a storage error interrupted the save", { ...meta, latency_ms: elapsed() }),
 		};
 	}

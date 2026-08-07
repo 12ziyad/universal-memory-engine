@@ -17,6 +17,34 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	const commitEffects = [];
 	const fallbackEffects = [];
 	let extractionCommitIndex = null;
+
+	// SRV-08 commit fence. `fence_guard` is unsatisfiable by construction
+	// (NOT NULL + CHECK (violation IS NULL)), so an INSERT that actually
+	// produces a row errors and D1 rolls the WHOLE batch back — graph rows
+	// included. Two conditions arm it:
+	//   1. the extraction run is no longer 'committing' — a confirmed erasure
+	//      cancelled it between the guarded transition and this batch;
+	//   2. a deletion barrier postdates this work's ACCEPTANCE — retries and
+	//      replays mint fresh runs, but acceptance time travels with the
+	//      packet, so nothing accepted before an erasure can commit after it.
+	// The guards precede every graph statement; the committing→wrote update at
+	// the end of the batch runs after them, so guard 1 reads the pre-commit
+	// status. Interactive writers (candidate promotion, manual collect) carry
+	// no run context and are not fenced: a live user action after a delete is
+	// a genuinely new write.
+	if (options.extractionRunId) {
+		stmts.push(env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE (SELECT status FROM extraction_runs WHERE id = ? AND user_id = ?) IS NOT 'committing'`,
+		).bind(options.extractionRunId, userId));
+		const acceptedAt = Number(options.acceptedAt);
+		if (Number.isFinite(acceptedAt) && acceptedAt > 0) {
+			stmts.push(env.DB.prepare(
+				`INSERT INTO fence_guard (violation)
+				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
+			).bind(userId, acceptedAt));
+		}
+	}
 	const newNodes = plan.newNodes ?? [];
 	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
 	const nodeTouches = plan.nodeTouches ?? [];

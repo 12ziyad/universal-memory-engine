@@ -2263,6 +2263,10 @@ export class UserMemory extends DurableObject {
 		overrides.meta = {
 			...(overrides.meta ?? {}),
 			context_trace: context.trace,
+			// SRV-08: acceptance-time fallback for the deletion barrier when the
+			// entry carries no source packet. Packet creation wins when present —
+			// replays re-enqueue with a fresh enqueuedAt, but never a fresh packet.
+			...(Number(entry.enqueuedAt) > 0 ? { accepted_at: Number(entry.enqueuedAt) } : {}),
 		};
 		const dedupeByMessage = { ...(entry.dedupeByMessage ?? {}) };
 		for (const message of entry.messages ?? []) {
@@ -2366,6 +2370,23 @@ export class UserMemory extends DurableObject {
 				lastId,
 				lastIdentity,
 				error,
+			});
+			return this.#processPendingExtract(userId, key, pending, overrides);
+		}
+
+		// SRV-08: a confirmed erasure superseded this accepted save. Terminal
+		// and visible (job `failed` with the cancellation named), never retried
+		// — the barrier would cancel every retry, so retrying only burns model
+		// budget to rediscover the same answer.
+		if (result.outcome === "cancelled_by_delete") {
+			const error = String(result.error ?? "cancelled_by_delete: a confirmed delete erased this scope after this save was accepted").slice(0, 400);
+			const pending = await this.#persistExtractSettlement(userId, key, entry, result, {
+				action: "failed",
+				processedIds,
+				processedIdentities,
+				lastId,
+				lastIdentity,
+				error: error.startsWith("cancelled_by_delete") ? error : `cancelled_by_delete: ${error}`,
 			});
 			return this.#processPendingExtract(userId, key, pending, overrides);
 		}

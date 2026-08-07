@@ -791,11 +791,78 @@ export async function repairGraph(env, userId, opts = {}) {
 }
 
 /**
- * Bulk delete by source (fix round 1, Part 3.2). Deletion is scoped by the
- * extraction ledger: every engine write records what it created on its
- * extraction_runs row, so "delete what source X wrote between A and B" is a
- * walk over those lists — including edges that joined two PRE-EXISTING nodes,
- * which no node cascade would ever reach.
+ * The tables whose live rows an unscoped delete must converge to zero, keyed
+ * by the id-set name the sweep uses. `memory_pages` maps to the `pages` set.
+ */
+const ERASURE_TABLES = [
+	["nodes", "nodes"], ["pages", "memory_pages"], ["slices", "slices"],
+	["events", "events"], ["edges", "edges"], ["candidates", "candidates"],
+];
+
+/**
+ * SRV-08: enumerate what an UNSCOPED delete owns from the AUTHORITATIVE tables,
+ * never from run manifests. A row written by an extraction that raced an
+ * earlier delete — or that never got a manifest at all — is still live here,
+ * so it is still discoverable and removable (Mem0's delete_all enumerates its
+ * vector store the same way; Graphiti's clear_data queries the graph by
+ * group_id; see external-research.md §Q9).
+ */
+async function enumerateLiveScope(env, userId) {
+	const ids = {
+		nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(),
+		edges: new Set(), candidates: new Set(),
+	};
+	for (const [setName, table] of ERASURE_TABLES) {
+		const { results } = await env.DB.prepare(
+			`SELECT id FROM ${table} WHERE user_id = ? AND deleted_at IS NULL LIMIT 10000`,
+		).bind(userId).all();
+		for (const row of results ?? []) ids[setName].add(row.id);
+	}
+	return ids;
+}
+
+/** Which of `candidateIds` are still LIVE rows of `table` for this user. */
+async function filterLiveIds(env, userId, table, candidateIds) {
+	const live = new Set();
+	const list = [...candidateIds];
+	for (let offset = 0; offset < list.length; offset += 50) {
+		const chunk = list.slice(offset, offset + 50);
+		const marks = chunk.map(() => "?").join(", ");
+		const { results } = await env.DB.prepare(
+			`SELECT id FROM ${table} WHERE user_id = ? AND deleted_at IS NULL AND id IN (${marks})`,
+		).bind(userId, ...chunk).all();
+		for (const row of results ?? []) live.add(row.id);
+	}
+	return live;
+}
+
+const idCounts = (ids) => ({
+	nodes: ids.nodes.size,
+	pages: ids.pages.size,
+	slices: ids.slices.size,
+	events: ids.events.size,
+	edges: ids.edges.size,
+	candidates: ids.candidates.size,
+});
+
+/**
+ * Bulk delete (fix round 1, Part 3.2; rebuilt for SRV-08).
+ *
+ * Two distinct contracts (D19):
+ *
+ * UNSCOPED + confirmed = ERASURE. Enumerates from the authoritative tables
+ * (manifests are bookkeeping, never the source of truth), records a per-tenant
+ * deletion barrier, cancels in-flight extraction runs, and converges: work
+ * ACCEPTED before the barrier can never produce durable rows after it — the
+ * commit fence in write.js refuses it atomically, and queued entries settle
+ * terminal `cancelled_by_delete` without a model call.
+ *
+ * SCOPED (source/before/after) = curation, not erasure: no barrier, and
+ * accepted in-flight work keeps D15's honest-visibility contract. Its
+ * enumeration walks ALL matching run manifests — including runs already
+ * `status='deleted'`, which is how SRV-08 hid live rows — and intersects them
+ * with live table state, so previews count what actually exists and repeats
+ * converge.
  *
  * dry_run (the DEFAULT) counts everything that would go and touches nothing.
  * The destructive pass requires confirm=true and ends with: FTS rows gone,
@@ -810,32 +877,33 @@ export async function bulkDeleteBySource(env, userId, {
 	confirm = false,
 	by = null,
 } = {}) {
-	const clauses = ["user_id = ?", "(status IS NULL OR status != 'deleted')"];
+	const beforeMs = Number(before);
+	const afterMs = Number(after);
+	const erasure = !source && !(Number.isFinite(beforeMs) && beforeMs > 0) && !(Number.isFinite(afterMs) && afterMs > 0);
+
+	// Matching runs: for scoped deletes these ATTRIBUTE rows to the scope; for
+	// erasure they are bookkeeping only. Never filtered by status — a run whose
+	// output outlived its 'deleted' mark is exactly the SRV-08 specimen.
+	const clauses = ["user_id = ?"];
 	const binds = [userId];
 	if (source) {
 		clauses.push("(source_mode = ? OR tool_name = ?)");
 		binds.push(source, source);
 	}
-	const beforeMs = Number(before);
 	if (Number.isFinite(beforeMs) && beforeMs > 0) {
 		clauses.push("created_at < ?");
 		binds.push(beforeMs);
 	}
-	const afterMs = Number(after);
 	if (Number.isFinite(afterMs) && afterMs > 0) {
 		clauses.push("created_at > ?");
 		binds.push(afterMs);
 	}
 	const { results: runs } = await env.DB.prepare(
-		`SELECT id, source_mode, tool_name, scope_json, created_nodes_json, created_pages_json,
+		`SELECT id, status, source_mode, tool_name, scope_json, created_nodes_json, created_pages_json,
 			created_slices_json, created_events_json, created_edges_json, created_candidates_json
 		 FROM extraction_runs WHERE ${clauses.join(" AND ")}`,
 	).bind(...binds).all();
 
-	const ids = {
-		nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(),
-		edges: new Set(), candidates: new Set(),
-	};
 	const labels = [];
 	const projectScopes = new Map();
 	for (const run of runs ?? []) {
@@ -844,54 +912,80 @@ export async function bulkDeleteBySource(env, userId, {
 		const projectId = runScope.project_id ?? runScope.projectId ?? null;
 		const projectName = runScope.project_name ?? runScope.projectName ?? null;
 		projectScopes.set(projectId ?? "__global__", { project_id: projectId, project_name: projectName });
-		for (const item of parseJsonArray(run.created_nodes_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.nodes.add(id);
-			if (item?.label && labels.length < 30) labels.push(item.label);
+	}
+
+	let ids;
+	if (erasure) {
+		ids = await enumerateLiveScope(env, userId);
+		const { results: sampleRows } = await env.DB.prepare(
+			"SELECT label FROM nodes WHERE user_id = ? AND deleted_at IS NULL LIMIT 30",
+		).bind(userId).all();
+		for (const row of sampleRows ?? []) if (row.label) labels.push(row.label);
+	} else {
+		const manifestIds = {
+			nodes: new Set(), pages: new Set(), slices: new Set(), events: new Set(),
+			edges: new Set(), candidates: new Set(),
+		};
+		const manifestLabels = new Map();
+		for (const run of runs ?? []) {
+			for (const item of parseJsonArray(run.created_nodes_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.nodes.add(id);
+				if (id && item?.label) manifestLabels.set(id, item.label);
+			}
+			for (const item of parseJsonArray(run.created_pages_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.pages.add(id);
+			}
+			for (const item of parseJsonArray(run.created_slices_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.slices.add(id);
+			}
+			for (const item of parseJsonArray(run.created_events_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.events.add(id);
+			}
+			for (const item of parseJsonArray(run.created_edges_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.edges.add(id);
+			}
+			// Candidates carry their own evidence text — a delete that skips them
+			// leaves the deleted content findable (Part 9 acceptance finding).
+			for (const item of parseJsonArray(run.created_candidates_json)) {
+				const id = item?.id ?? item;
+				if (id) manifestIds.candidates.add(id);
+			}
 		}
-		for (const item of parseJsonArray(run.created_pages_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.pages.add(id);
+		// Only what is still LIVE counts — the preview must describe reality,
+		// and the destructive pass must converge on repeats.
+		ids = {};
+		for (const [setName, table] of ERASURE_TABLES) {
+			ids[setName] = await filterLiveIds(env, userId, table, manifestIds[setName]);
 		}
-		for (const item of parseJsonArray(run.created_slices_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.slices.add(id);
-		}
-		for (const item of parseJsonArray(run.created_events_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.events.add(id);
-		}
-		for (const item of parseJsonArray(run.created_edges_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.edges.add(id);
-		}
-		// Candidates carry their own evidence text — a delete that skips them
-		// leaves the deleted content findable (Part 9 acceptance finding).
-		for (const item of parseJsonArray(run.created_candidates_json)) {
-			const id = item?.id ?? item;
-			if (id) ids.candidates.add(id);
+		for (const id of ids.nodes) {
+			if (manifestLabels.has(id) && labels.length < 30) labels.push(manifestLabels.get(id));
 		}
 	}
 
 	const counts = {
-		runs: (runs ?? []).length,
-		nodes: ids.nodes.size,
-		pages: ids.pages.size,
-		slices: ids.slices.size,
-		events: ids.events.size,
-		edges: ids.edges.size,
-		candidates: ids.candidates.size,
+		// Runs already retired by an earlier cleanup — 'deleted' (consumed) or
+		// 'cancelled_by_delete' (fenced) — are settled bookkeeping, not work
+		// this delete would consume.
+		runs: (runs ?? []).filter((run) => run.status !== "deleted" && run.status !== "cancelled_by_delete").length,
+		...idCounts(ids),
 	};
 
-	// Accepted work still processing will land AFTER this delete (the server
-	// owns its liveness). Saying so is the difference between an honest zero
-	// and a user who deleted "everything" and then watches memory reappear.
+	// Accepted work still processing is named honestly either way. For a
+	// scoped curation it will land AFTER this delete (D15). For an erasure the
+	// confirmed pass CANCELS it (D19) — the preview says which is coming.
 	const pending = await env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status NOT IN ('enriched', 'failed', 'completed')",
 	).bind(userId).first();
 	const pendingJobs = Number(pending?.n ?? 0);
 	const pendingNote = pendingJobs > 0
-		? `${pendingJobs} accepted save(s) are still processing and will finish AFTER this delete; preview again afterwards to remove their output.`
+		? (erasure
+			? `${pendingJobs} accepted save(s) are still processing; a confirmed delete will cancel them.`
+			: `${pendingJobs} accepted save(s) are still processing and will finish AFTER this delete; preview again afterwards to remove their output.`)
 		: undefined;
 
 	if (dryRun || !confirm) {
@@ -904,6 +998,31 @@ export async function bulkDeleteBySource(env, userId, {
 	const now = Date.now();
 	const config = getConfig(env);
 
+	let cancelledRuns = 0;
+	if (erasure) {
+		// The deletion barrier FIRST, before any row is touched: from this
+		// instant, no extraction whose work was accepted earlier can commit —
+		// the fence inside the writer's atomic batch refuses it (SRV-08).
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(user_id) DO UPDATE SET
+				barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at),
+				by = excluded.by`,
+		).bind(userId, now, now, by ?? null).run();
+		// In-flight runs are cancelled by name. The guarded running→committing
+		// transition and the commit fence both observe this status, so a run
+		// mid-model-call can never publish its rows afterwards.
+		const cancelled = await env.DB.prepare(
+			`UPDATE extraction_runs
+			 SET status = 'cancelled_by_delete',
+				error = 'cancelled_by_delete: a confirmed delete erased this scope while the save was processing',
+				updated_at = ?
+			 WHERE user_id = ? AND status IN ('running', 'committing')`,
+		).bind(now, userId).run();
+		cancelledRuns = Number(cancelled.meta?.changes ?? 0);
+	}
+
 	// The read-your-writes staging bridge answers recall until its rows settle,
 	// so a confirmed delete must retire them too — deleted content staying
 	// recallable for the enrichment window is the SRV-03 leak wearing a
@@ -913,27 +1032,26 @@ export async function bulkDeleteBySource(env, userId, {
 		"UPDATE staged_memories SET settled_at = ? WHERE user_id = ? AND settled_at IS NULL",
 	).bind(now, userId).run();
 
-	// Nodes first: their cascade also removes their remaining slices/events/
-	// edges, FTS rows, vectors, and regenerates neighbour summaries.
-	for (const nodeId of ids.nodes) {
-		await deleteObject(env, userId, { kind: "node", id: nodeId, suppress: false });
-	}
-	// Rows that landed on PRE-EXISTING nodes (or between them, for edges):
-	// the node cascade never saw these — delete them directly.
-	const slicesLeft = [...ids.slices];
-	const eventsLeft = [...ids.events];
-	const edgesLeft = [...ids.edges];
-	await softDeleteByIds(env, userId, "slices", slicesLeft, now);
-	await softDeleteByIds(env, userId, "events", eventsLeft, now);
-	await softDeleteByIds(env, userId, "edges", edgesLeft, now);
-	await softDeleteByIds(env, userId, "candidates", [...ids.candidates], now);
-	for (const pageId of ids.pages) {
-		await deleteObject(env, userId, { kind: "page", id: pageId, suppress: false });
-	}
+	// The sweep, as a function of an id set — the erasure convergence loop
+	// re-derives the set from live state and runs it again (Mem0's delete_all
+	// shape: list from the authoritative store until it comes back empty).
+	const deletedTotals = { nodes: 0, pages: 0, slices: 0, events: 0, edges: 0, candidates: 0 };
+	let regenerated = 0;
+	const sweep = async (sweepIds) => {
+		// Nodes first: their cascade also removes their remaining slices/events/
+		// edges, FTS rows, vectors, and regenerates neighbour summaries.
+		for (const nodeId of sweepIds.nodes) {
+			await deleteObject(env, userId, { kind: "node", id: nodeId, suppress: false });
+		}
+		// Rows that landed on PRE-EXISTING nodes (or between them, for edges):
+		// the node cascade never saw these — delete them directly.
+		const slicesLeft = [...sweepIds.slices];
+		const eventsLeft = [...sweepIds.events];
+		const edgesLeft = [...sweepIds.edges];
 
-	// Which surviving nodes just lost facts? Their summaries are dirty.
-	const touched = new Set();
-	if (slicesLeft.length || eventsLeft.length) {
+		// Which surviving nodes just lost facts? Their summaries are dirty.
+		// (Resolved BEFORE the soft-delete so node_id lookups still match.)
+		const touched = new Set();
 		const list = async (table, rowIds) => {
 			const out = [];
 			for (const id of rowIds) {
@@ -945,44 +1063,85 @@ export async function bulkDeleteBySource(env, userId, {
 		};
 		for (const nodeId of await list("slices", slicesLeft)) touched.add(nodeId);
 		for (const nodeId of await list("events", eventsLeft)) touched.add(nodeId);
-	}
-	for (const edgeId of edgesLeft) {
-		const row = await env.DB.prepare("SELECT from_node, to_node FROM edges WHERE id = ? AND user_id = ?")
-			.bind(edgeId, userId).first();
-		if (row?.from_node) touched.add(row.from_node);
-		if (row?.to_node) touched.add(row.to_node);
-	}
-	for (const nodeId of ids.nodes) touched.delete(nodeId);
+		for (const edgeId of edgesLeft) {
+			const row = await env.DB.prepare("SELECT from_node, to_node FROM edges WHERE id = ? AND user_id = ?")
+				.bind(edgeId, userId).first();
+			if (row?.from_node) touched.add(row.from_node);
+			if (row?.to_node) touched.add(row.to_node);
+		}
+		for (const nodeId of sweepIds.nodes) touched.delete(nodeId);
 
-	const { regenerated } = await regenerateDirtySummaries(
-		env,
-		userId,
-		[...ids.nodes, ...slicesLeft, ...eventsLeft, ...edgesLeft],
-		[...touched],
-	);
-	await deleteNodeVectors(env, config, [...ids.nodes]);
-	if (touched.size) await refreshManualSearchProfiles(env, config, userId, { nodeIds: [...touched] });
+		await softDeleteByIds(env, userId, "slices", slicesLeft, now);
+		await softDeleteByIds(env, userId, "events", eventsLeft, now);
+		await softDeleteByIds(env, userId, "edges", edgesLeft, now);
+		await softDeleteByIds(env, userId, "candidates", [...sweepIds.candidates], now);
+		for (const pageId of sweepIds.pages) {
+			await deleteObject(env, userId, { kind: "page", id: pageId, suppress: false });
+		}
+
+		const regen = await regenerateDirtySummaries(
+			env,
+			userId,
+			[...sweepIds.nodes, ...slicesLeft, ...eventsLeft, ...edgesLeft],
+			[...touched],
+		);
+		regenerated += Number(regen.regenerated ?? 0);
+		await deleteNodeVectors(env, config, [...sweepIds.nodes]);
+		if (touched.size) await refreshManualSearchProfiles(env, config, userId, { nodeIds: [...touched] });
+
+		for (const [setName] of ERASURE_TABLES) deletedTotals[setName] += sweepIds[setName].size;
+		return [...sweepIds.nodes, ...sweepIds.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft, ...sweepIds.candidates];
+	};
+
+	const sweptIds = await sweep(ids);
+	let convergencePasses = 1;
+	if (erasure) {
+		// Converge: anything that slipped in between enumeration and sweep is
+		// still live in the authoritative tables — re-derive and sweep again,
+		// bounded. (Post-barrier NEW work may legitimately appear concurrently;
+		// the loop removes only what existed at each pass, and INV-3 makes any
+		// remainder discoverable by the next delete.)
+		for (let pass = 0; pass < 2; pass += 1) {
+			const remaining = await enumerateLiveScope(env, userId);
+			if (ERASURE_TABLES.every(([setName]) => remaining[setName].size === 0)) break;
+			convergencePasses += 1;
+			sweptIds.push(...await sweep(remaining));
+		}
+	}
 
 	await storeDeletionTombstone(env, userId, {
 		kind: "bulk_by_source",
-		ids: [...ids.nodes, ...ids.pages, ...slicesLeft, ...eventsLeft, ...edgesLeft, ...ids.candidates],
+		ids: sweptIds,
 		by,
 		source: "bulk_delete",
 		projectScopes: [...projectScopes.values()],
 	});
 	// Keep the extraction ledger (and its source packet/job links) for audit,
-	// but retire exactly the runs consumed by this successful cleanup so a
-	// repeated preview is an honest zero.
-	for (let offset = 0; offset < (runs ?? []).length; offset += 50) {
-		await env.DB.batch((runs ?? []).slice(offset, offset + 50).map((run) =>
+	// and mark the runs this cleanup consumed. BOOKKEEPING ONLY: enumeration
+	// never trusts these marks again (SRV-08), and runs a concurrent delete
+	// already cancelled keep their `cancelled_by_delete` status.
+	const consumedRuns = (runs ?? []).filter((run) => run.status !== "cancelled_by_delete");
+	for (let offset = 0; offset < consumedRuns.length; offset += 50) {
+		await env.DB.batch(consumedRuns.slice(offset, offset + 50).map((run) =>
 			env.DB.prepare(
-				"UPDATE extraction_runs SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ?",
+				"UPDATE extraction_runs SET status = 'deleted', updated_at = ? WHERE id = ? AND user_id = ? AND status NOT IN ('running', 'committing', 'cancelled_by_delete')",
 			).bind(now, run.id, userId)));
 	}
 
 	return {
-		ok: true, dry_run: false, deleted: counts, summaries_regenerated: regenerated,
+		ok: true, dry_run: false,
+		// `runs` = runs consumed (marked retired) by this cleanup — the same
+		// number the preview promised. Row totals report what was actually swept.
+		deleted: { runs: counts.runs, ...deletedTotals },
+		summaries_regenerated: regenerated,
 		staged_settled: stagedSettled.meta?.changes ?? 0,
-		pending_jobs: pendingJobs, ...(pendingNote ? { note: pendingNote } : {}),
+		convergence_passes: convergencePasses,
+		...(erasure ? { cancelled_runs: cancelledRuns } : {}),
+		pending_jobs: pendingJobs,
+		...(pendingJobs > 0
+			? { note: erasure
+				? `${pendingJobs} accepted save(s) were cancelled by this delete.`
+				: pendingNote }
+			: {}),
 	};
 }

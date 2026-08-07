@@ -303,10 +303,19 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 	}
 	fields.push("updated_at = ?");
 	values.push(Date.now());
-	if (!fields.length) return;
-	await env.DB.prepare(`UPDATE extraction_runs SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
-		.bind(...values, runId, userId)
+	if (!fields.length) return { changes: 0 };
+	// SRV-08: a status transition may be GUARDED — `expectStatus` makes the
+	// update conditional on the run still being where the caller left it, so a
+	// concurrent delete's `cancelled_by_delete` mark cannot be overwritten by
+	// the running→committing transition. Callers check `changes`.
+	const guard = data.expectStatus ? " AND status = ?" : "";
+	const guardValues = data.expectStatus ? [data.expectStatus] : [];
+	const result = await env.DB.prepare(
+		`UPDATE extraction_runs SET ${fields.join(", ")} WHERE id = ? AND user_id = ?${guard}`,
+	)
+		.bind(...values, runId, userId, ...guardValues)
 		.run();
+	return { changes: Number(result.meta?.changes ?? 0) };
 }
 
 /**
