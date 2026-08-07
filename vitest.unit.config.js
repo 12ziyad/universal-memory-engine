@@ -24,6 +24,7 @@ export default defineConfig({
 			"test/claude_capture.spec.js",
 			"test/claude_transcript.spec.js",
 			"test/claude_transcript_tail.spec.js",
+			"test/cross_door_project_identity.spec.js",
 			"test/doctor.spec.js",
 			"test/hook_manifest.spec.js",
 			"test/hook_outbox.spec.js",

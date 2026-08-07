@@ -217,7 +217,14 @@ export async function resolveCodexProjectScope(cwd, options = {}) {
 			"ITSUKI_PROJECT_ID must be a non-empty control-free string of at most 160 characters with no surrounding whitespace.",
 		);
 	}
-	const projectId = explicit ?? `local_${hash(`itsuki-codex-project:v1\0${identityPath}`).slice(0, 32)}`;
+	// CANONICAL project identity, shared with the Claude adapter
+	// (hooks/project-identity.mjs). The derivation either side of this string
+	// is already byte-identical — resolve, realpath, normalize, lowercase on
+	// win32 — so the salt was the only thing separating them, and separating
+	// them meant the same folder became two different projects depending on
+	// which tool you opened it with. "One memory service" requires one project
+	// identity (SRV-07).
+	const projectId = explicit ?? `local_${hash(`itsuki-project:v1\0${identityPath}`).slice(0, 32)}`;
 	return {
 		projectId,
 		projectName: safeProjectName(basename(normalize(canonical))),

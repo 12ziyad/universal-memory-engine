@@ -22,6 +22,7 @@ export default defineWorkersConfig(async () => {
 				"test/codex_session_end.spec.js",
 				"test/codex_session_start.spec.js",
 				"test/codex_transcript.spec.js",
+				"test/cross_door_project_identity.spec.js",
 				"test/doctor.spec.js",
 				"test/hook_batching.spec.js",
 				"test/hook_manifest.spec.js",
