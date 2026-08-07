@@ -174,6 +174,41 @@ describe("OPS-02 — operator overview", () => {
 	});
 });
 
+describe("OPS-03 — tenant fan-out is chunked under D1's bound-parameter limit", () => {
+	it("aggregates identically however the tenant list is split", async () => {
+		// The production failure this pins: `user_id IN (...)` built from an
+		// account's tenants is a query that works until the account grows. The
+		// campaign account had 360 sub-tenants and D1 answered "too many SQL
+		// variables"; a two-tenant test account could never have shown it.
+		const acct = await account("ops-chunk");
+		const names = [];
+		for (let i = 0; i < 3; i += 1) {
+			const t = `tenant-chunk-${i}-${crypto.randomUUID().slice(0, 8)}`;
+			names.push(t);
+			await save(acct.token, t, `Chunky${i}`);
+		}
+
+		const whole = await call("/v1/ops/overview", { headers: bearer(acct.token) });
+		expect(whole.status).toBe(200);
+		expect(whole.body.account.tenants).toBeGreaterThanOrEqual(3);
+
+		// Force multi-chunk fan-out over the SAME data; the roll-up must not move.
+		const { operatorOverview } = await import("../src/pipeline/ops.js");
+		for (const chunkSize of [1, 2, 3]) {
+			const split = await operatorOverview(env, acct.user.id, { chunkSize });
+			expect(split.account.tenants).toBe(whole.body.account.tenants);
+			expect(split.account.live_nodes).toBe(whole.body.account.live_nodes);
+			expect(split.account.jobs.enriched).toBe(whole.body.account.jobs.enriched);
+			expect(split.account.latency_ms.samples).toBe(whole.body.account.latency_ms.samples);
+			for (const name of names) {
+				const row = split.tenants.find((t) => t.external_user_id === name);
+				expect(row, `tenant ${name} missing at chunkSize ${chunkSize}`).toBeTruthy();
+				expect(row.live_nodes).toBeGreaterThan(0);
+			}
+		}
+	});
+});
+
 describe("A10-F2 — cancellations are first-class in the jobs ledger", () => {
 	it("marks a cancelled job as cancelled_by_delete without inventing a new terminal status", async () => {
 		const acct = await account("ops-cancel");

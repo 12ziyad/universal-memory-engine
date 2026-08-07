@@ -36,6 +36,18 @@ const CANCELLED_PREFIX = "cancelled_by_delete";
 // A job still non-terminal after this long is not "busy", it is a question.
 const STUCK_AFTER_MS = 15 * 60 * 1000;
 const MAX_TENANTS = 200;
+// OPS-03: D1 caps bound parameters per statement, so a `user_id IN (...)` list
+// built from an account's tenants is a query that works until the account
+// grows. Every fan-out below is chunked; 80 leaves headroom for the extra
+// binds each statement adds. Found in production at 360 tenants — a test
+// account with two could never have shown it.
+const ID_CHUNK = 80;
+
+function chunk(list, size = ID_CHUNK) {
+	const out = [];
+	for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+	return out;
+}
 
 function percentile(sorted, p) {
 	if (!sorted.length) return null;
@@ -56,7 +68,7 @@ function emptyJobCounts() {
  *
  * @param ownerUserId the authenticated account (never a sub-tenant hash)
  */
-export async function operatorOverview(env, ownerUserId, { range = "7d", limit } = {}) {
+export async function operatorOverview(env, ownerUserId, { range = "7d", limit, chunkSize = ID_CHUNK } = {}) {
 	const rangeDays = RANGE_DAYS[range] ?? 7;
 	const now = Date.now();
 	const fromMs = now - rangeDays * 24 * 60 * 60 * 1000;
@@ -127,31 +139,46 @@ export async function operatorOverview(env, ownerUserId, { range = "7d", limit }
 	};
 	if (!ids.length) return { ok: true, account, tenants: [] };
 
-	const slot = placeholders(ids);
-	const [jobRows, nodeRows, barrierRows, latencyRows, projectRows] = await env.DB.batch([
-		env.DB.prepare(
-			`SELECT user_id, status, attempts, created_at, error
-			   FROM memory_jobs
-			  WHERE user_id IN (${slot}) AND type IN ('extract', 'mcp_enrich')`,
-		).bind(...ids),
-		env.DB.prepare(
-			`SELECT user_id, COUNT(*) AS n FROM nodes
-			  WHERE deleted_at IS NULL AND user_id IN (${slot}) GROUP BY user_id`,
-		).bind(...ids),
-		env.DB.prepare(
-			`SELECT user_id, barrier_at FROM deletion_barriers WHERE user_id IN (${slot})`,
-		).bind(...ids),
-		env.DB.prepare(
-			`SELECT user_id, latency_ms FROM receipts
-			  WHERE user_id IN (${slot}) AND created_at >= ? AND latency_ms IS NOT NULL`,
-		).bind(...ids, fromMs),
-		env.DB.prepare(
-			`SELECT DISTINCT user_id, json_extract(scope_json, '$.project_id') AS project_id
-			   FROM receipts
-			  WHERE user_id IN (${slot}) AND created_at >= ?
-			    AND json_extract(scope_json, '$.project_id') IS NOT NULL`,
-		).bind(...ids, fromMs),
-	]);
+	// One batch per chunk of tenant ids, then the rows are merged. Splitting by
+	// chunk rather than by query keeps every statement under the D1 bound-
+	// parameter limit no matter how many tenants an account has (OPS-03).
+	const jobRows = { results: [] };
+	const nodeRows = { results: [] };
+	const barrierRows = { results: [] };
+	const latencyRows = { results: [] };
+	const projectRows = { results: [] };
+	for (const group of chunk(ids, Math.max(1, Number(chunkSize) || ID_CHUNK))) {
+		const slot = placeholders(group);
+		const [jobs, nodes, barriers, latency, projects] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT user_id, status, attempts, created_at, error
+				   FROM memory_jobs
+				  WHERE user_id IN (${slot}) AND type IN ('extract', 'mcp_enrich')`,
+			).bind(...group),
+			env.DB.prepare(
+				`SELECT user_id, COUNT(*) AS n FROM nodes
+				  WHERE deleted_at IS NULL AND user_id IN (${slot}) GROUP BY user_id`,
+			).bind(...group),
+			env.DB.prepare(
+				`SELECT user_id, barrier_at FROM deletion_barriers WHERE user_id IN (${slot})`,
+			).bind(...group),
+			env.DB.prepare(
+				`SELECT user_id, latency_ms FROM receipts
+				  WHERE user_id IN (${slot}) AND created_at >= ? AND latency_ms IS NOT NULL`,
+			).bind(...group, fromMs),
+			env.DB.prepare(
+				`SELECT DISTINCT user_id, json_extract(scope_json, '$.project_id') AS project_id
+				   FROM receipts
+				  WHERE user_id IN (${slot}) AND created_at >= ?
+				    AND json_extract(scope_json, '$.project_id') IS NOT NULL`,
+			).bind(...group, fromMs),
+		]);
+		jobRows.results.push(...(jobs.results ?? []));
+		nodeRows.results.push(...(nodes.results ?? []));
+		barrierRows.results.push(...(barriers.results ?? []));
+		latencyRows.results.push(...(latency.results ?? []));
+		projectRows.results.push(...(projects.results ?? []));
+	}
 
 	const latencies = new Map(ids.map((id) => [id, []]));
 	const accountLatencies = [];
