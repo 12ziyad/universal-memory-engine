@@ -69,13 +69,18 @@ const LONG_TOKEN_RE = /[A-Za-z0-9+/=_-]{32,}/g;
 // symbol. That is what keeps ordinary English intact: "my password is stored
 // in 1Password", "the token is expired", "the secret is that I like tidepools"
 // all describe a secret without being one, and memory exists to keep prose.
-const SECRET_LABEL = "(?:pass(?:word|phrase|wd)?|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|token)";
+const SECRET_LABEL = "(?:pass(?:word|phrase|wd)?|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|token|credential(?:s)?)";
+// The separator admits an optional closing quote after the label so JSON/JSON5
+// config lines ("apiKey": "…", 'token': '…') match too — a pasted config block
+// is the same credential in a different coat (SEC-02, found by the corpus).
+// Quoted values get their own alternates because a quoted passphrase may
+// contain spaces ('password is "two words"') that the bare form cannot span.
 const LABELED_SECRET_ASSIGN_RE = new RegExp(
-	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s*[:=]\\s*)(["']?)([^\\s"']{6,256})\\3`,
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(["']?\\s*[:=]\\s*)(?:"([^"\\r\\n]{1,256})"|'([^'\\r\\n]{1,256})'|([^\\s"']{6,256}))`,
 	"gi",
 );
 const LABELED_SECRET_PROSE_RE = new RegExp(
-	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s+(?:is|was)\\s+)(["']?)([^\\s"']{6,256})\\3`,
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s+(?:is|was)\\s+)(?:"([^"\\r\\n]{1,256})"|'([^'\\r\\n]{1,256})'|([^\\s"']{6,256}))`,
 	"gi",
 );
 
@@ -157,8 +162,16 @@ export function scrubText(input) {
 	// Last: the label→value forms. Runs after the shape families so an already
 	// redacted value is left alone, and keeps the LABEL (it carries the meaning).
 	for (const re of [LABELED_SECRET_ASSIGN_RE, LABELED_SECRET_PROSE_RE]) {
-		text = text.replace(re, (match, label, separator, quote, value) => {
-			if (!looksLikeSecretValue(value)) return match;
+		text = text.replace(re, (match, label, separator, doubleQuoted, singleQuoted, bare) => {
+			const value = doubleQuoted ?? singleQuoted ?? bare;
+			// Quoting after a secret label is itself a strong signal, so for
+			// quoted values a contained space stands in for the digit/symbol
+			// requirement — that is how multi-word passphrases are caught
+			// without loosening the prose protection on bare values.
+			const secretish = bare === undefined
+				? looksLikeSecretValue(value) || (value.length >= 6 && /\s/.test(value) && !value.startsWith("[REDACTED"))
+				: looksLikeSecretValue(value);
+			if (!secretish) return match;
 			hit("labeled_secret");
 			return `${label}${separator}[REDACTED:secret]`;
 		});
