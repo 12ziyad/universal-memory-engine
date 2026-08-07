@@ -123,6 +123,11 @@ const NAV = [
 	{ sec: "Concepts", items: [
 		["/concepts/memory", "How memory works"],
 		["/concepts/receipts", "Receipts & rules"],
+		["/concepts/scope", "Who memory belongs to"],
+		["/concepts/delete", "Delete & erasure"],
+	]},
+	{ sec: "Operate", items: [
+		["/operate/observability", "Monitoring & diagnostics"],
 	]},
 	{ sec: "Trust", items: [
 		["/privacy", "Privacy & limits"],
@@ -517,14 +522,182 @@ ${codeBlock(`{ "summary": "Saved: 1 memory (Kotlin), 1 detail. Skipped: 1 (quest
 <p>Rules apply at the engine, so every door obeys them — MCP tools, API, SDK, and the app itself.</p>
 ` };
 
+PAGES["/concepts/scope"] = { title: "Who memory belongs to", html: `
+<h1>Who memory belongs to</h1>
+<p class="lede">Every memory is stored under exactly one <b>memory user</b>, and optionally tagged with a <b>project</b>. Isolation is the point — so nothing crosses a boundary just because it would be convenient.</p>
+
+<h2>The three levels</h2>
+<ul>
+<li><b>Account root</b> — your own memory. This is where writes land when you send no <code>userId</code>.</li>
+<li><b>Sub-tenant</b> — one memory space per end user of <i>your</i> product. You create it by sending <code>userId</code> (any stable string you choose). The server derives an opaque id from your account plus that string, so two different accounts sending the same <code>userId</code> never touch the same memory.</li>
+<li><b>Project</b> — a tag <i>within</i> a memory user, not a separate store. It narrows what recall returns; it does not create a new tenant.</li>
+</ul>
+<p>Sub-tenants are isolated from each other and from your root. There is no query that reads across them, and no setting that merges them.</p>
+
+<h2>Project scope, and the thing that surprises people</h2>
+<p>When the Claude Code or Codex plugin captures something while you work in a directory, it tags that memory with a <b>project id</b> derived from the directory path — an opaque hash like <code>local_3f2a…</code>, never the path itself.</p>
+<div class="callout"><b>The rule:</b> memory a plugin saved in a project is reachable from the SDK or REST <b>only when the caller carries that same project scope</b>. It does not automatically become account-global, and a caller that sends no project scope will not see it.</div>
+<p>This is deliberate — the whole value of project scope is that opening one repo does not surface another repo's decisions. But it does mean "I saved it in Claude Code and my script can't find it" is normally a scope question, not a bug.</p>
+<p>To find the project id a directory derives, run the plugin's own diagnostic. It prints the id (never the path):</p>
+${codeBlock(`# Claude Code plugin — type this in a session
+/itsuki:doctor
+
+# Codex plugin
+node <plugin-root>/hooks/codex-doctor.mjs`)}
+<p>Both plugins derive the <b>same</b> id for the same directory, so a project captured in one is reachable in the other.</p>
+
+<h2>How recall chooses what to read</h2>
+<table>
+<tr><th>Mode</th><th>What it reads</th></tr>
+<tr><td><code>global</code> (default)</td><td>The memory user's whole store, project tags ignored.</td></tr>
+<tr><td><code>project_only</code></td><td>Only memory tagged with the project id you send. Returns nothing if the project has nothing — which is a real answer, not an error.</td></tr>
+<tr><td><code>project_then_global</code></td><td>Project memory first, then account-global to fill the remaining budget. This is what the plugins use, so a session opened in a project always leads with that project's context.</td></tr>
+</table>
+<p>The first three are the <code>recallScope</code> option in the JavaScript client and <code>recall_scope</code> in Python. There is a fourth, <code>project_bootstrap</code>, sent as a separate <code>recallMode</code> field on <code>POST /v1/recall</code>: a deterministic listing for session start — no similarity search, just this project's most salient and recent memory. Both editor plugins send it when a session opens, because an opening query like "project decisions and conventions" is not something any ranker answers well. Neither SDK exposes it as a typed option today; send it in the request body if you are building your own session-start flow.</p>
+
+<h2>Reaching plugin project memory from your own code</h2>
+${codeBlock(`import { Memory } from "itsuki";
+const memory = new Memory({ apiKey: process.env.ITSUKI_API_KEY });
+
+// Carry the project scope the plugin used, or you will not see its memory.
+await memory.recall("deployment decisions", {
+  memoryScope: { projectId: "local_3f2a…" },
+  recallScope: "project_then_global",
+});`)}
+<p>The Python client spells the same two options <code>memory_scope={"project_id": …}</code> and <code>recall_scope=…</code>.</p>
+
+<h2>What does NOT happen</h2>
+<ul>
+<li>Project memory does not become account-global over time.</li>
+<li>A sub-tenant's memory is never visible to another sub-tenant, or to your root.</li>
+<li>Your account never sees another account's tenants, projects, or counts.</li>
+<li>Nothing you save is used to train a model.</li>
+</ul>
+` };
+
+PAGES["/concepts/delete"] = { title: "Delete & erasure", html: `
+<h1>Delete &amp; erasure</h1>
+<p class="lede">Two different operations share one route. Knowing which one you asked for is the difference between tidying up and exercising a right to erasure.</p>
+
+<h2>Scoped delete is curation</h2>
+<p>A delete that names a source lane or a time window removes what matched, and nothing else:</p>
+${codeBlock(`# Preview first — this is the default, and it changes nothing
+DELETE /v1/memories?source=ingest&after=1786000000000
+
+# Then confirm
+DELETE /v1/memories?source=ingest&after=1786000000000&confirm=true&dry_run=false`)}
+<p>Work you already submitted that is <i>still processing</i> is not cancelled by a scoped delete. It finishes, and its output lands after the delete — because you asked to remove what exists, not to stop what is running. The preview tells you how many such saves are in flight so the number is never a surprise.</p>
+
+<h2>Unscoped confirmed delete is an erasure</h2>
+<p>A confirmed delete with no source and no window means "remove everything in this memory space". That is a stronger promise, so it does more:</p>
+<ul>
+<li>It records an <b>erasure barrier</b> — a timestamp for that memory user.</li>
+<li>It removes everything currently live, then re-checks and sweeps again, so anything that landed mid-operation is caught too.</li>
+<li>It <b>cancels accepted work that had not yet committed</b>. Any save accepted <i>before</i> the barrier is refused at commit time, so it cannot reappear after you erased.</li>
+</ul>
+${codeBlock(`DELETE /v1/memories?confirm=true&dry_run=false`)}
+<p>The confirmed response tells you what happened, including how many in-flight saves were cancelled:</p>
+${codeBlock(`{
+  "ok": true,
+  "dry_run": false,
+  "deleted": { "runs": 3, "nodes": 41, "pages": 2, "slices": 55, "events": 7, "edges": 63, "candidates": 0 },
+  "cancelled_runs": 1,
+  "pending_jobs": 1,
+  "convergence_passes": 1,
+  "note": "1 accepted save(s) were cancelled by this delete."
+}`)}
+<p><code>convergence_passes: 1</code> means the first sweep was enough. A higher number means work arrived while the erasure ran and was swept too.</p>
+
+<h2>What a cancelled save looks like</h2>
+<p>A cancelled save is <b>terminal</b>. It is reported through the job status you already poll:</p>
+${codeBlock(`{
+  "status": "failed",
+  "cancelled_by_delete": true,
+  "outcome_reason": "cancelled_by_delete",
+  "error": "cancelled_by_delete: a confirmed delete erased this scope while the save was processing"
+}`)}
+<div class="callout"><b>Why <code>failed</code> and not a new status?</b> Because every already-released SDK treats <code>enriched</code>, <code>failed</code> and <code>completed</code> as the complete set of terminal states. Inventing a fourth word would make an older client poll forever on a job that is finished. The state stays in the vocabulary every client knows, and the <i>reason</i> is published as its own field.</div>
+<p><b>Do not retry a cancelled save.</b> It is not a transient error. The barrier applies to the original work, so a retry is cancelled the same way — it just costs you another round trip. If you still want that content stored, write it again as a <b>new</b> save: work submitted <i>after</i> the barrier is ordinary work and lands normally. Erasure clears the past; it does not lock the memory space.</p>
+<p>To separate cancellations from genuine failures:</p>
+${codeBlock(`GET /v1/jobs?cancelled=true    # only work your own erasure cancelled
+GET /v1/jobs?cancelled=false   # only work that actually failed`)}
+
+<h2>What is kept</h2>
+<p>Erasure removes your memory. It retains the bookkeeping that proves the deletion happened — deletion records, job and receipt history, and the timestamps above. That audit trail carries no memory content, and it is what lets a later preview honestly answer "nothing left".</p>
+` };
+
+PAGES["/operate/observability"] = { title: "Monitoring & diagnostics", html: `
+<h1>Monitoring &amp; diagnostics</h1>
+<p class="lede">If you run Itsuki behind your own product, this page is the answer to "is it healthy, and if not, which part?"</p>
+
+<h2>One call for the whole account</h2>
+<p>Every other read endpoint is scoped to a single memory user. <code>GET /v1/ops/overview</code> is the account view: it rolls up your root and your sub-tenants together, and lists each one.</p>
+${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
+  "https://itsuki.app/v1/ops/overview?range=7d"`)}
+${codeBlock(`{
+  "ok": true,
+  "account": {
+    "owner_user_id": "user_…",
+    "range": { "days": 7, "from": 1785539673072, "to": 1786144473072 },
+    "tenants": 12,
+    "truncated": false,
+    "live_nodes": 94,
+    "jobs": { "queued": 0, "staged": 0, "processing": 0, "enriched": 150, "failed": 11, "completed": 0 },
+    "backlog": { "depth": 0, "oldest_age_ms": null },
+    "stuck": { "non_terminal": 0, "older_than_ms": 900000 },
+    "cancelled_by_delete": 14,
+    "failures": { "total": 25, "cancelled_by_delete": 14, "other": 11 },
+    "retries": { "jobs_with_retries": 3, "max_attempts": 2 },
+    "erasures": { "tenants_with_barrier": 2, "latest_barrier_at": 1786144705593 },
+    "latency_ms": { "p50": 973, "p95": 3363, "samples": 962 }
+  },
+  "tenants": [ { "memory_user_id": "mem_…", "external_user_id": "your-user-42", "is_root": false, "live_nodes": 12, "…": "…" } ]
+}`)}
+<p>Needs a Bearer API token or a signed-in session. The legacy <code>x-api-key</code> lane is refused with <code>account_scope_required</code>, because it writes under raw identifiers and has no account relationship to roll up.</p>
+
+<h2>Reading it</h2>
+<table>
+<tr><th>Question</th><th>Where to look</th></tr>
+<tr><td>Is it healthy?</td><td><code>backlog.depth</code> near zero and <code>stuck.non_terminal</code> at zero.</td></tr>
+<tr><td>Is backlog building?</td><td><code>backlog.depth</code> rising, or <code>backlog.oldest_age_ms</code> growing between polls.</td></tr>
+<tr><td>Are there stuck jobs?</td><td><code>stuck.non_terminal</code> — work still not terminal after <code>stuck.older_than_ms</code>.</td></tr>
+<tr><td>Which tenant is affected?</td><td>The <code>tenants</code> array. <code>external_user_id</code> is the id <i>you</i> sent.</td></tr>
+<tr><td>Did something actually fail, or did I erase it?</td><td><code>failures.other</code> vs <code>failures.cancelled_by_delete</code>. Only the first needs investigating.</td></tr>
+<tr><td>Are retries happening?</td><td><code>retries.jobs_with_retries</code> and <code>retries.max_attempts</code>.</td></tr>
+<tr><td>Did an erasure converge?</td><td>The tenant's <code>barrier_at</code> is set and its <code>live_nodes</code> is zero.</td></tr>
+<tr><td>How slow is it?</td><td><code>latency_ms.p50</code> / <code>p95</code>. Write latency is dominated by the model call.</td></tr>
+</table>
+<p><b>Metadata only.</b> This endpoint returns counts, states, timestamps and latency. It never returns memory content, labels, or project display names — a project's opaque id is included, the directory name it came from is not. <code>truncated: true</code> means the sub-tenant list was capped; your account's own root row is always present regardless.</p>
+
+<h2>Per-memory-user detail</h2>
+${codeBlock(`GET /v1/status?userId=your-user-42                 # counts for one memory user
+GET /v1/jobs?userId=your-user-42                   # that user's job ledger
+GET /v1/jobs?userId=your-user-42&cancelled=true    # only erasure-cancelled work
+GET /v1/packets/<source_packet_id>/status          # one accepted write
+GET /v1/requests?userId=your-user-42               # request history, metadata only`)}
+
+<h2>Diagnosing a plugin install</h2>
+<p>Both editor plugins ship a diagnostic that checks version, configuration, endpoint, credential presence, connectivity, the local outbox, and the project id the current directory derives. Neither prints your API key.</p>
+${codeBlock(`# Claude Code — type it in a session
+/itsuki:doctor
+/itsuki:doctor --bind-outbox   # after rotating a key, re-key queued captures
+
+# Codex — run it directly
+node <plugin-root>/hooks/codex-doctor.mjs
+node <plugin-root>/hooks/codex-doctor.mjs --json`)}
+<p>Queued captures are never deleted by a diagnostic. If a key rotation stranded them, they are preserved and reported until you rebind deliberately.</p>
+` };
+
 PAGES["/privacy"] = { title: "Privacy & limits", html: `
 <h1>Privacy &amp; limits</h1>
 <p class="lede">The short version we hold ourselves to: no selling data, no ads, no third-party trackers, no training on your memory.</p>
 <h2>Privacy</h2>
 <ul>
-<li>Your memory belongs to you. Export everything anytime (<code>GET /v1/export</code>); delete everything anytime (Settings → danger zone). Deletion is immediate.</li>
+<li>Your memory belongs to you. Export everything anytime (<code>GET /v1/export</code>); delete everything anytime (Settings → danger zone, or a confirmed unscoped <code>DELETE /v1/memories</code>). A confirmed erasure takes effect immediately and also <b>cancels saves you had already submitted</b>, so nothing you erased can reappear afterwards — see <a href="/concepts/delete">Delete &amp; erasure</a>. What is retained is the bookkeeping proving the deletion happened; it carries no memory content.</li>
 <li>Site analytics are aggregate-only: no cookies, no visitor IDs, bot-filtered counts.</li>
-<li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed.</li>
+<li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed. The <a href="/operate/observability">operator endpoints</a> available to <i>you</i> return counts, states and timings only — never content.</li>
+<li>The identifier you pass as <code>userId</code> for a sub-tenant is stored as part of that write's provenance, so your own account can list its tenants. Use an opaque, stable id of your own rather than an end user's email address.</li>
+<li>Secret redaction before storage covers labelled credentials (<i>"api key is …"</i>, <i>"password: …"</i>) and common key formats. It is a strong safety net, not a guarantee: an unlabelled high-entropy string, or a labelled passphrase of ordinary words, can still be stored. Treat memory as you would any store you write to deliberately.</li>
 <li>Full details: <a href="${ORIGIN}/privacy" target="_blank" rel="noopener">Privacy Policy</a> · <a href="${ORIGIN}/terms" target="_blank" rel="noopener">Terms</a>.</li>
 </ul>
 <h2>Limits (early access)</h2>

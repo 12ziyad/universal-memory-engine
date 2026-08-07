@@ -1,0 +1,172 @@
+# Changelog
+
+Itsuki ships as several artifacts on independent version lines: two editor
+plugins, two SDKs, and the hosted service. Each section below covers one of them.
+
+The hosted service has no public version number — it is a Worker, identified by
+its deployment. Service changes are listed by what they mean for a caller, and
+the documentation at <https://itsuki.app/docs/> is the contract.
+
+---
+
+## Claude Code plugin — 0.7.0 (prepared, not yet published)
+
+The first release since the plugin was hardened against a full acceptance
+campaign. Nothing here changes how you install or configure it.
+
+### Fixed
+
+- **Over-redaction in capture.** The scrubber shared a rule set with the Codex
+  adapter but had drifted from it, so some ordinary technical writing was
+  redacted as if it were a credential — losing meaning that should have been
+  kept. Both adapters now run one canonical rule set, verified against a single
+  shared corpus of credential and non-credential cases.
+
+### Changed
+
+- **Session start is a lookup, not a search.** Opening a session used to run a
+  similarity search for a generic phrase like "project decisions, conventions
+  and architecture", which reliably retrieved nothing for ordinary project
+  content. It now asks for a deterministic listing of the project's most
+  salient and recent memory, and project memory is ordered ahead of
+  account-global memory so a busy global store cannot crowd out the project you
+  actually opened.
+
+### Added
+
+- **`/itsuki:doctor` reports the plugin version** it is running, read from the
+  installed manifest so it cannot drift from the copy that is executing.
+- **`/itsuki:doctor` reports the project identity** this directory derives.
+  "My project memory is missing" is nearly always a question about which
+  project id a directory maps to, and that id was previously not visible
+  anywhere. The directory path is identity material and is never printed; the
+  opaque id and the folder name are.
+
+---
+
+## Codex plugin — 0.3.0 (prepared, not yet published)
+
+### Added
+
+- **A diagnostic, finally.** Codex plugins register hooks rather than slash
+  commands, so there was no equivalent of `/itsuki:doctor` — and a user whose
+  setup was broken had no way to find out which part. Run it directly:
+
+  ```
+  node <plugin-root>/hooks/codex-doctor.mjs
+  node <plugin-root>/hooks/codex-doctor.mjs --json
+  ```
+
+  It checks the installed version, hook registration, service and MCP targets,
+  credential presence, connectivity, the protected local outbox and its
+  backlog, credential-binding mismatches left by a key rotation, and the
+  project id the current directory derives. It never prints your API key.
+
+### Changed — read this one
+
+- **Project identity now matches the Claude Code plugin.** The two adapters
+  derived *different* project ids for the same directory, so a project captured
+  in one was invisible to the other. They now agree.
+
+  **Consequence:** captures delivered by an earlier Codex build remain under the
+  old project id. They are not lost and are still reachable account-wide, but
+  they will not appear under the converged project id. There is no migration,
+  because no version of this plugin has been published — if that changes before
+  this release ships, this note becomes a migration instead.
+
+### Fixed
+
+- **AWS temporary credentials are redacted** before capture leaves the machine.
+  Session tokens and the temporary access-key form were not covered by the
+  previous prefix rules, which were also brittle about key length.
+- **Scrubber parity with the Claude adapter**, against one shared corpus.
+- **Session-start recall no longer fails on a slow first response.** The budget
+  was a fixed 700 ms cliff that real network latency crossed routinely, so
+  recall silently produced nothing; it is now sized from measured latency.
+- **Delivery latency budgets** reflect real-world conditions rather than an
+  optimistic local assumption.
+
+---
+
+## JavaScript SDK — `itsuki` 0.2.1 (current; no upgrade needed)
+
+**0.2.1 is the verified current version. There is no 0.2.2.**
+
+It was re-verified end to end against the live service after the deletion and
+erasure work landed on the server, including the erasure flow and the
+cancellation path. No client change was required: the service expresses the new
+cancellation outcome through a terminal state this version already understands
+(`failed`) plus additional response fields, and additive fields pass through
+untouched.
+
+Two things are worth knowing when you use it against the current service — both
+documented in the README:
+
+- A save cancelled by your own erasure arrives as `status: "failed"` with
+  `cancelled_by_delete: true` and `outcome_reason: "cancelled_by_delete"`.
+  Do not retry it; submit new content instead.
+- The service accepts `GET /v1/jobs?cancelled=true|false`, but this client
+  rejects `cancelled` as an unknown option. Filter on the returned
+  `cancelled_by_delete` field, or call the endpoint directly.
+
+## Python SDK — `itsuki` 0.2.1 (current; no upgrade needed)
+
+Same status, same two notes, same verification: re-verified end to end against
+the live service after the erasure work, with no client change required. The
+`cancelled` filter is likewise not accepted by `jobs()`; read the
+`cancelled_by_delete` field on each job instead.
+
+---
+
+## Hosted service
+
+No public version number — the deployment is the identity. What changed for
+callers, newest first:
+
+### Operator visibility
+
+- **`GET /v1/ops/overview`** is new: one account-scoped call that rolls up your
+  root and your sub-tenants and lists each one — live counts, job states,
+  backlog depth and age, stuck work, retries, erasure barriers, latency
+  percentiles, and cancellations counted separately from real failures. Every
+  other read endpoint is scoped to a single memory user, so there was previously
+  nowhere to see an account. Metadata only: no memory content, no labels, no
+  project display names. Requires a Bearer token or a session; the legacy
+  `x-api-key` lane is refused with `account_scope_required` because it has no
+  account relationship to roll up.
+- **Jobs distinguish cancellation from failure.** Every job now carries
+  `cancelled_by_delete` and `outcome_reason`, and `GET /v1/jobs` accepts
+  `?cancelled=true|false`. Triaging failures no longer means substring-matching
+  an error message.
+
+### Deletion and erasure
+
+- **A confirmed unscoped delete is an erasure.** It records a barrier, sweeps to
+  convergence, and cancels accepted work that has not yet committed, so nothing
+  erased can reappear afterwards. A scoped delete remains curation: work already
+  in flight finishes and lands, and the preview tells you how much is coming.
+- **Cancelled work is terminal and honest.** It reports `failed` with
+  `cancelled_by_delete: true` — deliberately not a new status word, because
+  every released client treats the existing three terminal states as complete
+  and a fourth would make older clients poll a finished job forever.
+- **New writes after an erasure land normally.** Erasure clears the past; it
+  does not lock the memory space.
+- Confirmed responses gained `cancelled_runs` and `convergence_passes`.
+
+### Retrieval
+
+- **Session-start retrieval is deterministic** (`recallMode: "project_bootstrap"`)
+  rather than a similarity search against a generic opening phrase.
+- **Project memory is ordered ahead of account-global** under
+  `project_then_global`, so a session opened in a project leads with that
+  project's context.
+- **One project identity across doors**, so a directory means the same project
+  whichever editor captured it.
+
+### Privacy and scrubbing
+
+- Credential redaction covers AWS temporary credentials and is no longer
+  brittle about key length. Its documented limits are on the
+  [privacy page](https://itsuki.app/docs/#/privacy): an unlabelled
+  high-entropy string, or a labelled passphrase of ordinary words, can still be
+  stored.

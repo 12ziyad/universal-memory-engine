@@ -133,6 +133,69 @@ if (preview.dry_run) {
 
 `confirm: true` is destructive. With no source or time filter it can select all extraction runs in the chosen memory space.
 
+### Scoped delete vs erasure
+
+The two shapes behave differently on purpose:
+
+- **Scoped** (a `source` and/or a time window) is curation. Saves you already submitted that are still processing are **not** cancelled — they finish, and their output lands after the delete. The preview reports `pending_jobs` so that count is never a surprise.
+- **Unscoped and confirmed** is an erasure. It records a barrier, sweeps to convergence, and **cancels accepted work that has not yet committed**, so nothing you erased can reappear.
+
+```js
+const result = await memory.deleteBySource({ userId: "ada", confirm: true });
+// result.cancelled_runs        → in-flight saves the erasure cancelled
+// result.convergence_passes    → 1 means the first sweep was sufficient
+// result.deleted               → { runs, nodes, pages, slices, events, edges, candidates }
+```
+
+### A save your own erasure cancelled
+
+A cancelled save is **terminal**, and it is reported through the status you already poll:
+
+```js
+const terminal = await memory.waitFor(receipt.source_packet_id);
+
+if (terminal.cancelled_by_delete) {
+  // terminal.status         === "failed"
+  // terminal.outcome_reason === "cancelled_by_delete"
+  // terminal.error          === "cancelled_by_delete: a confirmed delete erased this scope …"
+}
+```
+
+The status stays `failed` rather than becoming a new word, because every released client treats `enriched`, `failed` and `completed` as the complete terminal set — a fourth value would make an older client poll a finished job forever. The distinction is published as its own field instead.
+
+**Do not retry a cancelled save.** It is not transient: the barrier applies to that original work, so a retry is cancelled the same way. If you still want the content stored, submit it as a **new** save — work accepted after the barrier is ordinary work and lands normally.
+
+Triage — separate real failures from your own erasures by reading the field, which this version returns on every job:
+
+```js
+const failed = await memory.jobs({ userId: "ada", status: "failed" });
+const broken = failed.jobs.filter((job) => !job.cancelled_by_delete);   // worth investigating
+const erased = failed.jobs.filter((job) => job.cancelled_by_delete);    // expected, no action
+```
+
+The API also accepts a server-side filter, `GET /v1/jobs?cancelled=true|false`. **This client cannot send it**: `jobs()` validates its options against a fixed list and rejects `cancelled` with `invalid_argument`. That is a client limitation, not a server one — filter locally as above, or call the endpoint directly if you need the server to do it:
+
+```js
+const res = await fetch("https://itsuki.app/v1/jobs?userId=ada&cancelled=true", {
+  headers: { authorization: `Bearer ${process.env.ITSUKI_API_KEY}` },
+});
+```
+
+## Memory scope
+
+Sending no `userId` writes to your account root. Sending one creates an isolated sub-tenant derived from your account plus that string — two accounts sending the same `userId` never share memory.
+
+Project scope narrows recall *within* a memory user. Memory that the Claude Code or Codex plugin captured in a project is reachable here **only when this client carries the same project scope**:
+
+```js
+await memory.recall("deployment decisions", {
+  memoryScope: { projectId: "local_3f2a…" },
+  recallScope: "project_then_global",   // or "project_only"
+});
+```
+
+It does not become account-global on its own. Run the plugin's `doctor` to see the project id a directory derives.
+
 ## Errors and TypeScript
 
 Every HTTP, timeout, transport, or local validation failure throws `MemoryAPIError`:
@@ -159,6 +222,8 @@ The package includes first-party TypeScript declarations for client options, sco
 ## 0.2.1 release changes
 
 This directory is the `0.2.1` release candidate. `npm install itsuki` resolves the version currently published to the registry; inspect the exported `VERSION` before relying on newly prepared helpers.
+
+**Compatibility status: 0.2.1 is current and needs no upgrade.** It was re-verified end to end against the live service after the deletion/erasure work landed, including the erasure flow and the cancellation path described above. No client change was required: the server expresses cancellation through the terminal state this version already knows plus additional response fields, and additive fields are tolerated by construction. There is no 0.2.2 — if you are on 0.2.1, you are on the verified version.
 
 - Adds complete TypeScript declarations.
 - Makes per-call `userId` selection consistent across every supported operation.

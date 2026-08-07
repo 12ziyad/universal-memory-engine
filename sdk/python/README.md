@@ -157,6 +157,84 @@ deleted = memory.delete_by_source(
 When supplied, `source` must be a non-empty identifier and `before`/`after`
 must be finite numbers greater than or equal to `1`.
 
+### Scoped delete vs erasure
+
+The two shapes behave differently on purpose:
+
+- **Scoped** (a `source` and/or a time window) is curation. Saves already
+  submitted and still processing are **not** cancelled — they finish, and their
+  output lands after the delete. The preview reports `pending_jobs` so that
+  count is never a surprise.
+- **Unscoped and confirmed** is an erasure. It records a barrier, sweeps to
+  convergence, and **cancels accepted work that has not yet committed**, so
+  nothing erased can reappear.
+
+```python
+result = memory.delete_by_source(confirm=True, user_id="ada")
+result["cancelled_runs"]       # in-flight saves the erasure cancelled
+result["convergence_passes"]   # 1 means the first sweep was sufficient
+result["deleted"]              # runs, nodes, pages, slices, events, edges, candidates
+```
+
+### A save your own erasure cancelled
+
+A cancelled save is **terminal**, reported through the status you already poll:
+
+```python
+terminal = memory.wait_for(receipt["source_packet_id"])
+
+if terminal.get("cancelled_by_delete"):
+    terminal["status"]          # "failed"
+    terminal["outcome_reason"]  # "cancelled_by_delete"
+    terminal["error"]           # "cancelled_by_delete: a confirmed delete erased this scope …"
+```
+
+The status stays `failed` rather than becoming a new word, because every
+released client treats `enriched`, `failed` and `completed` as the complete
+terminal set — a fourth value would make an older client poll a finished job
+forever. The distinction is published as its own field instead.
+
+**Do not retry a cancelled save.** It is not transient: the barrier applies to
+that original work, so a retry is cancelled the same way. If you still want the
+content stored, submit it as a **new** save — work accepted after the barrier is
+ordinary work and lands normally.
+
+Triage — separate real failures from your own erasures by reading the field,
+which this version returns on every job:
+
+```python
+failed = memory.jobs(status="failed", user_id="ada")
+broken = [job for job in failed["jobs"] if not job.get("cancelled_by_delete")]
+erased = [job for job in failed["jobs"] if job.get("cancelled_by_delete")]
+```
+
+The API also accepts a server-side filter, `GET /v1/jobs?cancelled=true|false`.
+**This client cannot send it**: `jobs()` has a fixed signature and raises
+`TypeError` on `cancelled`. That is a client limitation, not a server one —
+filter locally as above, or call the endpoint directly with `httpx` when you
+need the server to do it.
+
+## Memory scope
+
+Sending no `user_id` writes to your account root. Sending one creates an
+isolated sub-tenant derived from your account plus that string — two accounts
+sending the same `user_id` never share memory.
+
+Project scope narrows recall *within* a memory user. Memory that the Claude Code
+or Codex plugin captured in a project is reachable here **only when this client
+carries the same project scope**:
+
+```python
+memory.recall(
+    "deployment decisions",
+    memory_scope={"project_id": "local_3f2a…"},
+    recall_scope="project_then_global",   # or "project_only"
+)
+```
+
+It does not become account-global on its own. Run the plugin's `doctor` to see
+the project id a directory derives.
+
 ## Errors and types
 
 Non-success responses and transport failures raise `MemoryAPIError` with:
