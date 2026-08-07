@@ -498,8 +498,108 @@ function itemSummary(entry) {
 	};
 }
 
+/**
+ * Startup context for a project: what this project holds, ranked by salience
+ * and recency. Deterministic and model-free — no embedding call, no query
+ * matching, no gate. Scope is enforced exactly as everywhere else, so a
+ * bootstrap can never borrow another project's memory (I5).
+ */
+async function projectBootstrapRecall(env, userId, opts = {}) {
+	const { recallScope, projectId } = resolveRecallScope(userId, opts);
+	const bindings = projectBindings(recallScope, projectId);
+	const plan = { ...recallGate("project memory"), mode: "project_bootstrap", reason: "session_start_lookup" };
+	try {
+		const [nodesRes, pagesRes, slicesRes, eventsRes] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT n.id, n.label, n.category, n.state, n.summary, n.aliases_json, n.updated_at,
+					n.last_seen_at, n.heat_score, n.cluster, n.project_id, n.project_name
+				 FROM nodes n
+				 WHERE n.user_id = ? AND n.deleted_at IS NULL AND n.archived_at IS NULL AND n.suppressed_at IS NULL${projectPredicate("n", recallScope)}
+				 ORDER BY COALESCE(n.heat_score, 1) DESC, COALESCE(n.updated_at, n.last_seen_at, 0) DESC
+				 LIMIT ?`,
+			).bind(userId, ...bindings, plan.maxContextNodes),
+			env.DB.prepare(
+				`SELECT p.id, p.title, p.topic_filter, p.short_summary, p.key_points_json, p.decisions_json,
+					p.next_steps_json, p.related_concepts_json, p.updated_at, p.heat_score, p.source_mode,
+					p.cluster, p.project_id, p.project_name
+				 FROM memory_pages p
+				 WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.suppressed_at IS NULL${projectPredicate("p", recallScope)}
+				 ORDER BY COALESCE(p.heat_score, 1) DESC, COALESCE(p.updated_at, 0) DESC
+				 LIMIT ?`,
+			).bind(userId, ...bindings, plan.maxContextPages),
+			env.DB.prepare(
+				`SELECT s.id, s.node_id, s.text, s.kind, s.created_at, s.project_id, s.project_name
+				 FROM slices s
+				 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
+			).bind(userId, ...bindings),
+			env.DB.prepare(
+				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
+					e.project_id, e.project_name
+				 FROM events e
+				 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
+				 ORDER BY e.created_at DESC LIMIT ?`,
+			).bind(userId, ...bindings, plan.eventScanLimit),
+		]);
+
+		const nodes = nodesRes.results ?? [];
+		const pages = pagesRes.results ?? [];
+		if (!nodes.length && !pages.length) return emptyRecall(plan);
+
+		const slicesByNode = new Map();
+		for (const s of slicesRes.results ?? []) {
+			if (!slicesByNode.has(s.node_id)) slicesByNode.set(s.node_id, []);
+			slicesByNode.get(s.node_id).push(s);
+		}
+		const eventsByNode = new Map();
+		for (const e of eventsRes.results ?? []) {
+			const list = eventsByNode.get(e.node_id) ?? [];
+			if (list.length < plan.maxEventsPerNode) list.push(e);
+			eventsByNode.set(e.node_id, list);
+		}
+
+		const entries = [
+			...nodes.map((node) => ({
+				type: "node",
+				item: {
+					...node,
+					slices: slicesByNode.get(node.id) ?? [],
+					events: eventsByNode.get(node.id) ?? [],
+					relations: [],
+				},
+			})),
+			...pages.map((page) => ({
+				type: "page",
+				item: { ...page, key_points: parseJsonArray(page.key_points_json) },
+			})),
+		];
+		const context = buildContext(entries, plan);
+		return {
+			...emptyRecall(plan),
+			context,
+			count: entries.length,
+			nodes: nodes.map((n) => ({ id: n.id, label: n.label, category: n.category })),
+			pages: pages.map((p) => ({ id: p.id, title: p.title })),
+			compressed: Boolean(context),
+		};
+	} catch (error) {
+		// Startup context is a convenience: never fail a session over it.
+		console.warn("project bootstrap recall failed:", error?.message ?? error);
+		return emptyRecall(plan);
+	}
+}
+
 export async function recall(env, config, userId, query, opts = {}) {
 	const q = String(query ?? "").trim();
+	// REC-01: opening a session is a LOOKUP, not a question. Both plugins used
+	// to send a fixed sentence ("project decisions, conventions, architecture,
+	// and fixes for X") and hope similarity found something — but scoped recall
+	// deliberately skips BM25 (search profiles carry no project column), so
+	// ordinary project memory, which shares no words with that sentence,
+	// matched nothing and the user was told their project had no memory.
+	// Mem0 separates get_all(filters) from search(query); Zep/Graphiti expose
+	// get_episodes alongside graph search, for exactly this reason.
+	const bootstrap = String(opts.recallMode ?? "").trim() === "project_bootstrap";
+	if (bootstrap) return projectBootstrapRecall(env, userId, opts);
 	const plan = recallGate(q, opts);
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	if (plan.mode === "no_recall") return emptyRecall(plan);

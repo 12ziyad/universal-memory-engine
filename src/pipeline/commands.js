@@ -526,6 +526,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 			const value = await recall(env, getConfig(env), userId, query, {
 				memoryScope: input.memoryScope,
 				recallScope: input.recallScope,
+				recallMode: input.recallMode,
 			});
 			return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 		});

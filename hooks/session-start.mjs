@@ -110,9 +110,15 @@ async function recallProject(project, memoryScope, timeoutMs) {
 			redirect: "manual",
 			headers: { authorization: `Bearer ${API_KEY}`, "content-type": "application/json" },
 			body: JSON.stringify({
+				// REC-01: opening a session asks "what does this project know?",
+				// which is a lookup, not a similarity search. The query stays for
+				// older servers that ignore recallMode; the mode is what makes
+				// ordinary project memory (which shares no words with this
+				// sentence) actually come back.
 				query: `project decisions, conventions, architecture, and fixes for ${project.projectName}`,
 				memoryScope,
 				recallScope: PROJECT_RECALL_SCOPE,
+				recallMode: "project_bootstrap",
 			}),
 		});
 		if (response.status === 401 || response.status === 403) {

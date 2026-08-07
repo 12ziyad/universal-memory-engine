@@ -44,7 +44,7 @@ const COMMON = [
 
 export const ENDPOINT_PARAMS = {
 	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope"],
-	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope"],
+	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope", "recallMode"],
 	"/v1/ingest": [...COMMON, "messages", "flush", "delivery"],
 	"/v1/turn": [...COMMON, "messages", "query", "recallScope"],
 };

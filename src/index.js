@@ -1597,6 +1597,7 @@ const routes = {
 			topic: body.topic,
 			memoryScope: auth.memoryScope,
 			recallScope: body.recallScope,
+			recallMode: body.recallMode,
 		});
 		return json(result, result?.ok === false ? (result.http_status ?? 400) : 200);
 	},

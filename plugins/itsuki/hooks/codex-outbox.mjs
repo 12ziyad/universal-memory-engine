@@ -1213,9 +1213,12 @@ export async function recallCodexContext({
 			signal: controller.signal,
 			headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
 			body: JSON.stringify({
+				// REC-01: session start is a lookup, not a similarity search. The
+				// query remains for servers that predate recallMode.
 				query: `project decisions, conventions, architecture, and fixes for ${safeScope.projectName}`,
 				memoryScope: safeScope,
 				recallScope: "project_then_global",
+				recallMode: "project_bootstrap",
 			}),
 		});
 		if (!response.ok || String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
