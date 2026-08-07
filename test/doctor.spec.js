@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -410,5 +410,47 @@ describe("trusted Itsuki doctor", () => {
 
 		expect(result.code).toBe(0);
 		expect(JSON.parse(result.stdout).reason).toMatch(/^FAIL  delivery authentication pause/m);
+	}, 30_000);
+});
+
+describe("A11 — the doctor answers the two questions support always asks", () => {
+	it("reports the installed plugin version and the derived project identity", async () => {
+		const data = await fixture("doctor-a11-identity");
+		const endpoint = await service();
+		const result = await runHook(data, endpoint.url);
+
+		expect(result.code).toBe(0);
+		const output = JSON.parse(result.stdout);
+
+		// "Which build am I running?" — read off the installed manifest, so it
+		// cannot drift from the copy actually executing.
+		const manifest = JSON.parse(await readFile(join(ROOT, ".claude-plugin", "plugin.json"), "utf8"));
+		expect(output.reason).toMatch(/^PASS  plugin version -- itsuki \d+\.\d+\.\d+ \(installed manifest\)$/m);
+		expect(output.reason).toContain(`itsuki ${manifest.version}`);
+
+		// "Why can't my project memory be seen from the SDK?" — the answer is the
+		// derived project id, which the user could not see anywhere before.
+		expect(output.reason).toMatch(/^PASS  project identity -- this directory derives local_[0-9a-f]{32}/m);
+		expect(output.reason).toMatch(/an SDK or REST caller must carry it to see the same memory/);
+	}, 30_000);
+
+	it("names an ITSUKI_PROJECT_ID override instead of silently honouring it", async () => {
+		const data = await fixture("doctor-a11-override");
+		const endpoint = await service();
+		const result = await runHook(data, endpoint.url, { extraEnv: { ITSUKI_PROJECT_ID: "local_pinned_project_id" } });
+
+		const output = JSON.parse(result.stdout);
+		expect(output.reason).toMatch(/^PASS  project identity -- this directory derives local_pinned_project_id \(ITSUKI_PROJECT_ID override in effect\)/m);
+	}, 30_000);
+
+	it("never prints the working directory path, which is identity material", async () => {
+		const data = await fixture("doctor-a11-nopath");
+		const endpoint = await service();
+		const result = await runHook(data, endpoint.url);
+
+		const output = JSON.parse(result.stdout);
+		// The basename may appear (it is UI), but never the absolute path.
+		expect(output.reason).not.toContain(ROOT);
+		expect(`${result.stdout}\n${result.stderr}`).not.toContain("DOCTOR_HOOK_CANARY_82731");
 	}, 30_000);
 });

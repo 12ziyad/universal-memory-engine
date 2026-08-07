@@ -13,6 +13,7 @@ export default defineConfig({
 		// turning PowerShell process-start contention into suite-only flakes.
 		maxWorkers: process.platform === "win32" ? 1 : 4,
 		include: [
+			"test/codex_doctor.spec.js",
 			"test/codex_hook_manifest.spec.js",
 			"test/codex_outbox.spec.js",
 			"test/codex_outbox_recovery.spec.js",

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { probeMcp } from "./mcp-diagnostic.mjs";
 import { validatePluginContract } from "./plugin-contract.mjs";
+import { claudeProjectDirectory, resolveProjectIdentity } from "./project-identity.mjs";
 import {
 	DEFAULT_DELIVERY_BASE_URL,
 	bindOutbox,
@@ -62,6 +63,38 @@ async function staticConfigEvidence() {
 		return validatePluginContract({ manifest, registered: hooks, legacyMcpPresent });
 	} catch {
 		return false;
+	}
+}
+
+/** The artifact version actually executing — "which build am I running?" is the
+ *  first question in any support conversation, and reading it off the installed
+ *  manifest is the only answer that cannot be stale. */
+async function versionEvidence() {
+	const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+	try {
+		const manifest = JSON.parse(await readFile(resolve(root, ".claude-plugin", "plugin.json"), "utf8"));
+		return { version: typeof manifest.version === "string" ? manifest.version : null, name: manifest.name ?? null };
+	} catch {
+		return { version: null, name: null };
+	}
+}
+
+/** The derived project identity. Memory captured in a project is reachable only
+ *  under this id (architecture.md §I), so "my project memory is missing" is
+ *  almost always a question about WHICH id this directory derives — which the
+ *  user could not see anywhere before. The directory PATH is identity material
+ *  and is never printed; the opaque id and the basename are. */
+async function projectEvidence(input) {
+	try {
+		const directory = claudeProjectDirectory(input?.cwd);
+		const identity = await resolveProjectIdentity(directory);
+		return {
+			projectId: identity.projectId,
+			projectName: identity.projectName,
+			overridden: Boolean(String(process.env.ITSUKI_PROJECT_ID ?? "").trim()),
+		};
+	} catch {
+		return null;
 	}
 }
 
@@ -222,11 +255,13 @@ async function main() {
 
 	let health = null;
 	try { health = await diagnostic.inspect({ apiKey: API_KEY, baseUrl }); } catch {}
-	const [root, staticConfigOk, recall, mcp] = await Promise.all([
+	const [root, staticConfigOk, recall, mcp, version, project] = await Promise.all([
 		rootEvidence(),
 		staticConfigEvidence(),
 		keyValid ? boundedRecall(baseUrl) : { outcome: "skipped", httpStatus: null },
 		keyValid ? probeMcp({ apiKey: API_KEY, baseUrl }) : { outcome: "skipped", toolsValid: false },
+		versionEvidence(),
+		projectEvidence(input),
 	]);
 	let failures = 0;
 	let warnings = 0;
@@ -236,6 +271,8 @@ async function main() {
 	const warn = (name, detail) => { warnings += 1; lines.push(`WARN  ${name} -- ${detail}`); };
 	const skip = (name, detail) => lines.push(`SKIP  ${name} -- ${detail}`);
 	pass("trusted invocation", "user-typed Itsuki plugin command reached UserPromptExpansion");
+	if (version.version) pass("plugin version", `${version.name ?? "itsuki"} ${version.version} (installed manifest)`);
+	else fail("plugin version", "the installed plugin manifest could not be read; reinstall the plugin");
 	if ([22, 24].includes(Number(process.versions.node.split(".")[0]))) pass("Node runtime", `Node ${process.versions.node} from the configured absolute executable`);
 	else fail("Node runtime", `Node ${process.versions.node} is unsupported; select Node 22 or 24 LTS through /plugin`);
 	if (root.matches) pass("installed plugin root", "CLAUDE_PLUGIN_ROOT matches this executing plugin copy");
@@ -246,6 +283,9 @@ async function main() {
 	else warn("service target", "explicit loopback/development target used; this does not prove production");
 	if (keyValid) pass("sensitive key", "trusted hook received a header-safe plugin credential (value hidden)");
 	else fail("sensitive key", "trusted hook did not receive a valid key; configure itsuki_api_key through /plugin and reload");
+	if (project?.projectId) {
+		pass("project identity", `this directory derives ${project.projectId}${project.overridden ? " (ITSUKI_PROJECT_ID override in effect)" : ""}; project memory saved here is recalled under that id, and an SDK or REST caller must carry it to see the same memory`);
+	} else warn("project identity", "the working directory could not be resolved, so project-scoped recall may fall back to account-global memory");
 	if (!health) fail("protected outbox", "metadata inspection failed; queued content was not deleted");
 	else if (Number(health.deliveryGroups?.incomplete ?? 0) > 0) {
 		fail("protected outbox", `${health.deliveryGroups.incomplete} ordered delivery group${health.deliveryGroups.incomplete === 1 ? " is a" : "s are"} recoverable incomplete prefix${health.deliveryGroups.incomplete === 1 ? "" : "es"}; content remains protected and later SessionStart runs resume it`);
