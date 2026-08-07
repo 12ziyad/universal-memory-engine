@@ -88,7 +88,7 @@ async function fixture(baseUrl) {
 	return { pluginData, scope };
 }
 
-async function endpoint({ ingestStatus = 202, recallContext = "Remember the accepted startup delivery." } = {}) {
+async function endpoint({ ingestStatus = 202, recallContext = "Remember the accepted startup delivery.", recallDelayMs = 0 } = {}) {
 	const requests = [];
 	const server = createServer(async (request, response) => {
 		const chunks = [];
@@ -101,6 +101,7 @@ async function endpoint({ ingestStatus = 202, recallContext = "Remember the acce
 			return;
 		}
 		if (request.url === "/v1/recall") {
+			if (recallDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, recallDelayMs));
 			response.statusCode = 200;
 			response.end(JSON.stringify({ ok: true, context: recallContext }));
 			return;
@@ -123,6 +124,35 @@ function payload(cwd, source = "startup") {
 		source,
 	};
 }
+
+describe("Codex SessionStart recall budget vs real service latency", () => {
+	// CDX-08. Measured against production on a real account (9/9 samples):
+	// recall p50 2130 ms, max 2726 ms — while this hook capped recall at
+	// 1000 ms inside a 3800 ms total budget that delivery could consume first.
+	// The result was that project recall NEVER succeeded for an account with
+	// meaningful memory: the user simply got "recall was unavailable within
+	// its bound" every session, silently, forever. Same class as CDX-06 (a
+	// bound picked for the host budget, never checked against measured
+	// latency) — and Claude's equivalent hook allows 8000 ms.
+	it("recalls successfully when the service answers at production-realistic latency", async () => {
+		const service = await endpoint({ recallContext: "Keep the harbor ledger convention.", recallDelayMs: 2_200 });
+		const data = await fixture(service.url);
+		const result = await runHook(payload(data.pluginData), {
+			PLUGIN_ROOT,
+			PLUGIN_DATA: data.pluginData,
+			ITSUKI_API_KEY: API_KEY,
+			ITSUKI_BASE_URL: service.url,
+		}, 20_000);
+
+		expect(result.code).toBe(0);
+		expect(service.requests.map(({ url }) => url)).toContain("/v1/recall");
+		const output = JSON.parse(result.stdout);
+		const message = String(output.systemMessage ?? "");
+		expect(message).not.toMatch(/recall was unavailable within its bound/i);
+		expect(message).toMatch(/project memory recalled/i);
+		expect(String(output.hookSpecificOutput?.additionalContext ?? "")).toContain("harbor ledger");
+	});
+});
 
 describe("Codex SessionStart delivery and recall", () => {
 	it("delivers the protected queue before recall and emits only bounded safe context/status", async () => {

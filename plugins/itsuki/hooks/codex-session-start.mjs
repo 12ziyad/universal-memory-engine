@@ -14,7 +14,18 @@ import {
 const MAX_STDIN_BYTES = 64 * 1024;
 // Bounded well below the 10 s host hook timeout (hooks.json), leaving margin
 // for PowerShell/Node launcher startup before this budget starts counting.
-const TOTAL_BUDGET_MS = 3_800;
+//
+// CDX-08: 3800 ms could not hold BOTH a bounded drain (≤2600 ms) and a recall,
+// so recall was left ~1 s — below the measured production recall latency on a
+// real account (p50 2130 ms, max 2726 ms across 9 samples). Project recall
+// therefore never succeeded for anyone with meaningful memory. Sized from that
+// measurement: drain 2600 + recall 3500 + launcher/startup margin, still ~2 s
+// clear of the 10 s host kill. Claude's equivalent hook allows 8000 ms for
+// recall inside a 12 s budget, so this also ends an unexplained asymmetry.
+const TOTAL_BUDGET_MS = 7_500;
+// Covers measured max (2726 ms) with ~30% headroom, and stays bounded by the
+// budget actually remaining after delivery.
+const RECALL_BUDGET_MS = 3_500;
 
 async function readBoundedStdin() {
 	const chunks = [];
@@ -112,7 +123,7 @@ async function main() {
 			apiKey,
 			baseUrl,
 			memoryScope,
-			timeoutMs: Math.min(1_000, remaining),
+			timeoutMs: Math.min(RECALL_BUDGET_MS, remaining),
 		});
 	} catch {
 		recalled = { status: "unavailable", context: "" };
