@@ -503,6 +503,12 @@ function itemSummary(entry) {
  * and recency. Deterministic and model-free — no embedding call, no query
  * matching, no gate. Scope is enforced exactly as everywhere else, so a
  * bootstrap can never borrow another project's memory (I5).
+ *
+ * Project rows lead. Under project_then_global the account's global memory
+ * shares this bounded context, and it is often much hotter — live reproduction
+ * showed ten global nodes displacing a project's only node, so a session opened
+ * in that project would have shown everything EXCEPT the project. Global memory
+ * is supporting material here, never the headline.
  */
 async function projectBootstrapRecall(env, userId, opts = {}) {
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
@@ -515,7 +521,8 @@ async function projectBootstrapRecall(env, userId, opts = {}) {
 					n.last_seen_at, n.heat_score, n.cluster, n.project_id, n.project_name
 				 FROM nodes n
 				 WHERE n.user_id = ? AND n.deleted_at IS NULL AND n.archived_at IS NULL AND n.suppressed_at IS NULL${projectPredicate("n", recallScope)}
-				 ORDER BY COALESCE(n.heat_score, 1) DESC, COALESCE(n.updated_at, n.last_seen_at, 0) DESC
+				 ORDER BY CASE WHEN n.project_id IS NULL THEN 1 ELSE 0 END ASC,
+					COALESCE(n.heat_score, 1) DESC, COALESCE(n.updated_at, n.last_seen_at, 0) DESC
 				 LIMIT ?`,
 			).bind(userId, ...bindings, plan.maxContextNodes),
 			env.DB.prepare(
@@ -524,7 +531,8 @@ async function projectBootstrapRecall(env, userId, opts = {}) {
 					p.cluster, p.project_id, p.project_name
 				 FROM memory_pages p
 				 WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.suppressed_at IS NULL${projectPredicate("p", recallScope)}
-				 ORDER BY COALESCE(p.heat_score, 1) DESC, COALESCE(p.updated_at, 0) DESC
+				 ORDER BY CASE WHEN p.project_id IS NULL THEN 1 ELSE 0 END ASC,
+					COALESCE(p.heat_score, 1) DESC, COALESCE(p.updated_at, 0) DESC
 				 LIMIT ?`,
 			).bind(userId, ...bindings, plan.maxContextPages),
 			env.DB.prepare(

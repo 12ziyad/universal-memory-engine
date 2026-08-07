@@ -123,6 +123,37 @@ describe("project startup recall returns the project's memory", () => {
 		expect(String(recalled.body?.context ?? "")).not.toMatch(/porcelain drawbridge|nightly ledger/i);
 	});
 
+	it("puts the project's own memory ahead of higher-heat global memory", async () => {
+		// The plugins ask for project_then_global, so global memory competes for
+		// the same bounded context. Live reproduction showed ten hotter global
+		// nodes displacing the project's only node entirely — a session opened
+		// in a project would show everything EXCEPT that project. Startup
+		// context must lead with the project; global is supporting material.
+		const userId = `bootstrap-priority-${crypto.randomUUID()}`;
+		await seedProjectMemory(userId);
+		const now = Date.now();
+		for (let i = 0; i < 10; i++) {
+			await env.DB.prepare(
+				`INSERT INTO nodes (id, user_id, label, category, state, summary, aliases_json, created_at,
+					updated_at, last_seen_at, heat_score, project_id, project_name)
+				 VALUES (?, ?, ?, 'other', 'active', ?, '[]', ?, ?, ?, ?, NULL, NULL)`,
+			).bind(
+				`node_${crypto.randomUUID()}`, userId, `Global hot topic ${i}`,
+				"Account-wide memory with a much higher heat score.", now, now, now, 99,
+			).run();
+		}
+
+		const recalled = await call("/v1/recall", {
+			userId,
+			query: BOILERPLATE,
+			memoryScope: scope,
+			recallScope: "project_then_global",
+			recallMode: "project_bootstrap",
+		});
+		const context = String(recalled.body?.context ?? "");
+		expect(context).toMatch(/porcelain drawbridge/i);
+	});
+
 	it("returns an empty context for a project with no memory", async () => {
 		const userId = `bootstrap-empty-${crypto.randomUUID()}`;
 		const recalled = await call("/v1/recall", {
