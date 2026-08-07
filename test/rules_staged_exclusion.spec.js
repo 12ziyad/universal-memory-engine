@@ -16,7 +16,7 @@
 import { env, createExecutionContext, waitOnExecutionContext, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import worker from "../src";
+import worker, { scopedMemoryUserId } from "../src";
 import { saveMemoryRules } from "../src/pipeline/rules.js";
 
 const headers = { "x-api-key": env.API_KEY, "content-type": "application/json" };
@@ -128,6 +128,106 @@ describe("user rules gate the read-your-writes staging index", () => {
 		});
 
 		expect(await stagedRowsFor(userId)).toHaveLength(1);
+		await stub.resetAll();
+	});
+});
+
+async function call(path, init) {
+	const request = new Request(`http://example.com${path}`, init);
+	const ctx = createExecutionContext();
+	const response = await worker.fetch(request, env, ctx);
+	await waitOnExecutionContext(ctx);
+	let body = null;
+	try { body = await response.json(); } catch {}
+	return { status: response.status, body, cookie: response.headers.get("set-cookie")?.split(";")[0] ?? null };
+}
+
+async function bearerAccount(prefix) {
+	const signup = await call("/auth/signup", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ email: `${prefix}-${crypto.randomUUID()}@example.com`, password: "correct-horse", name: prefix, acceptTerms: true }),
+	});
+	expect(signup.status).toBe(201);
+	const tok = await call("/auth/tokens", {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie: signup.cookie },
+		body: JSON.stringify({ type: "api", label: "sdk" }),
+	});
+	return { key: tok.body.token, ownerId: signup.body.user.id };
+}
+
+describe("account rules govern sub-tenant staging (Bearer door, defect SRV-04)", () => {
+	// Rules belong to the ACCOUNT (doorOverrides): a derived mem_ sub-tenant id
+	// owns no configuration, so the door loads the account rules once and hands
+	// them to the pipeline as an override — the gates already enforce that
+	// object. Staging must enforce the SAME object instead of re-resolving by
+	// the scoped id, which silently returns defaults.
+	it("keeps account-excluded content out of a sub-tenant's staged rows and pre-enrichment recall", async () => {
+		const { key, ownerId } = await bearerAccount("srv04");
+		const bearer = { "content-type": "application/json", authorization: `Bearer ${key}` };
+		const tenant = `tenant-${crypto.randomUUID()}`;
+
+		const put = await call("/v1/rules", {
+			method: "PUT",
+			headers: bearer,
+			body: JSON.stringify({ userId: tenant, rules: { excludes: ["salary"] } }),
+		});
+		expect(put.status).toBe(200);
+		expect(put.body?.rules?.excludes).toContain("salary");
+
+		const memId = await scopedMemoryUserId(ownerId, tenant);
+		expect(memId).not.toBe(ownerId);
+		const stub = await holdLease(memId);
+
+		const save = await call("/v1/ingest", {
+			method: "POST",
+			headers: bearer,
+			body: JSON.stringify({
+				userId: tenant,
+				flush: true,
+				messages: [
+					{ id: "m1", role: "user", content: "My salary at Meridian is ninety-two thousand euros a year." },
+					{ id: "m2", role: "user", content: "I decided our deploy pipeline always runs the smoke suite first." },
+				],
+			}),
+		});
+		expect(save.status).toBe(200);
+
+		const staged = await stagedRowsFor(memId);
+		expect(staged.some((text) => /salary/i.test(text))).toBe(false);
+		// The allowed line must still stage — account rules are not a shutdown.
+		expect(staged.some((text) => /smoke suite/i.test(text))).toBe(true);
+
+		const recalled = await call("/v1/recall", {
+			method: "POST",
+			headers: bearer,
+			body: JSON.stringify({ userId: tenant, query: "What is my salary at Meridian?" }),
+		});
+		expect(String(recalled.body?.context ?? "")).not.toMatch(/salary|ninety-two thousand/i);
+
+		await stub.resetAll();
+	});
+
+	it("still stages everything for a sub-tenant when the account has no rules", async () => {
+		const { key, ownerId } = await bearerAccount("srv04-default");
+		const bearer = { "content-type": "application/json", authorization: `Bearer ${key}` };
+		const tenant = `tenant-${crypto.randomUUID()}`;
+		const memId = await scopedMemoryUserId(ownerId, tenant);
+		const stub = await holdLease(memId);
+
+		const save = await call("/v1/ingest", {
+			method: "POST",
+			headers: bearer,
+			body: JSON.stringify({
+				userId: tenant,
+				flush: true,
+				messages: [{ id: "m1", role: "user", content: "My office is above the bakery on Keizersgracht." }],
+			}),
+		});
+		expect(save.status).toBe(200);
+
+		expect(await stagedRowsFor(memId)).toHaveLength(1);
 		await stub.resetAll();
 	});
 });

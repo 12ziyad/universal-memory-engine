@@ -320,6 +320,10 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 
 	// 8.2 read-your-writes: the scrubbed text is findable NOW, not after
 	// enrichment. Best-effort — a staging failure never fails an accepted write.
+	// Rules belong to the ACCOUNT: for scoped sub-tenant doors the resolved
+	// rules ride in as an override (doorOverrides), and staging must enforce
+	// the same object the gates enforce — a derived mem_ id owns no rules row,
+	// so a self-load here would silently return defaults.
 	if (jobClaim.claimed) {
 		await stageMemoryText(env, userId, {
 			jobId,
@@ -328,6 +332,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			messages: normalized.messages,
 			projectId,
 			projectName,
+			rules: pipelineOverrides.rules,
 		});
 	}
 	maybeInjectIngestFault(env, ingestFault, "after_job_claim");
