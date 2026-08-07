@@ -51,6 +51,7 @@ export default defineConfig({
 			"test/migrations_append_only.spec.js",
 			"test/recall_gate.spec.js",
 			"test/sdk_js.spec.js",
+			"test/security_corpus_plugins.spec.js",
 			"test/title.spec.js",
 		],
 	},

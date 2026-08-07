@@ -801,16 +801,24 @@ describe("deterministic Claude coding-event capture", () => {
 			row({ uuid: "cargo-command-prose", content: "We decided to run cargo test RAW_CARGO_COMMAND." }),
 			row({ uuid: "go-command-prose", content: "We decided to run go test ./... RAW_GO_COMMAND." }),
 			row({ uuid: "code-assignment-prose", content: 'status = "fixed RAW_CODE_ASSIGNMENT"' }),
-			row({ type: "user", uuid: "named-secret-prose", content: 'We prefer pwd=x, password is "two words", and credential hunter2 for fixture access.' }),
+			// CLD-02 contract update (§3.2 justified): capture scrubbing is now the
+			// shared server lane verbatim — labeled values redact only in
+			// separator forms (=, :, is/was) with the D8 value-shape guard, and
+			// quoted multi-word passphrases are caught by the quoted alternates.
+			// The old bare-whitespace form ("credential hunter2") is gone on
+			// purpose: it ate ordinary prose ("token bucket", "bearer of bad
+			// news") in durable capture. A 1-char value (pwd=x) is prose noise,
+			// not a credential, under the same guard.
+			row({ type: "user", uuid: "named-secret-prose", content: 'We prefer pwd=x9$k42q, password is "two words", and credential: hunter2z for fixture access.' }),
 		], OPTIONS);
 
 		expect(result.messages).toHaveLength(1);
 		expect(result.messages[0].content).toContain("pwd=[REDACTED:secret]");
-		expect(result.messages[0].content).toContain('password is "[REDACTED:secret]"');
-		expect(allSerialized(result)).not.toContain("hunter2");
+		expect(result.messages[0].content).toContain("password is [REDACTED:secret]");
+		expect(allSerialized(result)).not.toContain("hunter2z");
 		expect(allSerialized(result)).not.toContain("two words");
 		expect(allSerialized(result)).not.toMatch(/RAW_(?:CARGO_COMMAND|GO_COMMAND|CODE_ASSIGNMENT)/);
-		expect(result.metadata.redactions.named_secret).toBe(3);
+		expect(result.metadata.redactions.labeled_secret).toBe(3);
 	});
 
 	it("returns no messages for a real-shape transcript with no durable outcome", async () => {

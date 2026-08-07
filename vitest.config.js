@@ -29,6 +29,7 @@ export default defineWorkersConfig(async () => {
 				"test/migrations_append_only.spec.js",
 				"test/project_identity.spec.js",
 				"test/sdk_js.spec.js",
+				"test/security_corpus_plugins.spec.js",
 				"test/session_end_delivery.spec.js",
 				"test/session_start_delivery.spec.js",
 			],

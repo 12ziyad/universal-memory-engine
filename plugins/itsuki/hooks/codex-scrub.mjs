@@ -14,7 +14,25 @@ export const RECALL_CLOSE_MARKER = "</itsuki-codex-recalled-context-v1>";
 const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 const URI_CREDENTIAL_RE = /\b([a-z][a-z0-9+.-]{1,30}):\/\/([^\s/@:]{1,64}):([^\s@]{1,256})@/gi;
 const QUERY_SECRET_RE = /([?&](?:api[_-]?key|token|secret|password|passwd|pwd|auth|access[_-]?token|apikey)=)([^\s&#]{6,})/gi;
-const NAMED_SECRET_RE = /\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|pwd|secret|token)\s*[:=]\s*)(["']?)([^\s,"'}]{8,})(\2)/gi;
+// Labeled → value forms, kept semantically identical to the server lane
+// (src/pipeline/scrub.js) and proven against the same corpus
+// (test/fixtures/security_corpus.mjs). Copied, not imported: this file stays
+// self-contained inside the installed plugin. CDX-07: the old single pattern
+// missed prose ("password is …"), prefixed labels (DB_PASSWORD=…), and
+// quoted JSON/YAML labels ("apiKey": "…").
+const SECRET_LABEL = "(?:pass(?:word|phrase|wd)?|pwd|secret|api[_-]?key|apikey|access[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|token|credential(?:s)?)";
+const LABELED_SECRET_ASSIGN_RE = new RegExp(
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(["']?\\s*[:=]\\s*)(?:"([^"\\r\\n]{1,256})"|'([^'\\r\\n]{1,256})'|([^\\s"']{6,256}))`,
+	"gi",
+);
+const LABELED_SECRET_PROSE_RE = new RegExp(
+	`\\b([A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*?[_-]?${SECRET_LABEL})(\\s+(?:is|was)\\s+)(?:"([^"\\r\\n]{1,256})"|'([^'\\r\\n]{1,256})'|([^\\s"']{6,256}))`,
+	"gi",
+);
+function looksLikeLabeledSecretValue(value) {
+	if (value.length < 6 || value.startsWith("[REDACTED")) return false;
+	return /[0-9]/.test(value) || /[^A-Za-z0-9]/.test(value);
+}
 const BEARER_RE = /\b(bearer\s+)([A-Za-z0-9._~+/=-]{12,})/gi;
 const LONG_TOKEN_RE = /[A-Za-z0-9+/=_-]{32,}/g;
 const KEY_PATTERNS = [
@@ -89,10 +107,6 @@ export function scrubCodexText(input) {
 		hit("query_secret");
 		return `${prefix}[REDACTED:secret]`;
 	});
-	text = text.replace(NAMED_SECRET_RE, (_match, prefix, quote) => {
-		hit("named_secret");
-		return `${prefix}${quote}[REDACTED:secret]${quote}`;
-	});
 	for (const pattern of KEY_PATTERNS) {
 		text = text.replace(pattern, () => {
 			hit("api_key");
@@ -109,6 +123,21 @@ export function scrubCodexText(input) {
 		hit("high_entropy");
 		return "[REDACTED:secret]";
 	});
+
+	// Last, mirroring the server lane: label→value forms run after the shape
+	// families so already-redacted values are left alone, and the LABEL is
+	// preserved because it carries the meaning.
+	for (const re of [LABELED_SECRET_ASSIGN_RE, LABELED_SECRET_PROSE_RE]) {
+		text = text.replace(re, (match, label, separator, doubleQuoted, singleQuoted, bare) => {
+			const value = doubleQuoted ?? singleQuoted ?? bare;
+			const secretish = bare === undefined
+				? looksLikeLabeledSecretValue(value) || (value.length >= 6 && /\s/.test(value) && !value.startsWith("[REDACTED"))
+				: looksLikeLabeledSecretValue(value);
+			if (!secretish) return match;
+			hit("named_secret");
+			return `${label}${separator}[REDACTED:secret]`;
+		});
+	}
 
 	return { text, redactions };
 }

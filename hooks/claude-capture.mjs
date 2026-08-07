@@ -57,7 +57,9 @@ const STACK_LINE_RE = /^\s*(?:at\s+\S+|File\s+"[^"]+",\s+line\s+\d+|\.{3}\s+\d+\
 const PROGRESS_RE = /^\s*(?:[|/\\-]\s*)?(?:\d{1,3}%|\[[-= >.]+\])\s*$/;
 const RAW_COMMAND_RE = /(?:^|[`$>]\s*|\b)(?:(?:npm|pnpm|yarn|bun)\s+(?:run|test|exec|install|add|remove|build|lint|deploy)\b|npx\s+\S+|git\s+(?:add|commit|push|pull|checkout|switch|reset|clean|status|diff|log)\b|wrangler\s+\S+|(?:cargo|go|dotnet|mvnw?|gradlew?)\s+(?:test|build|check|run|package|verify)\b|tsc(?:\.cmd)?\s+\S+|wrangler\s+\S+|curl\s+[-\w]|wget\s+[-\w]|(?:bash|sh|zsh|powershell|pwsh|cmd(?:\.exe)?)\s+(?:-|\/c)|(?:node|python(?:3)?|pytest|vitest|jest)\s+\S+)/i;
 const RAW_CODE_RE = /^\s*(?:const|let|var|function|class|interface|type|import|export|def|#include)\b|^\s*["']?[A-Za-z_$][\w$.-]*["']?\s*(?::|[+*/%-]?=)\s*.+|(?:=>|[{};])\s*$/i;
-const NAMED_SECRET_RE = /(\b(?:api[_ -]?key|access[_ -]?token|auth(?:orization)?|bearer|client[_ -]?secret|credential|password|passwd|pwd|secret|token)\b(?:(?:\s*(?:=|:|\bis\b)\s*)|\s+))(?:(?:"([^"\r\n]{1,256})")|(?:'([^'\r\n]{1,256})')|([^\s,;`]{1,256}))/gi;
+// (The old NAMED_SECRET_RE extra pass was removed here — CLD-02: the shared
+// scrub lane below covers every labeled class, and the bare-whitespace form
+// over-redacted ordinary prose in durable capture.)
 
 function sha256(value) {
 	return createHash("sha256").update(String(value ?? ""), "utf8").digest("hex");
@@ -285,17 +287,18 @@ function mergeRedactions(metadata, redactions) {
 	}
 }
 
-function scrubCaptureText(value) {
+// Exported as a test seam: the canonical security corpus
+// (test/fixtures/security_corpus.mjs) drives every scrubber in the stack.
+//
+// This is the shared server scrub lane verbatim (scrubText): since the
+// labeled/prose/.env/JSON families moved server-side (SEC-01/SEC-02), the
+// hook's old extra NAMED_SECRET_RE pass caught nothing the shared lane
+// misses while its bare-whitespace separator ate ordinary prose — "token
+// bucket", "bearer of bad news" — destroying legitimate capture content
+// (CLD-02, found by the corpus).
+export function scrubCaptureText(value) {
 	const result = scrubText(value);
-	const redactions = { ...result.redactions };
-	const text = result.text.replace(NAMED_SECRET_RE, (match, prefix, doubleQuoted, singleQuoted, bare) => {
-		const secret = doubleQuoted ?? singleQuoted ?? bare;
-		if (String(secret).startsWith("[REDACTED:")) return match;
-		redactions.named_secret = (redactions.named_secret ?? 0) + 1;
-		const quote = doubleQuoted !== undefined ? '"' : singleQuoted !== undefined ? "'" : "";
-		return `${prefix}${quote}[REDACTED:secret]${quote}`;
-	});
-	return { text, redactions };
+	return { text: result.text, redactions: { ...result.redactions } };
 }
 
 function redact(value, metadata) {
