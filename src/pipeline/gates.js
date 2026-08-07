@@ -261,7 +261,8 @@ async function recentEventMatch(env, userId, nodeId, action, now, projectId) {
  * keeps legitimately co-existing facts ("uses D1", "uses Vectorize") alive.
  */
 async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = {}) {
-	const namesObsolete = obsoletedValues(text).size > 0;
+	const namesObsolete = obsoletedValues(text).size > 0
+		|| (opts.updateMode === true && obsoletedValues(opts.sourceText).size > 0);
 	const attributeChange = opts.updateMode === true && Boolean(attributeAssertion(text));
 	if (!namesObsolete && !attributeChange) return [];
 	// S1: the extractor can split one subject across nodes ("Alnwick" and
@@ -285,8 +286,12 @@ async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = 
 		 WHERE user_id = ? AND node_id IN (${marks}) AND project_id IS ? AND deleted_at IS NULL AND is_current = 1
 		 ORDER BY created_at DESC LIMIT 120`,
 	).bind(userId, ...nodeIds, projectId).all();
+	// Conflict may be stated in the extracted text OR only in what the user
+	// wrote: extraction normalizes "now uses CircleCI, not Jenkins" into the
+	// clean "X uses CircleCI", which names nothing obsolete.
+	const conflictSources = [text, opts.updateMode ? opts.sourceText : null].filter(Boolean);
 	return (results ?? [])
-		.filter((s) => supersedesValue({ text }, { text: s.text })
+		.filter((s) => conflictSources.some((t) => supersedesValue({ text: t }, { text: s.text }))
 			|| (attributeChange && replacesAttributeValue({ text }, { text: s.text })))
 		// node_id must travel with the conflict: a cross-node retirement targets
 		// the node the OBSOLETE fact lives on, not the correction's node.
@@ -621,7 +626,7 @@ export async function applyGates(
 		// SUPERSEDE-01: retire whatever this correction makes obsolete, whatever
 		// kind it was filed under. Kind-keyed retirement alone left contradictory
 		// facts current in 3 of 3 measured correction shapes.
-		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId, { updateMode, nodes: nodeIdentityList() })) {
+		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 			plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 		}
 		plan.newSlices.push({
@@ -922,7 +927,7 @@ export async function applyGates(
 			if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
 			// SUPERSEDE-01: plus anything this correction explicitly obsoletes,
 			// regardless of the kind it was originally filed under.
-			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId, { updateMode, nodes: nodeIdentityList() })) {
+			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 				plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 			}
 			plan.newSlices.push({
@@ -1015,10 +1020,19 @@ export async function applyGates(
 			// still stale via edges). Close the validity window rather than
 			// deleting: recall already honors invalid_at and renders it as
 			// "(until …)", so history stays queryable.
-			if (isV2 && obj.fact) {
+			if (isV2) {
+				// The obsoleting language lives in what the USER wrote, not in the
+				// extracted fact: a correction "now uses CircleCI, not Jenkins"
+				// becomes the clean fact "X uses CircleCI", which names nothing as
+				// obsolete. Measured: the Jenkins relation stayed current because
+				// conflict was read from the fact alone. So consult the source
+				// text too — still requiring explicit obsoleting language, so an
+				// ordinary additive statement never closes anything.
+				const conflictSources = [obj.fact, updateMode ? sourceText : null].filter(Boolean);
 				for (const e of existingEdges) {
 					if (e.from_node !== from.id || e.invalid_at || e.deleted_at) continue;
-					if (!e.fact || !supersedesValue({ text: obj.fact }, { text: e.fact })) continue;
+					if (!e.fact) continue;
+					if (!conflictSources.some((t) => supersedesValue({ text: t }, { text: e.fact }))) continue;
 					plan.edgeClosures.push({ id: e.id, invalid_at: obj.valid_at ?? now });
 				}
 			}

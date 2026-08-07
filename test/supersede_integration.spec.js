@@ -245,6 +245,40 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(after.filter((s) => /paints its roof/i.test(s.text)).every((s) => s.is_current === 1), "the unrelated node's fact must survive").toBe(true);
 	});
 
+	it("closes a relation when the obsoleting language is only in the USER's message", async () => {
+		// Production shape (SUPERSEDE-01 final): extraction normalizes
+		// "now uses CircleCI, not Jenkins" into the clean fact "X uses CircleCI",
+		// which names nothing obsolete. Reading conflict from the fact alone left
+		// the Jenkins relation current — measured live on 57338efe.
+		const userId = `supersede-srctext-${crypto.randomUUID()}`;
+		const rel = (to, fact) => ({
+			objects: [
+				{ kind: "node", label: "Deploy runner", category: "other", confidence: 0.9 },
+				{ kind: "node", label: to, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Deploy runner", text: `pipeline runs on ${to}`, kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Deploy runner", to, type: "USES", fact, confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "I decided the deploy runner uses Jenkins for its pipeline.",
+			rel("Jenkins", "Deploy runner uses Jenkins"), `x1-${crypto.randomUUID()}`);
+		await drain(userId);
+		// The correction's EXTRACTED fact is clean; only the user text says "not Jenkins".
+		await save(userId, "Correction: the deploy runner now uses CircleCI, not Jenkins.",
+			rel("CircleCI", "Deploy runner uses CircleCI"), `x2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const { results } = await env.DB.prepare(
+			"SELECT fact, invalid_at FROM edges WHERE user_id = ? AND fact IS NOT NULL ORDER BY created_at",
+		).bind(userId).all();
+		console.error("SUPERSEDE-SRCTEXT", JSON.stringify((results ?? []).map((e) => ({ f: String(e.fact).slice(0, 36), inv: e.invalid_at !== null }))));
+		const jenkins = (results ?? []).filter((e) => /jenkins/i.test(String(e.fact)));
+		const circle = (results ?? []).filter((e) => /circleci/i.test(String(e.fact)));
+		expect(jenkins.length).toBeGreaterThan(0);
+		expect(jenkins.every((e) => e.invalid_at !== null), "the Jenkins relation must be closed").toBe(true);
+		expect(circle.every((e) => e.invalid_at === null), "the CircleCI relation must stay current").toBe(true);
+	});
+
 	it("leaves legitimately co-existing facts current", async () => {
 		const userId = `supersede-int-multi-${crypto.randomUUID()}`;
 		const multi = (text, kind) => ({
