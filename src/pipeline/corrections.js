@@ -146,19 +146,39 @@ export function attributeAssertion(text) {
 }
 
 /**
+ * Same-subject attributes, by the identityRelatedLabels standard: equal, or
+ * whole-token containment in either direction. The shorter side must still be
+ * a real multi-word attribute — a single generic token ("retention") must not
+ * reach every qualified attribute ("archive retention") on the node.
+ */
+function attributesRelated(a, b) {
+	if (a === b) return true;
+	const left = String(a ?? "").split(" ").filter(Boolean);
+	const right = String(b ?? "").split(" ").filter(Boolean);
+	const [shortSide, longSide] = left.length <= right.length ? [left, right] : [right, left];
+	if (shortSide.length < 2) return false;
+	const longSet = new Set(longSide);
+	return shortSide.every((t) => longSet.has(t));
+}
+
+/**
  * A single-valued state change: the same attribute is re-asserted with a
  * different value. This is what lets "the retention is now 30 days" retire
  * "the retention is 14 days" WITHOUT the user repeating the obsolete value.
  *
  * Requires update-mode intent from the caller — a first-time assertion must
  * never retire anything — and refuses when either side is not a copula
- * assertion, which is the guard that protects multi-valued facts.
+ * assertion, which is the guard that protects multi-valued facts. Attribute
+ * matching allows whole-token containment because the extractor drops subject
+ * qualifiers nondeterministically (measured live: the slice said "Cache
+ * backend is Redis" while the correction's attribute was "<tag> cache
+ * backend" — exact equality left both values current).
  */
 export function replacesAttributeValue(correction, existing) {
 	const next = attributeAssertion(correction?.text);
 	const prior = attributeAssertion(existing?.text);
 	if (!next || !prior) return false;
-	if (next.attribute !== prior.attribute) return false;
+	if (!attributesRelated(next.attribute, prior.attribute)) return false;
 	return next.value !== prior.value;
 }
 

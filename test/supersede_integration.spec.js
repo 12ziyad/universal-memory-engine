@@ -320,6 +320,57 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(factNullCircle.every((e) => e.invalid_at === null), "the fact-null CircleCI relation must stay current").toBe(true);
 	});
 
+	it("S3 production shape: the copula lives only in the USER's message and the extractor drops the qualifier", async () => {
+		// Measured live on d2c243f2 (a5-supersede-battery-v2.1786114431231):
+		// v1's slice landed as "Cache backend is Redis" while extraction
+		// mutilated the correction "Update: the <tag> cache backend is now
+		// Memcached." into the fragment "now Memcached" — no copula, so the
+		// attribute-change pass never fired. And the source attribute carries a
+		// qualifier the v1 slice does not, so exact attribute equality would
+		// still refuse. Both must be read the way eb7ecae reads obsoleting
+		// language: from the user's words, with whole-token attribute
+		// containment (the identityRelatedLabels standard).
+		const userId = `supersede-s3src-${crypto.randomUUID()}`;
+		const mk = (sliceText) => ({
+			objects: [
+				{ kind: "node", label: "Cache backend", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Cache backend", text: sliceText, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The itsuki cache backend is Redis.", mk("Cache backend is Redis"), `p1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the itsuki cache backend is now Memcached.", mk("now Memcached"), `p2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-S3SRC", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		expect(after.filter((s) => /redis/i.test(s.text)).every((s) => s.is_current === 0), "the old copula value must be retired from the user's words alone").toBe(true);
+		expect(after.filter((s) => /memcached/i.test(s.text)).some((s) => s.is_current === 1), "the correction must be current").toBe(true);
+	});
+
+	it("S3 containment guard: a single generic attribute token never widens retirement", async () => {
+		// "the retention is now 30 days" must NOT retire "archive retention is
+		// 14 days" — a one-token attribute is too generic for containment; only
+		// exact attribute equality or a >=2-token contained attribute may fire.
+		const userId = `supersede-s3guard-${crypto.randomUUID()}`;
+		const mk = (sliceText) => ({
+			objects: [
+				{ kind: "node", label: "Archive retention", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Archive retention", text: sliceText, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The archive retention is 14 days.", mk("archive retention is 14 days"), `q1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the retention is now 30 days.", mk("retention is now 30 days"), `q2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-S3GUARD", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		expect(after.filter((s) => /14 days/i.test(s.text)).every((s) => s.is_current === 1), "a generic one-token attribute must not retire the qualified one").toBe(true);
+	});
+
 	it("an edge-only correction retires the conflicting slice (production S2 shape)", async () => {
 		// Measured live on 2e3790e4: "We changed the index from Postgres to
 		// SQLite" extracted as RELATIONS only — no slice — so the slice conflict

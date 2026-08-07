@@ -263,7 +263,12 @@ async function recentEventMatch(env, userId, nodeId, action, now, projectId) {
 async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = {}) {
 	const namesObsolete = obsoletedValues(text).size > 0
 		|| (opts.updateMode === true && obsoletedValues(opts.sourceText).size > 0);
-	const attributeChange = opts.updateMode === true && Boolean(attributeAssertion(text));
+	// The copula, like obsoleting language, may live ONLY in the user's words:
+	// extraction mutilated "the cache backend is now Memcached" into the
+	// fragment "now Memcached" (measured live), so the attribute change must be
+	// readable from the source message too.
+	const attrSources = [text, opts.updateMode === true ? opts.sourceText : null].filter(Boolean);
+	const attributeChange = opts.updateMode === true && attrSources.some((t) => attributeAssertion(t));
 	if (!namesObsolete && !attributeChange) return [];
 	// S1: the extractor can split one subject across nodes ("Alnwick" and
 	// "Alnwick deploy runner"), so a same-node scan misses the obsolete fact.
@@ -292,7 +297,7 @@ async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = 
 	const conflictSources = [text, opts.updateMode ? opts.sourceText : null].filter(Boolean);
 	return (results ?? [])
 		.filter((s) => conflictSources.some((t) => supersedesValue({ text: t }, { text: s.text }))
-			|| (attributeChange && replacesAttributeValue({ text }, { text: s.text })))
+			|| (attributeChange && attrSources.some((t) => replacesAttributeValue({ text: t }, { text: s.text }))))
 		// node_id must travel with the conflict: a cross-node retirement targets
 		// the node the OBSOLETE fact lives on, not the correction's node.
 		.map((s) => ({ id: s.id, kind: s.kind, node_id: s.node_id }));
