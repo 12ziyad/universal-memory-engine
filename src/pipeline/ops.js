@@ -89,8 +89,18 @@ export async function operatorOverview(env, ownerUserId, { range = "7d", limit, 
 		  LIMIT ?`,
 	).bind(fromMs, ownerUserId, ownerUserId, cap).all();
 
+	// OPS-04: the account's OWN memory must never be crowded out by busier
+	// sub-tenants. Recency ordering plus a cap did exactly that in production —
+	// 200 recently-erased sub-tenants filled the list and the root row, holding
+	// hundreds of live nodes, fell off the end. An operator asking "how much
+	// memory do I have?" was answered zero.
+	const rows = [...(discovered ?? [])];
+	if (!rows.some((row) => String(row.user_id) === ownerUserId)) {
+		rows.push({ user_id: ownerUserId, external_user_id: null, last_activity_at: 0 });
+	}
+
 	const tenants = new Map();
-	for (const row of discovered ?? []) {
+	for (const row of rows) {
 		const id = String(row.user_id);
 		// Belt and braces: the root row is the account itself; every other row
 		// must be a scoped hash. Anything else is not ours and is dropped rather

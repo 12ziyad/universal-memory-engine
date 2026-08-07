@@ -174,6 +174,32 @@ describe("OPS-02 — operator overview", () => {
 	});
 });
 
+describe("OPS-04 — the account's own root memory is never crowded out", () => {
+	it("keeps the root row even when busier sub-tenants fill the cap", async () => {
+		// Found by using the surface: the campaign account's 200 most recently
+		// active sub-tenants (all erased, 0 nodes) filled the list and pushed the
+		// ROOT row out, so an operator asking "how much memory do I have?" was
+		// told 0 while the root held hundreds of nodes.
+		const acct = await account("ops-root");
+		await save(acct.token, null, "RootFalcon");              // account root
+		await save(acct.token, `sub-a-${crypto.randomUUID().slice(0, 8)}`, "SubA");
+		await save(acct.token, `sub-b-${crypto.randomUUID().slice(0, 8)}`, "SubB");
+
+		// A cap smaller than the tenant count is exactly the production shape.
+		const res = await call("/v1/ops/overview?limit=1", { headers: bearer(acct.token) });
+		expect(res.status).toBe(200);
+
+		const root = res.body.tenants.find((t) => t.is_root);
+		expect(root, "root tenant row must survive truncation").toBeTruthy();
+		expect(root.memory_user_id).toBe(acct.user.id);
+		expect(root.live_nodes).toBeGreaterThan(0);
+
+		// And the account total must include what the root holds.
+		expect(res.body.account.live_nodes).toBeGreaterThanOrEqual(root.live_nodes);
+		expect(res.body.account.truncated).toBe(true);
+	});
+});
+
 describe("OPS-03 — tenant fan-out is chunked under D1's bound-parameter limit", () => {
 	it("aggregates identically however the tenant list is split", async () => {
 		// The production failure this pins: `user_id IN (...)` built from an
