@@ -160,6 +160,91 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(obsolete.every((e) => e.deleted_at === null)).toBe(true);
 	});
 
+	it("S3: a single-valued state change retires the old value without the user naming it", async () => {
+		// "retention is now 30 days" names no old value, yet a reader must not
+		// see both 14 and 30 as current. The signal is a copula attribute in
+		// UPDATE MODE ("is now"): same attribute, different value.
+		const userId = `supersede-s3-${crypto.randomUUID()}`;
+		const attr = (text) => ({
+			objects: [
+				{ kind: "node", label: "Archive retention", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Archive retention", text, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The archive retention is 14 days.", attr("archive retention is 14 days"), `t1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "The archive retention is now 30 days.", attr("archive retention is now 30 days"), `t2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-S3", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		expect(after.filter((s) => /30 days/i.test(s.text)).some((s) => s.is_current === 1)).toBe(true);
+		expect(after.filter((s) => /14 days/i.test(s.text)).every((s) => s.is_current === 0)).toBe(true);
+	});
+
+	it("S3 negative control: an additive multi-valued fact is NEVER retired", async () => {
+		// The exact disaster to avoid: "uses D1" must survive "uses Vectorize".
+		// Different predicate (uses, not a copula) — S3 must not fire.
+		const userId = `supersede-s3neg-${crypto.randomUUID()}`;
+		const attr = (text) => ({
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine", text, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The engine uses D1 for storage.", attr("uses D1 for storage"), `n1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "The engine now uses Vectorize for embeddings.", attr("now uses Vectorize for embeddings"), `n2-${crypto.randomUUID()}`);
+		await drain(userId);
+		const after = await slicesFor(userId);
+		expect(after.filter((s) => /D1/i.test(s.text)).some((s) => s.is_current === 1), "D1 must remain current").toBe(true);
+		expect(after.filter((s) => /Vectorize/i.test(s.text)).some((s) => s.is_current === 1), "Vectorize must be current").toBe(true);
+	});
+
+	it("S1: retires a conflicting fact that landed on a DIFFERENT but identity-related node", async () => {
+		// The model split one subject: the obsolete fact sits on "Deploy runner"
+		// while the correction lands on "Deploy runner service". Label
+		// containment + an explicitly named obsolete value is sufficient evidence.
+		const userId = `supersede-s1-${crypto.randomUUID()}`;
+		const on = (label, text) => ({
+			objects: [
+				{ kind: "node", label, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: label, text, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The deploy runner uses blue-green cutover.", on("Deploy runner", "uses blue-green cutover"), `a1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Correction: the deploy runner service now uses canary cutover, not blue-green.", on("Deploy runner service", "now uses canary cutover, not blue-green"), `a2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-S1", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		expect(after.filter((s) => /canary/i.test(s.text)).some((s) => s.is_current === 1)).toBe(true);
+		expect(after.filter((s) => /uses blue-green cutover/i.test(s.text)).every((s) => s.is_current === 0), "the cross-node obsolete fact must be retired").toBe(true);
+	});
+
+	it("S1 negative control: a same-worded fact about an UNRELATED node is untouched", async () => {
+		// "blue" appears in both, but "Weather station" is not identity-related
+		// to "Deploy runner", so its fact must survive.
+		const userId = `supersede-s1neg-${crypto.randomUUID()}`;
+		const on = (label, text) => ({
+			objects: [
+				{ kind: "node", label, category: "other", confidence: 0.9 },
+				{ kind: "slice", on: label, text, kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		});
+		await save(userId, "The weather station paints its roof blue-green.", on("Weather station", "paints its roof blue-green"), `w1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Correction: the deploy runner now uses canary cutover, not blue-green.", on("Deploy runner", "now uses canary cutover, not blue-green"), `w2-${crypto.randomUUID()}`);
+		await drain(userId);
+		const after = await slicesFor(userId);
+		expect(after.filter((s) => /paints its roof/i.test(s.text)).every((s) => s.is_current === 1), "the unrelated node's fact must survive").toBe(true);
+	});
+
 	it("leaves legitimately co-existing facts current", async () => {
 		const userId = `supersede-int-multi-${crypto.randomUUID()}`;
 		const multi = (text, kind) => ({
@@ -182,5 +267,24 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(current.some((t) => /D1/i.test(t))).toBe(true);
 		expect(current.some((t) => /Vectorize/i.test(t))).toBe(true);
 		expect(current.some((t) => /Durable Objects/i.test(t))).toBe(true);
+	});
+});
+
+describe("SUPERSEDE-01 blanket-kind risk probe", () => {
+	it("PROBE: an update-cued multi-valued 'uses' must not retire a sibling 'uses'", async () => {
+		const userId = `s3probe-${crypto.randomUUID()}`;
+		const attr = (text) => ({ objects: [ { kind: "node", label: "Engine", category: "other", confidence: 0.9 }, { kind: "slice", on: "Engine", text, kind_detail: "technical_detail", confidence: 0.9 } ], notes: "" });
+		const save2 = async (content, llm, key) => {
+			const request = new Request("http://example.com/v1/ingest", { method: "POST", headers, body: JSON.stringify({ userId, flush: true, idempotencyKey: key, messages: [{ id: `m-${key}`, role: "user", content }], _test: { llmResponse: llm } }) });
+			const ctx = createExecutionContext(); const r = await worker.fetch(request, env, ctx); await waitOnExecutionContext(ctx); return r;
+		};
+		await save2("The engine uses D1 for storage.", attr("uses D1 for storage"), `p1-${crypto.randomUUID()}`);
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+		for (let i=0;i<25;i++){const p=await env.DB.prepare("SELECT COUNT(*) n FROM memory_jobs WHERE user_id=? AND status NOT IN ('enriched','failed','completed')").bind(userId).first(); if(Number(p?.n??0)===0)break; await runInDurableObject(stub,(x)=>x.alarm()); await new Promise(r=>setTimeout(r,60));}
+		await save2("Actually, the engine uses Vectorize now.", attr("actually uses Vectorize now"), `p2-${crypto.randomUUID()}`);
+		for (let i=0;i<25;i++){const p=await env.DB.prepare("SELECT COUNT(*) n FROM memory_jobs WHERE user_id=? AND status NOT IN ('enriched','failed','completed')").bind(userId).first(); if(Number(p?.n??0)===0)break; await runInDurableObject(stub,(x)=>x.alarm()); await new Promise(r=>setTimeout(r,60));}
+		const { results } = await env.DB.prepare("SELECT text, is_current FROM slices WHERE user_id=?").bind(userId).all();
+		console.error("S3PROBE", JSON.stringify((results||[]).map(s=>({t:s.text.slice(0,30),cur:s.is_current}))));
+		expect((results||[]).filter(s=>/D1/i.test(s.text)).some(s=>s.is_current===1)).toBe(true);
 	});
 });

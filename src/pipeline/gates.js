@@ -35,22 +35,16 @@ import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from 
 import { durablePlanFromText } from "./candidate_rules.js";
 import { clusterForMemory } from "./clusters.js";
 import { resolveAdmissionRules } from "./admission.js";
-import { obsoletedValues, supersedesValue } from "./corrections.js";
+import { attributeAssertion, identityRelatedLabels, obsoletedValues, replacesAttributeValue, supersedesValue } from "./corrections.js";
 import { rulesRejection } from "./rules.js";
 import { isBadTitle } from "./title.js";
 
 // Slice kinds that hold a single "current" value, so a new one supersedes the old.
+// Kinds that are single-valued by nature: a newer "progress" or "preference"
+// genuinely replaces the older one. (The old UPDATE_MODE_SUPERSEDE_KINDS set,
+// which blanket-retired nearly every kind whenever update language appeared,
+// was removed — see SUPERSEDE-01: it destroyed co-existing multi-valued facts.)
 const SUPERSEDE_KINDS = new Set(["progress", "preference"]);
-const UPDATE_MODE_SUPERSEDE_KINDS = new Set([
-	"feature_detail",
-	"technical_detail",
-	"progress",
-	"blocker",
-	"fix",
-	"decision",
-	"preference",
-	"other",
-]);
 // Window for treating a same-action event as a duplicate of an ongoing incident.
 const EVENT_DEDUPE_MS = 24 * 60 * 60 * 1000;
 
@@ -266,16 +260,37 @@ async function recentEventMatch(env, userId, nodeId, action, now, projectId) {
  * assert something the correction explicitly marks obsolete, which is what
  * keeps legitimately co-existing facts ("uses D1", "uses Vectorize") alive.
  */
-async function conflictingSliceIds(env, userId, nodeId, text, projectId) {
-	if (!obsoletedValues(text).size) return [];
+async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = {}) {
+	const namesObsolete = obsoletedValues(text).size > 0;
+	const attributeChange = opts.updateMode === true && Boolean(attributeAssertion(text));
+	if (!namesObsolete && !attributeChange) return [];
+	// S1: the extractor can split one subject across nodes ("Alnwick" and
+	// "Alnwick deploy runner"), so a same-node scan misses the obsolete fact.
+	// Widen to identity-related nodes ONLY when the correction names an obsolete
+	// value — the strongest evidence we have — and never on attribute-change
+	// alone, where a same-worded attribute on a different node is ambiguous.
+	const nodeIds = [nodeId];
+	if (namesObsolete && Array.isArray(opts.nodes)) {
+		const self = opts.nodes.find((n) => n.id === nodeId);
+		if (self?.label) {
+			for (const other of opts.nodes) {
+				if (other.id === nodeId || !other.label) continue;
+				if (identityRelatedLabels(self.label, other.label)) nodeIds.push(other.id);
+			}
+		}
+	}
+	const marks = nodeIds.map(() => "?").join(", ");
 	const { results } = await env.DB.prepare(
-		`SELECT id, text, kind FROM slices
-		 WHERE user_id = ? AND node_id = ? AND project_id IS ? AND deleted_at IS NULL AND is_current = 1
-		 ORDER BY created_at DESC LIMIT 80`,
-	).bind(userId, nodeId, projectId).all();
+		`SELECT id, text, kind, node_id FROM slices
+		 WHERE user_id = ? AND node_id IN (${marks}) AND project_id IS ? AND deleted_at IS NULL AND is_current = 1
+		 ORDER BY created_at DESC LIMIT 120`,
+	).bind(userId, ...nodeIds, projectId).all();
 	return (results ?? [])
-		.filter((s) => supersedesValue({ text }, { text: s.text }))
-		.map((s) => ({ id: s.id, kind: s.kind }));
+		.filter((s) => supersedesValue({ text }, { text: s.text })
+			|| (attributeChange && replacesAttributeValue({ text }, { text: s.text })))
+		// node_id must travel with the conflict: a cross-node retirement targets
+		// the node the OBSOLETE fact lives on, not the correction's node.
+		.map((s) => ({ id: s.id, kind: s.kind, node_id: s.node_id }));
 }
 
 async function matchingSliceId(env, userId, nodeId, kind, text, projectId) {
@@ -374,7 +389,13 @@ export async function applyGates(
 		if (sourceMessages.length === 1) return sourceMessages[0].content;
 		return sourceMessages.length ? "" : sourceText;
 	}
-	const supersedeKinds = updateMode ? UPDATE_MODE_SUPERSEDE_KINDS : SUPERSEDE_KINDS;
+	// SUPERSEDE-01: update mode used to blanket-retire EVERY slice of these
+	// kinds on the node, which measurably destroyed legitimate multi-valued
+	// memory — "uses D1 for storage" went non-current the moment "actually uses
+	// Vectorize now" arrived. Retirement in update mode is now decided per-fact
+	// by conflict detection (named obsolete value, or a same-attribute copula
+	// change); the narrow always-single-valued kinds keep their original rule.
+	const supersedeKinds = SUPERSEDE_KINDS;
 	// Dense capture keeps every durable detail: the auto-lane floor drops to the
 	// manual (lenient) floor. Standard stays exactly as before.
 	const dense = (settings?.captureDensity ?? null) === "dense";
@@ -461,6 +482,13 @@ export async function applyGates(
 	const writeScope = { projectId: projectScope.projectId };
 	const existing = await getUserNodes(env, userId, writeScope);
 	const existingById = new Map(existing.map((n) => [n.id, n]));
+	// S1: labels for identity-related conflict scanning. Includes nodes created
+	// earlier in THIS batch, since the extractor can split one subject within a
+	// single extraction.
+	const nodeIdentityList = () => [
+		...existing.map((n) => ({ id: n.id, label: n.label })),
+		...plan.newNodes.map((n) => ({ id: n.id, label: n.label })),
+	];
 	const candidates = await getUserCandidates(env, userId, writeScope);
 	const candidateByLabel = new Map(candidates.map((c) => [normalizeLabel(c.label), c]));
 	const existingEdges = await getUserEdges(env, userId, writeScope);
@@ -593,8 +621,8 @@ export async function applyGates(
 		// SUPERSEDE-01: retire whatever this correction makes obsolete, whatever
 		// kind it was filed under. Kind-keyed retirement alone left contradictory
 		// facts current in 3 of 3 measured correction shapes.
-		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId)) {
-			plan.sliceSupersede.push({ node_id: node.id, kind: conflict.kind, id: conflict.id });
+		for (const conflict of await conflictingSliceIds(env, userId, node.id, durable.text, projectScope.projectId, { updateMode, nodes: nodeIdentityList() })) {
+			plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 		}
 		plan.newSlices.push({
 			id: newId("slice"),
@@ -894,8 +922,8 @@ export async function applyGates(
 			if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
 			// SUPERSEDE-01: plus anything this correction explicitly obsoletes,
 			// regardless of the kind it was originally filed under.
-			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId)) {
-				plan.sliceSupersede.push({ node_id: node.id, kind: conflict.kind, id: conflict.id });
+			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId, { updateMode, nodes: nodeIdentityList() })) {
+				plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 			}
 			plan.newSlices.push({
 				id: newId("slice"),

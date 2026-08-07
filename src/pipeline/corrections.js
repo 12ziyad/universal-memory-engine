@@ -124,6 +124,68 @@ function assertedValues(text) {
 }
 
 /**
+ * The attribute a copula statement asserts, and the value it assigns.
+ *
+ * "archive retention is 14 days" -> { attribute: "archive retention", value: "14 days" }
+ * "archive retention is now 30 days" -> { attribute: "archive retention", value: "30 days" }
+ *
+ * Copula ONLY ("is/are/was/were"). A predicate like "uses" is deliberately not
+ * an attribute assertion, because "uses D1" and "uses Vectorize" are both true
+ * at once — treating them as one attribute is how blanket supersession
+ * destroys legitimate multi-valued memory.
+ */
+export function attributeAssertion(text) {
+	const value = String(text ?? "").trim();
+	if (!value) return null;
+	const m = value.match(/^(.{2,80}?)\s+(?:is|are|was|were)\s+(?:now\s+|currently\s+)?(.{1,80}?)\s*[.!?]?$/i);
+	if (!m) return null;
+	const attribute = significantTerms(m[1]).join(" ");
+	const assigned = significantTerms(m[2]).join(" ");
+	if (!attribute || !assigned) return null;
+	return { attribute, value: assigned };
+}
+
+/**
+ * A single-valued state change: the same attribute is re-asserted with a
+ * different value. This is what lets "the retention is now 30 days" retire
+ * "the retention is 14 days" WITHOUT the user repeating the obsolete value.
+ *
+ * Requires update-mode intent from the caller — a first-time assertion must
+ * never retire anything — and refuses when either side is not a copula
+ * assertion, which is the guard that protects multi-valued facts.
+ */
+export function replacesAttributeValue(correction, existing) {
+	const next = attributeAssertion(correction?.text);
+	const prior = attributeAssertion(existing?.text);
+	if (!next || !prior) return false;
+	if (next.attribute !== prior.attribute) return false;
+	return next.value !== prior.value;
+}
+
+/**
+ * Is `candidateLabel` plausibly the same real-world subject as `correctionLabel`?
+ *
+ * Graphiti resolves entities before contradiction handling (exact normalized
+ * name, then embeddings ≥0.6, then an LLM). Itsuki's conservative, deterministic
+ * analogue: whole-token containment in either direction — "Alnwick deploy runner"
+ * vs "Alnwick" — which is exactly how the extractor splits one subject across
+ * nodes. No LLM on the write path, and an unrelated label can never match.
+ */
+export function identityRelatedLabels(a, b) {
+	const norm = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/\s+/).filter(Boolean);
+	const left = norm(a);
+	const right = norm(b);
+	if (!left.length || !right.length) return false;
+	if (left.join(" ") === right.join(" ")) return true;
+	const [shortSide, longSide] = left.length <= right.length ? [left, right] : [right, left];
+	// Every token of the shorter label must appear in the longer one, and the
+	// shorter must carry real identity (a single generic word is not enough).
+	if (shortSide.length < 1) return false;
+	const longSet = new Set(longSide);
+	return shortSide.every((t) => longSet.has(t));
+}
+
+/**
  * Does `correction` obsolete `existing`?
  *
  * True only when the existing fact asserts a value the correction explicitly
