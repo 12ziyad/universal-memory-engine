@@ -42,7 +42,9 @@ const KEY_PATTERNS = [
 	/\bpypi-[A-Za-z0-9_-]{20,}\b/g,
 	/\bitsuki_live_[A-Za-z0-9_-]{8,}\b/g,
 	/\buml_live_[A-Za-z0-9_-]{8,}\b/g,
-	/\bAKIA[0-9A-Z]{16}\b/g,
+	// AKIA long-term + ASIA STS/temporary credentials, length-tolerant —
+	// mirrors the server lane exactly (SEC-03; corpus-locked).
+	/\b(?:AKIA|ASIA)[0-9A-Z]{16,}/g,
 	/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
 	/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/g,
 ];

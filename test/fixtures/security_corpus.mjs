@@ -82,6 +82,24 @@ export const SECRET_ENTRIES = [
 		expect: { server: "must", claude: "must", codex: "must" },
 	},
 	{
+		id: "aws-temporary-key",
+		class: "cloud key prefix — STS/temporary credentials (SEC-03)",
+		text: "The assumed-role session used ASIAY34FZKBOKMUTVV7A before it expired.",
+		mustNotSurvive: ["ASIAY34FZKBOKMUTVV7A"],
+		mustSurvive: ["assumed-role", "expired"],
+		expect: { server: "must", claude: "must", codex: "must" },
+	},
+	{
+		id: "aws-key-overlong",
+		class: "cloud key prefix — length-brittle boundary (SEC-03)",
+		// A prefix family must not be defeated by trailing characters: a
+		// paste that runs long (or concatenates) is still the credential.
+		text: "Someone pasted AKIAIOSFODNN7EXAMPLEKEYQ into the ticket.",
+		mustNotSurvive: ["AKIAIOSFODNN7EXAMPLEKEYQ"],
+		mustSurvive: ["ticket"],
+		expect: { server: "must", claude: "must", codex: "must" },
+	},
+	{
 		id: "anthropic-style-key",
 		class: "vendor key prefix",
 		text: "I pasted sk-ant-api03-fake7Vv2mQ9xLp4Rw8Tz1Yc6Nb3 into the wrong box earlier.",

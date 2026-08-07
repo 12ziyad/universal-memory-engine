@@ -29,8 +29,14 @@ const KEY_PATTERNS = [
 	// Our own keys — the product must never memorize its own credentials.
 	/\bitsuki_live_[A-Za-z0-9_-]{8,}\b/g,
 	/\buml_live_[A-Za-z0-9_-]{8,}\b/g,
-	// AWS access key id (fixed shape) + the secret that often travels beside it
-	/\bAKIA[0-9A-Z]{16}\b/g,
+	// AWS unique identifiers. AKIA = long-term keys, ASIA = STS/temporary
+	// session credentials (assumed roles and SSO — just as leakable, and they
+	// were missed entirely until the gold battery caught it). No trailing
+	// boundary and an open length: a distinctive 4-char prefix followed by 16+
+	// uppercase alphanumerics is credential-shaped whatever runs after it, and
+	// a family that only matches ONE exact length is defeated by a paste that
+	// runs long or concatenates (SEC-03).
+	/\b(?:AKIA|ASIA)[0-9A-Z]{16,}/g,
 	// Slack
 	/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
 	// JWTs: three base64url segments, first one is always {"alg":… → eyJ
