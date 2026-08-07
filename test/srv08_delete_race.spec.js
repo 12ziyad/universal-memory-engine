@@ -314,6 +314,96 @@ describe("SRV-08: erasure vs in-flight extraction", () => {
 		expect(previewTotal(await bulkDeleteBySource(env, userId, {}))).toBe(0);
 	});
 
+	it("SRV-09 mechanism: an interactive write whose acceptedAt predates the barrier is refused atomically", async () => {
+		// A9 finding: the barrier guard was nested under `if (extractionRunId)`,
+		// so interactive writers could not opt into the fence at all — a
+		// candidate promotion that READ its stored content before an erasure
+		// could commit it back afterwards (a resurrection of erased content
+		// through /v1/candidates/:id/promote, bounded to the ms-wide read→write
+		// window but real). The fence must arm on acceptedAt alone.
+		const { writeApproved } = await import("../src/pipeline/write.js");
+		const { getConfig } = await import("../src/config.js");
+		const userId = `srv09-fence-${crypto.randomUUID()}`;
+		const now = Date.now();
+		await env.DB.prepare(
+			"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv09-test')",
+		).bind(userId, now, now).run();
+
+		const nodeId = `node_${crypto.randomUUID()}`;
+		const plan = {
+			newNodes: [{
+				id: nodeId, user_id: userId, label: "Resurrected candidate", canonical_label: "resurrected candidate",
+				category: "other", role: null, state: "active", summary: null,
+				created_at: now, updated_at: now, last_seen_at: now,
+				mention_count: 1, session_count: 1, heat_score: 1, cluster: null,
+			}],
+			affectedNodeIds: new Set([nodeId]),
+		};
+		await expect(
+			writeApproved(env, getConfig(env), userId, plan, { acceptedAt: now - 5_000 }),
+		).rejects.toThrow(/fence_guard|violation IS NULL/i);
+		const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM nodes WHERE user_id = ?").bind(userId).first();
+		expect(Number(row?.n ?? -1), "the fenced interactive write must leave no rows").toBe(0);
+	});
+
+	it("SRV-09: a promotion that read its candidate before the erasure cannot resurrect it", async () => {
+		const { promoteCandidate } = await import("../src/pipeline/candidates.js");
+		const userId = `srv09-promo-${crypto.randomUUID()}`;
+		const now = Date.now();
+		// The candidate is LIVE (as the handler's guarded read found it)…
+		await env.DB.prepare(
+			"INSERT INTO candidates (id, user_id, label, strength, mentions, created_at) VALUES (?, ?, 'harbor sensor array', 'strong', 3, ?)",
+		).bind(`cand_${crypto.randomUUID().slice(0, 8)}`, userId, now - 60_000).run();
+		const cand = await env.DB.prepare("SELECT id FROM candidates WHERE user_id = ?").bind(userId).first();
+		// …and the erasure's barrier lands between that read and the write.
+		await env.DB.prepare(
+			"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv09-test')",
+		).bind(userId, now, now).run();
+
+		const res = await promoteCandidate(env, userId, cand.id, {}, { acceptedAt: now - 2_000 });
+		expect(res.ok, "pre-barrier promotion must be refused").toBe(false);
+		expect(Number(res.status)).toBe(409);
+		expect(String(res.error)).toMatch(/erase|delete/i);
+		const nodes = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM nodes WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(Number(nodes?.n ?? -1), "no resurrected node may exist").toBe(0);
+	});
+
+	it("SRV-09 contract: promotion AFTER an old erasure still works — the fence never blocks new actions", async () => {
+		const { promoteCandidate } = await import("../src/pipeline/candidates.js");
+		const userId = `srv09-fresh-${crypto.randomUUID()}`;
+		const past = Date.now() - 60_000;
+		await env.DB.prepare(
+			"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv09-test')",
+		).bind(userId, past, past).run();
+		// A candidate that appeared AFTER the erasure (new capture), promoted by
+		// a live user action: acceptedAt > barrier_at, must succeed.
+		await env.DB.prepare(
+			"INSERT INTO candidates (id, user_id, label, strength, mentions, created_at) VALUES (?, ?, 'fresh lighthouse feed', 'strong', 2, ?)",
+		).bind(`cand_${crypto.randomUUID().slice(0, 8)}`, userId, Date.now()).run();
+		const cand = await env.DB.prepare("SELECT id FROM candidates WHERE user_id = ?").bind(userId).first();
+		const res = await promoteCandidate(env, userId, cand.id, {});
+		expect(res.ok, "post-erasure promotion of new content must land").toBe(true);
+		const nodes = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM nodes WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(Number(nodes?.n ?? 0)).toBeGreaterThan(0);
+	});
+
+	it("SRV-09 first line of defense: an erased candidate is not promotable at all", async () => {
+		const { promoteCandidate } = await import("../src/pipeline/candidates.js");
+		const userId = `srv09-gone-${crypto.randomUUID()}`;
+		const now = Date.now();
+		await env.DB.prepare(
+			"INSERT INTO candidates (id, user_id, label, strength, mentions, created_at, deleted_at) VALUES (?, ?, 'erased relic', 'weak', 1, ?, ?)",
+		).bind(`cand_${crypto.randomUUID().slice(0, 8)}`, userId, now - 60_000, now).run();
+		const cand = await env.DB.prepare("SELECT id FROM candidates WHERE user_id = ?").bind(userId).first();
+		const res = await promoteCandidate(env, userId, cand.id, {});
+		expect(res.ok).toBe(false);
+		expect(Number(res.status)).toBe(404);
+	});
+
 	it("N: erasing tenant A leaves tenant B untouched, including B's in-flight work", async () => {
 		const a = `srv08-tenant-a-${crypto.randomUUID()}`;
 		const b = `srv08-tenant-b-${crypto.randomUUID()}`;

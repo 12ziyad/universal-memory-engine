@@ -755,7 +755,10 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		// The commit fence rolled the batch back: a confirmed erasure superseded
 		// this save between acceptance and commit. Terminal and honest — never a
 		// retryable storage error (the barrier would cancel the retry anyway).
-		if (/fence_guard/i.test(message)) {
+		// The constraint is NAMED fence_guard_violation (migration 0031) so the
+		// error text carries "fence_guard"; the expression form is kept for the
+		// rollout window where the unnamed 0030 table may still be live.
+		if (/fence_guard|violation IS NULL/i.test(message)) {
 			console.warn(`extraction cancelled_by_delete at commit user=${userId}`);
 			await updateExtractionRun(env, userId, extractionRunId, {
 				status: "cancelled_by_delete",

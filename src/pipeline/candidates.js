@@ -149,9 +149,25 @@ function ensureNode(plan, userId, row, nodes, body = {}) {
 	return { id: addNodeToPlan(plan, userId, label, category), existed: false, label };
 }
 
-async function persistPromotion(env, userId, row, plan, status, object) {
+async function persistPromotion(env, userId, row, plan, status, object, acceptedAt) {
 	const config = getConfig(env);
-	await writeApproved(env, config, userId, plan);
+	// SRV-09: promotion writes STORED pre-request content back into the graph,
+	// so it must respect the erasure barrier for the window between reading the
+	// candidate and committing. acceptedAt is the promotion's start; a barrier
+	// newer than it means the user erased this scope mid-request, and the
+	// candidate this promotion read no longer exists.
+	try {
+		await writeApproved(env, config, userId, plan, { acceptedAt });
+	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			return {
+				ok: false,
+				status: 409,
+				error: "This memory space was erased while the promotion was in flight; the candidate no longer exists.",
+			};
+		}
+		throw error;
+	}
 	await markCandidate(env, userId, row.id, status, {
 		promotedObjectId: object?.id ?? null,
 		promotedObjectKind: object?.kind ?? null,
@@ -185,7 +201,7 @@ export async function listCandidates(env, userId, { status = "pending", limit = 
 	return (results ?? []).map(rowToCandidate);
 }
 
-export async function promoteCandidate(env, userId, id, body = {}) {
+export async function promoteCandidate(env, userId, id, body = {}, { acceptedAt = Date.now() } = {}) {
 	const row = await getCandidate(env, userId, id);
 	if (!row) return { ok: false, error: "candidate not found", status: 404 };
 	if ((row.status ?? "pending") !== "pending") return { ok: false, error: "candidate is not pending", status: 409 };
@@ -212,7 +228,7 @@ export async function promoteCandidate(env, userId, id, body = {}) {
 			confidence: row.confidence ?? null,
 		});
 		plan.affectedNodeIds.add(node.id);
-		return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "event" });
+		return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "event" }, acceptedAt);
 	}
 
 	if (action === "promote_to_slice") {
@@ -226,7 +242,7 @@ export async function promoteCandidate(env, userId, id, body = {}) {
 			created_at: ts,
 		});
 		plan.affectedNodeIds.add(node.id);
-		return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "slice" });
+		return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "slice" }, acceptedAt);
 	}
 
 	if (action === "merge_with_existing") {
@@ -241,10 +257,10 @@ export async function promoteCandidate(env, userId, id, body = {}) {
 			created_at: ts,
 		});
 		plan.affectedNodeIds.add(node.id);
-		return persistPromotion(env, userId, row, plan, "merged", { id: node.id, kind: "node" });
+		return persistPromotion(env, userId, row, plan, "merged", { id: node.id, kind: "node" }, acceptedAt);
 	}
 
-	return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "node" });
+	return persistPromotion(env, userId, row, plan, "promoted", { id: node.id, kind: "node" }, acceptedAt);
 }
 
 export async function rejectCandidate(env, userId, id, body = {}) {

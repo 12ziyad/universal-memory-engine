@@ -37,13 +37,19 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			`INSERT INTO fence_guard (violation)
 			 SELECT 1 WHERE (SELECT status FROM extraction_runs WHERE id = ? AND user_id = ?) IS NOT 'committing'`,
 		).bind(options.extractionRunId, userId));
-		const acceptedAt = Number(options.acceptedAt);
-		if (Number.isFinite(acceptedAt) && acceptedAt > 0) {
-			stmts.push(env.DB.prepare(
-				`INSERT INTO fence_guard (violation)
-				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
-			).bind(userId, acceptedAt));
-		}
+	}
+	// The barrier guard arms on acceptedAt ALONE (SRV-09): interactive writers
+	// that put STORED content back into the graph — candidate promotion read
+	// its evidence before this write — carry the moment they read it, so an
+	// erasure landing in the read→write window refuses the commit atomically.
+	// It was originally nested under extractionRunId, which made the fence
+	// unreachable for every non-extraction writer.
+	const acceptedAt = Number(options.acceptedAt);
+	if (Number.isFinite(acceptedAt) && acceptedAt > 0) {
+		stmts.push(env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
+		).bind(userId, acceptedAt));
 	}
 	const newNodes = plan.newNodes ?? [];
 	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
