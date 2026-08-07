@@ -1054,6 +1054,14 @@ export async function applyGates(
 					if (!conflictSources.some((t) => supersedesValue({ text: t }, { text: assertion }))) continue;
 					plan.edgeClosures.push({ id: e.id, invalid_at: obj.valid_at ?? now });
 				}
+				// The same correction must also retire conflicting SLICES: the
+				// extractor often emits a correction as relations only (measured
+				// live: "changed the index from Postgres to SQLite" produced no
+				// slice object), and what a correction retires must not depend on
+				// which object kinds its extraction happened to emit.
+				for (const conflict of await conflictingSliceIds(env, userId, from.id, obj.fact ?? "", projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
+					plan.sliceSupersede.push({ node_id: conflict.node_id ?? from.id, kind: conflict.kind, id: conflict.id });
+				}
 			}
 			plan.newEdges.push({
 				id: newId("edge"),

@@ -320,6 +320,75 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(factNullCircle.every((e) => e.invalid_at === null), "the fact-null CircleCI relation must stay current").toBe(true);
 	});
 
+	it("an edge-only correction retires the conflicting slice (production S2 shape)", async () => {
+		// Measured live on 2e3790e4: "We changed the index from Postgres to
+		// SQLite" extracted as RELATIONS only — no slice — so the slice conflict
+		// pass never ran and v1's "stores its index in Postgres" slice stayed
+		// current while every Postgres relation closed. Retirement must not
+		// depend on which object kinds the correction's extraction happens to
+		// emit.
+		const userId = `supersede-edgeonly-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Catalog service", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Postgres", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Catalog service", text: "stores its index in Postgres", kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Catalog service", to: "Postgres", type: "USES", fact: "Catalog service stores its index in Postgres", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		// The correction emits ONLY relations — the shape measured in production.
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "Catalog service", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "SQLite", category: "other", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Catalog service", to: "SQLite", type: "USES", fact: "Catalog service uses SQLite", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The catalog service stores its index in Postgres.", v1, `h1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "We changed the catalog service index from Postgres to SQLite.", v2, `h2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-EDGEONLY", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		const postgres = after.filter((s) => /postgres/i.test(s.text));
+		expect(postgres.length).toBeGreaterThan(0);
+		expect(postgres.every((s) => s.is_current === 0), "the conflicting slice must be retired by an edge-only correction").toBe(true);
+		expect(postgres.every((s) => s.deleted_at === null), "retired, not deleted — history stays readable").toBe(true);
+	});
+
+	it("edge-only negative control: an additive edge-only save retires no slice", async () => {
+		// "uses D1" as a slice must survive an edge-only additive save about
+		// Vectorize — the widened pass must not let a non-correction retire.
+		const userId = `supersede-edgeonly-neg-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "D1", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Engine", text: "uses D1 for storage", kind_detail: "technical_detail", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Engine", to: "D1", type: "USES", fact: "Engine uses D1", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "Engine", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Vectorize", category: "other", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "Engine", to: "Vectorize", type: "USES", fact: "Engine uses Vectorize", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The engine uses D1 for storage.", v1, `j1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "The engine also uses Vectorize for embeddings.", v2, `j2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		expect(after.filter((s) => /D1/i.test(s.text)).every((s) => s.is_current === 1), "the additive edge-only save must retire nothing").toBe(true);
+	});
+
 	it("fact-null negative control: an additive statement never closes a fact-null relation", async () => {
 		// "uses D1" and "uses Vectorize" co-exist as legacy triples too — the
 		// triple resolution must not widen what a non-correction can retire.
