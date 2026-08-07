@@ -272,11 +272,16 @@ async function conflictingSliceIds(env, userId, nodeId, text, projectId, opts = 
 	if (!namesObsolete && !attributeChange) return [];
 	// S1: the extractor can split one subject across nodes ("Alnwick" and
 	// "Alnwick deploy runner"), so a same-node scan misses the obsolete fact.
-	// Widen to identity-related nodes ONLY when the correction names an obsolete
-	// value — the strongest evidence we have — and never on attribute-change
-	// alone, where a same-worded attribute on a different node is ambiguous.
+	// Widen to identity-related nodes when the correction names an obsolete
+	// value — and, since the split was measured intersecting S3 live (the
+	// correction's subject landed on a fresh node while "cache backend is
+	// Redis" stayed current on the original), when it re-asserts an attribute
+	// in update mode: identity-related label + matching multi-token attribute
+	// + copula on both sides is the same evidence standard. An unrelated label
+	// is never reached (identityRelatedLabels), and the one-token attribute
+	// guard keeps "retention" away from "archive retention".
 	const nodeIds = [nodeId];
-	if (namesObsolete && Array.isArray(opts.nodes)) {
+	if ((namesObsolete || attributeChange) && Array.isArray(opts.nodes)) {
 		const self = opts.nodes.find((n) => n.id === nodeId);
 		if (self?.label) {
 			for (const other of opts.nodes) {

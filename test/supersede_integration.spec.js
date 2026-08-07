@@ -349,6 +349,71 @@ describe("a correction retires the conflicting fact through the real ingest path
 		expect(after.filter((s) => /memcached/i.test(s.text)).some((s) => s.is_current === 1), "the correction must be current").toBe(true);
 	});
 
+	it("S3 production shape: the attribute change lands on a SPLIT node (identity-related)", async () => {
+		// Measured live on 42ffad14 (a5-supersede-battery-v2.1786115588860):
+		// v1 wrote one node with "The <tag> cache backend is Redis."; the
+		// correction's subject did not resolve onto it — TWO new nodes appeared
+		// — so the same-node attribute scan missed and Redis stayed current
+		// beside Memcached. Identity-related label + matching multi-token
+		// attribute + copula + update mode is the same evidence standard S1
+		// already accepts for named-obsolete widening.
+		const userId = `supersede-s3split-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Cache backend", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Cache backend", text: "The 588860 cache backend is Redis.", kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "588860 cache backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Memcached", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "588860 cache backend", text: "now Memcached", kind_detail: "decision", confidence: 0.9 },
+				{ kind: "edge", _v2: true, from: "588860 cache backend", to: "Memcached", type: "USES", fact: "The 588860 cache backend is now Memcached", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The 588860 cache backend is Redis.", v1, `r1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the 588860 cache backend is now Memcached.", v2, `r2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		console.error("SUPERSEDE-S3SPLIT", JSON.stringify(after.map((s) => ({ t: s.text.slice(0, 40), cur: s.is_current }))));
+		expect(after.filter((s) => /redis/i.test(s.text)).every((s) => s.is_current === 0), "the split-node copula value must be retired").toBe(true);
+		expect(after.filter((s) => /memcached/i.test(s.text)).some((s) => s.is_current === 1)).toBe(true);
+	});
+
+	it("S3 split guard: the same attribute on an UNRELATED node survives an attribute change", async () => {
+		// The reason widening was same-node-only: a same-worded attribute on a
+		// DIFFERENT subject is ambiguous. Identity-relation is the boundary —
+		// an unrelated label must never be reached.
+		const userId = `supersede-s3split-neg-${crypto.randomUUID()}`;
+		const v1 = {
+			objects: [
+				{ kind: "node", label: "Weather station", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Weather station", text: "cache backend is Redis", kind_detail: "technical_detail", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		const v2 = {
+			objects: [
+				{ kind: "node", label: "Cache backend", category: "other", confidence: 0.9 },
+				{ kind: "node", label: "Memcached", category: "other", confidence: 0.9 },
+				{ kind: "slice", on: "Cache backend", text: "now Memcached", kind_detail: "decision", confidence: 0.9 },
+			],
+			notes: "",
+		};
+		await save(userId, "The weather station's cache backend is Redis.", v1, `u1-${crypto.randomUUID()}`);
+		await drain(userId);
+		await save(userId, "Update: the cache backend is now Memcached.", v2, `u2-${crypto.randomUUID()}`);
+		await drain(userId);
+
+		const after = await slicesFor(userId);
+		expect(after.filter((s) => /redis/i.test(s.text)).every((s) => s.is_current === 1), "an unrelated node's attribute must survive").toBe(true);
+	});
+
 	it("S3 containment guard: a single generic attribute token never widens retirement", async () => {
 		// "the retention is now 30 days" must NOT retire "archive retention is
 		// 14 days" — a one-token attribute is too generic for containment; only
