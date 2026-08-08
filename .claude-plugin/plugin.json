@@ -1,7 +1,7 @@
 {
 	"name": "itsuki",
 	"displayName": "Itsuki Memory",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "One private memory for every AI. Loads project memory at session start, queues decisions and fixes safely at session end, and bundles memory tools with receipts for every write.",
 	"author": {
 		"name": "Itsuki",

@@ -76,6 +76,13 @@ campaign. Nothing here changes how you install or configure it.
 
 ### Fixed
 
+- **One corrupt envelope can no longer block delivery forever.** If a queued
+  capture file was damaged on disk (disk fault, third-party interference), the
+  delivery pass threw on reading it and gave up entirely — every valid capture
+  behind it stayed queued on every future session, while the diagnostics
+  showed a healthy-looking queue. A damaged envelope is now quarantined with
+  its bytes preserved for review, exactly like a server-rejected one, and
+  delivery continues. Found by this release's randomized state-machine tests.
 - **AWS temporary credentials are redacted** before capture leaves the machine.
   Session tokens and the temporary access-key form were not covered by the
   previous prefix rules, which were also brittle about key length.
