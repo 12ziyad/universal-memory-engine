@@ -1054,11 +1054,23 @@ export async function drainCodexOutbox({
 		const snapshotRelease = await acquireLock(opened.paths, QUEUE_MUTATION_LOCK);
 		if (!snapshotRelease) return { ...result, status: "busy" };
 		const envelopes = [];
+		const corrupt = [];
 		try {
 			const usage = await queueUsage(opened.paths);
 			for (const entry of usage.entries) {
 				const queueId = entry.name.slice(0, -5);
-				envelopes.push({ entry, envelope: await readEnvelope(join(opened.paths.staged, entry.name), queueId) });
+				try {
+					envelopes.push({ entry, envelope: await readEnvelope(join(opened.paths.staged, entry.name), queueId) });
+				} catch {
+					// CDX-09: one unreadable envelope must never wedge the whole
+					// queue. Before this catch, a single corrupt staged file made
+					// EVERY drain throw here — valid work behind it could never
+					// deliver again, while inspect (which reads per-entry) kept
+					// reporting a healthy-looking queue. Same class as CDX-01,
+					// same remedy as the Claude adapter: quarantine to failed/
+					// (bytes preserved for review), keep delivering.
+					corrupt.push({ entry, envelope: { queueId } });
+				}
 			}
 		} finally {
 			await snapshotRelease();
@@ -1084,6 +1096,16 @@ export async function drainCodexOutbox({
 				await releaseMutation();
 			}
 		};
+		// Quarantine corrupt entries first — bookkeeping, not delivery, so it
+		// neither consumes the delivery budget nor stops on a busy mutation lock
+		// (a still-staged corrupt entry simply quarantines on the next drain).
+		let corruptQuarantined = 0;
+		for (const item of corrupt) {
+			if (await quarantine(item, {}, "outbox_corrupt", null)) {
+				result.quarantined += 1;
+				corruptQuarantined += 1;
+			}
+		}
 		const boundedCount = Math.max(0, Math.min(CODEX_OUTBOX_LIMITS.maxDeliveryEntries, Number(maxEntries) || 0));
 		let attempted = 0;
 		for (const item of envelopes) {
@@ -1178,7 +1200,8 @@ export async function drainCodexOutbox({
 			result.delivered += 1;
 			result.accepted.push({ queueId: item.envelope.queueId, ...delivery.acceptance });
 		}
-		result.preserved = envelopes.length - result.delivered - result.quarantined;
+		result.preserved = (envelopes.length - result.delivered - (result.quarantined - corruptQuarantined))
+			+ (corrupt.length - corruptQuarantined);
 		result.status = interrupted
 			?? (result.delivered > 0 ? "delivered"
 				: result.quarantined > 0 ? "quarantined"

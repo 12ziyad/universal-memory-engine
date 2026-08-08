@@ -479,6 +479,13 @@ describe("Codex protected outbox", () => {
 	});
 
 	it("does not deliver a tampered or unsanitized protected envelope", async () => {
+		// CONTRACT CHANGE (CDX-09, A12): the drain used to throw outbox_corrupt
+		// here, which also wedged every VALID envelope behind the tampered one —
+		// forever. The security invariants this test exists for are unchanged
+		// and still asserted below: tampered content is NEVER sent anywhere
+		// (fetch not called for it) and the bytes are PRESERVED for review. What
+		// changed is only the handling: quarantine to failed/, like the Claude
+		// adapter and like CDX-01's poison handling, so later valid work drains.
 		const queued = await enqueue();
 		const health = await inspectCodexOutbox({ pluginData, ...SECURITY });
 		const path = join(health.root, "staged", `${queued.queueId}.json`);
@@ -486,14 +493,20 @@ describe("Codex protected outbox", () => {
 		envelope.request.body.messages[0].content = "Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
 		await writeFile(path, JSON.stringify(envelope), "utf8");
 		const fetchImpl = vi.fn();
-		await expect(drainCodexOutbox({
+		const drained = await drainCodexOutbox({
 			pluginData,
 			apiKey: API_KEY,
 			baseUrl: BASE_URL,
 			fetchImpl,
 			...SECURITY,
-		})).rejects.toMatchObject({ code: "outbox_corrupt" });
+		});
+		expect(drained.quarantined).toBe(1);
+		expect(drained.delivered).toBe(0);
+		expect(drained.status).toBe("quarantined");
+		// The tampered content never left the machine…
 		expect(fetchImpl).not.toHaveBeenCalled();
-		expect(await readFile(path, "utf8")).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456");
+		// …and its bytes are preserved verbatim in quarantine, not deleted.
+		const quarantinedPath = join(health.root, "failed", `${queued.queueId}.json`);
+		expect(await readFile(quarantinedPath, "utf8")).toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456");
 	});
 });

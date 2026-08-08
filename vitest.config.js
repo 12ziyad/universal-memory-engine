@@ -20,6 +20,7 @@ export default defineWorkersConfig(async () => {
 				"test/codex_doctor.spec.js",
 				"test/codex_outbox.spec.js",
 				"test/codex_outbox_recovery.spec.js",
+				"test/outbox_state_machine.spec.js",
 				"test/codex_session_end.spec.js",
 				"test/codex_session_start.spec.js",
 				"test/codex_transcript.spec.js",
