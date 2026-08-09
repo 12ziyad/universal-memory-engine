@@ -143,6 +143,61 @@ function extractBalanced(text) {
 	return null;
 }
 
+/**
+ * Salvage whole objects from a response that was cut off mid-JSON.
+ *
+ * A truncated extraction is not an empty one. The model may have emitted
+ * twenty complete, well-formed facts before the token budget ended the
+ * twenty-first mid-string, and `extractBalanced` throws all twenty away
+ * because the enclosing brace never arrives. That is a pure loss of captured
+ * memory to a formatting accident, in a system whose dominant failure is
+ * already "never stored".
+ *
+ * So: find the objects array, walk it, and keep every element that closed.
+ * Anything still open at the end of the text is discarded — a half-parsed fact
+ * is not a fact.
+ */
+export function salvageObjects(text) {
+	const source = String(text ?? "");
+	const marker = source.search(/"objects"\s*:\s*\[/);
+	if (marker === -1) return null;
+	const start = source.indexOf("[", marker);
+	if (start === -1) return null;
+
+	const objects = [];
+	let depth = 0;
+	let elementStart = -1;
+	let inStr = false;
+	let esc = false;
+	for (let i = start + 1; i < source.length; i += 1) {
+		const c = source[i];
+		if (inStr) {
+			if (esc) esc = false;
+			else if (c === "\\") esc = true;
+			else if (c === '"') inStr = false;
+			continue;
+		}
+		if (c === '"') { inStr = true; continue; }
+		if (c === "{") {
+			if (depth === 0) elementStart = i;
+			depth += 1;
+			continue;
+		}
+		if (c === "}") {
+			depth -= 1;
+			if (depth === 0 && elementStart !== -1) {
+				const parsed = tolerantParse(source.slice(elementStart, i + 1));
+				if (parsed && typeof parsed === "object") objects.push(parsed);
+				elementStart = -1;
+			}
+			continue;
+		}
+		// The array closed cleanly; anything after it is not our business.
+		if (c === "]" && depth === 0) break;
+	}
+	return objects.length ? objects : null;
+}
+
 /** Parse arbitrary model text into a JS value, as robustly as we reasonably can. */
 export function extractJson(text) {
 	if (typeof text !== "string") return null;
@@ -151,7 +206,32 @@ export function extractJson(text) {
 	const direct = tolerantParse(cleaned);
 	if (direct && typeof direct === "object") return direct;
 	// 2. Otherwise pull the first balanced object out of the surrounding prose.
-	return extractBalanced(cleaned);
+	const balanced = extractBalanced(cleaned);
+	if (balanced) return balanced;
+	// 3. Nothing balanced. If the response was cut off, keep what did complete
+	//    rather than discarding a whole call's worth of captured facts.
+	const salvaged = salvageObjects(cleaned);
+	return salvaged ? { objects: salvaged, notes: "salvaged_from_truncated_response", _truncated: true } : null;
+}
+
+/**
+ * Did the model stop because it ran out of output budget, rather than because
+ * it finished? Worth knowing separately from "did it parse": a truncated
+ * response means the CHUNK was too big, which is a chunking decision, while an
+ * unparseable one usually means the model wandered off format.
+ */
+export function responseTruncated(res) {
+	if (!res || typeof res !== "string") {
+		for (const choice of res?.choices ?? []) {
+			const reason = choice?.finish_reason ?? choice?.finishReason;
+			if (reason === "length" || reason === "max_tokens") return true;
+		}
+		if (res?.finish_reason === "length" || res?.stop_reason === "max_tokens") return true;
+		if (res?.usage && Number.isFinite(res.usage.completion_tokens) && Number.isFinite(res.usage.max_tokens)) {
+			if (res.usage.completion_tokens >= res.usage.max_tokens) return true;
+		}
+	}
+	return false;
 }
 
 /** Coerce any parsed value into the normalized proposal shape. */
@@ -161,7 +241,14 @@ export function normalize(parsed) {
 	if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.objects)) {
 		return { objects: [], notes: "malformed", _ok: false };
 	}
-	return { objects: parsed.objects, notes: String(parsed.notes ?? ""), _ok: true };
+	return {
+		objects: parsed.objects,
+		notes: String(parsed.notes ?? ""),
+		_ok: true,
+		// Carried so the receipt can say the response was cut off and how much
+		// survived, instead of the save looking like an ordinary small one.
+		...(parsed._truncated ? { _truncated: true } : {}),
+	};
 }
 
 /** Robustly pull assistant text out of the various Workers AI response shapes. */
@@ -246,17 +333,38 @@ async function callModel(env, config, packet, shortlist, { dense = false, rules 
 		const res = await runAi(
 			env,
 			config.llm.model,
-			{ messages, temperature: config.llm.temperature, max_tokens: config.llm.maxTokens },
+			{
+				messages,
+				temperature: config.llm.temperature,
+				max_tokens: config.llm.maxTokens,
+				// Schema-constrained output, when the deployment says the model
+				// supports it. DEFAULT OFF: whether a given Workers AI model honours
+				// `response_format` is a live fact about that model, and asserting it
+				// from a config file would be a guess. Enabling it is a measured
+				// decision (ablation E2), not a deploy-time side effect.
+				...(config.llm.jsonMode ? { response_format: { type: "json_object" } } : {}),
+			},
 			options,
 			{ task: "extract" },
 		);
 		const raw = responseText(res);
+		const truncated = responseTruncated(res);
 		const parsed = extractJson(raw);
 		if (!parsed) {
-			console.warn(`llm parse_failed model=${config.llm.model} raw="${String(raw).slice(0, 240)}"`);
-			return { objects: [], notes: "unparseable", _ok: false };
+			// Say which failure this was. "Unparseable" and "ran out of output
+			// budget" have different fixes — the second one is a chunking problem,
+			// and it stayed invisible while both looked the same on a receipt.
+			console.warn(
+				`llm ${truncated ? "truncated" : "parse_failed"} model=${config.llm.model} raw="${String(raw).slice(0, 240)}"`,
+			);
+			return { objects: [], notes: truncated ? "truncated" : "unparseable", _ok: false, ...(truncated ? { _truncated: true } : {}) };
 		}
-		return normalize(parsed);
+		const normalized = normalize(parsed);
+		if (truncated && !normalized._truncated) normalized._truncated = true;
+		if (normalized._truncated) {
+			console.warn(`llm truncated_salvage model=${config.llm.model} objects=${normalized.objects.length}`);
+		}
+		return normalized;
 	} catch (err) {
 		console.warn("llm call failed:", err?.message ?? err);
 		return { objects: [], notes: "llm_error", _ok: false };

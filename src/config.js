@@ -209,6 +209,11 @@ export function getConfig(env) {
 			// in wrangler.jsonc vars or via env without touching code.
 			model: env.LLM_MODEL || "@cf/meta/llama-3.1-8b-instruct-fp8",
 			maxTokens: Number(env.LLM_MAX_TOKENS ?? 4096),
+			// Ask the model for JSON via `response_format` rather than by asking
+			// nicely in the prompt. DEFAULT OFF: support is a live property of the
+			// selected Workers AI model, and turning it on without confirming it
+			// would trade a known failure mode for an unknown one.
+			jsonMode: flag(env.LLM_JSON_MODE, false),
 			// The v2 edge/reflexion passes: output-light JSON lists. A tighter
 			// budget than the extractor's keeps a thinking model from spending
 			// half a minute ruminating per pass.
@@ -241,6 +246,18 @@ export function getConfig(env) {
 		splitRescue: {
 			maxCalls: Number(env.SPLIT_RESCUE_MAX_CALLS ?? 8),
 			failFast: Number(env.SPLIT_RESCUE_FAIL_FAST ?? 3),
+		},
+
+		// Deterministic pre-splitting (src/pipeline/chunking.js). The message
+		// bound must never exceed splitRescue.maxCalls, or a sub-chunk exists
+		// that the rescue is not allowed to re-extract — which is precisely the
+		// 9-and-10-message hole this replaced.
+		extractionChunk: {
+			maxMessages: Math.min(
+				Number(env.EXTRACT_CHUNK_MAX_MESSAGES ?? 8),
+				Number(env.SPLIT_RESCUE_MAX_CALLS ?? 8),
+			),
+			maxChars: Number(env.EXTRACT_CHUNK_MAX_CHARS ?? 6000),
 		},
 
 		// Gate tuning.

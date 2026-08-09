@@ -69,33 +69,51 @@ describe("split-rescue spending contract", () => {
 		expect(result.receipt.savedTotal).toBe(0);
 	});
 
-	it("ceiling: a chunk larger than SPLIT_RESCUE_MAX_CALLS is refused before spending anything", async () => {
+	// CONTRACT CHANGE, deliberate (V3 / P0-C). These two used to assert that a
+	// chunk of 9 or 10 messages spent exactly ONE call and then refused the
+	// rescue with `over_ceiling`. That bound the spend, but it was also a
+	// zero-write hole: the old pre-split threshold only split chunks LONGER than
+	// 10 while the rescue refused more than 8, so a merely TRUNCATED response in
+	// that band had no recovery path at all and the fire captured nothing.
+	//
+	// Deterministic pre-splitting now guarantees every sub-chunk is at or under
+	// the rescue ceiling, which makes `over_ceiling` structurally unreachable
+	// from the primary path (the check stays as defence in depth, and the
+	// invariant behind it is pinned in test/extraction_chunking.spec.js).
+	// The spend bound is preserved in the form that matters: a poisoned chunk
+	// still fails fast, inside the FIRST failing sub-chunk, and the fire returns
+	// immediately rather than walking the rest.
+	it("a poisoned oversized chunk fails inside its first sub-chunk, not across the whole chunk", async () => {
 		const userId = `sr-ceiling-${crypto.randomUUID()}`;
 		const { hook, counter } = alwaysGarbage();
-		const chunk = messages(CONVERSATION); // 10 messages > default ceiling of 8
+		const chunk = messages(CONVERSATION); // 10 messages -> sub-chunks of 8 + 2
 
 		const result = await runExtraction(env, userId, chunk, [], { llmResponse: hook });
 
 		expect(result.outcome).toBe("llm_failed");
-		// Only the primary call happened; the rescue never started.
-		expect(counter.calls).toBe(1);
+		// 1 primary + one fail-fast rescue batch of 4, then the fire gives up.
+		// Emphatically NOT 1 + 10, and not the 41/47/107 this contract exists for.
+		expect(counter.calls).toBe(5);
 		expect(result.receipt.split_rescue).toBe(true);
-		expect(result.receipt.split_rescue_calls).toBe(0);
-		expect(result.receipt.split_rescue_aborted).toBe("over_ceiling");
+		expect(result.receipt.split_rescue_aborted).toBe("fail_fast");
+		expect(result.receipt.savedTotal).toBe(0);
 	});
 
-	it("ceiling is env-configurable", async () => {
+	it("tightening SPLIT_RESCUE_MAX_CALLS tightens the sub-chunks with it", async () => {
 		const userId = `sr-dial-${crypto.randomUUID()}`;
 		const { hook, counter } = alwaysGarbage();
-		const chunk = messages(CONVERSATION.slice(0, 3)); // 3 messages > ceiling of 2
+		const chunk = messages(CONVERSATION.slice(0, 3));
 
 		const tightened = Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
 			SPLIT_RESCUE_MAX_CALLS: "2",
 		});
 		const result = await runExtraction(tightened, userId, chunk, [], { llmResponse: hook });
 
-		expect(counter.calls).toBe(1);
-		expect(result.receipt.split_rescue_aborted).toBe("over_ceiling");
+		// Sub-chunks are now 2 messages, so the first one costs 1 primary + 2
+		// rescue calls and nothing parses. The dial still bounds the spend.
+		expect(result.outcome).toBe("llm_failed");
+		expect(counter.calls).toBe(3);
+		expect(result.receipt.split_rescue_aborted).toBe("all_failed");
 	});
 
 	it("partial rescue: keeps what parsed when failures stay under the fail-fast line", async () => {

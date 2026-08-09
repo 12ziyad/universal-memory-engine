@@ -23,6 +23,7 @@
 
 import { getConfig } from "../config.js";
 import { buildPacket, chunkText } from "./packet.js";
+import { planExtractionChunks, verifyChunkCoverage } from "./chunking.js";
 import { shortlistNodes } from "./shortlist.js";
 import { proposeMemory } from "./llm.js";
 import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
@@ -274,47 +275,69 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 	};
 }
 
-// A chunk this big cannot be extracted in one call: the model's output runs
-// past the token budget and truncates mid-JSON — the exact failure the conv-0
-// smoke measured on end-of-session flushes. Pre-splitting into sub-chunks
-// BEFORE the primary call is the fix; the rescue stays as the parse-failure
-// fallback within each sub-chunk.
-const PRIMARY_SUBCHUNK = 8;
-const PRIMARY_SUBCHUNK_THRESHOLD = 10;
-
+/**
+ * Pre-split in code, then extract each sub-chunk.
+ *
+ * The split decision is a pure function (`planExtractionChunks`) rather than
+ * inline arithmetic, so coverage, chronology and replay equivalence are
+ * properties that can be stated and tested. It also closed a real hole: the old
+ * threshold only split chunks LONGER than 10 messages while the split rescue
+ * refused to run on more than 8, so a truncated response inside a 9- or
+ * 10-message chunk had no recovery path and the fire wrote nothing.
+ */
 async function proposePrimary(env, config, userId, chunk, recent, packet, shortlist, overrides) {
 	const projectScope = normalizeProjectScope(overrides?.meta);
-	if (chunk.length <= PRIMARY_SUBCHUNK_THRESHOLD) {
-		return proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides);
+	const plan = planExtractionChunks(chunk, config.extractionChunk);
+	const coverage = verifyChunkCoverage(chunk, plan);
+	if (!coverage.ok) {
+		// Never silently extract from a partial view of accepted content. This is
+		// a code fault, not a model fault, and it fails loudly rather than
+		// quietly capturing less than the user was told we accepted.
+		console.error(`extraction chunk coverage broken user=${userId}: ${coverage.problems.join("; ")}`);
+		return {
+			proposal: { objects: [], notes: `chunk_coverage_broken: ${coverage.problems.join("; ")}`, _ok: false },
+			rescued: false,
+			rescueStats: null,
+			coverage,
+		};
 	}
-	console.warn(`chunk of ${chunk.length} messages pre-split for extraction user=${userId}`);
+	if (plan.length <= 1) {
+		const result = await proposeWithSplitRescue(env, config, userId, chunk, recent, packet, shortlist, overrides);
+		return { ...result, coverage };
+	}
+
+	console.warn(`chunk of ${chunk.length} messages pre-split into ${plan.length} for extraction user=${userId}`);
 	const objects = [];
 	const notes = [];
 	let rescuedAny = false;
+	let truncatedAny = false;
 	let stats = null;
-	for (let i = 0; i < chunk.length; i += PRIMARY_SUBCHUNK) {
-		const sub = chunk.slice(i, i + PRIMARY_SUBCHUNK);
-		const subPacket = buildPacket(sub, recent);
-		const subShortlist = i === 0 ? shortlist : await shortlistNodes(env, config, userId, chunkText(sub), projectScope);
-		const part = await proposeWithSplitRescue(env, config, userId, sub, recent, subPacket, subShortlist, overrides);
+	for (const sub of plan) {
+		const subPacket = buildPacket(sub.messages, recent);
+		const subShortlist = sub.index === 0
+			? shortlist
+			: await shortlistNodes(env, config, userId, chunkText(sub.messages), projectScope);
+		const part = await proposeWithSplitRescue(env, config, userId, sub.messages, recent, subPacket, subShortlist, overrides);
 		if (part.rescueStats) {
 			rescuedAny = rescuedAny || part.rescued;
 			stats = stats
 				? { calls: stats.calls + part.rescueStats.calls, failures: stats.failures + part.rescueStats.failures, aborted: part.rescueStats.aborted ?? stats.aborted }
 				: { ...part.rescueStats };
 		}
+		truncatedAny = truncatedAny || Boolean(part.proposal._truncated);
 		if (!part.proposal._ok) {
 			// One unreadable sub-chunk fails the fire (chunk is retained) — but
 			// only after bounded spend, and the receipt says which guard fired.
-			return { proposal: part.proposal, rescued: rescuedAny, rescueStats: stats };
+			return { proposal: part.proposal, rescued: rescuedAny, rescueStats: stats, coverage };
 		}
 		objects.push(...(part.proposal.objects ?? []));
 		if (part.proposal.notes) notes.push(part.proposal.notes);
 	}
 	return {
-		proposal: { objects, notes: notes.join("; "), _ok: true },
+		proposal: { objects, notes: notes.join("; "), _ok: true, ...(truncatedAny ? { _truncated: true } : {}) },
 		rescued: rescuedAny,
 		rescueStats: stats,
+		coverage,
 	};
 }
 
@@ -575,7 +598,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 
 	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
 	// Oversized chunks are pre-split by code before the model sees them.
-	const { proposal, rescued, rescueStats } = await proposePrimary(
+	const { proposal, rescued, rescueStats, coverage } = await proposePrimary(
 		env,
 		config,
 		userId,
@@ -585,6 +608,18 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		shortlist,
 		withRules,
 	);
+	if (coverage) {
+		// Privacy-safe capture counters: how the accepted content was divided and
+		// whether every message of it reached the model.
+		meta.chunks_planned = coverage.chunkCount;
+		meta.chunk_coverage_ok = coverage.ok;
+		meta.chunk_messages_covered = coverage.coveredCount;
+	}
+	if (proposal._truncated) {
+		// The model ran out of output budget. Whatever completed was salvaged;
+		// saying so is what turns "this save looked small" into a tunable fact.
+		meta.extraction_truncated = true;
+	}
 	if (rescueStats) {
 		// The rescue happened (or was refused) — the receipt must say so even
 		// when the fire ends llm_failed, or this spend is invisible again.
