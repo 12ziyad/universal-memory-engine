@@ -446,6 +446,37 @@ function dedupeEntries(entries) {
 	return out;
 }
 
+/**
+ * Provenance values whose date describes when something HAPPENED. Anything else
+ * — including a legacy row's NULL — describes when we were told, which is not
+ * an answer to "when did this happen?" and must not be printed as one.
+ */
+const TRUSTWORTHY_EVENT_DATES = new Set(["extracted", "phrase", "source_time"]);
+
+/**
+ * Render one event for the context block, with its date when we actually know it.
+ *
+ * V3-D04: this used to be `(e) => e.text`. The date was loaded from D1, carried
+ * all the way here, and dropped on the last line before the reader saw it — so
+ * "When did Jon lose his job as a banker?" was answered from the string "Left
+ * job as a banker", which contains no date. Fixing the parser (V3-D03) put the
+ * right date in the graph and changed nothing downstream, because nothing
+ * downstream ever showed it.
+ */
+function eventLine(event) {
+	const text = event?.text;
+	if (!text) return text;
+	if (!TRUSTWORTHY_EVENT_DATES.has(event.happened_at_source)) return text;
+	const at = Number(event.happened_at);
+	if (!Number.isFinite(at) || at <= 0) return text;
+	const date = new Date(at).toISOString().slice(0, 10);
+	// Don't repeat a date the fact already states in words. The extraction prompt
+	// asks for the timing to be kept inside the text too, so a lot of facts
+	// already carry it and " (2023-01-20)" twice reads as two different claims.
+	if (text.includes(date)) return text;
+	return `${text} (${date})`;
+}
+
 export function buildContext(entries, plan = recallGate("memory"), staged = []) {
 	const lines = [];
 	let nodeCount = 0;
@@ -460,7 +491,7 @@ export function buildContext(entries, plan = recallGate("memory"), staged = []) 
 		if (entry.type === "node" && nodeCount < plan.maxContextNodes) {
 			const n = entry.item;
 			const sliceTexts = n.slices.map((s) => s.text);
-			const eventTexts = [...n.events].reverse().map((e) => e.text);
+			const eventTexts = [...n.events].reverse().map(eventLine);
 			// Relations lead: an edge fact ("Amara works at Nova Systems") is
 			// usually the direct answer, and it is what the edge pass paid for.
 			const relationTexts = n.relations ?? [];
@@ -671,7 +702,7 @@ async function projectBootstrapRecall(env, userId, opts = {}) {
 				 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
 			).bind(userId, ...bindings),
 			env.DB.prepare(
-				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
+				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source, e.created_at,
 					e.project_id, e.project_name
 				 FROM events e
 				 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
@@ -765,7 +796,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 			 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
 		).bind(userId, ...bindings),
 		env.DB.prepare(
-			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
+			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source, e.created_at,
 				e.project_id, e.project_name
 			 FROM events e
 			 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}

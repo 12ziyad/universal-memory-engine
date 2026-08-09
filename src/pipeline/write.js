@@ -617,7 +617,10 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		const factGuarded = manualFactGuards.get(e.id) === true;
 		const guarded = factGuarded || identityClaims.length > 0;
 		const values = [
-			e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.created_at,
+			e.id, e.user_id, e.node_id, e.action, e.text, e.importance, e.happened_at,
+			// V3-D04: where the date came from, so recall can decline to print an
+			// "observed" one as though it were the day the thing happened.
+			e.happened_at_source ?? null, e.created_at,
 			e.created_at, e.confidence ?? null,
 			e.valid_at ?? e.happened_at ?? null, e.invalid_at ?? null, e.source_snippet ?? null,
 			projectScope.projectId, projectScope.projectName,
@@ -628,17 +631,17 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		stmts.push(
 			env.DB.prepare(
 				`INSERT INTO events
-					(id, user_id, node_id, action, text, importance, happened_at, created_at, last_seen_at, confidence,
+					(id, user_id, node_id, action, text, importance, happened_at, happened_at_source, created_at, last_seen_at, confidence,
 					 valid_at, invalid_at, source_snippet, project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
-						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {

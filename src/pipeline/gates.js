@@ -384,14 +384,18 @@ function parseProposedDate(value, now) {
  */
 function factHappenedAt(durable, opts, now) {
 	const proposed = parseProposedDate(durable?.date, now);
-	if (proposed !== null) return proposed;
+	if (proposed !== null) return { at: proposed, source: "extracted" };
 	const anchor = opts?.temporalAnchor ?? null;
 	if (anchor) {
 		const resolved = resolveFactDate(durable?.text, anchor);
-		if (resolved && resolved.epoch_ms <= now + 48 * 60 * 60 * 1000) return resolved.epoch_ms;
-		if (anchor.kind === "source_time") return anchor.epoch_ms;
+		if (resolved && resolved.epoch_ms <= now + 48 * 60 * 60 * 1000) {
+			return { at: resolved.epoch_ms, source: "phrase" };
+		}
+		if (anchor.kind === "source_time") return { at: anchor.epoch_ms, source: "source_time" };
 	}
-	return opts?.lastTs ?? now;
+	// V3-D04: this is when we were TOLD, not when it happened. Recording that
+	// honestly is what lets recall decline to print it as a fact.
+	return { at: opts?.lastTs ?? now, source: "observed" };
 }
 
 export async function applyGates(
@@ -713,7 +717,9 @@ export async function applyGates(
 				action,
 				text: durable.text,
 				importance: valid(durable.importance, IMPORTANCE, "important"),
-				happened_at: factHappenedAt(durable, opts, now),
+				...(({ at, source }) => ({ happened_at: at, happened_at_source: source }))(
+					factHappenedAt(durable, opts, now),
+				),
 				created_at: now,
 				confidence: durable.confidence,
 				project_id: projectScope.projectId,
@@ -997,7 +1003,9 @@ export async function applyGates(
 				action,
 				text: obj.text ?? "",
 				importance: valid(obj.importance, IMPORTANCE, "ordinary"),
-				happened_at: factHappenedAt(obj, opts, now),
+				...(({ at, source }) => ({ happened_at: at, happened_at_source: source }))(
+					factHappenedAt(obj, opts, now),
+				),
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,

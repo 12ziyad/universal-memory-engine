@@ -6,6 +6,12 @@
 			"runtimeExecutable": "npx",
 			"runtimeArgs": ["wrangler", "dev", "--port", "8787"],
 			"port": 8787
+		},
+		{
+			"name": "itsuki-eval-door",
+			"runtimeExecutable": "npx",
+			"runtimeArgs": ["wrangler", "dev", "--port", "8799"],
+			"port": 8799
 		}
 	]
 }

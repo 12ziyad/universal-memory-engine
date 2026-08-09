@@ -31,5 +31,6 @@
  "0030_deletion_barriers.sql": "df9666dbc3974326d4402e7065e5152d4743bc5c63e913ecb76f91b59d6273e6",
  "0031_named_fence_constraint.sql": "7c23c8858d853d78f2b69635c21c79daf22e51c4e0ecc0dc3808ff2dd7dbc113",
  "0032_source_time.sql": "d865964c2242e3fbac3bf56b025e5481e1b427c35fcf5c35eda4aa9836dc2ea2",
- "0033_source_episodes.sql": "f2d4a5a7213b8e3d928bafb635d5d19cc121617bc68d2b3475a30d3b2131e6e2"
+ "0033_source_episodes.sql": "f2d4a5a7213b8e3d928bafb635d5d19cc121617bc68d2b3475a30d3b2131e6e2",
+ "0034_event_date_provenance.sql": "a5adfe9b479687c339f0e1dff80c61ec3823546eacd1b1ae2ce4d3520b40d62b"
 }
