@@ -21,6 +21,117 @@ const MAX_CONTEXT_PAGES = 4;
 const MAX_LINE_ITEMS = 4;
 const MAX_CONTEXT_CHARS = 1800;
 const RECALL_SCOPES = new Set(["global", "project_only", "project_then_global"]);
+
+/**
+ * BF-2 — the recall depth budget.
+ *
+ * `/v1/recall` advertised a `limit` parameter, both SDKs expose it, and the
+ * handler never forwarded it. A caller asking for one memory got eight and had
+ * no way to tell. A parameter that is documented must either work or fail
+ * loudly; quietly doing nothing is the worst of the three.
+ *
+ * Two budgets, deliberately separated:
+ *
+ *   FINAL EVIDENCE BUDGET     how many items the caller gets back, and how much
+ *                             of the rendered context they fill.
+ *   INTERNAL CANDIDATE BUDGET how many candidates each retrieval lane may
+ *                             generate before fusion. Always bounded by the
+ *                             constants below, never by the caller.
+ *
+ * Two modes, because widening retrieval and narrowing it are different risks:
+ *
+ *   "narrow"  Legacy accounts. `limit` may only ever REDUCE what the proven
+ *             path would have returned. Asking for 3 gets at most 3; asking for
+ *             200 gets the legacy maximum. No new retrieval work, no new spend,
+ *             no architecture change — and no published SDK caller breaks.
+ *   "depth"   Memory V3 accounts. `limit` is a real depth control that raises
+ *             both budgets, up to the hard ceilings here.
+ */
+export const RECALL_LIMIT_MIN = 1;
+export const RECALL_LIMIT_MAX = 200;
+const RECALL_CONTEXT_CHARS_HARD_MAX = 24_000;
+const RECALL_CONTEXT_CHARS_PER_ITEM = 220;
+// Vectorize's own per-query ceiling. Asking past it is an error, not more results.
+const VECTOR_TOPK_MAX = 100;
+const BM25_CANDIDATES_BASE = 24;
+const BM25_CANDIDATES_MAX = 200;
+const GRAPH_EXPANSION_BASE = 50;
+const GRAPH_EXPANSION_MAX = 200;
+const EVENT_SCAN_HARD_MAX = 4000;
+
+export class RecallLimitError extends Error {
+	constructor(message) {
+		super(message);
+		this.name = "RecallLimitError";
+		this.code = "invalid_limit";
+		this.status = 400;
+	}
+}
+
+/**
+ * Validate a caller-supplied `limit`. Absent is fine. Anything present that is
+ * not a whole number in range is refused by name — never clamped, because a
+ * silent clamp is the same lie in a smaller font.
+ */
+export function validateRecallLimit(value) {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
+		throw new RecallLimitError(`limit must be a whole number between ${RECALL_LIMIT_MIN} and ${RECALL_LIMIT_MAX}.`);
+	}
+	if (value < RECALL_LIMIT_MIN || value > RECALL_LIMIT_MAX) {
+		throw new RecallLimitError(
+			`limit must be between ${RECALL_LIMIT_MIN} and ${RECALL_LIMIT_MAX} — ${value} is outside what recall will return.`,
+		);
+	}
+	return value;
+}
+
+/** Apply the caller's evidence budget to a gate plan. */
+function applyRecallLimit(plan, limit, mode) {
+	if (!limit || plan.mode === "no_recall") return plan;
+	if (mode !== "depth") {
+		// Narrowing only: never more than the legacy path would have produced.
+		return {
+			...plan,
+			limit_applied: Math.min(plan.topN, limit),
+			limit_requested: limit,
+			limit_mode: "narrow",
+			topN: Math.min(plan.topN, limit),
+			maxContextNodes: Math.min(plan.maxContextNodes, limit),
+			maxContextPages: Math.min(plan.maxContextPages, limit),
+		};
+	}
+	const extra = Math.max(0, limit - plan.topN);
+	return {
+		...plan,
+		limit_applied: limit,
+		limit_requested: limit,
+		limit_mode: "depth",
+		topN: limit,
+		maxContextNodes: limit,
+		maxContextPages: Math.max(plan.maxContextPages, Math.ceil(limit / 2)),
+		maxEventsPerNode: plan.maxEventsPerNode,
+		eventScanLimit: Math.min(EVENT_SCAN_HARD_MAX, Math.max(plan.eventScanLimit, limit * 20)),
+		maxContextChars: Math.min(
+			RECALL_CONTEXT_CHARS_HARD_MAX,
+			plan.maxContextChars + extra * RECALL_CONTEXT_CHARS_PER_ITEM,
+		),
+	};
+}
+
+/**
+ * The internal candidate budget for each lane. Derived from the final budget,
+ * but capped by constants the caller cannot move — "no unbounded retrieval"
+ * has to be true of the lanes, not just of the answer.
+ */
+function candidateBudget(plan) {
+	const topN = Math.max(1, Number(plan.topN) || TOP_N);
+	return {
+		vectorTopK: Math.min(VECTOR_TOPK_MAX, topN + 6),
+		bm25: Math.min(BM25_CANDIDATES_MAX, Math.max(BM25_CANDIDATES_BASE, topN * 2)),
+		graphExpansionTotal: Math.min(GRAPH_EXPANSION_MAX, Math.max(GRAPH_EXPANSION_BASE, topN)),
+	};
+}
 const NO_RECALL_RE =
 	/^(hi|hello|hey|yo|thanks|thank you|ok|okay|cool|nice|great|awesome|good morning|good night|what is \d+\s*[+\-*/]\s*\d+\??)$/i;
 const UPDATE_RE =
@@ -103,12 +214,23 @@ function isQuestion(text) {
 		|| /^(?:who|what|when|where|why|which|how|did|do|does|is|are|was|were|can|could|will|would|has|have|had|tell me)\b/i.test(q);
 }
 
+/** What the caller asked for and what they actually got, always both. */
+function limitReport(plan) {
+	return {
+		limit_requested: plan.limit_requested ?? null,
+		limit_applied: plan.limit_applied ?? null,
+		limit_mode: plan.limit_mode ?? null,
+		evidence_budget: plan.topN ?? 0,
+	};
+}
+
 function emptyRecall(plan, extras = {}) {
 	return {
 		ok: true,
 		recall_mode: plan.mode,
 		mode: plan.mode,
 		reason: plan.reason,
+		...limitReport(plan),
 		context: "",
 		items: [],
 		count: 0,
@@ -124,6 +246,10 @@ function emptyRecall(plan, extras = {}) {
 }
 
 export function recallGate(query, opts = {}) {
+	return applyRecallLimit(baseRecallGate(query, opts), opts.limit ?? null, opts.limitMode ?? "narrow");
+}
+
+function baseRecallGate(query, opts = {}) {
 	const q = String(query ?? "").trim();
 	const base = {
 		topN: TOP_N,
@@ -513,7 +639,11 @@ function itemSummary(entry) {
 async function projectBootstrapRecall(env, userId, opts = {}) {
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	const bindings = projectBindings(recallScope, projectId);
-	const plan = { ...recallGate("project memory"), mode: "project_bootstrap", reason: "session_start_lookup" };
+	const plan = {
+		...recallGate("project memory", { limit: opts.limit ?? null, limitMode: opts.limitMode ?? "narrow" }),
+		mode: "project_bootstrap",
+		reason: "session_start_lookup",
+	};
 	try {
 		const [nodesRes, pagesRes, slicesRes, eventsRes] = await env.DB.batch([
 			env.DB.prepare(
@@ -609,6 +739,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const bootstrap = String(opts.recallMode ?? "").trim() === "project_bootstrap";
 	if (bootstrap) return projectBootstrapRecall(env, userId, opts);
 	const plan = recallGate(q, opts);
+	const budget = candidateBudget(plan);
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";
@@ -737,8 +868,8 @@ export async function recall(env, config, userId, query, opts = {}) {
 					 JOIN manual_search_profiles p ON p.rowid = f.rowid
 					 WHERE manual_search_fts MATCH ? AND p.user_id = ?
 					 ORDER BY bm25(manual_search_fts, 4.0, 1.5, 0.5)
-					 LIMIT 24`,
-				).bind(ftsMatch, userId).all();
+					 LIMIT ?`,
+				).bind(ftsMatch, userId, budget.bm25).all();
 				bm25Rank = (results ?? [])
 					.filter((r) => (r.object_kind === "node" ? byId.has(r.object_id) : pageById.has(r.object_id)))
 					.map((r) => ({ key: `${r.object_kind}:${r.object_id}` }));
@@ -776,7 +907,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// result that another project can fill before the requested project is seen.
 	if (!filteredByProject) {
 		const vector = await embed(env, config, q);
-		const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: plan.topN + 6 });
+		const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: budget.vectorTopK });
 		vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
 	}
 
@@ -806,7 +937,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 		(pastIntent || edge.invalid_at == null || Number(edge.invalid_at) > now)
 		&& (edge.valid_at == null || Number(edge.valid_at) <= now);
 	const MAX_NEIGHBOURS_PER_SEED = 10;
-	const MAX_EXPANSION_TOTAL = 50;
+	const MAX_EXPANSION_TOTAL = budget.graphExpansionTotal;
 	const graphRank = [];
 	const expanded = new Map(); // node id -> hop
 	let frontier = new Set(seedIds);
@@ -907,6 +1038,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 		recall_mode: plan.mode,
 		mode: plan.mode,
 		reason: plan.reason,
+		...limitReport(plan),
 		context,
 		items,
 		count: items.length + stagedRows.length,

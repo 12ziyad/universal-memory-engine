@@ -2,7 +2,8 @@ import { getConfig } from "../config.js";
 import { linkIngestMemoryJobReceipt, storeReceipt } from "../lib/db.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
-import { recall, RecallScopeError, validateRecallScope } from "./recall.js";
+import { recall, RecallLimitError, RecallScopeError, validateRecallLimit, validateRecallScope } from "./recall.js";
+import { memoryV3Enabled } from "../lib/memory_v3.js";
 import { emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
@@ -437,6 +438,34 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 }
 
 export async function runRecallCommand(env, userId, query, input = {}) {
+	// BF-2: the depth budget is validated HERE, in the shared facade, so every
+	// door — REST, MCP, SDK — gets the same answer. It reaches `recall()` from
+	// this point on; it used to stop at the handler and vanish.
+	let limit;
+	try {
+		limit = validateRecallLimit(input.limit);
+	} catch (error) {
+		if (error instanceof RecallLimitError || error?.name === "RecallLimitError") {
+			return {
+				ok: false,
+				command_mode: "recall",
+				mode: "recall",
+				source: "recall",
+				error: error.code ?? "invalid_limit",
+				code: error.code ?? "invalid_limit",
+				http_status: Number(error.status ?? 400),
+				summary: String(error.message),
+				source_packet_id: null,
+				receipt_id: null,
+				receipt: null,
+				counts: { received: 1, items: 0, nodes: 0, pages: 0, savedTotal: 0 },
+			};
+		}
+		throw error;
+	}
+	// Narrowing is safe on any architecture; widening changes retrieval depth,
+	// which is V3 behaviour and stays behind the flag.
+	const limitMode = memoryV3Enabled(env, userId) ? "depth" : "narrow";
 	try {
 		validateRecallScope(userId, {
 			memoryScope: input.memoryScope,
@@ -529,6 +558,8 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 				memoryScope: input.memoryScope,
 				recallScope: input.recallScope,
 				recallMode: input.recallMode,
+				limit,
+				limitMode,
 			});
 			return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 		});
