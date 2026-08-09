@@ -1337,7 +1337,22 @@ const routes = {
 		const door = await doorOverrides(env, auth, body);
 		// The SDK profile's layered rules govern this door end to end — the
 		// autoCollect decision included, so a key's rules can turn capture off.
-		const rules = await resolveAdmissionRules(env, auth.userId, door.rules);
+		// If the rules store cannot be read we do not know what this account
+		// allows, and this door both recalls and captures. Refuse honestly rather
+		// than proceed on assumed defaults.
+		let rules;
+		try {
+			rules = await resolveAdmissionRules(env, auth.userId, door.rules);
+		} catch (error) {
+			if (error?.code === "memory_rules_unavailable") {
+				return json({
+					error: "memory_rules_unavailable",
+					code: "memory_rules_unavailable",
+					message: "Your memory rules could not be read just now, so nothing was captured. Nothing was lost — retry in a moment.",
+				}, 503, { "retry-after": "5" });
+			}
+			throw error;
+		}
 
 		const recall = query
 			? await runRecallCommand(env, auth.userId, query, {

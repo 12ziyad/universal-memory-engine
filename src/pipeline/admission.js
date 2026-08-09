@@ -38,5 +38,11 @@ import { getMemoryRules } from "./rules.js";
  */
 export async function resolveAdmissionRules(env, userId, overrideRules) {
 	if (overrideRules !== undefined && overrideRules !== null) return overrideRules;
-	return getMemoryRules(env, userId);
+	// FAIL CLOSED. This is the admission boundary: every caller here is about to
+	// write something the user can later recall, export, or search. An
+	// unreadable rules store used to come back as DEFAULTS, which meant a
+	// transient D1 error on one SELECT silently converted "never keep my salary"
+	// into "keep everything" — and the fail-closed handling every caller already
+	// had could never fire, because nothing ever threw.
+	return getMemoryRules(env, userId, { failClosed: true });
 }

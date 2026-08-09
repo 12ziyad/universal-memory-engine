@@ -31,6 +31,8 @@ import { activeJobDepth, claimIngestMemoryJob } from "../lib/db.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { stageMemoryText } from "./staged_text.js";
+import { writeSourceEpisodes } from "./episodes.js";
+import { memoryV3Enabled } from "../lib/memory_v3.js";
 
 // 1.7 backpressure: never accept unbounded work you can't see.
 const MAX_QUEUE_DEPTH = 200;
@@ -335,6 +337,23 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			projectName,
 			rules: pipelineOverrides.rules,
 		});
+		// V3 / P0-D: preserve the permitted source text BEFORE the model is
+		// consulted, so a conservative extraction pass can no longer make allowed
+		// evidence permanently unrecoverable. Behind the V3 flag, scrubbed by the
+		// call at the top of this function, rules-enforced by the writer, and
+		// best-effort — an episode failure must never fail an accepted write.
+		if (memoryV3Enabled(env, userId)) {
+			await writeSourceEpisodes(env, userId, {
+				sourcePacketId: sourcePacket?.id ?? null,
+				conversationId: sourcePacket?.conversation_id ?? normalized.packet.conversation_id ?? null,
+				threadId: sourcePacket?.thread_id ?? normalized.packet.thread_id ?? null,
+				sessionId: sourcePacket?.session_id ?? normalized.packet.session_id ?? null,
+				messages: normalized.messages,
+				projectId,
+				projectName,
+				rules: pipelineOverrides.rules,
+			});
+		}
 	}
 	maybeInjectIngestFault(env, ingestFault, "after_job_claim");
 

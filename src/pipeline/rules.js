@@ -111,13 +111,44 @@ export function memoryRulesAreDefault(rules) {
 		rules.captureDensity === "standard" && rules.retentionDays === null;
 }
 
-export async function getMemoryRules(env, userId) {
+/**
+ * The rules row could not be read, and we do not know what it said.
+ *
+ * Distinct from "there is no rules row", which is a real answer meaning
+ * defaults. This one means the question was never answered, and an admission
+ * lane that treats it as defaults is admitting content it cannot prove is
+ * permitted.
+ */
+export class MemoryRulesUnavailableError extends Error {
+	constructor(cause) {
+		super(`memory rules could not be read: ${cause}`);
+		this.name = "MemoryRulesUnavailableError";
+		this.code = "memory_rules_unavailable";
+	}
+}
+
+/**
+ * Load an account's memory rules.
+ *
+ * `failClosed` decides what an UNREADABLE rules store means. Display and
+ * reporting callers want defaults — a rules page that 500s over a transient
+ * read is worse than one showing defaults. Admission callers want the throw,
+ * because the alternative is storing content the user asked us never to keep,
+ * on the basis of a rules set we never actually saw.
+ *
+ * A missing TABLE is not ambiguous either way: a table that does not exist
+ * cannot hold a rule, so it is defaults in both modes. That was the original
+ * reason this swallowed everything, and it is preserved exactly.
+ */
+export async function getMemoryRules(env, userId, { failClosed = false } = {}) {
 	try {
 		const row = await env.DB.prepare("SELECT * FROM memory_rules WHERE user_id = ?").bind(userId).first();
 		return row ? normalizeMemoryRules(row) : { ...DEFAULT_MEMORY_RULES };
 	} catch (err) {
-		// Rules must never break a save. Missing table (pre-migration) → defaults.
-		console.warn(`memory rules load failed user=${userId}:`, err?.message ?? err);
+		const message = String(err?.message ?? err);
+		if (/no such table/i.test(message)) return { ...DEFAULT_MEMORY_RULES };
+		console.warn(`memory rules load failed user=${userId}:`, message);
+		if (failClosed) throw new MemoryRulesUnavailableError(message);
 		return { ...DEFAULT_MEMORY_RULES };
 	}
 }

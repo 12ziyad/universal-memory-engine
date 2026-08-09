@@ -9,6 +9,7 @@ import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
 import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
+import { countSourceEpisodes, deleteSourceEpisodes } from "./episodes.js";
 
 function parseJsonArray(value) {
 	try {
@@ -580,6 +581,11 @@ export async function deleteAllMemories(env, userId, confirm) {
 		"manual_fact_identities",
 		"manual_page_identities",
 		"manual_page_versions",
+		// V3 / P0-D. Hard delete, and the FTS triggers drop the tokens with the
+		// row — an episode surviving a "delete everything" would be the user's own
+		// words, still searchable, after they asked us to erase them.
+		"source_episodes",
+		"staged_memories",
 	];
 	const counts = {};
 	for (const table of tables) {
@@ -899,7 +905,8 @@ export async function bulkDeleteBySource(env, userId, {
 		binds.push(afterMs);
 	}
 	const { results: runs } = await env.DB.prepare(
-		`SELECT id, status, source_mode, tool_name, scope_json, created_nodes_json, created_pages_json,
+		`SELECT id, status, source_mode, tool_name, scope_json, source_packet_id,
+			created_nodes_json, created_pages_json,
 			created_slices_json, created_events_json, created_edges_json, created_candidates_json
 		 FROM extraction_runs WHERE ${clauses.join(" AND ")}`,
 	).bind(...binds).all();
@@ -1032,6 +1039,21 @@ export async function bulkDeleteBySource(env, userId, {
 		"UPDATE staged_memories SET settled_at = ? WHERE user_id = ? AND settled_at IS NULL",
 	).bind(now, userId).run();
 
+	// V3 / P0-D: source episodes are the user's own permitted text, indexed for
+	// search. A confirmed erasure must remove them, not tombstone them — a
+	// soft-deleted episode is retained text with a flag on it. Scoped deletes
+	// remove only the scope's episodes; an unscoped one removes them all.
+	// Hard delete fires the FTS triggers, so the tokens go with the row.
+	const episodeErasure = erasure
+		? await deleteSourceEpisodes(env, userId)
+		: await deleteSourceEpisodes(env, userId, {
+			// A scoped curation removes only the episodes of the accepted writes it
+			// matched, identified by the same run manifests that attribute every
+			// other row to this scope.
+			sourcePacketIds: [...new Set((runs ?? []).map((run) => run.source_packet_id).filter(Boolean))],
+		});
+	const episodesDeleted = Number(episodeErasure.deleted ?? 0);
+
 	// The sweep, as a function of an id set — the erasure convergence loop
 	// re-derives the set from live state and runs it again (Mem0's delete_all
 	// shape: list from the authoritative store until it comes back empty).
@@ -1103,8 +1125,14 @@ export async function bulkDeleteBySource(env, userId, {
 		// remainder discoverable by the next delete.)
 		for (let pass = 0; pass < 2; pass += 1) {
 			const remaining = await enumerateLiveScope(env, userId);
-			if (ERASURE_TABLES.every(([setName]) => remaining[setName].size === 0)) break;
+			// Episodes are written at ACCEPT time, so one can land between the
+			// enumeration and the sweep exactly as a graph row can. Convergence has
+			// to include them or "erased" would be true of the graph and false of
+			// the words the graph came from.
+			const remainingEpisodes = await countSourceEpisodes(env, userId);
+			if (remainingEpisodes === 0 && ERASURE_TABLES.every(([setName]) => remaining[setName].size === 0)) break;
 			convergencePasses += 1;
+			if (remainingEpisodes > 0) await deleteSourceEpisodes(env, userId);
 			sweptIds.push(...await sweep(remaining));
 		}
 	}
@@ -1135,6 +1163,7 @@ export async function bulkDeleteBySource(env, userId, {
 		deleted: { runs: counts.runs, ...deletedTotals },
 		summaries_regenerated: regenerated,
 		staged_settled: stagedSettled.meta?.changes ?? 0,
+		source_episodes_deleted: episodesDeleted,
 		convergence_passes: convergencePasses,
 		...(erasure ? { cancelled_runs: cancelledRuns } : {}),
 		pending_jobs: pendingJobs,
