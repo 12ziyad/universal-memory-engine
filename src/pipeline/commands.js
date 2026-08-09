@@ -560,6 +560,10 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 				recallMode: input.recallMode,
 				limit,
 				limitMode,
+				// E8: cross-encoder reranking. V3 accounts only — it costs a model
+				// call per recall, so it can never switch on for a legacy account.
+				rerank: limitMode === "depth" && input.rerank === true,
+				rerankKeep: input.rerankKeep,
 			});
 			return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
 		});

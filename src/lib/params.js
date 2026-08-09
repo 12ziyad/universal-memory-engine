@@ -34,6 +34,7 @@ const ALIASES = {
 	capture_density: "captureDensity",
 	metadata_only: "metadataOnly",
 	run_id: "runId",
+	rerank_keep: "rerankKeep",
 	source_time: "sourceTime",
 	sourceTimestamp: "sourceTime",
 	source_timestamp: "sourceTime",
@@ -56,7 +57,7 @@ const COMMON = [
  */
 export const ENDPOINT_PARAMS = {
 	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope", "sourceTime"],
-	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope", "recallMode"],
+	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope", "recallMode", "rerank", "rerankKeep"],
 	"/v1/ingest": [...COMMON, "messages", "flush", "delivery", "sourceTime"],
 	"/v1/turn": [...COMMON, "messages", "query", "recallScope", "sourceTime"],
 };

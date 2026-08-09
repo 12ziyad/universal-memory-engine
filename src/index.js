@@ -1697,6 +1697,10 @@ const routes = {
 			// BF-2: this is the line that was missing. The parameter was
 			// allowlisted, documented, and exposed by both SDKs, and it stopped here.
 			limit: body.limit,
+			// E8: cross-encoder reranking. Honoured only for accounts already on
+			// the V3 depth path, so it can never add a model call to a legacy read.
+			rerank: body.rerank,
+			rerankKeep: body.rerankKeep,
 		});
 		return json(result, result?.ok === false ? (result.http_status ?? 400) : 200);
 	},

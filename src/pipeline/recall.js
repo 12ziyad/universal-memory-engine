@@ -12,6 +12,7 @@ import { tokens, normalizeLabel, wordContains } from "../lib/text.js";
 import { resolveScope } from "./source.js";
 import { classifyMessage } from "./trigger.js";
 import { findStagedText } from "./staged_text.js";
+import { rerankEntries } from "./rerank.js";
 
 const TOP_N = 8;
 const MAX_EVENTS_PER_NODE = 8;
@@ -1059,6 +1060,20 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// ---- MMR: five phrasings of one fact return once -------------------------
 	entries = mmrSelect(dedupeEntries(entries).sort((a, b) => b.score - a.score), plan.topN);
 
+	// ---- cross-encoder rerank (E8) -------------------------------------------
+	// Fusion ranks by how many lanes agreed; it does not know whether an item
+	// answers THIS question. At depth that cost a measured 9.96 pp of conditional
+	// accuracy. Reranking reorders what MMR already selected — it can never
+	// introduce an item, so scope filtering upstream still holds absolutely.
+	// Off unless the deployment asks for it; a failure returns the fused order.
+	let rerank = { used: false, scored: 0, keep: null, latencyMs: 0 };
+	if (opts.rerank === true && entries.length > 1) {
+		rerank = await rerankEntries(env, q, entries, {
+			keep: Number.isInteger(opts.rerankKeep) && opts.rerankKeep > 0 ? opts.rerankKeep : null,
+		});
+		entries = rerank.entries;
+	}
+
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
 	const context = buildContext(entries, plan, stagedRows);
@@ -1081,6 +1096,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 		vector_used: vectorUsed,
 		lexical_used: lexicalUsed,
 		graph_expansion_used: graphExpansionUsed,
+		rerank_used: rerank.used,
+		rerank_scored: rerank.scored,
+		rerank_keep: rerank.keep,
+		rerank_ms: rerank.latencyMs,
 		compressed: Boolean(context),
 	};
 }
