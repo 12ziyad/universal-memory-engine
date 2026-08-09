@@ -1,0 +1,140 @@
+import { describe, expect, it } from "vitest";
+import { env } from "cloudflare:test";
+
+import {
+	MEMORY_V3_MODES,
+	memoryV3Config,
+	memoryV3Enabled,
+	memoryV3Status,
+} from "../src/lib/memory_v3.js";
+
+/**
+ * The V3 write/read architecture ships behind a flag that is OFF in production
+ * and can only be turned on for explicitly named accounts. This suite is the
+ * rollback mechanism's proof: if any of it fails, V3 can reach a user who was
+ * never selected for it.
+ */
+
+const base = { ...env };
+
+describe("V3 feature flag: default state", () => {
+	it("is OFF when nothing is configured", () => {
+		expect(memoryV3Config({}).mode).toBe("off");
+		expect(memoryV3Enabled({}, "user_a")).toBe(false);
+	});
+
+	it("is OFF for the real deployed environment (production default)", () => {
+		// The deployed worker must not carry an enabling value by accident.
+		expect(memoryV3Enabled(base, "user_a")).toBe(false);
+	});
+
+	it("fails closed on an unrecognised value rather than guessing", () => {
+		for (const value of ["yes", "1", "true-ish", "ON!", "enabled", " ", "allowlist;on", null, 0, {}]) {
+			expect(memoryV3Config({ ITSUKI_MEMORY_V3: value }).mode).toBe("off");
+			expect(memoryV3Enabled({ ITSUKI_MEMORY_V3: value }, "user_a")).toBe(false);
+		}
+	});
+
+	it("exposes only the three modes it claims to support", () => {
+		expect([...MEMORY_V3_MODES].sort()).toEqual(["allowlist", "off", "on"]);
+	});
+});
+
+describe("V3 feature flag: allowlist mode", () => {
+	const allowlistEnv = {
+		ITSUKI_MEMORY_V3: "allowlist",
+		ITSUKI_MEMORY_V3_USERS: "user_campaign, user_bench ,user_test",
+	};
+
+	it("enables exactly the named accounts", () => {
+		expect(memoryV3Enabled(allowlistEnv, "user_campaign")).toBe(true);
+		expect(memoryV3Enabled(allowlistEnv, "user_bench")).toBe(true);
+		expect(memoryV3Enabled(allowlistEnv, "user_test")).toBe(true);
+	});
+
+	it("leaves every other account on the legacy path", () => {
+		for (const other of ["user_a", "user_campaign2", "campaign", "user_camp", "USER_CAMPAIGN", ""]) {
+			expect(memoryV3Enabled(allowlistEnv, other)).toBe(false);
+		}
+	});
+
+	it("matches the whole id, never a prefix, suffix, or substring", () => {
+		const one = { ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: "user_1" };
+		expect(memoryV3Enabled(one, "user_1")).toBe(true);
+		expect(memoryV3Enabled(one, "user_10")).toBe(false);
+		expect(memoryV3Enabled(one, "xuser_1")).toBe(false);
+		expect(memoryV3Enabled(one, "user_1x")).toBe(false);
+	});
+
+	it("is case sensitive, because account ids are", () => {
+		const one = { ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: "User_Mixed" };
+		expect(memoryV3Enabled(one, "User_Mixed")).toBe(true);
+		expect(memoryV3Enabled(one, "user_mixed")).toBe(false);
+	});
+
+	it("is OFF for everyone when the mode is allowlist but the list is empty", () => {
+		for (const users of [undefined, "", "   ", ",,,", null]) {
+			const cfg = { ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: users };
+			expect(memoryV3Config(cfg).allowlistCount).toBe(0);
+			expect(memoryV3Enabled(cfg, "user_a")).toBe(false);
+		}
+	});
+
+	it("never enables an absent, empty, or non-string account id", () => {
+		for (const id of [undefined, null, "", "   ", 0, 123, {}, []]) {
+			expect(memoryV3Enabled(allowlistEnv, id)).toBe(false);
+		}
+	});
+
+	it("cannot be turned on by anything a caller can send", () => {
+		// The resolver takes (env, userId) only. There is no request-body,
+		// header, or scope-object path into it — a caller cannot opt themselves
+		// in, which is what makes cross-tenant bleed impossible by construction.
+		expect(memoryV3Enabled.length).toBe(2);
+		const hostile = {
+			ITSUKI_MEMORY_V3: "off",
+			ITSUKI_MEMORY_V3_USERS: "user_a",
+		};
+		expect(memoryV3Enabled(hostile, "user_a")).toBe(false);
+	});
+});
+
+describe("V3 feature flag: global on", () => {
+	it("enables every account, and is the only mode that does", () => {
+		const on = { ITSUKI_MEMORY_V3: "on" };
+		expect(memoryV3Enabled(on, "user_a")).toBe(true);
+		expect(memoryV3Enabled(on, "user_b")).toBe(true);
+		// Still needs a real account id.
+		expect(memoryV3Enabled(on, "")).toBe(false);
+	});
+});
+
+describe("V3 feature flag: observability", () => {
+	it("reports state without exposing a single account id", () => {
+		const status = memoryV3Status({
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "user_campaign,user_bench",
+		});
+		expect(status).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "allowlist", allowlistCount: 2 });
+		const serialized = JSON.stringify(status);
+		expect(serialized).not.toContain("user_campaign");
+		expect(serialized).not.toContain("user_bench");
+	});
+
+	it("reports the off state plainly", () => {
+		expect(memoryV3Status({})).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 });
+	});
+});
+
+describe("V3 feature flag: surfaced on the HTTP doors", () => {
+	it("GET /health reports the flag mode and no account ids", async () => {
+		const response = await (await import("../src/index.js")).default.fetch(
+			new Request("https://itsuki.app/health"),
+			env,
+			{ waitUntil() {}, passThroughOnException() {} },
+		);
+		const body = await response.json();
+		expect(response.status).toBe(200);
+		expect(body.memory_v3).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 });
+	});
+});

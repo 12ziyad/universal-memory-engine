@@ -289,6 +289,8 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		idempotencyKey: input.idempotencyKey,
 		delivery: input.delivery,
 		memoryScope: input.memoryScope,
+		// BF-1: the batch-level authoritative write time, if the caller gave one.
+		sourceTime: input.sourceTime,
 		sourceMode,
 		overrides: { source, ...(input.overrides ?? {}) },
 	});

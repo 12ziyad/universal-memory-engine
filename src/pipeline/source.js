@@ -1,6 +1,7 @@
 import { newId } from "../lib/ids.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import { normalizeSourceTime, parseSourceTime, persistedSourceTime } from "../lib/source_time.mjs";
 import {
 	canonicalizeSourceEvent,
 	normalizeSourceEventTrace,
@@ -249,6 +250,10 @@ export async function stableSourceMessageId(namespace, role, content) {
 
 async function normalizeMessageBatch(messages = [], opts = {}) {
 	const conversationId = opts.conversationId ?? opts.sessionId ?? opts.namespace ?? "source";
+	// BF-1: the batch default. A per-message sourceTime always wins over it; when
+	// neither is present the message simply has none, and every consumer falls
+	// back to `ts` (observation time) exactly as it did before this contract.
+	const batchSourceTime = normalizeSourceTime(opts.sourceTime ?? null);
 	const prepared = [];
 	let droppedSourceEvents = 0;
 	for (const raw of messages ?? []) {
@@ -263,12 +268,21 @@ async function normalizeMessageBatch(messages = [], opts = {}) {
 		if (sourceEvent.provided && !sourceEvent.event) droppedSourceEvents += 1;
 		const contentHash = await hashText(text);
 		const id = raw?.id ?? await stableSourceMessageId(conversationId, role, text);
+		const own = typeof raw === "object" && raw !== null
+			? (raw.sourceTime ?? raw.source_time ?? null)
+			: null;
+		// The door already validated these. A value that fails here is one that
+		// never crossed a validating door (an internal caller), so it is dropped
+		// to the batch default rather than fabricating an instant.
+		const parsed = own === null ? { ok: true, time: null } : parseSourceTime(own);
+		const sourceTime = (parsed.ok && parsed.time ? normalizeSourceTime(parsed.time) : null) ?? batchSourceTime;
 		prepared.push({
 			id,
 			role,
 			content: text,
 			ts: numberOrNow(raw?.ts),
 			content_hash: contentHash,
+			...(sourceTime ? { source_time: sourceTime } : {}),
 			_raw_source_event: sourceEvent.event,
 		});
 	}
@@ -356,6 +370,11 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const sourceRole = cleanKey(input.sourceRole ?? input.role, null);
 	const topic = cleanKey(input.topic ?? scope.topic, null);
 	const delivery = normalizeDeliveryMetadata(input.delivery);
+	// BF-1: the packet's authoritative write time. Doors validate before we get
+	// here; an unusable value from an internal caller is dropped rather than
+	// turned into a fabricated instant.
+	const parsedSourceTime = parseSourceTime(input.sourceTime ?? input.source_time ?? null);
+	const packetSourceTime = parsedSourceTime.ok ? normalizeSourceTime(parsedSourceTime.time) : null;
 	const singleMessage = input.content ? [{
 		id: input.messageId,
 		role: input.role ?? "user",
@@ -366,7 +385,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	}] : [];
 	const normalizedMessages = await normalizeMessageBatch(
 		input.messages ?? singleMessage,
-		{ conversationId: conversationId ?? sessionId, sessionId },
+		{ conversationId: conversationId ?? sessionId, sessionId, sourceTime: packetSourceTime },
 	);
 	const messages = normalizedMessages.messages;
 	const sourceEventTrace = sourceEventTraceFromMessages(messages, {
@@ -380,6 +399,10 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		? { ...legacyHashScope, project_id: hashProjectId }
 		: legacyHashScope;
 	const deliveryIdentity = deliveryContentIdentity(delivery);
+	// The same words said on two different days are two different memories, so
+	// source_time participates in content identity. It is added CONDITIONALLY:
+	// a packet without one hashes byte-for-byte as it did before BF-1, which is
+	// what keeps every already-issued idempotency key and replay valid.
 	const hashPayload = {
 		sourceType,
 		sourceMode,
@@ -388,11 +411,13 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		topic,
 		scope: hashScope,
 		...(deliveryIdentity ? { delivery: deliveryIdentity } : {}),
+		...(packetSourceTime ? { source_time: packetSourceTime } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
 			content_hash: m.content_hash,
 			...(m.source_event ? { source_event: m.source_event } : {}),
+			...(m.source_time ? { source_time: m.source_time } : {}),
 		})),
 	};
 	const contentHash = await hashText(JSON.stringify(hashPayload));
@@ -415,13 +440,17 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const rawMeta = {
 		delivery,
 		session_id_explicit: Boolean(explicitSession),
+		...(packetSourceTime ? { source_time: packetSourceTime } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
 			role: m.role,
+			// `ts` is when we OBSERVED the message. `source_time` is when the
+			// caller says it was written. Keeping both is the whole point of BF-1.
 			ts: m.ts,
 			content_hash: m.content_hash,
 			snippet: clamp(m.content, 240),
 			...(m.source_event ? { source_event: m.source_event } : {}),
+			...(m.source_time ? { source_time: m.source_time } : {}),
 		})),
 		...(sourceEventTrace ? { source_event_trace: sourceEventTrace } : {}),
 	};
@@ -450,10 +479,32 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			message_count: messages.length,
 			raw_meta_json: JSON.stringify(rawMeta),
 			received_at: numberOrNow(input.receivedAt),
+			// Persisted columns (migration 0032). Null for every packet that did
+			// not carry a source time, which is every packet written before BF-1.
+			source_time: packetSourceTime?.epoch_ms ?? null,
+			source_time_offset_minutes: packetSourceTime?.offset_minutes ?? null,
+			source_time_precision: packetSourceTime?.precision ?? null,
 			delivery,
 			messages,
 		},
 	};
+}
+
+/**
+ * The packet's authoritative write time, read back from a stored row. Prefers
+ * the columns; falls back to the provenance blob so packets written between the
+ * code deploy and the migration are still readable.
+ */
+export function sourcePacketSourceTime(sourcePacket) {
+	if (!sourcePacket) return null;
+	const fromColumns = persistedSourceTime({
+		epoch_ms: Number(sourcePacket.source_time),
+		offset_minutes: sourcePacket.source_time_offset_minutes ?? null,
+		precision: sourcePacket.source_time_precision ?? "time",
+	});
+	if (fromColumns) return fromColumns;
+	const rawMeta = parseRecord(sourcePacket.raw_meta_json ?? sourcePacket.rawMetaJson);
+	return persistedSourceTime(rawMeta.source_time);
 }
 
 export async function storeSourcePacket(env, packet, { immutableIdempotency = true } = {}) {
@@ -484,6 +535,9 @@ export async function storeSourcePacket(env, packet, { immutableIdempotency = tr
 				content_preview = excluded.content_preview,
 				message_count = excluded.message_count,
 				raw_meta_json = excluded.raw_meta_json,
+				source_time = excluded.source_time,
+				source_time_offset_minutes = excluded.source_time_offset_minutes,
+				source_time_precision = excluded.source_time_precision,
 				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
 				received_at = excluded.received_at,
 				updated_at = excluded.updated_at`;
@@ -493,8 +547,9 @@ export async function storeSourcePacket(env, packet, { immutableIdempotency = tr
 				 workspace_id, app_id, agent_id, session_id, source_scope, project_id, project_name,
 				 source_type, source_mode, source_id, source_role, conversation_id, thread_id, topic,
 				 idempotency_key, content_hash, content_preview, message_count, raw_meta_json,
+				 source_time, source_time_offset_minutes, source_time_precision,
 				 seen_count, received_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, idempotency_key) ${conflictUpdate}
 			 RETURNING *`,
 		)
@@ -524,6 +579,9 @@ export async function storeSourcePacket(env, packet, { immutableIdempotency = tr
 				packet.content_preview,
 				packet.message_count,
 				packet.raw_meta_json,
+				packet.source_time ?? null,
+				packet.source_time_offset_minutes ?? null,
+				packet.source_time_precision ?? null,
 				1,
 				packet.received_at ?? now,
 				now,
@@ -646,6 +704,10 @@ export function sourceMeta(sourcePacket) {
 		project_id: sourcePacket.project_id ?? null,
 		project_name: sourcePacket.project_name ?? null,
 		delivery,
+		// BF-1: carried onto extraction meta so the gates and temporal
+		// normalization can anchor on when the content was WRITTEN. Absent when
+		// the caller gave no source time — consumers then fall back to `ts`.
+		...(sourcePacketSourceTime(sourcePacket) ? { source_time: sourcePacketSourceTime(sourcePacket) } : {}),
 		...(sourceEventTrace ? { source_event_trace: sourceEventTrace } : {}),
 	};
 }
@@ -661,6 +723,7 @@ export function sourceEvidenceFromPacket(sourcePacket, opts = {}) {
 			source_role: m.role,
 			snippet: clamp(m.content, SNIPPET_LIMIT),
 			timestamp: m.ts ?? null,
+			...(m.source_time ? { source_time: m.source_time } : {}),
 			content_hash: m.content_hash ?? null,
 			receipt_id: opts.receiptId ?? null,
 			confidence: m.role === "user" ? 0.92 : 0.72,

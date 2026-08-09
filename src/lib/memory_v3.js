@@ -1,0 +1,76 @@
+/**
+ * The Memory V3 feature flag.
+ *
+ * V3 changes what the product captures and how it retrieves. Existing users
+ * stay on the proven path while it is developed, so the flag is OFF unless the
+ * deployment explicitly says otherwise, and "otherwise" means naming accounts.
+ *
+ * This flag is the rollback mechanism for V3 behaviour. Three properties make
+ * that true, and `test/memory_v3_flag.spec.js` holds them:
+ *
+ *   1. It fails CLOSED. An unset, empty, misspelt, or non-string value is `off`.
+ *      There is no value a typo can produce that turns V3 on.
+ *   2. It is resolved from `env` and an account id ONLY. There is no request
+ *      body, header, query parameter, or scope object that reaches it — so a
+ *      caller cannot opt themselves (or anybody else) in, and one account's
+ *      setting cannot bleed into another's request.
+ *   3. Allowlist membership is whole-string and case-sensitive, because account
+ *      ids are. `user_1` never matches `user_10`.
+ *
+ * Modes:
+ *   off        — everybody on the legacy path. THE PRODUCTION DEFAULT.
+ *   allowlist  — only the accounts named in ITSUKI_MEMORY_V3_USERS.
+ *   on         — every account. Development and test only; enabling this in
+ *                production is a deliberate act, never a side effect of a deploy.
+ */
+
+export const MEMORY_V3_FLAG_SCHEMA = "itsuki.memory-v3-flag/v1";
+
+export const MEMORY_V3_MODES = new Set(["off", "allowlist", "on"]);
+
+/** Split the allowlist var into exact account ids. Blank entries are dropped. */
+function parseAllowlist(raw) {
+	if (typeof raw !== "string") return new Set();
+	const ids = new Set();
+	for (const part of raw.split(",")) {
+		const id = part.trim();
+		if (id) ids.add(id);
+	}
+	return ids;
+}
+
+/**
+ * Resolve the flag's configuration. Never throws: a broken value is `off`,
+ * because a memory system that guesses at a rollout switch is worse than one
+ * that stays on the path it already proved.
+ */
+export function memoryV3Config(env) {
+	const raw = env?.ITSUKI_MEMORY_V3;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist" ? parseAllowlist(env?.ITSUKI_MEMORY_V3_USERS) : new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+/**
+ * Is V3 active for this account? `userId` is the account that owns the rows —
+ * the same identity every scoped query binds — so the answer cannot differ
+ * between the write that stores something and the read that finds it.
+ */
+export function memoryV3Enabled(env, userId) {
+	if (typeof userId !== "string" || !userId.trim()) return false;
+	const { mode, allowlist } = memoryV3Config(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
+ * Flag state for operators, carrying no private data: the mode and how many
+ * accounts are selected, never which ones.
+ */
+export function memoryV3Status(env) {
+	const { mode, allowlistCount } = memoryV3Config(env);
+	return { schema: MEMORY_V3_FLAG_SCHEMA, mode, allowlistCount };
+}

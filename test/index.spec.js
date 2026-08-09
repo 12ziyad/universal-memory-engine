@@ -22,6 +22,9 @@ describe("GET /health", () => {
 			ok: true,
 			service: "memory-engine",
 			version: "0.1.0",
+			// Rollout state is operational, not personal: the mode and how many
+			// accounts are selected, never which ones.
+			memory_v3: { schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 },
 		});
 	});
 });

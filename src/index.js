@@ -22,6 +22,7 @@ import {
 	validateIngestBody,
 } from "./lib/ingest_contract.mjs";
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
+import { memoryV3Enabled, memoryV3Status } from "./lib/memory_v3.js";
 import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
 	archiveObject,
@@ -225,6 +226,32 @@ async function readBody(request, path, { maxBytes = INGEST_LIMITS.maxRequestByte
 	return { body: checked.body, requestBytes: totalBytes };
 }
 
+/**
+ * BF-1 gate. `sourceTime` is allowlisted at every memory door so a caller who
+ * sends it gets a semantic answer instead of "unknown_parameter" — but honouring
+ * it is Memory V3 behaviour, and V3 is off for everyone who was not explicitly
+ * selected. Refuse by name rather than accepting a timestamp we will not use:
+ * a caller who believes their write times landed and finds "now" instead is the
+ * BF-2 failure repeated in a more damaging place.
+ *
+ * Returns a Response to send, or null when the request may proceed.
+ */
+function refuseUngatedSourceTime(env, userId, body) {
+	const onBody = body && Object.prototype.hasOwnProperty.call(body, "sourceTime");
+	const onMessage = Array.isArray(body?.messages) && body.messages.some(
+		(message) => message && typeof message === "object" && !Array.isArray(message)
+			&& Object.prototype.hasOwnProperty.call(message, "sourceTime"),
+	);
+	if (!onBody && !onMessage) return null;
+	if (memoryV3Enabled(env, userId)) return null;
+	return json({
+		error: "source_time_not_enabled",
+		code: "source_time_not_enabled",
+		message: "sourceTime is part of the Memory V3 timestamp contract, which is not enabled for this account. Remove it and the write is accepted as before, or ask for V3 access.",
+		field: onBody ? "sourceTime" : "messages[].sourceTime",
+	}, 400);
+}
+
 function testOnlyOverrides(env, value) {
 	if (String(env?.ENABLE_TEST_OVERRIDES ?? "false") !== "true") return {};
 	return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -416,7 +443,15 @@ function authFailureResponse(mode, error) {
 const BOT_UA_PATTERN = /bot|crawl|spider|slurp|headless|phantom|selenium|playwright|puppeteer|lighthouse|pingdom|uptime|monitor|scrap|curl|wget|python-requests|httpx|axios|go-http|okhttp|java\/|libwww|facebookexternalhit|preview|prerender|embedly|vkshare|qwantify|bitlybot|telegrambot|whatsapp|discordbot|slackbot|twitterbot|linkedinbot|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|claudebot|ccbot|amazonbot|applebot|yandex|baidu|duckduck/i;
 
 const routes = {
-	"GET /health": () => json({ ok: true, service: "memory-engine", version: "0.1.0" }),
+	// The V3 rollout state is operational information, not user data: the mode
+	// and how many accounts are selected, never which ones. Surfacing it here is
+	// what makes "is V3 off in production?" answerable without a deploy inspection.
+	"GET /health": (request, env) => json({
+		ok: true,
+		service: "memory-engine",
+		version: "0.1.0",
+		memory_v3: memoryV3Status(env),
+	}),
 	"GET /v1/ingest/limits": () => json({
 		ok: true,
 		schema: "itsuki.ingest-limits/v1",
@@ -557,6 +592,8 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		if (ungatedSourceTime) return ungatedSourceTime;
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
 
@@ -572,6 +609,7 @@ const routes = {
 			idempotencyKey: body.idempotencyKey,
 			delivery: normalizeDeliveryMetadata(body.delivery),
 			memoryScope: auth.memoryScope,
+			sourceTime: body.sourceTime,
 			source: body.source === "plugin" ? "plugin" : "ingest",
 			sourceMode: "ingest",
 			overrides: {
@@ -793,6 +831,8 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		if (ungatedSourceTime) return ungatedSourceTime;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
 		const t = testOnlyOverrides(env, body._test);
@@ -1286,6 +1326,8 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		if (ungatedSourceTime) return ungatedSourceTime;
 		const messages = Array.isArray(body.messages) ? body.messages : [];
 		if (!messages.length && !body.query) {
 			return json({ error: "messages[] or query is required" }, 400);

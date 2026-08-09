@@ -29,5 +29,6 @@
  "0028_project_scope.sql": "24ab27550d50d7015191bf41ad101673bc7344c737beb2f98936cc3c21326891",
  "0029_webhook_outbox.sql": "a84fd24a5cc5dddaf3aec7963c5274c78b333ef3bd11294410723d5cfb17cdcf",
  "0030_deletion_barriers.sql": "df9666dbc3974326d4402e7065e5152d4743bc5c63e913ecb76f91b59d6273e6",
- "0031_named_fence_constraint.sql": "7c23c8858d853d78f2b69635c21c79daf22e51c4e0ecc0dc3808ff2dd7dbc113"
+ "0031_named_fence_constraint.sql": "7c23c8858d853d78f2b69635c21c79daf22e51c4e0ecc0dc3808ff2dd7dbc113",
+ "0032_source_time.sql": "d865964c2242e3fbac3bf56b025e5481e1b427c35fcf5c35eda4aa9836dc2ea2"
 }

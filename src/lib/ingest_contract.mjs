@@ -13,6 +13,8 @@ export const INGEST_LIMITS = Object.freeze({
 	maxRequestBytes: 512 * 1024,
 });
 
+import { parseSourceTime } from "./source_time.mjs";
+
 export const INGEST_DELIVERY_SCHEMA = "itsuki.ingest.delivery/v1";
 export const INGEST_CAPTURE_EVIDENCE_SCHEMA = "itsuki.capture-evidence/v1";
 export const INGEST_MESSAGE_ID_MAX_CHARACTERS = 200;
@@ -282,6 +284,18 @@ export function validateIngestBody(body, { requestBytes } = {}) {
 		);
 	}
 
+	// BF-1: the batch-level default write time, applied to any message that does
+	// not carry its own.
+	if (body && Object.prototype.hasOwnProperty.call(body, "sourceTime")) {
+		const parsed = parseSourceTime(body.sourceTime);
+		if (!parsed.ok) {
+			return violation(422, parsed.code, parsed.message, null, null, {
+				unit: "timestamp",
+				field: "sourceTime",
+			});
+		}
+	}
+
 	const messages = body?.messages;
 	if (Array.isArray(messages)) {
 		if (messages.length > contentLimits.maxMessages) {
@@ -322,6 +336,19 @@ export function validateIngestBody(body, { requestBytes } = {}) {
 					`messages[${index}].role`,
 					`messages[${index}].role must be user, assistant, system, or tool.`,
 				);
+			}
+			// BF-1: a per-message authoritative write time. Structural validation
+			// happens here, at the door, so a malformed timestamp is a named 422
+			// rather than a value that quietly becomes "now" three layers down.
+			if (Object.prototype.hasOwnProperty.call(message, "sourceTime")) {
+				const parsed = parseSourceTime(message.sourceTime);
+				if (!parsed.ok) {
+					return invalidMessage(
+						index,
+						`messages[${index}].sourceTime`,
+						parsed.message.replace("sourceTime", `messages[${index}].sourceTime`),
+					);
+				}
 			}
 			if (Object.prototype.hasOwnProperty.call(message, "id")) {
 				const idCharacters = typeof message.id === "string" ? unicodeLength(message.id) : null;

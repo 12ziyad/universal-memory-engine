@@ -187,6 +187,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		sourceId: opts.sourceId,
 		idempotencyKey: opts.idempotencyKey,
 		delivery,
+		sourceTime: opts.sourceTime,
 		scope: memoryScope,
 	});
 

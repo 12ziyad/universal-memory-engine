@@ -34,6 +34,9 @@ const ALIASES = {
 	capture_density: "captureDensity",
 	metadata_only: "metadataOnly",
 	run_id: "runId",
+	source_time: "sourceTime",
+	sourceTimestamp: "sourceTime",
+	source_timestamp: "sourceTime",
 };
 
 /** Fields every memory endpoint accepts, on top of its own list. */
@@ -42,11 +45,20 @@ const COMMON = [
 	"sourceId", "idempotencyKey", "source", "captureDensity", "rules", "_test",
 ];
 
+/**
+ * `sourceTime` (BF-1) is the authoritative time content was WRITTEN, as opposed
+ * to the time we received it. It belongs only to doors that WRITE memory — a
+ * lookup has no write time — and is allowlisted for every account so a caller
+ * who sends it gets a semantic answer rather than "unknown_parameter". Whether
+ * it is honoured is decided after authentication by the Memory V3 flag, which
+ * refuses it by name when V3 is off for that account. Accepted-then-ignored is
+ * exactly the failure this file exists to prevent, so it is never silently dropped.
+ */
 export const ENDPOINT_PARAMS = {
-	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope"],
+	"/v1/save": [...COMMON, "mode", "content", "messages", "scope", "n", "topic", "recentContext", "contentScope", "sourceTime"],
 	"/v1/recall": [...COMMON, "query", "topic", "limit", "recallScope", "recallMode"],
-	"/v1/ingest": [...COMMON, "messages", "flush", "delivery"],
-	"/v1/turn": [...COMMON, "messages", "query", "recallScope"],
+	"/v1/ingest": [...COMMON, "messages", "flush", "delivery", "sourceTime"],
+	"/v1/turn": [...COMMON, "messages", "query", "recallScope", "sourceTime"],
 };
 
 // A save is a memory, not a file upload. Past this the extractor cannot do
