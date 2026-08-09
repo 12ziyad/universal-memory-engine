@@ -24,6 +24,8 @@
 import { getConfig } from "../config.js";
 import { buildPacket, chunkText } from "./packet.js";
 import { planExtractionChunks, verifyChunkCoverage } from "./chunking.js";
+import { chunkAnchor } from "./temporal.js";
+import { memoryV3Enabled } from "../lib/memory_v3.js";
 import { shortlistNodes } from "./shortlist.js";
 import { proposeMemory } from "./llm.js";
 import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
@@ -728,6 +730,11 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		const ts = Number(m?.ts);
 		return Number.isFinite(ts) && ts > max ? ts : max;
 	}, 0) || null;
+	// BF-1 / P1: the authoritative anchor for relative phrases. Only accounts on
+	// the V3 timestamp contract can supply one, and without it the gates fall
+	// back to `lastTs` exactly as before.
+	const temporalAnchor = memoryV3Enabled(env, userId) ? chunkAnchor(chunk) : null;
+	if (temporalAnchor) meta.temporal_anchor = temporalAnchor.kind;
 	const plan = await applyGates(env, config, userId, { ...proposal, objects }, shortlist, overrides.settings, {
 		manual: Boolean(overrides.manual),
 		updateMode,
@@ -736,6 +743,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		// for fallback slice/event text and candidate evidence.
 		sourceMessages: chunk.map((m) => ({ id: m.id, content: m.content })),
 		lastTs,
+		temporalAnchor,
 		rules,
 		profile,
 		projectScope,

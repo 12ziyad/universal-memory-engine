@@ -33,6 +33,7 @@ import { normalizeProjectScope } from "../lib/project_scope.js";
 import { canonicalKey, getActiveSuppressions, getUserCandidates, getUserEdges, getUserNodes } from "../lib/db.js";
 import { normalizeLabel, jaccard, tokens, wordContains, levenshteinRatio } from "../lib/text.js";
 import { durablePlanFromText } from "./candidate_rules.js";
+import { resolveFactDate } from "./temporal.js";
 import { clusterForMemory } from "./clusters.js";
 import { resolveAdmissionRules } from "./admission.js";
 import { attributeAssertion, attributesRelated, identityRelatedLabels, obsoletedValues, replacesAttributeValue, significantTerms, supersedesValue } from "./corrections.js";
@@ -341,13 +342,56 @@ const DEFAULT_SETTINGS = { paused: false, disabledCategories: [], captureDensity
  * Parse a model-proposed "date" (YYYY-MM-DD, copied from the source text or
  * message timestamps, never invented) into epoch ms. Anything unparseable,
  * pre-1970, or more than 48h in the future is rejected.
+ *
+ * V3-D03: this pattern was written without its backslashes —
+ * `/^s*(d{4})-(d{2})-(d{2})s*$/` — so it matched the literal text
+ * "sssd{4}-d{2}-d{2}" and never a date. Every date the extractor was asked to
+ * copy out of the source failed to parse here, and every event silently fell
+ * back to the message timestamp: when Itsuki was TOLD, not when the thing
+ * happened. The rejection of a rolled-over date (2023-13-45) is now explicit
+ * rather than accidental.
  */
 function parseProposedDate(value, now) {
-	const match = /^s*(d{4})-(d{2})-(d{2})s*$/.exec(String(value ?? ""));
+	const match = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/.exec(String(value ?? ""));
 	if (!match) return null;
-	const ms = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+	const year = Number(match[1]);
+	const monthIndex = Number(match[2]) - 1;
+	const day = Number(match[3]);
+	if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > 31) return null;
+	const ms = Date.UTC(year, monthIndex, day, 12, 0, 0);
 	if (!Number.isFinite(ms) || ms < 0 || ms > now + 48 * 60 * 60 * 1000) return null;
+	// Date.UTC rolls 2023-02-30 into March; a date that does not survive the
+	// round trip is not a date the source could have contained.
+	const back = new Date(ms);
+	if (back.getUTCFullYear() !== year || back.getUTCMonth() !== monthIndex || back.getUTCDate() !== day) return null;
 	return ms;
+}
+
+/**
+ * When did this fact actually happen? In priority order:
+ *
+ *   1. a date the extractor copied out of the source
+ *   2. a relative phrase in the fact's own words, resolved against when the
+ *      content was WRITTEN (BF-1's anchor)
+ *   3. the anchor itself, when it is an authoritative source time — an
+ *      undated fact from a 2023 conversation belongs in 2023, not on the day
+ *      the archive happened to be imported
+ *   4. the newest message timestamp, then now
+ *
+ * Steps 2 and 3 need an authoritative anchor, which only exists for accounts on
+ * the V3 timestamp contract. Without one this collapses to the previous
+ * behaviour exactly.
+ */
+function factHappenedAt(durable, opts, now) {
+	const proposed = parseProposedDate(durable?.date, now);
+	if (proposed !== null) return proposed;
+	const anchor = opts?.temporalAnchor ?? null;
+	if (anchor) {
+		const resolved = resolveFactDate(durable?.text, anchor);
+		if (resolved && resolved.epoch_ms <= now + 48 * 60 * 60 * 1000) return resolved.epoch_ms;
+		if (anchor.kind === "source_time") return anchor.epoch_ms;
+	}
+	return opts?.lastTs ?? now;
 }
 
 export async function applyGates(
@@ -669,7 +713,7 @@ export async function applyGates(
 				action,
 				text: durable.text,
 				importance: valid(durable.importance, IMPORTANCE, "important"),
-				happened_at: parseProposedDate(durable.date, now) ?? opts.lastTs ?? now,
+				happened_at: factHappenedAt(durable, opts, now),
 				created_at: now,
 				confidence: durable.confidence,
 				project_id: projectScope.projectId,
@@ -953,7 +997,7 @@ export async function applyGates(
 				action,
 				text: obj.text ?? "",
 				importance: valid(obj.importance, IMPORTANCE, "ordinary"),
-				happened_at: parseProposedDate(obj.date, now) ?? opts.lastTs ?? now,
+				happened_at: factHappenedAt(obj, opts, now),
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
