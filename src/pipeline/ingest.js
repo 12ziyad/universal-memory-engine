@@ -382,6 +382,9 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	if (sourceEpisodesRequired) {
 		episodeResult = await writeSourceEpisodes(env, userId, {
 			sourcePacketId: sourcePacket?.id ?? null,
+			memoryUserId: sourcePacket?.memory_user_id ?? userId,
+			ownerUserId: sourcePacket?.owner_user_id ?? userId,
+			externalUserId: sourcePacket?.external_user_id ?? userId,
 			conversationId: sourcePacket?.conversation_id ?? normalized.packet.conversation_id ?? null,
 			threadId: sourcePacket?.thread_id ?? normalized.packet.thread_id ?? null,
 			sessionId: sourcePacket?.session_id ?? normalized.packet.session_id ?? null,

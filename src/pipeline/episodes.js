@@ -54,6 +54,9 @@ const PRESERVED_ROLES = new Set(["user", "assistant"]);
  */
 export async function writeSourceEpisodes(env, userId, {
 	sourcePacketId = null,
+	memoryUserId = userId,
+	ownerUserId = userId,
+	externalUserId = userId,
 	conversationId = null,
 	threadId = null,
 	sessionId = null,
@@ -140,9 +143,9 @@ export async function writeSourceEpisodes(env, userId, {
 			).bind(
 				newId("episode"),
 				userId,
-				userId,
-				userId,
-				userId,
+				memoryUserId ?? userId,
+				ownerUserId ?? userId,
+				externalUserId ?? userId,
 				project.projectId,
 				project.projectName,
 				sourcePacketId,

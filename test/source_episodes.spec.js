@@ -187,6 +187,29 @@ describe("episodes preserve what extraction might decline", () => {
 		expect(rows[0].source_packet_id).toBe("pkt_1");
 	});
 
+	it("persists accepted owner and external sub-tenant provenance instead of laundering it into the internal scope id", async () => {
+		const userId = nextUser("scope_provenance");
+		const result = await writeSourceEpisodes(env, userId, {
+			sourcePacketId: "pkt_scope",
+			memoryUserId: userId,
+			ownerUserId: "owner_account_1",
+			externalUserId: "customer_workspace_7",
+			messages: messages(["a permitted scoped fact"], { packet: "pkt_scope" }),
+			required: true,
+		});
+		expect(result.ok).toBe(true);
+		const row = await env.DB.prepare(
+			`SELECT user_id, memory_user_id, owner_user_id, external_user_id
+			 FROM source_episodes WHERE user_id = ? AND source_packet_id = ?`,
+		).bind(userId, "pkt_scope").first();
+		expect(row).toEqual({
+			user_id: userId,
+			memory_user_id: userId,
+			owner_user_id: "owner_account_1",
+			external_user_id: "customer_workspace_7",
+		});
+	});
+
 	it("is searchable by the words the user actually used", async () => {
 		const userId = nextUser("search");
 		await write(userId, [
