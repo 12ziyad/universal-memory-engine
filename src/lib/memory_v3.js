@@ -117,6 +117,30 @@ export function memoryV3AtomicCaptureEnabled(env, userId) {
 }
 
 /**
+ * E6's projection switch is nested below both parent V3 and atomic capture.
+ * A projection allowlist can therefore never make an account start capturing
+ * atoms, and a stale capture allowlist can never make them enter semantic state.
+ */
+export function memoryV3AtomicProjectionConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_ATOMIC_PROJECTION;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3AtomicProjectionEnabled(env, userId) {
+	if (!memoryV3AtomicCaptureEnabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3AtomicProjectionConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -124,11 +148,13 @@ export function memoryV3Status(env) {
 	const { mode, allowlistCount } = memoryV3Config(env);
 	const extraction = memoryV3ExtractionB1Config(env);
 	const atomicCapture = memoryV3AtomicCaptureConfig(env);
+	const atomicProjection = memoryV3AtomicProjectionConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
 		allowlistCount,
 		extractionB1: { mode: extraction.mode, allowlistCount: extraction.allowlistCount },
 		atomicCapture: { mode: atomicCapture.mode, allowlistCount: atomicCapture.allowlistCount },
+		atomicProjection: { mode: atomicProjection.mode, allowlistCount: atomicProjection.allowlistCount },
 	};
 }

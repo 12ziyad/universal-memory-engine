@@ -122,7 +122,11 @@
 		// E4 zero-to-many candidates. Nested under the parent V3 account flag and
 		// independently OFF until a named synthetic treatment cohort is deployed.
 		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE": "off",
-		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS": ""
+		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS": "",
+		// E6 governed projection is independently nested and remains OFF even
+		// when atomic capture is selected for a write-only experiment cohort.
+		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION": "off",
+		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS": ""
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

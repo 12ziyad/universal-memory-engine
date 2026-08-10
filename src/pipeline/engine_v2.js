@@ -550,7 +550,10 @@ export function attachProvenance(plan, chunk, allow = null) {
 		return best.content.length > SNIPPET_CAP ? `${best.content.slice(0, SNIPPET_CAP - 1)}…` : best.content;
 	};
 
-	for (const s of plan.newSlices ?? []) s.source_snippet = snippetFor(s.text);
-	for (const e of plan.newEvents ?? []) e.source_snippet = snippetFor(e.text);
-	for (const ed of plan.newEdges ?? []) ed.source_snippet = snippetFor(ed.fact ?? `${ed.type}`);
+	// E6 projection has an exact source span from the candidate trust boundary.
+	// Never replace exact provenance with a token-overlap guess; legacy objects
+	// still receive the same inferred snippet as before.
+	for (const s of plan.newSlices ?? []) s.source_snippet ??= snippetFor(s.text);
+	for (const e of plan.newEvents ?? []) e.source_snippet ??= snippetFor(e.text);
+	for (const ed of plan.newEdges ?? []) ed.source_snippet ??= snippetFor(ed.fact ?? `${ed.type}`);
 }

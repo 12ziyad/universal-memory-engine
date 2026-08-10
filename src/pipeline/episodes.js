@@ -334,12 +334,16 @@ export async function deleteSourceEpisodes(env, userId, { projectId = null, sour
 		const before = await countSourceEpisodes(env, userId, { projectId });
 		const atomicBefore = await countSemanticAtomCandidates(env, userId, { projectId });
 		const captureBefore = await countAtomicCaptureRuns(env, userId, { projectId });
+		const projectionBefore = await countSemanticAtomProjections(env, userId, { projectId });
 		if (Array.isArray(sourcePacketIds)) {
 			const ids = sourcePacketIds.filter(Boolean);
 			for (let offset = 0; offset < ids.length; offset += 50) {
 				const chunk = ids.slice(offset, offset + 50);
 				const marks = chunk.map(() => "?").join(", ");
 				await env.DB.batch([
+					env.DB.prepare(
+						`DELETE FROM semantic_atom_projections WHERE user_id = ? AND source_packet_id IN (${marks})`,
+					).bind(userId, ...chunk),
 					env.DB.prepare(
 						`DELETE FROM semantic_atom_candidates WHERE user_id = ? AND source_packet_id IN (${marks})`,
 					).bind(userId, ...chunk),
@@ -353,6 +357,8 @@ export async function deleteSourceEpisodes(env, userId, { projectId = null, sour
 			}
 		} else if (projectId) {
 			await env.DB.batch([
+				env.DB.prepare("DELETE FROM semantic_atom_projections WHERE user_id = ? AND project_id = ?")
+					.bind(userId, projectId),
 				env.DB.prepare("DELETE FROM semantic_atom_candidates WHERE user_id = ? AND project_id = ?")
 					.bind(userId, projectId),
 				env.DB.prepare("DELETE FROM semantic_atom_capture_runs WHERE user_id = ? AND project_id = ?")
@@ -362,6 +368,7 @@ export async function deleteSourceEpisodes(env, userId, { projectId = null, sour
 			]);
 		} else {
 			await env.DB.batch([
+				env.DB.prepare("DELETE FROM semantic_atom_projections WHERE user_id = ?").bind(userId),
 				env.DB.prepare("DELETE FROM semantic_atom_candidates WHERE user_id = ?").bind(userId),
 				env.DB.prepare("DELETE FROM semantic_atom_capture_runs WHERE user_id = ?").bind(userId),
 				env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ?").bind(userId),
@@ -370,15 +377,32 @@ export async function deleteSourceEpisodes(env, userId, { projectId = null, sour
 		const after = await countSourceEpisodes(env, userId, { projectId });
 		const atomicAfter = await countSemanticAtomCandidates(env, userId, { projectId });
 		const captureAfter = await countAtomicCaptureRuns(env, userId, { projectId });
+		const projectionAfter = await countSemanticAtomProjections(env, userId, { projectId });
 		return {
 			deleted: Math.max(0, before - after),
 			atomicCandidatesDeleted: Math.max(0, atomicBefore - atomicAfter),
 			atomicCaptureRunsDeleted: Math.max(0, captureBefore - captureAfter),
+			atomicProjectionsDeleted: Math.max(0, projectionBefore - projectionAfter),
 		};
 	} catch (error) {
 		console.warn("episode delete failed:", error?.message ?? error);
 		return { deleted: 0, error: String(error?.message ?? error) };
 	}
+}
+
+/** Projection provenance is source-bound and must converge to zero with it. */
+export async function countSemanticAtomProjections(env, userId, { projectId = null } = {}) {
+	if (!userId) return 0;
+	// Erasure convergence must fail closed. A D1 read error is not evidence that
+	// zero provenance rows remain, so unlike a best-effort display counter this
+	// helper deliberately propagates the failure.
+	const row = projectId == null
+		? await env.DB.prepare("SELECT COUNT(*) AS n FROM semantic_atom_projections WHERE user_id = ?")
+			.bind(userId).first()
+		: await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_projections WHERE user_id = ? AND project_id = ?",
+		).bind(userId, projectId).first();
+	return Number(row?.n ?? 0);
 }
 
 async function countAtomicCaptureRuns(env, userId, { projectId = null } = {}) {

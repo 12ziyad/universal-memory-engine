@@ -210,6 +210,25 @@ function atomicCaptureFields(meta = {}) {
 	};
 }
 
+/** Content-free accounting for E6's governed semantic projection. */
+function atomicProjectionFields(meta = {}) {
+	if (meta.atomic_projection_enabled == null) return {};
+	const integer = (value) => Number.isFinite(Number(value))
+		? Math.max(0, Math.trunc(Number(value)))
+		: 0;
+	return {
+		atomic_projection_enabled: meta.atomic_projection_enabled === true,
+		atomic_projection_outcome: String(meta.atomic_projection_outcome ?? "not_attempted").slice(0, 64),
+		atomic_projection_candidates: integer(meta.atomic_projection_candidates),
+		atomic_projection_promoted: integer(meta.atomic_projection_promoted),
+		atomic_projection_reinforced: integer(meta.atomic_projection_reinforced),
+		atomic_projection_ignored: integer(meta.atomic_projection_ignored),
+		atomic_projection_latency_ms: Number.isFinite(Number(meta.atomic_projection_latency_ms))
+			? Math.max(0, Math.round(Number(meta.atomic_projection_latency_ms)))
+			: null,
+	};
+}
+
 function plural(n, one, many = `${one}s`) {
 	return `${n} ${n === 1 ? one : many}`;
 }
@@ -286,6 +305,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		...splitRescueFields(meta),
 		...extractionConservationFields(meta),
 		...atomicCaptureFields(meta),
+		...atomicProjectionFields(meta),
 		...(meta.rules_active ? { rules_active: meta.rules_active } : {}),
 		saved,
 		savedTotal,
@@ -335,6 +355,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		...splitRescueFields(meta),
 		...extractionConservationFields(meta),
 		...atomicCaptureFields(meta),
+		...atomicProjectionFields(meta),
 		// Workers AI rollups, when the caller metered this scope (recall does).
 		ai_calls: meta.ai?.calls ?? null,
 		ai_input_tokens: meta.ai?.input_tokens ?? null,

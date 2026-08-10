@@ -27,6 +27,7 @@ import { planExtractionChunks, verifyChunkCoverage } from "./chunking.js";
 import { chunkAnchor } from "./temporal.js";
 import {
 	memoryV3AtomicCaptureEnabled,
+	memoryV3AtomicProjectionEnabled,
 	memoryV3Enabled,
 	memoryV3ExtractionB1Enabled,
 } from "../lib/memory_v3.js";
@@ -55,6 +56,11 @@ import {
 	atomicCaptureSummaryForExtractionRun,
 	captureAtomicCandidates,
 } from "./atomic_candidates.mjs";
+import {
+	buildAtomicProjection,
+	deriveAtomicProjectionDecisions,
+	loadAtomicProjectionCandidates,
+} from "./atomic_projection.mjs";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 const EXTRACTION_CLAIM_TTL_MS = 15 * 60 * 1000;
@@ -77,6 +83,19 @@ function attachAtomicCaptureMeta(meta, result, enabled = false) {
 	meta.atomic_capture_temporal_anchor_missing = Number(result.temporalAnchorMissing ?? 0);
 	meta.atomic_capture_replayed = result.replayed === true;
 	meta.atomic_capture_latency_ms = Number.isFinite(Number(result.latencyMs))
+		? Number(result.latencyMs)
+		: null;
+}
+
+function attachAtomicProjectionMeta(meta, result, enabled = false) {
+	meta.atomic_projection_enabled = enabled === true;
+	if (!result) return;
+	meta.atomic_projection_outcome = result.outcome ?? "internal_error";
+	meta.atomic_projection_candidates = Number(result.candidates ?? 0);
+	meta.atomic_projection_promoted = Number(result.promoted ?? 0);
+	meta.atomic_projection_reinforced = Number(result.reinforced ?? 0);
+	meta.atomic_projection_ignored = Number(result.ignored ?? 0);
+	meta.atomic_projection_latency_ms = Number.isFinite(Number(result.latencyMs))
 		? Number(result.latencyMs)
 		: null;
 }
@@ -696,7 +715,9 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	meta.extraction_v3_b1 = extractionV3;
 	const withRules = { ...overrides, rules, profile, extractionV3 };
 	const atomicCaptureEnabled = memoryV3AtomicCaptureEnabled(env, userId);
+	const atomicProjectionEnabled = memoryV3AtomicProjectionEnabled(env, userId);
 	attachAtomicCaptureMeta(meta, null, atomicCaptureEnabled);
+	attachAtomicProjectionMeta(meta, null, atomicProjectionEnabled);
 
 	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
 	// Oversized chunks are pre-split by code before the model sees them.
@@ -877,6 +898,47 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// G — gates (the backend judge). manual=true → lenient Path A gate.
 	// The newest message timestamp anchors undated events: "yesterday I ran the
 	// race" said on May 8 lands on/near May 8, not on extraction day.
+	// E6 runs only after all legacy model passes. It can change the write
+	// proposal, but cannot change extraction prompts, model-call count, or the
+	// relation/reflexion result. The loader joins every candidate to its exact
+	// permitted source episode in the same tenant/project scope.
+	let atomicProjection = null;
+	if (atomicProjectionEnabled) {
+		const projectionStarted = Date.now();
+		if (!atomicResult?.complete) {
+			attachAtomicProjectionMeta(meta, {
+				outcome: "capture_incomplete",
+				latencyMs: Date.now() - projectionStarted,
+			}, true);
+		} else {
+			try {
+				const candidates = await loadAtomicProjectionCandidates(env, {
+					userId,
+					projectId: projectScope.projectId,
+					captureRunIds: atomicResult.captureRunIds ?? [],
+				});
+				const built = buildAtomicProjection(candidates);
+				objects = [...objects, ...built.objects];
+				atomicProjection = { ...built, candidates, startedAt: projectionStarted };
+				attachAtomicProjectionMeta(meta, {
+					outcome: candidates.length ? "prepared" : "empty",
+					candidates: candidates.length,
+					latencyMs: Date.now() - projectionStarted,
+				}, true);
+			} catch (error) {
+				console.warn(JSON.stringify({
+					event: "atomic_projection_failed",
+					outcome: "load_or_build_failed",
+					error_name: String(error?.name ?? "Error").slice(0, 80),
+				}));
+				attachAtomicProjectionMeta(meta, {
+					outcome: "load_or_build_failed",
+					latencyMs: Date.now() - projectionStarted,
+				}, true);
+			}
+		}
+	}
+
 	const lastTs = chunk.reduce((max, m) => {
 		const ts = Number(m?.ts);
 		return Number.isFinite(ts) && ts > max ? ts : max;
@@ -898,10 +960,28 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		rules,
 		profile,
 		projectScope,
+		atomicProjectionMetadata: atomicProjection?.metadata ?? null,
 	});
 	// Rejections from the v2 passes (unknown entity ids, malformed relation
 	// types) surface on the receipt with everything the gates refused.
 	plan.rejected.push(...preRejected);
+	if (atomicProjection) {
+		plan.atomicProjectionDecisions = deriveAtomicProjectionDecisions(plan, atomicProjection.candidates);
+		const promoted = plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "promoted").length;
+		const reinforced = plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "reinforced").length;
+		const ignored = plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "ignored").length;
+		attachAtomicProjectionMeta(meta, {
+			outcome: "prepared",
+			candidates: plan.atomicProjectionDecisions.length,
+			promoted,
+			reinforced,
+			ignored,
+			latencyMs: Date.now() - atomicProjection.startedAt,
+		}, true);
+		// An ignored decision is still durable semantic-admission state. Commit it
+		// atomically instead of leaving an accepted candidate in limbo.
+		if (plan.atomicProjectionDecisions.length) plan.hasWrites = true;
+	}
 
 	// Provenance: a capped, scrubbed excerpt of the message that produced each
 	// object — enough to answer "why do you think that?".
@@ -977,6 +1057,16 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			error: message,
 			receipt: emptyReceipt("db_write_failed", "a storage error interrupted the save", { ...meta, latency_ms: elapsed() }),
 		};
+	}
+	if (atomicProjection) {
+		attachAtomicProjectionMeta(meta, {
+			outcome: "completed",
+			candidates: plan.atomicProjectionDecisions.length,
+			promoted: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "promoted").length,
+			reinforced: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "reinforced").length,
+			ignored: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "ignored").length,
+			latencyMs: Date.now() - atomicProjection.startedAt,
+		}, true);
 	}
 
 	const receipt = buildReceipt("wrote", plan, { ...meta, latency_ms: elapsed() });

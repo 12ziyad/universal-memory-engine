@@ -74,6 +74,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	const newCandidates = plan.newCandidates ?? [];
 	const candidateBumps = plan.candidateBumps ?? [];
 	const candidateResolutions = plan.candidateResolutions ?? [];
+	const atomicProjectionDecisions = plan.atomicProjectionDecisions ?? [];
 	const newPages = plan.newPages ?? [];
 	const pageUpdates = plan.pageUpdates ?? [];
 	const pageClaims = plan.pageClaims ?? [];
@@ -517,8 +518,9 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		stmts.push(
 			env.DB.prepare(
 				`UPDATE slices SET is_current = 0
-				 WHERE user_id = ? AND node_id = ? AND kind = ? AND is_current = 1
+				 WHERE user_id = ? AND node_id = ? AND (? IS NULL OR kind = ?) AND is_current = 1
 				   AND project_id IS ?
+				   AND (? IS NULL OR semantic_attribute = ?)
 				   AND (? IS NULL OR id = ?)
 				   AND (? IS NULL OR EXISTS (
 					 SELECT 1 FROM manual_fact_identities
@@ -531,8 +533,11 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			).bind(
 				userId,
 				s.node_id,
-				s.kind,
+				s.kind ?? null,
+				s.kind ?? null,
 				projectScope.projectId,
+				s.semantic_attribute ?? null,
+				s.semantic_attribute ?? null,
 				s.id ?? null,
 				s.id ?? null,
 				guarded ? s.replacement_id : null,
@@ -552,6 +557,8 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		const values = [
 			s.id, s.user_id, s.node_id, s.page_id ?? null, s.text, s.kind, s.is_current,
 			s.created_at, s.created_at, s.source_snippet ?? null,
+			s.semantic_attribute ?? null, s.semantic_cardinality ?? null,
+			s.valid_from ?? null, s.valid_to ?? null,
 			projectScope.projectId, projectScope.projectName,
 		];
 		if (factGuarded) values.push(userId, s.manual_fact_key, "slice", s.id);
@@ -561,16 +568,16 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			env.DB.prepare(
 				`INSERT INTO slices
 					(id, user_id, node_id, page_id, text, kind, is_current, created_at, last_seen_at, source_snippet,
-					 project_id, project_name)
+					 semantic_attribute, semantic_cardinality, valid_from, valid_to, project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
-						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -623,6 +630,8 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			e.happened_at_source ?? null, e.created_at,
 			e.created_at, e.confidence ?? null,
 			e.valid_at ?? e.happened_at ?? null, e.invalid_at ?? null, e.source_snippet ?? null,
+			e.semantic_attribute ?? null, e.semantic_cardinality ?? null,
+			e.event_time_end ?? null, e.event_time_precision ?? null, e.event_time_relation ?? null,
 			projectScope.projectId, projectScope.projectName,
 		];
 		if (factGuarded) values.push(userId, e.manual_fact_key, "event", e.id);
@@ -632,16 +641,17 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			env.DB.prepare(
 				`INSERT INTO events
 					(id, user_id, node_id, action, text, importance, happened_at, happened_at_source, created_at, last_seen_at, confidence,
-					 valid_at, invalid_at, source_snippet, project_id, project_name)
+					 valid_at, invalid_at, source_snippet, semantic_attribute, semantic_cardinality,
+					 event_time_end, event_time_precision, event_time_relation, project_id, project_name)
 				 ${factGuarded
-					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					? `SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 					   WHERE EXISTS (
 						 SELECT 1 FROM manual_fact_identities
 						 WHERE user_id = ? AND fact_key = ? AND object_kind = ? AND object_id = ?
 					   )`
 					: guarded
-						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
-						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
+						? "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM nodes WHERE id = ? AND user_id = ? AND project_id IS ?)"
+						: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"}`,
 			).bind(...values),
 		);
 		if (factGuarded) {
@@ -1418,6 +1428,105 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		);
 	}
 
+	// E6 candidate decisions are part of this exact graph transaction. The
+	// guards run after graph statements (so they can see a newly inserted object)
+	// and before the extraction commit marker. A missing source episode, scope
+	// mismatch, or missing semantic object rolls the whole batch back.
+	const projectionTables = { slice: "slices", event: "events", edge: "edges" };
+	for (const decision of atomicProjectionDecisions) {
+		if (!options.extractionRunId) throw new Error("atomic projection requires an extraction run");
+		if (decision?.userId !== userId || (decision?.projectId ?? null) !== projectScope.projectId) {
+			throw new Error("atomic projection scope mismatch");
+		}
+		if (!decision.candidateId || !decision.sourceEpisodeId || !decision.sourcePacketId) {
+			throw new Error("atomic projection provenance incomplete");
+		}
+		const table = decision.objectKind ? projectionTables[decision.objectKind] : null;
+		if ((decision.objectKind || decision.objectId) && (!table || !decision.objectId)) {
+			throw new Error("atomic projection semantic object invalid");
+		}
+		if (!["promoted", "reinforced", "ignored"].includes(decision.outcome)) {
+			throw new Error("atomic projection outcome invalid");
+		}
+		stmts.push(env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+				SELECT 1 FROM semantic_atom_candidates c
+				JOIN source_episodes e ON e.id = c.source_episode_id AND e.user_id = c.user_id
+				 AND e.source_packet_id = c.source_packet_id AND e.message_id = c.source_message_id
+				 AND e.project_id IS c.project_id
+				WHERE c.id = ? AND c.user_id = ? AND c.project_id IS ?
+				 AND c.source_episode_id = ? AND c.source_packet_id = ? AND c.status = 'candidate'
+			 )`,
+		).bind(
+			decision.candidateId, userId, projectScope.projectId,
+			decision.sourceEpisodeId, decision.sourcePacketId,
+		));
+		if (table) {
+			stmts.push(env.DB.prepare(
+				`INSERT INTO fence_guard (violation)
+				 SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM ${table}
+					 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+				 )`,
+			).bind(decision.objectId, userId, projectScope.projectId));
+		}
+		trackNext({ kind: "atomicProjections", id: decision.candidateId });
+		stmts.push(env.DB.prepare(
+			`INSERT INTO semantic_atom_projections
+			 (candidate_id, user_id, project_id, source_episode_id, source_packet_id,
+			  extraction_run_id, outcome, reason, object_kind, object_id, schema_version, created_at)
+			 SELECT c.id, c.user_id, c.project_id, c.source_episode_id, c.source_packet_id,
+			  ?, ?, ?, ?, ?, ?, ?
+			 FROM semantic_atom_candidates c
+			 WHERE c.id = ? AND c.user_id = ? AND c.project_id IS ? AND c.status = 'candidate'
+			 ON CONFLICT(candidate_id) DO NOTHING`,
+		).bind(
+			options.extractionRunId,
+			decision.outcome,
+			decision.reason == null ? null : String(decision.reason).slice(0, 96),
+			decision.objectKind ?? null,
+			decision.objectId ?? null,
+			decision.schemaVersion,
+			Date.now(),
+			decision.candidateId,
+			userId,
+			projectScope.projectId,
+		));
+		// ON CONFLICT is defensive against a replayed SQL batch, not permission to
+		// adopt an unrelated pre-existing decision. The exact projection must now
+		// exist or the fence aborts the entire graph transaction.
+		stmts.push(env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+				SELECT 1 FROM semantic_atom_projections
+				 WHERE candidate_id = ? AND user_id = ? AND project_id IS ?
+				   AND extraction_run_id = ? AND outcome = ?
+				   AND object_kind IS ? AND object_id IS ? AND schema_version = ?
+			 )`,
+		).bind(
+			decision.candidateId,
+			userId,
+			projectScope.projectId,
+			options.extractionRunId,
+			decision.outcome,
+			decision.objectKind ?? null,
+			decision.objectId ?? null,
+			decision.schemaVersion,
+		));
+		stmts.push(env.DB.prepare(
+			`UPDATE semantic_atom_candidates SET status = ?
+			 WHERE id = ? AND user_id = ? AND project_id IS ? AND status = 'candidate'
+			   AND EXISTS (
+				SELECT 1 FROM semantic_atom_projections p
+				 WHERE p.candidate_id = semantic_atom_candidates.id AND p.user_id = ?
+			   )`,
+		).bind(
+			decision.outcome === "ignored" ? "ignored" : "promoted",
+			decision.candidateId, userId, projectScope.projectId, userId,
+		));
+	}
+
 	// Transient correction guards never survive a successful batch. If any later
 	// statement fails, D1 rolls the whole batch back, including acquisition.
 	for (const guard of correctionGuards) {
@@ -1467,6 +1576,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			aliases: [],
 			identityClaims: [],
 			correctionGuards: [],
+			atomicProjections: [],
 			communities: [],
 			nodeStateUpdates: [],
 			nodeTouches: [],

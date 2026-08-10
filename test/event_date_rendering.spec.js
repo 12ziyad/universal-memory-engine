@@ -53,6 +53,33 @@ describe("an event's date reaches the reader", () => {
 		expect(context).toContain("(2025-09-17)");
 	});
 
+	it("preserves month and year precision instead of fabricating a day", () => {
+		const year = buildContext(node([{
+			id: "e1", text: "Launched the beta",
+			happened_at: Date.UTC(2024, 0, 1, 12), happened_at_source: "phrase",
+			event_time_precision: "year",
+		}]), plan);
+		const month = buildContext(node([{
+			id: "e2", text: "Moved to Berlin",
+			happened_at: Date.UTC(2025, 10, 1, 12), happened_at_source: "phrase",
+			event_time_precision: "month",
+		}]), plan);
+		expect(year).toContain("Launched the beta (2024)");
+		expect(year).not.toContain("2024-01-01");
+		expect(month).toContain("Moved to Berlin (2025-11)");
+		expect(month).not.toContain("2025-11-01");
+	});
+
+	it("renders a bounded temporal range without inventing more precision", () => {
+		const context = buildContext(node([{
+			id: "e1", text: "Worked at Northwind",
+			happened_at: Date.UTC(2022, 0, 1, 12), happened_at_source: "phrase",
+			event_time_end: Date.UTC(2024, 0, 1, 12),
+			event_time_precision: "year", event_time_relation: "range",
+		}]), plan);
+		expect(context).toContain("Worked at Northwind (2022 to 2024)");
+	});
+
 	it("renders a date anchored on the caller's authoritative write time", () => {
 		const context = buildContext(node([{
 			id: "e1", text: "Ran the charity race",

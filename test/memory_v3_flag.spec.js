@@ -7,6 +7,8 @@ import {
 	memoryV3Enabled,
 	memoryV3AtomicCaptureConfig,
 	memoryV3AtomicCaptureEnabled,
+	memoryV3AtomicProjectionConfig,
+	memoryV3AtomicProjectionEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -106,6 +108,27 @@ describe("V3 atomic capture experiment flag", () => {
 	});
 });
 
+describe("V3 atomic projection experiment flag", () => {
+	it("defaults off and requires parent V3 plus atomic capture plus exact projection membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: "treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS: "treatment_user",
+		};
+		expect(memoryV3AtomicProjectionConfig({ ITSUKI_MEMORY_V3: "on" }).mode).toBe("off");
+		expect(memoryV3AtomicProjectionEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3AtomicProjectionEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3AtomicProjectionEnabled(treatment, "treatment_user_suffix")).toBe(false);
+		expect(memoryV3AtomicProjectionEnabled({ ...treatment, ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "off" }, "treatment_user")).toBe(false);
+		for (const value of ["yes", "enabled", "", null, 1, {}]) {
+			expect(memoryV3AtomicProjectionEnabled({ ...treatment, ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: value }, "treatment_user")).toBe(false);
+		}
+	});
+});
+
 describe("V3 feature flag: allowlist mode", () => {
 	const allowlistEnv = {
 		ITSUKI_MEMORY_V3: "allowlist",
@@ -187,6 +210,7 @@ describe("V3 feature flag: observability", () => {
 			allowlistCount: 2,
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
+			atomicProjection: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -200,6 +224,7 @@ describe("V3 feature flag: observability", () => {
 			allowlistCount: 0,
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
+			atomicProjection: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -219,6 +244,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			allowlistCount: 0,
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
+			atomicProjection: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });

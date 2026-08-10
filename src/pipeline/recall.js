@@ -464,18 +464,31 @@ const TRUSTWORTHY_EVENT_DATES = new Set(["extracted", "phrase", "source_time"]);
  * right date in the graph and changed nothing downstream, because nothing
  * downstream ever showed it.
  */
+function temporalLabel(event, at) {
+	const iso = new Date(at).toISOString().slice(0, 10);
+	switch (event?.event_time_precision) {
+		case "year": return iso.slice(0, 4);
+		case "month": return iso.slice(0, 7);
+		case "week": return `week of ${iso}`;
+		default: return iso;
+	}
+}
+
 function eventLine(event) {
 	const text = event?.text;
 	if (!text) return text;
 	if (!TRUSTWORTHY_EVENT_DATES.has(event.happened_at_source)) return text;
 	const at = Number(event.happened_at);
 	if (!Number.isFinite(at) || at <= 0) return text;
-	const date = new Date(at).toISOString().slice(0, 10);
+	const date = temporalLabel(event, at);
+	const endAt = Number(event?.event_time_end);
+	const end = Number.isFinite(endAt) && endAt > at ? temporalLabel(event, endAt) : null;
+	const timing = end && event?.event_time_relation === "range" ? `${date} to ${end}` : date;
 	// Don't repeat a date the fact already states in words. The extraction prompt
 	// asks for the timing to be kept inside the text too, so a lot of facts
 	// already carry it and " (2023-01-20)" twice reads as two different claims.
-	if (text.includes(date)) return text;
-	return `${text} (${date})`;
+	if (text.includes(date) && (!end || text.includes(end))) return text;
+	return `${text} (${timing})`;
 }
 
 export function buildContext(entries, plan = recallGate("memory"), staged = []) {
@@ -718,7 +731,8 @@ async function projectBootstrapRecall(env, userId, opts = {}) {
 				 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
 			).bind(userId, ...bindings),
 			env.DB.prepare(
-				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source, e.created_at,
+				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source,
+					e.event_time_end, e.event_time_precision, e.event_time_relation, e.created_at,
 					e.project_id, e.project_name
 				 FROM events e
 				 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
@@ -812,7 +826,8 @@ export async function recall(env, config, userId, query, opts = {}) {
 			 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
 		).bind(userId, ...bindings),
 		env.DB.prepare(
-			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source, e.created_at,
+			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source,
+				e.event_time_end, e.event_time_precision, e.event_time_relation, e.created_at,
 				e.project_id, e.project_name
 			 FROM events e
 			 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}

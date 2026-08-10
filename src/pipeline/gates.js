@@ -383,6 +383,19 @@ function parseProposedDate(value, now) {
  * behaviour exactly.
  */
 function factHappenedAt(durable, opts, now) {
+	// E6: this value did not come from a model field. It came from E5's
+	// deterministic normalization on an exact source span and is carried in an
+	// out-of-band WeakMap that model output cannot forge. Preserve its real
+	// precision on the event row; recall renders that precision explicitly.
+	const projected = opts?.atomicProjectionMetadata?.get?.(durable) ?? null;
+	if (projected && Number.isFinite(Number(projected.eventTime)) && Number(projected.eventTime) > 0) {
+		return { at: Number(projected.eventTime), source: "phrase" };
+	}
+	// A temporal phrase that deterministic code declined is not permission to
+	// print the source-message date as the event date.
+	if (projected?.rawTemporalPhrase) {
+		return { at: opts?.lastTs ?? now, source: "observed" };
+	}
 	const proposed = parseProposedDate(durable?.date, now);
 	if (proposed !== null) return { at: proposed, source: "extracted" };
 	const anchor = opts?.temporalAnchor ?? null;
@@ -490,6 +503,59 @@ export async function applyGates(
 		merges: [], // 7.2 audit: every non-exact merge, with its basis
 		rejected: [],
 	};
+	const atomicMetaFor = (obj) => opts?.atomicProjectionMetadata?.get?.(obj) ?? null;
+	const atomicIdsFor = (obj) => {
+		const ids = atomicMetaFor(obj)?.candidateIds;
+		return Array.isArray(ids) ? [...new Set(ids.map(String).filter(Boolean))] : [];
+	};
+	const reject = (obj, reason) => {
+		const ids = atomicIdsFor(obj);
+		plan.rejected.push({
+			kind: obj?.kind ?? "object",
+			label: obj?.label ?? obj?.on ?? obj?.from ?? null,
+			reason,
+			...(ids.length ? { atomic_candidate_ids: ids } : {}),
+		});
+	};
+	const decorateAtomic = (target, obj) => {
+		const meta = atomicMetaFor(obj);
+		if (!meta) return target;
+		target._atomic_candidate_ids = [...new Set([
+			...(target._atomic_candidate_ids ?? []),
+			...atomicIdsFor(obj),
+		])];
+		if (meta.evidenceQuote) target.source_snippet = String(meta.evidenceQuote).slice(0, 240);
+		if (meta.attribute) target.semantic_attribute = String(meta.attribute).slice(0, 96);
+		if (["single", "multi", "unknown"].includes(meta.cardinality)) {
+			target.semantic_cardinality = meta.cardinality;
+		}
+		if (Number.isFinite(Number(meta.eventTime)) && Number(meta.eventTime) > 0) {
+			target.valid_from = Number(meta.eventTime);
+			target.valid_at = Number(meta.eventTime);
+		}
+		if (Number.isFinite(Number(meta.eventTimeEnd)) && Number(meta.eventTimeEnd) > 0) {
+			target.valid_to = Number(meta.eventTimeEnd);
+			target.event_time_end = Number(meta.eventTimeEnd);
+		}
+		if (meta.eventTimePrecision) target.event_time_precision = meta.eventTimePrecision;
+		if (meta.eventTimeRelation) target.event_time_relation = meta.eventTimeRelation;
+		return target;
+	};
+	const plannedSliceMatch = (nodeId, text) => {
+		const wanted = normalizeLabel(text);
+		return wanted
+			? plan.newSlices.find((slice) => slice.node_id === nodeId && normalizeLabel(slice.text) === wanted) ?? null
+			: null;
+	};
+	const plannedEventMatch = (nodeId, action, text) => {
+		const wanted = normalizeLabel(text);
+		return wanted
+			? plan.newEvents.find((event) =>
+				event.node_id === nodeId
+				&& event.action === action
+				&& normalizeLabel(event.text) === wanted) ?? null
+			: null;
+	};
 
 	let objects = applyUserSettings(proposal.objects ?? [], settings);
 	if (!settings?.paused && objects.length === 0) {
@@ -524,7 +590,7 @@ export async function applyGates(
 		objects = objects.filter((obj) => {
 			const reason = rulesRejection(rules, obj?.text, obj?.label, obj?.on, obj?.from, obj?.to);
 			if (!reason) return true;
-			plan.rejected.push({ kind: obj?.kind ?? "object", label: obj?.label ?? obj?.on ?? null, reason });
+			reject(obj, reason);
 			return false;
 		});
 	}
@@ -615,7 +681,6 @@ export async function applyGates(
 
 	// label(normalized) -> resolved node id, including nodes created in this batch.
 	const resolved = new Map();
-	const reject = (o, reason) => plan.rejected.push({ kind: o.kind, label: o.label ?? o.on ?? o.from, reason });
 	const isSuppressed = (kind, label) => suppressionByKindKey.has(`${kind}:${canonicalKey(label)}`);
 
 	/** Create a brand-new node and make it resolvable for the rest of this batch. */
@@ -706,11 +771,11 @@ export async function applyGates(
 			const action = valid(durable.action, ACTIONS, "other");
 			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
 			if (duplicateEventId) {
-				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
+				plan.eventTouches.push(decorateAtomic({ id: duplicateEventId, node_id: node.id, action }, obj));
 				plan.affectedNodeIds.add(node.id);
 				return true;
 			}
-			plan.newEvents.push({
+			plan.newEvents.push(decorateAtomic({
 				id: newId("event"),
 				user_id: userId,
 				node_id: node.id,
@@ -724,7 +789,7 @@ export async function applyGates(
 				confidence: durable.confidence,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
-			});
+			}, obj));
 			const newState = ACTION_TO_STATE[action];
 			if (newState) plan.nodeStateUpdates.push({ id: node.id, state: newState });
 			plan.affectedNodeIds.add(node.id);
@@ -990,13 +1055,19 @@ export async function applyGates(
 				reject(obj, "event_no_node");
 				continue;
 			}
-			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
-			if (duplicateEventId) {
-				plan.eventTouches.push({ id: duplicateEventId, node_id: node.id, action });
+			const plannedEvent = plannedEventMatch(node.id, action, obj.text ?? "");
+			if (plannedEvent) {
+				decorateAtomic(plannedEvent, obj);
 				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
-			plan.newEvents.push({
+			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
+			if (duplicateEventId) {
+				plan.eventTouches.push(decorateAtomic({ id: duplicateEventId, node_id: node.id, action }, obj));
+				plan.affectedNodeIds.add(node.id);
+				continue;
+			}
+			plan.newEvents.push(decorateAtomic({
 				id: newId("event"),
 				user_id: userId,
 				node_id: node.id,
@@ -1009,7 +1080,7 @@ export async function applyGates(
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
-			});
+			}, obj));
 			plan.affectedNodeIds.add(node.id);
 			// A lifecycle event also updates the node's state.
 			const newState = ACTION_TO_STATE[action];
@@ -1035,21 +1106,36 @@ export async function applyGates(
 				continue;
 			}
 			const kind = valid(obj.kind_detail, SLICE_KINDS, "other");
-			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text, projectScope.projectId);
-			if (duplicateSliceId) {
-				plan.sliceTouches.push({ id: duplicateSliceId, node_id: node.id, kind });
+			const plannedSlice = plannedSliceMatch(node.id, text);
+			if (plannedSlice) {
+				decorateAtomic(plannedSlice, obj);
 				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
-			// Supersede an older single-valued slice (mark is_current = 0) before append.
-			if (supersedeKinds.has(kind)) plan.sliceSupersede.push({ node_id: node.id, kind });
+			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text, projectScope.projectId);
+			if (duplicateSliceId) {
+				plan.sliceTouches.push(decorateAtomic({ id: duplicateSliceId, node_id: node.id, kind }, obj));
+				plan.affectedNodeIds.add(node.id);
+				continue;
+			}
+			// Atomic assertions carry an explicit attribute/cardinality contract, so
+			// any single-valued attribute retires only that attribute, irrespective
+			// of the model's coarse slice kind. Legacy rows retain the proven
+			// preference/progress behavior; atomic multi-valued facts never inherit
+			// its blanket retirement.
+			const atomic = atomicMetaFor(obj);
+			if (atomic?.cardinality === "single" && atomic.attribute) {
+				plan.sliceSupersede.push({ node_id: node.id, kind: null, semantic_attribute: atomic.attribute });
+			} else if (!atomic && supersedeKinds.has(kind)) {
+				plan.sliceSupersede.push({ node_id: node.id, kind });
+			}
 			// SUPERSEDE-01: plus anything this correction explicitly obsoletes,
 			// regardless of the kind it was originally filed under.
 			for (const conflict of await conflictingSliceIds(env, userId, node.id, text, projectScope.projectId, { updateMode, nodes: nodeIdentityList(), sourceText })) {
 				plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 			}
 			attributeEdgeClosures(text);
-			plan.newSlices.push({
+			plan.newSlices.push(decorateAtomic({
 				id: newId("slice"),
 				user_id: userId,
 				node_id: node.id,
@@ -1059,7 +1145,7 @@ export async function applyGates(
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
-			});
+			}, obj));
 			plan.affectedNodeIds.add(node.id);
 			continue;
 		}

@@ -9,7 +9,11 @@ import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
 import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
-import { countSourceEpisodes, deleteSourceEpisodes } from "./episodes.js";
+import {
+	countSemanticAtomProjections,
+	countSourceEpisodes,
+	deleteSourceEpisodes,
+} from "./episodes.js";
 import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
 
 function parseJsonArray(value) {
@@ -585,6 +589,10 @@ export async function deleteAllMemories(env, userId, confirm) {
 		// V3 / P0-D. Hard delete, and the FTS triggers drop the tokens with the
 		// row — an episode surviving a "delete everything" would be the user's own
 		// words, still searchable, after they asked us to erase them.
+		// Projection rows reference candidates/source episodes by durable id and
+		// must be removed first. The ledger has no user prose, but retaining it
+		// after account erasure would violate provenance convergence.
+		"semantic_atom_projections",
 		"source_episodes",
 		"semantic_atom_candidates",
 		"semantic_atom_capture_runs",
@@ -1080,6 +1088,7 @@ export async function bulkDeleteBySource(env, userId, {
 	const episodesDeleted = Number(episodeErasure.deleted ?? 0);
 	const atomicCandidatesDeleted = Number(episodeErasure.atomicCandidatesDeleted ?? 0);
 	const atomicCaptureRunsDeleted = Number(episodeErasure.atomicCaptureRunsDeleted ?? 0);
+	const atomicProjectionsDeleted = Number(episodeErasure.atomicProjectionsDeleted ?? 0);
 
 	// The sweep, as a function of an id set — the erasure convergence loop
 	// re-derives the set from live state and runs it again (Mem0's delete_all
@@ -1158,17 +1167,24 @@ export async function bulkDeleteBySource(env, userId, {
 			// the words the graph came from.
 			const remainingEpisodes = await countSourceEpisodes(env, userId);
 			const remainingAtoms = await countSemanticAtomCandidates(env, userId);
+			const remainingProjections = await countSemanticAtomProjections(env, userId);
 			const remainingAtomicRuns = await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?",
 			).bind(userId).first();
 			if (
 				remainingEpisodes === 0
 				&& remainingAtoms === 0
+				&& remainingProjections === 0
 				&& Number(remainingAtomicRuns?.n ?? 0) === 0
 				&& ERASURE_TABLES.every(([setName]) => remaining[setName].size === 0)
 			) break;
 			convergencePasses += 1;
-			if (remainingEpisodes > 0 || remainingAtoms > 0 || Number(remainingAtomicRuns?.n ?? 0) > 0) {
+			if (
+				remainingEpisodes > 0
+				|| remainingAtoms > 0
+				|| remainingProjections > 0
+				|| Number(remainingAtomicRuns?.n ?? 0) > 0
+			) {
 				await deleteSourceEpisodes(env, userId);
 			}
 			sweptIds.push(...await sweep(remaining));
@@ -1204,6 +1220,7 @@ export async function bulkDeleteBySource(env, userId, {
 		source_episodes_deleted: episodesDeleted,
 		semantic_atom_candidates_deleted: atomicCandidatesDeleted,
 		semantic_atom_capture_runs_deleted: atomicCaptureRunsDeleted,
+		semantic_atom_projections_deleted: atomicProjectionsDeleted,
 		convergence_passes: convergencePasses,
 		...(erasure ? {
 			cancelled_runs: cancelledRuns,

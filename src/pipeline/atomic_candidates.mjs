@@ -660,6 +660,10 @@ export async function captureAtomicCandidates(env, options = {}) {
 		temporalUnresolved: results.reduce((sum, result) => sum + integer(result.temporalUnresolved), 0),
 		temporalAnchorMissing: results.reduce((sum, result) => sum + integer(result.temporalAnchorMissing), 0),
 		replayed: results.some((result) => result.replayed),
+		// Internal hand-off for E6. These opaque ids never enter a public receipt;
+		// they scope the projection load to exactly the capture chunks that just
+		// completed (including a deterministic terminal replay).
+		captureRunIds: results.map((result) => result.captureRunId).filter(Boolean),
 		latencyMs: Date.now() - startedAt,
 	};
 }
