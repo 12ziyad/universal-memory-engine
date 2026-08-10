@@ -33,6 +33,11 @@ export default defineConfig(async () => {
 			}),
 		],
 		test: {
+			// Product suites live under test/. Campaign evidence may contain
+			// executable regression helpers whose names end in `.test.mjs`; letting
+			// Vitest discover ignored evidence under tmp/ turns a helper that exits
+			// zero into a false "no test suite" gate failure.
+			include: ["test/**/*.spec.js"],
 			exclude: [
 				...configDefaults.exclude,
 				// These exercise host filesystem/process behavior and are covered by

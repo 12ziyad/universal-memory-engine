@@ -199,6 +199,10 @@ function atomicCaptureFields(meta = {}) {
 		atomic_capture_rejected: integer(meta.atomic_capture_rejected),
 		atomic_capture_duplicates: integer(meta.atomic_capture_duplicates),
 		atomic_capture_truncated: integer(meta.atomic_capture_truncated),
+		atomic_capture_temporal_present: integer(meta.atomic_capture_temporal_present),
+		atomic_capture_temporal_resolved: integer(meta.atomic_capture_temporal_resolved),
+		atomic_capture_temporal_unresolved: integer(meta.atomic_capture_temporal_unresolved),
+		atomic_capture_temporal_anchor_missing: integer(meta.atomic_capture_temporal_anchor_missing),
 		atomic_capture_replayed: meta.atomic_capture_replayed === true,
 		atomic_capture_latency_ms: Number.isFinite(Number(meta.atomic_capture_latency_ms))
 			? Math.max(0, Math.round(Number(meta.atomic_capture_latency_ms)))

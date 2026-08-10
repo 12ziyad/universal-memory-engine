@@ -33,5 +33,6 @@
  "0032_source_time.sql": "d865964c2242e3fbac3bf56b025e5481e1b427c35fcf5c35eda4aa9836dc2ea2",
  "0033_source_episodes.sql": "f2d4a5a7213b8e3d928bafb635d5d19cc121617bc68d2b3475a30d3b2131e6e2",
  "0034_event_date_provenance.sql": "a5adfe9b479687c339f0e1dff80c61ec3823546eacd1b1ae2ce4d3520b40d62b",
- "0035_semantic_atom_candidates.sql": "3710442146add152af84203fef725ca5aa4c6b05404c4420cbd5b9698a4c2346"
+ "0035_semantic_atom_candidates.sql": "3710442146add152af84203fef725ca5aa4c6b05404c4420cbd5b9698a4c2346",
+ "0036_atomic_temporal_representation.sql": "5905ee19bd9df86a8b8cf73097b820686e23cde54011816bf530bce3222e4d28"
 }

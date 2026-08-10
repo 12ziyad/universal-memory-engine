@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	chunkAnchor,
 	messageAnchor,
+	normalizeAtomicTemporal,
 	resolveFactDate,
 	resolveTemporalPhrase,
 } from "../src/pipeline/temporal.js";
@@ -92,6 +93,12 @@ describe("explicit dates", () => {
 	it("fills a missing year from the anchor rather than guessing", () => {
 		expect(resolveTemporalPhrase("on 3 November", THU).date).toBe("2025-11-03");
 	});
+
+	it("rejects impossible calendar dates instead of normalizing their overflow", () => {
+		expect(resolveTemporalPhrase("2025-02-31", THU)).toBe(null);
+		expect(resolveTemporalPhrase("31 February 2025", THU)).toBe(null);
+		expect(resolveTemporalPhrase("April 31, 2025", THU)).toBe(null);
+	});
 });
 
 describe("bare months and years", () => {
@@ -104,6 +111,35 @@ describe("bare months and years", () => {
 		const resolved = resolveTemporalPhrase("back in 2019", THU);
 		expect(resolved.date).toBe("2019-01-01");
 		expect(resolved.precision).toBe("year");
+	});
+
+	it("uses the nearest civil occurrence for an otherwise unqualified month", () => {
+		expect(resolveTemporalPhrase("in August", anchorAt("2026-02-11T08:11:00Z")).date).toBe("2026-08-01");
+		expect(resolveTemporalPhrase("in October", anchorAt("2026-01-19T11:09:00Z")).date).toBe("2025-10-01");
+	});
+});
+
+describe("future offsets and explicit ranges", () => {
+	it("resolves a future relative offset without changing its stated precision", () => {
+		const resolved = resolveTemporalPhrase("in two weeks", THU);
+		expect(resolved.date).toBe("2025-10-02");
+		expect(resolved.precision).toBe("week");
+		expect(resolved.relation).toBe("at");
+	});
+
+	it("clamps month arithmetic to the target month's last real day", () => {
+		expect(resolveTemporalPhrase("one month ago", anchorAt("2025-03-31T08:00:00Z")).date).toBe("2025-02-28");
+		expect(resolveTemporalPhrase("one month ago", anchorAt("2024-03-31T08:00:00Z")).date).toBe("2024-02-29");
+	});
+
+	it("represents both endpoints of an explicit same-month range", () => {
+		const resolved = resolveTemporalPhrase("14 to 21 June", anchorAt("2026-02-11T08:02:00Z"));
+		expect(resolved).toMatchObject({
+			date: "2026-06-14",
+			end_date: "2026-06-21",
+			precision: "day",
+			relation: "range",
+		});
 	});
 });
 
@@ -218,5 +254,42 @@ describe("resolving a fact's date from its own words", () => {
 
 	it("returns nothing without an anchor", () => {
 		expect(resolveFactDate("Moved in yesterday", null)).toBe(null);
+	});
+});
+
+describe("atomic temporal representation", () => {
+	it("binds a normalized phrase to the exact message source-time anchor", () => {
+		const normalized = normalizeAtomicTemporal("yesterday", {
+			ts: Date.parse("2026-08-11T12:00:00Z"),
+			source_time: {
+				epoch_ms: Date.parse("2025-09-18T08:00:00Z"),
+				offset_minutes: 0,
+				precision: "time",
+			},
+		});
+		expect(normalized).toMatchObject({
+			schema: "itsuki.atomic-temporal/v1",
+			outcome: "resolved",
+			eventTime: Date.UTC(2025, 8, 17, 12),
+			eventTimeEnd: null,
+			eventTimePrecision: "day",
+			eventTimeRelation: "at",
+			eventTimeSource: "phrase",
+			eventTimeAnchor: "source_time",
+		});
+	});
+
+	it("labels observation fallback and never pretends it was authoritative source time", () => {
+		const normalized = normalizeAtomicTemporal("today", { ts: Date.parse("2025-09-18T08:00:00Z") });
+		expect(normalized).toMatchObject({ outcome: "resolved", eventTimeAnchor: "observed_at" });
+	});
+
+	it("keeps absent and unresolvable phrases distinct without fabricated values", () => {
+		expect(normalizeAtomicTemporal("   ", { ts: THU.epoch_ms })).toMatchObject({
+			outcome: "absent", eventTime: null, eventTimePrecision: null,
+		});
+		expect(normalizeAtomicTemporal("eventually", { ts: THU.epoch_ms })).toMatchObject({
+			outcome: "unresolvable", eventTime: null, eventTimePrecision: null,
+		});
 	});
 });

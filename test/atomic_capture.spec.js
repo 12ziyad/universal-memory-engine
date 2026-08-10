@@ -117,6 +117,52 @@ describe("atomic capture normalization and exact provenance", () => {
 		expect(result.atoms[0].id).toMatch(/^atom:v1:[a-f0-9]{64}$/);
 	});
 
+	it("normalizes an exact temporal phrase against that source message only", async () => {
+		const temporalMessages = [{
+			id: "when",
+			content: "I moved to Malmo yesterday.",
+			ts: Date.parse("2026-08-11T12:00:00Z"),
+			source_time: {
+				epoch_ms: Date.parse("2025-09-18T08:00:00Z"),
+				offset_minutes: 0,
+				precision: "time",
+			},
+		}];
+		const result = await normalizeAtomicCapture({ atoms: [proposal({
+			type: "event",
+			entity: "user",
+			entity_type: "person",
+			attribute: "location history",
+			value: "Malmo",
+			assertion: "The user moved to Malmo.",
+			source_message_id: "when",
+			evidence_quote: "moved to Malmo yesterday",
+			raw_temporal_phrase: "yesterday",
+		})] }, {
+			messages: temporalMessages,
+			userId: "tenant-a",
+			projectId: "project-a",
+			sourcePacketId: "packet-a",
+			chunkKey: "chunk-a",
+		});
+		expect(result.atoms[0]).toMatchObject({
+			rawTemporalPhrase: "yesterday",
+			temporal: {
+				outcome: "resolved",
+				eventTime: Date.UTC(2025, 8, 17, 12),
+				eventTimeAnchor: "source_time",
+			},
+		});
+		expect(result.outcomes).toMatchObject({ temporalPresent: 1, temporalResolved: 1 });
+	});
+
+	it("canonicalizes an empty model temporal phrase to absent", async () => {
+		const result = await normalize([proposal({ raw_temporal_phrase: "" })]);
+		expect(result.atoms[0].rawTemporalPhrase).toBe(null);
+		expect(result.atoms[0].temporal.outcome).toBe("absent");
+		expect(result.outcomes.temporalAbsent).toBe(1);
+	});
+
 	it("rejects unknown source ids and inexact quotes", async () => {
 		const result = await normalize([
 			proposal({ source_message_id: "assistant" }),

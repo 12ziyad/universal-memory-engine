@@ -71,6 +71,10 @@ function attachAtomicCaptureMeta(meta, result, enabled = false) {
 	meta.atomic_capture_rejected = Number(result.rejected ?? 0);
 	meta.atomic_capture_duplicates = Number(result.duplicates ?? 0);
 	meta.atomic_capture_truncated = Number(result.truncated ?? 0);
+	meta.atomic_capture_temporal_present = Number(result.temporalPresent ?? 0);
+	meta.atomic_capture_temporal_resolved = Number(result.temporalResolved ?? 0);
+	meta.atomic_capture_temporal_unresolved = Number(result.temporalUnresolved ?? 0);
+	meta.atomic_capture_temporal_anchor_missing = Number(result.temporalAnchorMissing ?? 0);
 	meta.atomic_capture_replayed = result.replayed === true;
 	meta.atomic_capture_latency_ms = Number.isFinite(Number(result.latencyMs))
 		? Number(result.latencyMs)

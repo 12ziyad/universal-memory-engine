@@ -1,5 +1,6 @@
 import { normalizeMemoryRules, rulesPromptLines, rulesRejection } from "./rules.js";
 import { scrubText } from "./scrub.js";
+import { normalizeAtomicTemporal } from "./temporal.js";
 
 export const ATOMIC_CAPTURE_SCHEMA = "itsuki.semantic-atom/v1";
 export const ATOMIC_TYPES = Object.freeze([
@@ -276,6 +277,11 @@ export async function normalizeAtomicCapture(parsed, options = {}) {
 		accepted: 0,
 		rejected: 0,
 		duplicate: 0,
+		temporalPresent: 0,
+		temporalResolved: 0,
+		temporalUnresolved: 0,
+		temporalAnchorMissing: 0,
+		temporalAbsent: 0,
 		rejectedByReason: {},
 	};
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.atoms)) {
@@ -314,9 +320,10 @@ export async function normalizeAtomicCapture(parsed, options = {}) {
 			reject(outcomes, "inexact_evidence_quote");
 			continue;
 		}
-		const rawTemporalPhrase = proposal.raw_temporal_phrase == null
+		const proposedTemporalPhrase = proposal.raw_temporal_phrase == null
 			? null
 			: String(proposal.raw_temporal_phrase);
+		const rawTemporalPhrase = proposedTemporalPhrase?.trim() ? proposedTemporalPhrase : null;
 		if (rawTemporalPhrase && content.indexOf(rawTemporalPhrase) < 0) {
 			reject(outcomes, "inexact_temporal_phrase");
 			continue;
@@ -385,6 +392,7 @@ export async function normalizeAtomicCapture(parsed, options = {}) {
 			value,
 			assertion,
 			rawTemporalPhrase,
+			temporal: normalizeAtomicTemporal(rawTemporalPhrase, message),
 			cardinality: proposal.cardinality,
 			confidence: proposal.confidence,
 		};
@@ -398,6 +406,14 @@ export async function normalizeAtomicCapture(parsed, options = {}) {
 	}
 
 	const atoms = [...acceptedById.values()];
+	for (const atom of atoms) {
+		const outcome = atom.temporal?.outcome ?? "absent";
+		if (atom.rawTemporalPhrase) outcomes.temporalPresent += 1;
+		if (outcome === "resolved") outcomes.temporalResolved += 1;
+		else if (outcome === "unresolvable") outcomes.temporalUnresolved += 1;
+		else if (outcome === "anchor_missing") outcomes.temporalAnchorMissing += 1;
+		else outcomes.temporalAbsent += 1;
+	}
 	outcomes.accepted = atoms.length;
 	return {
 		ok: true,

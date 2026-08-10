@@ -120,6 +120,72 @@ describe("E4 atomic candidate persistence", () => {
 		expect(Number(graph.n)).toBe(0);
 	});
 
+	it("persists deterministic temporal fields with exact episode provenance", async () => {
+		const f = await fixture("temporal", { content: "Northwind switched to sqlc yesterday." });
+		const result = await extract(f, { atoms: [atom("m1", {
+			type: "event",
+			attribute: "database transition",
+			value: "sqlc",
+			assertion: "Northwind switched to sqlc.",
+			evidence_quote: "switched to sqlc yesterday",
+			raw_temporal_phrase: "yesterday",
+		})] });
+		expect(result.receipt).toMatchObject({
+			atomic_capture_temporal_present: 1,
+			atomic_capture_temporal_resolved: 1,
+			atomic_capture_temporal_unresolved: 0,
+		});
+		const row = await env.DB.prepare(
+			`SELECT event_time, event_time_end, event_time_precision, event_time_relation,
+				event_time_source, event_time_anchor, temporal_schema, raw_temporal_phrase,
+				source_episode_id
+			 FROM semantic_atom_candidates WHERE user_id = ?`,
+		).bind(f.userId).first();
+		expect(row).toMatchObject({
+			event_time: Date.UTC(2025, 10, 3, 12),
+			event_time_end: null,
+			event_time_precision: "day",
+			event_time_relation: "at",
+			event_time_source: "phrase",
+			event_time_anchor: "source_time",
+			temporal_schema: "itsuki.atomic-temporal/v1",
+			raw_temporal_phrase: "yesterday",
+		});
+		expect(row.source_episode_id).toBeTruthy();
+	});
+
+	it("preserves an unsupported exact phrase but stores no fabricated event time", async () => {
+		const f = await fixture("temporal-vague", { content: "Northwind may switch databases eventually." });
+		const result = await extract(f, { atoms: [atom("m1", {
+			type: "plan",
+			attribute: "database plan",
+			value: "switch databases",
+			assertion: "Northwind may switch databases.",
+			evidence_quote: "may switch databases eventually",
+			raw_temporal_phrase: "eventually",
+		})] });
+		expect(result.receipt).toMatchObject({
+			atomic_capture_temporal_present: 1,
+			atomic_capture_temporal_resolved: 0,
+			atomic_capture_temporal_unresolved: 1,
+		});
+		const row = await env.DB.prepare(
+			`SELECT raw_temporal_phrase, event_time, event_time_end, event_time_precision,
+				event_time_relation, event_time_source, event_time_anchor, temporal_schema
+			 FROM semantic_atom_candidates WHERE user_id = ?`,
+		).bind(f.userId).first();
+		expect(row).toEqual({
+			raw_temporal_phrase: "eventually",
+			event_time: null,
+			event_time_end: null,
+			event_time_precision: null,
+			event_time_relation: null,
+			event_time_source: null,
+			event_time_anchor: null,
+			temporal_schema: "itsuki.atomic-temporal/v1",
+		});
+	});
+
 	it("replay reuses the terminal capture run and never invokes the model twice", async () => {
 		const f = await fixture("replay");
 		let calls = 0;

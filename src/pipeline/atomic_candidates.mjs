@@ -98,6 +98,10 @@ function terminalRunResult(row, { replayed = false } = {}) {
 		rejected: integer(row?.rejected_count),
 		duplicates: integer(row?.duplicate_count),
 		truncated: Number(row?.truncated ?? 0) === 1,
+		temporalPresent: integer(row?.temporal_phrase_count),
+		temporalResolved: integer(row?.temporal_resolved_count),
+		temporalUnresolved: integer(row?.temporal_unresolved_count),
+		temporalAnchorMissing: integer(row?.temporal_anchor_missing_count),
 		replayed,
 	};
 }
@@ -109,6 +113,8 @@ async function failRun(env, userId, runId, errorCode, counts = {}) {
 		`UPDATE semantic_atom_capture_runs
 		 SET status = 'failed', error_code = ?, proposed_count = ?, accepted_count = ?,
 			stored_count = ?, rejected_count = ?, duplicate_count = ?, truncated = ?,
+			temporal_phrase_count = ?, temporal_resolved_count = ?,
+			temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
 			rejected_reasons_json = ?, updated_at = ?, completed_at = ?
 		 WHERE id = ? AND user_id = ? AND status = 'running'`,
 	).bind(
@@ -119,6 +125,10 @@ async function failRun(env, userId, runId, errorCode, counts = {}) {
 		integer(counts.rejected),
 		integer(counts.duplicates),
 		counts.truncated ? 1 : 0,
+		integer(counts.temporalPresent),
+		integer(counts.temporalResolved),
+		integer(counts.temporalUnresolved),
+		integer(counts.temporalAnchorMissing),
 		counts.rejectedByReason ? JSON.stringify(counts.rejectedByReason) : null,
 		now,
 		now,
@@ -135,6 +145,10 @@ async function failRun(env, userId, runId, errorCode, counts = {}) {
 		rejected: integer(counts.rejected),
 		duplicates: integer(counts.duplicates),
 		truncated: Boolean(counts.truncated),
+		temporalPresent: integer(counts.temporalPresent),
+		temporalResolved: integer(counts.temporalResolved),
+		temporalUnresolved: integer(counts.temporalUnresolved),
+		temporalAnchorMissing: integer(counts.temporalAnchorMissing),
 		replayed: false,
 	};
 }
@@ -304,11 +318,13 @@ async function persistChunk(env, {
 			  atom_type, entity, entity_type, attribute, value, assertion,
 			  raw_temporal_phrase, cardinality, confidence,
 			  source_time, source_time_offset_minutes, source_time_precision, observed_at,
+			  event_time, event_time_end, event_time_precision, event_time_relation,
+			  event_time_source, event_time_anchor, temporal_schema,
 			  extraction_model, schema_version, status, created_at)
 			 SELECT ?, e.user_id, e.memory_user_id, e.owner_user_id, e.external_user_id,
 				e.project_id, e.project_name, ?, ?, e.id, ?, ?, ?, ?, ?, ?, ?, ?,
 				?, ?, ?, ?, ?, ?, ?, ?, ?, e.source_time, e.source_time_offset_minutes,
-				e.source_time_precision, e.observed_at, ?, ?, 'candidate', ?
+				e.source_time_precision, e.observed_at, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?
 			 FROM source_episodes e
 			 WHERE e.user_id = ? AND e.source_packet_id = ? AND e.message_id = ? AND e.project_id IS ?
 			 ON CONFLICT DO NOTHING`,
@@ -333,6 +349,13 @@ async function persistChunk(env, {
 			atom.rawTemporalPhrase,
 			atom.cardinality,
 			atom.confidence,
+			atom.temporal?.eventTime ?? null,
+			atom.temporal?.eventTimeEnd ?? null,
+			atom.temporal?.eventTimePrecision ?? null,
+			atom.temporal?.eventTimeRelation ?? null,
+			atom.temporal?.eventTimeSource ?? null,
+			atom.temporal?.eventTimeAnchor ?? null,
+			atom.temporal?.schema ?? null,
 			ATOMIC_CAPTURE_MODEL,
 			ATOMIC_CAPTURE_SCHEMA,
 			now,
@@ -357,7 +380,9 @@ async function persistChunk(env, {
 				SELECT COUNT(*) FROM semantic_atom_candidates
 				 WHERE user_id = ? AND capture_run_id = ?
 			),
-			truncated = ?, rejected_reasons_json = ?,
+			truncated = ?, temporal_phrase_count = ?, temporal_resolved_count = ?,
+			temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
+			rejected_reasons_json = ?,
 			error_code = NULL, updated_at = ?, completed_at = ?
 		 WHERE id = ? AND user_id = ? AND status = 'running'`,
 	).bind(
@@ -372,6 +397,10 @@ async function persistChunk(env, {
 		userId,
 		runId,
 		truncated ? 1 : 0,
+		integer(outcomes.temporalPresent),
+		integer(outcomes.temporalResolved),
+		integer(outcomes.temporalUnresolved),
+		integer(outcomes.temporalAnchorMissing),
 		JSON.stringify(outcomes.rejectedByReason ?? {}),
 		now,
 		now,
@@ -399,6 +428,10 @@ async function persistChunk(env, {
 			rejected: integer(outcomes.rejected),
 			duplicates,
 			truncated: Boolean(truncated),
+			temporalPresent: integer(outcomes.temporalPresent),
+			temporalResolved: integer(outcomes.temporalResolved),
+			temporalUnresolved: integer(outcomes.temporalUnresolved),
+			temporalAnchorMissing: integer(outcomes.temporalAnchorMissing),
 			replayed: false,
 		};
 	} catch (error) {
@@ -413,6 +446,8 @@ async function persistChunk(env, {
 				`UPDATE semantic_atom_capture_runs
 				 SET status = ?, error_code = ?, proposed_count = ?, accepted_count = ?,
 					stored_count = 0, rejected_count = ?, duplicate_count = ?, truncated = ?,
+					temporal_phrase_count = ?, temporal_resolved_count = ?,
+					temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
 					rejected_reasons_json = ?, updated_at = ?, completed_at = ?
 				 WHERE id = ? AND user_id = ? AND status = 'running'`,
 			).bind(
@@ -423,6 +458,10 @@ async function persistChunk(env, {
 				integer(outcomes.rejected),
 				integer(outcomes.duplicate),
 				truncated ? 1 : 0,
+				integer(outcomes.temporalPresent),
+				integer(outcomes.temporalResolved),
+				integer(outcomes.temporalUnresolved),
+				integer(outcomes.temporalAnchorMissing),
 				JSON.stringify(outcomes.rejectedByReason ?? {}),
 				now,
 				now,
@@ -439,6 +478,10 @@ async function persistChunk(env, {
 				rejected: integer(outcomes.rejected),
 				duplicates: integer(outcomes.duplicate),
 				truncated: Boolean(truncated),
+				temporalPresent: integer(outcomes.temporalPresent),
+				temporalResolved: integer(outcomes.temporalResolved),
+				temporalUnresolved: integer(outcomes.temporalUnresolved),
+				temporalAnchorMissing: integer(outcomes.temporalAnchorMissing),
 				replayed: false,
 			};
 		}
@@ -454,6 +497,10 @@ async function persistChunk(env, {
 			rejected: outcomes.rejected,
 			duplicates: outcomes.duplicate,
 			truncated,
+			temporalPresent: outcomes.temporalPresent,
+			temporalResolved: outcomes.temporalResolved,
+			temporalUnresolved: outcomes.temporalUnresolved,
+			temporalAnchorMissing: outcomes.temporalAnchorMissing,
 			rejectedByReason: outcomes.rejectedByReason,
 		});
 	}
@@ -476,6 +523,10 @@ async function captureChunk(env, options, plannedChunk) {
 				rejected: 0,
 				duplicates: 0,
 				truncated: false,
+				temporalPresent: 0,
+				temporalResolved: 0,
+				temporalUnresolved: 0,
+				temporalAnchorMissing: 0,
 				replayed: true,
 			};
 		}
@@ -540,6 +591,10 @@ export async function captureAtomicCandidates(env, options = {}) {
 			rejected: 0,
 			duplicates: 0,
 			truncated: 0,
+			temporalPresent: 0,
+			temporalResolved: 0,
+			temporalUnresolved: 0,
+			temporalAnchorMissing: 0,
 			replayed: false,
 			latencyMs: Date.now() - startedAt,
 		};
@@ -563,6 +618,10 @@ export async function captureAtomicCandidates(env, options = {}) {
 			rejected: 0,
 			duplicates: 0,
 			truncated: 0,
+			temporalPresent: 0,
+			temporalResolved: 0,
+			temporalUnresolved: 0,
+			temporalAnchorMissing: 0,
 			replayed: false,
 			latencyMs: Date.now() - startedAt,
 		};
@@ -596,6 +655,10 @@ export async function captureAtomicCandidates(env, options = {}) {
 		rejected: results.reduce((sum, result) => sum + result.rejected, 0),
 		duplicates: results.reduce((sum, result) => sum + result.duplicates, 0),
 		truncated: results.filter((result) => result.truncated).length,
+		temporalPresent: results.reduce((sum, result) => sum + integer(result.temporalPresent), 0),
+		temporalResolved: results.reduce((sum, result) => sum + integer(result.temporalResolved), 0),
+		temporalUnresolved: results.reduce((sum, result) => sum + integer(result.temporalUnresolved), 0),
+		temporalAnchorMissing: results.reduce((sum, result) => sum + integer(result.temporalAnchorMissing), 0),
 		replayed: results.some((result) => result.replayed),
 		latencyMs: Date.now() - startedAt,
 	};
@@ -622,6 +685,10 @@ export async function atomicCaptureSummaryForExtractionRun(env, userId, extracti
 			SUM(rejected_count) AS rejected,
 			SUM(duplicate_count) AS duplicates,
 			SUM(truncated) AS truncated,
+			SUM(temporal_phrase_count) AS temporal_present,
+			SUM(temporal_resolved_count) AS temporal_resolved,
+			SUM(temporal_unresolved_count) AS temporal_unresolved,
+			SUM(temporal_anchor_missing_count) AS temporal_anchor_missing,
 			SUM(replay_count) AS replay_count,
 			SUM(CASE WHEN status IN ('completed', 'empty') THEN 0 ELSE 1 END) AS incomplete,
 			SUM(CASE WHEN status = 'cancelled_by_delete' THEN 1 ELSE 0 END) AS cancelled,
@@ -644,6 +711,10 @@ export async function atomicCaptureSummaryForExtractionRun(env, userId, extracti
 		rejected: integer(row?.rejected),
 		duplicates: integer(row?.duplicates),
 		truncated: integer(row?.truncated),
+		temporalPresent: integer(row?.temporal_present),
+		temporalResolved: integer(row?.temporal_resolved),
+		temporalUnresolved: integer(row?.temporal_unresolved),
+		temporalAnchorMissing: integer(row?.temporal_anchor_missing),
 		replayed: integer(row?.replay_count) > 0,
 		latencyMs: null,
 	};
