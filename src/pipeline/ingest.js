@@ -133,6 +133,26 @@ async function recordReplay(env, userId, normalized, replay, { bumpSeen = true }
 }
 
 /**
+ * A terminal job is retained as audit/idempotency state after erasure, but its
+ * live semantic rows and source episodes are gone. Returning its old 200
+ * receipt would tell a durable sender that the evidence still exists and may
+ * be discarded. The deletion barrier therefore fences replays as well as late
+ * writes. A packet accepted after the latest barrier remains a legitimate new
+ * write and can still be replayed idempotently.
+ */
+async function replayPredatesErasure(env, userId, replay) {
+	if (!replay?.job) return false;
+	const barrier = await env.DB.prepare(
+		"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? LIMIT 1",
+	).bind(userId).first();
+	if (!barrier) return false;
+	const acceptedAt = Number(replay.sourcePacket?.received_at ?? replay.sourcePacket?.created_at);
+	// A retained V3 packet with no provable acceptance time cannot be treated as
+	// post-erasure. Fail closed instead of manufacturing a false durability ack.
+	return !Number.isFinite(acceptedAt) || Number(barrier.barrier_at) >= acceptedAt;
+}
+
+/**
  * Promote an accept-time job only after its source episode set is verified.
  *
  * D1 and the Durable Object cannot share a transaction. `awaiting_source` is
@@ -246,6 +266,15 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			idempotencyKey: normalized.packet.idempotency_key,
 			sourcePacketId: replay.sourcePacket?.id ?? replay.job?.source_packet_id ?? null,
 			summary: "That idempotency key is already bound to different content or a different save lane. Send the original request or use a new key.",
+		};
+	}
+	if (replay?.job && memoryV3Enabled(env, userId) && await replayPredatesErasure(env, userId, replay)) {
+		return {
+			sourceEpisodeErased: true,
+			jobId: replay.job.id,
+			jobStatus: replay.job.status,
+			sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+			summary: "This accepted write was erased and cannot be replayed. Send a genuinely new write if you want to remember it again.",
 		};
 	}
 	if (replay?.job?.status === "failed" && replay.job.type === "extract") {

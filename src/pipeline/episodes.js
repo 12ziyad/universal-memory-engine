@@ -48,9 +48,10 @@ const PRESERVED_ROLES = new Set(["user", "assistant"]);
 /**
  * Write the permitted source text of one accepted write.
  *
- * Best-effort in the same sense as read-your-writes staging: an episode failure
- * must never fail an accepted write, because the semantic path is still going
- * to run. It returns what it did so a receipt can say so.
+ * V3 acceptance requires this write to succeed completely before extraction
+ * becomes runnable. Legacy callers can still request best-effort behavior by
+ * leaving `required` false; the V3 ingest path always passes `required: true`.
+ * The typed result lets that caller return a named non-accepting response.
  */
 export async function writeSourceEpisodes(env, userId, {
 	sourcePacketId = null,

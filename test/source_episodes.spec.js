@@ -383,6 +383,53 @@ describe("episodes cannot cross a scope boundary", () => {
 });
 
 describe("episodes are erased, not tombstoned", () => {
+	it("refuses an acceptance-shaped exact replay after a terminal V3 write was erased", async () => {
+		const userId = nextUser("terminal_replay_erased");
+		const idempotencyKey = `terminal-replay-erased-${crypto.randomUUID()}`;
+		const request = () => new Request("https://itsuki.app/v1/ingest", {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+			body: JSON.stringify({
+				userId,
+				idempotencyKey,
+				flush: true,
+				messages: [{ id: "terminal_replay_m1", role: "user", content: "Keep this source evidence" }],
+				_test: { llmResponse: { objects: [], notes: "none" } },
+			}),
+		});
+
+		const firstCtx = createExecutionContext();
+		const first = await worker.fetch(request(), V3(userId), firstCtx);
+		await waitOnExecutionContext(firstCtx);
+		expect(first.status).toBe(200);
+		expect(await first.json()).toMatchObject({
+			ok: true,
+			source_episodes_written: 1,
+			source_episodes_expected: 1,
+		});
+		const terminal = await env.DB.prepare(
+			"SELECT status FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?",
+		).bind(userId, idempotencyKey).first();
+		expect(["enriched", "completed"]).toContain(terminal?.status);
+
+		const erased = await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
+		expect(erased.ok).toBe(true);
+		expect(await countSourceEpisodes(env, userId)).toBe(0);
+
+		const replayCtx = createExecutionContext();
+		const replay = await worker.fetch(request(), V3(userId), replayCtx);
+		await waitOnExecutionContext(replayCtx);
+		expect(replay.status).toBe(409);
+		expect(await replay.json()).toMatchObject({
+			code: "source_write_erased",
+			retryable: false,
+		});
+		expect(await countSourceEpisodes(env, userId)).toBe(0);
+
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+		await stub.resetAll();
+	}, 30_000);
+
 	it("confirmed erasure terminally fences an awaiting-source job that has no DO handoff", async () => {
 		const userId = nextUser("erase_waiting");
 		const jobId = `job_${userId}`;
