@@ -182,6 +182,30 @@ function extractionConservationFields(meta = {}) {
 	};
 }
 
+/** Content-free accounting for E4's source-grounded candidate lane. */
+function atomicCaptureFields(meta = {}) {
+	if (meta.atomic_capture_enabled == null) return {};
+	const integer = (value) => Number.isFinite(Number(value))
+		? Math.max(0, Math.trunc(Number(value)))
+		: 0;
+	return {
+		atomic_capture_enabled: meta.atomic_capture_enabled === true,
+		atomic_capture_outcome: String(meta.atomic_capture_outcome ?? "not_attempted").slice(0, 64),
+		atomic_capture_complete: meta.atomic_capture_complete === true,
+		atomic_capture_chunks: integer(meta.atomic_capture_chunks),
+		atomic_capture_proposed: integer(meta.atomic_capture_proposed),
+		atomic_capture_accepted: integer(meta.atomic_capture_accepted),
+		atomic_capture_stored: integer(meta.atomic_capture_stored),
+		atomic_capture_rejected: integer(meta.atomic_capture_rejected),
+		atomic_capture_duplicates: integer(meta.atomic_capture_duplicates),
+		atomic_capture_truncated: integer(meta.atomic_capture_truncated),
+		atomic_capture_replayed: meta.atomic_capture_replayed === true,
+		atomic_capture_latency_ms: Number.isFinite(Number(meta.atomic_capture_latency_ms))
+			? Math.max(0, Math.round(Number(meta.atomic_capture_latency_ms)))
+			: null,
+	};
+}
+
 function plural(n, one, many = `${one}s`) {
 	return `${n} ${n === 1 ? one : many}`;
 }
@@ -257,6 +281,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		...splitRescueFields(meta),
 		...extractionConservationFields(meta),
+		...atomicCaptureFields(meta),
 		...(meta.rules_active ? { rules_active: meta.rules_active } : {}),
 		saved,
 		savedTotal,
@@ -305,6 +330,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
 		...splitRescueFields(meta),
 		...extractionConservationFields(meta),
+		...atomicCaptureFields(meta),
 		// Workers AI rollups, when the caller metered this scope (recall does).
 		ai_calls: meta.ai?.calls ?? null,
 		ai_input_tokens: meta.ai?.input_tokens ?? null,

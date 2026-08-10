@@ -93,16 +93,42 @@ export function memoryV3ExtractionB1Enabled(env, userId) {
 }
 
 /**
+ * E4's zero-to-many capture lane has an independent nested switch. It writes
+ * append-only candidates and is intentionally OFF even for parent-V3 accounts
+ * until a named treatment cohort is selected.
+ */
+export function memoryV3AtomicCaptureConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_ATOMIC_CAPTURE;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3AtomicCaptureEnabled(env, userId) {
+	if (!memoryV3Enabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3AtomicCaptureConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
 export function memoryV3Status(env) {
 	const { mode, allowlistCount } = memoryV3Config(env);
 	const extraction = memoryV3ExtractionB1Config(env);
+	const atomicCapture = memoryV3AtomicCaptureConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
 		allowlistCount,
 		extractionB1: { mode: extraction.mode, allowlistCount: extraction.allowlistCount },
+		atomicCapture: { mode: atomicCapture.mode, allowlistCount: atomicCapture.allowlistCount },
 	};
 }

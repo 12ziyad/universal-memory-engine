@@ -25,7 +25,11 @@ import { getConfig } from "../config.js";
 import { buildPacket, chunkText } from "./packet.js";
 import { planExtractionChunks, verifyChunkCoverage } from "./chunking.js";
 import { chunkAnchor } from "./temporal.js";
-import { memoryV3Enabled, memoryV3ExtractionB1Enabled } from "../lib/memory_v3.js";
+import {
+	memoryV3AtomicCaptureEnabled,
+	memoryV3Enabled,
+	memoryV3ExtractionB1Enabled,
+} from "../lib/memory_v3.js";
 import { shortlistNodes } from "./shortlist.js";
 import { proposeMemory } from "./llm.js";
 import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
@@ -47,9 +51,31 @@ import { rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
+import {
+	atomicCaptureSummaryForExtractionRun,
+	captureAtomicCandidates,
+} from "./atomic_candidates.mjs";
 
 const UPDATE_MODE_RE = /\b(actually|correction|no longer|from now on|replace|instead|forget that|not anymore|it is now|it's now)\b/i;
 const EXTRACTION_CLAIM_TTL_MS = 15 * 60 * 1000;
+
+function attachAtomicCaptureMeta(meta, result, enabled = false) {
+	meta.atomic_capture_enabled = enabled === true;
+	if (!result) return;
+	meta.atomic_capture_outcome = result.outcome ?? "internal_error";
+	meta.atomic_capture_complete = result.complete === true;
+	meta.atomic_capture_chunks = Number(result.chunks ?? 0);
+	meta.atomic_capture_proposed = Number(result.proposed ?? 0);
+	meta.atomic_capture_accepted = Number(result.accepted ?? 0);
+	meta.atomic_capture_stored = Number(result.stored ?? 0);
+	meta.atomic_capture_rejected = Number(result.rejected ?? 0);
+	meta.atomic_capture_duplicates = Number(result.duplicates ?? 0);
+	meta.atomic_capture_truncated = Number(result.truncated ?? 0);
+	meta.atomic_capture_replayed = result.replayed === true;
+	meta.atomic_capture_latency_ms = Number.isFinite(Number(result.latencyMs))
+		? Number(result.latencyMs)
+		: null;
+}
 
 function jsonList(value) {
 	try {
@@ -138,6 +164,15 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		).bind(current.id, userId).first();
 	}
 
+	const atomicEnabled = memoryV3AtomicCaptureEnabled(env, userId);
+	let atomicSummary = null;
+	if (atomicEnabled && current?.id) {
+		try {
+			atomicSummary = await atomicCaptureSummaryForExtractionRun(env, userId, current.id);
+		} catch (error) {
+			console.warn("atomic capture recovery summary failed:", error?.message ?? error);
+		}
+	}
 	const recoveredMeta = {
 		...meta,
 		source: current.tool_name ?? meta.source ?? "ingest",
@@ -148,6 +183,7 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		scope_json: current.scope_json ?? meta.scope_json ?? null,
 		received: (chunk ?? []).filter((message) => (message?.role ?? "user") === "user").length,
 	};
+	attachAtomicCaptureMeta(recoveredMeta, atomicSummary, atomicEnabled);
 	const plan = planFromExtractionRun(current);
 	if (current.status === "wrote") {
 		const receipt = await receiptFromExtractionRun(env, userId, current)
@@ -655,19 +691,66 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const extractionV3 = memoryV3ExtractionB1Enabled(env, userId);
 	meta.extraction_v3_b1 = extractionV3;
 	const withRules = { ...overrides, rules, profile, extractionV3 };
+	const atomicCaptureEnabled = memoryV3AtomicCaptureEnabled(env, userId);
+	attachAtomicCaptureMeta(meta, null, atomicCaptureEnabled);
 
 	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
 	// Oversized chunks are pre-split by code before the model sees them.
-	const { proposal, rescued, rescueStats, coverage } = await proposePrimary(
-		env,
-		config,
-		userId,
-		chunk,
-		recent,
-		packet,
-		shortlist,
-		withRules,
-	);
+	// E4's append-only candidate lane runs independently beside the established
+	// proposal. Its deterministic terminal run prevents replayed inference, and
+	// a lane failure is visible without turning a proven graph write into a false
+	// failure. It has no recall participation in this phase.
+	const atomicPromise = atomicCaptureEnabled
+		? captureAtomicCandidates(env, {
+			userId,
+			messages: chunk,
+			recent,
+			rules,
+			projectId: projectScope.projectId,
+			projectName: projectScope.projectName,
+			sourcePacketId: meta.source_packet_id ?? null,
+			extractionRunId,
+			acceptedAt,
+			sourceTime: meta.source_time ?? null,
+			chunkConfig: config.extractionChunk,
+			override: overrides.atomicLlmResponse,
+		}).catch((error) => {
+			console.warn(JSON.stringify({
+				event: "atomic_capture_failed",
+				outcome: "internal_error",
+				error_name: String(error?.name ?? "Error").slice(0, 80),
+			}));
+			return {
+				enabled: true,
+				outcome: "internal_error",
+				complete: false,
+				chunks: 0,
+				proposed: 0,
+				accepted: 0,
+				stored: 0,
+				rejected: 0,
+				duplicates: 0,
+				truncated: 0,
+				replayed: false,
+				latencyMs: null,
+			};
+		})
+		: Promise.resolve(null);
+	const [primaryResult, atomicResult] = await Promise.all([
+		proposePrimary(
+			env,
+			config,
+			userId,
+			chunk,
+			recent,
+			packet,
+			shortlist,
+			withRules,
+		),
+		atomicPromise,
+	]);
+	const { proposal, rescued, rescueStats, coverage } = primaryResult;
+	attachAtomicCaptureMeta(meta, atomicResult, atomicCaptureEnabled);
 	if (coverage) {
 		// Privacy-safe capture counters: how the accepted content was divided and
 		// whether every message of it reached the model.

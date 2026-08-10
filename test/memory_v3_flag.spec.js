@@ -5,6 +5,8 @@ import {
 	MEMORY_V3_MODES,
 	memoryV3Config,
 	memoryV3Enabled,
+	memoryV3AtomicCaptureConfig,
+	memoryV3AtomicCaptureEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -69,6 +71,37 @@ describe("V3 extraction B1 experiment flag", () => {
 			const candidate = { ITSUKI_MEMORY_V3: "on", ITSUKI_MEMORY_V3_EXTRACTION_B1: value };
 			expect(memoryV3ExtractionB1Config(candidate).mode).toBe("off");
 			expect(memoryV3ExtractionB1Enabled(candidate, "user_a")).toBe(false);
+		}
+	});
+});
+
+describe("V3 atomic capture experiment flag", () => {
+	it("defaults off even for a V3 account", () => {
+		const v3 = { ITSUKI_MEMORY_V3: "on" };
+		expect(memoryV3AtomicCaptureConfig(v3).mode).toBe("off");
+		expect(memoryV3AtomicCaptureEnabled(v3, "control_user")).toBe(false);
+	});
+
+	it("requires exact membership in both the parent and nested allowlists", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: "treatment_user",
+		};
+		expect(memoryV3AtomicCaptureEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3AtomicCaptureEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3AtomicCaptureEnabled(treatment, "treatment_user_suffix")).toBe(false);
+
+		const notV3 = { ...treatment, ITSUKI_MEMORY_V3_USERS: "control_user" };
+		expect(memoryV3AtomicCaptureEnabled(notV3, "treatment_user")).toBe(false);
+	});
+
+	it("fails closed on malformed nested configuration", () => {
+		for (const value of ["yes", "enabled", "allowlist;on", "", null, 1, {}]) {
+			const candidate = { ITSUKI_MEMORY_V3: "on", ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: value };
+			expect(memoryV3AtomicCaptureConfig(candidate).mode).toBe("off");
+			expect(memoryV3AtomicCaptureEnabled(candidate, "user_a")).toBe(false);
 		}
 	});
 });
@@ -153,6 +186,7 @@ describe("V3 feature flag: observability", () => {
 			mode: "allowlist",
 			allowlistCount: 2,
 			extractionB1: { mode: "off", allowlistCount: 0 },
+			atomicCapture: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -165,6 +199,7 @@ describe("V3 feature flag: observability", () => {
 			mode: "off",
 			allowlistCount: 0,
 			extractionB1: { mode: "off", allowlistCount: 0 },
+			atomicCapture: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -183,6 +218,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			mode: "off",
 			allowlistCount: 0,
 			extractionB1: { mode: "off", allowlistCount: 0 },
+			atomicCapture: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });

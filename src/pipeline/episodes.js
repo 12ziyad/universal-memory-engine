@@ -34,6 +34,7 @@ import { normalizeProjectScope } from "../lib/project_scope.js";
 import { resolveAdmissionRules } from "./admission.js";
 import { rulesAllowText } from "./rules.js";
 import { hashText } from "./source.js";
+import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
 
 /** Per-message cap. Long enough to hold the evidence, short enough to bound a row. */
 export const EPISODE_TEXT_CAP = 4000;
@@ -331,27 +332,63 @@ export async function deleteSourceEpisodes(env, userId, { projectId = null, sour
 		// delete that claims to have erased six of two things is a report nobody
 		// can act on.
 		const before = await countSourceEpisodes(env, userId, { projectId });
+		const atomicBefore = await countSemanticAtomCandidates(env, userId, { projectId });
+		const captureBefore = await countAtomicCaptureRuns(env, userId, { projectId });
 		if (Array.isArray(sourcePacketIds)) {
 			const ids = sourcePacketIds.filter(Boolean);
 			for (let offset = 0; offset < ids.length; offset += 50) {
 				const chunk = ids.slice(offset, offset + 50);
 				const marks = chunk.map(() => "?").join(", ");
-				await env.DB.prepare(
-					`DELETE FROM source_episodes WHERE user_id = ? AND source_packet_id IN (${marks})`,
-				).bind(userId, ...chunk).run();
+				await env.DB.batch([
+					env.DB.prepare(
+						`DELETE FROM semantic_atom_candidates WHERE user_id = ? AND source_packet_id IN (${marks})`,
+					).bind(userId, ...chunk),
+					env.DB.prepare(
+						`DELETE FROM semantic_atom_capture_runs WHERE user_id = ? AND source_packet_id IN (${marks})`,
+					).bind(userId, ...chunk),
+					env.DB.prepare(
+						`DELETE FROM source_episodes WHERE user_id = ? AND source_packet_id IN (${marks})`,
+					).bind(userId, ...chunk),
+				]);
 			}
 		} else if (projectId) {
-			await env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ? AND project_id = ?")
-				.bind(userId, projectId).run();
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM semantic_atom_candidates WHERE user_id = ? AND project_id = ?")
+					.bind(userId, projectId),
+				env.DB.prepare("DELETE FROM semantic_atom_capture_runs WHERE user_id = ? AND project_id = ?")
+					.bind(userId, projectId),
+				env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ? AND project_id = ?")
+					.bind(userId, projectId),
+			]);
 		} else {
-			await env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ?").bind(userId).run();
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM semantic_atom_candidates WHERE user_id = ?").bind(userId),
+				env.DB.prepare("DELETE FROM semantic_atom_capture_runs WHERE user_id = ?").bind(userId),
+				env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ?").bind(userId),
+			]);
 		}
 		const after = await countSourceEpisodes(env, userId, { projectId });
-		return { deleted: Math.max(0, before - after) };
+		const atomicAfter = await countSemanticAtomCandidates(env, userId, { projectId });
+		const captureAfter = await countAtomicCaptureRuns(env, userId, { projectId });
+		return {
+			deleted: Math.max(0, before - after),
+			atomicCandidatesDeleted: Math.max(0, atomicBefore - atomicAfter),
+			atomicCaptureRunsDeleted: Math.max(0, captureBefore - captureAfter),
+		};
 	} catch (error) {
 		console.warn("episode delete failed:", error?.message ?? error);
 		return { deleted: 0, error: String(error?.message ?? error) };
 	}
+}
+
+async function countAtomicCaptureRuns(env, userId, { projectId = null } = {}) {
+	const row = projectId == null
+		? await env.DB.prepare("SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?")
+			.bind(userId).first()
+		: await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ? AND project_id = ?",
+		).bind(userId, projectId).first();
+	return Number(row?.n ?? 0);
 }
 
 /** How many episodes are still live for this account — the erasure convergence check. */
