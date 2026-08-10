@@ -121,7 +121,8 @@
 		"ITSUKI_MEMORY_V3_EXTRACTION_B1": "off",
 		// E4 zero-to-many candidates. Nested under the parent V3 account flag and
 		// independently OFF until a named synthetic treatment cohort is deployed.
-		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE": "off"
+		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE": "allowlist",
+		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS": "mem_0e31646bbc5e929fd410f2c77d4c9e30,mem_509f5cea063ca216bea17f4ccdb0fcc1,mem_b4d8a0b4f938d13392187022aedd3421,mem_8866073597edbb24c8c4bf6118363f54,mem_5e14d5e51b4db6ebdb8ce4dad6bd7aed,mem_98597b3f4ec03d05348d606b471dbecf,mem_c7fb389dc7153489990ac3bb2c87bf57,mem_ef73d3bde23303be216373b3953bbcfe,mem_8418fc674eb7d8d69ffd1c3e7ac58fd2,mem_31988a00ba0b73f26df882ee3d1598dc"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.
