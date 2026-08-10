@@ -20,6 +20,9 @@ function shapeJob(row) {
 	let payload = {};
 	try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
 	const saved = payload.saved ?? {};
+	const sourceEpisodes = payload.source_episodes && typeof payload.source_episodes === "object"
+		? payload.source_episodes
+		: null;
 	const counts = {
 		nodes: Number(saved.nodes ?? payload.nodes ?? 0),
 		edges: Number(saved.edges ?? payload.edges ?? 0),
@@ -43,6 +46,12 @@ function shapeJob(row) {
 		receipt_id: row.receipt_id ?? null,
 		counts,
 		remaining_messages: Array.isArray(payload.remaining) ? payload.remaining.length : null,
+		...(sourceEpisodes ? { source_episodes: {
+			outcome: sourceEpisodes.outcome ?? null,
+			written: Number(sourceEpisodes.written ?? 0),
+			expected: Number(sourceEpisodes.expected ?? 0),
+			rule_filtered: Number(sourceEpisodes.rule_filtered ?? 0),
+		} } : {}),
 		// Machine-readable reason, so "was this cancelled by my own delete?" is a
 		// field lookup rather than a substring hunt over an error string.
 		cancelled_by_delete: cancelledByDelete(row),
@@ -95,7 +104,7 @@ export async function queueCounters(env) {
 	const [active, failed24, unparseable] = await env.DB.batch([
 		env.DB.prepare(
 			`SELECT COUNT(*) AS n, MIN(created_at) AS oldest
-			 FROM memory_jobs WHERE status IN ('queued', 'staged', 'processing')`,
+			 FROM memory_jobs WHERE status IN ('awaiting_source', 'queued', 'staged', 'processing')`,
 		),
 		env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM memory_jobs WHERE status = 'failed' AND completed_at > ?",

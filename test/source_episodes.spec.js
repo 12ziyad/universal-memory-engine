@@ -49,6 +49,76 @@ async function write(userId, texts, options = {}) {
 }
 
 describe("episodes preserve what extraction might decline", () => {
+	it("does not accept or enqueue V3 work until every permitted episode is durable, then repairs the exact retry", async () => {
+		const userId = nextUser("accept_atomic");
+		const idempotencyKey = `episode-atomic-${crypto.randomUUID()}`;
+		let batchCalls = 0;
+		const failingDb = {
+			prepare(sql) {
+				return env.DB.prepare(sql);
+			},
+			async batch(statements) {
+				batchCalls += 1;
+				// Source episodes are intentionally the first D1 batch in the E3
+				// acceptance protocol. Staging runs only after source readiness.
+				if (batchCalls === 1) {
+					throw new Error("injected source episode persistence failure");
+				}
+				return env.DB.batch(statements);
+			},
+		};
+		const request = () => new Request("https://itsuki.app/v1/ingest", {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+			body: JSON.stringify({
+				userId,
+				idempotencyKey,
+				flush: true,
+				messages: [{ id: "atomic_m1", role: "user", content: "I moved to Malmo on Tuesday" }],
+				_test: { llmResponse: { objects: [], notes: "none" } },
+			}),
+		});
+
+		const failedCtx = createExecutionContext();
+		const failed = await worker.fetch(request(), { ...V3(userId), DB: failingDb }, failedCtx);
+		await waitOnExecutionContext(failedCtx);
+		expect(failed.status).toBe(503);
+		expect(await failed.json()).toMatchObject({
+			error: "source_episode_unavailable",
+			code: "source_episode_unavailable",
+		});
+		expect(await countSourceEpisodes(env, userId)).toBe(0);
+		const waiting = await env.DB.prepare(
+			"SELECT status FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?",
+		).bind(userId, idempotencyKey).first();
+		expect(waiting?.status).toBe("awaiting_source");
+		const beforeRetry = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM extraction_runs WHERE user_id = ?",
+		).bind(userId).first();
+		expect(Number(beforeRetry?.n ?? 0)).toBe(0);
+
+		const retryCtx = createExecutionContext();
+		const retry = await worker.fetch(request(), V3(userId), retryCtx);
+		await waitOnExecutionContext(retryCtx);
+		expect(retry.status).toBe(200);
+		expect(await retry.json()).toMatchObject({
+			ok: true,
+			source_episodes_written: 1,
+			source_episodes_expected: 1,
+		});
+		expect(await countSourceEpisodes(env, userId)).toBe(1);
+		expect((await episodesForPacket(env, userId,
+			(await env.DB.prepare("SELECT id FROM source_packets WHERE user_id = ? AND idempotency_key = ?")
+				.bind(userId, idempotencyKey).first()).id))).toHaveLength(1);
+		const repaired = await env.DB.prepare(
+			"SELECT status FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?",
+		).bind(userId, idempotencyKey).first();
+		expect(repaired?.status).not.toBe("awaiting_source");
+
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+		await stub.resetAll();
+	}, 30_000);
+
 	it("keeps accepted evidence recoverable after bounded semantic dead-letter", async () => {
 		const userId = nextUser("deadletter");
 		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
@@ -157,6 +227,14 @@ describe("episodes preserve what extraction might decline", () => {
 		expect(rows[0].text).toHaveLength(EPISODE_TEXT_CAP);
 	});
 
+	it("applies the episode cap in Unicode code points without splitting a surrogate pair", async () => {
+		const userId = nextUser("unicode_cap");
+		await write(userId, ["🧠".repeat(EPISODE_TEXT_CAP + 10)]);
+		const rows = await episodesForPacket(env, userId, "pkt_1");
+		expect([...rows[0].text]).toHaveLength(EPISODE_TEXT_CAP);
+		expect(rows[0].text).not.toContain("�");
+	});
+
 	it("bounds how many rows one accepted write can create", async () => {
 		const userId = nextUser("bound");
 		const many = Array.from({ length: 120 }, (_, i) => `durable fact number ${i}`);
@@ -255,6 +333,10 @@ describe("episodes cannot cross a scope boundary", () => {
 			projectId: "proj_alpha",
 		});
 		expect(alpha.map((r) => r.text)).toEqual(["alpha banking fact"]);
+		expect(await episodesForPacket(env, userId, "pkt_b", {
+			recallScope: "project_only",
+			projectId: "proj_alpha",
+		})).toEqual([]);
 	});
 
 	it("project_then_global returns the project and the account's global, never a sibling project", async () => {
@@ -278,6 +360,53 @@ describe("episodes cannot cross a scope boundary", () => {
 });
 
 describe("episodes are erased, not tombstoned", () => {
+	it("confirmed erasure terminally fences an awaiting-source job that has no DO handoff", async () => {
+		const userId = nextUser("erase_waiting");
+		const jobId = `job_${userId}`;
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO memory_jobs
+			 (id, user_id, type, status, idempotency_key, attempts, payload_json, run_after, created_at, updated_at)
+			 VALUES (?, ?, 'extract', 'awaiting_source', ?, 0, '{}', ?, ?, ?)`,
+		).bind(jobId, userId, "waiting-source-key", now, now, now).run();
+
+		const result = await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
+		expect(result.cancelled_source_jobs).toBe(1);
+		const row = await env.DB.prepare(
+			"SELECT status, error FROM memory_jobs WHERE id = ? AND user_id = ?",
+		).bind(jobId, userId).first();
+		expect(row?.status).toBe("failed");
+		expect(row?.error).toMatch(/^cancelled_by_delete:/);
+	});
+
+	it("a pre-erasure packet cannot be repaired into source evidence after the deletion barrier", async () => {
+		const userId = nextUser("no_resurrection");
+		const acceptedAt = Date.parse("2026-02-01T10:00:00Z");
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(user_id) DO UPDATE SET barrier_at = excluded.barrier_at`,
+		).bind(userId, acceptedAt + 1000, acceptedAt + 1000, "test").run();
+
+		const blocked = await writeSourceEpisodes(env, userId, {
+			sourcePacketId: "pkt_before_delete",
+			messages: messages(["evidence that must stay erased"], { packet: "pkt_before_delete" }),
+			acceptedAt,
+			required: true,
+		});
+		expect(blocked).toMatchObject({ ok: false, outcome: "blocked_by_erasure" });
+		expect(await countSourceEpisodes(env, userId)).toBe(0);
+
+		const fresh = await writeSourceEpisodes(env, userId, {
+			sourcePacketId: "pkt_after_delete",
+			messages: messages(["a genuinely new post-delete write"], { packet: "pkt_after_delete" }),
+			acceptedAt: acceptedAt + 2000,
+			required: true,
+		});
+		expect(fresh).toMatchObject({ ok: true, outcome: "stored", written: 1 });
+		expect(await countSourceEpisodes(env, userId)).toBe(1);
+	});
+
 	it("a confirmed unscoped delete removes the rows and their search tokens", async () => {
 		const userId = nextUser("erase");
 		await write(userId, ["Alice left her banking job", "and moved to Malmo"]);

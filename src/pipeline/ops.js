@@ -60,7 +60,7 @@ function placeholders(list) {
 }
 
 function emptyJobCounts() {
-	return { queued: 0, staged: 0, processing: 0, enriched: 0, failed: 0, completed: 0 };
+	return { awaiting_source: 0, queued: 0, staged: 0, processing: 0, enriched: 0, failed: 0, completed: 0 };
 }
 
 /**

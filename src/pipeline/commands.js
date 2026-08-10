@@ -90,6 +90,11 @@ async function storeStatusReceipt(env, userId, sourcePacket, outcome, reason, so
 	if (meta.processing !== undefined) receipt.processing = Boolean(meta.processing);
 	if (meta.final !== undefined) receipt.final = Boolean(meta.final);
 	if (meta.status) receipt.status = meta.status;
+	if (meta.source_episodes_written !== undefined) {
+		receipt.source_episodes_written = Number(meta.source_episodes_written ?? 0);
+		receipt.source_episodes_expected = Number(meta.source_episodes_expected ?? 0);
+		receipt.source_episodes_rule_filtered = Number(meta.source_episodes_rule_filtered ?? 0);
+	}
 	// One immutable door receipt per source packet. Concurrent exact retries
 	// race on this deterministic primary key and all return the first durable
 	// verdict instead of manufacturing accepted/accumulating duplicates.
@@ -318,6 +323,34 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			source_packet_id: res.sourcePacketId ?? null,
 		};
 	}
+	if (res.episodePersistenceFailed) {
+		return {
+			ok: false,
+			episodePersistenceFailed: true,
+			error: "source_episode_unavailable",
+			code: "source_episode_unavailable",
+			http_status: res.retryable === false ? 409 : 503,
+			retry_after_s: res.retryable === false ? null : 5,
+			retryable: res.retryable !== false,
+			outcome: res.episodeOutcome ?? "unknown",
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
+	if (res.sourceEpisodeErased) {
+		return {
+			ok: false,
+			sourceEpisodeErased: true,
+			error: "source_write_erased",
+			code: "source_write_erased",
+			http_status: 409,
+			retryable: false,
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
 	// SRV-02: a replay of permanently failed extraction must never look like an
 	// acceptance — callers rely on acceptance to release their durable local copy.
 	if (res.extractionFailedTerminal) {
@@ -331,6 +364,11 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		};
 	}
 
+	const episodeMeta = res.episodeResult ? {
+		source_episodes_written: Number(res.episodeResult.written ?? 0),
+		source_episodes_expected: Number(res.episodeResult.expected ?? 0),
+		source_episodes_rule_filtered: Number(res.episodeResult.ruleFiltered ?? 0),
+	} : {};
 	let receipt = res.receipt ?? null;
 	let summary = res.summary ?? null;
 	let id = res.receiptId ?? receipt?.id ?? null;
@@ -352,6 +390,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 					processing: true,
 					final: false,
 					status: "processing",
+					...episodeMeta,
 				},
 			);
 			receipt = accepted.receipt;
@@ -370,6 +409,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 					received: (messages ?? []).length,
 					held: res.held,
 					skipped: res.skipped,
+					...episodeMeta,
 				},
 			);
 			receipt = stored.receipt;
@@ -380,6 +420,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 				received: (messages ?? []).length,
 				skipped: res.skipped,
 				status: res.jobStatus ?? null,
+				...episodeMeta,
 			});
 			receipt = stored.receipt;
 			summary = res.summary ?? stored.summary;
@@ -389,6 +430,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 				received: (messages ?? []).length,
 				held: res.held,
 				skipped: res.skipped,
+				...episodeMeta,
 			});
 			receipt = stored.receipt;
 			summary = stored.summary;
@@ -433,6 +475,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			...(res.jobId ? { job_id: res.jobId } : {}),
 			...(res.queueDepth != null ? { queue_depth: res.queueDepth } : {}),
 			...(res.duplicate ? { duplicate: true } : {}),
+			...episodeMeta,
 		},
 	});
 }

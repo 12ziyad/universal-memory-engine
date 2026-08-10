@@ -64,7 +64,7 @@ async function findIdempotencyState(env, userId, idempotencyKey, contentHash) {
 			"SELECT * FROM source_packets WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
 		).bind(userId, idempotencyKey).first(),
 		env.DB.prepare(
-			`SELECT id, status, type, receipt_id, source_packet_id, attempts, created_at FROM memory_jobs
+			`SELECT id, status, type, receipt_id, source_packet_id, attempts, error, created_at FROM memory_jobs
 			 WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
 		).bind(userId, idempotencyKey).first(),
 	]);
@@ -130,6 +130,45 @@ async function recordReplay(env, userId, normalized, replay, { bumpSeen = true }
 			id: replay.job.source_packet_id ?? null,
 		},
 	};
+}
+
+/**
+ * Promote an accept-time job only after its source episode set is verified.
+ *
+ * D1 and the Durable Object cannot share a transaction. `awaiting_source` is
+ * the cross-resource fence: reconciliation and the DO only run `queued` work,
+ * while an exact HTTP retry can safely finish this compare-and-set.
+ */
+async function activateSourceReadyJob(env, userId, jobId, episodeResult) {
+	for (let attempt = 0; attempt < 8; attempt += 1) {
+		const row = await env.DB.prepare(
+			"SELECT status, payload_json, error FROM memory_jobs WHERE id = ? AND user_id = ?",
+		).bind(jobId, userId).first();
+		if (!row) return { ok: false, status: null, outcome: "job_missing" };
+		if (row.status !== "awaiting_source") {
+			return { ok: true, activated: false, status: row.status, error: row.error ?? null };
+		}
+		let payload = {};
+		try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+		const nextPayload = JSON.stringify({
+			...payload,
+			source_episodes: {
+				outcome: episodeResult.outcome,
+				written: Number(episodeResult.written ?? 0),
+				expected: Number(episodeResult.expected ?? 0),
+				rule_filtered: Number(episodeResult.ruleFiltered ?? 0),
+			},
+		});
+		const changed = await env.DB.prepare(
+			`UPDATE memory_jobs
+			 SET status = 'queued', payload_json = ?, run_after = ?, updated_at = ?
+			 WHERE id = ? AND user_id = ? AND status = 'awaiting_source' AND payload_json = ?`,
+		).bind(nextPayload, Date.now(), Date.now(), jobId, userId, row.payload_json ?? "{}").run();
+		if (Number(changed?.meta?.changes ?? 0) > 0) {
+			return { ok: true, activated: true, status: "queued", error: null };
+		}
+	}
+	return { ok: false, status: "awaiting_source", outcome: "activation_cas_exhausted" };
 }
 
 export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
@@ -210,6 +249,18 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		};
 	}
 	if (replay?.job?.status === "failed" && replay.job.type === "extract") {
+		// An erasure is a permanent user decision, not an extraction failure that
+		// an exact replay may repair. Re-queuing it would permit source or semantic
+		// evidence to reappear behind the deletion barrier.
+		if (String(replay.job.error ?? "").startsWith("cancelled_by_delete")) {
+			return {
+				sourceEpisodeErased: true,
+				jobId: replay.job.id,
+				jobStatus: "failed",
+				sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+				summary: "This accepted write was erased and cannot be replayed. Send a genuinely new write if you want to remember it again.",
+			};
+		}
 		// SRV-02: never answer a replay of failed work with an acceptance-shaped
 		// duplicate — the caller would discard its durable local copy while no
 		// memory was ever written. Either repair the job or refuse honestly.
@@ -268,9 +319,10 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// 1.1 job row before the 200 — refusing to accept work without a durable
 	// record is the whole point, so a failed insert fails the request.
 	const userMsgIds = normalized.messages.filter((m) => m.role === "user").map((m) => m.id);
+	const sourceEpisodesRequired = memoryV3Enabled(env, userId);
 	const jobClaim = await claimIngestMemoryJob(env, userId, {
 		type: "extract",
-		status: "queued",
+		status: sourceEpisodesRequired ? "awaiting_source" : "queued",
 		idempotencyKey: sourcePacket?.idempotency_key ?? normalized.packet.idempotency_key,
 		sourcePacketId: sourcePacket?.id ?? null,
 		payload: {
@@ -292,7 +344,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	}
 	let duplicate = false;
 	let jobId = jobClaim.id;
-	let jobStatus = jobClaim.job?.status ?? "queued";
+	let jobStatus = jobClaim.job?.status ?? (sourceEpisodesRequired ? "awaiting_source" : "queued");
 	if (!jobClaim.claimed) {
 		const concurrentReplay = await findIdempotencyState(
 			env,
@@ -321,13 +373,69 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		throw new Error("memory job row could not be created — refusing to accept work without a durable record");
 	}
 
+	// E3: source preservation is part of V3 acceptance, not a best-effort task
+	// after acceptance. The job cannot become runnable until every permitted row
+	// is verified durable. Exact retries repeat this idempotently and complete the
+	// same `awaiting_source` job; no model call can occur before this boundary.
+	let episodeResult = null;
+	let sourceActivation = { ok: true, activated: false, status: jobStatus };
+	if (sourceEpisodesRequired) {
+		episodeResult = await writeSourceEpisodes(env, userId, {
+			sourcePacketId: sourcePacket?.id ?? null,
+			conversationId: sourcePacket?.conversation_id ?? normalized.packet.conversation_id ?? null,
+			threadId: sourcePacket?.thread_id ?? normalized.packet.thread_id ?? null,
+			sessionId: sourcePacket?.session_id ?? normalized.packet.session_id ?? null,
+			messages: normalized.messages,
+			projectId,
+			projectName,
+			rules: pipelineOverrides.rules,
+			acceptedAt: sourcePacket?.received_at ?? sourcePacket?.created_at ?? null,
+			required: true,
+		});
+		if (!episodeResult.ok) {
+			return {
+				episodePersistenceFailed: true,
+				episodeOutcome: episodeResult.outcome,
+				retryable: episodeResult.outcome !== "blocked_by_erasure",
+				jobId,
+				jobStatus,
+				sourcePacketId: sourcePacket?.id ?? null,
+				summary: episodeResult.outcome === "blocked_by_erasure"
+					? "This write predates a confirmed erasure and cannot restore deleted source evidence."
+					: "Permitted source evidence could not be durably preserved, so this write was not accepted. Retry safely.",
+			};
+		}
+		sourceActivation = await activateSourceReadyJob(env, userId, jobId, episodeResult);
+		jobStatus = sourceActivation.status ?? jobStatus;
+		if (!sourceActivation.ok || jobStatus === "awaiting_source") {
+			return {
+				episodePersistenceFailed: true,
+				episodeOutcome: sourceActivation.outcome ?? "activation_failed",
+				retryable: true,
+				jobId,
+				jobStatus,
+				sourcePacketId: sourcePacket?.id ?? null,
+				summary: "Source evidence is durable but its extraction job could not be activated, so this write was not accepted. Retry safely.",
+			};
+		}
+		if (jobStatus === "failed" && String(sourceActivation.error ?? "").startsWith("cancelled_by_delete")) {
+			return {
+				sourceEpisodeErased: true,
+				jobId,
+				jobStatus,
+				sourcePacketId: sourcePacket?.id ?? null,
+				summary: "This accepted write was erased and cannot be replayed. Send a genuinely new write if you want to remember it again.",
+			};
+		}
+	}
+
 	// 8.2 read-your-writes: the scrubbed text is findable NOW, not after
 	// enrichment. Best-effort — a staging failure never fails an accepted write.
 	// Rules belong to the ACCOUNT: for scoped sub-tenant doors the resolved
 	// rules ride in as an override (doorOverrides), and staging must enforce
 	// the same object the gates enforce — a derived mem_ id owns no rules row,
 	// so a self-load here would silently return defaults.
-	if (jobClaim.claimed) {
+	if (jobClaim.claimed || sourceActivation.activated) {
 		await stageMemoryText(env, userId, {
 			jobId,
 			sourcePacketId: sourcePacket?.id ?? null,
@@ -337,23 +445,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			projectName,
 			rules: pipelineOverrides.rules,
 		});
-		// V3 / P0-D: preserve the permitted source text BEFORE the model is
-		// consulted, so a conservative extraction pass can no longer make allowed
-		// evidence permanently unrecoverable. Behind the V3 flag, scrubbed by the
-		// call at the top of this function, rules-enforced by the writer, and
-		// best-effort — an episode failure must never fail an accepted write.
-		if (memoryV3Enabled(env, userId)) {
-			await writeSourceEpisodes(env, userId, {
-				sourcePacketId: sourcePacket?.id ?? null,
-				conversationId: sourcePacket?.conversation_id ?? normalized.packet.conversation_id ?? null,
-				threadId: sourcePacket?.thread_id ?? normalized.packet.thread_id ?? null,
-				sessionId: sourcePacket?.session_id ?? normalized.packet.session_id ?? null,
-				messages: normalized.messages,
-				projectId,
-				projectName,
-				rules: pipelineOverrides.rules,
-			});
-		}
+		// Episode durability was already verified above. Staging remains a
+		// best-effort, short-lived read-your-writes bridge.
 	}
 	maybeInjectIngestFault(env, ingestFault, "after_job_claim");
 
@@ -414,6 +507,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		receiptId: result?.receipt?.id ?? null,
 		summary: result?.summary ?? null,
 		sourcePacket,
+		episodeResult,
 	};
 }
 

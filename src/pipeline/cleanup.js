@@ -1006,6 +1006,7 @@ export async function bulkDeleteBySource(env, userId, {
 	const config = getConfig(env);
 
 	let cancelledRuns = 0;
+	let cancelledSourceJobs = 0;
 	if (erasure) {
 		// The deletion barrier FIRST, before any row is touched: from this
 		// instant, no extraction whose work was accepted earlier can commit —
@@ -1017,6 +1018,19 @@ export async function bulkDeleteBySource(env, userId, {
 				barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at),
 				by = excluded.by`,
 		).bind(userId, now, now, by ?? null).run();
+		// E3's `awaiting_source` job deliberately has no Durable Object entry yet:
+		// source preservation must finish before handoff. The DO therefore cannot
+		// settle it during erasure, so the D1 owner closes it here after the barrier
+		// is durable. Exact replay sees `cancelled_by_delete` and cannot resurrect
+		// the source episode.
+		const sourceJobs = await env.DB.prepare(
+			`UPDATE memory_jobs
+			 SET status = 'failed',
+				error = 'cancelled_by_delete: source preservation was fenced before acceptance',
+				completed_at = ?, updated_at = ?
+			 WHERE user_id = ? AND status = 'awaiting_source'`,
+		).bind(now, now, userId).run();
+		cancelledSourceJobs = Number(sourceJobs.meta?.changes ?? 0);
 		// In-flight runs are cancelled by name. The guarded running→committing
 		// transition and the commit fence both observe this status, so a run
 		// mid-model-call can never publish its rows afterwards.
@@ -1165,7 +1179,7 @@ export async function bulkDeleteBySource(env, userId, {
 		staged_settled: stagedSettled.meta?.changes ?? 0,
 		source_episodes_deleted: episodesDeleted,
 		convergence_passes: convergencePasses,
-		...(erasure ? { cancelled_runs: cancelledRuns } : {}),
+		...(erasure ? { cancelled_runs: cancelledRuns, cancelled_source_jobs: cancelledSourceJobs } : {}),
 		pending_jobs: pendingJobs,
 		...(pendingJobs > 0
 			? { note: erasure

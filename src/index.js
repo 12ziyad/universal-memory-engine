@@ -636,6 +636,30 @@ const routes = {
 				source_packet_id: result.source_packet_id,
 			}, 409, contractHeaders);
 		}
+		if (result.episodePersistenceFailed) {
+			return json({
+				error: result.error,
+				code: result.code,
+				message: result.summary,
+				retryable: result.retryable,
+				outcome: result.outcome,
+				job_id: result.job_id,
+				source_packet_id: result.source_packet_id,
+			}, result.http_status ?? 503, {
+				...contractHeaders,
+				...(result.retry_after_s ? { "retry-after": String(result.retry_after_s) } : {}),
+			});
+		}
+		if (result.sourceEpisodeErased) {
+			return json({
+				error: result.error,
+				code: result.code,
+				message: result.summary,
+				retryable: false,
+				job_id: result.job_id,
+				source_packet_id: result.source_packet_id,
+			}, result.http_status ?? 409, contractHeaders);
+		}
 		if (result.extractionFailedTerminal) {
 			// 422: this exact content's extraction failed permanently after its
 			// bounded repairs. Deliberately NOT acceptance-shaped so outbox-style
@@ -1392,7 +1416,7 @@ const routes = {
 			recall,
 			collect,
 			rules: { autoCollect: rules.autoCollect, captureDefault: rules.captureDefault },
-		}, ok ? 200 : (collect.backpressure ? 429 : (collect.idempotencyConflict ? 409 : 400)));
+		}, ok ? 200 : (collect.http_status ?? (collect.backpressure ? 429 : (collect.idempotencyConflict ? 409 : 400))));
 	},
 
 	// ---- Playground -------------------------------------------------------

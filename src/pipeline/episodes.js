@@ -61,6 +61,8 @@ export async function writeSourceEpisodes(env, userId, {
 	projectId = null,
 	projectName = null,
 	rules,
+	acceptedAt = null,
+	required = false,
 }) {
 	// Fail closed. An episode is durable, searchable, permitted text; writing it
 	// without knowing the account's exclude rules is exactly the hidden archive
@@ -70,7 +72,13 @@ export async function writeSourceEpisodes(env, userId, {
 		effectiveRules = await resolveAdmissionRules(env, userId, rules);
 	} catch (error) {
 		console.warn("episode rules load failed:", error?.message ?? error);
-		return { written: 0, ruleFiltered: 0, rulesUnavailable: true };
+		return {
+			ok: false,
+			outcome: "rules_unavailable",
+			written: 0,
+			ruleFiltered: 0,
+			rulesUnavailable: true,
+		};
 	}
 
 	const eligible = [];
@@ -85,21 +93,49 @@ export async function writeSourceEpisodes(env, userId, {
 	const allowed = eligible.filter((row) => rulesAllowText(effectiveRules, row.text));
 	const ruleFiltered = eligible.length - allowed.length;
 	const rows = allowed.slice(0, EPISODE_MAX_ROWS_PER_WRITE);
-	if (!rows.length) return { written: 0, ruleFiltered };
+	if (!rows.length) {
+		return {
+			ok: true,
+			outcome: "no_permitted_source",
+			written: 0,
+			expected: 0,
+			eligible: eligible.length,
+			ruleFiltered,
+		};
+	}
+	if (required && !sourcePacketId) {
+		return {
+			ok: false,
+			outcome: "invalid_provenance",
+			written: 0,
+			expected: rows.length,
+			eligible: eligible.length,
+			ruleFiltered,
+		};
+	}
 
 	const now = Date.now();
+	const packetAcceptedAt = Number(acceptedAt);
+	const acceptanceTime = Number.isFinite(packetAcceptedAt) && packetAcceptedAt > 0
+		? packetAcceptedAt
+		: now;
 	const project = normalizeProjectScope({ projectId, projectName });
 	try {
-		const statements = await Promise.all(rows.map(async (row) => {
-			const text = row.text.slice(0, EPISODE_TEXT_CAP);
-			return env.DB.prepare(
+		const prepared = await Promise.all(rows.map(async (row) => {
+			const text = [...row.text].slice(0, EPISODE_TEXT_CAP).join("");
+			const textHash = await hashText(text);
+			const statement = env.DB.prepare(
 				`INSERT INTO source_episodes
 					(id, user_id, memory_user_id, owner_user_id, external_user_id,
 					 project_id, project_name, source_packet_id, conversation_id, thread_id,
 					 session_id, message_id, message_index, role, text, text_hash,
 					 source_time, source_time_offset_minutes, source_time_precision,
 					 observed_at, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				 WHERE NOT EXISTS (
+					SELECT 1 FROM deletion_barriers
+					 WHERE user_id = ? AND barrier_at >= ?
+				 )
 				 ON CONFLICT(user_id, source_packet_id, message_id) DO NOTHING`,
 			).bind(
 				newId("episode"),
@@ -117,19 +153,83 @@ export async function writeSourceEpisodes(env, userId, {
 				row.index,
 				row.role,
 				text,
-				await hashText(text),
+				textHash,
 				row.sourceTime?.epoch_ms ?? null,
 				row.sourceTime?.offset_minutes ?? null,
 				row.sourceTime?.precision ?? null,
 				Number(messages?.[row.index]?.ts) || now,
 				now,
+				userId,
+				acceptanceTime,
 			);
+			return { statement, messageId: row.id, textHash };
 		}));
-		await env.DB.batch(statements);
-		return { written: rows.length, ruleFiltered };
+		await env.DB.batch(prepared.map((row) => row.statement));
+
+		// A batch that executed without throwing can still have inserted zero rows:
+		// the erasure barrier deliberately turns a pre-delete retry into a no-op,
+		// and an idempotent replay deliberately conflicts. Verify the durable rows
+		// instead of equating "SQL returned" with source conservation.
+		const ids = [...new Set(prepared.map((row) => row.messageId).filter(Boolean))];
+		if (ids.length !== prepared.length) {
+			return {
+				ok: false,
+				outcome: "invalid_provenance",
+				written: 0,
+				expected: prepared.length,
+				eligible: eligible.length,
+				ruleFiltered,
+			};
+		}
+		const marks = ids.map(() => "?").join(", ");
+		const { results } = await env.DB.prepare(
+			`SELECT message_id, text_hash FROM source_episodes
+			 WHERE user_id = ? AND source_packet_id = ? AND message_id IN (${marks})`,
+		).bind(userId, sourcePacketId, ...ids).all();
+		const durable = new Map((results ?? []).map((row) => [row.message_id, row.text_hash]));
+		const barrier = await env.DB.prepare(
+			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ? LIMIT 1",
+		).bind(userId, acceptanceTime).first();
+		if (barrier) {
+			return {
+				ok: false,
+				outcome: "blocked_by_erasure",
+				written: 0,
+				expected: prepared.length,
+				eligible: eligible.length,
+				ruleFiltered,
+			};
+		}
+		const complete = prepared.every((row) => durable.get(row.messageId) === row.textHash);
+		if (!complete) {
+			return {
+				ok: false,
+				outcome: "verification_failed",
+				written: durable.size,
+				expected: prepared.length,
+				eligible: eligible.length,
+				ruleFiltered,
+			};
+		}
+		return {
+			ok: true,
+			outcome: "stored",
+			written: durable.size,
+			expected: prepared.length,
+			eligible: eligible.length,
+			ruleFiltered,
+		};
 	} catch (error) {
 		console.warn("episode write failed:", error?.message ?? error);
-		return { written: 0, ruleFiltered, error: String(error?.message ?? error) };
+		return {
+			ok: false,
+			outcome: "write_failed",
+			written: 0,
+			expected: rows.length,
+			eligible: eligible.length,
+			ruleFiltered,
+			...(required ? {} : { error: String(error?.message ?? error) }),
+		};
 	}
 }
 
@@ -190,17 +290,22 @@ export async function findSourceEpisodes(env, userId, queryTokens = [], {
  * expansion reads: a semantic hit says "Alice left banking", and the message
  * behind it says when she said so and in what words.
  */
-export async function episodesForPacket(env, userId, sourcePacketId, { limit = 30 } = {}) {
+export async function episodesForPacket(env, userId, sourcePacketId, {
+	limit = 30,
+	recallScope = "global",
+	projectId = null,
+} = {}) {
 	if (!userId || !sourcePacketId) return [];
 	const bounded = Math.max(1, Math.min(EPISODE_SEARCH_MAX, Number(limit) || 30));
+	const project = episodeProjectFilter(recallScope, normalizeProjectScope({ projectId }).projectId);
 	try {
 		const { results } = await env.DB.prepare(
-			`SELECT id, text, role, message_id, message_index, source_packet_id,
-				source_time, source_time_offset_minutes, source_time_precision, observed_at
-			 FROM source_episodes
-			 WHERE user_id = ? AND source_packet_id = ?
-			 ORDER BY message_index ASC LIMIT ?`,
-		).bind(userId, sourcePacketId, bounded).all();
+			`SELECT e.id, e.text, e.role, e.message_id, e.message_index, e.source_packet_id,
+				e.source_time, e.source_time_offset_minutes, e.source_time_precision, e.observed_at
+			 FROM source_episodes e
+			 WHERE e.user_id = ? AND e.source_packet_id = ?${project.sql}
+			 ORDER BY e.message_index ASC LIMIT ?`,
+		).bind(userId, sourcePacketId, ...project.bindings, bounded).all();
 		return results ?? [];
 	} catch (error) {
 		console.warn("episode packet lookup failed:", error?.message ?? error);

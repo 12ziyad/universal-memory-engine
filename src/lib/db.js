@@ -477,7 +477,7 @@ export async function claimMemoryJob(env, userId, data = {}) {
 		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE (
 			SELECT COUNT(*) FROM memory_jobs
-			WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')
+			WHERE user_id = ? AND status IN ('awaiting_source', 'queued', 'staged', 'processing')
 		 ) < ?
 		 ON CONFLICT(user_id, idempotency_key) DO NOTHING
 		 RETURNING id`,
@@ -693,7 +693,7 @@ export async function settleMemoryJobs(env, userId, updates = [], { strict = fal
 export async function activeJobDepth(env, userId) {
 	try {
 		const row = await env.DB.prepare(
-			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status IN ('queued', 'staged', 'processing')",
+			"SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ? AND status IN ('awaiting_source', 'queued', 'staged', 'processing')",
 		).bind(userId).first();
 		return Number(row?.n ?? 0);
 	} catch (err) {
