@@ -39,6 +39,7 @@ import {
 	neutralizeReservedSourcePrefix,
 	persistedSourceEventFromMessage,
 } from "../lib/source_event.mjs";
+import { persistedSourceTime } from "../lib/source_time.mjs";
 import { DIALS } from "../config.js";
 
 const RECENT_LIMIT = 20;
@@ -1258,6 +1259,7 @@ export class UserMemory extends DurableObject {
 			for (const msg of messages ?? []) {
 				if (!msg || !msg.id) continue;
 				const sourceEvent = persistedSourceEventFromMessage(msg);
+				const sourceTime = persistedSourceTime(msg.source_time);
 				const content = neutralizeReservedSourcePrefix(
 					msg.content ?? "",
 					Boolean(sourceEvent.event),
@@ -1277,6 +1279,7 @@ export class UserMemory extends DurableObject {
 					ts: msg.ts ?? Date.now(),
 					content_hash: contentHash,
 					...(sourceEvent.event ? { source_event: sourceEvent.event } : {}),
+					...(sourceTime ? { source_time: sourceTime } : {}),
 					_dedupe: dedupeIdentity,
 				};
 				recent.push(norm);

@@ -27,6 +27,39 @@ async function queueEntries(stub) {
 }
 
 describe("Durable Object ingest handoff", () => {
+	it("preserves authoritative per-message source time through the held and queued handoff", async () => {
+		const userId = `handoff-source-time-${crypto.randomUUID()}`;
+		const stub = stubFor(userId);
+		const handoffId = `job_${crypto.randomUUID()}`;
+		const sourceTime = {
+			epoch_ms: Date.parse("2025-09-18T08:00:00Z"),
+			offset_minutes: 0,
+			precision: "time",
+			text: "2025-09-18T08:00:00Z",
+		};
+		const messages = [{
+			...message("m-source-time", "I moved into the flat yesterday."),
+			source_time: sourceTime,
+		}];
+		const opts = {
+			handoffId,
+			requestHash: hash("f"),
+			jobId: handoffId,
+			flush: false,
+		};
+
+		await stub.acceptMessagesOnce(userId, messages, opts);
+		const held = await runInDurableObject(stub, async (_instance, state) => state.storage.get("chunk"));
+		expect(held).toHaveLength(1);
+		expect(held[0].source_time).toEqual(sourceTime);
+
+		await stub.addMessages(userId, [], { flush: true });
+		const queued = await queueEntries(stub);
+		expect(queued).toHaveLength(1);
+		expect(queued[0].messages[0].source_time).toEqual(sourceTime);
+		await stub.resetAll();
+	}, 30_000);
+
 	it("serializes concurrent exact calls, stores the original result, and rejects a hash conflict", async () => {
 		const userId = `handoff-concurrent-${crypto.randomUUID()}`;
 		const stub = stubFor(userId);
