@@ -234,21 +234,117 @@ export function responseTruncated(res) {
 	return false;
 }
 
-/** Coerce any parsed value into the normalized proposal shape. */
-export function normalize(parsed) {
-	// A bare array is tolerated as the objects list.
-	if (Array.isArray(parsed)) return { objects: parsed, notes: "", _ok: true };
-	if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.objects)) {
-		return { objects: [], notes: "malformed", _ok: false };
+const EXTRACTION_OBJECT_KINDS = new Set(["node", "slice", "event", "edge", "candidate"]);
+
+function nonEmptyString(value) {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function structurallyValidObject(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	if (!EXTRACTION_OBJECT_KINDS.has(value.kind)) return false;
+	if (value.kind === "node" || value.kind === "candidate") return nonEmptyString(value.label);
+	if (value.kind === "slice") return nonEmptyString(value.on) && nonEmptyString(value.text);
+	if (value.kind === "event") return nonEmptyString(value.on) && nonEmptyString(value.action) && nonEmptyString(value.text);
+	if (value.kind === "edge") return nonEmptyString(value.from) && nonEmptyString(value.to) && nonEmptyString(value.type);
+	return false;
+}
+
+function canonicalValue(value, { includeConfidence = false } = {}) {
+	if (Array.isArray(value)) return value.map((item) => canonicalValue(item, { includeConfidence }));
+	if (value && typeof value === "object") {
+		const result = {};
+		for (const key of Object.keys(value).sort()) {
+			if (key.startsWith("_")) continue;
+			if (!includeConfidence && key === "confidence") continue;
+			if (value[key] == null) continue;
+			result[key] = canonicalValue(value[key], { includeConfidence });
+		}
+		return result;
 	}
+	if (typeof value === "string") return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-US");
+	return value;
+}
+
+function deduplicateObjects(objects) {
+	const winners = new Map();
+	for (const object of objects) {
+		const key = JSON.stringify(canonicalValue(object));
+		const current = winners.get(key);
+		if (!current) {
+			winners.set(key, object);
+			continue;
+		}
+		const confidence = Number(object?.confidence);
+		const currentConfidence = Number(current?.confidence);
+		const candidateScore = Number.isFinite(confidence) ? confidence : -1;
+		const currentScore = Number.isFinite(currentConfidence) ? currentConfidence : -1;
+		const candidateTie = JSON.stringify(canonicalValue(object, { includeConfidence: true }));
+		const currentTie = JSON.stringify(canonicalValue(current, { includeConfidence: true }));
+		if (candidateScore > currentScore || (candidateScore === currentScore && candidateTie < currentTie)) {
+			winners.set(key, object);
+		}
+	}
+	return [...winners.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+}
+
+/** Coerce and locally validate any parsed value into the proposal contract. */
+export function normalize(parsed, { strict = false, dedupe = false } = {}) {
+	const bareArray = Array.isArray(parsed);
+	if (!bareArray && (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.objects))) {
+		return { objects: [], notes: "malformed", _ok: false, _outcome: "schema_invalid", _invalid_objects: 0 };
+	}
+	const sourceObjects = bareArray ? parsed : parsed.objects;
+	const invalidObjects = strict
+		? sourceObjects.filter((object) => !structurallyValidObject(object)).length
+		: 0;
+	if (invalidObjects > 0) {
+		return {
+			objects: [],
+			notes: "schema_invalid",
+			_ok: false,
+			_outcome: "schema_invalid",
+			_invalid_objects: invalidObjects,
+			...(parsed?._truncated ? { _truncated: true } : {}),
+		};
+	}
+	const objects = dedupe ? deduplicateObjects(sourceObjects) : sourceObjects;
+	const duplicates = sourceObjects.length - objects.length;
 	return {
-		objects: parsed.objects,
-		notes: String(parsed.notes ?? ""),
+		objects,
+		notes: bareArray ? "" : String(parsed.notes ?? ""),
 		_ok: true,
+		_outcome: parsed?._truncated
+			? "truncated_salvaged"
+			: objects.length ? "valid_nonempty" : "valid_empty",
+		_duplicates: duplicates,
+		_invalid_objects: 0,
 		// Carried so the receipt can say the response was cut off and how much
 		// survived, instead of the save looking like an ordinary small one.
-		...(parsed._truncated ? { _truncated: true } : {}),
+		...(parsed?._truncated ? { _truncated: true } : {}),
 	};
+}
+
+function responseRefused(res) {
+	if (!res || typeof res !== "object") return false;
+	if (res.refusal) return true;
+	for (const choice of res.choices ?? []) {
+		if (choice?.message?.refusal || choice?.refusal) return true;
+	}
+	for (const item of res.output ?? []) {
+		if (item?.type === "refusal" || item?.refusal) return true;
+		for (const content of item?.content ?? []) {
+			if (content?.type === "refusal" || content?.refusal) return true;
+		}
+	}
+	return false;
+}
+
+function failureKind(error) {
+	const name = String(error?.name ?? "").toLowerCase();
+	const code = String(error?.code ?? "").toLowerCase();
+	if (name.includes("timeout") || name.includes("abort") || code.includes("timeout")) return "timeout";
+	return "transport_error";
 }
 
 /** Robustly pull assistant text out of the various Workers AI response shapes. */
@@ -311,8 +407,13 @@ export function hasStructuredSourceEvent(packet) {
 	));
 }
 
-async function callModel(env, config, packet, shortlist, { dense = false, rules = null, profile = null } = {}) {
-	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false };
+async function callModel(env, config, packet, shortlist, {
+	dense = false,
+	rules = null,
+	profile = null,
+	extractionV3 = false,
+} = {}) {
+	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false, _outcome: "no_ai_binding" };
 	// The user's own rules, as guidance. The digest and manual lanes already did
 	// this; the auto lane did not, so custom instructions never reached the
 	// extractor at all. Enforcement still happens in the gates — a model that
@@ -349,25 +450,43 @@ async function callModel(env, config, packet, shortlist, { dense = false, rules 
 		);
 		const raw = responseText(res);
 		const truncated = responseTruncated(res);
+		const refused = responseRefused(res);
 		const parsed = extractJson(raw);
 		if (!parsed) {
 			// Say which failure this was. "Unparseable" and "ran out of output
 			// budget" have different fixes — the second one is a chunking problem,
 			// and it stayed invisible while both looked the same on a receipt.
-			console.warn(
-				`llm ${truncated ? "truncated" : "parse_failed"} model=${config.llm.model} raw="${String(raw).slice(0, 240)}"`,
-			);
-			return { objects: [], notes: truncated ? "truncated" : "unparseable", _ok: false, ...(truncated ? { _truncated: true } : {}) };
+			const outcome = refused ? "refusal" : truncated ? "truncated_unsalvageable" : "parse_invalid";
+			// Never log source/model text. Length and a typed outcome are enough to
+			// diagnose mechanics without turning ordinary logs into a shadow archive.
+			console.warn(JSON.stringify({ event: "llm_extraction_failed", outcome, model: config.llm.model, output_chars: Array.from(raw).length }));
+			return {
+				objects: [],
+				notes: outcome,
+				_ok: false,
+				_outcome: outcome,
+				...(truncated ? { _truncated: true } : {}),
+			};
 		}
-		const normalized = normalize(parsed);
-		if (truncated && !normalized._truncated) normalized._truncated = true;
+		const normalized = normalize(parsed, { strict: extractionV3, dedupe: extractionV3 });
+		if (truncated && !normalized._truncated) {
+			normalized._truncated = true;
+			if (normalized._ok) normalized._outcome = "truncated_salvaged";
+		}
 		if (normalized._truncated) {
 			console.warn(`llm truncated_salvage model=${config.llm.model} objects=${normalized.objects.length}`);
 		}
 		return normalized;
 	} catch (err) {
-		console.warn("llm call failed:", err?.message ?? err);
-		return { objects: [], notes: "llm_error", _ok: false };
+		const outcome = failureKind(err);
+		console.warn(JSON.stringify({
+			event: "llm_extraction_failed",
+			outcome,
+			model: config.llm.model,
+			error_name: String(err?.name ?? "Error").slice(0, 80),
+			error_code: err?.code == null ? null : String(err.code).slice(0, 80),
+		}));
+		return { objects: [], notes: outcome, _ok: false, _outcome: outcome };
 	}
 }
 
@@ -379,11 +498,15 @@ export async function proposeMemory(env, config, { packet, shortlist }, override
 		const canned = typeof overrides.llmResponse === "function"
 			? await overrides.llmResponse({ packet, shortlist })
 			: overrides.llmResponse;
-		return normalize(canned);
+		return normalize(canned, {
+			strict: overrides?.extractionV3 === true,
+			dedupe: overrides?.extractionV3 === true,
+		});
 	}
 	return callModel(env, config, packet, shortlist, {
 		dense: overrides?.settings?.captureDensity === "dense",
 		rules: overrides?.rules ?? null,
 		profile: overrides?.profile ?? null,
+		extractionV3: overrides?.extractionV3 === true,
 	});
 }

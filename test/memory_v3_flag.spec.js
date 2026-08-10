@@ -5,6 +5,8 @@ import {
 	MEMORY_V3_MODES,
 	memoryV3Config,
 	memoryV3Enabled,
+	memoryV3ExtractionB1Config,
+	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
 } from "../src/lib/memory_v3.js";
 
@@ -37,6 +39,37 @@ describe("V3 feature flag: default state", () => {
 
 	it("exposes only the three modes it claims to support", () => {
 		expect([...MEMORY_V3_MODES].sort()).toEqual(["allowlist", "off", "on"]);
+	});
+});
+
+describe("V3 extraction B1 experiment flag", () => {
+	it("defaults off even for a V3 account, preserving the causal control", () => {
+		const v3 = { ITSUKI_MEMORY_V3: "on" };
+		expect(memoryV3ExtractionB1Config(v3).mode).toBe("off");
+		expect(memoryV3ExtractionB1Enabled(v3, "control_user")).toBe(false);
+	});
+
+	it("requires both V3 membership and exact B1 membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_EXTRACTION_B1: "allowlist",
+			ITSUKI_MEMORY_V3_EXTRACTION_B1_USERS: "treatment_user",
+		};
+		expect(memoryV3ExtractionB1Enabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3ExtractionB1Enabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3ExtractionB1Enabled(treatment, "treatment_user_suffix")).toBe(false);
+
+		const notV3 = { ...treatment, ITSUKI_MEMORY_V3_USERS: "control_user" };
+		expect(memoryV3ExtractionB1Enabled(notV3, "treatment_user")).toBe(false);
+	});
+
+	it("fails closed on malformed B1 configuration", () => {
+		for (const value of ["yes", "enabled", "allowlist;on", "", null, 1, {}]) {
+			const candidate = { ITSUKI_MEMORY_V3: "on", ITSUKI_MEMORY_V3_EXTRACTION_B1: value };
+			expect(memoryV3ExtractionB1Config(candidate).mode).toBe("off");
+			expect(memoryV3ExtractionB1Enabled(candidate, "user_a")).toBe(false);
+		}
 	});
 });
 
@@ -115,14 +148,24 @@ describe("V3 feature flag: observability", () => {
 			ITSUKI_MEMORY_V3: "allowlist",
 			ITSUKI_MEMORY_V3_USERS: "user_campaign,user_bench",
 		});
-		expect(status).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "allowlist", allowlistCount: 2 });
+		expect(status).toEqual({
+			schema: "itsuki.memory-v3-flag/v1",
+			mode: "allowlist",
+			allowlistCount: 2,
+			extractionB1: { mode: "off", allowlistCount: 0 },
+		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
 		expect(serialized).not.toContain("user_bench");
 	});
 
 	it("reports the off state plainly", () => {
-		expect(memoryV3Status({})).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 });
+		expect(memoryV3Status({})).toEqual({
+			schema: "itsuki.memory-v3-flag/v1",
+			mode: "off",
+			allowlistCount: 0,
+			extractionB1: { mode: "off", allowlistCount: 0 },
+		});
 	});
 });
 
@@ -135,6 +178,11 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 		);
 		const body = await response.json();
 		expect(response.status).toBe(200);
-		expect(body.memory_v3).toEqual({ schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 });
+		expect(body.memory_v3).toEqual({
+			schema: "itsuki.memory-v3-flag/v1",
+			mode: "off",
+			allowlistCount: 0,
+			extractionB1: { mode: "off", allowlistCount: 0 },
+		});
 	});
 });

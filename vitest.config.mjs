@@ -1,20 +1,42 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
-import { configDefaults } from "vitest/config";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineWorkersConfig(async () => {
+export default defineConfig(async () => {
 	const migrationsPath = path.join(configDirectory, "migrations");
 	const migrations = await readD1Migrations(migrationsPath);
 
 	return {
+		plugins: [
+			cloudflareTest({
+				wrangler: { configPath: "./wrangler.test.jsonc" },
+				miniflare: {
+					// Disable the external-service paths (Workers AI / Vectorize) so the
+					// suite is deterministic and offline. The LLM is stubbed per-test via
+					// the request `_test.llmResponse` hook; trigger/gates/write/checkpoint
+					// all run as the real code under test.
+					bindings: {
+						TEST_MIGRATIONS: migrations,
+						USE_VECTORS: "false",
+						ENABLE_PASS2: "true",
+						// The DO's self-arming wake alarms are structural in prod
+						// (queue in storage + alarm + cron sweep) but fire across
+						// test boundaries here, corrupting the pool's stacked
+						// storage. Tests drive drains explicitly instead.
+						DO_WAKE_ALARMS: "false",
+						ENABLE_TEST_OVERRIDES: "true",
+					},
+				},
+			}),
+		],
 		test: {
 			exclude: [
 				...configDefaults.exclude,
 				// These exercise host filesystem/process behavior and are covered by
-				// vitest.unit.config.js; the Workers isolate cannot import those APIs.
+				// vitest.unit.config.mjs; the Workers isolate cannot import those APIs.
 				"test/claude_transcript_tail.spec.js",
 				"test/codex_hook_manifest.spec.js",
 				"test/codex_doctor.spec.js",
@@ -38,28 +60,6 @@ export default defineWorkersConfig(async () => {
 				"test/session_start_delivery.spec.js",
 			],
 			setupFiles: ["./test/apply-migrations.js"],
-			poolOptions: {
-				workers: {
-					wrangler: { configPath: "./wrangler.test.jsonc" },
-					miniflare: {
-						// Disable the external-service paths (Workers AI / Vectorize) so the
-						// suite is deterministic and offline. The LLM is stubbed per-test via
-						// the request `_test.llmResponse` hook; trigger/gates/write/checkpoint
-						// all run as the real code under test.
-						bindings: {
-							TEST_MIGRATIONS: migrations,
-							USE_VECTORS: "false",
-							ENABLE_PASS2: "true",
-							// The DO's self-arming wake alarms are structural in prod
-							// (queue in storage + alarm + cron sweep) but fire across
-							// test boundaries here, corrupting the pool's stacked
-							// storage. Tests drive drains explicitly instead.
-							DO_WAKE_ALARMS: "false",
-							ENABLE_TEST_OVERRIDES: "true",
-						},
-					},
-				},
-			},
 		},
 	};
 });

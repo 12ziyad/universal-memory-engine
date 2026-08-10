@@ -164,6 +164,24 @@ function splitRescueFields(meta = {}) {
 	};
 }
 
+function extractionConservationFields(meta = {}) {
+	if (meta.extraction_outcome == null && meta.chunks_planned == null) return {};
+	const integer = (value) => Number.isFinite(Number(value))
+		? Math.max(0, Math.trunc(Number(value)))
+		: 0;
+	return {
+		extraction_outcome: String(meta.extraction_outcome ?? "not_attempted").slice(0, 64),
+		extraction_failed_spans: integer(meta.extraction_failed_spans),
+		extraction_invalid_objects: integer(meta.extraction_invalid_objects),
+		extraction_duplicates: integer(meta.extraction_duplicates),
+		chunks_planned: integer(meta.chunks_planned),
+		chunk_coverage_ok: meta.chunk_coverage_ok === true,
+		chunk_messages_covered: integer(meta.chunk_messages_covered),
+		chunk_code_points_input: integer(meta.chunk_code_points_input),
+		chunk_code_points_covered: integer(meta.chunk_code_points_covered),
+	};
+}
+
 function plural(n, one, many = `${one}s`) {
 	return `${n} ${n === 1 ? one : many}`;
 }
@@ -238,6 +256,7 @@ export function buildReceipt(outcome, plan, meta = {}) {
 		// when the caller did not measure it.
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		...splitRescueFields(meta),
+		...extractionConservationFields(meta),
 		...(meta.rules_active ? { rules_active: meta.rules_active } : {}),
 		saved,
 		savedTotal,
@@ -285,6 +304,7 @@ export function emptyReceipt(outcome, reason, meta = {}) {
 		latency_ms: Number.isFinite(meta.latency_ms) ? Math.round(meta.latency_ms) : null,
 		matched: Number.isFinite(meta.matched) ? Math.round(meta.matched) : null,
 		...splitRescueFields(meta),
+		...extractionConservationFields(meta),
 		// Workers AI rollups, when the caller metered this scope (recall does).
 		ai_calls: meta.ai?.calls ?? null,
 		ai_input_tokens: meta.ai?.input_tokens ?? null,

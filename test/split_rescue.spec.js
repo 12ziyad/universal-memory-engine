@@ -9,7 +9,7 @@
  *   1. a rescue larger than SPLIT_RESCUE_MAX_CALLS never starts
  *   2. once SPLIT_RESCUE_FAIL_FAST messages fail to parse, the fire is
  *      abandoned without walking the rest of the chunk
- *   3. fewer failures than that are tolerated: what parsed is kept
+ *   3. any failed span keeps the semantic attempt incomplete; no partial write
  *   4. every receipt reports what the rescue cost, even on failure
  */
 
@@ -116,7 +116,7 @@ describe("split-rescue spending contract", () => {
 		expect(result.receipt.split_rescue_aborted).toBe("all_failed");
 	});
 
-	it("partial rescue: keeps what parsed when failures stay under the fail-fast line", async () => {
+	it("partial rescue: one unreadable span prevents a false semantic-success verdict", async () => {
 		const userId = `sr-partial-${crypto.randomUUID()}`;
 		let calls = 0;
 		const hook = ({ packet }) => {
@@ -156,20 +156,27 @@ describe("split-rescue spending contract", () => {
 			CONVERSATION[6], // manager (hook returns empty objects)
 		]);
 
-		const result = await runExtraction(env, userId, chunk, [], { llmResponse: hook });
+		const v3Env = Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
+			ITSUKI_MEMORY_V3: "on",
+			ITSUKI_MEMORY_V3_EXTRACTION_B1: "on",
+		});
+		const result = await runExtraction(v3Env, userId, chunk, [], { llmResponse: hook });
 
-		expect(result.outcome).toBe("wrote");
+		expect(result.outcome).toBe("llm_failed");
 		expect(calls).toBe(6); // 1 primary + 5 rescue
 		expect(result.receipt.split_rescue).toBe(true);
 		expect(result.receipt.split_rescue_calls).toBe(5);
 		expect(result.receipt.split_rescue_dropped).toBe(1);
-		expect(result.receipt.split_rescue_recovered).toBe(true);
-		expect(result.receipt.savedTotal).toBeGreaterThan(0);
+		expect(result.receipt.split_rescue_aborted).toBe("incomplete");
+		expect(result.receipt.split_rescue_recovered).toBe(false);
+		expect(result.receipt.extraction_outcome).toBe("span_incomplete");
+		expect(result.receipt.savedTotal).toBe(0);
 
-		// The good parses actually landed in the graph.
+		// Good siblings remain uncommitted until the complete source entry can be
+		// extracted or the bounded durable job reaches its terminal dead-letter.
 		const { results } = await env.DB.prepare("SELECT label FROM nodes WHERE user_id = ?").bind(userId).all();
 		const labels = results.map((r) => r.label);
-		expect(labels).toContain("Biscuit");
+		expect(labels).not.toContain("Biscuit");
 	});
 
 	it("a single-message chunk that fails to parse never rescues (nothing to split)", async () => {

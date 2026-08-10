@@ -25,7 +25,7 @@
  * the whole is a lie about where the fact came from.
  */
 
-export const EXTRACTION_CHUNK_SCHEMA = "itsuki.extraction-chunk/v1";
+export const EXTRACTION_CHUNK_SCHEMA = "itsuki.extraction-chunk/v2";
 
 /**
  * Messages per sub-chunk. Deliberately equal to the split-rescue ceiling
@@ -43,25 +43,45 @@ export const EXTRACTION_CHUNK_MAX_MESSAGES = 8;
  * and the facts in them cannot fit in one response. This is the real budget;
  * the message count is a secondary guard.
  *
- * The exact number is not yet validated against measured truncation rates —
- * that is ablation E2, which needs inference and is blocked by the cost gate.
+ * The exact number is validated during ablation E2 against measured truncation
+ * rates; it remains configurable so later evidence can change the budget.
  * It is an env dial (`EXTRACT_CHUNK_MAX_CHARS`) precisely so it can be tuned by
  * evidence later without touching this logic.
  */
 export const EXTRACTION_CHUNK_MAX_CHARS = 6000;
 
 function messageChars(message) {
-	return String(message?.content ?? "").length;
+	// The wire contract and provenance spans count Unicode scalar values. JS
+	// string.length counts UTF-16 code units, so astral characters (emoji, many
+	// historic scripts) otherwise consume two units during planning and one in
+	// downstream source accounting. Array.from gives one deterministic unit per
+	// code point without splitting a surrogate pair.
+	return Array.from(String(message?.content ?? "")).length;
+}
+
+function canonicalSourceTime(value) {
+	if (!value || typeof value !== "object") return null;
+	return {
+		epoch_ms: Number.isFinite(Number(value.epoch_ms)) ? Number(value.epoch_ms) : null,
+		offset_minutes: Number.isFinite(Number(value.offset_minutes)) ? Number(value.offset_minutes) : null,
+		precision: value.precision == null ? null : String(value.precision),
+	};
+}
+
+async function sha256Hex(value) {
+	const bytes = new TextEncoder().encode(String(value ?? ""));
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**
  * Split an accepted chunk into ordered, contiguous, bounded sub-chunks.
  *
- * Pure and synchronous: no clock, no randomness, no I/O. Given the same input
- * it returns the same output forever, which is what makes replay equivalence a
- * property rather than a hope.
+ * Deterministic: no clock, no randomness, and only Web Crypto for the stable
+ * SHA-256 identity. Given the same input it returns the same output forever,
+ * which makes replay equivalence a property rather than a hope.
  */
-export function planExtractionChunks(messages, options = {}) {
+export async function planExtractionChunks(messages, options = {}) {
 	const maxMessages = Math.max(1, Number(options.maxMessages) || EXTRACTION_CHUNK_MAX_MESSAGES);
 	const maxChars = Math.max(1, Number(options.maxChars) || EXTRACTION_CHUNK_MAX_CHARS);
 	const input = Array.isArray(messages) ? messages : [];
@@ -77,26 +97,39 @@ export function planExtractionChunks(messages, options = {}) {
 		currentChars = 0;
 	};
 
-	for (const message of input) {
+	for (let messageIndex = 0; messageIndex < input.length; messageIndex += 1) {
+		const message = input[messageIndex];
 		const chars = messageChars(message);
 		const wouldExceedCount = current.length >= maxMessages;
 		// An oversized message cannot be made to fit, so it must not be allowed to
 		// force an empty flush loop: it starts a sub-chunk of its own and ends it.
 		const wouldExceedChars = current.length > 0 && currentChars + chars > maxChars;
 		if (wouldExceedCount || wouldExceedChars) flush();
-		current.push(message);
+		current.push({ message, messageIndex });
 		currentChars += chars;
 		if (currentChars >= maxChars) flush();
 	}
 	flush();
 
-	return chunks.map((group, index) => ({
-		schema: EXTRACTION_CHUNK_SCHEMA,
-		index,
-		messages: group,
-		messageIds: group.map((message) => message?.id ?? null),
-		chars: group.reduce((total, message) => total + messageChars(message), 0),
-		key: extractionChunkKey(group),
+	return Promise.all(chunks.map(async (group, index) => {
+		const groupMessages = group.map((entry) => entry.message);
+		return {
+			schema: EXTRACTION_CHUNK_SCHEMA,
+			index,
+			messages: groupMessages,
+			messageIds: groupMessages.map((message) => message?.id ?? null),
+			chars: groupMessages.reduce((total, message) => total + messageChars(message), 0),
+			spans: group.map(({ message, messageIndex }) => ({
+				messageId: message?.id ?? null,
+				messageIndex,
+				startCodePoint: 0,
+				endCodePoint: messageChars(message),
+			})),
+			key: await extractionChunkKey(groupMessages, {
+				sourcePacketId: options.sourcePacketId ?? null,
+				sourceTime: options.sourceTime ?? null,
+			}),
+		};
 	}));
 }
 
@@ -105,23 +138,20 @@ export function planExtractionChunks(messages, options = {}) {
  * content. Deterministic and dependency-free — this labels work for logs,
  * telemetry and replay equivalence, and is never used as a security boundary.
  */
-export function extractionChunkKey(messages) {
-	let hash = 0x811c9dc5;
-	const write = (text) => {
-		const value = String(text ?? "");
-		for (let i = 0; i < value.length; i += 1) {
-			hash ^= value.charCodeAt(i);
-			hash = Math.imul(hash, 0x01000193) >>> 0;
-		}
-		hash ^= 0x1f;
-		hash = Math.imul(hash, 0x01000193) >>> 0;
+export async function extractionChunkKey(messages, identity = {}) {
+	const descriptor = {
+		schema: EXTRACTION_CHUNK_SCHEMA,
+		source_packet_id: identity.sourcePacketId == null ? null : String(identity.sourcePacketId),
+		source_time: canonicalSourceTime(identity.sourceTime),
+		messages: (messages ?? []).map((message, index) => ({
+			index,
+			id: message?.id == null ? null : String(message.id),
+			role: message?.role == null ? null : String(message.role),
+			content_hash: String(message?.content_hash ?? message?.content ?? ""),
+			source_time: canonicalSourceTime(message?.source_time ?? message?.sourceTime),
+		})),
 	};
-	for (const message of messages ?? []) {
-		write(message?.id);
-		write(message?.role);
-		write(message?.content_hash ?? message?.content);
-	}
-	return `chunk:v1:${hash.toString(16).padStart(8, "0")}`;
+	return `chunk:v2:${await sha256Hex(JSON.stringify(descriptor))}`;
 }
 
 /**
@@ -131,8 +161,11 @@ export function extractionChunkKey(messages) {
  */
 export function verifyChunkCoverage(messages, chunks) {
 	const input = Array.isArray(messages) ? messages : [];
-	const flat = chunks.flatMap((chunk) => chunk.messages);
+	const safeChunks = Array.isArray(chunks) ? chunks : [];
+	const flat = safeChunks.flatMap((chunk) => Array.isArray(chunk?.messages) ? chunk.messages : []);
 	const problems = [];
+	const inputCodePoints = input.reduce((total, message) => total + messageChars(message), 0);
+	let coveredCodePoints = 0;
 	if (flat.length !== input.length) {
 		problems.push(`covered ${flat.length} of ${input.length} messages`);
 	}
@@ -142,11 +175,47 @@ export function verifyChunkCoverage(messages, chunks) {
 			break;
 		}
 	}
+	let spanCursor = 0;
+	for (const chunk of safeChunks) {
+		const chunkMessages = Array.isArray(chunk?.messages) ? chunk.messages : [];
+		const spans = Array.isArray(chunk?.spans) ? chunk.spans : [];
+		if (spans.length !== chunkMessages.length) {
+			problems.push(`chunk ${chunk?.index ?? "?"} has ${spans.length} spans for ${chunkMessages.length} messages`);
+		}
+		const expectedChars = chunkMessages.reduce((total, message) => total + messageChars(message), 0);
+		if (chunk?.chars !== expectedChars) {
+			problems.push(`chunk ${chunk?.index ?? "?"} code point count does not match its messages`);
+		}
+		for (let i = 0; i < Math.min(spans.length, chunkMessages.length); i += 1) {
+			const span = spans[i];
+			const expectedMessageIndex = spanCursor + i;
+			const expectedEnd = messageChars(chunkMessages[i]);
+			const start = Number(span?.startCodePoint);
+			const end = Number(span?.endCodePoint);
+			if (
+				span?.messageId !== (chunkMessages[i]?.id ?? null) ||
+				Number(span?.messageIndex) !== expectedMessageIndex ||
+				start !== 0 ||
+				end !== expectedEnd
+			) {
+				problems.push(`chunk ${chunk?.index ?? "?"} span ${i} does not exactly cover its source message`);
+			}
+			if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+				coveredCodePoints += end - start;
+			}
+		}
+		spanCursor += chunkMessages.length;
+	}
+	if (coveredCodePoints !== inputCodePoints) {
+		problems.push(`covered ${coveredCodePoints} of ${inputCodePoints} source code points`);
+	}
 	return {
 		ok: problems.length === 0,
 		inputCount: input.length,
 		coveredCount: flat.length,
-		chunkCount: chunks.length,
+		inputCodePoints,
+		coveredCodePoints,
+		chunkCount: safeChunks.length,
 		problems,
 	};
 }

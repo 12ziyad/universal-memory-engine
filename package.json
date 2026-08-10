@@ -9,13 +9,14 @@
     "test": "vitest"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.4",
-    "vitest": "~3.2.0",
-    "wrangler": "^4.104.0"
+    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "vitest": "~4.1.10",
+    "wrangler": "^4.120.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "agents": "^0.16.2",
+    "@cloudflare/codemode": "^0.5.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "agents": "^0.20.1",
     "zod": "^4.4.3"
   }
 }

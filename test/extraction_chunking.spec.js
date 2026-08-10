@@ -27,19 +27,19 @@ const message = (id, chars, role = "user") => ({
 });
 
 describe("chunk planning: coverage", () => {
-	it("covers every message exactly once, in order", () => {
+	it("covers every message exactly once, in order", async () => {
 		for (const count of [0, 1, 2, 7, 8, 9, 10, 17, 31, 64]) {
 			const messages = Array.from({ length: count }, (_, i) => message(`m${i}`, 10));
-			const chunks = planExtractionChunks(messages);
+			const chunks = await planExtractionChunks(messages);
 			const flat = chunks.flatMap((chunk) => chunk.messages);
 			expect(flat, `count=${count}`).toEqual(messages);
 			expect(verifyChunkCoverage(messages, chunks).ok).toBe(true);
 		}
 	});
 
-	it("preserves chronology within and across sub-chunks", () => {
+	it("preserves chronology within and across sub-chunks", async () => {
 		const messages = Array.from({ length: 25 }, (_, i) => message(`m${i}`, 10));
-		const chunks = planExtractionChunks(messages);
+		const chunks = await planExtractionChunks(messages);
 		const seen = chunks.flatMap((chunk) => chunk.messageIds);
 		expect(seen).toEqual(messages.map((m) => m.id));
 		// Sub-chunks are contiguous slices, never interleaved.
@@ -50,18 +50,18 @@ describe("chunk planning: coverage", () => {
 		}
 	});
 
-	it("never exceeds its message bound", () => {
+	it("never exceeds its message bound", async () => {
 		const messages = Array.from({ length: 40 }, (_, i) => message(`m${i}`, 10));
-		for (const chunk of planExtractionChunks(messages)) {
+		for (const chunk of await planExtractionChunks(messages)) {
 			expect(chunk.messages.length).toBeLessThanOrEqual(EXTRACTION_CHUNK_MAX_MESSAGES);
 		}
 	});
 
-	it("bounds by CHARACTERS too, because eight long messages do not fit one call", () => {
+	it("bounds by CHARACTERS too, because eight long messages do not fit one call", async () => {
 		// Eight messages at the 4,000-character wire limit is 32,000 characters:
 		// under the message bound, far over any sane output budget.
 		const messages = Array.from({ length: 8 }, (_, i) => message(`m${i}`, 4000));
-		const chunks = planExtractionChunks(messages);
+		const chunks = await planExtractionChunks(messages);
 		expect(chunks.length).toBeGreaterThan(1);
 		for (const chunk of chunks) {
 			// A chunk may reach the budget but must not be built past it, except
@@ -71,9 +71,9 @@ describe("chunk planning: coverage", () => {
 		expect(verifyChunkCoverage(messages, chunks).ok).toBe(true);
 	});
 
-	it("gives an oversized single message its own chunk rather than splitting it", () => {
+	it("gives an oversized single message its own chunk rather than splitting it", async () => {
 		const messages = [message("small", 10), message("huge", 50_000), message("after", 10)];
-		const chunks = planExtractionChunks(messages);
+		const chunks = await planExtractionChunks(messages);
 		const huge = chunks.find((chunk) => chunk.messageIds.includes("huge"));
 		expect(huge.messages).toHaveLength(1);
 		// Half a message with a provenance pointer to the whole would be a lie
@@ -82,14 +82,14 @@ describe("chunk planning: coverage", () => {
 		expect(verifyChunkCoverage(messages, chunks).ok).toBe(true);
 	});
 
-	it("closes the 9-and-10-message hole: no sub-chunk outruns the rescue ceiling", () => {
+	it("closes the 9-and-10-message hole: no sub-chunk outruns the rescue ceiling", async () => {
 		// The old threshold split only chunks LONGER than 10 while the split
 		// rescue refused more than 8, so a truncated 9- or 10-message call had no
 		// recovery path and the fire wrote nothing.
 		const rescueCeiling = getConfig(env).splitRescue.maxCalls;
 		for (const count of [9, 10]) {
 			const messages = Array.from({ length: count }, (_, i) => message(`m${i}`, 10));
-			const chunks = planExtractionChunks(messages, getConfig(env).extractionChunk);
+			const chunks = await planExtractionChunks(messages, getConfig(env).extractionChunk);
 			expect(chunks.length).toBeGreaterThan(1);
 			for (const chunk of chunks) {
 				expect(chunk.messages.length).toBeLessThanOrEqual(rescueCeiling);
@@ -104,31 +104,31 @@ describe("chunk planning: coverage", () => {
 });
 
 describe("chunk planning: replay equivalence", () => {
-	it("is a pure function — same input, same plan, forever", () => {
+	it("is a pure function — same input, same plan, forever", async () => {
 		const messages = Array.from({ length: 23 }, (_, i) => message(`m${i}`, 300));
-		const first = planExtractionChunks(messages);
-		const second = planExtractionChunks(messages);
+		const first = await planExtractionChunks(messages);
+		const second = await planExtractionChunks(messages);
 		expect(second.map((c) => c.key)).toEqual(first.map((c) => c.key));
 		expect(second.map((c) => c.messageIds)).toEqual(first.map((c) => c.messageIds));
 	});
 
-	it("derives the same identities from a rebuilt copy of the same messages", () => {
+	it("derives the same identities from a rebuilt copy of the same messages", async () => {
 		// What a retry actually does: rebuild the messages from D1, re-plan.
 		const messages = Array.from({ length: 19 }, (_, i) => message(`m${i}`, 250));
 		const rebuilt = JSON.parse(JSON.stringify(messages));
-		expect(planExtractionChunks(rebuilt).map((c) => c.key))
-			.toEqual(planExtractionChunks(messages).map((c) => c.key));
+		expect((await planExtractionChunks(rebuilt)).map((c) => c.key))
+			.toEqual((await planExtractionChunks(messages)).map((c) => c.key));
 	});
 
-	it("changes identity when the content changes", () => {
+	it("changes identity when the content changes", async () => {
 		const a = [message("m0", 10), message("m1", 10)];
 		const b = [message("m0", 10), { ...message("m1", 10), content_hash: "different" }];
-		expect(extractionChunkKey(b)).not.toBe(extractionChunkKey(a));
+		expect(await extractionChunkKey(b)).not.toBe(await extractionChunkKey(a));
 	});
 
-	it("changes identity when the order changes", () => {
+	it("changes identity when the order changes", async () => {
 		const a = [message("m0", 10), message("m1", 10)];
-		expect(extractionChunkKey([a[1], a[0]])).not.toBe(extractionChunkKey(a));
+		expect(await extractionChunkKey([a[1], a[0]])).not.toBe(await extractionChunkKey(a));
 	});
 });
 

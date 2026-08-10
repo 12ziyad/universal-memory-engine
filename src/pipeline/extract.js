@@ -25,7 +25,7 @@ import { getConfig } from "../config.js";
 import { buildPacket, chunkText } from "./packet.js";
 import { planExtractionChunks, verifyChunkCoverage } from "./chunking.js";
 import { chunkAnchor } from "./temporal.js";
-import { memoryV3Enabled } from "../lib/memory_v3.js";
+import { memoryV3Enabled, memoryV3ExtractionB1Enabled } from "../lib/memory_v3.js";
 import { shortlistNodes } from "./shortlist.js";
 import { proposeMemory } from "./llm.js";
 import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
@@ -213,8 +213,9 @@ const SPLIT_RESCUE_BATCH = 4;
  * Per-message re-extraction with a spending contract:
  *   - never starts if the chunk alone would blow `maxCalls` (over_ceiling)
  *   - abandons as soon as `failFast` messages have failed to parse (fail_fast)
- *   - tolerates fewer failures than that, keeping what parsed — a 46/47 parse
- *     is a save with one dropped message, not 5,000 wasted neurons
+ *   - legacy accounts retain the prior partial-rescue behavior
+ *   - V3 accounts reject a partial rescue so every failed source span remains
+ *     explicit and repairable instead of being reported as semantic success
  * Always returns { split, stats }: stats reports calls actually made, failures,
  * and why it stopped, so the receipt can say what this rescue really cost.
  */
@@ -222,7 +223,7 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 	const projectScope = normalizeProjectScope(overrides?.meta);
 	const maxCalls = Number.isFinite(limits.maxCalls) ? limits.maxCalls : Infinity;
 	const failFast = Number.isFinite(limits.failFast) ? limits.failFast : 3;
-	const stats = { calls: 0, failures: 0, aborted: null };
+	const stats = { calls: 0, failures: 0, aborted: null, outcomes: {}, duplicates: 0, invalidObjects: 0 };
 
 	if (chunk.length > maxCalls) {
 		console.warn(`split rescue refused user=${userId}: ${chunk.length} messages > ceiling ${maxCalls}`);
@@ -240,8 +241,12 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 			const singleShortlist = await shortlistNodes(env, config, userId, singleText, projectScope);
 			stats.calls += 1;
 			const single = await proposeMemory(env, config, { packet: singlePacket, shortlist: singleShortlist }, overrides);
+			const outcome = single._outcome ?? (single._ok ? "valid_unknown" : "invalid_unknown");
+			stats.outcomes[outcome] = (stats.outcomes[outcome] ?? 0) + 1;
+			stats.duplicates += Number(single._duplicates ?? 0);
+			stats.invalidObjects += Number(single._invalid_objects ?? 0);
 			if (!single._ok) {
-				console.warn(`llm split rescue failed user=${userId} msg=${msg.id} notes=${single.notes}`);
+				console.warn(`llm split rescue failed user=${userId} outcome=${outcome}`);
 				return null;
 			}
 			return single;
@@ -260,9 +265,14 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 		}
 	}
 
+	if (stats.failures > 0 && overrides?.extractionV3 === true) {
+		// V3 never reports semantic success for only part of an accepted source.
+		// The permitted episode remains recoverable and this typed failure can be
+		// retried/repaired; committing the successful fragments would hide the gap.
+		stats.aborted = objects.length === 0 ? "all_failed" : "incomplete";
+		return { split: null, stats };
+	}
 	if (objects.length === 0 && stats.failures > 0) {
-		// Everything that failed stayed under the fail-fast line, but nothing
-		// parsed either — there is no partial result to keep.
 		stats.aborted = "all_failed";
 		return { split: null, stats };
 	}
@@ -272,6 +282,7 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 			objects,
 			notes: `split_rescue${notes.length ? `: ${notes.join("; ")}` : ""}`,
 			_ok: true,
+			_outcome: objects.length ? "valid_nonempty" : "valid_empty",
 		},
 		stats,
 	};
@@ -289,7 +300,13 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
  */
 async function proposePrimary(env, config, userId, chunk, recent, packet, shortlist, overrides) {
 	const projectScope = normalizeProjectScope(overrides?.meta);
-	const plan = planExtractionChunks(chunk, config.extractionChunk);
+	const plan = await planExtractionChunks(chunk, {
+		...config.extractionChunk,
+		// Bind replay identities to the accepted source packet/time when present.
+		// Per-message source_time is included by the chunk planner as well.
+		sourcePacketId: overrides?.meta?.source_packet_id ?? null,
+		sourceTime: overrides?.meta?.source_time ?? null,
+	});
 	const coverage = verifyChunkCoverage(chunk, plan);
 	if (!coverage.ok) {
 		// Never silently extract from a partial view of accepted content. This is
@@ -297,7 +314,12 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 		// quietly capturing less than the user was told we accepted.
 		console.error(`extraction chunk coverage broken user=${userId}: ${coverage.problems.join("; ")}`);
 		return {
-			proposal: { objects: [], notes: `chunk_coverage_broken: ${coverage.problems.join("; ")}`, _ok: false },
+			proposal: {
+				objects: [],
+				notes: `chunk_coverage_broken: ${coverage.problems.join("; ")}`,
+				_ok: false,
+				_outcome: "coverage_invalid",
+			},
 			rescued: false,
 			rescueStats: null,
 			coverage,
@@ -313,6 +335,8 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 	const notes = [];
 	let rescuedAny = false;
 	let truncatedAny = false;
+	let duplicates = 0;
+	let invalidObjects = 0;
 	let stats = null;
 	for (const sub of plan) {
 		const subPacket = buildPacket(sub.messages, recent);
@@ -323,10 +347,22 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 		if (part.rescueStats) {
 			rescuedAny = rescuedAny || part.rescued;
 			stats = stats
-				? { calls: stats.calls + part.rescueStats.calls, failures: stats.failures + part.rescueStats.failures, aborted: part.rescueStats.aborted ?? stats.aborted }
+				? {
+					calls: stats.calls + part.rescueStats.calls,
+					failures: stats.failures + part.rescueStats.failures,
+					aborted: part.rescueStats.aborted ?? stats.aborted,
+					duplicates: Number(stats.duplicates ?? 0) + Number(part.rescueStats.duplicates ?? 0),
+					invalidObjects: Number(stats.invalidObjects ?? 0) + Number(part.rescueStats.invalidObjects ?? 0),
+					outcomes: Object.entries(part.rescueStats.outcomes ?? {}).reduce((all, [key, count]) => ({
+						...all,
+						[key]: Number(all[key] ?? 0) + Number(count ?? 0),
+					}), { ...(stats.outcomes ?? {}) }),
+				}
 				: { ...part.rescueStats };
 		}
 		truncatedAny = truncatedAny || Boolean(part.proposal._truncated);
+		duplicates += Number(part.proposal._duplicates ?? 0);
+		invalidObjects += Number(part.proposal._invalid_objects ?? 0);
 		if (!part.proposal._ok) {
 			// One unreadable sub-chunk fails the fire (chunk is retained) — but
 			// only after bounded spend, and the receipt says which guard fired.
@@ -336,7 +372,15 @@ async function proposePrimary(env, config, userId, chunk, recent, packet, shortl
 		if (part.proposal.notes) notes.push(part.proposal.notes);
 	}
 	return {
-		proposal: { objects, notes: notes.join("; "), _ok: true, ...(truncatedAny ? { _truncated: true } : {}) },
+		proposal: {
+			objects,
+			notes: notes.join("; "),
+			_ok: true,
+			_outcome: truncatedAny ? "truncated_salvaged" : objects.length ? "valid_nonempty" : "valid_empty",
+			_duplicates: duplicates,
+			_invalid_objects: invalidObjects,
+			...(truncatedAny ? { _truncated: true } : {}),
+		},
 		rescued: rescuedAny,
 		rescueStats: stats,
 		coverage,
@@ -359,7 +403,13 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 		});
 		if (split) return { proposal: split, rescued: true, rescueStats: stats };
 		return {
-			proposal: { objects: [], notes: `split_rescue_failed${stats.aborted ? ` (${stats.aborted})` : ""}`, _ok: false },
+			proposal: {
+				objects: [],
+				notes: `split_rescue_failed${stats.aborted ? ` (${stats.aborted})` : ""}`,
+				_ok: false,
+				_outcome: stats.failures > 0 && overrides?.extractionV3 === true ? "span_incomplete" : "split_rescue_failed",
+				_failed_spans: stats.failures,
+			},
 			rescued: false,
 			rescueStats: stats,
 		};
@@ -373,7 +423,13 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 	console.warn(`llm primary parse failed user=${userId}; retrying ${chunk.length} message(s) individually`);
 	const { split, stats } = await proposeSplit(env, config, userId, chunk, recent, overrides, limits);
 	if (split) return { proposal: split, rescued: true, rescueStats: stats };
-	return { proposal, rescued: false, rescueStats: stats };
+	return {
+		proposal: stats.failures > 0 && overrides?.extractionV3 === true
+			? { ...proposal, _outcome: "span_incomplete", _failed_spans: stats.failures }
+			: proposal,
+		rescued: false,
+		rescueStats: stats,
+	};
 }
 
 function runListsFromPlan(plan) {
@@ -596,7 +652,9 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const profile = overrides.profile
 		?? ({ plugin: "plugin", sdk: "sdk" }[overrides.source] ?? null);
 	if (profile) meta.profile = profile;
-	const withRules = { ...overrides, rules, profile };
+	const extractionV3 = memoryV3ExtractionB1Enabled(env, userId);
+	meta.extraction_v3_b1 = extractionV3;
+	const withRules = { ...overrides, rules, profile, extractionV3 };
 
 	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
 	// Oversized chunks are pre-split by code before the model sees them.
@@ -616,12 +674,18 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		meta.chunks_planned = coverage.chunkCount;
 		meta.chunk_coverage_ok = coverage.ok;
 		meta.chunk_messages_covered = coverage.coveredCount;
+		meta.chunk_code_points_input = coverage.inputCodePoints;
+		meta.chunk_code_points_covered = coverage.coveredCodePoints;
 	}
 	if (proposal._truncated) {
 		// The model ran out of output budget. Whatever completed was salvaged;
 		// saying so is what turns "this save looked small" into a tunable fact.
 		meta.extraction_truncated = true;
 	}
+	meta.extraction_outcome = proposal._outcome ?? (proposal._ok ? "valid_unknown" : "invalid_unknown");
+	meta.extraction_failed_spans = Number(proposal._failed_spans ?? rescueStats?.failures ?? 0);
+	meta.extraction_duplicates = Number(proposal._duplicates ?? rescueStats?.duplicates ?? 0);
+	meta.extraction_invalid_objects = Number(proposal._invalid_objects ?? rescueStats?.invalidObjects ?? 0);
 	if (rescueStats) {
 		// The rescue happened (or was refused) — the receipt must say so even
 		// when the fire ends llm_failed, or this spend is invisible again.

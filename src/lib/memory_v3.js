@@ -67,10 +67,42 @@ export function memoryV3Enabled(env, userId) {
 }
 
 /**
+ * E2-B1 changes extraction acceptance semantics, so it has its own nested
+ * experiment switch. The parent V3 flag remains necessary: a B1 typo or stale
+ * allowlist can never opt a legacy account into V3 behavior. Default OFF keeps
+ * already-allowlisted benchmark accounts as the causal control until an
+ * explicit treatment cohort is named.
+ */
+export function memoryV3ExtractionB1Config(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_EXTRACTION_B1;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_EXTRACTION_B1_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3ExtractionB1Enabled(env, userId) {
+	if (!memoryV3Enabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3ExtractionB1Config(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
 export function memoryV3Status(env) {
 	const { mode, allowlistCount } = memoryV3Config(env);
-	return { schema: MEMORY_V3_FLAG_SCHEMA, mode, allowlistCount };
+	const extraction = memoryV3ExtractionB1Config(env);
+	return {
+		schema: MEMORY_V3_FLAG_SCHEMA,
+		mode,
+		allowlistCount,
+		extractionB1: { mode: extraction.mode, allowlistCount: extraction.allowlistCount },
+	};
 }

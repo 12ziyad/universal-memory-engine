@@ -24,7 +24,12 @@ describe("GET /health", () => {
 			version: "0.1.0",
 			// Rollout state is operational, not personal: the mode and how many
 			// accounts are selected, never which ones.
-			memory_v3: { schema: "itsuki.memory-v3-flag/v1", mode: "off", allowlistCount: 0 },
+			memory_v3: {
+				schema: "itsuki.memory-v3-flag/v1",
+				mode: "off",
+				allowlistCount: 0,
+				extractionB1: { mode: "off", allowlistCount: 0 },
+			},
 		});
 	});
 });

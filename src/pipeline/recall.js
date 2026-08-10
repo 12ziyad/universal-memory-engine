@@ -656,6 +656,21 @@ function itemSummary(entry) {
 	};
 }
 
+async function internalReadTrace(candidateIds, selectedIds, context) {
+	const bytes = new TextEncoder().encode(String(context ?? ""));
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	const contextHash = [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+	return {
+		schema: "itsuki.internal-read-trace/v1",
+		candidate_ids: candidateIds,
+		selected_ids: selectedIds,
+		context_bytes: bytes.byteLength,
+		context_sha256: contextHash,
+	};
+}
+
 /**
  * Startup context for a project: what this project holds, ranked by salience
  * and recency. Deterministic and model-free — no embedding call, no query
@@ -1054,6 +1069,9 @@ export async function recall(env, config, userId, query, opts = {}) {
 			? { type, id, score, item: nodeItem(byId.get(id), slicesByNode, eventsByNode, { edgeRows, byId, pastIntent }) }
 			: { type, id, score, item: pageItem(pageById.get(id)) };
 	}).filter((entry) => entry.item);
+	const traceCandidateIds = opts.internalTrace === true
+		? entries.map((entry) => `${entry.type}:${entry.id}`)
+		: null;
 
 	const activatedClusters = activateClusters(entries);
 
@@ -1078,6 +1096,16 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
 	const context = buildContext(entries, plan, stagedRows);
 	const items = entries.map(itemSummary);
+	const internalTrace = opts.internalTrace === true
+		? await internalReadTrace(
+			traceCandidateIds,
+			[
+				...entries.map((entry) => `${entry.type}:${entry.id}`),
+				...stagedRows.map((row) => `staged:${row.id}`),
+			],
+			context,
+		)
+		: null;
 
 	return {
 		ok: true,
@@ -1101,5 +1129,6 @@ export async function recall(env, config, userId, query, opts = {}) {
 		rerank_keep: rerank.keep,
 		rerank_ms: rerank.latencyMs,
 		compressed: Boolean(context),
+		...(internalTrace ? { internal_trace: internalTrace } : {}),
 	};
 }

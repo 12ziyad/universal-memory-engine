@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { createExecutionContext, env, runInDurableObject, waitOnExecutionContext } from "cloudflare:test";
 
 import worker from "../src/index.js";
 import {
@@ -49,6 +49,62 @@ async function write(userId, texts, options = {}) {
 }
 
 describe("episodes preserve what extraction might decline", () => {
+	it("keeps accepted evidence recoverable after bounded semantic dead-letter", async () => {
+		const userId = nextUser("deadletter");
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+		await runInDurableObject(stub, async (_instance, state) => {
+			await state.storage.put("lease", { until: Date.now() + 60_000, token: "episode-deadletter-test" });
+		});
+
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(
+			new Request("https://itsuki.app/v1/ingest", {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+				body: JSON.stringify({
+					userId,
+					messages: [{ id: "deadletter_m1", role: "user", content: "I moved to Malmo on Tuesday" }],
+					flush: true,
+					_test: { llmResponse: "%%% not json at all %%%" },
+				}),
+			}),
+			V3(userId),
+			ctx,
+		);
+		await waitOnExecutionContext(ctx);
+		expect(response.status).toBeLessThan(400);
+		expect(await countSourceEpisodes(env, userId)).toBe(1);
+
+		await runInDurableObject(stub, async (_instance, state) => {
+			await state.storage.delete("lease");
+		});
+		for (let attempt = 0; attempt < 20; attempt += 1) {
+			const state = await stub.drain({ userId, maxJobs: 10, ignoreBackoff: true });
+			if (!state.leased && state.remaining === 0) break;
+		}
+
+		const job = await env.DB.prepare(
+			"SELECT status, receipt_id FROM memory_jobs WHERE user_id = ? AND type = 'extract'",
+		).bind(userId).first();
+		expect(job?.status).toBe("failed");
+		const receiptRow = await env.DB.prepare(
+			"SELECT detail FROM receipts WHERE id = ? AND user_id = ?",
+		).bind(job.receipt_id, userId).first();
+		const receipt = JSON.parse(receiptRow.detail);
+		expect(receipt).toMatchObject({
+			outcome: "llm_failed",
+			extraction_outcome: "schema_invalid",
+			savedTotal: 0,
+		});
+		expect(await countSourceEpisodes(env, userId)).toBe(1);
+		expect(await episodesForPacket(env, userId, receipt.source_packet_id)).toHaveLength(1);
+		const semantic = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM nodes WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(userId).first();
+		expect(Number(semantic?.n ?? 0)).toBe(0);
+		await stub.resetAll();
+	}, 30_000);
+
 	it("writes one row per permitted message, in order, with its provenance", async () => {
 		const userId = nextUser("write");
 		const result = await write(userId, ["I moved to Malmo", "The lease runs two years"]);

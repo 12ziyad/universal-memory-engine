@@ -56,13 +56,17 @@ describe("multi-hop through the graph", () => {
 
 describe("bi-temporal answers", () => {
 	const seedLiving = async (userId) => {
-		await seedNode(userId, "bt-me", "Ziyad", { category: "identity" });
-		await seedNode(userId, "bt-porto", "Porto", { category: "place", summary: "Coastal city." });
-		await seedNode(userId, "bt-braga", "Braga", { category: "place", summary: "Northern city." });
-		await seedEdge(userId, "bt-e1", "bt-me", "bt-porto", "LIVES_IN", {
+		// Vitest 4 isolates Workers storage per file rather than per test. Bind
+		// globally-unique primary keys to this test's tenant so the two temporal
+		// cases can share a file without sharing rows.
+		const id = (part) => `${userId}:${part}`;
+		await seedNode(userId, id("bt-me"), "Ziyad", { category: "identity" });
+		await seedNode(userId, id("bt-porto"), "Porto", { category: "place", summary: "Coastal city." });
+		await seedNode(userId, id("bt-braga"), "Braga", { category: "place", summary: "Northern city." });
+		await seedEdge(userId, id("bt-e1"), id("bt-me"), id("bt-porto"), "LIVES_IN", {
 			fact: "Lives in Porto", valid: Date.parse("2023-02-01"), invalid: Date.parse("2026-06-01"),
 		});
-		await seedEdge(userId, "bt-e2", "bt-me", "bt-braga", "LIVES_IN", {
+		await seedEdge(userId, id("bt-e2"), id("bt-me"), id("bt-braga"), "LIVES_IN", {
 			fact: "Lives in Braga", valid: Date.parse("2026-06-01"),
 		});
 	};
