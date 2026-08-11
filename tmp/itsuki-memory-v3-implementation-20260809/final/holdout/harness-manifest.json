@@ -29,7 +29,8 @@
     "lock-proof.mjs": "ddce57cd22d678eaecc94a60f5349a7c2ac7d97dd6c91d958df307f040db59be",
     "product.mjs": "2fa6fe4f653371668ebb42713755638179d3bb657b9464f27294bf7fa6d65b81",
     "run.mjs": "0fbcffaef9d23e3b01bc9662e9d214b386f2aec1debd1e4322a665c7820c9f03",
-    "score.mjs": "08d7cf880d4d10065d37b3df226addf6e9538f5c98f3b6f79990c7eef232208f"
+    "score.mjs": "08d7cf880d4d10065d37b3df226addf6e9538f5c98f3b6f79990c7eef232208f",
+    "verify-config.mjs": "8d25713ca4d2a1146072afb9d5266a0eeccb97af1336cc89667b99dae7abeb04"
   },
   "lock_proof": {
     "contender_exit": 73,
