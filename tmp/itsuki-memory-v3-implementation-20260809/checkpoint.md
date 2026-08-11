@@ -1,5 +1,33 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 Stage D harness frozen / no inference yet
+
+- Repo/origin are `3565b01bad482a06633bb03ce1b91c4920e51ada`; only the
+  owner-owned `AGENTS.md` is dirty. Production remains Worker
+  `052d9b68-b131-45cb-b792-1804c86a50d6` with parent V3 allowlist 30,
+  historical E7 ten, and every write/source/rejected lane OFF.
+- No benchmark, judge or evaluator process was running and the global lock was
+  absent. The Stage D contender proof exits 73 before writes, leaves the
+  artifact inventory unchanged and releases the lock.
+- Stage D is frozen as three sequential fresh treatment seeds on the ten-scenario,
+  42-question non-LoCoMo holdout. Products are reference-blind and SHA-sealed
+  before capture/answer scoring loads references. Cleanup zero is mandatory
+  between seeds.
+- The exact accepted candidate is E4 capture + E5 temporal + E6 projection +
+  BF-2/E7/D13 depth-200 retrieval + E9A source expansion + GPT-OSS-120B.
+  E2-B1, E6M, reranking, E9B and E10 remain OFF.
+- Frozen mechanical gates: mean capture precision >=95%, mean judge >=80%, no
+  seed below 75%, mean evidence availability >=75%, no accepted category loses
+  >15pp, and zero security/durability/accounting/cleanup failure.
+- Billing guard is PASS for all 11 permitted first-party `partner=false` models;
+  current burn is exactly 1,914,249 / 3,000,000. Stage D cap is 90,000 and the
+  500,000-neuron final LoCoMo reserve remains protected.
+- Durable files: `final/holdout/STAGE-D-HOLDOUT-PREREGISTRATION.md`,
+  `final/holdout/harness-manifest.json`, `final/holdout/LOCK-PROOF.json` and
+  `final/holdout/harness/`. Exact next action: commit/push this no-inference
+  boundary, activate only the treatment cohort, prove propagation/isolation,
+  then run the three seeds under the global lock.
+
 ## 2026-08-11 V3-D13 CLOSED / exact Stage C PASS / Stage D next
 
 - The failing-first production-schema cells proved that E7 copied 800/8,000/

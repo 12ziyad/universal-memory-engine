@@ -1,0 +1,39 @@
+{
+  "schema": "itsuki.v3-final-holdout-harness-manifest/v1",
+  "frozen_at": "2026-08-11T18:42:00Z",
+  "repo_head_before_stage_d": "3565b01bad482a06633bb03ce1b91c4920e51ada",
+  "production_worker_before_activation": "052d9b68-b131-45cb-b792-1804c86a50d6",
+  "project": "v3-final-holdout",
+  "seeds": [1, 2, 3],
+  "questions_per_seed": 42,
+  "product_reference_blind": true,
+  "reader": "@cf/openai/gpt-oss-120b",
+  "judge": "@cf/openai/gpt-oss-120b",
+  "atomic_model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+  "recall_limit": 200,
+  "stage_start_neurons": 1914249,
+  "stage_cap_neurons": 90000,
+  "stage_max_neurons": 2004249,
+  "protected_final_reserve_neurons": 500000,
+  "frozen_inputs": {
+    "holdout_manifest": "598ba1bb35bbcee1784dce506ee743d1965398c5fca453ac82008b5f649654a6",
+    "holdout_digest_ledger": "259f22f29659b2ad46761483a6ac20162b24dc1441b8eaedb00e3f80fe17a97f",
+    "reference_free_questions": "588fc4b5f3e6a74a7d7f8dc1f8b3bbcb795f79362930c67fefc6c075f5f7d73c",
+    "cohort": "555b01b4f5204a4cf3638801a1b0a3b1ca6e6cb1d1d71bbddb4e47fd44c04930",
+    "accepted_path_summary": "110d3416a61ca155db706381e16397387e9be87a5bd05fb1179b3514a1abf9ab",
+    "final_preregistration": "ecf58be85195c0c0d89bd88b46246dd22c0a424f1589de7d0a895b3d82d4d142"
+  },
+  "harness": {
+    "aggregate.mjs": "62e6c23411d5259d2d4ea6a747fb296a358898205dd8d7c40ca97439a702ca05",
+    "common.mjs": "86f953f369bd3ab42ed7a009de0f439bc1c7885aaec4cb3dba09b8b16561b7ba",
+    "lock-proof.mjs": "ddce57cd22d678eaecc94a60f5349a7c2ac7d97dd6c91d958df307f040db59be",
+    "product.mjs": "2fa6fe4f653371668ebb42713755638179d3bb657b9464f27294bf7fa6d65b81",
+    "run.mjs": "0fbcffaef9d23e3b01bc9662e9d214b386f2aec1debd1e4322a665c7820c9f03",
+    "score.mjs": "08d7cf880d4d10065d37b3df226addf6e9538f5c98f3b6f79990c7eef232208f"
+  },
+  "lock_proof": {
+    "contender_exit": 73,
+    "artifact_inventory_unchanged": true,
+    "lock_released": true
+  }
+}

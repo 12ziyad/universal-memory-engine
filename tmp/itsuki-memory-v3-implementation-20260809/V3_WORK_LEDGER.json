@@ -4,10 +4,21 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage C complete; V3-D13 HIGH closed; Stage D repeated frozen holdout next",
-  "latest_verified_head": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+  "current_phase": "Stage D harness and gates frozen; treatment-only production activation next",
+  "latest_verified_head": "3565b01bad482a06633bb03ce1b91c4920e51ada",
   "latest_verified_production": "052d9b68-b131-45cb-b792-1804c86a50d6",
   "latest_verified_burn": 1914249,
+  "stage_d_preflight": {
+    "status": "FROZEN_NO_INFERENCE",
+    "seeds": 3,
+    "questions_per_seed": 42,
+    "project": "v3-final-holdout",
+    "stage_cap_neurons": 90000,
+    "protected_final_reserve_neurons": 500000,
+    "lock_contender_exit": 73,
+    "lock_artifact_inventory_unchanged": true,
+    "harness_manifest": "final/holdout/harness-manifest.json"
+  },
   "phases": [
     {
       "id": "A0",
