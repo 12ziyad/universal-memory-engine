@@ -4,6 +4,25 @@ Every entry records the evidence that forced the decision, not a preference.
 
 ---
 
+## D-023 — accept the final candidate for one decisive Stage E measurement
+
+**Decision.** Stage D passes and authorizes exactly one fresh complete LoCoMo
+run of the already frozen candidate. No component, prompt, threshold, model,
+reranker, fallback or context cap may change before that measurement.
+
+**Evidence.** Across three independent fresh non-LoCoMo seeds, mean judge was
+95.24%, evidence availability 96.83%, conditional accuracy 96.71%, token-F1
+69.60%, capture recall 78.18%, and capture precision 96.59%. All 126 products
+and verdicts reconciled; safety, scope, provenance, replay, bounded retrieval,
+assembly and cleanup gates had zero failures. Judge range was 92.86–100.00%,
+availability range 95.24–97.62%, and capture precision range only 0.08pp.
+
+**Consequence.** General quality is strong enough to spend the protected final
+reserve on Stage E. The single full result is a measurement, not a tuning set;
+below-baseline performance will be reported without a benchmark-specific rerun.
+
+---
+
 ## D-011 — Reject redundant lexical episode fallback; proceed to E10
 
 **Decision.** Keep the scrubbed source-episode store and accepted E9A exact

@@ -1,0 +1,367 @@
+
+ ⛅️ wrangler 4.120.0 (update available 4.120.1)
+───────────────────────────────────────────────
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mProcessing wrangler.jsonc configuration:[0m
+
+    - "unsafe" fields are experimental and may change or break at any time.
+
+
+Using secrets defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                                                        Resource                  Mode
+env.USER_MEMORY (UserMemory)                                                                   Durable Object            local
+env.DB (uml-memory)                                                                            D1 Database               local
+env.VECTORIZE (uml-node-embeddings)                                                            Vectorize Index           not supported
+env.AI                                                                                         AI                        remote
+env.ASSETS                                                                                     Assets                    local
+env.AUTH_LIMITER (ratelimit)                                                                   Unsafe Metadata           remote
+env.SAVE_LIMITER (ratelimit)                                                                   Unsafe Metadata           remote
+env.RECALL_LIMITER (ratelimit)                                                                 Unsafe Metadata           remote
+env.USE_VECTORS ("true")                                                                       Environment Variable      local
+env.ENABLE_PASS2 ("true")                                                                      Environment Variable      local
+env.LLM_PROVIDER ("workers-ai")                                                                Environment Variable      local
+env.LLM_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                                                   Environment Variable      local
+env.LLM_MAX_TOKENS ("4096")                                                                    Environment Variable      local
+env.LLM_SUMMARY_MODEL ("@cf/meta/llama-3.1-8b-instruct-fp8")                                   Environment Variable      local
+env.LLM_SUMMARY_MAX_TOKENS ("256")                                                             Environment Variable      local
+env.LLM_DIGEST_MODEL ("@cf/meta/llama-3.1-8b-instruct-fp8")                                    Environment Variable      local
+env.LLM_DIGEST_MAX_TOKENS ("768")                                                              Environment Variable      local
+env.EMBED_MODEL ("@cf/baai/bge-base-en-v1.5")                                                  Environment Variable      local
+env.CHAT_MODEL ("@cf/meta/llama-3.2-1b-instruct")                                              Environment Variable      local
+env.SPLIT_RESCUE_MAX_CALLS ("8")                                                               Environment Variable      local
+env.SPLIT_RESCUE_FAIL_FAST ("3")                                                               Environment Variable      local
+env.PLAYGROUND_DAILY_MESSAGES ("30")                                                           Environment Variable      local
+env.PLAYGROUND_MAX_THREADS ("5")                                                               Environment Variable      local
+env.GOOGLE_CLIENT_ID ("(hidden)")                                                              Environment Variable      local
+env.ITSUKI_MEMORY_V3 ("allowlist")                                                             Environment Variable      local
+env.ITSUKI_MEMORY_V3_USERS ("mem_119e35f60838133e8b7f13f21bd07c01,...")                        Environment Variable      local
+env.ITSUKI_MEMORY_V3_EXTRACTION_B1 ("off")                                                     Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_CAPTURE ("allowlist")                                              Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS ("mem_0e31646bbc5e929fd410f2c77d4c9e30,...")         Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_PROJECTION ("allowlist")                                           Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS ("mem_0e31646bbc5e929fd410f2c77d4c9e30,...")      Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_COALESCING ("off")                                                 Environment Variable      local
+env.ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS ("")                                              Environment Variable      local
+env.ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL ("allowlist")                                            Environment Variable      local
+env.ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS ("mem_119e35f60838133e8b7f13f21bd07c01,...")       Environment Variable      local
+env.ITSUKI_MEMORY_V3_SOURCE_EXPANSION ("allowlist")                                            Environment Variable      local
+env.ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS ("mem_0e31646bbc5e929fd410f2c77d4c9e30,...")       Environment Variable      local
+env.ITSUKI_MEMORY_V3_EPISODE_FALLBACK ("off")                                                  Environment Variable      local
+env.ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS ("")                                               Environment Variable      local
+env.ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT ("off")                                                  Environment Variable      local
+env.ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS ("")                                               Environment Variable      local
+env.API_KEY ("(hidden)")                                                                       Environment Variable      local
+env.GOOGLE_CLIENT_SECRET ("(hidden)")                                                          Environment Variable      local
+env.EVAL_MODE ("(hidden)")                                                                     Environment Variable      local
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mScheduled Workers are not automatically triggered during local development.[0m
+
+  To manually trigger a scheduled event, run:
+    curl "http://127.0.0.1:8799/cdn-cgi/local/scheduled"
+  For more details, see [4mhttps://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally[0m
+
+
+Wrangler detected this dev session is running in an AI agent.
+The Local Explorer API is available at http://127.0.0.1:8799/cdn-cgi/local/explorer/api
+Useful routes:
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/local/workers - local Workers and bindings
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/storage/kv/namespaces - KV namespaces
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/d1/database - D1 databases
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/r2/buckets - R2 buckets
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/workers/durable_objects/namespaces - Durable Object namespaces
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api/workflows - Workflows
+  POST http://127.0.0.1:8799/cdn-cgi/local/explorer/api/local/observability/query - run a read-only SQL query (SELECT/WITH only) over captured request traces and console logs. Tables: spans, logs (read attributes via json(attributes)). Example:
+    curl -X POST http://127.0.0.1:8799/cdn-cgi/local/explorer/api/local/observability/query -H 'Content-Type: application/json' -d '{"sql":"SELECT service, name, outcome, duration_ms FROM spans WHERE parent_id IS NULL LIMIT 20"}'
+If the routes above don't cover what you need, fetch the full OpenAPI schema (large - use only as a last resort):
+  GET http://127.0.0.1:8799/cdn-cgi/local/explorer/api - OpenAPI schema
+⎔ Establishing remote connection...
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mVectorize Index bindings do not support local development, and so parts of your Worker may not work correctly. You can set `remote: true` for the binding definition in your configuration file to access a remote version of the resource.[0m
+
+
+⎔ Starting local server...
+[wrangler:info] Ready on http://127.0.0.1:8799
+[wrangler:info] GET /health 200 OK (7319ms)
+[wrangler:info] POST /eval/llm 200 OK (1607ms)
+[wrangler:info] POST /eval/llm 200 OK (5422ms)
+[wrangler:info] POST /eval/llm 200 OK (2907ms)
+[wrangler:info] POST /eval/llm 200 OK (2369ms)
+[wrangler:info] POST /eval/llm 200 OK (2349ms)
+[wrangler:info] POST /eval/llm 200 OK (2546ms)
+[wrangler:info] POST /eval/llm 200 OK (1691ms)
+[wrangler:info] POST /eval/llm 200 OK (1867ms)
+[wrangler:info] POST /eval/llm 200 OK (2461ms)
+[wrangler:info] POST /eval/llm 200 OK (1320ms)
+[wrangler:info] POST /eval/llm 200 OK (2186ms)
+[wrangler:info] POST /eval/llm 200 OK (6658ms)
+[wrangler:info] POST /eval/llm 200 OK (2412ms)
+[wrangler:info] POST /eval/llm 200 OK (3045ms)
+[wrangler:info] POST /eval/llm 200 OK (3141ms)
+[wrangler:info] POST /eval/llm 200 OK (3373ms)
+[wrangler:info] POST /eval/llm 200 OK (2337ms)
+[wrangler:info] POST /eval/llm 200 OK (3310ms)
+[wrangler:info] POST /eval/llm 200 OK (1490ms)
+[wrangler:info] POST /eval/llm 200 OK (1863ms)
+[wrangler:info] POST /eval/llm 200 OK (1437ms)
+[wrangler:info] POST /eval/llm 200 OK (3385ms)
+[wrangler:info] POST /eval/llm 200 OK (1934ms)
+[wrangler:info] POST /eval/llm 200 OK (1901ms)
+[wrangler:info] POST /eval/llm 200 OK (2246ms)
+[wrangler:info] POST /eval/llm 200 OK (2119ms)
+[wrangler:info] POST /eval/llm 200 OK (1981ms)
+[wrangler:info] POST /eval/llm 200 OK (853ms)
+[wrangler:info] POST /eval/llm 200 OK (1553ms)
+[wrangler:info] POST /eval/llm 200 OK (1832ms)
+[wrangler:info] POST /eval/llm 200 OK (961ms)
+[wrangler:info] POST /eval/llm 200 OK (2523ms)
+[wrangler:info] POST /eval/llm 200 OK (1556ms)
+[wrangler:info] POST /eval/llm 200 OK (1603ms)
+[wrangler:info] POST /eval/llm 200 OK (905ms)
+[wrangler:info] POST /eval/llm 200 OK (2121ms)
+[wrangler:info] POST /eval/llm 200 OK (1345ms)
+[wrangler:info] POST /eval/llm 200 OK (3896ms)
+[wrangler:info] POST /eval/llm 200 OK (2135ms)
+[wrangler:info] POST /eval/llm 200 OK (1843ms)
+[wrangler:info] POST /eval/llm 200 OK (2258ms)
+[wrangler:info] POST /eval/llm 200 OK (3597ms)
+[wrangler:info] POST /eval/llm 200 OK (8372ms)
+[wrangler:info] POST /eval/llm 200 OK (863ms)
+[wrangler:info] POST /eval/llm 200 OK (2004ms)
+[wrangler:info] POST /eval/llm 200 OK (1261ms)
+[wrangler:info] POST /eval/llm 200 OK (1642ms)
+[wrangler:info] POST /eval/llm 200 OK (1131ms)
+[wrangler:info] POST /eval/llm 200 OK (1835ms)
+[wrangler:info] POST /eval/llm 200 OK (17921ms)
+[wrangler:info] POST /eval/llm 200 OK (2460ms)
+[wrangler:info] POST /eval/llm 200 OK (3126ms)
+[wrangler:info] POST /eval/llm 200 OK (1204ms)
+[wrangler:info] POST /eval/llm 200 OK (1807ms)
+[wrangler:info] POST /eval/llm 200 OK (1839ms)
+[wrangler:info] POST /eval/llm 200 OK (6563ms)
+[wrangler:info] POST /eval/llm 200 OK (2071ms)
+[wrangler:info] POST /eval/llm 200 OK (1234ms)
+[wrangler:info] POST /eval/llm 200 OK (2900ms)
+[wrangler:info] POST /eval/llm 200 OK (1198ms)
+[wrangler:info] POST /eval/llm 200 OK (1780ms)
+[wrangler:info] POST /eval/llm 200 OK (12562ms)
+[wrangler:info] POST /eval/llm 200 OK (1920ms)
+[wrangler:info] POST /eval/llm 200 OK (836ms)
+[wrangler:info] POST /eval/llm 200 OK (1149ms)
+[wrangler:info] POST /eval/llm 200 OK (912ms)
+[wrangler:info] POST /eval/llm 200 OK (10870ms)
+[wrangler:info] POST /eval/llm 200 OK (967ms)
+[wrangler:info] POST /eval/llm 200 OK (1150ms)
+[wrangler:info] POST /eval/llm 200 OK (907ms)
+[wrangler:info] POST /eval/llm 200 OK (1314ms)
+[wrangler:info] POST /eval/llm 200 OK (5220ms)
+[wrangler:info] POST /eval/llm 200 OK (1325ms)
+[wrangler:info] POST /eval/llm 200 OK (931ms)
+[wrangler:info] POST /eval/llm 200 OK (1200ms)
+[wrangler:info] POST /eval/llm 200 OK (752ms)
+[wrangler:info] POST /eval/llm 200 OK (10594ms)
+[wrangler:info] POST /eval/llm 200 OK (1957ms)
+[wrangler:info] POST /eval/llm 200 OK (4839ms)
+[wrangler:info] POST /eval/llm 200 OK (813ms)
+[wrangler:info] POST /eval/llm 200 OK (1381ms)
+[wrangler:info] POST /eval/llm 200 OK (11182ms)
+[wrangler:info] POST /eval/llm 200 OK (4011ms)
+[wrangler:info] POST /eval/llm 200 OK (2011ms)
+[wrangler:info] POST /eval/llm 200 OK (35636ms)
+[wrangler:info] POST /eval/llm 200 OK (885ms)
+[wrangler:info] POST /eval/llm 200 OK (10435ms)
+[wrangler:info] POST /eval/llm 200 OK (1209ms)
+[wrangler:info] POST /eval/llm 200 OK (1332ms)
+[wrangler:info] POST /eval/llm 200 OK (1386ms)
+[wrangler:info] POST /eval/llm 200 OK (1707ms)
+[wrangler:info] POST /eval/llm 200 OK (11387ms)
+[wrangler:info] POST /eval/llm 200 OK (1727ms)
+[wrangler:info] POST /eval/llm 200 OK (2833ms)
+[wrangler:info] POST /eval/llm 200 OK (2103ms)
+[wrangler:info] POST /eval/llm 200 OK (1551ms)
+[wrangler:info] POST /eval/llm 200 OK (1357ms)
+[wrangler:info] POST /eval/llm 200 OK (1749ms)
+[wrangler:info] POST /eval/llm 200 OK (1595ms)
+[wrangler:info] POST /eval/llm 200 OK (5499ms)
+[wrangler:info] POST /eval/llm 200 OK (929ms)
+[wrangler:info] POST /eval/llm 200 OK (1583ms)
+[wrangler:info] POST /eval/llm 200 OK (11394ms)
+[wrangler:info] POST /eval/llm 200 OK (1225ms)
+[wrangler:info] POST /eval/llm 200 OK (1328ms)
+[wrangler:info] POST /eval/llm 200 OK (1730ms)
+[wrangler:info] POST /eval/llm 200 OK (1720ms)
+[wrangler:info] POST /eval/llm 200 OK (2033ms)
+[wrangler:info] POST /eval/llm 200 OK (1513ms)
+[wrangler:info] POST /eval/llm 200 OK (2620ms)
+[wrangler:info] POST /eval/llm 200 OK (12696ms)
+[wrangler:info] POST /eval/llm 200 OK (1504ms)
+[wrangler:info] POST /eval/llm 200 OK (748ms)
+[wrangler:info] POST /eval/llm 200 OK (1178ms)
+[wrangler:info] POST /eval/llm 200 OK (9828ms)
+[wrangler:info] POST /eval/llm 200 OK (1392ms)
+[wrangler:info] POST /eval/llm 200 OK (1580ms)
+[wrangler:info] POST /eval/llm 200 OK (1807ms)
+[wrangler:info] POST /eval/llm 200 OK (831ms)
+[wrangler:info] POST /eval/llm 200 OK (724ms)
+[wrangler:info] POST /eval/llm 200 OK (1621ms)
+[wrangler:info] POST /eval/llm 200 OK (941ms)
+[wrangler:info] POST /eval/llm 200 OK (766ms)
+[wrangler:info] POST /eval/llm 200 OK (1679ms)
+[wrangler:info] POST /eval/llm 200 OK (623ms)
+[wrangler:info] POST /eval/llm 200 OK (749ms)
+[wrangler:info] POST /eval/llm 200 OK (1753ms)
+[wrangler:info] POST /eval/llm 200 OK (2912ms)
+[wrangler:info] POST /eval/llm 200 OK (774ms)
+[wrangler:info] POST /eval/llm 200 OK (1250ms)
+[wrangler:info] POST /eval/llm 200 OK (1219ms)
+[wrangler:info] POST /eval/llm 200 OK (1534ms)
+[wrangler:info] POST /eval/llm 200 OK (1710ms)
+[wrangler:info] POST /eval/llm 200 OK (1640ms)
+[wrangler:info] POST /eval/llm 200 OK (2979ms)
+[wrangler:info] POST /eval/llm 200 OK (3028ms)
+[wrangler:info] POST /eval/llm 200 OK (2387ms)
+[wrangler:info] POST /eval/llm 200 OK (12263ms)
+[wrangler:info] POST /eval/llm 200 OK (1149ms)
+[wrangler:info] POST /eval/llm 200 OK (2713ms)
+[wrangler:info] POST /eval/llm 200 OK (1322ms)
+[wrangler:info] POST /eval/llm 200 OK (1987ms)
+[wrangler:info] POST /eval/llm 200 OK (1723ms)
+[wrangler:info] POST /eval/llm 200 OK (1165ms)
+[wrangler:info] POST /eval/llm 200 OK (12220ms)
+[wrangler:info] POST /eval/llm 200 OK (3693ms)
+[wrangler:info] POST /eval/llm 200 OK (2000ms)
+[wrangler:info] POST /eval/llm 200 OK (1512ms)
+[wrangler:info] POST /eval/llm 200 OK (2767ms)
+[wrangler:info] POST /eval/llm 200 OK (1926ms)
+[wrangler:info] POST /eval/llm 200 OK (12852ms)
+[wrangler:info] POST /eval/llm 200 OK (1216ms)
+[wrangler:info] POST /eval/llm 200 OK (1707ms)
+[wrangler:info] POST /eval/llm 200 OK (2431ms)
+[wrangler:info] POST /eval/llm 200 OK (1411ms)
+[wrangler:info] POST /eval/llm 200 OK (2639ms)
+[wrangler:info] POST /eval/llm 200 OK (11289ms)
+[wrangler:info] POST /eval/llm 200 OK (2055ms)
+[wrangler:info] POST /eval/llm 200 OK (1133ms)
+[wrangler:info] POST /eval/llm 200 OK (1396ms)
+[wrangler:info] POST /eval/llm 200 OK (2222ms)
+[wrangler:info] POST /eval/llm 200 OK (10630ms)
+[wrangler:info] POST /eval/llm 200 OK (1871ms)
+[wrangler:info] POST /eval/llm 200 OK (1406ms)
+[wrangler:info] POST /eval/llm 200 OK (1430ms)
+[wrangler:info] POST /eval/llm 200 OK (1229ms)
+[wrangler:info] POST /eval/llm 200 OK (14841ms)
+[wrangler:info] POST /eval/llm 200 OK (1960ms)
+[wrangler:info] POST /eval/llm 200 OK (3908ms)
+[wrangler:info] POST /eval/llm 200 OK (1248ms)
+[wrangler:info] POST /eval/llm 200 OK (1666ms)
+[wrangler:info] POST /eval/llm 200 OK (9281ms)
+[wrangler:info] POST /eval/llm 200 OK (3379ms)
+[wrangler:info] POST /eval/llm 200 OK (1006ms)
+[wrangler:info] POST /eval/llm 200 OK (724ms)
+[wrangler:info] POST /eval/llm 200 OK (1199ms)
+[wrangler:info] POST /eval/llm 200 OK (11374ms)
+[wrangler:info] POST /eval/llm 200 OK (1257ms)
+[wrangler:info] POST /eval/llm 200 OK (1382ms)
+[wrangler:info] POST /eval/llm 200 OK (1196ms)
+[wrangler:info] POST /eval/llm 200 OK (9753ms)
+[wrangler:info] POST /eval/llm 200 OK (728ms)
+[wrangler:info] POST /eval/llm 200 OK (2105ms)
+[wrangler:info] POST /eval/llm 200 OK (1586ms)
+[wrangler:info] POST /eval/llm 200 OK (1601ms)
+[wrangler:info] POST /eval/llm 200 OK (16192ms)
+[wrangler:info] POST /eval/llm 200 OK (1619ms)
+[wrangler:info] POST /eval/llm 200 OK (1820ms)
+[wrangler:info] POST /eval/llm 200 OK (773ms)
+[wrangler:info] POST /eval/llm 200 OK (2134ms)
+[wrangler:info] POST /eval/llm 200 OK (1646ms)
+[wrangler:info] POST /eval/llm 200 OK (2261ms)
+[wrangler:info] POST /eval/llm 200 OK (5420ms)
+[wrangler:info] POST /eval/llm 200 OK (1464ms)
+[wrangler:info] POST /eval/llm 200 OK (2076ms)
+[wrangler:info] POST /eval/llm 200 OK (2801ms)
+[wrangler:info] POST /eval/llm 200 OK (1656ms)
+[wrangler:info] POST /eval/llm 200 OK (1245ms)
+[wrangler:info] POST /eval/llm 200 OK (3102ms)
+[wrangler:info] POST /eval/llm 200 OK (2068ms)
+[wrangler:info] POST /eval/llm 200 OK (2098ms)
+[wrangler:info] POST /eval/llm 200 OK (6824ms)
+[wrangler:info] POST /eval/llm 200 OK (3704ms)
+[wrangler:info] POST /eval/llm 200 OK (2628ms)
+[wrangler:info] POST /eval/llm 200 OK (2245ms)
+[wrangler:info] POST /eval/llm 200 OK (1812ms)
+[wrangler:info] POST /eval/llm 200 OK (10066ms)
+[wrangler:info] POST /eval/llm 200 OK (2808ms)
+[wrangler:info] POST /eval/llm 200 OK (1340ms)
+[wrangler:info] POST /eval/llm 200 OK (2729ms)
+[wrangler:info] POST /eval/llm 200 OK (2471ms)
+[wrangler:info] POST /eval/llm 200 OK (1144ms)
+[wrangler:info] POST /eval/llm 200 OK (2460ms)
+[wrangler:info] POST /eval/llm 200 OK (2610ms)
+[wrangler:info] POST /eval/llm 200 OK (1929ms)
+[wrangler:info] POST /eval/llm 200 OK (1243ms)
+[wrangler:info] POST /eval/llm 200 OK (9710ms)
+[wrangler:info] POST /eval/llm 200 OK (3071ms)
+[wrangler:info] POST /eval/llm 200 OK (2069ms)
+[wrangler:info] POST /eval/llm 200 OK (3268ms)
+[wrangler:info] POST /eval/llm 200 OK (1487ms)
+[wrangler:info] POST /eval/llm 200 OK (1847ms)
+[wrangler:info] POST /eval/llm 200 OK (1040ms)
+[wrangler:info] POST /eval/llm 200 OK (808ms)
+[wrangler:info] POST /eval/llm 200 OK (1027ms)
+[wrangler:info] POST /eval/llm 200 OK (1829ms)
+[wrangler:info] POST /eval/llm 200 OK (3031ms)
+[wrangler:info] POST /eval/llm 200 OK (4439ms)
+[wrangler:info] POST /eval/llm 200 OK (2835ms)
+[wrangler:info] POST /eval/llm 200 OK (3054ms)
+[wrangler:info] POST /eval/llm 200 OK (4966ms)
+[wrangler:info] POST /eval/llm 200 OK (15974ms)
+[wrangler:info] POST /eval/llm 200 OK (1104ms)
+[wrangler:info] POST /eval/llm 200 OK (2240ms)
+[wrangler:info] POST /eval/llm 200 OK (2318ms)
+[wrangler:info] POST /eval/llm 200 OK (37284ms)
+[wrangler:info] POST /eval/llm 200 OK (2946ms)
+[wrangler:info] POST /eval/llm 200 OK (1839ms)
+[wrangler:info] POST /eval/llm 200 OK (1152ms)
+[wrangler:info] POST /eval/llm 200 OK (12803ms)
+[wrangler:info] POST /eval/llm 200 OK (2115ms)
+[wrangler:info] POST /eval/llm 200 OK (1419ms)
+[wrangler:info] POST /eval/llm 200 OK (1818ms)
+[wrangler:info] POST /eval/llm 200 OK (1821ms)
+[wrangler:info] POST /eval/llm 200 OK (1640ms)
+[wrangler:info] POST /eval/llm 200 OK (27920ms)
+[wrangler:info] POST /eval/llm 200 OK (997ms)
+[wrangler:info] POST /eval/llm 200 OK (838ms)
+[wrangler:info] POST /eval/llm 200 OK (1342ms)
+[wrangler:info] POST /eval/llm 200 OK (14103ms)
+[wrangler:info] POST /eval/llm 200 OK (853ms)
+[wrangler:info] POST /eval/llm 200 OK (7855ms)
+[wrangler:info] POST /eval/llm 200 OK (1681ms)
+[wrangler:info] POST /eval/llm 200 OK (1381ms)
+[wrangler:info] POST /eval/llm 200 OK (915ms)
+[wrangler:info] POST /eval/llm 200 OK (760ms)
+[wrangler:info] POST /eval/llm 200 OK (18671ms)
+[wrangler:info] POST /eval/llm 200 OK (1431ms)
+[wrangler:info] POST /eval/llm 200 OK (888ms)
+[wrangler:info] POST /eval/llm 200 OK (728ms)
+[wrangler:info] POST /eval/llm 200 OK (629ms)
+[wrangler:info] POST /eval/llm 200 OK (8301ms)
+[wrangler:info] POST /eval/llm 200 OK (1425ms)
+[wrangler:info] POST /eval/llm 200 OK (1634ms)
+[wrangler:info] POST /eval/llm 200 OK (1989ms)
+[wrangler:info] POST /eval/llm 200 OK (2302ms)
+[wrangler:info] POST /eval/llm 200 OK (11346ms)
+[wrangler:info] POST /eval/llm 200 OK (3119ms)
+[wrangler:info] POST /eval/llm 200 OK (1214ms)
+[wrangler:info] POST /eval/llm 200 OK (1257ms)
+[wrangler:info] POST /eval/llm 200 OK (1198ms)
+[wrangler:info] POST /eval/llm 200 OK (9902ms)
+[wrangler:info] POST /eval/llm 200 OK (2042ms)
+[wrangler:info] POST /eval/llm 200 OK (1170ms)
+[wrangler:info] POST /eval/llm 200 OK (1246ms)
+[wrangler:info] POST /eval/llm 200 OK (19968ms)
+[wrangler:info] POST /eval/llm 200 OK (2659ms)
+[wrangler:info] POST /eval/llm 200 OK (1806ms)
+[wrangler:info] POST /eval/llm 200 OK (2730ms)
+[wrangler:info] POST /eval/llm 200 OK (1294ms)
+[wrangler:info] POST /eval/llm 200 OK (9386ms)
+[wrangler:info] POST /eval/llm 200 OK (3003ms)
+[wrangler:info] POST /eval/llm 200 OK (1098ms)
+[wrangler:info] POST /eval/llm 200 OK (1966ms)

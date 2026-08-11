@@ -1,5 +1,19 @@
 # ITSUKI MEMORY V3 — FINAL REPORT
 
+## 2026-08-11 Stage D general holdout PASS — authoritative interim status
+
+The final candidate passed three independent fresh non-LoCoMo seeds. Mean
+judge accuracy was **95.24%**, token-F1 **69.60%**, evidence availability
+**96.83%**, conditional accuracy **96.71%**, capture recall **78.18%** and
+capture precision **96.59%**. Per-seed judge was 100.00% / 92.86% / 92.86%; all
+security, durability, provenance, bounded-recall, accounting and cleanup gates
+passed, with zero assembly loss. Valid burn was 18,995 neurons. This is strong
+generalization evidence, not a LoCoMo score. Stage E is now authorized as one
+fresh, complete, frozen 1,540-question measurement with no retuning or repeat.
+
+Full evidence: `final/holdout/STAGE-D-FINAL.md` and
+`final/holdout/results/summary.json`.
+
 ## 2026-08-11 Stage C bounded-recall repair - authoritative interim status
 
 V3-D13 is **CLOSED**. The repaired production-schema 1k/10k/100k cells all pass

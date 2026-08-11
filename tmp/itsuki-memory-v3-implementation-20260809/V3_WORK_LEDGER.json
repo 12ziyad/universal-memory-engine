@@ -4,12 +4,12 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage D treatment cohort live and isolated; three-seed holdout execution next",
-  "latest_verified_head": "efdc222eb8e6a8b0769b9d1f85a3124907937781",
+  "current_phase": "Stage D PASS; safe closure deployment pending before one decisive Stage E LoCoMo run",
+  "latest_verified_head": "faea0dbe0622e8964578f089cac29102dec2d501",
   "latest_verified_production": "0dc9164e-cf44-4cf2-a61c-58ab598882e2",
-  "latest_verified_burn": 1914249,
+  "latest_verified_burn": 1933582,
   "stage_d_preflight": {
-    "status": "FROZEN_NO_INFERENCE",
+    "status": "COMPLETED_PASS_TO_STAGE_E",
     "seeds": 3,
     "questions_per_seed": 42,
     "project": "v3-final-holdout",
@@ -22,6 +22,23 @@
     "propagation_passed": 20,
     "propagation_checked": 20,
     "routing_isolated": true
+  },
+  "stage_d_result": {
+    "status": "PASS_TO_STAGE_E",
+    "seeds": 3,
+    "answers_and_verdicts": 126,
+    "mean_judge_accuracy": 0.9523809523809524,
+    "mean_token_f1": 0.6959732018301237,
+    "mean_evidence_availability": 0.9682539682539683,
+    "mean_conditional_accuracy": 0.9670731707317074,
+    "mean_capture_recall": 0.7818181818181819,
+    "mean_capture_precision": 0.9659061557066208,
+    "mean_capture_f1": 0.8638562205971438,
+    "per_seed_judge": [1, 0.9285714285714286, 0.9285714285714286],
+    "observed_neurons": 18995,
+    "all_gates_passed": true,
+    "all_cleanup_zero": true,
+    "evidence": "final/holdout/results/summary.json"
   },
   "phases": [
     {
@@ -445,6 +462,28 @@
         "Exact production E7 recall used the bounded corpus with zero failures, 66 items/9301 chars and 1459 ms server latency.",
         "Production-primary live treatment state and nonterminal jobs remain zero; all 809 packet fences are minimized/content-free; no lock, temporary credential file or campaign process remains.",
         "V3-D13 HIGH is closed and Stage D repeated frozen holdout is next."
+      ]
+    },
+    {
+      "id": "FINAL-D",
+      "title": "Three-seed final non-LoCoMo generalization holdout",
+      "status": "completed_pass_to_stage_e",
+      "outputs": [
+        "final/holdout/STAGE-D-HOLDOUT-PREREGISTRATION.md",
+        "final/holdout/STAGE-D-ACTIVATION.md",
+        "final/holdout/STAGE-D-FINAL.md",
+        "final/holdout/results/summary.json",
+        "final/holdout/evidence/run-manifest.json",
+        "three sealed products and score artifacts",
+        "three zero-residue cleanup artifacts"
+      ],
+      "findings": [
+        "Three fresh sequential seeds averaged 95.24% judge, 69.60% token-F1, 96.83% evidence availability and 96.71% conditional accuracy.",
+        "Capture recall averaged 78.18%, precision 96.59% and F1 86.39%; judge range was 92.86% to 100%.",
+        "All 126 answers/verdicts reconciled with zero security, scope, provenance, durability, bounded-recall or assembly-accounting failure.",
+        "All three seeds erased to zero; the global lock released and no campaign process remained.",
+        "Valid Stage D burn was 18,995 neurons, ending at a settled 1,933,582 / 3,000,000.",
+        "Stage D authorizes one frozen, complete Stage E LoCoMo measurement without retuning or repeat."
       ]
     }
   ]

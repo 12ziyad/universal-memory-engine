@@ -1,5 +1,16 @@
 # V3 DECISION LOG
 
+## 2026-08-11 — D-023: Stage D passes; authorize one decisive Stage E run
+
+Three independent fresh non-LoCoMo seeds averaged 95.24% judge, 69.60%
+token-F1, 96.83% evidence availability, 96.71% conditional accuracy, 78.18%
+capture recall and 96.59% capture precision. All 126 answers/verdicts,
+provenance, bounds, replay and cleanup gates reconciled with zero failure.
+
+**Decision:** freeze the accepted candidate unchanged and run exactly one fresh
+complete 1,540-question LoCoMo Stage E measurement. Do not tune or repeat based
+on its references or score.
+
 Every entry records the evidence that forced the decision, not a preference.
 
 ---

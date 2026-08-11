@@ -88,12 +88,29 @@
     "requested_ceiling_rationale": "The original 1,500,000-neuron ceiling was owner-authorized on 2026-08-09. After the invalid concurrent reranking attempt consumed budget without producing evidence, the owner explicitly raised the hard campaign ceiling to 3,000,000 neurons on 2026-08-10 for the sequential frozen-subset rerun and later decisive V3 validation."
   },
   "spend": {
-    "inference_calls_made_this_campaign": 86071,
-    "neurons_consumed_this_campaign": 1914249,
-    "estimated_usd_at_published_rate": 21.06,
+    "inference_calls_made_this_campaign": 86705,
+    "neurons_consumed_this_campaign": 1933582,
+    "estimated_usd_at_published_rate": 21.27,
     "third_party_paid_apis_called": "none"
   },
   "entries": [
+    {
+      "phase": "Final Stage D three-seed non-LoCoMo holdout",
+      "dataset": "frozen 10-scenario / 42-question general-memory holdout; three fresh sequential seeds; 126 sealed products and verdicts",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1914249,
+      "experiment_boundary_neurons_after": 1933244,
+      "settled_neurons_after": 1933582,
+      "valid_observed_increment": 18995,
+      "settled_increment_since_prior_ledger": 19333,
+      "per_seed_deltas": [5901, 6632, 6462],
+      "estimated_valid_increment_usd": 0.21,
+      "stage_cap": 90000,
+      "global_final_reserve": 500000,
+      "gate": "PASS_TO_STAGE_E - all generalization, safety, accounting and cleanup gates passed",
+      "verified_at": "2026-08-11T19:40:12.511Z"
+    },
     {
       "phase": "Final Stage C V3-D13 bounded-recall lifecycle and production reattack",
       "dataset": "local production-schema 1k/10k/100k scale plus one previously evaluated d04 product-input recall; no reference supplied and no re-ingest",

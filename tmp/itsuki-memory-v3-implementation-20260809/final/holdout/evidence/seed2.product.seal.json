@@ -1,0 +1,10 @@
+{
+  "schema": "itsuki.v3-final-holdout-product-seal/v1",
+  "productFile": "seed2.product.json",
+  "productSha256": "06d9f333a89a35f835368464d392ba0d6ea61aa9d61647821281b6b49087c67a",
+  "sealedAt": "2026-08-11T19:20:53.367Z",
+  "seed": 2,
+  "answers": 42,
+  "scenarios": 10,
+  "stateSha256": "28fc12378389429179dbaf33da87acf308eb559e5acf9c8863f6d929dee3df3d"
+}

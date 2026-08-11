@@ -1,5 +1,31 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 Stage D PASS / safe closure deployment next
+
+- The preregistered three-seed final non-LoCoMo holdout is complete and
+  **PASS_TO_STAGE_E**. Products were reference-blind and SHA-sealed before
+  scoring; all three seeds cleaned to zero before reuse.
+- Mean judge accuracy **95.24%**, token-F1 **69.60%**, evidence availability
+  **96.83%**, conditional accuracy **96.71%**, capture recall **78.18%**,
+  capture precision **96.59%** and capture F1 **86.39%**. Per-seed judge was
+  100.00% / 92.86% / 92.86%; no category lost 15pp.
+- Safety/provenance/accounting/bounds passed with zero failures; 126/126
+  answers/verdicts reconciled and all three cleanup proofs are zero. Mean source
+  expansion recovered 33 evidence-bearing questions per seed; assembly loss was
+  zero.
+- Valid Stage D burn was **18,995 neurons** (5,901 / 6,632 / 6,462), ending at
+  1,933,244 at the harness boundary; the immediately settled meter is
+  **1,933,582 / 3,000,000**. Billing guard remains first-party/non-partner and
+  direct Workers AI only.
+- Global benchmark lock is released and campaign process count is zero.
+  Authoritative evidence: `final/holdout/STAGE-D-FINAL.md` and
+  `final/holdout/results/summary.json`.
+- The local config is restored to the safe between-stage posture: parent V3
+  allowlist 30; capture/projection/source/rejected lanes OFF; E7 historical d04
+  ten only. Exact next action is commit/deploy/prove that closure, then build and
+  freeze the one-shot Stage E harness for the clean middle ten and project
+  `v3-final-locomo`.
+
 ## 2026-08-11 Stage D harness frozen / no inference yet
 
 - Repo/origin are `3565b01bad482a06633bb03ce1b91c4920e51ada`; only the

@@ -4,10 +4,10 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage C complete; V3-D13 HIGH closed; Stage D repeated frozen holdout next",
-  "latest_verified_head": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
-  "latest_verified_production": "052d9b68-b131-45cb-b792-1804c86a50d6",
-  "latest_verified_burn": 1914249,
+  "current_phase": "Stage D PASS; safe closure deployment pending before one decisive Stage E LoCoMo run",
+  "latest_verified_head": "faea0dbe0622e8964578f089cac29102dec2d501",
+  "latest_verified_production": "0dc9164e-cf44-4cf2-a61c-58ab598882e2",
+  "latest_verified_burn": 1933582,
   "phases": [
     {
       "id": "A0",
@@ -352,6 +352,21 @@
         "Worker 1313/1313, unit 539/539 plus one skip, audit and dry deploy pass.",
         "Commit 5f11d75 deployed as Worker 052d9b68-b131-45cb-b792-1804c86a50d6; 20/20 propagation and exact bounded live reattack passed.",
         "Production cleanup remained zero and V3-D13 HIGH is closed; Stage D repeated frozen holdout is next."
+      ]
+    },
+    {
+      "id": "FINAL-D",
+      "title": "Three-seed final non-LoCoMo generalization holdout",
+      "status": "completed_pass_to_stage_e",
+      "outputs": [
+        "final/holdout/STAGE-D-FINAL.md",
+        "final/holdout/results/summary.json",
+        "final/holdout/evidence/run-manifest.json"
+      ],
+      "findings": [
+        "Three fresh seeds averaged 95.24% judge, 69.60% token-F1, 96.83% evidence availability and 96.71% conditional accuracy.",
+        "Capture recall averaged 78.18% and precision 96.59%; all 126 answers/verdicts and every safety/accounting/cleanup gate reconciled.",
+        "Valid burn was 18,995 neurons; Stage D passes to one unchanged decisive Stage E LoCoMo measurement."
       ]
     }
   ]
