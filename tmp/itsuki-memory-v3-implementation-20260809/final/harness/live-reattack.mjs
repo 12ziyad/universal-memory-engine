@@ -248,13 +248,23 @@ async function packetIdempotencyAudit(slot, packetId) {
 	const rows = await d1Select([
 		`SELECT COUNT(*) AS n FROM source_packets WHERE user_id = ${user} AND id = ${packet}`,
 		`SELECT COUNT(*) AS n FROM source_episodes WHERE user_id = ${user} AND source_packet_id = ${packet}`,
+		`SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ${user} AND source_packet_id = ${packet} AND type = 'extract'`,
+		`SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ${user} AND source_packet_id = ${packet} AND type = 'pass2_rollup'`,
 		`SELECT COUNT(*) AS n FROM memory_jobs WHERE user_id = ${user} AND source_packet_id = ${packet}`,
 		`SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ${user} AND source_packet_id = ${packet}`,
 	]);
 	const counts = rows.map((row) => integer(row.results?.[0]?.n));
-	assert(counts[0] === 1 && counts[1] === 1 && counts[2] === 1 && counts[3] === 1,
+	assert(counts[0] === 1 && counts[1] === 1 && counts[2] === 1 && counts[3] <= 1
+		&& counts[4] === counts[2] + counts[3] && counts[5] === 1,
 		`idempotency convergence failed: ${counts.join("/")}`);
-	return { packets: counts[0], episodes: counts[1], jobs: counts[2], captureRuns: counts[3] };
+	return {
+		packets: counts[0],
+		episodes: counts[1],
+		extractJobs: counts[2],
+		pass2Jobs: counts[3],
+		totalJobs: counts[4],
+		captureRuns: counts[5],
+	};
 }
 
 async function ftsErasureAudit(slots, markers) {
