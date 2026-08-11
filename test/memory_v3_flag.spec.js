@@ -17,6 +17,8 @@ import {
 	memoryV3SourceExpansionEnabled,
 	memoryV3EpisodeFallbackConfig,
 	memoryV3EpisodeFallbackEnabled,
+	memoryV3AdaptiveContextConfig,
+	memoryV3AdaptiveContextEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -220,6 +222,24 @@ describe("V3 episode-fallback experiment flag", () => {
 	});
 });
 
+describe("V3 adaptive-context experiment flag", () => {
+	it("defaults off and requires exact parent V3, E7, and compiler membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "allowlist",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT: "allowlist",
+			ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS: "treatment_user",
+		};
+		expect(memoryV3AdaptiveContextConfig({ ITSUKI_MEMORY_V3: "on" }).mode).toBe("off");
+		expect(memoryV3AdaptiveContextEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3AdaptiveContextEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3AdaptiveContextEnabled(treatment, "treatment_user_suffix")).toBe(false);
+		expect(memoryV3AdaptiveContextEnabled({ ...treatment, ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "off" }, "treatment_user")).toBe(false);
+	});
+});
+
 describe("V3 feature flag: allowlist mode", () => {
 	const allowlistEnv = {
 		ITSUKI_MEMORY_V3: "allowlist",
@@ -306,6 +326,7 @@ describe("V3 feature flag: observability", () => {
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
 			episodeFallback: { mode: "off", allowlistCount: 0 },
+			adaptiveContext: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -324,6 +345,7 @@ describe("V3 feature flag: observability", () => {
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
 			episodeFallback: { mode: "off", allowlistCount: 0 },
+			adaptiveContext: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -348,6 +370,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
 			episodeFallback: { mode: "off", allowlistCount: 0 },
+			adaptiveContext: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });

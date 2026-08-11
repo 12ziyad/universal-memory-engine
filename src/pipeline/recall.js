@@ -14,10 +14,12 @@ import { classifyMessage } from "./trigger.js";
 import { findStagedText } from "./staged_text.js";
 import { rerankEntries } from "./rerank.js";
 import {
+	memoryV3AdaptiveContextEnabled,
 	memoryV3EpisodeFallbackEnabled,
 	memoryV3HybridRetrievalEnabled,
 	memoryV3SourceExpansionEnabled,
 } from "../lib/memory_v3.js";
+import { adaptiveContextPlan, compileAdaptiveContext } from "./adaptive_context.mjs";
 import { orderNodeEvidence, rankHybridAssertions } from "./hybrid_retrieval.mjs";
 import { expandSelectedSourceEvidence } from "./source_expansion.mjs";
 import {
@@ -708,6 +710,32 @@ function episodeFallbackTelemetry(enabled, fallback, context = "") {
 	};
 }
 
+function adaptiveContextTelemetry(enabled, compiled) {
+	if (!enabled || !compiled?.telemetry) return {};
+	const row = compiled.telemetry;
+	return {
+		adaptive_context_used: true,
+		adaptive_context_profile: row.profile,
+		adaptive_context_max_assertions_per_node: Number(row.maxAssertionsPerNode ?? 0),
+		adaptive_context_max_chars: Number(row.maxContextChars ?? 0),
+		adaptive_context_selected_entries: Number(row.selectedEntries ?? 0),
+		adaptive_context_available_assertions: Number(row.availableAssertions ?? 0),
+		adaptive_context_profile_selected_assertions: Number(row.profileSelectedAssertions ?? 0),
+		adaptive_context_intentional_assertion_omissions: Number(row.intentionalAssertionOmissions ?? 0),
+		adaptive_context_exact_duplicates_removed: Number(row.exactDuplicatesRemoved ?? 0),
+		adaptive_context_selected_sources: Number(row.selectedSources ?? 0),
+		adaptive_context_rendered_entries: Number(row.renderedEntries ?? 0),
+		adaptive_context_rendered_assertions: Number(row.renderedAssertions ?? 0),
+		adaptive_context_rendered_sources: Number(row.renderedSources ?? 0),
+		adaptive_context_hard_cap_dropped_entries: Number(row.hardCapDroppedEntries ?? 0),
+		adaptive_context_hard_cap_dropped_assertions: Number(row.hardCapDroppedAssertions ?? 0),
+		adaptive_context_hard_cap_dropped_sources: Number(row.hardCapDroppedSources ?? 0),
+		adaptive_context_clipped_assertions: Number(row.clippedAssertions ?? 0),
+		adaptive_context_lines: Number(row.contextLines ?? 0),
+		adaptive_context_chars: Number(row.contextChars ?? 0),
+	};
+}
+
 function pageItem(page) {
 	return {
 		id: page.id,
@@ -884,6 +912,8 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId);
 	const sourceExpansionEnabled = memoryV3SourceExpansionEnabled(env, userId);
 	const episodeFallbackEnabled = memoryV3EpisodeFallbackEnabled(env, userId);
+	const adaptiveContextEnabled = memoryV3AdaptiveContextEnabled(env, userId);
+	const adaptivePlan = adaptiveContextEnabled ? adaptiveContextPlan(q, plan) : null;
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";
 	const bindings = projectBindings(recallScope, projectId);
@@ -944,7 +974,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 			})
 			: emptyEpisodeFallbackResult();
 		if ((stagedRows.length || fallback.lines.length) && q.length > 0) {
-			const context = buildContext([], plan, stagedRows, [], fallback.lines);
+			const compiled = adaptiveContextEnabled
+				? compileAdaptiveContext(q, { entries: [], plan, staged: stagedRows, fallbackLines: fallback.lines })
+				: null;
+			const context = compiled?.context ?? buildContext([], plan, stagedRows, [], fallback.lines);
 			const internalTrace = opts.internalTrace === true && episodeFallbackEnabled
 				? await internalReadTrace(
 					[],
@@ -967,10 +1000,12 @@ export async function recall(env, config, userId, query, opts = {}) {
 				staged_count: stagedRows.length,
 				compressed: Boolean(context),
 				...episodeFallbackTelemetry(episodeFallbackEnabled, fallback, context),
+				...adaptiveContextTelemetry(adaptiveContextEnabled, compiled),
 				...(internalTrace ? { internal_trace: internalTrace } : {}),
 			};
 		}
-		const empty = emptyRecall(plan);
+		const compiled = adaptiveContextEnabled ? compileAdaptiveContext(q, { entries: [], plan }) : null;
+		const empty = emptyRecall(plan, adaptiveContextTelemetry(adaptiveContextEnabled, compiled));
 		return episodeFallbackEnabled
 			? { ...empty, ...episodeFallbackTelemetry(true, fallback, "") }
 			: empty;
@@ -1196,7 +1231,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 			})
 			: emptyEpisodeFallbackResult();
 		if (stagedRows.length || fallback.lines.length) {
-			const context = buildContext([], plan, stagedRows, [], fallback.lines);
+			const compiled = adaptiveContextEnabled
+				? compileAdaptiveContext(q, { entries: [], plan, staged: stagedRows, fallbackLines: fallback.lines })
+				: null;
+			const context = compiled?.context ?? buildContext([], plan, stagedRows, [], fallback.lines);
 			const internalTrace = opts.internalTrace === true && episodeFallbackEnabled
 				? await internalReadTrace(
 					[],
@@ -1219,10 +1257,16 @@ export async function recall(env, config, userId, query, opts = {}) {
 				staged_count: stagedRows.length,
 				compressed: Boolean(context),
 				...episodeFallbackTelemetry(episodeFallbackEnabled, fallback, context),
+				...adaptiveContextTelemetry(adaptiveContextEnabled, compiled),
 				...(internalTrace ? { internal_trace: internalTrace } : {}),
 			};
 		}
-		const empty = emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+		const compiled = adaptiveContextEnabled ? compileAdaptiveContext(q, { entries: [], plan }) : null;
+		const empty = emptyRecall(plan, {
+			lexical_used: lexicalUsed,
+			vector_used: vectorUsed,
+			...adaptiveContextTelemetry(adaptiveContextEnabled, compiled),
+		});
 		return episodeFallbackEnabled
 			? { ...empty, ...episodeFallbackTelemetry(true, fallback, "") }
 			: empty;
@@ -1265,7 +1309,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 
 	const sourceExpansion = sourceExpansionEnabled
 		? await expandSelectedSourceEvidence(env, userId, entries, {
-			maxLineItems: plan.maxLineItems,
+			maxLineItems: adaptivePlan?.maxAssertionsPerNode ?? plan.maxLineItems,
 			recallScope,
 			projectId,
 		})
@@ -1283,12 +1327,23 @@ export async function recall(env, config, userId, query, opts = {}) {
 		: emptyEpisodeFallbackResult();
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
-	const context = buildContext(entries, plan, stagedRows, sourceExpansion.lines, episodeFallback.lines);
+	const compiled = adaptiveContextEnabled
+		? compileAdaptiveContext(q, {
+			entries,
+			plan,
+			staged: stagedRows,
+			sourceExpansion,
+			fallbackLines: episodeFallback.lines,
+		})
+		: null;
+	const context = compiled?.context
+		?? buildContext(entries, plan, stagedRows, sourceExpansion.lines, episodeFallback.lines);
 	const items = entries.map(itemSummary);
 	const hybridCandidateKeys = new Set(hybrid.candidates.map((candidate) => candidate.key));
+	const renderedLineItems = adaptivePlan?.maxAssertionsPerNode ?? plan.maxLineItems;
 	const hybridOrderedIds = entries
 		.filter((entry) => entry.type === "node")
-		.flatMap((entry) => (entry.item.evidence ?? []).slice(0, plan.maxLineItems).map((evidence) => evidence.key))
+		.flatMap((entry) => (entry.item.evidence ?? []).slice(0, renderedLineItems).map((evidence) => evidence.key))
 		.filter((key) => hybridCandidateKeys.has(key));
 	const internalTrace = opts.internalTrace === true
 		? await internalReadTrace(
@@ -1302,6 +1357,12 @@ export async function recall(env, config, userId, query, opts = {}) {
 			hybridEnabled ? {
 				hybrid_assertion_candidate_ids: hybrid.candidates.map((candidate) => candidate.key),
 				hybrid_assertion_ordered_ids: hybridOrderedIds,
+				...(adaptiveContextEnabled ? {
+					adaptive_context_profile_selected_assertion_ids: compiled?.trace?.profileSelectedAssertionIds ?? [],
+					adaptive_context_rendered_assertion_ids: compiled?.trace?.renderedAssertionIds ?? [],
+					adaptive_context_rendered_entry_ids: compiled?.trace?.renderedEntryIds ?? [],
+					adaptive_context_rendered_episode_ids: compiled?.trace?.renderedEpisodeIds ?? [],
+				} : {}),
 				...(sourceExpansionEnabled ? {
 					source_expansion_assertion_ids: sourceExpansion.assertionIds,
 					source_expansion_episode_ids: sourceExpansion.episodeIds,
@@ -1346,6 +1407,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 			source_expansion_failed: sourceExpansion.failed,
 		} : {}),
 		...episodeFallbackTelemetry(episodeFallbackEnabled, episodeFallback, context),
+		...adaptiveContextTelemetry(adaptiveContextEnabled, compiled),
 		rerank_used: rerank.used,
 		rerank_scored: rerank.scored,
 		rerank_keep: rerank.keep,

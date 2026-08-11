@@ -132,7 +132,9 @@
 		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION": "off",
 		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS": "",
 		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK": "off",
-		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS": ""
+		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS": "",
+		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT": "off",
+		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS": ""
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

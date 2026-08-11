@@ -35,6 +35,7 @@ describe("GET /health", () => {
 				hybridRetrieval: { mode: "off", allowlistCount: 0 },
 				sourceExpansion: { mode: "off", allowlistCount: 0 },
 				episodeFallback: { mode: "off", allowlistCount: 0 },
+				adaptiveContext: { mode: "off", allowlistCount: 0 },
 			},
 		});
 	});

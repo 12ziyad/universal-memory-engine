@@ -186,6 +186,11 @@ describe("E9A exact source expansion", () => {
 		expect(result.lines[0]).toContain("Rita said she moved to Lisbon");
 		expect(result.lines.join(" ")).not.toContain("Cross-tenant canary");
 		expect(result.episodeIds).toEqual([seeded.episodeId]);
+		expect(result.records).toEqual([expect.objectContaining({
+			episodeId: seeded.episodeId,
+			assertionKeys: [`slice:${objectId}`],
+			sourceTime: Date.parse("2024-03-04T09:30:00Z"),
+		})]);
 		expect(result).toMatchObject({ assertions: 1, linkedAssertions: 1, episodes: 1, failed: false });
 	});
 

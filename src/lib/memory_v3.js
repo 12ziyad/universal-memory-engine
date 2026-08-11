@@ -239,6 +239,31 @@ export function memoryV3EpisodeFallbackEnabled(env, userId) {
 }
 
 /**
+ * E10 changes only how E7-selected evidence is rendered. It is nested directly
+ * under E7 so historical states without E9A projections can run the causal
+ * context-only confirmation, while accepted V3 states can still combine it
+ * with independently gated source expansion.
+ */
+export function memoryV3AdaptiveContextConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3AdaptiveContextEnabled(env, userId) {
+	if (!memoryV3HybridRetrievalEnabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3AdaptiveContextConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -251,6 +276,7 @@ export function memoryV3Status(env) {
 	const hybridRetrieval = memoryV3HybridRetrievalConfig(env);
 	const sourceExpansion = memoryV3SourceExpansionConfig(env);
 	const episodeFallback = memoryV3EpisodeFallbackConfig(env);
+	const adaptiveContext = memoryV3AdaptiveContextConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
@@ -262,5 +288,6 @@ export function memoryV3Status(env) {
 		hybridRetrieval: { mode: hybridRetrieval.mode, allowlistCount: hybridRetrieval.allowlistCount },
 		sourceExpansion: { mode: sourceExpansion.mode, allowlistCount: sourceExpansion.allowlistCount },
 		episodeFallback: { mode: episodeFallback.mode, allowlistCount: episodeFallback.allowlistCount },
+		adaptiveContext: { mode: adaptiveContext.mode, allowlistCount: adaptiveContext.allowlistCount },
 	};
 }

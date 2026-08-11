@@ -17,6 +17,7 @@ const OBJECT_KINDS = new Set(["slice", "event", "edge"]);
 function emptyResult(overrides = {}) {
 	return {
 		lines: [],
+		records: [],
 		assertions: 0,
 		linkedAssertions: 0,
 		episodes: 0,
@@ -162,22 +163,37 @@ export async function expandSelectedSourceEvidence(env, userId, entries = [], {
 			.map((assertion) => assertion.key);
 		const episodeIds = [];
 		const lines = [];
-		const seenEpisodes = new Set();
+		const records = [];
+		const byEpisode = new Map();
 		for (const assertion of assertions) {
 			const row = byAssertion.get(assertion.key);
 			if (!row) continue;
 			const episodeId = String(row.episode_id ?? "");
-			if (!episodeId || seenEpisodes.has(episodeId)) continue;
+			if (!episodeId) continue;
+			const existing = byEpisode.get(episodeId);
+			if (existing) {
+				existing.assertionKeys.push(assertion.key);
+				continue;
+			}
 			if (lines.length >= SOURCE_EXPANSION_EPISODE_MAX) break;
 			const rescrubbed = scrubText(row.text).text.replace(/\s+/g, " ").trim();
 			if (!rescrubbed) continue;
 			const sourceText = clipCodePoints(rescrubbed, SOURCE_EXPANSION_TEXT_CODEPOINT_MAX);
-			lines.push(`Source evidence [${timestampLabel(row)}; ${safeRole(row.role)}]: ${sourceText}`);
-			seenEpisodes.add(episodeId);
+			const line = `Source evidence [${timestampLabel(row)}; ${safeRole(row.role)}]: ${sourceText}`;
+			const record = {
+				episodeId,
+				assertionKeys: [assertion.key],
+				line,
+				sourceTime: validTimestamp(row?.source_time)?.getTime() ?? null,
+			};
+			lines.push(line);
+			records.push(record);
+			byEpisode.set(episodeId, record);
 			episodeIds.push(episodeId);
 		}
 		return emptyResult({
 			lines,
+			records,
 			assertions: assertions.length,
 			linkedAssertions: linkedAssertionIds.length,
 			episodes: lines.length,
