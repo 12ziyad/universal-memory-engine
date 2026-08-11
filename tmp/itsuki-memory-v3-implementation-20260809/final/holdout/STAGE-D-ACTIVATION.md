@@ -23,5 +23,18 @@ four `.spec.js` files were then run and passed 51/51.
 
 ## Production apply
 
-Pending the commit/push boundary. This section is updated with the exact Worker
-version, deployment id, propagation checks and live health proof after apply.
+- Config commit/origin: `efdc222eb8e6a8b0769b9d1f85a3124907937781`.
+- Worker version: `0dc9164e-cf44-4cf2-a61c-58ab598882e2`.
+- Deployment id: `821ade3f-dbc5-40f3-b60c-857907530687`, 100% traffic.
+- Uncached propagation: 10/10 `itsuki.app` and 10/10
+  `uml.gpmai.workers.dev`; all exact modes/counts matched.
+- Resolver proof against the exact deployed config: treatment = parent +
+  capture + projection + E7 + E9A; control = parent only; non-allowlisted normal
+  account = all V3 lanes false. Rejected lanes are false in every cell.
+- Migration: none. Binding change: none. Product-code change: none.
+- No inference occurred during deployment or propagation.
+
+The first serial PowerShell propagation transport exceeded its 120-second local
+timeout and produced no accepted evidence. It was replaced with bounded curl
+transport without changing the 10-per-domain assertions; the replacement is
+the valid 20/20 proof.

@@ -4,9 +4,9 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage D harness and gates frozen; treatment-only production activation next",
-  "latest_verified_head": "3565b01bad482a06633bb03ce1b91c4920e51ada",
-  "latest_verified_production": "052d9b68-b131-45cb-b792-1804c86a50d6",
+  "current_phase": "Stage D treatment cohort live and isolated; three-seed holdout execution next",
+  "latest_verified_head": "efdc222eb8e6a8b0769b9d1f85a3124907937781",
+  "latest_verified_production": "0dc9164e-cf44-4cf2-a61c-58ab598882e2",
   "latest_verified_burn": 1914249,
   "stage_d_preflight": {
     "status": "FROZEN_NO_INFERENCE",
@@ -17,7 +17,11 @@
     "protected_final_reserve_neurons": 500000,
     "lock_contender_exit": 73,
     "lock_artifact_inventory_unchanged": true,
-    "harness_manifest": "final/holdout/harness-manifest.json"
+    "harness_manifest": "final/holdout/harness-manifest.json",
+    "deployment_id": "821ade3f-dbc5-40f3-b60c-857907530687",
+    "propagation_passed": 20,
+    "propagation_checked": 20,
+    "routing_isolated": true
   },
   "phases": [
     {

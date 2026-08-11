@@ -24,9 +24,14 @@
   500,000-neuron final LoCoMo reserve remains protected.
 - Durable files: `final/holdout/STAGE-D-HOLDOUT-PREREGISTRATION.md`,
   `final/holdout/harness-manifest.json`, `final/holdout/LOCK-PROOF.json` and
-  `final/holdout/harness/`. Exact next action: commit/push this no-inference
-  boundary, activate only the treatment cohort, prove propagation/isolation,
-  then run the three seeds under the global lock.
+  `final/holdout/harness/`.
+- Activation is now live from commit/origin `efdc222eb8e6a8b0769b9d1f85a3124907937781`:
+  Worker `0dc9164e-cf44-4cf2-a61c-58ab598882e2`, deployment
+  `821ade3f-dbc5-40f3-b60c-857907530687`, 100% traffic. Propagation is 20/20;
+  treatment/control/normal routing matches the frozen nested contract. No
+  migration, binding, inference or product-code change occurred.
+- Exact next action: rerun billing preflight/burn, prove clean slots/lock/process
+  state, then run the three Stage D seeds under the global lock.
 
 ## 2026-08-11 V3-D13 CLOSED / exact Stage C PASS / Stage D next
 
