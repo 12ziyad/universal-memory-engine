@@ -2,6 +2,7 @@ import { newId } from "../lib/ids.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeSourceTime, parseSourceTime, persistedSourceTime } from "../lib/source_time.mjs";
+import { rulesAllowText } from "./rules.js";
 import {
 	canonicalizeSourceEvent,
 	normalizeSourceEventTrace,
@@ -15,6 +16,7 @@ const PREVIEW_LIMIT = 900;
 const SNIPPET_LIMIT = 900;
 const SCOPED_IDEMPOTENCY_PREFIX = "itsuki-scope:v1:";
 const EXTRACTION_CONTEXT_SCHEMA = "itsuki.extract-context/v1";
+export const ERASED_SOURCE_CONTENT_HASH = "itsuki-erased-source/v1";
 
 function cleanText(value, fallback = "") {
 	const text = String(value ?? fallback).replace(/\s+/g, " ").trim();
@@ -487,6 +489,41 @@ export async function normalizeSourcePacket(userId, input = {}) {
 			delivery,
 			messages,
 		},
+	};
+}
+
+/**
+ * Remove text that the resolved admission rules refuse before a V3 source
+ * packet becomes durable. The full scrubbed messages remain in memory for the
+ * deterministic gates to evaluate, but the audit row may retain snippets only
+ * for messages that the same rules admit to searchable source episodes.
+ *
+ * The packet content hash deliberately remains the hash of the complete
+ * scrubbed request: idempotency still binds the caller's exact payload even
+ * when one message is excluded. A cryptographic identity is not a recoverable
+ * source copy; previews and provenance snippets are.
+ */
+export function sourcePacketWithAdmissionRules(packet, messages = [], rules = null) {
+	if (!packet || !rules) return packet;
+	const permitted = (messages ?? []).map((message) => rulesAllowText(rules, message?.content));
+	if (permitted.every(Boolean)) return packet;
+	const allowedMessages = (messages ?? []).filter((_, index) => permitted[index]);
+	const rawMeta = parseRecord(packet.raw_meta_json);
+	const storedMessages = Array.isArray(rawMeta.messages) ? rawMeta.messages : [];
+	const nextRawMeta = {
+		...rawMeta,
+		messages: storedMessages.filter((_, index) => permitted[index]),
+	};
+	const sourceEventTrace = sourceEventTraceFromMessages(allowedMessages);
+	if (sourceEventTrace) nextRawMeta.source_event_trace = sourceEventTrace;
+	else delete nextRawMeta.source_event_trace;
+	return {
+		...packet,
+		content_preview: allowedMessages.length
+			? clamp(allowedMessages.map((message) => message.content).join("\n"))
+			: null,
+		message_count: allowedMessages.length,
+		raw_meta_json: JSON.stringify(nextRawMeta),
 	};
 }
 

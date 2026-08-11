@@ -284,6 +284,44 @@ describe("episodes are not a privacy bypass", () => {
 		expect(await findSourceEpisodes(env, userId, ["salary"])).toEqual([]);
 	});
 
+	it("does not retain rules-excluded plaintext in the V3 source packet audit row", async () => {
+		const userId = nextUser("packet_rules");
+		const suffix = String(Date.now() % 1_000_000);
+		const forbidden = `forbiddencedar${suffix}`;
+		const allowed = `allowedwillow${suffix}`;
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(
+			new Request("https://itsuki.app/v1/ingest", {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+				body: JSON.stringify({
+					userId,
+					idempotencyKey: `packet-rules-${crypto.randomUUID()}`,
+					flush: true,
+					rules: { excludes: [forbidden] },
+					messages: [
+						{ id: "allowed", role: "user", content: `Remember ${allowed}.` },
+						{ id: "forbidden", role: "user", content: `Never retain ${forbidden}.` },
+					],
+					_test: { llmResponse: { objects: [], notes: "none" } },
+				}),
+			}),
+			V3(userId),
+			ctx,
+		);
+		await waitOnExecutionContext(ctx);
+		expect(response.status).toBe(200);
+
+		const packet = await env.DB.prepare(
+			"SELECT content_preview, raw_meta_json, message_count FROM source_packets WHERE user_id = ?",
+		).bind(userId).first();
+		const persisted = `${packet?.content_preview ?? ""}\n${packet?.raw_meta_json ?? ""}`;
+		expect(persisted).toContain(allowed);
+		expect(persisted).not.toContain(forbidden);
+		expect(packet?.message_count).toBe(1);
+		expect(JSON.parse(packet?.raw_meta_json ?? "{}").messages).toHaveLength(1);
+	});
+
 	it("writes NOTHING when the rules cannot be loaded, rather than writing everything", async () => {
 		const userId = nextUser("failclosed");
 		const brokenEnv = {
@@ -411,10 +449,22 @@ describe("episodes are erased, not tombstoned", () => {
 			"SELECT status FROM memory_jobs WHERE user_id = ? AND idempotency_key = ?",
 		).bind(userId, idempotencyKey).first();
 		expect(["enriched", "completed"]).toContain(terminal?.status);
+		const packetBefore = await env.DB.prepare(
+			"SELECT content_hash, content_preview, raw_meta_json, message_count FROM source_packets WHERE user_id = ? AND idempotency_key = ?",
+		).bind(userId, idempotencyKey).first();
+		expect(`${packetBefore?.content_preview}\n${packetBefore?.raw_meta_json}`).toContain("Keep this source evidence");
 
 		const erased = await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
 		expect(erased.ok).toBe(true);
 		expect(await countSourceEpisodes(env, userId)).toBe(0);
+		const packetAfter = await env.DB.prepare(
+			"SELECT content_hash, content_preview, raw_meta_json, message_count FROM source_packets WHERE user_id = ? AND idempotency_key = ?",
+		).bind(userId, idempotencyKey).first();
+		expect(packetAfter?.content_preview).toBeNull();
+		expect(packetAfter?.raw_meta_json).toBe("{}");
+		expect(packetAfter?.message_count).toBe(0);
+		expect(packetAfter?.content_hash).not.toBe(packetBefore?.content_hash);
+		expect(JSON.stringify(packetAfter)).not.toContain("Keep this source evidence");
 
 		const replayCtx = createExecutionContext();
 		const replay = await worker.fetch(request(), V3(userId), replayCtx);

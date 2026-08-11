@@ -1,5 +1,34 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 V3-D10 HIGH repaired locally / production lifecycle next
+
+- The replacement Stage B run is **INVALID / UNSCORED** and stopped fail-closed
+  at the first rules/secret persistence audit: synthetic rules-exclusion marker
+  index 9 survived only in `source_packets`; the searchable episode, atom,
+  graph, staging, recall and export boundaries were clean.
+- Root cause: the legacy packet preview/provenance row was written after secret
+  scrubbing but before rules admission. Unscoped erasure removed live memory
+  but intentionally retained that packet unchanged as the D06 anti-resurrection
+  replay fence. This is V3-D10 HIGH, not a harness mismatch.
+- Failing-first: `source_episodes.spec.js` passed 29/31 and failed the exact
+  pre-erasure rules-leak and post-erasure plaintext assertions.
+- Fix: V3 resolves/fails closed on admission rules before packet durability;
+  packet preview/provenance contains only admitted messages. Confirmed erasure
+  strips all packet plaintext and replaces its request digest with a non-content
+  sentinel while retaining only the minimal idempotency/context fence needed
+  to return named `409 source_write_erased` and drain canceled DO work safely.
+- Exact and regression gates: source episode suite 31/31; focused rules,
+  replay, delete, race, crash and ingest set 15 files / 201 tests; full Worker
+  110 files / 1,310 tests; unit/cross-door 33 files / 539 pass + one intentional
+  skip; npm audit zero; Wrangler 4.120.0 dry deploy pass.
+- Pre-fix production cleanup erased all live episode/semantic/graph/staging
+  state and left no non-terminal jobs, but cannot close D10 because the old
+  deployed erasure path still retains packet plaintext. Deploy, re-run erasure,
+  prove packet content zero, and reattack the exact rules/replay contract before
+  resuming Stage B.
+- No migration or binding change is required. Owner `AGENTS.md` remains
+  untouched. Production normal users remain outside every active V3 lane.
+
 ## 2026-08-11 Final Stage B invalid run closed / replacement ready
 
 - Final Stage B production activation is deployed at commit/origin

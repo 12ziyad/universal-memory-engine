@@ -1,0 +1,18 @@
+ITSUKI_API_KEY: LOADED
+  ok  @cf/qwen/qwen3-30b-a3b-fp8                   partner=false  Text Generation
+  ok  @cf/openai/gpt-oss-120b                      partner=false  Text Generation
+  ok  @cf/meta/llama-3.3-70b-instruct-fp8-fast     partner=false  Text Generation
+  ok  @cf/baai/bge-base-en-v1.5                    partner=false  Text Embeddings
+  ok  @cf/meta/llama-3.1-8b-instruct-fp8           partner=false  Text Generation
+  ok  @cf/meta/llama-3.2-1b-instruct               partner=false  Text Generation
+  ok  @cf/baai/bge-reranker-base                   partner=false  Text Classification
+  ok  @cf/openai/gpt-oss-20b                       partner=false  Text Generation
+  ok  @cf/meta/llama-4-scout-17b-16e-instruct      partner=false  Text Generation
+  ok  @cf/google/gemma-4-26b-a4b-it                partner=false  Text Generation
+  ok  @cf/zai-org/glm-4.7-flash                    partner=false  Text Generation
+
+BILLING GUARD PASS — 11 models, all first-party, no AI Gateway.
+stage-b preclean: PASS
+stage-b concurrent subtenant ingest: PASS
+stage-b same-key race: PASS
+stage-b same-tenant/project/index-lag ingest: PASS

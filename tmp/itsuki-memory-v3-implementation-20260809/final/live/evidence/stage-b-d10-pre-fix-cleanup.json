@@ -1,0 +1,20 @@
+{
+  "schema": "itsuki.v3-final-stage-b-d10-pre-fix-cleanup/v1",
+  "at": "2026-08-11T15:41:24.274Z",
+  "classification": "PARTIAL_PRE_FIX_CLEANUP_NOT_D10_CLOSURE",
+  "liveMemoryClean": true,
+  "packetPlaintext": "KNOWN_SURVIVOR_PENDING_FIXED_ERASURE",
+  "counts": {
+    "episodes": 0,
+    "atomic_candidates": 0,
+    "atomic_runs": 0,
+    "projections": 0,
+    "nodes": 0,
+    "slices": 0,
+    "events": 0,
+    "edges": 0,
+    "pages": 0,
+    "live_staged": 0,
+    "nonterminal_jobs": 0
+  }
+}

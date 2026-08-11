@@ -15,6 +15,7 @@ import {
 	deleteSourceEpisodes,
 } from "./episodes.js";
 import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
+import { ERASED_SOURCE_CONTENT_HASH } from "./source.js";
 
 function parseJsonArray(value) {
 	try {
@@ -1019,6 +1020,7 @@ export async function bulkDeleteBySource(env, userId, {
 	let cancelledRuns = 0;
 	let cancelledSourceJobs = 0;
 	let cancelledAtomicRuns = 0;
+	let sourcePacketsMinimized = 0;
 	if (erasure) {
 		// The deletion barrier FIRST, before any row is touched: from this
 		// instant, no extraction whose work was accepted earlier can commit —
@@ -1030,6 +1032,22 @@ export async function bulkDeleteBySource(env, userId, {
 				barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at),
 				by = excluded.by`,
 		).bind(userId, now, now, by ?? null).run();
+		// Source packets remain as the minimal idempotency/replay fence that keeps
+		// an erased terminal write from receiving an acceptance-shaped 200. They
+		// must not remain a shadow archive: remove every plaintext preview and
+		// provenance snippet accepted at or before this barrier, replace the
+		// request digest with a non-content sentinel, and clear user-supplied scope
+		// metadata. A genuinely new post-barrier packet does not match this sweep.
+		const minimized = await env.DB.prepare(
+			`UPDATE source_packets SET
+				content_hash = ?, content_preview = NULL, message_count = 0, raw_meta_json = '{}',
+				source_id = NULL, source_role = NULL, topic = NULL,
+				project_name = NULL, external_user_id = NULL,
+				source_time = NULL, source_time_offset_minutes = NULL, source_time_precision = NULL,
+				updated_at = ?
+			 WHERE user_id = ? AND COALESCE(received_at, created_at, 0) <= ?`,
+		).bind(ERASED_SOURCE_CONTENT_HASH, now, userId, now).run();
+		sourcePacketsMinimized = Number(minimized.meta?.changes ?? 0);
 		// E3's `awaiting_source` job deliberately has no Durable Object entry yet:
 		// source preservation must finish before handoff. The DO therefore cannot
 		// settle it during erasure, so the D1 owner closes it here after the barrier
@@ -1226,6 +1244,7 @@ export async function bulkDeleteBySource(env, userId, {
 			cancelled_runs: cancelledRuns,
 			cancelled_source_jobs: cancelledSourceJobs,
 			cancelled_atomic_runs: cancelledAtomicRuns,
+			source_packets_minimized: sourcePacketsMinimized,
 		} : {}),
 		pending_jobs: pendingJobs,
 		...(pendingJobs > 0

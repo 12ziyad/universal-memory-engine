@@ -19,10 +19,12 @@
  */
 
 import {
+	ERASED_SOURCE_CONTENT_HASH,
 	hashText,
 	normalizeSourcePacket,
 	sourceContextIdentity,
 	sourceMeta,
+	sourcePacketWithAdmissionRules,
 	storeSourcePacket,
 } from "./source.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
@@ -33,6 +35,7 @@ import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scop
 import { stageMemoryText } from "./staged_text.js";
 import { writeSourceEpisodes } from "./episodes.js";
 import { memoryV3Enabled } from "../lib/memory_v3.js";
+import { resolveAdmissionRules } from "./admission.js";
 
 // 1.7 backpressure: never accept unbounded work you can't see.
 const MAX_QUEUE_DEPTH = 200;
@@ -73,6 +76,9 @@ async function findIdempotencyState(env, userId, idempotencyKey, contentHash) {
 	// never turn it into a partial side effect followed by an opaque 500.
 	if (job && job.type !== "extract") return { conflict: true, sourcePacket, job };
 	if (!sourcePacket) return job ? { conflict: true, sourcePacket: null, job } : null;
+	if (sourcePacket.content_hash === ERASED_SOURCE_CONTENT_HASH) {
+		return { erased: true, sourcePacket, job };
+	}
 	if (sourcePacket.content_hash !== contentHash) return { conflict: true, sourcePacket, job };
 	if (job?.source_packet_id && job.source_packet_id !== sourcePacket.id) {
 		return { conflict: true, sourcePacket, job };
@@ -239,6 +245,24 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			sourcePacket: null,
 		};
 	}
+	const sourceEpisodesRequired = memoryV3Enabled(env, userId);
+	let admissionRules = pipelineOverrides.rules;
+	if (sourceEpisodesRequired) {
+		try {
+			admissionRules = await resolveAdmissionRules(env, userId, pipelineOverrides.rules);
+		} catch (error) {
+			console.warn("source packet rules load failed:", error?.message ?? error);
+			return {
+				episodePersistenceFailed: true,
+				episodeOutcome: "rules_unavailable",
+				retryable: true,
+				jobId: null,
+				jobStatus: null,
+				sourcePacketId: null,
+				summary: "Memory rules could not be verified, so no source packet or memory was stored. Retry safely.",
+			};
+		}
+	}
 	const normalized = await normalizeSourcePacket(userId, {
 		type: opts.sourceType ?? "message_batch",
 		sourceMode: opts.sourceMode ?? overrides.source ?? "ingest",
@@ -251,6 +275,9 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		sourceTime: opts.sourceTime,
 		scope: memoryScope,
 	});
+	if (sourceEpisodesRequired) {
+		normalized.packet = sourcePacketWithAdmissionRules(normalized.packet, normalized.messages, admissionRules);
+	}
 
 	// Permanent exact replay returns the original receipt; conflicting content
 	// never mutates the packet or reaches the queue.
@@ -260,6 +287,15 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		normalized.packet.idempotency_key,
 		normalized.packet.content_hash,
 	);
+	if (replay?.erased) {
+		return {
+			sourceEpisodeErased: true,
+			jobId: replay.job?.id ?? null,
+			jobStatus: replay.job?.status ?? "failed",
+			sourcePacketId: replay.sourcePacket?.id ?? null,
+			summary: "This accepted write was erased and cannot be replayed. Send a genuinely new write if you want to remember it again.",
+		};
+	}
 	if (replay?.conflict) {
 		return {
 			idempotencyConflict: true,
@@ -268,7 +304,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			summary: "That idempotency key is already bound to different content or a different save lane. Send the original request or use a new key.",
 		};
 	}
-	if (replay?.job && memoryV3Enabled(env, userId) && await replayPredatesErasure(env, userId, replay)) {
+	if (replay?.job && sourceEpisodesRequired && await replayPredatesErasure(env, userId, replay)) {
 		return {
 			sourceEpisodeErased: true,
 			jobId: replay.job.id,
@@ -339,6 +375,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	const { contextKey } = await sourceContextIdentity(userId, { sourcePacket });
 	const extractionOverrides = {
 		...pipelineOverrides,
+		...(sourceEpisodesRequired ? { rules: admissionRules } : {}),
 		meta: {
 			...(pipelineOverrides.meta ?? {}),
 			...sourceMeta(sourcePacket),
@@ -348,7 +385,6 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// 1.1 job row before the 200 — refusing to accept work without a durable
 	// record is the whole point, so a failed insert fails the request.
 	const userMsgIds = normalized.messages.filter((m) => m.role === "user").map((m) => m.id);
-	const sourceEpisodesRequired = memoryV3Enabled(env, userId);
 	const jobClaim = await claimIngestMemoryJob(env, userId, {
 		type: "extract",
 		status: sourceEpisodesRequired ? "awaiting_source" : "queued",
@@ -420,7 +456,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			messages: normalized.messages,
 			projectId,
 			projectName,
-			rules: pipelineOverrides.rules,
+			rules: admissionRules,
 			acceptedAt: sourcePacket?.received_at ?? sourcePacket?.created_at ?? null,
 			required: true,
 		});
@@ -475,7 +511,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			messages: normalized.messages,
 			projectId,
 			projectName,
-			rules: pipelineOverrides.rules,
+			rules: admissionRules,
 		});
 		// Episode durability was already verified above. Staging remains a
 		// best-effort, short-lived read-your-writes bridge.

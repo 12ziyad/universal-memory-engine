@@ -1,5 +1,11 @@
 # V3 DEFECT LEDGER
 
+## Final Stage B product finding (2026-08-11)
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-D10** | **HIGH** | **PRODUCT PRIVACY / ERASURE DEFECT** | Request-scoped rules correctly blocked a synthetic forbidden marker from episodes, FTS, semantic candidates, graph state, staging, recall and export, but `normalizeSourcePacket` had already copied every scrubbed message into `source_packets.content_preview` and `raw_meta_json` before rules admission. Confirmed erasure intentionally retained that packet as an idempotency/replay fence without minimizing its plaintext, so the audit row was a non-searchable but durable shadow copy. | **FIXED LOCALLY / PRODUCTION REATTACK PENDING** - failing-first 29/31 exposed both pre-erasure rule leakage and post-erasure plaintext; V3 now resolves rules before any packet write, persists snippets only for admitted messages, and confirmed erasure converts pre-barrier packets to content-free replay fences while preserving `409 source_write_erased`; exact 31/31, focused privacy/replay/delete 201/201, full Worker 1,310/1,310, unit/cross-door 539/539 + one intentional skip, audit zero and Wrangler dry deploy pass. |
+
 ## Final Stage B harness finding (2026-08-11)
 
 | id | sev | classification | finding | status |

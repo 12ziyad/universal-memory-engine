@@ -277,12 +277,14 @@ async function ftsErasureAudit(slots, markers) {
 		 (SELECT COUNT(*) FROM manual_search_fts f JOIN manual_search_profiles p ON p.rowid = f.rowid
 		  WHERE p.user_id IN (${ids})
 		  AND instr(lower(coalesce(f.identity_text,'') || ' ' || coalesce(f.semantic_text,'') || ' ' || coalesce(f.context_text,'')), lower(m.needle)) > 0) AS semantic_fts
+		 ,(SELECT COUNT(*) FROM source_packets p WHERE p.user_id IN (${ids})
+		  AND instr(lower(coalesce(p.content_preview,'') || ' ' || coalesce(p.raw_meta_json,'')), lower(m.needle)) > 0) AS packet_content
 		FROM m ORDER BY CAST(idx AS INTEGER)`]);
 	const audited = result.results ?? [];
 	assert(audited.length === markers.length, "FTS erasure accounting mismatch");
-	assert(audited.every((row) => integer(row.episode_fts) === 0 && integer(row.semantic_fts) === 0),
-		"erased marker survived FTS");
-	return { markers: audited.length, episodeFtsHits: 0, semanticFtsHits: 0 };
+	assert(audited.every((row) => integer(row.episode_fts) === 0 && integer(row.semantic_fts) === 0
+		&& integer(row.packet_content) === 0), "erased marker survived FTS/source-packet minimization");
+	return { markers: audited.length, episodeFtsHits: 0, semanticFtsHits: 0, packetContentHits: 0 };
 }
 
 async function unauthorizedWriteProbe(slot, invalidMarker) {
