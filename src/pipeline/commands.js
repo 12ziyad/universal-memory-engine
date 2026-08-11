@@ -682,8 +682,14 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		receipt_id: stored.receipt_id,
 		sourcePacket,
 		counts: { received: 1 },
-			extra: {
+		extra: {
 			...recallDetails,
+			// The durable receipt is intentionally immutable per source packet. An
+			// exact repeated query therefore returns the first receipt's latency,
+			// which is audit history rather than this invocation's timing. Expose the
+			// current measurement separately so callers and quality gates never read
+			// stale performance telemetry.
+			recall_latency_ms: latencyMs,
 			recall_scope: input.recallScope ?? "global",
 			processing_note: processingNote,
 			recall_mode: result.recall_mode,

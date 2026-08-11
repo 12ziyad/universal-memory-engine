@@ -198,3 +198,21 @@ describe("BF-2 at the HTTP door", () => {
 		expect(result.body.items.length).toBeLessThanOrEqual(8);
 	});
 });
+
+describe("recall latency observability", () => {
+	it("reports the current invocation latency even when the durable recall receipt is idempotently reused", async () => {
+		const userId = `${USER}_current_latency`;
+		await seedGraph(userId, 3);
+		const first = await recallOnce(userId, "Falcon project", {});
+		const second = await recallOnce(userId, "Falcon project", {});
+
+		// The durable receipt is intentionally immutable for the same source
+		// packet. A separate response field must therefore carry this invocation's
+		// timing instead of replaying the first request's receipt latency forever.
+		expect(second.receipt_id).toBe(first.receipt_id);
+		expect(Number.isFinite(first.recall_latency_ms)).toBe(true);
+		expect(Number.isFinite(second.recall_latency_ms)).toBe(true);
+		expect(first.recall_latency_ms).toBeGreaterThanOrEqual(0);
+		expect(second.recall_latency_ms).toBeGreaterThanOrEqual(0);
+	});
+});
