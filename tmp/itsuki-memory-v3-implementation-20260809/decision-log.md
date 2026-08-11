@@ -396,4 +396,5 @@ broad recall took 510.978 seconds. **Decision:** preserve E7's quality behavior
 and graph, but move scope and candidate limits into D1 and hydrate only a fixed
 evidence closure. The repaired 100k cell took 2.596 seconds, loaded at most 600
 node/slice/edge rows, and preserved scope, source expansion, output bounds and
-erasure. Live reattack remains mandatory before closing V3-D13.
+erasure. The subsequent exact production reattack returned bounded telemetry
+with zero failures and unchanged safe flags/cleanup, closing V3-D13.

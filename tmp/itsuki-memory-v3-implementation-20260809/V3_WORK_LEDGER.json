@@ -4,10 +4,10 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "V3-D13 implemented and exact Stage C PASS; commit/deploy/production reattack next",
-  "latest_verified_head": "85a10d0309556c28658184822b769a0c0f4c6415",
-  "latest_verified_production": "2cb1f213-0f3f-4cbc-87e1-e5d04ddabb17",
-  "latest_verified_burn": 1914246,
+  "current_phase": "Stage C complete; V3-D13 HIGH closed; Stage D repeated frozen holdout next",
+  "latest_verified_head": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+  "latest_verified_production": "052d9b68-b131-45cb-b792-1804c86a50d6",
+  "latest_verified_burn": 1914249,
   "phases": [
     {
       "id": "A0",
@@ -395,7 +395,7 @@
     {
       "id": "FINAL-C",
       "title": "Local long-history scale and V3-D13 bounded-recall lifecycle",
-      "status": "implementation_complete_deploy_next",
+      "status": "completed_v3_d13_closed",
       "outputs": [
         "final/scale/vitest.config.mjs",
         "final/scale/scale.spec.js",
@@ -410,7 +410,13 @@
         "final/scale/evidence/stage-c-scale-final.json (INVALID/UNSCORED)",
         "final/scale/evidence/stage-c-scale-repaired.json (authoritative PASS)",
         "final/scale/evidence/d13-worker-gate.json",
-        "final/scale/evidence/d13-unit-gate.json"
+        "final/scale/evidence/d13-unit-gate.json",
+        "final/scale/production-reattack.ps1",
+        "final/scale/V3-D13-PRODUCTION.md",
+        "final/scale/evidence/v3-d13-production-reattack.json",
+        "implementation commit 5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+        "production version 052d9b68-b131-45cb-b792-1804c86a50d6",
+        "production deployment 29d876c2-fdd1-45b4-a784-314ae6feac7e"
       ],
       "findings": [
         "The production-schema 1k/10k/100k cells were local-only and used zero inference.",
@@ -419,8 +425,11 @@
         "V3-D13 replaces full-corpus materialization under E7 with tenant/project-filtered D1 limits, fair identity fusion, bounded graph expansion and bounded evidence hydration; legacy accounts remain unchanged.",
         "The exact repaired 1k/10k/100k run passed all aggregate gates with zero inference and zero final fixture state; 100k broad recall fell to 2596 ms and maximum node/slice/edge load remained 600.",
         "Worker 111 files/1313 tests, unit 33 files/539 pass plus one skip, zero-vulnerability audit and dry deploy all pass.",
-        "V3-H14 is closed; the result-less aggregate remains INVALID and the filter-safe exact rerun is authoritative.",
-        "V3-D13 remains HIGH/open only until commit, deployment, exact production reattack and cleanup complete."
+        "V3-H14 and V3-H15 are closed; every affected harness attempt remains invalid and unscored.",
+        "Deployment propagated 20/20 with parent 30, hybrid historical ten, all write/source/rejected lanes OFF/0 and normal users outside V3.",
+        "Exact production E7 recall used the bounded corpus with zero failures, 66 items/9301 chars and 1459 ms server latency.",
+        "Production-primary live treatment state and nonterminal jobs remain zero; all 809 packet fences are minimized/content-free; no lock, temporary credential file or campaign process remains.",
+        "V3-D13 HIGH is closed and Stage D repeated frozen holdout is next."
       ]
     }
   ]

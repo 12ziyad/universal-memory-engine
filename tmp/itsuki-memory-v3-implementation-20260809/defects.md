@@ -4,13 +4,14 @@
 
 | id | sev | classification | finding | status |
 |---|---|---|---|---|
-| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge before bounded fusion. Production-schema local cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k. Final context, scope and erasure stayed correct. | **OPEN — IMPLEMENTED / PRODUCTION REATTACK PENDING.** Exact repaired scale and full gates pass; 100k broad recall is 2.596s with maximum node/slice/edge load 600. Deploy, reattack and cleanup remain. |
+| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge before bounded fusion. Production-schema local cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k. Final context, scope and erasure stayed correct. | **CLOSED.** Exact repaired scale/full gates, deployment and live reattack pass. 100k broad recall is 2.596s, max node/slice/edge load 600; production returned bounded telemetry/zero failures and cleanup stayed zero. Commit `5f11d75`, Worker `052d9b68-b131-45cb-b792-1804c86a50d6`. |
 
 ## Final Stage C harness finding (2026-08-11)
 
 | id | sev | classification | finding | status |
 |---|---|---|---|---|
 | **V3-H14** | **MEDIUM** | **HARNESS DEFECT / STDOUT CAPTURE** | Passing scale-cell stdout was intercepted, leaving a result-less aggregate. | **CLOSED BEFORE SCORE.** The empty aggregate remains INVALID; the corrected exact rerun is authoritative PASS. |
+| **V3-H15** | **MEDIUM** | **HARNESS DEFECT / WINDOWS HTTP TRANSPORT** | Local Node/pipe transports hung and one inline JSON request was malformed. | **CLOSED BEFORE PRODUCT VERDICT.** Corrected ephemeral-file curl harness produced the valid HTTP 200 proof and left zero temporary files/processes. |
 
 ## E9A harness finding (2026-08-11)
 

@@ -487,4 +487,5 @@ evidence hydration. Do not remove the graph, lower reader evidence breadth, or
 change legacy accounts to solve a resource-boundary defect. The exact repaired
 100k cell completed broad recall in 2.596 seconds (~196.8x faster), loaded at
 most 600 node/slice/edge rows, and preserved scope, source expansion, context
-bounds and erasure. Production reattack is required before closing the HIGH.
+bounds and erasure. The subsequent exact production reattack returned bounded
+telemetry with zero failures and unchanged safe flags/cleanup, closing V3-D13.

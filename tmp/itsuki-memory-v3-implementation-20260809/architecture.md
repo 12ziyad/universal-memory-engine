@@ -154,7 +154,8 @@ identities are fused fairly and only a fixed evidence closure is hydrated; lane
 failure cannot fall back to a full-corpus scan. The legacy path remains
 unchanged outside E7. The repaired 100k cell reduced broad recall from 510.978s
 to 2.596s with maximum node/slice/edge load 600 and all scope/erasure gates
-preserved.
+preserved. The exact production reattack returned bounded telemetry with zero
+failures and unchanged safe flags/cleanup.
 
 ## E9A exact source-evidence expansion (KEEP, default OFF)
 

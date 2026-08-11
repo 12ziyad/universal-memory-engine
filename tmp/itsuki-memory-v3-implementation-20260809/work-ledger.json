@@ -4,10 +4,10 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "V3-D13 implemented and exact Stage C PASS; commit/deploy/production reattack next",
-  "latest_verified_head": "85a10d0309556c28658184822b769a0c0f4c6415",
-  "latest_verified_production": "2cb1f213-0f3f-4cbc-87e1-e5d04ddabb17",
-  "latest_verified_burn": 1914246,
+  "current_phase": "Stage C complete; V3-D13 HIGH closed; Stage D repeated frozen holdout next",
+  "latest_verified_head": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+  "latest_verified_production": "052d9b68-b131-45cb-b792-1804c86a50d6",
+  "latest_verified_burn": 1914249,
   "phases": [
     {
       "id": "A0",
@@ -337,17 +337,21 @@
     {
       "id": "FINAL-C",
       "title": "Local long-history scale and V3-D13 bounded-recall lifecycle",
-      "status": "implementation_complete_deploy_next",
+      "status": "completed_v3_d13_closed",
       "outputs": [
         "final/scale/evidence/stage-c-scale-failing-first.json",
         "final/scale/evidence/stage-c-scale-repaired.json",
         "final/scale/V3-D13-IMPLEMENTATION-GATES.md",
-        "final/scale/STAGE-C-SCALE-REPORT.md"
+        "final/scale/STAGE-C-SCALE-REPORT.md",
+        "final/scale/V3-D13-PRODUCTION.md",
+        "final/scale/evidence/v3-d13-production-reattack.json"
       ],
       "findings": [
         "Failing-first 100k broad recall took 510978 ms and copied 80000 scoped rows per lane into the Worker.",
         "D1-first bounded E7 candidates reduced 100k broad recall to 2596 ms with maximum node/slice/edge load 600 and preserved scope/erasure.",
-        "Worker 1313/1313, unit 539/539 plus one skip, audit and dry deploy pass; production reattack remains before HIGH closure."
+        "Worker 1313/1313, unit 539/539 plus one skip, audit and dry deploy pass.",
+        "Commit 5f11d75 deployed as Worker 052d9b68-b131-45cb-b792-1804c86a50d6; 20/20 propagation and exact bounded live reattack passed.",
+        "Production cleanup remained zero and V3-D13 HIGH is closed; Stage D repeated frozen holdout is next."
       ]
     }
   ]

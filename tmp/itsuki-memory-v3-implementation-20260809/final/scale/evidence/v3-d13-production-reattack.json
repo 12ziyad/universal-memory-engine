@@ -1,0 +1,94 @@
+{
+  "schema": "itsuki.v3-d13-production-reattack/v1",
+  "at": "2026-08-11T18:24:58.7540339Z",
+  "pass": true,
+  "commit": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+  "originMaster": "5f11d750386c6f276ed0188c8eb7cdb102a988a6",
+  "workerVersion": "052d9b68-b131-45cb-b792-1804c86a50d6",
+  "deploymentId": "29d876c2-fdd1-45b4-a784-314ae6feac7e",
+  "trafficPercent": 100,
+  "migration": null,
+  "bindingChange": false,
+  "productionFlags": {
+    "propagationChecks": 20,
+    "propagationPassed": 20,
+    "parentMode": "allowlist",
+    "parentAllowlistCount": 30,
+    "hybridMode": "allowlist",
+    "hybridAllowlistCount": 10,
+    "writeAndSourceLanes": "OFF",
+    "rejectedLanes": "OFF",
+    "normalUsersEnabled": false
+  },
+  "reattack": {
+    "dataset": "one previously evaluated d04 product-input question; no reference supplied; no re-ingest",
+    "httpStatus": 200,
+    "boundedCorpusUsed": true,
+    "boundedFailures": 0,
+    "laneBound": true,
+    "corpusBound": true,
+    "laneCounts": {
+      "fts": 0,
+      "exactNode": 18,
+      "exactPage": 0,
+      "lexicalSlice": 25,
+      "lexicalEvent": 3,
+      "temporalEvent": 0,
+      "lexicalEdge": 12,
+      "vector": 66,
+      "graph": 18
+    },
+    "corpusCounts": {
+      "nodes": 66,
+      "pages": 0,
+      "slices": 85,
+      "events": 44,
+      "edges": 18
+    },
+    "itemCount": 66,
+    "contextChars": 9301,
+    "serverLatencyMs": 1459,
+    "clientLatencyMs": 2659,
+    "sourceExpansionUsed": false
+  },
+  "spend": {
+    "preflightPassed": true,
+    "permittedPath": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+    "model": "@cf/baai/bge-base-en-v1.5",
+    "campaignNeuronsBefore": 1914249,
+    "campaignNeuronsAfter": 1914249,
+    "roundedNeuronDelta": 0,
+    "modelCallDelta": 1,
+    "ceiling": 3000000,
+    "finalReserve": 500000
+  },
+  "cleanup": {
+    "productionPrimary": true,
+    "stageBTreatmentSlots": 10,
+    "liveTreatmentCounts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "retainedPacketFences": 809,
+    "minimizedPacketFences": 809,
+    "packetContentRows": 0,
+    "globalBenchmarkLockHeld": false,
+    "temporaryCredentialFiles": 0,
+    "campaignProcesses": 0,
+    "orphanTailProcessesStopped": 5
+  },
+  "invalidHarnessAttempts": [
+    "Node fetch/native-HTTPS clients hung locally while direct curl and production health remained responsive; no result scored.",
+    "PowerShell stdin-config curl transport hung locally; no result scored.",
+    "The first file-config request returned HTTP 400 because PowerShell mangled inline JSON; no product assertion was made."
+  ]
+}

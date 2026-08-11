@@ -1,6 +1,6 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
-## 2026-08-11 V3-D13 implemented / exact Stage C PASS / deploy next
+## 2026-08-11 V3-D13 CLOSED / exact Stage C PASS / Stage D next
 
 - The failing-first production-schema cells proved that E7 copied 800/8,000/
   80,000 scoped rows per lane into the Worker before applying its nominal
@@ -17,13 +17,20 @@
 - Full implementation gates pass: Worker **111 files / 1,313 tests**, unit/
   cross-door **33 files / 539 pass + 1 skip**, zero audit vulnerabilities, and
   Wrangler dry deploy PASS.
+- Commit/origin `5f11d750386c6f276ed0188c8eb7cdb102a988a6` is live as
+  Worker `052d9b68-b131-45cb-b792-1804c86a50d6`, deployment
+  `29d876c2-fdd1-45b4-a784-314ae6feac7e`, 100% traffic. No migration or
+  binding changed; propagation is 20/20 with normal users still outside V3.
+- Exact live E7 recall passed every bound with zero lane failures: 66 items,
+  9,301 context characters, 1,459 ms server latency. Production-primary state
+  remains zero, all 809 packet fences are content-free, the benchmark lock is
+  absent, and no temporary credential file or campaign process remains.
 - Durable proof: `final/scale/evidence/stage-c-scale-repaired.json`,
   `final/scale/STAGE-C-SCALE-REPORT.md`, and
-  `final/scale/V3-D13-IMPLEMENTATION-GATES.md`.
-- **V3-D13 remains open only for deployment, live reattack and cleanup.** Exact
-  next action: commit/push the tested implementation, deploy with unchanged
-  safe flags, prove bounded live E7 behavior and legacy isolation, then close
-  the HIGH before Stage D repeated holdout.
+  `final/scale/evidence/v3-d13-production-reattack.json`.
+- **V3-D13 HIGH is CLOSED.** Exact next action is Stage D: three independent
+  frozen non-LoCoMo holdout seeds on the accepted final architecture, then the
+  single decisive full LoCoMo validation if holdout does not regress.
 
 ## 2026-08-11 Final Stage B safely closed / Stage C next
 

@@ -1,0 +1,371 @@
+{
+  "schema": "itsuki.v3-cost-ledger/v2",
+  "campaign": "itsuki-memory-v3-implementation-20260809",
+  "V3_NEURON_CEILING": 3000000,
+  "ceiling_status": "VERIFIED_BY_OWNER_AUTHORIZATION",
+  "ceiling_verdict": "APPROVED - Cloudflare Startup Program credits cover first-party Workers AI; owner raised the campaign ceiling to 3,000,000 neurons on 2026-08-10",
+  "inference_permitted": true,
+  "verified_at": "2026-08-09 (second attempt)",
+  "what_changed_since_the_first_attempt": [
+    "The first attempt recorded 401s on the AI model catalogue and on the GraphQL neuron-usage query. BOTH were transient. On re-attempt they return 200, exactly as the D1 7403 did.",
+    "That means neuron consumption IS machine-readable on this account, and the model catalogue IS enumerable. Real per-model, per-day usage is now recorded below.",
+    "Billing endpoints are a different story: six distinct endpoint shapes were tried and ALL return a stable 403 (permission), not 401 (auth). This is a genuine scope denial, not a race."
+  ],
+  "MACHINE_VERIFIED": {
+    "workers_ai_is_metered_on_this_account": true,
+    "evidence": "GraphQL viewer.accounts.aiInferenceAdaptiveGroups returns per-model and per-day totalNeurons for account b6009ce8df89884b79e4f6fa49e52942.",
+    "all_candidate_models_available": true,
+    "candidate_models_are_first_party_not_partner_billed": true,
+    "partner_billed_models_in_catalogue": 10,
+    "partner_billed_models_among_our_candidates": 0,
+    "ai_gateway_configured": false,
+    "third_party_billing_path_reachable": false,
+    "third_party_billing_note": "AI_GATEWAY_ID is unset in wrangler.jsonc, the AI binding is direct, and every model in use or under consideration is @cf/ first-party with partner=false. There is no configured path by which a billable third-party provider could be hit, silently or otherwise.",
+    "account_is_NOT_under_the_free_plan_daily_cap": true,
+    "free_cap_evidence": "Workers AI includes 10,000 neurons/day; on the Free plan requests are refused beyond it. This account recorded 216,347 neurons on 2026-08-08, 102,219 on 2026-08-06 and 98,799 on 2026-08-02 - 10x to 21x that allocation - and the LLM-judge campaign logged 0 errors and 0 retries across all 1,540 questions on the 2026-08-08 run. A hard-capped Free account cannot produce that. Workers AI is therefore on a paid or credited path."
+  },
+  "NOT_MACHINE_VERIFIABLE": {
+    "credit_balance": "403 on every billing endpoint",
+    "whether_startup_credits_cover_the_spend": "403",
+    "endpoints_tried_all_403": [
+      "GET /accounts/{acct}/subscriptions",
+      "GET /accounts/{acct}/billing/profile",
+      "GET /accounts/{acct}/billing/history",
+      "GET /accounts/{acct}/billing/credits",
+      "GET /user/billing/profile",
+      "GET /user/subscriptions"
+    ],
+    "wrangler_billing_command": "does not exist (checked --help on wrangler 4.104.0)",
+    "CLOUDFLARE_API_TOKEN_in_env": false
+  },
+  "MEASURED_USAGE": {
+    "source": "GraphQL aiInferenceAdaptiveGroups",
+    "total_neurons_since_2026_07_25": 610361,
+    "estimated_usd_at_published_rate": 6.71,
+    "published_rate_usd_per_1000_neurons": 0.011,
+    "daily": {
+      "2026-07-29": 7926,
+      "2026-07-30": 8149,
+      "2026-07-31": 45937,
+      "2026-08-01": 57404,
+      "2026-08-02": 98799,
+      "2026-08-03": 37572,
+      "2026-08-04": 491,
+      "2026-08-05": 1193,
+      "2026-08-06": 102219,
+      "2026-08-07": 33401,
+      "2026-08-08": 216347
+    },
+    "per_call_neurons_measured_on_the_benchmark_window": {
+      "@cf/qwen/qwen3-30b-a3b-fp8 (extraction)": 28.2,
+      "@cf/openai/gpt-oss-120b (judge)": 34.3,
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast (reader)": 9.5,
+      "@cf/baai/bge-base-en-v1.5 (embeddings)": 0.5
+    }
+  },
+  "PLANNED_EXPERIMENT_BUDGETS": {
+    "note": "Derived from the measured per-call costs above, not from estimates.",
+    "phase_2_D03_rebase_full_locomo": {
+      "neurons": 203948,
+      "usd": 2.24
+    },
+    "phase_3_E0_reader_ablation": {
+      "neurons": 105644,
+      "usd": 1.16
+    },
+    "phase_5_E1_retrieval_depth_3_arms": {
+      "neurons": 286500,
+      "usd": 3.15
+    },
+    "subtotal": {
+      "neurons": 596092,
+      "usd": 6.55
+    },
+    "requested_ceiling": {
+      "neurons": 3000000,
+      "usd": 33
+    },
+    "requested_ceiling_rationale": "The original 1,500,000-neuron ceiling was owner-authorized on 2026-08-09. After the invalid concurrent reranking attempt consumed budget without producing evidence, the owner explicitly raised the hard campaign ceiling to 3,000,000 neurons on 2026-08-10 for the sequential frozen-subset rerun and later decisive V3 validation."
+  },
+  "spend": {
+    "inference_calls_made_this_campaign": 86071,
+    "neurons_consumed_this_campaign": 1914249,
+    "estimated_usd_at_published_rate": 21.06,
+    "third_party_paid_apis_called": "none"
+  },
+  "entries": [
+    {
+      "phase": "Final Stage C V3-D13 bounded-recall lifecycle and production reattack",
+      "dataset": "local production-schema 1k/10k/100k scale plus one previously evaluated d04 product-input recall; no reference supplied and no re-ingest",
+      "models": ["@cf/baai/bge-base-en-v1.5"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1914249,
+      "campaign_neurons_after": 1914249,
+      "rounded_increment": 0,
+      "production_embedding_call_delta": 1,
+      "local_scale_inference_calls": 0,
+      "estimated_increment_usd": 0,
+      "global_final_reserve": 500000,
+      "gate": "CLOSED - exact repaired scale/full gates/deployment/20-of-20 propagation/live bounded recall/cleanup all pass; V3-D13 HIGH closed",
+      "verified_at": "2026-08-11T18:24:58.7540339Z"
+    },
+    {
+      "phase": "E9B bounded episode FTS fallback",
+      "dataset": "frozen non-LoCoMO holdout: 10 scenarios, 84 messages, 42 questions; one sealed state; paired E7+E9A control versus bounded semantic-thin episode FTS fallback",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1889378,
+      "campaign_neurons_after": 1896203,
+      "increment": 6825,
+      "increment_inference_calls_including_account_ambient": 267,
+      "estimated_increment_usd": 0.08,
+      "e9b_cap": 25000,
+      "global_final_reserve": 500000,
+      "invalid_preflight_and_account_meter_overhead_included": true,
+      "gate": "REJECT - 18 fallback triggers produced zero eligible/rendered episodes; judge and availability unchanged; all 42 contexts byte-identical; recall p95 +60.29% exceeded +40%; cleanup zero",
+      "verified_at": "2026-08-11T13:07:00Z"
+    },
+    {
+      "phase": "E9A bounded exact source-evidence expansion",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 84 messages, 42 questions; one sealed state; paired E7 control versus exact source expansion",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1882731,
+      "campaign_neurons_after": 1889378,
+      "increment": 6647,
+      "increment_inference_calls_including_account_ambient": 384,
+      "estimated_increment_usd": 0.07,
+      "e9a_cap": 25000,
+      "global_final_reserve": 500000,
+      "ambient_delayed_meter_and_harness_overhead_included": true,
+      "gate": "KEEP - judge 40/42 to 41/42; token-F1 +7.45pp; availability preserved at 40/42; conditional 95% to 100%; recall p95 +25%; zero failures; cleanup zero",
+      "verified_at": "2026-08-11T11:42:57.625Z"
+    },
+    {
+      "phase": "E7M paired recall-only current-latency confirmation",
+      "dataset": "frozen 399-question query set; exact historical control and E7 context/item hashes; no reader, judge, reranker, ingest, or scoring",
+      "models": ["@cf/baai/bge-base-en-v1.5"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1882673,
+      "campaign_neurons_after": 1882731,
+      "increment": 58,
+      "estimated_increment_usd": 0.001,
+      "e7m_cap": 5000,
+      "global_final_reserve": 500000,
+      "gate": "KEEP - every output/fingerprint/routing/safety gate passed; current server p95 414ms control versus 416ms E7 (+0.48%, max +25%); client p95 +7.12%",
+      "verified_at": "2026-08-11T10:24:48.981Z"
+    },
+    {
+      "phase": "E7 hybrid assertion retrieval holdout plus frozen-399 confirmation and settled meter boundary before E7M",
+      "dataset": "frozen non-LoCoMo holdout plus immutable frozen 399-question LoCoMo development subset",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1811425,
+      "experiment_boundary_neurons_after": 1877027,
+      "settled_neurons_before_e7m": 1882673,
+      "settled_increment": 71248,
+      "estimated_settled_increment_usd": 0.78,
+      "e7_amended_cap": 100000,
+      "e7m_recall_only_cap": 5000,
+      "global_final_reserve": 500000,
+      "invalid_harness_and_delayed_meter_overhead_included": true,
+      "gate": "MODIFY - all frozen-399 quality/safety gates pass (judge +7.77pp; temporal +24.10pp); latency pending because V3-D09 proved historical server telemetry stale; E7M preregistered before paired recall-only measurement",
+      "verified_at": "2026-08-11T07:24:00Z"
+    },
+    {
+      "phase": "E6M conservative same-source coalescing three-seed holdout ablation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 55 must-capture atoms, 42 questions, paired control/treatment across three independent seeds",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1766027,
+      "campaign_neurons_after": 1811425,
+      "increment": 45398,
+      "estimated_increment_usd": 0.50,
+      "e6m_final_amended_cap": 52000,
+      "invalid_harness_and_malformed_attempt_overhead_included": true,
+      "global_final_reserve": 500000,
+      "gate": "MODIFY - same-source paraphrases reduced 55.87% with evidence preserved, but precision loss and rendered-context duplicate gates failed; cohorts disabled",
+      "verified_at": "2026-08-11T04:28:27.784Z"
+    },
+    {
+      "phase": "E6 governed atomic projection three-seed holdout ablation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 55 must-capture atoms, 42 questions, paired control/treatment across three independent seeds",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1716541,
+      "experiment_boundary_neurons_after": 1766026,
+      "increment": 49485,
+      "estimated_increment_usd": 0.54,
+      "e6_final_amended_cap": 58000,
+      "invalid_harness_overhead_included": true,
+      "global_final_reserve": 500000,
+      "gate": "MODIFY - large capture/evidence/judge gains and all safety/accounting gates pass; semantic duplicate gate failed pending E6M same-source coalescing",
+      "verified_at": "2026-08-11T01:31:45.732Z"
+    },
+    {
+      "phase": "E5 deterministic temporal representation and repaired production proof",
+      "dataset": "frozen non-LoCoMo temporal cases plus one reference-isolated HO-03 production proof; three invalid live attempts retained, erased, and unscored",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1715212,
+      "campaign_neurons_after": 1716541,
+      "increment": 1329,
+      "invalid_attempt_neurons_included": 1124,
+      "repaired_proof_neurons": 205,
+      "estimated_increment_usd": 0.01,
+      "e5_live_cap": 5000,
+      "global_final_reserve": 500000,
+      "gate": "KEEP - deterministic temporal representation correct; V3-D08 HIGH repaired; live 7/7 source-time resolution; replay/erasure/cleanup pass",
+      "verified_at": "2026-08-11T03:10:00+05:30"
+    },
+    {
+      "phase": "E4 three-seed production-path atomic capture confirmation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 84 messages, 55 must-capture facts, three valid seeds; four invalid reference-blind attempts retained and unscored",
+      "models": ["@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1700453,
+      "campaign_neurons_after": 1715211,
+      "increment": 14758,
+      "invalid_attempt_neurons_included": 3934,
+      "estimated_increment_usd": 0.16,
+      "confirmation_incremental_cap": 30000,
+      "global_final_reserve": 500000,
+      "gate": "KEEP - mean recall 74.55%, precision 99.25%, F1 85.08%; all safety/provenance/replay/erasure gates pass",
+      "verified_at": "2026-08-10T20:28:04.865Z"
+    },
+    {
+      "phase": "E4 atomic-capture model bakeoff and non-inference product integration",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 55 must-capture atoms; Stage A six arms, Stage B A3/A1 three total runs per arm",
+      "models": ["@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/google/gemma-4-26b-a4b-it", "@cf/zai-org/glm-4.7-flash", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1682147,
+      "campaign_neurons_after": 1700453,
+      "increment": 18306,
+      "estimated_increment_usd": 0.2,
+      "e4_incremental_cap": 100000,
+      "gate": "A3 winner confirmed; product integration completed and subsequent three-seed product confirmation KEEP recorded separately",
+      "verified_at": "2026-08-10"
+    },
+    {
+      "phase": "E3 acceptance-atomic source episodes and three-seed source-recovery ablation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 55 must-capture atoms, 42 questions, three independent semantic-extraction seeds",
+      "models": ["@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1661340,
+      "campaign_neurons_after": 1682147,
+      "increment": 20807,
+      "estimated_increment_usd": 0.23,
+      "e3_incremental_cap": 90000,
+      "gate": "KEEP - exact source coverage 100%; paired semantic-miss recovery 97.78%; all security/provenance/cleanup gates pass",
+      "verified_at": "2026-08-10T14:30:00Z"
+    },
+    {
+      "phase": "E2 three-seed paired holdout ablation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 55 must-capture atoms, 42 questions, three seeds, two arms",
+      "models": ["@cf/qwen/qwen3-30b-a3b-fp8", "@cf/baai/bge-base-en-v1.5", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1630107,
+      "campaign_neurons_after": 1661340,
+      "increment": 31233,
+      "per_seed_deltas": { "seed_1": 9503, "seed_2": 10526, "seed_3": 11204 },
+      "estimated_increment_usd": 0.34,
+      "e2_incremental_cap": 190000,
+      "gate": "B0 KEEP; B1 REJECT - precision safeguard failed; no LoCoMo screen",
+      "verified_at": "2026-08-10T11:48:17.234Z"
+    },
+    {
+      "phase": "E2 implementation and preregistration",
+      "dataset": "none - deterministic tests and source review only",
+      "models": [],
+      "path": "no inference",
+      "campaign_neurons_before": 1630107,
+      "campaign_neurons_after": 1630107,
+      "increment": 0,
+      "gate": "PASS - E2 screen/holdout protocol frozen; 190000 incremental cap",
+      "verified_at": "2026-08-10"
+    },
+    {
+      "phase": "E2 autonomous cold-resume preflight",
+      "dataset": "none - read-only billing and production verification",
+      "models": ["nine permitted catalogue models"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1630107,
+      "campaign_neurons_after": 1630107,
+      "increment": 0,
+      "gate": "REVIEW - 54.3%; E2 hard cap 190000; final reserve preserved",
+      "verified_at": "2026-08-10T09:16:14Z"
+    },
+    {
+      "phase": "E8 reranking ablation — valid sequential rerun",
+      "dataset": "frozen 399-question stratified subset",
+      "subset_sha256": "500959da6c7e030248d85669ce49cf85ed62551fba0d0690d7a70bca0337ea6d",
+      "models": ["@cf/baai/bge-reranker-base", "@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1428862,
+      "experiment_boundary_neurons_after": 1625527,
+      "post_run_live_neurons_after": 1630107,
+      "increment_including_interruption_overhead": 196665,
+      "valid_arm_neuron_deltas": { "keep_8": 29635, "keep_20": 46594, "keep_40": 49222, "reorder_only": 68949 },
+      "estimated_increment_usd": 2.16,
+      "verdict": "ALL_REJECT",
+      "completed_at": "2026-08-10"
+    },
+    {
+      "phase": "E10 deterministic adaptive context paired holdout ablation",
+      "dataset": "frozen non-LoCoMo holdout: 10 scenarios, 42 questions, one sealed state, two read arms",
+      "question_sha256": "588fc4b5f3e6a74a7d7f8dc1f8b3bbcb795f79362930c67fefc6c075f5f7d73c",
+      "models": [
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/baai/bge-base-en-v1.5",
+        "@cf/openai/gpt-oss-120b"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1896203,
+      "campaign_neurons_after": 1904127,
+      "increment": 7924,
+      "estimated_increment_usd": 0.09,
+      "e10_incremental_cap": 90000,
+      "gate": "REJECT - context compressed 30.45% but availability lost 14.29pp and judge lost 4.76pp",
+      "verified_at": "2026-08-11T14:42:10.286Z"
+    }
+  ],
+  "ceiling_revisions": [
+    {
+      "authorized_at": "2026-08-09",
+      "from_neurons": null,
+      "to_neurons": 1500000,
+      "basis": "Initial owner authorization under the Cloudflare Startup Program credit-backed first-party Workers AI path."
+    },
+    {
+      "authorized_at": "2026-08-10",
+      "from_neurons": 1500000,
+      "to_neurons": 3000000,
+      "basis": "Explicit owner instruction to rerun the four pre-registered reranking arms sequentially after invalid concurrent drivers corrupted trials 5-8."
+    }
+  ],
+  "authorized_at": "2026-08-09",
+  "authorization": {
+    "basis": "Owner confirmation: account enrolled in Cloudflare Startup Program with the $10,000 credit offer. Startup credits are applied automatically to eligible usage-based products, cover Workers AI, and are reflected through invoices/credit deductions rather than as a normal dashboard credit balance. AI Gateway is separately excluded from Startup-credit coverage.",
+    "why_the_dashboard_balance_was_the_wrong_thing_to_ask_for": "The ordinary AI Gateway / Unified Billing credit balance is a different facility from the Startup Program allowance. Asking for it would have returned a number that does not govern this spend.",
+    "permitted_path": "FIRST-PARTY Workers AI only: @cf/ models with partner=false, invoked through the direct AI binding.",
+    "forbidden_paths": [
+      "partner / third-party models",
+      "AI Gateway Unified Billing",
+      "any direct external-provider API"
+    ],
+    "stop_condition": "If any planned model changes from first-party partner=false Workers AI to a partner/third-party billing path, STOP before invoking it."
+  },
+  "burn_checkpoints": {
+    "50%": 1500000,
+    "75%": 2250000,
+    "90%": 2700000,
+    "100%": 3000000,
+    "policy": {
+      "50": "review burn rate",
+      "75": "stop full-dataset exploratory repetitions; representative frozen subsets only",
+      "90": "reserve remainder for decisive regression/final validation",
+      "100": "STOP all inference"
+    }
+  }
+}

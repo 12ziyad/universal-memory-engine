@@ -222,7 +222,8 @@ full-corpus scan. Accounts outside E7 retain the unchanged legacy path.
 The repaired production-schema 100k cell held node/slice/edge loads to at most
 600 and reduced broad recall from 510.978 seconds to 2.596 seconds while
 preserving scope, source expansion, output bounds and erasure. No schema,
-binding, model or reader behavior changed.
+binding, model or reader behavior changed. The exact production reattack then
+returned bounded telemetry with zero failures and unchanged safe flags/cleanup.
 
 ## E9A exact source-evidence expansion (KEEP, default OFF)
 
