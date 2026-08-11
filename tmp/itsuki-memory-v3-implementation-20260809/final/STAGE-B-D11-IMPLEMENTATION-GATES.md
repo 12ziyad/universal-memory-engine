@@ -15,5 +15,14 @@
 - Invalid Stage B replacement state was erased through the public product
   contract. Production-primary verification found zero live memory/jobs and
   **642/642** retained packet fences content-free.
-- Production deployment, exact reattack and the unchanged clean Stage B run
-  remain mandatory before V3-D11 can close.
+- Commit/origin: `183d540184e3e355e2bf99b82cfdc43ee5fb648e`.
+- Production version: `345cd4d7-c680-4e16-9a99-2fe59baa33bc`;
+  deployment `1b13b0e9-68ae-4520-8353-33a27b1a343d`, 100% traffic.
+- Propagation: **20/20 pass** across `itsuki.app` and the workers.dev domain,
+  with the exact treatment-only Stage B flags unchanged.
+- Production reattack: identical post-erasure recall **200**, erased write replay
+  non-retryable **409 `source_write_erased`**, second identical post-erasure
+  recall **200** with the same packet identity.
+- Final production-primary cleanup: zero live memory/jobs and **643/643**
+  retained packet fences minimized/content-free. V3-D11 is closed; the
+  unchanged clean Stage B run remains mandatory.
