@@ -2,6 +2,31 @@
 
 Every entry records the evidence that forced the decision, not a preference.
 
+## D-025 - repair interrupted atomic suffixes from durable proof, never from terminal status alone
+
+**Decision.** Preserve normal terminal idempotency. Permit an exact `enriched`
+packet to reopen only when its tenant-, packet-, and project-bound atomic ledger
+proves a stale or known-interrupted zero-candidate chunk. Bind repair to a
+bounded monotonic generation, restore the original accepted message IDs, join
+concurrent followers, fence every atomic publication by attempt, and fence
+Durable Object ownership plus D1 settlement by the same generation.
+
+**Evidence.** Stage E completed 272 writes then stopped reference-blind on two
+packets whose first chunks stored 11 / 8 candidates and whose second chunks
+remained stale `running` with zero rows. The old replay had falsely terminalized
+both jobs. Failing-first tests separately reproduced failed-seen pollution,
+missing remaining payload, terminal false success, cross-project authorization,
+post-CAS follower divergence, and a late superseded writer. The exact repair is
+9/9; full Worker 1,322/1,322 and unit/cross-door 539/539 pass. The last two
+regressions prove an older local queue entry is discarded without inference and
+cannot settle a newer durable repair generation.
+
+**Consequence.** Deploy without migration, exact-replay only the two original
+Stage E packet identities, and require production-primary complete accounting
+before reader or judge inference. An ordinary enriched replay, another scope's
+ledger, an erasure, or an exhausted generation can never trigger another model
+call.
+
 ---
 
 ## D-024 — freeze the reference-blind one-shot Stage E protocol

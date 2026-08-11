@@ -27,6 +27,7 @@ import { responseText, responseTruncated } from "./llm.js";
 export const ATOMIC_CAPTURE_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 export const ATOMIC_CAPTURE_MAX_TOKENS = 3072;
 export const ATOMIC_CAPTURE_RUN_TTL_MS = 15 * 60 * 1000;
+export const ATOMIC_CAPTURE_MAX_ATTEMPTS = 6;
 
 export const ATOMIC_CAPTURE_JSON_SCHEMA = Object.freeze({
 	type: "object",
@@ -106,6 +107,25 @@ function terminalRunResult(row, { replayed = false } = {}) {
 	};
 }
 
+function inProgressRunResult(row, { replayed = true } = {}) {
+	return {
+		captureRunId: row?.id ?? null,
+		outcome: "in_progress",
+		complete: false,
+		proposed: 0,
+		accepted: 0,
+		stored: 0,
+		rejected: 0,
+		duplicates: 0,
+		truncated: false,
+		temporalPresent: 0,
+		temporalResolved: 0,
+		temporalUnresolved: 0,
+		temporalAnchorMissing: 0,
+		replayed,
+	};
+}
+
 function cancelledBeforeClaimResult() {
 	return {
 		captureRunId: null,
@@ -125,17 +145,17 @@ function cancelledBeforeClaimResult() {
 	};
 }
 
-async function failRun(env, userId, runId, errorCode, counts = {}) {
+async function failRun(env, userId, runId, errorCode, counts = {}, expectedAttempt = 1) {
 	const now = Date.now();
 	const code = safeErrorCode(errorCode);
-	await env.DB.prepare(
+	const failed = await env.DB.prepare(
 		`UPDATE semantic_atom_capture_runs
 		 SET status = 'failed', error_code = ?, proposed_count = ?, accepted_count = ?,
 			stored_count = ?, rejected_count = ?, duplicate_count = ?, truncated = ?,
 			temporal_phrase_count = ?, temporal_resolved_count = ?,
 			temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
 			rejected_reasons_json = ?, updated_at = ?, completed_at = ?
-		 WHERE id = ? AND user_id = ? AND status = 'running'`,
+		 WHERE id = ? AND user_id = ? AND status = 'running' AND attempts = ?`,
 	).bind(
 		code,
 		integer(counts.proposed),
@@ -153,7 +173,15 @@ async function failRun(env, userId, runId, errorCode, counts = {}) {
 		now,
 		runId,
 		userId,
+		integer(expectedAttempt),
 	).run();
+	if (Number(failed?.meta?.changes ?? 0) !== 1) {
+		const current = await env.DB.prepare(
+			"SELECT * FROM semantic_atom_capture_runs WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(runId, userId).first();
+		if (current?.status === "running") return inProgressRunResult(current);
+		return terminalRunResult(current, { replayed: true });
+	}
 	return {
 		captureRunId: runId,
 		outcome: code,
@@ -234,12 +262,87 @@ async function claimRun(env, {
 			"SELECT * FROM semantic_atom_capture_runs WHERE id = ? AND user_id = ? LIMIT 1",
 		).bind(row.id, userId).first();
 	}
+	// A dead Worker may leave an inference outcome unknowable. Once the same
+	// durable TTL used by extraction recovery has elapsed, an exact packet replay
+	// may reclaim only that interrupted chunk. The monotonically increasing
+	// attempt number is a write fence: a late superseded invocation can no longer
+	// publish candidates or overwrite this attempt's terminal marker.
+	if (
+		row.status === "failed"
+		&& row.error_code === "interrupted_unknown"
+		&& integer(row.attempts) < ATOMIC_CAPTURE_MAX_ATTEMPTS
+	) {
+		const reclaimed = await env.DB.prepare(
+			`UPDATE semantic_atom_capture_runs
+			 SET status = 'running', extraction_run_id = ?, attempts = attempts + 1,
+				replay_count = replay_count + 1, proposed_count = 0, accepted_count = 0,
+				stored_count = 0, rejected_count = 0, duplicate_count = 0, truncated = 0,
+				temporal_phrase_count = 0, temporal_resolved_count = 0,
+				temporal_unresolved_count = 0, temporal_anchor_missing_count = 0,
+				rejected_reasons_json = NULL, error_code = NULL, updated_at = ?, completed_at = NULL
+			 WHERE id = ? AND user_id = ? AND status = 'failed'
+			   AND error_code = 'interrupted_unknown' AND attempts = ?
+			   AND NOT EXISTS (
+				SELECT 1 FROM semantic_atom_candidates c
+				 WHERE c.user_id = ? AND c.capture_run_id = semantic_atom_capture_runs.id
+			   )
+			 RETURNING *`,
+		).bind(
+			extractionRunId,
+			now,
+			row.id,
+			userId,
+			integer(row.attempts),
+			userId,
+		).first();
+		if (reclaimed) return { claimed: true, row: reclaimed, reclaimed: true };
+		row = await env.DB.prepare(
+			"SELECT * FROM semantic_atom_capture_runs WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(row.id, userId).first();
+	}
 	if (row.status !== "running") {
 		await env.DB.prepare(
 			"UPDATE semantic_atom_capture_runs SET replay_count = replay_count + 1, updated_at = ? WHERE id = ? AND user_id = ?",
 		).bind(now, row.id, userId).run();
 	}
 	return { claimed: false, row };
+}
+
+/**
+ * Exact-replay repair is permitted for an otherwise terminal job only when the
+ * atomic ledger itself proves an interrupted chunk. Semantic/schema failures
+ * are intentionally excluded: they remain visible terminal outcomes and cannot
+ * turn an ordinary enriched replay into another inference call.
+ */
+export async function hasRecoverableAtomicCaptureInterruption(
+	env,
+	userId,
+	sourcePacketId,
+	{ projectId = null, now = Date.now() } = {},
+) {
+	if (!userId || !sourcePacketId) return false;
+	const row = await env.DB.prepare(
+		`SELECT 1 AS recoverable
+		 FROM semantic_atom_capture_runs r
+		 WHERE r.user_id = ? AND r.source_packet_id = ? AND r.project_id IS ?
+		   AND r.attempts < ?
+		   AND NOT EXISTS (
+			SELECT 1 FROM semantic_atom_candidates c
+			 WHERE c.user_id = r.user_id AND c.capture_run_id = r.id
+		   )
+		   AND (
+			(r.status = 'running' AND r.updated_at <= ?)
+			OR (r.status = 'failed' AND r.error_code = 'interrupted_unknown')
+		   )
+		 LIMIT 1`,
+	).bind(
+		userId,
+		sourcePacketId,
+		projectId,
+		ATOMIC_CAPTURE_MAX_ATTEMPTS,
+		Number(now) - ATOMIC_CAPTURE_RUN_TTL_MS,
+	).first();
+	return Number(row?.recoverable ?? 0) === 1;
 }
 
 function parsedModelValue(value) {
@@ -302,6 +405,7 @@ async function persistChunk(env, {
 	extractionRunId,
 	acceptedAt,
 	runId,
+	runAttempt,
 	chunkKey,
 	atoms,
 	outcomes,
@@ -361,6 +465,10 @@ async function persistChunk(env, {
 				e.source_time_precision, e.observed_at, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?
 			 FROM source_episodes e
 			 WHERE e.user_id = ? AND e.source_packet_id = ? AND e.message_id = ? AND e.project_id IS ?
+			   AND EXISTS (
+				SELECT 1 FROM semantic_atom_capture_runs r
+				 WHERE r.id = ? AND r.user_id = ? AND r.status = 'running' AND r.attempts = ?
+			   )
 			 ON CONFLICT DO NOTHING`,
 		).bind(
 			atom.id,
@@ -397,6 +505,9 @@ async function persistChunk(env, {
 			sourcePacketId,
 			atom.sourceMessageId,
 			projectId,
+			runId,
+			userId,
+			integer(runAttempt),
 		));
 	}
 
@@ -418,7 +529,7 @@ async function persistChunk(env, {
 			temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
 			rejected_reasons_json = ?,
 			error_code = NULL, updated_at = ?, completed_at = ?
-		 WHERE id = ? AND user_id = ? AND status = 'running'`,
+			 WHERE id = ? AND user_id = ? AND status = 'running' AND attempts = ?`,
 	).bind(
 		status,
 		integer(outcomes.proposed),
@@ -440,6 +551,7 @@ async function persistChunk(env, {
 		now,
 		runId,
 		userId,
+		integer(runAttempt),
 	));
 
 	try {
@@ -476,14 +588,14 @@ async function persistChunk(env, {
 			).bind(userId, acceptedAt).first();
 			const code = barrier ? "cancelled_by_delete" : "source_episode_unavailable";
 			const terminalStatus = barrier ? "cancelled_by_delete" : "failed";
-			await env.DB.prepare(
+			const terminal = await env.DB.prepare(
 				`UPDATE semantic_atom_capture_runs
 				 SET status = ?, error_code = ?, proposed_count = ?, accepted_count = ?,
 					stored_count = 0, rejected_count = ?, duplicate_count = ?, truncated = ?,
 					temporal_phrase_count = ?, temporal_resolved_count = ?,
 					temporal_unresolved_count = ?, temporal_anchor_missing_count = ?,
 					rejected_reasons_json = ?, updated_at = ?, completed_at = ?
-				 WHERE id = ? AND user_id = ? AND status = 'running'`,
+				 WHERE id = ? AND user_id = ? AND status = 'running' AND attempts = ?`,
 			).bind(
 				terminalStatus,
 				code,
@@ -501,7 +613,15 @@ async function persistChunk(env, {
 				now,
 				runId,
 				userId,
+				integer(runAttempt),
 			).run();
+			if (Number(terminal?.meta?.changes ?? 0) !== 1) {
+				const current = await env.DB.prepare(
+					"SELECT * FROM semantic_atom_capture_runs WHERE id = ? AND user_id = ? LIMIT 1",
+				).bind(runId, userId).first();
+				if (current?.status === "running") return inProgressRunResult(current);
+				return terminalRunResult(current, { replayed: true });
+			}
 			return {
 				captureRunId: runId,
 				outcome: code,
@@ -536,7 +656,7 @@ async function persistChunk(env, {
 			temporalUnresolved: outcomes.temporalUnresolved,
 			temporalAnchorMissing: outcomes.temporalAnchorMissing,
 			rejectedByReason: outcomes.rejectedByReason,
-		});
+		}, runAttempt);
 	}
 }
 
@@ -548,22 +668,7 @@ async function captureChunk(env, options, plannedChunk) {
 	if (claim.cancelledByDelete) return cancelledBeforeClaimResult();
 	if (!claim.claimed) {
 		if (claim.row.status === "running") {
-			return {
-				captureRunId: claim.row.id,
-				outcome: "in_progress",
-				complete: false,
-				proposed: 0,
-				accepted: 0,
-				stored: 0,
-				rejected: 0,
-				duplicates: 0,
-				truncated: false,
-				temporalPresent: 0,
-				temporalResolved: 0,
-				temporalUnresolved: 0,
-				temporalAnchorMissing: 0,
-				replayed: true,
-			};
+			return inProgressRunResult(claim.row);
 		}
 		return terminalRunResult(claim.row, { replayed: true });
 	}
@@ -582,7 +687,8 @@ async function captureChunk(env, options, plannedChunk) {
 		},
 	);
 	if (!proposed.ok) {
-		return failRun(env, options.userId, claim.row.id, proposed.outcome, { truncated: proposed.truncated });
+		return failRun(env, options.userId, claim.row.id, proposed.outcome,
+			{ truncated: proposed.truncated }, claim.row.attempts);
 	}
 	const normalized = await normalizeAtomicCapture(proposed.parsed, {
 		messages: plannedChunk.messages,
@@ -596,11 +702,12 @@ async function captureChunk(env, options, plannedChunk) {
 		return failRun(env, options.userId, claim.row.id, "schema_invalid", {
 			...normalized.outcomes,
 			truncated: normalized.truncated || proposed.truncated,
-		});
+		}, claim.row.attempts);
 	}
 	return persistChunk(env, {
 		...options,
 		runId: claim.row.id,
+		runAttempt: claim.row.attempts,
 		chunkKey: plannedChunk.key,
 		atoms: normalized.atoms,
 		outcomes: normalized.outcomes,

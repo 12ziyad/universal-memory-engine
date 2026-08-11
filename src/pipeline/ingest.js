@@ -34,12 +34,14 @@ import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { stageMemoryText } from "./staged_text.js";
 import { writeSourceEpisodes } from "./episodes.js";
-import { memoryV3Enabled } from "../lib/memory_v3.js";
+import { memoryV3AtomicCaptureEnabled, memoryV3Enabled } from "../lib/memory_v3.js";
 import { resolveAdmissionRules } from "./admission.js";
+import { hasRecoverableAtomicCaptureInterruption } from "./atomic_candidates.mjs";
 
 // 1.7 backpressure: never accept unbounded work you can't see.
 const MAX_QUEUE_DEPTH = 200;
 const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
+const ACTIVE_JOB_STATES = new Set(["awaiting_source", "queued", "staged", "processing"]);
 // A failed extract job is not a verdict about the content — it is a verdict
 // about one processing attempt (a lost handoff, a model fault). An exact
 // replay is the caller explicitly asking again, so it re-queues the SAME job
@@ -67,7 +69,8 @@ async function findIdempotencyState(env, userId, idempotencyKey, contentHash) {
 			"SELECT * FROM source_packets WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
 		).bind(userId, idempotencyKey).first(),
 		env.DB.prepare(
-			`SELECT id, status, type, receipt_id, source_packet_id, attempts, error, created_at FROM memory_jobs
+			`SELECT id, status, type, receipt_id, source_packet_id, attempts, payload_json,
+			 error, created_at FROM memory_jobs
 			 WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
 		).bind(userId, idempotencyKey).first(),
 	]);
@@ -107,6 +110,72 @@ async function findIdempotencyState(env, userId, idempotencyKey, contentHash) {
 		}
 	}
 	return { job, receipt, summary, sourcePacket };
+}
+
+function parsedJobPayload(value) {
+	try {
+		const parsed = JSON.parse(value ?? "{}");
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Reopen the exact same accepted job under a monotonic repair generation.
+ * Restoring `remaining` is essential: failed settlement intentionally empties
+ * it, and merely changing status to queued lets the next dedupe settle a false
+ * zero-write success. The compare-and-set makes concurrent exact replays share
+ * one generation and therefore one Durable Object handoff/model attempt.
+ */
+async function reopenExtractJobForReplay(env, userId, replay, messageIds) {
+	const job = replay?.job;
+	if (!job?.id || !["failed", "enriched"].includes(job.status)) return null;
+	const attempts = Math.max(0, Math.trunc(Number(job.attempts ?? 0)));
+	if (attempts >= MAX_FAILED_REPLAY_REPAIRS) return { exhausted: true, job };
+	const payloadJson = job.payload_json ?? "{}";
+	const payload = parsedJobPayload(payloadJson);
+	const generation = Math.max(attempts, Math.trunc(Number(payload.repair_generation ?? 0))) + 1;
+	if (!Number.isSafeInteger(generation) || generation > MAX_FAILED_REPLAY_REPAIRS) {
+		return { exhausted: true, job };
+	}
+	const nextPayload = JSON.stringify({
+		...payload,
+		remaining: [...messageIds],
+		repair_generation: generation,
+	});
+	const changed = await env.DB.prepare(
+		`UPDATE memory_jobs
+		 SET status = 'queued', attempts = ?, payload_json = ?, error = NULL,
+			completed_at = NULL, run_after = ?, updated_at = ?
+		 WHERE id = ? AND user_id = ? AND status = ? AND attempts = ? AND payload_json IS ?
+		 RETURNING id,status,attempts,payload_json,receipt_id,source_packet_id,type,error,created_at`,
+	).bind(
+		generation,
+		nextPayload,
+		Date.now(),
+		Date.now(),
+		job.id,
+		userId,
+		job.status,
+		attempts,
+		payloadJson,
+	).first();
+	if (changed) return { repaired: true, generation, job: changed };
+
+	// A concurrent exact replay may have won the CAS. Join only the same bounded
+	// repair generation; never manufacture local queued state after a lost CAS.
+	const current = await env.DB.prepare(
+		`SELECT id,status,attempts,payload_json,receipt_id,source_packet_id,type,error,created_at
+		 FROM memory_jobs WHERE id = ? AND user_id = ? LIMIT 1`,
+	).bind(job.id, userId).first();
+	const currentPayload = parsedJobPayload(current?.payload_json);
+	const currentGeneration = Math.trunc(Number(currentPayload.repair_generation ?? 0));
+	if (current && ["awaiting_source", "queued", "staged", "processing"].includes(current.status)
+		&& currentGeneration >= generation && currentGeneration <= MAX_FAILED_REPLAY_REPAIRS) {
+		return { repaired: false, joined: true, generation: currentGeneration, job: current };
+	}
+	return { repaired: false, joined: false, generation: 0, job: current ?? job };
 }
 
 async function recordReplay(env, userId, normalized, replay, { bumpSeen = true } = {}) {
@@ -278,6 +347,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	if (sourceEpisodesRequired) {
 		normalized.packet = sourcePacketWithAdmissionRules(normalized.packet, normalized.messages, admissionRules);
 	}
+	const userMsgIds = normalized.messages.filter((message) => message.role === "user").map((message) => message.id);
 
 	// Permanent exact replay returns the original receipt; conflicting content
 	// never mutates the packet or reaches the queue.
@@ -313,6 +383,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			summary: "This accepted write was erased and cannot be replayed. Send a genuinely new write if you want to remember it again.",
 		};
 	}
+	let repairGeneration = 0;
+	let repairReason = null;
 	if (replay?.job?.status === "failed" && replay.job.type === "extract") {
 		// An erasure is a permanent user decision, not an extraction failure that
 		// an exact replay may repair. Re-queuing it would permit source or semantic
@@ -338,12 +410,58 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 				summary: "Extraction for this exact content failed permanently after its bounded repair attempts. Keep your copy; review the job error, then resubmit as new content or contact support.",
 			};
 		}
-		// Compare-and-set on status so concurrent replays perform one reset;
-		// losers observe a non-terminal job and take the normal recovery path.
-		await env.DB.prepare(
-			"UPDATE memory_jobs SET status = 'queued', error = NULL, completed_at = NULL, run_after = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'failed'",
-		).bind(Date.now(), Date.now(), replay.job.id, userId).run();
-		replay.job.status = "queued";
+		repairReason = "failed_terminal";
+	} else if (
+		replay?.job?.status === "enriched"
+		&& replay.job.type === "extract"
+		&& sourceEpisodesRequired
+		&& memoryV3AtomicCaptureEnabled(env, userId)
+		&& await hasRecoverableAtomicCaptureInterruption(
+			env,
+			userId,
+			replay.sourcePacket?.id ?? replay.job.source_packet_id,
+			{ projectId: replay.sourcePacket?.project_id ?? null },
+		)
+	) {
+		// A terminal success is normally immutable. The only exception is a stale
+		// interrupted atomic-run row with no candidates: durable proof that this
+		// exact packet was accidentally settled before all accepted chunks landed.
+		repairReason = "interrupted_atomic_capture";
+	}
+	if (repairReason) {
+		const reopened = await reopenExtractJobForReplay(env, userId, replay, userMsgIds);
+		if (reopened?.exhausted) {
+			return {
+				extractionFailedTerminal: true,
+				jobId: replay.job.id,
+				jobStatus: replay.job.status,
+				sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+				summary: "Extraction for this exact content exhausted its bounded repair attempts. Keep your copy; review the job error, then resubmit as new content or contact support.",
+			};
+		}
+		if (reopened?.generation > 0 && reopened?.job) {
+			repairGeneration = reopened.generation;
+			replay.job = reopened.job;
+		} else if (reopened?.job && TERMINAL_JOB_STATES.has(reopened.job.status)) {
+			replay.job = reopened.job;
+		}
+	}
+	// A concurrent replay can begin after another caller won the terminal->queued
+	// CAS but before that winner completed the Durable Object handoff. Join the
+	// generation already bound in D1; falling back to the original handoff id can
+	// hit legacy seen-state and falsely settle the repaired job with zero writes.
+	if (repairGeneration === 0 && replay?.job && ACTIVE_JOB_STATES.has(replay.job.status)) {
+		const activeGeneration = Number(parsedJobPayload(replay.job.payload_json).repair_generation ?? 0);
+		if (!Number.isSafeInteger(activeGeneration) || activeGeneration < 0 || activeGeneration > MAX_FAILED_REPLAY_REPAIRS) {
+			return {
+				extractionFailedTerminal: true,
+				jobId: replay.job.id,
+				jobStatus: replay.job.status,
+				sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+				summary: "This repair has invalid durable generation state. Keep your copy and contact support; no inference was started.",
+			};
+		}
+		repairGeneration = activeGeneration;
 	}
 	if (replay?.job && TERMINAL_JOB_STATES.has(replay.job.status)) {
 		return recordReplay(env, userId, normalized, replay);
@@ -384,7 +502,6 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 
 	// 1.1 job row before the 200 — refusing to accept work without a durable
 	// record is the whole point, so a failed insert fails the request.
-	const userMsgIds = normalized.messages.filter((m) => m.role === "user").map((m) => m.id);
 	const jobClaim = await claimIngestMemoryJob(env, userId, {
 		type: "extract",
 		status: sourceEpisodesRequired ? "awaiting_source" : "queued",
@@ -503,7 +620,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// rules ride in as an override (doorOverrides), and staging must enforce
 	// the same object the gates enforce — a derived mem_ id owns no rules row,
 	// so a self-load here would silently return defaults.
-	if (jobClaim.claimed || sourceActivation.activated) {
+	if (jobClaim.claimed || sourceActivation.activated || repairGeneration > 0) {
 		await stageMemoryText(env, userId, {
 			jobId,
 			sourcePacketId: sourcePacket?.id ?? null,
@@ -519,11 +636,13 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	maybeInjectIngestFault(env, ingestFault, "after_job_claim");
 
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+	const handoffId = repairGeneration > 0 ? `${jobId}:repair:${repairGeneration}` : jobId;
 	const handoff = await stub.acceptMessagesOnce(userId, normalized.messages, {
 		flush,
 		jobId,
-		handoffId: jobId,
+		handoffId,
 		requestHash: normalized.packet.content_hash,
+		repairGeneration,
 		scopeKey,
 		contextKey,
 		overrides: extractionOverrides,

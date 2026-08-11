@@ -1,5 +1,40 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E paused on V3-D04 HIGH / repair fully gated / production reattack next
+
+- The frozen Stage E write phase is complete: **272/272 sessions**, **5,882
+  messages**, 301 deterministic batches. There are **0/1,540 answers**, zero
+  references opened by the product process, zero judge rows and no score.
+- The reference-blind state audit found V3-D04 HIGH. Two accepted packets each
+  have one completed atomic chunk (11 / 8 stored candidates) and one stale
+  zero-write `running` chunk. Their failed extraction predecessor plus a
+  falsely enriched exact replay made the interrupted suffix unrecoverable.
+- Root cause and bounded repair are durable in
+  `final/locomo/V3-D04-INTERRUPTED-CAPTURE-REPAIR.md`. Failed identities no
+  longer enter `seen`; exact jobs reopen with restored `remaining`, monotonic
+  repair generation and generation-bound handoff; concurrent followers join;
+  atomic reclamation is tenant/packet/project scoped and attempt-fenced.
+- Failing-first boundaries now pass **9/9**, including stale older-generation
+  queue ownership and a D1 settlement-generation fence. Full serialized Worker
+  is **112 files / 1,322 pass**; unit/cross-door is **539 pass + one intentional skip**;
+  focused replay/erasure/rules/secret/project/source slice is 192/192; audit is
+  zero, diff check and Wrangler dry deploy pass. No migration is needed.
+- Repo/origin before the repair commit remain
+  `60a2c17f64d4e56a5814d3876c6d5885d2db16da`; production remains deployment
+  `825157fb-1456-4c99-9c4d-1ad41dca93cd`, Worker
+  `6781ae37-c8cf-4a2e-a3fb-ea9178d1b924`. Only owner `AGENTS.md` is unrelated.
+- Read-only GraphQL burn is **2,142,168 / 3,000,000** (71.4%). Stage E has used
+  **208,586 / 500,000**, leaving 291,414. Its delta is ingestion only: Qwen
+  123,704; Scout 82,581; embeddings 2,300; GPT-OSS reader/judge delta zero.
+- No benchmark/judge process or global lock is active. The unreliable read-only
+  Wrangler D1 wrapper timed out once and its exact orphan processes were
+  removed; production-primary HTTPS evidence independently reconfirmed both
+  stale rows.
+- Exact next action: commit/push the gated V3-D04 repair, deploy with unchanged
+  Stage E allowlists, exact-replay only the two frozen packets, prove complete
+  accounting before any answer/reference/score phase, then resume the same
+  manifest.
+
 ## 2026-08-12 Stage E paused safely / V3-H16 repaired / exact resume next
 
 - The one-shot run retained 111/272 complete session rows and 0/1,540 answers;

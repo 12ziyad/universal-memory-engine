@@ -67,6 +67,7 @@ const MCP_HANDOFF_MARKER_PREFIX = "mcp-handoff:v1:";
 const HANDOFF_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const CONTENT_HASH_RE = /^[a-f0-9]{64}$/;
 const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
+const MAX_REPAIR_GENERATION = 5;
 
 // 1.5 poison ceiling and 1.9 drain pacing.
 const MAX_ATTEMPTS = 3;
@@ -458,8 +459,43 @@ export class UserMemory extends DurableObject {
 	async #memoryJobState(userId, jobId) {
 		if (!jobId) return null;
 		return this.env.DB.prepare(
-			"SELECT id, status FROM memory_jobs WHERE id = ? AND user_id = ? LIMIT 1",
+			`SELECT id,status,payload_json,source_packet_id,receipt_id,error
+			 FROM memory_jobs WHERE id = ? AND user_id = ? LIMIT 1`,
 		).bind(jobId, userId).first();
+	}
+
+	#repairGeneration(value) {
+		const generation = Number(value ?? 0);
+		if (!Number.isSafeInteger(generation) || generation < 0 || generation > MAX_REPAIR_GENERATION) {
+			throw codedError("HANDOFF_REPAIR_INVALID", "repair generation is invalid");
+		}
+		return generation;
+	}
+
+	#jobRepairGeneration(job) {
+		let payload;
+		try { payload = JSON.parse(job?.payload_json ?? "{}"); } catch {
+			throw codedError("HANDOFF_REPAIR_INVALID", "memory job repair state is malformed");
+		}
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+			throw codedError("HANDOFF_REPAIR_INVALID", "memory job repair state is malformed");
+		}
+		return this.#repairGeneration(payload.repair_generation ?? 0);
+	}
+
+	async #assertHandoffRepairGeneration(userId, jobId, repairGeneration) {
+		if (!jobId) return null;
+		const job = await this.#memoryJobState(userId, jobId);
+		if (!job) return null; // Back-compatible job-less diagnostic RPC callers.
+		const expected = this.#repairGeneration(repairGeneration);
+		const current = this.#jobRepairGeneration(job);
+		if (current > expected) {
+			throw codedError("HANDOFF_REPAIR_SUPERSEDED", "handoff repair generation was superseded");
+		}
+		if (current !== expected) {
+			throw codedError("HANDOFF_REPAIR_INVALID", "handoff repair generation does not match durable job state");
+		}
+		return job;
 	}
 
 	/**
@@ -468,14 +504,17 @@ export class UserMemory extends DurableObject {
 	 * the same _job tag. We deliberately do not infer ownership from message ids
 	 * alone because an overlapping packet may legitimately reuse them.
 	 */
-	async #handoffOwnership(jobId) {
+	async #handoffOwnership(jobId, repairGeneration = null) {
 		if (!jobId) return { owned: false, held: 0, queued: 0, heldIds: [], queuedIds: [], contextKeys: [] };
+		const expectedGeneration = repairGeneration == null ? null : this.#repairGeneration(repairGeneration);
 		const chunk = await this.ctx.storage.get("chunk");
 		const acceptStates = (await this.ctx.storage.get("chunkAcceptState")) ?? {};
 		const heldIds = new Set();
 		const contextKeys = new Set();
 		for (const message of chunk ?? []) {
 			if (message?._job !== jobId) continue;
+			const heldGeneration = this.#repairGeneration(acceptStates[message._accept]?.repairGeneration ?? 0);
+			if (expectedGeneration != null && heldGeneration !== expectedGeneration) continue;
 			if (message.id) heldIds.add(message.id);
 			const contextKey = message._accept ? acceptStates[message._accept]?.contextKey : null;
 			if (contextKey) contextKeys.add(contextKey);
@@ -484,6 +523,8 @@ export class UserMemory extends DurableObject {
 		const queuedIds = new Set();
 		await this.#scanQueue((_key, entry) => {
 			if (entry?.kind !== "extract") return true;
+			const entryGeneration = this.#repairGeneration(entry.repairGeneration ?? 0);
+			if (expectedGeneration != null && entryGeneration !== expectedGeneration) return true;
 			const mappedIds = Object.entries(entry.jobByMessage ?? {})
 				.filter(([, mappedJobId]) => mappedJobId === jobId)
 				.map(([messageId]) => messageId);
@@ -507,6 +548,42 @@ export class UserMemory extends DurableObject {
 		};
 	}
 
+	/**
+	 * D1 may have reopened a terminal job while an older generation is still in
+	 * the pre-fire held chunk. Remove only that job's older held ownership before
+	 * accepting the exact repair. Queued entries are retained for generation-
+	 * aware cleanup so any already-durable terminal side effects can finish.
+	 */
+	async #dropSupersededHeldOwnership(jobId, repairGeneration) {
+		const targetGeneration = this.#repairGeneration(repairGeneration);
+		if (!jobId || targetGeneration === 0) return 0;
+		return this.ctx.storage.transaction(async (txn) => {
+			const chunk = (await txn.get("chunk")) ?? [];
+			const acceptStates = (await txn.get("chunkAcceptState")) ?? {};
+			const removedAcceptRefs = new Set();
+			const kept = [];
+			for (const message of chunk) {
+				const generation = this.#repairGeneration(acceptStates[message?._accept]?.repairGeneration ?? 0);
+				if (message?._job === jobId && generation < targetGeneration) {
+					if (message._accept) removedAcceptRefs.add(message._accept);
+					continue;
+				}
+				kept.push(message);
+			}
+			if (kept.length === chunk.length) return 0;
+			const retainedAcceptRefs = new Set(kept.map((message) => message?._accept).filter(Boolean));
+			for (const acceptRef of removedAcceptRefs) {
+				if (!retainedAcceptRefs.has(acceptRef)) delete acceptStates[acceptRef];
+			}
+			const overridesByJob = (await txn.get("chunkOverridesByJob")) ?? {};
+			if (!kept.some((message) => message?._job === jobId)) delete overridesByJob[jobId];
+			await txn.put("chunk", kept);
+			await txn.put("chunkAcceptState", acceptStates);
+			await txn.put("chunkOverridesByJob", overridesByJob);
+			return chunk.length - kept.length;
+		});
+	}
+
 	#recoveredHandoffResult(marker, ownership = null) {
 		const owned = ownership?.owned
 			? Math.max(Number(ownership.held ?? 0), Number(marker.fallback?.held ?? 0))
@@ -528,7 +605,10 @@ export class UserMemory extends DurableObject {
 	 */
 	async #recoverOwnedHandoff(userId, marker) {
 		return this.ctx.blockConcurrencyWhile(async () => {
-			let ownership = await this.#handoffOwnership(marker.jobId);
+			const repairGeneration = this.#repairGeneration(
+				marker.repairGeneration ?? marker.behavior?.repairGeneration ?? 0,
+			);
+			let ownership = await this.#handoffOwnership(marker.jobId, repairGeneration);
 			if (
 				marker.contextKey
 				&& ownership.contextKeys.some((contextKey) => contextKey !== marker.contextKey)
@@ -542,11 +622,14 @@ export class UserMemory extends DurableObject {
 				// remainder stays held and is completed below.
 				const queuedIds = new Set(ownership.queuedIds);
 				const chunk = (await this.ctx.storage.get("chunk")) ?? [];
+				const acceptStates = (await this.ctx.storage.get("chunkAcceptState")) ?? {};
 				const reconciled = chunk.filter((message) => !(
-					message?._job === marker.jobId && queuedIds.has(message.id)
+					message?._job === marker.jobId
+					&& this.#repairGeneration(acceptStates[message._accept]?.repairGeneration ?? 0) === repairGeneration
+					&& queuedIds.has(message.id)
 				));
 				if (reconciled.length !== chunk.length) await this.ctx.storage.put("chunk", reconciled);
-				ownership = await this.#handoffOwnership(marker.jobId);
+				ownership = await this.#handoffOwnership(marker.jobId, repairGeneration);
 			}
 			if (ownership.held > 0) {
 				const chunk = (await this.ctx.storage.get("chunk")) ?? [];
@@ -563,7 +646,7 @@ export class UserMemory extends DurableObject {
 						contextKey: marker.contextKey,
 					});
 				}
-				ownership = await this.#handoffOwnership(marker.jobId);
+				ownership = await this.#handoffOwnership(marker.jobId, repairGeneration);
 			}
 			await this.#guaranteeWake();
 			return this.#recoveredHandoffResult(marker, ownership);
@@ -578,7 +661,14 @@ export class UserMemory extends DurableObject {
 			await this.#announceJobTransitions(marker.userId, await settleMemoryJobs(
 				this.env,
 				marker.userId,
-				[{ jobId: marker.jobId, messageIds: marker.settledMessageIds, disposition: "skipped" }],
+				[{
+					jobId: marker.jobId,
+					messageIds: marker.settledMessageIds,
+					disposition: "skipped",
+					repairGeneration: this.#repairGeneration(
+						marker.repairGeneration ?? marker.behavior?.repairGeneration ?? 0,
+					),
+				}],
 				{ strict: true },
 			));
 		}
@@ -586,7 +676,10 @@ export class UserMemory extends DurableObject {
 			await this.#mirrorCheckpoint(marker.userId, marker.checkpointToMirror, { strict: true });
 		}
 
-		let ownership = await this.#handoffOwnership(marker.jobId);
+		const repairGeneration = this.#repairGeneration(
+			marker.repairGeneration ?? marker.behavior?.repairGeneration ?? 0,
+		);
+		let ownership = await this.#handoffOwnership(marker.jobId, repairGeneration);
 		let job = null;
 
 		// No local ownership is valid only when D1 already has a terminal verdict
@@ -600,7 +693,12 @@ export class UserMemory extends DurableObject {
 					await this.#announceJobTransitions(marker.userId, await settleMemoryJobs(
 						this.env,
 						marker.userId,
-						[{ jobId: marker.jobId, all: true, disposition: "skipped" }],
+						[{
+							jobId: marker.jobId,
+							all: true,
+							disposition: "skipped",
+							repairGeneration,
+						}],
 						{ strict: true },
 					));
 					job = await this.#memoryJobState(marker.userId, marker.jobId);
@@ -658,8 +756,12 @@ export class UserMemory extends DurableObject {
 			flush: Boolean(opts.flush),
 			scopeKey: requestedScopeKey,
 			contextKey: requestedContextKey,
+			repairGeneration: Math.max(0, Math.trunc(Number(opts.repairGeneration ?? 0))),
 			overrides: persistableOverrides(opts.overrides ?? {}),
 		};
+		if (!Number.isSafeInteger(behavior.repairGeneration) || behavior.repairGeneration > MAX_REPAIR_GENERATION) {
+			throw codedError("HANDOFF_REPAIR_INVALID", "handoff repair generation is invalid");
+		}
 		const behaviorHash = await sha256Hex(JSON.stringify(behavior));
 		const userMessages = (messages ?? []).filter((message) => message && (message.role ?? "user") === "user");
 		const meaningful = userMessages.filter((message) => {
@@ -688,6 +790,7 @@ export class UserMemory extends DurableObject {
 						...existing,
 						context_schema: 1,
 						contextKey: requestedContextKey,
+						repairGeneration: behavior.repairGeneration,
 						behaviorHash,
 						behavior,
 					};
@@ -706,6 +809,7 @@ export class UserMemory extends DurableObject {
 				jobId,
 				scopeKey: requestedScopeKey,
 				contextKey: requestedContextKey,
+				repairGeneration: behavior.repairGeneration,
 				flush: Boolean(opts.flush),
 				behaviorHash,
 				behavior,
@@ -736,10 +840,15 @@ export class UserMemory extends DurableObject {
 		}
 
 		this.#maybeInjectHandoffFault(opts, "after_pending");
+		const boundRepairGeneration = this.#repairGeneration(
+			marker.repairGeneration ?? marker.behavior?.repairGeneration ?? behavior.repairGeneration,
+		);
+		await this.#assertHandoffRepairGeneration(userId, jobId, boundRepairGeneration);
+		await this.#dropSupersededHeldOwnership(jobId, boundRepairGeneration);
 
 		// Recover an interrupted/legacy call before invoking addMessages. Finding
 		// ownership means the active job must never be appended or settled again.
-		const ownership = await this.#handoffOwnership(jobId);
+		const ownership = await this.#handoffOwnership(jobId, boundRepairGeneration);
 		if (ownership.owned) {
 			const result = await this.#recoverOwnedHandoff(userId, marker);
 			const { behavior: _behavior, ...stableMarker } = marker;
@@ -770,6 +879,7 @@ export class UserMemory extends DurableObject {
 			flush: Boolean(boundBehavior.flush ?? marker.flush),
 			scopeKey: cleanScopeKey(boundBehavior.scopeKey ?? marker.scopeKey),
 			contextKey: String(boundBehavior.contextKey ?? marker.contextKey ?? requestedContextKey),
+			repairGeneration: Number(boundBehavior.repairGeneration ?? 0),
 			overrides: boundBehavior.overrides ?? opts.overrides ?? {},
 		};
 		const {
@@ -1157,6 +1267,10 @@ export class UserMemory extends DurableObject {
 				...(contextSnapshot ? { contextSnapshot } : {}),
 				...(contextTrace ? { contextTrace } : {}),
 				...(acceptState?.rescuedFromNoWrite ? { rescuedFromNoWrite: true } : {}),
+				...(acceptState?.handoffMarkerKey
+					? { handoffMarkerKeys: [acceptState.handoffMarkerKey] }
+					: {}),
+				repairGeneration: Math.max(0, Math.trunc(Number(acceptState?.repairGeneration ?? 0))),
 				attempts: 0,
 				runAfter: 0,
 				enqueuedAt,
@@ -1239,6 +1353,7 @@ export class UserMemory extends DurableObject {
 				chunk.filter((message) => message?._dedupe).map((message) => [message._dedupe, message._job ?? null]),
 			);
 			const seen = new Set(state.seen);
+			const failedReplayRepair = Number(opts.repairGeneration ?? 0) > 0;
 			// Legacy project/global raw seen state has no conversation provenance.
 			// Leave it untouched for rollback, but fail open once context:v1 is
 			// active: one safe re-extraction is preferable to cross-session loss.
@@ -1292,7 +1407,7 @@ export class UserMemory extends DurableObject {
 					chunkIdentities.has(dedupeIdentity)
 					|| legacyHeld.has(`${norm.id}\u0000${contentHash}`)
 					|| dedupeIdentity === checkpointIdentity
-					|| seen.has(dedupeIdentity)
+					|| (!failedReplayRepair && seen.has(dedupeIdentity))
 				) {
 					skipped++;
 					// Two no-id copies in one request can normalize to the same raw
@@ -1405,6 +1520,8 @@ export class UserMemory extends DurableObject {
 						contextSnapshot: captured.snapshot,
 						contextTrace: captured.trace,
 						overrides: persistedOverrides ?? {},
+						repairGeneration: Math.max(0, Math.trunc(Number(opts.repairGeneration ?? 0))),
+						...(opts._handoffMarker?.key ? { handoffMarkerKey: opts._handoffMarker.key } : {}),
 					};
 					await txn.put("chunkAcceptState", acceptStates);
 				}
@@ -1464,6 +1581,7 @@ export class UserMemory extends DurableObject {
 					jobId: opts.jobId,
 					messageIds: settledMessageIds,
 					disposition: "skipped",
+					repairGeneration: this.#repairGeneration(opts.repairGeneration ?? 0),
 				}]));
 			}
 			// Every exit guarantees a wake while work exists — fired or held.
@@ -1955,6 +2073,7 @@ export class UserMemory extends DurableObject {
 	}
 
 	#extractJobUpdates(entry, disposition, extra = {}) {
+		const repairGeneration = this.#repairGeneration(entry?.repairGeneration ?? 0);
 		const byJob = new Map();
 		for (const [messageId, jobId] of Object.entries(entry.jobByMessage ?? {})) {
 			if (!jobId) continue;
@@ -1965,12 +2084,131 @@ export class UserMemory extends DurableObject {
 			jobId,
 			messageIds,
 			disposition,
+			repairGeneration,
 			...extra,
 		}));
 	}
 
+	async #extractEntryRepairState(userId, entry) {
+		const jobIds = this.#extractJobIds(entry);
+		if (jobIds.length === 0) return { superseded: false, generation: 0, jobs: [] };
+		const entryGeneration = this.#repairGeneration(entry?.repairGeneration ?? 0);
+		const jobs = (await Promise.all(jobIds.map((jobId) => this.#memoryJobState(userId, jobId))))
+			.filter(Boolean);
+		const generations = jobs.map((job) => this.#jobRepairGeneration(job));
+		if (generations.some((generation) => generation < entryGeneration)) {
+			throw codedError("EXTRACT_REPAIR_STATE_INVALID", "extract queue generation is ahead of its durable job");
+		}
+		const newer = generations.filter((generation) => generation > entryGeneration);
+		if (newer.length > 0 && newer.length !== generations.length) {
+			throw codedError("EXTRACT_REPAIR_STATE_INVALID", "mixed extract ownership spans repair generations");
+		}
+		return {
+			superseded: newer.length > 0,
+			generation: newer.length > 0 ? Math.min(...newer) : entryGeneration,
+			jobs,
+		};
+	}
+
+	async #deleteExtractQueueOwnership(key, entry) {
+		const markerKeys = await this.#terminalHandoffMarkerKeys(entry);
+		await this.ctx.storage.transaction(async (txn) => {
+			await txn.delete(key);
+			for (const markerKey of markerKeys) await txn.delete(markerKey);
+		});
+	}
+
+	async #terminalExtractResult(userId, terminal) {
+		const result = {
+			outcome: terminal.outcome,
+			receipt: terminal.receipt ?? null,
+			summary: terminal.summary ?? null,
+		};
+		if (!terminal.receipt) return result;
+		await storeReceipt(
+			this.env,
+			userId,
+			terminal.receipt.source,
+			terminal.receipt,
+			terminal.summary,
+			{ strict: true },
+		);
+		const stored = await this.env.DB.prepare(
+			"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(terminal.receipt.id, userId).first();
+		let fullReceipt = null;
+		try { fullReceipt = JSON.parse(stored?.detail ?? "null"); } catch {}
+		if (!fullReceipt || fullReceipt.id !== terminal.receipt.id) {
+			throw new Error("terminal receipt detail is missing or inconsistent");
+		}
+		result.receipt = fullReceipt;
+		result.summary = stored.summary ?? terminal.summary ?? formatReceipt(fullReceipt);
+		return result;
+	}
+
+	async #processSupersededExtract(userId, key, entry, repairState) {
+		const terminal = entry.terminal;
+		if (!terminal) {
+			await this.#deleteExtractQueueOwnership(key, entry);
+			return {
+				kind: "extract",
+				outcome: "superseded_repair_generation",
+				jobIds: this.#extractJobIds(entry),
+			};
+		}
+		if (terminal.version !== 1) {
+			throw codedError("SETTLEMENT_STATE_INVALID", "extract settlement retry state is invalid");
+		}
+
+		// D1 reached this older terminal state before the job was reopened. Preserve
+		// its deterministic outbox effects, but never settle or clear the staging
+		// bridge owned by the newer generation.
+		const result = await this.#terminalExtractResult(userId, terminal);
+		await this.#announceWrite(userId, result, { strict: true });
+		const updates = new Map((terminal.jobUpdates ?? []).map((update) => [update.jobId, update]));
+		const transitions = repairState.jobs.map((job) => {
+			let payload = {};
+			try { payload = JSON.parse(job.payload_json ?? "{}") ?? {}; } catch {}
+			const update = updates.get(job.id) ?? {};
+			return {
+				jobId: job.id,
+				status: terminal.action === "failed" ? "failed" : "enriched",
+				sourcePacketId: job.source_packet_id ?? null,
+				receiptId: update.receiptId ?? job.receipt_id ?? null,
+				project_id: payload.project_id ?? null,
+				project_name: payload.project_name ?? null,
+				saved: update.counts ?? payload.saved ?? null,
+				error: terminal.action === "failed" ? terminal.error ?? job.error ?? null : null,
+			};
+		});
+		await this.#announceJobTransitions(userId, transitions, { strict: true, settleStage: false });
+
+		if (terminal.action === "complete" || terminal.action === "failed") {
+			await this.#finalizeExtractQueueState(userId, key, entry, terminal);
+		} else {
+			// A superseded no-write rescue must not restore another copy beside the
+			// exact repair generation that is already queued.
+			await this.#deleteExtractQueueOwnership(key, entry);
+		}
+		if (terminal.action === "failed") {
+			await reportServerError(
+				this.env,
+				"extract_poison",
+				new Error(terminal.error ?? "entry dead-lettered"),
+				userId,
+			);
+		}
+		return {
+			kind: "extract",
+			outcome: "superseded_repair_generation",
+			jobIds: this.#extractJobIds(entry),
+		};
+	}
+
 	async #terminalHandoffMarkerKeys(entry) {
-		return Promise.all(this.#extractJobIds(entry).map((jobId) => this.#handoffMarkerKey(jobId)));
+		const keys = new Set(Array.isArray(entry?.handoffMarkerKeys) ? entry.handoffMarkerKeys : []);
+		for (const jobId of this.#extractJobIds(entry)) keys.add(await this.#handoffMarkerKey(jobId));
+		return [...keys];
 	}
 
 	async #persistExtractSettlement(userId, key, entry, result, {
@@ -2109,11 +2347,13 @@ export class UserMemory extends DurableObject {
 					);
 				}
 			}
-			const seenKey = contextKey ? contextStorageKey("seen", contextKey) : scopedStorageKey("seen", scopeKey);
-			const seen = (await txn.get(seenKey)) ?? [];
-			await txn.put(seenKey, this.#capSeen([
-				...new Set([...seen, ...(terminal.processedIdentities ?? [])]),
-			]));
+			if (terminal.action !== "failed") {
+				const seenKey = contextKey ? contextStorageKey("seen", contextKey) : scopedStorageKey("seen", scopeKey);
+				const seen = (await txn.get(seenKey)) ?? [];
+				await txn.put(seenKey, this.#capSeen([
+					...new Set([...seen, ...(terminal.processedIdentities ?? [])]),
+				]));
+			}
 			await txn.delete(key);
 			for (const markerKey of markerKeys) await txn.delete(markerKey);
 		});
@@ -2127,32 +2367,9 @@ export class UserMemory extends DurableObject {
 		if (!terminal || terminal.version !== 1) {
 			throw codedError("SETTLEMENT_STATE_INVALID", "extract settlement retry state is invalid");
 		}
-		const result = {
-			outcome: terminal.outcome,
-			receipt: terminal.receipt ?? null,
-			summary: terminal.summary ?? null,
-		};
+		let result;
 		try {
-			if (terminal.receipt) {
-				await storeReceipt(
-					this.env,
-					userId,
-					terminal.receipt.source,
-					terminal.receipt,
-					terminal.summary,
-					{ strict: true },
-				);
-				const stored = await this.env.DB.prepare(
-					"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
-				).bind(terminal.receipt.id, userId).first();
-				let fullReceipt = null;
-				try { fullReceipt = JSON.parse(stored?.detail ?? "null"); } catch {}
-				if (!fullReceipt || fullReceipt.id !== terminal.receipt.id) {
-					throw new Error("terminal receipt detail is missing or inconsistent");
-				}
-				result.receipt = fullReceipt;
-				result.summary = stored.summary ?? terminal.summary ?? formatReceipt(fullReceipt);
-			}
+			result = await this.#terminalExtractResult(userId, terminal);
 			if (typeof inlineOverrides?._testBeforeJobSettlement === "function") {
 				await inlineOverrides._testBeforeJobSettlement();
 			}
@@ -2217,8 +2434,8 @@ export class UserMemory extends DurableObject {
 		return {
 			kind: "extract",
 			outcome: terminal.action === "failed" ? "failed" : terminal.outcome,
-			receipt: result.receipt ?? null,
-			summary: result.summary ?? null,
+			receipt: result?.receipt ?? null,
+			summary: result?.summary ?? null,
 			jobIds: this.#extractJobIds(entry),
 		};
 	}
@@ -2232,11 +2449,15 @@ export class UserMemory extends DurableObject {
 	 * canonical-match upserts, never duplicate rows.
 	 */
 	async #processExtractEntry(userId, key, entry, inlineOverrides = null) {
+		if (entry.phase !== "settlement_pending" && await this.#splitMixedExtractEntry(key, entry)) {
+			return { kind: "extract", outcome: "split_mixed_ownership", jobIds: [] };
+		}
+		const repairState = await this.#extractEntryRepairState(userId, entry);
+		if (repairState.superseded) {
+			return this.#processSupersededExtract(userId, key, entry, repairState);
+		}
 		if (entry.phase === "settlement_pending") {
 			return this.#processPendingExtract(userId, key, entry, inlineOverrides);
-		}
-		if (await this.#splitMixedExtractEntry(key, entry)) {
-			return { kind: "extract", outcome: "split_mixed_ownership", jobIds: [] };
 		}
 		const ownedJobs = this.#extractJobIds(entry);
 		if (ownedJobs.length > 0 && !entry.rescuedFromNoWrite) {
@@ -2292,7 +2513,11 @@ export class UserMemory extends DurableObject {
 		const lastId = processedIds[processedIds.length - 1] ?? null;
 		const lastIdentity = lastId ? dedupeByMessage[lastId] ?? null : null;
 		const extractionAttempt = Number(entry.attempts ?? 0);
-		const extractionRunId = `run_extract_${(await sha256Hex(`${userId}\u0000${key}\u0000${extractionAttempt}`)).slice(0, 48)}`;
+		const repairGeneration = Math.max(0, Math.trunc(Number(entry.repairGeneration ?? 0)));
+		const attemptIdentity = repairGeneration > 0
+			? `${repairGeneration}:${extractionAttempt}`
+			: String(extractionAttempt);
+		const extractionRunId = `run_extract_${(await sha256Hex(`${userId}\u0000${key}\u0000${attemptIdentity}`)).slice(0, 48)}`;
 
 		let result;
 		try {
@@ -2432,11 +2657,11 @@ export class UserMemory extends DurableObject {
 	 * exactly once per accepted write, on its terminal transition. Metadata
 	 * only — ids, status, counts — never memory content.
 	 */
-	async #announceJobTransitions(userId, transitions = [], { strict = false } = {}) {
+	async #announceJobTransitions(userId, transitions = [], { strict = false, settleStage = true } = {}) {
 		// 8.2 upgrade: a job that reached a terminal state has its content in
 		// the graph (or a visible failure) — its staged text stops answering.
 		const terminalJobs = (transitions ?? []).map((t) => t.jobId).filter(Boolean);
-		if (terminalJobs.length) await settleStagedText(this.env, userId, terminalJobs);
+		if (settleStage && terminalJobs.length) await settleStagedText(this.env, userId, terminalJobs);
 		for (const t of transitions ?? []) {
 			const event = t.status === "failed" ? "memory.failed" : "memory.enriched";
 			const data = {

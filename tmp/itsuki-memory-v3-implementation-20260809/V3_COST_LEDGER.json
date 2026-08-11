@@ -88,9 +88,9 @@
     "requested_ceiling_rationale": "The original 1,500,000-neuron ceiling was owner-authorized on 2026-08-09. After the invalid concurrent reranking attempt consumed budget without producing evidence, the owner explicitly raised the hard campaign ceiling to 3,000,000 neurons on 2026-08-10 for the sequential frozen-subset rerun and later decisive V3 validation."
   },
   "spend": {
-    "inference_calls_made_this_campaign": 86705,
-    "neurons_consumed_this_campaign": 1933582,
-    "estimated_usd_at_published_rate": 21.27,
+    "inference_calls_made_this_campaign": 96212,
+    "neurons_consumed_this_campaign": 2142168,
+    "estimated_usd_at_published_rate": 23.56,
     "third_party_paid_apis_called": "none"
   },
   "entries": [
@@ -345,6 +345,32 @@
       "e10_incremental_cap": 90000,
       "gate": "REJECT - context compressed 30.45% but availability lost 14.29pp and judge lost 4.76pp",
       "verified_at": "2026-08-11T14:42:10.286Z"
+    },
+    {
+      "phase": "Final Stage E frozen LoCoMo ingestion through V3-D04 fail-closed boundary",
+      "dataset": "frozen 10-sample LoCoMo product input: 272 sessions, 5882 messages; zero answers/judges/scores",
+      "product_input_sha256": "e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd",
+      "models": [
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/baai/bge-base-en-v1.5"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1933582,
+      "campaign_neurons_after": 2142168,
+      "increment": 208586,
+      "estimated_increment_usd": 2.29,
+      "stage_e_cap": 500000,
+      "stage_e_remaining": 291414,
+      "model_neuron_deltas": {
+        "@cf/qwen/qwen3-30b-a3b-fp8": 123704,
+        "@cf/meta/llama-4-scout-17b-16e-instruct": 82581,
+        "@cf/baai/bge-base-en-v1.5": 2300,
+        "@cf/openai/gpt-oss-120b": 0
+      },
+      "call_increment": 9507,
+      "gate": "PAUSED - V3-D04 HIGH repair fully gated; production reattack required before answer/judge inference",
+      "verified_at": "2026-08-12T04:16:00+05:30"
     }
   ],
   "ceiling_revisions": [

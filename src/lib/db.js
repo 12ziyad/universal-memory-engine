@@ -530,7 +530,7 @@ export async function claimIngestMemoryJob(env, userId, data = {}) {
  * here; when nothing remains the row goes terminal: `enriched` or `failed`.
  * Runs under the DO's per-user serialization, so read-modify-write is safe.
  *
- * updates: [{ jobId, messageIds?, all?, disposition, counts?, error?, receiptId?, attempts? }]
+ * updates: [{ jobId, messageIds?, all?, disposition, counts?, error?, receiptId?, attempts?, repairGeneration? }]
  *   disposition: "processed" | "skipped" | "failed" | "attempted"
  *   - attempted: bookkeeping only (attempts + updated_at), no settlement
  *   - failed: terminal immediately, regardless of remaining
@@ -568,6 +568,25 @@ export async function settleMemoryJobs(env, userId, updates = [], { strict = fal
 
 				let payload = {};
 				try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+				if (update.repairGeneration !== undefined) {
+					const expectedGeneration = Number(update.repairGeneration);
+					const currentGeneration = Number(payload.repair_generation ?? 0);
+					if (
+						!Number.isSafeInteger(expectedGeneration)
+						|| expectedGeneration < 0
+						|| !Number.isSafeInteger(currentGeneration)
+						|| currentGeneration < 0
+					) {
+						throw new Error(`memory job ${update.jobId} has invalid repair-generation state`);
+					}
+					// A queue entry from an older repair generation may survive a crash
+					// after D1 reached terminal but before the Durable Object deleted its
+					// local entry. Never let that stale owner settle a newer generation.
+					if (currentGeneration !== expectedGeneration) {
+						finished = true;
+						break;
+					}
+				}
 				let safeReceiptId = null;
 				if (update.receiptId) {
 					const receiptOwner = await env.DB.prepare(

@@ -1,5 +1,15 @@
 # V3 DEFECT LEDGER
 
+## Final Stage E product finding (2026-08-12)
+
+V3-I04 was the contained infrastructure trigger. The deeper investigation below
+reclassifies its product consequence; the earlier LOW entry is not the final
+durability verdict.
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-D04** | **HIGH** | **PRODUCT DURABILITY / REPLAY DEFECT** | In each of two accepted multi-chunk packets, one atomic chunk committed and a later chunk was interrupted. Failed settlement polluted the DO `seen` set; exact replay did not restore `payload.remaining`, reused the old handoff identity, and could falsely settle `enriched`; stale atomic runs were unreclaimable and unfenced. A post-CAS concurrent follower and stale older-generation local ownership had the same zero-write/stale-settlement risk. Allowed accepted source survived as episodes, but the interrupted semantic suffix could remain permanently uncaptured. | **IMPLEMENTED + FULLY GATED; PRODUCTION REATTACK PENDING.** Nine failing-first boundaries now pass. Repair restores exact remaining IDs under bounded monotonic generations, joins concurrent followers, removes failed-seen pollution, scopes terminal reopening to tenant/packet/project interrupted-ledger proof, reclaims only zero-candidate interrupted chunks, attempt-fences all atomic writes/terminal updates, and generation-fences DO ownership plus D1 settlement. Exact 9/9; focused 192/192; Worker 1,322/1,322; unit 539/539 + one skip; audit/diff/dry deploy pass. No migration. Full lifecycle evidence: `final/locomo/V3-D04-INTERRUPTED-CAPTURE-REPAIR.md`. HIGH remains open until deployment and production exact-replay proof close it. |
+
 ## Final Stage E harness/infrastructure findings (2026-08-11)
 
 | id | sev | classification | finding | status |
