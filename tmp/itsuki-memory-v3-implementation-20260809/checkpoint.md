@@ -1,5 +1,26 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E paused safely / V3-H16 repaired / exact resume next
+
+- The one-shot run retained 111/272 complete session rows and 0/1,540 answers;
+  no reference, judge, or score phase started. The run manifest remains the same
+  resumable experiment and the global lock is absent.
+- Two parallel jobs reached the bounded 15-minute orphan margin with
+  `inference_outcome_unknown`, zero objects, and attempts=0. This is contained
+  infrastructure transient V3-I04; exact SRV-02 replay repairs the same durable
+  packet/job rows, never a new seed or key.
+- The first exact resume exposed V3-H16: an already-enriched terminal duplicate
+  correctly omitted current-call episode counters, but the harness coerced the
+  missing field to zero. No ledger row or score was written by that failed
+  precondition.
+- V3-H16 is closed narrowly: fresh/repaired writes still need exact explicit
+  counters; only an exact duplicate with the field absent defers to the existing
+  full source-episode/provenance state audit. Explicit zero and partial counts
+  still fail. Pure proof passes 5/5; repaired dry run opens zero references.
+- Stage E burn at diagnosis is 76,921; 423,079 stage neurons remain. Exact next
+  action: commit/push this reference-blind harness repair, then resume the same
+  manifest and idempotency identities.
+
 ## 2026-08-12 Stage E active / one-shot execution next
 
 - Frozen harness commit/origin is `073e6526ff473241d1d18b28dad6a43496db6045`;

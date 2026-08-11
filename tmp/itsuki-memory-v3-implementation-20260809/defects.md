@@ -1,5 +1,12 @@
 # V3 DEFECT LEDGER
 
+## Final Stage E harness/infrastructure findings (2026-08-11)
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-H16** | **MEDIUM** | **HARNESS DEFECT / TERMINAL REPLAY ACCOUNTING** | A valid enriched exact replay omitted current-call episode counters and the harness coerced missing to zero. | **CLOSED BEFORE ANSWER/SCORE.** Only absent counters on an exact duplicate defer to the existing exact state audit; all fresh/partial/explicit-zero cases remain fail-closed. 5/5 contract proof; zero references opened. |
+| **V3-I04** | **LOW** | **WORKERS AI / EXTRACTION TRANSIENT** | Two jobs stopped before a durable model result and were failed at the bounded 15-minute orphan margin. | **CONTAINED.** Same packet/job identities repair through the existing bounded SRV-02 replay path; no answer or score existed. |
+
 ## 2026-08-11 — V3-D10 residual cleanup extension CLOSED
 
 The otherwise empty middle/control synthetic cohort retained 217 plaintext

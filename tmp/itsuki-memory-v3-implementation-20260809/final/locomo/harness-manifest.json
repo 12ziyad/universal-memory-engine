@@ -8,8 +8,9 @@
   "scripts": {
     "common.mjs": "56c231e1e9338ac22265933c001c454d28c87e3a2788c2443f8c626ba0d7288d",
     "generate-product-inputs.mjs": "7e1f48942e866830b7e2a8687c6c9148cf85c9de5ae083c646724a246d2dfaa6",
+    "ingest-response.mjs": "987c72d01f0961514e64266e0ec8b0ffb02c149feb9eb77aaffcf925851991de",
     "lock-proof.mjs": "706bf9c48e26a09429cf8a7f66bf1c71e7aaea203930057047e8fe919b2ebf1b",
-    "product.mjs": "7e5c72e8adb6d815aeff31a6f3c64e78cf4237ade2cc600ff9cdb5594b945e2f",
+    "product.mjs": "6b94d029ea14b640b36a4ed5aaf10c08572a236ff48eb15121040eefb3be1d3e",
     "reference-boundary-proof.mjs": "2b78c31064c81574d2c4b6a65992e1a5d42aa9ec88e79e1ddf8ca02f09d32aa4",
     "run.mjs": "826d9e4595c8ffbf02fe00872b3807336840adc8c495b00ecdcf05955a7803b1",
     "schema-preflight.mjs": "092fb1b2f8fdae96692ad955337875c783fa4fd21fb0213612526e49c84ca42b",
@@ -22,10 +23,22 @@
     "locomo10.json": "553cd5a15e25f2ceccc6ed185221eba645080c93e5b91087560a91aa5961f365"
   },
   "proofs": {
+    "INGEST-REPLAY-CONTRACT-PROOF.json": "f774c3481dcde9faa2f7e6918cb77502adade90da4884b0db1dcda2708af31c7",
     "LOCK-PROOF.json": "9e7e6e15052a3a017a1caa928a355e3d9dc10c7213aff0746a476be09e8c9a49",
     "REFERENCE-BOUNDARY-PROOF.json": "0d9c9b1458cd665e1cb372a91212dee87a829690d855c194a5a1e090006048d2",
     "SCHEMA-PREFLIGHT.json": "c7b3e3e4a71738cffe99f363cd9257801d326c622feab9d41ac634c75d7443ed"
   },
+  "authorized_repairs": [
+    {
+      "id": "V3-H16",
+      "scope": "reference-blind harness accounting only",
+      "originalProductSha256": "7e5c72e8adb6d815aeff31a6f3c64e78cf4237ade2cc600ff9cdb5594b945e2f",
+      "completedSessionsRetained": 111,
+      "answersBeforeRepair": 0,
+      "productArchitectureChanged": false,
+      "referencesOpened": 0
+    }
+  ],
   "accounting": {
     "samples": 10,
     "sessions": 272,

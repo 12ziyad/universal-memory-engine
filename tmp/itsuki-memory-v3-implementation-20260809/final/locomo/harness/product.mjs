@@ -38,6 +38,7 @@ import {
 	writeJsonAtomic,
 	writeJsonExclusive,
 } from "./common.mjs";
+import { classifySourceEpisodeAcknowledgement } from "./ingest-response.mjs";
 
 const require = createRequire(import.meta.url);
 const { requireBenchmarkLockFromEnv } = require("../../../e2/harness/benchmark-lock.cjs");
@@ -175,8 +176,7 @@ async function ingestSession(token, sample, session, slot, start) {
 			`ingest(${sample.sampleId}/s${session.index}/b${batchIndex}) -> ${response.status} ${response.body?.code ?? "not_ok"}`);
 		assert(response.body.source_packet_id && response.body.job_id,
 			`${sample.sampleId}/s${session.index}/b${batchIndex}: accepted response omitted packet/job`);
-		assert(integer(response.body.source_episodes_written) === messages.length,
-			`${sample.sampleId}/s${session.index}/b${batchIndex}: source episode conservation failed`);
+		const episodeAcknowledgement = classifySourceEpisodeAcknowledgement(response.body, messages.length);
 		accepted.push({
 			batchIndex,
 			messageIds: messages.map((message) => message.id),
@@ -188,7 +188,8 @@ async function ingestSession(token, sample, session, slot, start) {
 			jobId: response.body.job_id,
 			fired: response.body.fired === true,
 			held: integer(response.body.held),
-			sourceEpisodesWritten: integer(response.body.source_episodes_written),
+			sourceEpisodesWritten: episodeAcknowledgement.reported,
+			sourceEpisodeConservation: episodeAcknowledgement.mode,
 			requestLatencyMs: response.elapsedMs,
 		});
 	}

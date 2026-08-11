@@ -1,5 +1,12 @@
 # V3 DEFECT LEDGER
 
+## Final Stage E harness/infrastructure findings (2026-08-11)
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-H16** | **MEDIUM** | **HARNESS DEFECT / TERMINAL REPLAY ACCOUNTING** | After a fail-closed extraction stop, an already-enriched but not-yet-ledgered concurrent session replayed with the product's intentional `duplicate=true` terminal response. That response reuses the original receipt and omits current-call top-level episode counters; the harness coerced missing to zero and falsely called it source loss. | **CLOSED BEFORE ANSWER/SCORE.** Fresh/repaired writes still require exact explicit counters. Only a duplicate with the field absent defers proof to the existing exact production-primary episode/provenance audit; explicit zero, partial, or fresh missing counts fail. Pure contract proof is 5/5 and the repaired dry run opens zero references. Same frozen identities resume; 111 completed sessions remain, 0 answers/scores existed. |
+| **V3-I04** | **LOW** | **WORKERS AI / EXTRACTION TRANSIENT** | Two parallel extract jobs reached the 15-minute orphan margin with `inference_outcome_unknown`, zero published objects, and `attempts=0`. | **CONTAINED.** The driver stopped before ledger/score, preserved accepted source episodes, and released its lock. The established bounded SRV-02 exact replay repairs the same packet/job rows; all retry burn remains charged to Stage E. |
+
 ## 2026-08-11 — V3-D10 residual cleanup extension CLOSED
 
 Stage E preflight found 217 legacy source-packet rows with plaintext metadata in
