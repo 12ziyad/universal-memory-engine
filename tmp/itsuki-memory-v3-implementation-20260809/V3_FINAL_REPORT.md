@@ -11,6 +11,12 @@ V3-D11 and V3-D12 HIGH are closed; no CRITICAL/HIGH is open at this boundary.
 Stage C local scale, repeated holdout, final full LoCoMo and final cleanup remain.
 Full evidence: `final/STAGE-B-FINAL.md`.
 
+The validated lanes were then safely closed at Worker version
+`2cb1f213-0f3f-4cbc-87e1-e5d04ddabb17`, deployment
+`33986e9a-65c4-48ef-9f5b-cc595675bd12`: 20/20 propagation checks passed,
+write/source/rejected lanes are OFF/0, E7 hybrid is historical d04 only, live
+treatment state is zero and all 809 packet fences are content-free.
+
 ## 2026-08-11 E9B closure / E10 next — authoritative
 
 ## 2026-08-11 E10 closure / final validation next - authoritative

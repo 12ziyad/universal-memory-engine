@@ -1,5 +1,20 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 Final Stage B safely closed / Stage C next
+
+- Closure commit/origin is `d2da0fc813a19cad8d2b662d26831b2fe3f98a6b`;
+  Worker version `2cb1f213-0f3f-4cbc-87e1-e5d04ddabb17`, deployment
+  `33986e9a-65c4-48ef-9f5b-cc595675bd12`, 100% traffic.
+- 20/20 uncached production checks prove parent allowlist 30, historical d04
+  hybrid 10, every write/source/rejected lane OFF/0, and equal state on both
+  domains. No schema/binding/migration changed.
+- Production-primary closure: every live Stage B treatment count is zero;
+  packet fences 809/minimized 809/content rows 0; global benchmark lock absent.
+- Durable proof is `final/STAGE-B-CLOSURE.md` and
+  `final/live/evidence/stage-b-closure-state.json`.
+- Exact next action: Stage C isolated local 1k/10k/100k scale. Do not place the
+  100k fixture in production and do not invoke inference.
+
 ## 2026-08-11 Final Stage B PASS / closure deployment next
 
 - The unchanged preregistered final Stage B run is valid and **PASS**. Durable
