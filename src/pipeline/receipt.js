@@ -223,6 +223,8 @@ function atomicProjectionFields(meta = {}) {
 		atomic_projection_promoted: integer(meta.atomic_projection_promoted),
 		atomic_projection_reinforced: integer(meta.atomic_projection_reinforced),
 		atomic_projection_ignored: integer(meta.atomic_projection_ignored),
+		atomic_projection_coalescing_enabled: meta.atomic_projection_coalescing_enabled === true,
+		atomic_projection_coalesced: integer(meta.atomic_projection_coalesced),
 		atomic_projection_latency_ms: Number.isFinite(Number(meta.atomic_projection_latency_ms))
 			? Math.max(0, Math.round(Number(meta.atomic_projection_latency_ms)))
 			: null,

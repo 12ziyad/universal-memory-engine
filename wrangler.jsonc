@@ -126,7 +126,11 @@
 		// E6 governed projection is independently nested and remains OFF even
 		// when atomic capture is selected for a write-only experiment cohort.
 		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION": "off",
-		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS": ""
+		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS": "",
+		// E6M same-source legacy/atomic paraphrase coalescing. Nested below
+		// governed projection and independently OFF outside an exact test cohort.
+		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING": "off",
+		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS": ""
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

@@ -84,10 +84,12 @@ function dayDate(row) {
 
 function metadataForRows(rows) {
 	const candidateIds = [...new Set(rows.map((row) => String(row.id)).filter(Boolean))];
+	const sourceMessageIds = [...new Set(rows.map((row) => String(row.source_message_id ?? "")).filter(Boolean))];
 	const first = rows[0] ?? {};
 	const attribute = normalizeLabel(first.attribute) || clean(first.attribute, 96).toLocaleLowerCase();
 	return {
 		candidateIds,
+		sourceMessageIds,
 		evidenceQuote: clean(first.evidence_quote, 240),
 		attribute: clean(attribute, 96),
 		cardinality: ["single", "multi", "unknown"].includes(first.cardinality) ? first.cardinality : "unknown",

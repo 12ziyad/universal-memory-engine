@@ -502,7 +502,9 @@ export async function applyGates(
 		autoCreated: [], // labels of nodes synthesized by the anti-orphan rule
 		merges: [], // 7.2 audit: every non-exact merge, with its basis
 		rejected: [],
+		atomicCoalesced: [], // content-free E6M same-source merge accounting
 	};
+	const legacyPlannedAssertions = new WeakSet();
 	const atomicMetaFor = (obj) => opts?.atomicProjectionMetadata?.get?.(obj) ?? null;
 	const atomicIdsFor = (obj) => {
 		const ids = atomicMetaFor(obj)?.candidateIds;
@@ -532,6 +534,12 @@ export async function applyGates(
 		if (Number.isFinite(Number(meta.eventTime)) && Number(meta.eventTime) > 0) {
 			target.valid_from = Number(meta.eventTime);
 			target.valid_at = Number(meta.eventTime);
+			// When an atomic event coalesces into an already planned legacy event,
+			// deterministic phrase time must replace the legacy fallback timestamp.
+			if (typeof target.action === "string") {
+				target.happened_at = Number(meta.eventTime);
+				target.happened_at_source = "phrase";
+			}
 		}
 		if (Number.isFinite(Number(meta.eventTimeEnd)) && Number(meta.eventTimeEnd) > 0) {
 			target.valid_to = Number(meta.eventTimeEnd);
@@ -539,6 +547,10 @@ export async function applyGates(
 		}
 		if (meta.eventTimePrecision) target.event_time_precision = meta.eventTimePrecision;
 		if (meta.eventTimeRelation) target.event_time_relation = meta.eventTimeRelation;
+		return target;
+	};
+	const rememberPlannedOrigin = (target, obj) => {
+		if (!atomicMetaFor(obj)) legacyPlannedAssertions.add(target);
 		return target;
 	};
 	const plannedSliceMatch = (nodeId, text) => {
@@ -555,6 +567,52 @@ export async function applyGates(
 				&& event.action === action
 				&& normalizeLabel(event.text) === wanted) ?? null
 			: null;
+	};
+	// Conservative plural normalization lets "migration" and "migrations"
+	// compare without opening a general semantic/stemming merge surface.
+	const assertionTokens = (text) => [...new Set(tokens(text).map((token) =>
+		token.length > 4 && token.endsWith("s") && !token.endsWith("ss")
+			? token.slice(0, -1)
+			: token))];
+	const assertionNumbers = (text) => [...new Set(normalizeLabel(text).split(" ").filter((token) => /^\d+$/.test(token)))].sort();
+	const isNegativeAssertion = (text) => /\b(?:no|not|never|without|cannot|can't|doesn't|didn't|isn't|wasn't|won't)\b/i.test(String(text ?? ""));
+	const sourceAwareTextMatch = (left, right, containment = 0.65) => {
+		if (isNegativeAssertion(left) !== isNegativeAssertion(right)) return false;
+		if (JSON.stringify(assertionNumbers(left)) !== JSON.stringify(assertionNumbers(right))) return false;
+		const a = assertionTokens(left);
+		const b = assertionTokens(right);
+		if (!a.length || !b.length) return false;
+		const rightSet = new Set(b);
+		const shared = a.filter((token) => rightSet.has(token)).length;
+		return shared >= 3 && shared / Math.min(a.length, b.length) >= containment;
+	};
+	const sourceAwarePlannedMatch = (items, nodeId, obj, action = null) => {
+		if (opts.atomicSourceCoalescing !== true) return null;
+		const meta = atomicMetaFor(obj);
+		const sourceIds = new Set(meta?.sourceMessageIds ?? []);
+		if (!meta || sourceIds.size === 0) return null;
+		for (const item of items) {
+			if (item.node_id !== nodeId || !legacyPlannedAssertions.has(item)) continue;
+			if (action !== null && item.action !== action) continue;
+			const source = bestMessageFor([item.text, obj?.on].filter(Boolean).join(" "));
+			if (!source?.id || source.coverage < 0.5 || !sourceIds.has(String(source.id))) continue;
+			if (!sourceAwareTextMatch(item.text, obj?.text)) continue;
+			// The exact scrubbed quote is the strongest source-grounded discriminator.
+			// Requiring it to agree prevents two similar clauses in one message (for
+			// example "D1 for storage" and "D1 for analytics") from collapsing.
+			if (!meta.evidenceQuote || !sourceAwareTextMatch(item.text, meta.evidenceQuote, 0.5)) continue;
+			return item;
+		}
+		return null;
+	};
+	const recordAtomicCoalescence = (target, obj, kind) => {
+		decorateAtomic(target, obj);
+		plan.atomicCoalesced.push({
+			kind,
+			object_id: target.id,
+			candidate_count: atomicIdsFor(obj).length,
+		});
+		return target;
 	};
 
 	let objects = applyUserSettings(proposal.objects ?? [], settings);
@@ -1061,13 +1119,19 @@ export async function applyGates(
 				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
+			const sourceAwareEvent = sourceAwarePlannedMatch(plan.newEvents, node.id, obj, action);
+			if (sourceAwareEvent) {
+				recordAtomicCoalescence(sourceAwareEvent, obj, "event");
+				plan.affectedNodeIds.add(node.id);
+				continue;
+			}
 			const duplicateEventId = await recentEventMatch(env, userId, node.id, action, now, projectScope.projectId);
 			if (duplicateEventId) {
 				plan.eventTouches.push(decorateAtomic({ id: duplicateEventId, node_id: node.id, action }, obj));
 				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
-			plan.newEvents.push(decorateAtomic({
+			plan.newEvents.push(rememberPlannedOrigin(decorateAtomic({
 				id: newId("event"),
 				user_id: userId,
 				node_id: node.id,
@@ -1080,7 +1144,7 @@ export async function applyGates(
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
-			}, obj));
+			}, obj), obj));
 			plan.affectedNodeIds.add(node.id);
 			// A lifecycle event also updates the node's state.
 			const newState = ACTION_TO_STATE[action];
@@ -1112,6 +1176,12 @@ export async function applyGates(
 				plan.affectedNodeIds.add(node.id);
 				continue;
 			}
+			const sourceAwareSlice = sourceAwarePlannedMatch(plan.newSlices, node.id, obj);
+			if (sourceAwareSlice) {
+				recordAtomicCoalescence(sourceAwareSlice, obj, "slice");
+				plan.affectedNodeIds.add(node.id);
+				continue;
+			}
 			const duplicateSliceId = await matchingSliceId(env, userId, node.id, kind, text, projectScope.projectId);
 			if (duplicateSliceId) {
 				plan.sliceTouches.push(decorateAtomic({ id: duplicateSliceId, node_id: node.id, kind }, obj));
@@ -1135,7 +1205,7 @@ export async function applyGates(
 				plan.sliceSupersede.push({ node_id: conflict.node_id ?? node.id, kind: conflict.kind, id: conflict.id });
 			}
 			attributeEdgeClosures(text);
-			plan.newSlices.push(decorateAtomic({
+			plan.newSlices.push(rememberPlannedOrigin(decorateAtomic({
 				id: newId("slice"),
 				user_id: userId,
 				node_id: node.id,
@@ -1145,7 +1215,7 @@ export async function applyGates(
 				created_at: now,
 				project_id: projectScope.projectId,
 				project_name: projectScope.projectName,
-			}, obj));
+			}, obj), obj));
 			plan.affectedNodeIds.add(node.id);
 			continue;
 		}

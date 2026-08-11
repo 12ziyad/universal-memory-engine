@@ -31,6 +31,7 @@ describe("GET /health", () => {
 				extractionB1: { mode: "off", allowlistCount: 0 },
 				atomicCapture: { mode: "off", allowlistCount: 0 },
 				atomicProjection: { mode: "off", allowlistCount: 0 },
+				atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			},
 		});
 	});

@@ -141,6 +141,30 @@ export function memoryV3AtomicProjectionEnabled(env, userId) {
 }
 
 /**
+ * E6M's source-aware coalescer is nested below governed projection. It can only
+ * alter how two already-authorized same-batch assertions share one semantic
+ * object; it cannot activate capture or projection for an account.
+ */
+export function memoryV3AtomicCoalescingConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_ATOMIC_COALESCING;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3AtomicCoalescingEnabled(env, userId) {
+	if (!memoryV3AtomicProjectionEnabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3AtomicCoalescingConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -149,6 +173,7 @@ export function memoryV3Status(env) {
 	const extraction = memoryV3ExtractionB1Config(env);
 	const atomicCapture = memoryV3AtomicCaptureConfig(env);
 	const atomicProjection = memoryV3AtomicProjectionConfig(env);
+	const atomicCoalescing = memoryV3AtomicCoalescingConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
@@ -156,5 +181,6 @@ export function memoryV3Status(env) {
 		extractionB1: { mode: extraction.mode, allowlistCount: extraction.allowlistCount },
 		atomicCapture: { mode: atomicCapture.mode, allowlistCount: atomicCapture.allowlistCount },
 		atomicProjection: { mode: atomicProjection.mode, allowlistCount: atomicProjection.allowlistCount },
+		atomicCoalescing: { mode: atomicCoalescing.mode, allowlistCount: atomicCoalescing.allowlistCount },
 	};
 }

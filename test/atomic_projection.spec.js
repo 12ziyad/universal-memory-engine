@@ -61,6 +61,14 @@ function treatmentEnv(userId) {
 	};
 }
 
+function coalescingEnv(userId) {
+	return {
+		...treatmentEnv(userId),
+		ITSUKI_MEMORY_V3_ATOMIC_COALESCING: "allowlist",
+		ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS: userId,
+	};
+}
+
 async function liveFixture(label, {
 	userId = `projection-${label}-${crypto.randomUUID()}`,
 	projectId = "projection-project",
@@ -152,6 +160,7 @@ describe("E6 deterministic atomic projection", () => {
 		expect(projected.metadata.get(projected.objects.find((object) => object.kind === "slice"))).toMatchObject({
 			candidateIds: ["atom-decision"],
 			evidenceQuote: decision.evidence_quote,
+			sourceMessageIds: ["m1"],
 		});
 	});
 
@@ -231,6 +240,188 @@ describe("E6 projection persistence", () => {
 			"SELECT object_id, outcome FROM semantic_atom_projections WHERE user_id = ?",
 		).bind(f.userId).first();
 		expect(projection).toEqual({ object_id: slices.results[0].id, outcome: "promoted" });
+	});
+
+	it("coalesces a conservative same-source legacy/atomic paraphrase and keeps projection provenance", async () => {
+		const f = await liveFixture("same-source-paraphrase", {
+			content: "Northwind's migration convention is additive: never use DROP COLUMN.",
+		});
+		f.testEnv = coalescingEnv(f.userId);
+		const result = await extract(f, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Northwind", category: "project", confidence: 0.97 },
+					{
+						kind: "slice", on: "Northwind", kind_detail: "decision",
+						text: "Migrations must be additive, with no DROP COLUMN.", confidence: 0.97,
+					},
+				],
+				notes: "legacy paraphrase",
+			},
+			atomicLlmResponse: {
+				atoms: [{
+					type: "decision", entity: "Northwind", entity_type: "project",
+					attribute: "migration convention", value: "additive, no DROP COLUMN",
+					assertion: "Northwind's migration convention is additive with no DROP COLUMN.",
+					source_message_id: "m1",
+					evidence_quote: "migration convention is additive: never use DROP COLUMN",
+					cardinality: "single", confidence: 0.97,
+				}],
+			},
+		});
+		expect(result.outcome).toBe("wrote");
+		expect(result.receipt.atomic_projection_coalesced).toBe(1);
+		const { results: slices } = await env.DB.prepare(
+			"SELECT id, text, source_snippet, semantic_attribute FROM slices WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(f.userId).all();
+		expect(slices).toHaveLength(1);
+		expect(slices[0]).toMatchObject({
+			text: "Migrations must be additive, with no DROP COLUMN.",
+			source_snippet: "migration convention is additive: never use DROP COLUMN",
+			semantic_attribute: "migration convention",
+		});
+		const projection = await env.DB.prepare(
+			"SELECT object_id, outcome FROM semantic_atom_projections WHERE user_id = ?",
+		).bind(f.userId).first();
+		expect(projection).toEqual({ object_id: slices[0].id, outcome: "promoted" });
+	});
+
+	it("keeps the established exact-only behavior when the E6M flag is off", async () => {
+		const f = await liveFixture("same-source-control", {
+			content: "Northwind's migration convention is additive: never use DROP COLUMN.",
+		});
+		const result = await extract(f, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Northwind", category: "project", confidence: 0.97 },
+					{ kind: "slice", on: "Northwind", kind_detail: "decision", text: "Migrations must be additive, with no DROP COLUMN.", confidence: 0.97 },
+				],
+				notes: "E6 exact-only control",
+			},
+			atomicLlmResponse: {
+				atoms: [{
+					type: "decision", entity: "Northwind", entity_type: "project",
+					attribute: "migration convention", value: "additive, no DROP COLUMN",
+					assertion: "Northwind's migration convention is additive with no DROP COLUMN.",
+					source_message_id: "m1", evidence_quote: "migration convention is additive: never use DROP COLUMN",
+					cardinality: "single", confidence: 0.97,
+				}],
+			},
+		});
+		expect(result.outcome).toBe("wrote");
+		expect(result.receipt.atomic_projection_coalescing_enabled).toBe(false);
+		expect(result.receipt.atomic_projection_coalesced).toBe(0);
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM slices WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(f.userId).first();
+		expect(Number(count.n)).toBe(2);
+	});
+
+	it("never coalesces distinct facts merely because they share one source message", async () => {
+		const f = await liveFixture("same-source-distinct", {
+			content: "Northwind stores data in D1 and deploys releases with Wrangler.",
+		});
+		f.testEnv = coalescingEnv(f.userId);
+		const result = await extract(f, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Northwind", category: "project", confidence: 0.97 },
+					{ kind: "slice", on: "Northwind", kind_detail: "technical_detail", text: "Northwind stores data in D1.", confidence: 0.97 },
+				],
+				notes: "one of two source facts",
+			},
+			atomicLlmResponse: {
+				atoms: [{
+					type: "procedure", entity: "Northwind", entity_type: "project",
+					attribute: "deployment", value: "Wrangler",
+					assertion: "Northwind deploys releases with Wrangler.",
+					source_message_id: "m1", evidence_quote: "deploys releases with Wrangler",
+					cardinality: "single", confidence: 0.97,
+				}],
+			},
+		});
+		expect(result.outcome).toBe("wrote");
+		expect(result.receipt.atomic_projection_coalesced).toBe(0);
+		const { results: slices } = await env.DB.prepare(
+			"SELECT text FROM slices WHERE user_id = ? AND deleted_at IS NULL ORDER BY text",
+		).bind(f.userId).all();
+		expect(slices.map((item) => item.text)).toEqual([
+			"Northwind deploys releases with Wrangler.",
+			"Northwind stores data in D1.",
+		]);
+	});
+
+	it("does not merge opposite-polarity assertions with high lexical overlap", async () => {
+		const f = await liveFixture("polarity-split", {
+			content: "Northwind does not use an ORM.",
+		});
+		f.testEnv = coalescingEnv(f.userId);
+		const result = await extract(f, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Northwind", category: "project", confidence: 0.97 },
+					{ kind: "slice", on: "Northwind", kind_detail: "decision", text: "Northwind uses an ORM.", confidence: 0.97 },
+				],
+				notes: "polarity protection",
+			},
+			atomicLlmResponse: {
+				atoms: [{
+					type: "decision", entity: "Northwind", entity_type: "project",
+					attribute: "ORM policy", value: "no ORM",
+					assertion: "Northwind does not use an ORM.", source_message_id: "m1",
+					evidence_quote: "does not use an ORM", cardinality: "single", confidence: 0.97,
+				}],
+			},
+		});
+		expect(result.receipt.atomic_projection_coalesced).toBe(0);
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM slices WHERE user_id = ? AND deleted_at IS NULL",
+		).bind(f.userId).first();
+		expect(Number(count.n)).toBe(2);
+	});
+
+	it("coalesces an event paraphrase only on matching source and action and preserves deterministic time", async () => {
+		const sourceTime = Date.UTC(2025, 10, 4, 12);
+		const f = await liveFixture("event-paraphrase", {
+			content: "Northwind moved its headquarters to Berlin yesterday.",
+			sourceTime,
+		});
+		f.testEnv = coalescingEnv(f.userId);
+		const result = await extract(f, {
+			llmResponse: {
+				objects: [
+					{ kind: "node", label: "Northwind", category: "project", confidence: 0.97 },
+					{ kind: "event", on: "Northwind", action: "moved", text: "Northwind headquarters moved to Berlin.", importance: "ordinary", confidence: 0.97 },
+				],
+				notes: "legacy event paraphrase",
+			},
+			atomicLlmResponse: {
+				atoms: [{
+					type: "event", entity: "Northwind", entity_type: "project",
+					attribute: "moved", value: "headquarters to Berlin",
+					assertion: "Northwind moved its headquarters to Berlin.",
+					source_message_id: "m1", evidence_quote: "moved its headquarters to Berlin yesterday",
+					raw_temporal_phrase: "yesterday", cardinality: "single", confidence: 0.97,
+				}],
+			},
+		});
+		expect(result.outcome).toBe("wrote");
+		expect(result.receipt.atomic_projection_coalesced).toBe(1);
+		const { results: events } = await env.DB.prepare(
+			`SELECT id, happened_at, happened_at_source, event_time_precision, event_time_relation
+			 FROM events WHERE user_id = ? AND deleted_at IS NULL`,
+		).bind(f.userId).all();
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			happened_at_source: "phrase",
+			event_time_precision: "day",
+			event_time_relation: "at",
+		});
+		expect(new Date(events[0].happened_at).toISOString().slice(0, 10)).toBe("2025-11-03");
+		const projection = await env.DB.prepare(
+			"SELECT object_id, object_kind, outcome FROM semantic_atom_projections WHERE user_id = ?",
+		).bind(f.userId).first();
+		expect(projection).toEqual({ object_id: events[0].id, object_kind: "event", outcome: "promoted" });
 	});
 
 	it("preserves deterministic year precision and records it as phrase-derived", async () => {

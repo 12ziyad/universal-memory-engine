@@ -28,6 +28,7 @@ import { chunkAnchor } from "./temporal.js";
 import {
 	memoryV3AtomicCaptureEnabled,
 	memoryV3AtomicProjectionEnabled,
+	memoryV3AtomicCoalescingEnabled,
 	memoryV3Enabled,
 	memoryV3ExtractionB1Enabled,
 } from "../lib/memory_v3.js";
@@ -95,6 +96,7 @@ function attachAtomicProjectionMeta(meta, result, enabled = false) {
 	meta.atomic_projection_promoted = Number(result.promoted ?? 0);
 	meta.atomic_projection_reinforced = Number(result.reinforced ?? 0);
 	meta.atomic_projection_ignored = Number(result.ignored ?? 0);
+	meta.atomic_projection_coalesced = Number(result.coalesced ?? 0);
 	meta.atomic_projection_latency_ms = Number.isFinite(Number(result.latencyMs))
 		? Number(result.latencyMs)
 		: null;
@@ -716,8 +718,10 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const withRules = { ...overrides, rules, profile, extractionV3 };
 	const atomicCaptureEnabled = memoryV3AtomicCaptureEnabled(env, userId);
 	const atomicProjectionEnabled = memoryV3AtomicProjectionEnabled(env, userId);
+	const atomicCoalescingEnabled = memoryV3AtomicCoalescingEnabled(env, userId);
 	attachAtomicCaptureMeta(meta, null, atomicCaptureEnabled);
 	attachAtomicProjectionMeta(meta, null, atomicProjectionEnabled);
+	meta.atomic_projection_coalescing_enabled = atomicCoalescingEnabled;
 
 	// F — call 1: extraction (deterministic in tests via overrides.llmResponse).
 	// Oversized chunks are pre-split by code before the model sees them.
@@ -961,6 +965,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		profile,
 		projectScope,
 		atomicProjectionMetadata: atomicProjection?.metadata ?? null,
+		atomicSourceCoalescing: atomicCoalescingEnabled,
 	});
 	// Rejections from the v2 passes (unknown entity ids, malformed relation
 	// types) surface on the receipt with everything the gates refused.
@@ -976,6 +981,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			promoted,
 			reinforced,
 			ignored,
+			coalesced: plan.atomicCoalesced.length,
 			latencyMs: Date.now() - atomicProjection.startedAt,
 		}, true);
 		// An ignored decision is still durable semantic-admission state. Commit it
@@ -1065,6 +1071,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			promoted: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "promoted").length,
 			reinforced: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "reinforced").length,
 			ignored: plan.atomicProjectionDecisions.filter((decision) => decision.outcome === "ignored").length,
+			coalesced: plan.atomicCoalesced.length,
 			latencyMs: Date.now() - atomicProjection.startedAt,
 		}, true);
 	}

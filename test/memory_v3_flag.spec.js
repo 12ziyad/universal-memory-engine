@@ -9,6 +9,8 @@ import {
 	memoryV3AtomicCaptureEnabled,
 	memoryV3AtomicProjectionConfig,
 	memoryV3AtomicProjectionEnabled,
+	memoryV3AtomicCoalescingConfig,
+	memoryV3AtomicCoalescingEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -129,6 +131,29 @@ describe("V3 atomic projection experiment flag", () => {
 	});
 });
 
+describe("V3 atomic source-coalescing experiment flag", () => {
+	it("defaults off and requires every parent plus exact coalescing membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_ATOMIC_COALESCING: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS: "treatment_user",
+		};
+		expect(memoryV3AtomicCoalescingConfig({ ITSUKI_MEMORY_V3: "on" }).mode).toBe("off");
+		expect(memoryV3AtomicCoalescingEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3AtomicCoalescingEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3AtomicCoalescingEnabled(treatment, "treatment_user_suffix")).toBe(false);
+		expect(memoryV3AtomicCoalescingEnabled({ ...treatment, ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "off" }, "treatment_user")).toBe(false);
+		for (const value of ["yes", "enabled", "", null, 1, {}]) {
+			expect(memoryV3AtomicCoalescingEnabled({ ...treatment, ITSUKI_MEMORY_V3_ATOMIC_COALESCING: value }, "treatment_user")).toBe(false);
+		}
+	});
+});
+
 describe("V3 feature flag: allowlist mode", () => {
 	const allowlistEnv = {
 		ITSUKI_MEMORY_V3: "allowlist",
@@ -211,6 +236,7 @@ describe("V3 feature flag: observability", () => {
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
 			atomicProjection: { mode: "off", allowlistCount: 0 },
+			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -225,6 +251,7 @@ describe("V3 feature flag: observability", () => {
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
 			atomicProjection: { mode: "off", allowlistCount: 0 },
+			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -245,6 +272,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			extractionB1: { mode: "off", allowlistCount: 0 },
 			atomicCapture: { mode: "off", allowlistCount: 0 },
 			atomicProjection: { mode: "off", allowlistCount: 0 },
+			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
