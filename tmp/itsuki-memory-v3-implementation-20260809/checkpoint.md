@@ -1,5 +1,31 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 Final Stage B PASS / closure deployment next
+
+- The unchanged preregistered final Stage B run is valid and **PASS**. Durable
+  evidence is `final/live/evidence/stage-b-live-reattack.json`; summary is
+  `final/STAGE-B-FINAL.md`. Earlier invalid runs remain invalid and unscored.
+- Ten parallel subtenant writes and six same-tenant/project burst writes had
+  zero accepted loss; the identical-write race converged to one packet,
+  episode, extraction job, pass-2 job and capture run. Tenant/subtenant/project
+  isolation and exact source expansion passed.
+- Eleven secret/rules storage checks plus three exports passed. Delete during
+  extraction drained in 40,713 ms; erased replay returned 409; late residue,
+  ten post-erasure recalls, 34-marker FTS/content audit and final live state
+  were all zero. A new post-delete write succeeded.
+- The bounded soak completed 10 writes and 200 recalls, drained backlog and
+  survived a 30-second grace. Recall mean/p95 was 399.41/1,285 ms during soak;
+  ordinary ingest/recall means were 1,625.5/231.71 ms, recall p95 410 ms.
+- Valid run burn was 2,227 neurons, 1,912,019 -> 1,914,246 / 3,000,000.
+  First-party Workers AI and the 500,000-neuron final reserve remain enforced.
+- V3-D10/D11/D12 HIGH and H11/H12/H13 harness defects are CLOSED. Current
+  product version is `e34b92bc-0577-4a16-b63d-7a1bc8b9a1f2`, deployment
+  `297b55ff-9668-4c11-8886-ba3d08bcbdfb`; no migration/binding changed.
+- Local closure config is prepared and verified: parent allowlist 30; write,
+  source and rejected lanes OFF/0; E7 hybrid restricted to the historical d04
+  ten; normal users remain outside V3. Exact next action is commit/deploy and
+  prove this closure state, then Stage C isolated local 1k/10k/100k scale.
+
 ## 2026-08-11 V3-D10 HIGH CLOSED / Stage B replacement ready
 
 - V3-D10 is **CLOSED** through the full HIGH lifecycle. Code commit/origin is

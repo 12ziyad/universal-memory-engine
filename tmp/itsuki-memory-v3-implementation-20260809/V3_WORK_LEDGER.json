@@ -4,7 +4,7 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "V3-D10 HIGH closed; clean Stage B final reattack replacement next",
+  "current_phase": "Final Stage B PASS; closure flags restoring; Stage C local scale next",
   "latest_verified_head": "3148a9c1dc3fb5f147a5234eb5119156f06d5b80",
   "latest_verified_production": "b0dfbaca-3807-4e18-8e66-b2d01ff5d468",
   "latest_verified_burn": 1906099,
@@ -360,22 +360,31 @@
     {
       "id": "FINAL-B",
       "title": "Final live security, isolation, erasure, concurrency and bounded soak",
-      "status": "in_progress_clean_replacement_ready",
+      "status": "completed",
       "outputs": [
         "final/FINAL-VALIDATION-PREREGISTRATION.md",
         "final/FINAL-LOCK-PROOF.json",
         "final/STAGE-A-GATES.md",
         "final/V3-D10-SOURCE-PACKET-PRIVACY.md",
         "final/live/evidence/v3-d10-production-reattack.json",
-        "implementation commit 3148a9c1dc3fb5f147a5234eb5119156f06d5b80",
-        "production version b0dfbaca-3807-4e18-8e66-b2d01ff5d468",
-        "deployment 26d82115-74df-47a0-89fa-cb8c32b6ed0d"
+        "final/STAGE-B-D11-IMPLEMENTATION-GATES.md",
+        "final/STAGE-B-D11-PRODUCTION.md",
+        "final/STAGE-B-D12-IMPLEMENTATION-GATES.md",
+        "final/STAGE-B-D12-PRODUCTION.md",
+        "final/STAGE-B-FINAL.md",
+        "final/live/evidence/stage-b-live-reattack.json",
+        "D11 implementation commit 183d540184e3e355e2bf99b82cfdc43ee5fb648e",
+        "D12 implementation commit cef9581902948e0d4a8cc55b46ed49298b8a3f49",
+        "production version e34b92bc-0577-4a16-b63d-7a1bc8b9a1f2",
+        "deployment 297b55ff-9668-4c11-8886-ba3d08bcbdfb"
       ],
       "findings": [
-        "V3-H11 harness-only idempotency accounting defect closed before replacement.",
-        "V3-D10 HIGH source-packet rules/erasure privacy defect completed the full lifecycle and is closed.",
-        "Production-primary cleanup proves 622 retained campaign packet fences are content-free and every live V3 memory/job count is zero.",
-        "The unchanged preregistered Stage B replacement is next; both prior attempts remain invalid and unscored."
+        "V3-D10, V3-D11 and V3-D12 HIGH completed full failing-first, repair, regression, deployment and production-reattack lifecycles and are closed.",
+        "V3-H11, V3-H12 and V3-H13 harness defects are closed; affected runs remain explicitly invalid and unscored.",
+        "Valid Stage B accepted ten parallel subtenant writes and six same-tenant burst writes with zero loss; the identical-write race converged to one durable unit.",
+        "Tenant/subtenant/project/source-expansion isolation, eleven secret/rules checks, three export audits, delete/replay/no-resurrection and bounded context all passed.",
+        "The 10-write/200-recall soak drained, held a 30-second grace and cleaned to zero; final FTS/content audits across 34 markers were zero.",
+        "Valid Stage B consumed 2227 neurons and ended at 1914246/3000000; mean ingest/recall latency was 1625.5/231.71 ms and recall p95 was 410 ms."
       ]
     }
   ]

@@ -1,0 +1,723 @@
+{
+  "schema": "itsuki.v3-final-stage-b-live-reattack/v1",
+  "pass": true,
+  "startedAt": "2026-08-11T17:08:02.788Z",
+  "completedAt": "2026-08-11T17:14:07.538Z",
+  "frozen": {
+    "hashes": {
+      "cohort": "555b01b4f5204a4cf3638801a1b0a3b1ca6e6cb1d1d71bbddb4e47fd44c04930",
+      "holdoutQuestions": "588fc4b5f3e6a74a7d7f8dc1f8b3bbcb795f79362930c67fefc6c075f5f7d73c",
+      "frozen399": "500959da6c7e030248d85669ce49cf85ed62551fba0d0690d7a70bca0337ea6d"
+    },
+    "slots": 10
+  },
+  "health": [
+    {
+      "domain": "https://itsuki.app",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    }
+  ],
+  "markers": {
+    "base": [
+      "87605ee7d683f6a6ac6ead366750319932bc0b95ded73f8bbcce216bc646277b",
+      "265166bb3fcfff37de5d66d22a9ed3711929aa2e5ba42b8ab782eed3913103c3",
+      "a88d537444c0c9777c8adbef6704c4786713a47c2149f7c7902934090f0e5090",
+      "edf7ff7567365424e22ac59590d27bfe6ce3936e6b13bc903cc787e87abe2799",
+      "4110c6c0649f653f7286f3250f2ec3984160d9a5ef00f2d0837e0da5f6e85abb",
+      "c4b5b69f94a530b2fb7b0337b31f0b5cf843730ee99dd455251df4eff3c59e38",
+      "f2ba8d692f8afb9525ebc2d73b989d2808c9c1033abb3f226789821b40af96e2",
+      "73f8c5f91e68609da812f4cd85639bc4e1d234f11e59107d9ccd935ee51bf830",
+      "b15abc093286d35d17c834ec1d1a224a72b676da9340c4716c7d4e59ddf6cf8e",
+      "97159edb8b1ad3c742274d65614778fa842751d3ce2115adaeeccdcb00e625ae"
+    ],
+    "beta": "f6f9f0b2bc803959affb2218e2da5624043197e80fa8136cc272f9b6ade078f0",
+    "global": "c4af65367a3e9870af2974b91601b327d6bad87fea1f0383281642f5f2cd7cbd",
+    "forbidden": "10cf3e114638482a2e1ae6a1cfc5d193cd4ae8d5a49ccc71fb43ab0c5bda3c25",
+    "unauthorized": "8791f22106f7d2b66c3246fb5003c6825d6f28e6c6fac0f91f959e56193d3c3a",
+    "duplicate": "9b7bf27652aa7801f4591962918ae4e7a33c6a6c4187e654ca433d40382549b9",
+    "immediate": "8e14e5fe87def1155b6475eee75da4aeb4049f2b104183512721b4acb1016752",
+    "burst": [
+      "fd05000203a61411b5744f787cec496a6c9987ed2e8fd9fed6fb92d59ef00975",
+      "4e3ca6e9bbd2814f7d3ec7604fa774b9c047a438e07f6a4311bed80c04a743bf",
+      "389d3e6006b702ef9b6d72a7d261a911f3992b0cce894359de8a64662b3db852",
+      "b17f2478288c4d071d4f7510525a1619bb8a8aecce9c22ca911db79774d9bb36",
+      "c98fe199d870e77f5c6a4e2792a8011e9525392538c42b618ba028d316d7c5c2",
+      "e176a9cc394857c3fd85a28595e0af9690dc21ec2d16d7392a786660b311465d"
+    ],
+    "soak": [
+      "adfdef197d46f693d70d10c31000b354e963988521a06f311921be958ca231c3",
+      "ed6b4cce38fd514fd5c2e26d832b9b3867e14c04c534f6dd26767d8d37fe3d20",
+      "b79b33f4c7477baa5dc39dedf45f7d4a1a8b3f980d948934c3fa16de6e699daa",
+      "61d76348a0819654cc09bd43fea0e6a6e2c8551e5da50f965bc37b308cb163c0",
+      "882805f88794a9866c51fa7228244d7b71b676fce67b1ef9186ce9e43854a155",
+      "dfd0b1e06d1148673145b109a179a4d41ccac691b86a7603e65f0aec7773be52",
+      "342172f7c5dd29526353be6eb862e9df510b03bb5295a9681624718cb74d0ec6",
+      "3b6409b1b196860351d25f9b4e0dd4ca8f55face768ea68b96c27d5690fcad66",
+      "d39adbdf83dba22645498fa4cfebe3b6dfe8a13dde4885b3596e561a37349e03",
+      "924bb67725b26c58bf9bb0a2d91e29173a52e5e93bebe90f4d980cab0c3c5409"
+    ],
+    "race": "a28ce8d6bb8f6bd69f2f63c4e86b405783190ac02ace81fdacd35da1e912d49d",
+    "fresh": "7c6ad1f692a4c13f3a5ec0427d8991e4562ff3b535d4eb9802fc7e4e5cd9e93c"
+  },
+  "syntheticSecretCount": 9,
+  "localSecretScrub": {
+    "pass": true,
+    "redactionKinds": [
+      "api_key",
+      "connection_credentials",
+      "high_entropy",
+      "private_key"
+    ]
+  },
+  "auth": {
+    "status": 401,
+    "accepted": false
+  },
+  "preclean": {
+    "clean": true,
+    "counts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    }
+  },
+  "concurrency": {
+    "parallelSubtenantWrites": 10,
+    "sameTenantBurstWrites": 6,
+    "maxObservedBurstBacklog": 6,
+    "idempotency": {
+      "packets": 1,
+      "episodes": 1,
+      "extractJobs": 1,
+      "pass2Jobs": 1,
+      "totalJobs": 2,
+      "captureRuns": 1
+    },
+    "acceptedLoss": 0
+  },
+  "isolation": {
+    "persistence": [
+      {
+        "index": 0,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 1,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 2,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 3,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 4,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 3,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 5,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 6,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 3,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 7,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 8,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      },
+      {
+        "index": 9,
+        "episodeOwn": 1,
+        "atomOwn": 1,
+        "graphOwn": 4,
+        "episodeCross": 0,
+        "atomCross": 0,
+        "graphCross": 0
+      }
+    ],
+    "projectPersistence": [
+      {
+        "index": 0,
+        "scope": "v3-final-security-alpha",
+        "correctScope": 1,
+        "wrongScope": 0
+      },
+      {
+        "index": 1,
+        "scope": "v3-final-security-beta",
+        "correctScope": 1,
+        "wrongScope": 0
+      },
+      {
+        "index": 2,
+        "scope": "__global__",
+        "correctScope": 1,
+        "wrongScope": 0
+      }
+    ],
+    "crossTenantRecalls": [
+      {
+        "source": 0,
+        "target": 1,
+        "items": 2,
+        "chars": 375
+      },
+      {
+        "source": 1,
+        "target": 2,
+        "items": 2,
+        "chars": 367
+      },
+      {
+        "source": 2,
+        "target": 3,
+        "items": 2,
+        "chars": 366
+      },
+      {
+        "source": 3,
+        "target": 4,
+        "items": 3,
+        "chars": 462
+      },
+      {
+        "source": 4,
+        "target": 5,
+        "items": 8,
+        "chars": 1100
+      },
+      {
+        "source": 5,
+        "target": 6,
+        "items": 3,
+        "chars": 458
+      },
+      {
+        "source": 6,
+        "target": 7,
+        "items": 2,
+        "chars": 367
+      },
+      {
+        "source": 7,
+        "target": 8,
+        "items": 2,
+        "chars": 366
+      },
+      {
+        "source": 8,
+        "target": 9,
+        "items": 2,
+        "chars": 366
+      },
+      {
+        "source": 9,
+        "target": 0,
+        "items": 2,
+        "chars": 367
+      }
+    ],
+    "projectOnly": {
+      "alphaExcludedBeta": true,
+      "betaExcludedAlpha": true
+    },
+    "projectThenGlobal": {
+      "includedGlobal": true,
+      "excludedSiblingProject": true
+    },
+    "sourceExpansion": {
+      "ownPreconditions": 10,
+      "allUsed": true
+    }
+  },
+  "privacy": {
+    "secretAndRules": [
+      {
+        "index": 0,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 1,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 2,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 3,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 4,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 5,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 6,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 7,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 8,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 9,
+        "pass": true,
+        "survivingStores": []
+      },
+      {
+        "index": 10,
+        "pass": true,
+        "survivingStores": []
+      }
+    ],
+    "exports": [
+      {
+        "slot": 0,
+        "checkedStrings": 5078,
+        "failures": 0
+      },
+      {
+        "slot": 1,
+        "checkedStrings": 3712,
+        "failures": 0
+      },
+      {
+        "slot": 2,
+        "checkedStrings": 3486,
+        "failures": 0
+      }
+    ],
+    "rulesDigestUnchanged": true,
+    "rawEpisodeArchive": false,
+    "episodeVectorsActive": false,
+    "rerankerActive": false
+  },
+  "boundedness": {
+    "limit": 200,
+    "contextCharsHardMax": 24000,
+    "observedItemMax": 8,
+    "observedContextCharsMax": 1100
+  },
+  "latencyMs": {
+    "ingestMean": 1625.5,
+    "recallMean": 231.7058823529412,
+    "recallP95": 410,
+    "soakRecallMean": 399.41,
+    "soakRecallP95": 1285
+  },
+  "soak": {
+    "writes": 10,
+    "recalls": 200,
+    "backlogDrained": true,
+    "stabilityGraceMs": 30000,
+    "countsBeforeCleanup": {
+      "episodes": 31,
+      "atomic_candidates": 30,
+      "atomic_runs": 30,
+      "projections": 30,
+      "nodes": 42,
+      "slices": 59,
+      "events": 2,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    }
+  },
+  "erasure": {
+    "deleteDuringExtraction": true,
+    "raceDrainMs": 40713,
+    "preBarrierReplayStatus": 409,
+    "preBarrierReplayCode": "source_write_erased",
+    "lateCommitResidue": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "newPostDeleteWrite": true,
+    "postEraseRecalls": [
+      {
+        "slot": 0,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 1,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 2,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 3,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 4,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 5,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 6,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 7,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 8,
+        "items": 0,
+        "chars": 0
+      },
+      {
+        "slot": 9,
+        "items": 0,
+        "chars": 0
+      }
+    ],
+    "ftsErasure": {
+      "markers": 34,
+      "episodeFtsHits": 0,
+      "semanticFtsHits": 0,
+      "packetContentHits": 0
+    },
+    "cleanupFirst": true,
+    "cleanupSecond": true,
+    "finalCounts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    }
+  },
+  "burnBefore": {
+    "label": "FINAL-B:start",
+    "at": "2026-08-11T17:08:02.788Z",
+    "spent": 1912019,
+    "ceiling": 3000000,
+    "remaining": 1087981,
+    "stageSpent": 7892,
+    "stageRemaining": 32108,
+    "reservedForNextBlock": 18000,
+    "calls": 85892,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1202142,
+        "calls": 23774
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 7139,
+        "calls": 28078
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 29014,
+        "calls": 390
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 425623,
+        "calls": 22907
+      }
+    }
+  },
+  "burnPrecleanup": {
+    "label": "FINAL-B:before-cleanup",
+    "at": "2026-08-11T17:12:59.210Z",
+    "spent": 1913821,
+    "ceiling": 3000000,
+    "remaining": 1086179,
+    "stageSpent": 9694,
+    "stageRemaining": 30306,
+    "reservedForNextBlock": 2000,
+    "calls": 86041,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1202142,
+        "calls": 23774
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 7142,
+        "calls": 28134
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 29625,
+        "calls": 416
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 426811,
+        "calls": 22974
+      }
+    }
+  },
+  "burnAfter": {
+    "label": "FINAL-B:complete",
+    "at": "2026-08-11T17:14:07.538Z",
+    "spent": 1914246,
+    "ceiling": 3000000,
+    "remaining": 1085754,
+    "stageSpent": 10119,
+    "stageRemaining": 29881,
+    "reservedForNextBlock": 1000,
+    "calls": 86068,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1202142,
+        "calls": 23774
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 7144,
+        "calls": 28140
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 29740,
+        "calls": 421
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 427119,
+        "calls": 22990
+      }
+    }
+  },
+  "neuronDeltaObserved": 2227
+}
