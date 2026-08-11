@@ -573,7 +573,13 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		topic: input.topic,
 		scope: input.memoryScope,
 	});
-	const sourcePacket = await storeSourcePacket(env, normalized.packet);
+	const sourcePacket = await storeSourcePacket(env, normalized.packet, {
+		// A confirmed erasure keeps content-free source-packet fences so accepted
+		// writes cannot replay. Read queries are different: repeating the same
+		// query is a new post-erasure operation and may safely replace only its own
+		// erased query/recall row.
+		allowErasedReadReplacement: true,
+	});
 	if (sourcePacket?.idempotency_conflict) {
 		return {
 			ok: false,

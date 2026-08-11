@@ -421,6 +421,49 @@ describe("episodes cannot cross a scope boundary", () => {
 });
 
 describe("episodes are erased, not tombstoned", () => {
+	it("allows a genuinely new identical recall after erasure while write replays stay fenced", async () => {
+		const userId = nextUser("post_erase_recall");
+		const query = "What was my immediate-read security codename?";
+		const request = () => new Request("https://itsuki.app/v1/recall", {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
+			body: JSON.stringify({ userId, query, limit: 8 }),
+		});
+
+		const firstCtx = createExecutionContext();
+		const first = await worker.fetch(request(), V3(userId), firstCtx);
+		await waitOnExecutionContext(firstCtx);
+		expect(first.status).toBe(200);
+		expect(await first.json()).toMatchObject({ ok: true, mode: "recall" });
+
+		const packetBefore = await env.DB.prepare(
+			"SELECT id, content_hash, content_preview FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
+		).bind(userId).first();
+		expect(packetBefore?.content_preview).toContain(query);
+
+		const erased = await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
+		expect(erased.ok).toBe(true);
+		const minimized = await env.DB.prepare(
+			"SELECT id, content_hash, content_preview FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
+		).bind(userId).first();
+		expect(minimized?.id).toBe(packetBefore.id);
+		expect(minimized?.content_preview).toBeNull();
+		expect(minimized?.content_hash).not.toBe(packetBefore.content_hash);
+
+		const repeatedCtx = createExecutionContext();
+		const repeated = await worker.fetch(request(), V3(userId), repeatedCtx);
+		await waitOnExecutionContext(repeatedCtx);
+		expect(repeated.status).toBe(200);
+		expect(await repeated.json()).toMatchObject({ ok: true, mode: "recall" });
+
+		const fresh = await env.DB.prepare(
+			"SELECT id, content_hash, content_preview FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
+		).bind(userId).first();
+		expect(fresh?.id).toBe(packetBefore.id);
+		expect(fresh?.content_hash).toBe(packetBefore.content_hash);
+		expect(fresh?.content_preview).toContain(query);
+	}, 30_000);
+
 	it("refuses an acceptance-shaped exact replay after a terminal V3 write was erased", async () => {
 		const userId = nextUser("terminal_replay_erased");
 		const idempotencyKey = `terminal-replay-erased-${crypto.randomUUID()}`;

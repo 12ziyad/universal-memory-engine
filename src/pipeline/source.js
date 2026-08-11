@@ -544,17 +544,15 @@ export function sourcePacketSourceTime(sourcePacket) {
 	return persistedSourceTime(rawMeta.source_time);
 }
 
-export async function storeSourcePacket(env, packet, { immutableIdempotency = true } = {}) {
+export async function storeSourcePacket(env, packet, {
+	immutableIdempotency = true,
+	allowErasedReadReplacement = false,
+} = {}) {
 	if (!env?.DB || !packet) return null;
 	const now = Date.now();
 	const id = packet.id ?? newId("src");
 	try {
-		const conflictUpdate = immutableIdempotency
-			? `DO UPDATE SET
-				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
-				updated_at = excluded.updated_at
-			 WHERE source_packets.content_hash = excluded.content_hash`
-			: `DO UPDATE SET
+		const mutableUpdate = `DO UPDATE SET
 				memory_user_id = excluded.memory_user_id,
 				owner_user_id = excluded.owner_user_id,
 				external_user_id = excluded.external_user_id,
@@ -578,6 +576,29 @@ export async function storeSourcePacket(env, packet, { immutableIdempotency = tr
 				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
 				received_at = excluded.received_at,
 				updated_at = excluded.updated_at`;
+		// Erasure retains a content-free packet as the immutable replay fence for
+		// accepted writes. A recall is not a write, however: asking the same query
+		// again after erasure is a genuinely new read and must not be permanently
+		// rejected by its old deterministic query key. Only a query/recall row may
+		// replace its own erased sentinel; save/ingest fences remain immutable.
+		const erasedReadReplacement = allowErasedReadReplacement
+			? ` OR (
+				source_packets.content_hash = '${ERASED_SOURCE_CONTENT_HASH}'
+				AND source_packets.source_type = 'query'
+				AND source_packets.source_mode = 'recall'
+				AND excluded.source_type = 'query'
+				AND excluded.source_mode = 'recall'
+			)`
+			: "";
+		const conflictUpdate = immutableIdempotency
+			? allowErasedReadReplacement
+				? `${mutableUpdate}
+				 WHERE source_packets.content_hash = excluded.content_hash${erasedReadReplacement}`
+				: `DO UPDATE SET
+				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
+				updated_at = excluded.updated_at
+			 WHERE source_packets.content_hash = excluded.content_hash`
+			: mutableUpdate;
 		const row = await env.DB.prepare(
 			`INSERT INTO source_packets
 				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
