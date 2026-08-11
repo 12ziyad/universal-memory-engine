@@ -1,0 +1,21 @@
+{
+  "schema": "itsuki.v3-final-lock-proof/v1",
+  "provedAt": "2026-08-11T15:12:42.579Z",
+  "lockPath": "C:\\Users\\ziyad\\uml\\tmp\\itsuki-memory-v3-implementation-20260809\\phase3-d04\\evidence\\.benchmark-driver.lock",
+  "holder": {
+    "pid": 2116,
+    "experiment": "FINAL-B-lock-proof",
+    "exit": 0
+  },
+  "contender": {
+    "exit": 73,
+    "expectedExit": 73,
+    "stderr": "LOCK_HELD: benchmark lock is already held at C:\\Users\\ziyad\\uml\\tmp\\itsuki-memory-v3-implementation-20260809\\phase3-d04\\evidence\\.benchmark-driver.lock by pid 2116"
+  },
+  "artifactSnapshot": {
+    "beforeCount": 0,
+    "afterCount": 0,
+    "unchanged": true
+  },
+  "lockReleased": true
+}
