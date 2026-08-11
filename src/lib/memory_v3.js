@@ -214,6 +214,31 @@ export function memoryV3SourceExpansionEnabled(env, userId) {
 }
 
 /**
+ * E9B searches scrubbed source episodes only when the semantic result is thin.
+ * It is nested below E9A as well as E7: fallback cannot accidentally turn on a
+ * broader read architecture for an account that has not accepted exact source
+ * rendering first.
+ */
+export function memoryV3EpisodeFallbackConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_EPISODE_FALLBACK;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3EpisodeFallbackEnabled(env, userId) {
+	if (!memoryV3SourceExpansionEnabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3EpisodeFallbackConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -225,6 +250,7 @@ export function memoryV3Status(env) {
 	const atomicCoalescing = memoryV3AtomicCoalescingConfig(env);
 	const hybridRetrieval = memoryV3HybridRetrievalConfig(env);
 	const sourceExpansion = memoryV3SourceExpansionConfig(env);
+	const episodeFallback = memoryV3EpisodeFallbackConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
@@ -235,5 +261,6 @@ export function memoryV3Status(env) {
 		atomicCoalescing: { mode: atomicCoalescing.mode, allowlistCount: atomicCoalescing.allowlistCount },
 		hybridRetrieval: { mode: hybridRetrieval.mode, allowlistCount: hybridRetrieval.allowlistCount },
 		sourceExpansion: { mode: sourceExpansion.mode, allowlistCount: sourceExpansion.allowlistCount },
+		episodeFallback: { mode: episodeFallback.mode, allowlistCount: episodeFallback.allowlistCount },
 	};
 }

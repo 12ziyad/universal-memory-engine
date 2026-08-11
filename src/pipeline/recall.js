@@ -13,9 +13,17 @@ import { resolveScope } from "./source.js";
 import { classifyMessage } from "./trigger.js";
 import { findStagedText } from "./staged_text.js";
 import { rerankEntries } from "./rerank.js";
-import { memoryV3HybridRetrievalEnabled, memoryV3SourceExpansionEnabled } from "../lib/memory_v3.js";
+import {
+	memoryV3EpisodeFallbackEnabled,
+	memoryV3HybridRetrievalEnabled,
+	memoryV3SourceExpansionEnabled,
+} from "../lib/memory_v3.js";
 import { orderNodeEvidence, rankHybridAssertions } from "./hybrid_retrieval.mjs";
 import { expandSelectedSourceEvidence } from "./source_expansion.mjs";
+import {
+	emptyEpisodeFallbackResult,
+	findEpisodeFallbackEvidence,
+} from "./episode_fallback.mjs";
 
 const TOP_N = 8;
 const MAX_EVENTS_PER_NODE = 8;
@@ -498,7 +506,7 @@ function eventLine(event) {
 	return `${text} (${timing})`;
 }
 
-export function buildContext(entries, plan = recallGate("memory"), staged = [], sourceLines = []) {
+export function buildContext(entries, plan = recallGate("memory"), staged = [], sourceLines = [], fallbackLines = []) {
 	const lines = [];
 	let nodeCount = 0;
 	let pageCount = 0;
@@ -511,6 +519,13 @@ export function buildContext(entries, plan = recallGate("memory"), staged = [], 
 	// E9A exact sources follow read-your-writes but precede their lossy semantic
 	// summaries. The shared context cap below remains the only final byte budget.
 	for (const line of sourceLines) {
+		const text = String(line ?? "").replace(/\s+/g, " ").trim();
+		if (text) lines.push(text);
+	}
+	// E9B is lower-confidence than an exact provenance link, but it is still
+	// verbatim scrubbed source and should precede lossy semantic summaries when
+	// the registered sparse-evidence trigger fires.
+	for (const line of fallbackLines) {
 		const text = String(line ?? "").replace(/\s+/g, " ").trim();
 		if (text) lines.push(text);
 	}
@@ -668,6 +683,28 @@ function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
 		events,
 		relations: relationEvidence.map((entry) => entry.text),
 		...(evidence ? { evidence } : {}),
+	};
+}
+
+function episodeFallbackTelemetry(enabled, fallback, context = "") {
+	if (!enabled) return {};
+	const rendered = String(context ?? "")
+		.split("\n")
+		.filter((line) => line.startsWith("Episode fallback evidence [")).length;
+	return {
+		episode_fallback_used: true,
+		episode_fallback_triggered: fallback.triggered === true,
+		episode_fallback_reason: fallback.reason,
+		episode_fallback_query_terms: Number(fallback.queryTerms ?? 0),
+		episode_fallback_candidates: Number(fallback.candidates ?? 0),
+		episode_fallback_eligible: Number(fallback.eligible ?? 0),
+		episode_fallback_episodes: Number(fallback.episodes ?? 0),
+		episode_fallback_rendered: rendered,
+		episode_fallback_assembly_dropped: Math.max(0, Number(fallback.episodes ?? 0) - rendered),
+		episode_fallback_duplicate_episodes: Number(fallback.duplicateEpisodes ?? 0),
+		episode_fallback_chars: Number(fallback.chars ?? 0),
+		episode_fallback_ms: Number(fallback.latencyMs ?? 0),
+		episode_fallback_failed: fallback.failed === true,
 	};
 }
 
@@ -846,6 +883,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId);
 	const sourceExpansionEnabled = memoryV3SourceExpansionEnabled(env, userId);
+	const episodeFallbackEnabled = memoryV3EpisodeFallbackEnabled(env, userId);
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";
 	const bindings = projectBindings(recallScope, projectId);
@@ -897,18 +935,45 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const stagedRows = await findStagedText(env, userId, tokens(q), { recallScope, projectId });
 
 	if ((nodes.length === 0 && pages.length === 0) || q.length === 0) {
-		if (stagedRows.length && q.length > 0) {
-			const context = buildContext([], plan, stagedRows);
+		const fallback = episodeFallbackEnabled && q.length > 0
+			? await findEpisodeFallbackEvidence(env, userId, q, {
+				entries: [],
+				sourceExpansion: {},
+				recallScope,
+				projectId,
+			})
+			: emptyEpisodeFallbackResult();
+		if ((stagedRows.length || fallback.lines.length) && q.length > 0) {
+			const context = buildContext([], plan, stagedRows, [], fallback.lines);
+			const internalTrace = opts.internalTrace === true && episodeFallbackEnabled
+				? await internalReadTrace(
+					[],
+					[
+						...stagedRows.map((row) => `staged:${row.id}`),
+						...fallback.episodeIds.map((id) => `episode-fallback:${id}`),
+					],
+					context,
+					{
+						episode_fallback_episode_ids: fallback.episodeIds,
+						episode_fallback_failed: fallback.failed,
+					},
+				)
+				: null;
 			return {
 				...emptyRecall(plan),
 				context,
 				count: stagedRows.length,
-				staged_used: true,
+				staged_used: stagedRows.length > 0,
 				staged_count: stagedRows.length,
 				compressed: Boolean(context),
+				...episodeFallbackTelemetry(episodeFallbackEnabled, fallback, context),
+				...(internalTrace ? { internal_trace: internalTrace } : {}),
 			};
 		}
-		return emptyRecall(plan);
+		const empty = emptyRecall(plan);
+		return episodeFallbackEnabled
+			? { ...empty, ...episodeFallbackTelemetry(true, fallback, "") }
+			: empty;
 	}
 
 	const slicesByNode = new Map();
@@ -1122,18 +1187,45 @@ export async function recall(env, config, userId, query, opts = {}) {
 
 	if (fused.size === 0) {
 		// Nothing in the graph matched — but freshly staged text might.
-		if (stagedRows.length) {
-			const context = buildContext([], plan, stagedRows);
+		const fallback = episodeFallbackEnabled
+			? await findEpisodeFallbackEvidence(env, userId, q, {
+				entries: [],
+				sourceExpansion: {},
+				recallScope,
+				projectId,
+			})
+			: emptyEpisodeFallbackResult();
+		if (stagedRows.length || fallback.lines.length) {
+			const context = buildContext([], plan, stagedRows, [], fallback.lines);
+			const internalTrace = opts.internalTrace === true && episodeFallbackEnabled
+				? await internalReadTrace(
+					[],
+					[
+						...stagedRows.map((row) => `staged:${row.id}`),
+						...fallback.episodeIds.map((id) => `episode-fallback:${id}`),
+					],
+					context,
+					{
+						episode_fallback_episode_ids: fallback.episodeIds,
+						episode_fallback_failed: fallback.failed,
+					},
+				)
+				: null;
 			return {
 				...emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed }),
 				context,
 				count: stagedRows.length,
-				staged_used: true,
+				staged_used: stagedRows.length > 0,
 				staged_count: stagedRows.length,
 				compressed: Boolean(context),
+				...episodeFallbackTelemetry(episodeFallbackEnabled, fallback, context),
+				...(internalTrace ? { internal_trace: internalTrace } : {}),
 			};
 		}
-		return emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+		const empty = emptyRecall(plan, { lexical_used: lexicalUsed, vector_used: vectorUsed });
+		return episodeFallbackEnabled
+			? { ...empty, ...episodeFallbackTelemetry(true, fallback, "") }
+			: empty;
 	}
 
 	let entries = [...fused.entries()].map(([key, score]) => {
@@ -1181,9 +1273,17 @@ export async function recall(env, config, userId, query, opts = {}) {
 			lines: [], assertions: 0, linkedAssertions: 0, episodes: 0, chars: 0,
 			latencyMs: 0, episodeIds: [], assertionIds: [], failed: false,
 		};
+	const episodeFallback = episodeFallbackEnabled
+		? await findEpisodeFallbackEvidence(env, userId, q, {
+			entries,
+			sourceExpansion,
+			recallScope,
+			projectId,
+		})
+		: emptyEpisodeFallbackResult();
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
-	const context = buildContext(entries, plan, stagedRows, sourceExpansion.lines);
+	const context = buildContext(entries, plan, stagedRows, sourceExpansion.lines, episodeFallback.lines);
 	const items = entries.map(itemSummary);
 	const hybridCandidateKeys = new Set(hybrid.candidates.map((candidate) => candidate.key));
 	const hybridOrderedIds = entries
@@ -1196,6 +1296,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 			[
 				...entries.map((entry) => `${entry.type}:${entry.id}`),
 				...stagedRows.map((row) => `staged:${row.id}`),
+				...episodeFallback.episodeIds.map((id) => `episode-fallback:${id}`),
 			],
 			context,
 			hybridEnabled ? {
@@ -1205,6 +1306,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 					source_expansion_assertion_ids: sourceExpansion.assertionIds,
 					source_expansion_episode_ids: sourceExpansion.episodeIds,
 					source_expansion_failed: sourceExpansion.failed,
+				} : {}),
+				...(episodeFallbackEnabled ? {
+					episode_fallback_episode_ids: episodeFallback.episodeIds,
+					episode_fallback_failed: episodeFallback.failed,
 				} : {}),
 			} : {},
 		)
@@ -1240,6 +1345,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 			source_expansion_ms: sourceExpansion.latencyMs,
 			source_expansion_failed: sourceExpansion.failed,
 		} : {}),
+		...episodeFallbackTelemetry(episodeFallbackEnabled, episodeFallback, context),
 		rerank_used: rerank.used,
 		rerank_scored: rerank.scored,
 		rerank_keep: rerank.keep,

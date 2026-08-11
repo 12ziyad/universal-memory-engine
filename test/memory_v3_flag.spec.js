@@ -15,6 +15,8 @@ import {
 	memoryV3HybridRetrievalEnabled,
 	memoryV3SourceExpansionConfig,
 	memoryV3SourceExpansionEnabled,
+	memoryV3EpisodeFallbackConfig,
+	memoryV3EpisodeFallbackEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -198,6 +200,26 @@ describe("V3 exact source-expansion experiment flag", () => {
 	});
 });
 
+describe("V3 episode-fallback experiment flag", () => {
+	it("defaults off and requires exact parent V3, E7, E9A, and fallback membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "allowlist",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "allowlist",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_EPISODE_FALLBACK: "allowlist",
+			ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS: "treatment_user",
+		};
+		expect(memoryV3EpisodeFallbackConfig({ ITSUKI_MEMORY_V3: "on" }).mode).toBe("off");
+		expect(memoryV3EpisodeFallbackEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3EpisodeFallbackEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3EpisodeFallbackEnabled(treatment, "treatment_user_suffix")).toBe(false);
+		expect(memoryV3EpisodeFallbackEnabled({ ...treatment, ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "off" }, "treatment_user")).toBe(false);
+	});
+});
+
 describe("V3 feature flag: allowlist mode", () => {
 	const allowlistEnv = {
 		ITSUKI_MEMORY_V3: "allowlist",
@@ -283,6 +305,7 @@ describe("V3 feature flag: observability", () => {
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
+			episodeFallback: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -300,6 +323,7 @@ describe("V3 feature flag: observability", () => {
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
+			episodeFallback: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -323,6 +347,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
 			sourceExpansion: { mode: "off", allowlistCount: 0 },
+			episodeFallback: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });

@@ -258,7 +258,7 @@ function episodeProjectFilter(recallScope, projectId) {
  * rather than after the fact — a post-filter lets another project's rows fill
  * the LIMIT before the requested one is ever seen.
  */
-export async function findSourceEpisodes(env, userId, queryTokens = [], {
+export async function findSourceEpisodesDetailed(env, userId, queryTokens = [], {
 	limit = 8,
 	recallScope = "global",
 	projectId = null,
@@ -266,28 +266,35 @@ export async function findSourceEpisodes(env, userId, queryTokens = [], {
 	const terms = [...new Set((queryTokens ?? [])
 		.map((token) => String(token ?? "").trim())
 		.filter((token) => token.length > 1))].slice(0, 12);
-	if (!terms.length || !userId) return [];
+	if (!terms.length || !userId) return { rows: [], failed: false };
 	const bounded = Math.max(1, Math.min(EPISODE_SEARCH_MAX, Number(limit) || 8));
 	const project = episodeProjectFilter(recallScope, normalizeProjectScope({ projectId }).projectId);
 	try {
 		const match = terms.map((term) => `"${term.replace(/"/g, "")}"`).join(" OR ");
 		const { results } = await env.DB.prepare(
-			`SELECT e.id, e.text, e.role, e.message_id, e.message_index, e.source_packet_id,
+			`SELECT e.id, e.text, e.text_hash, e.role, e.message_id, e.message_index, e.source_packet_id,
 				e.conversation_id, e.session_id, e.project_id, e.project_name,
 				e.source_time, e.source_time_offset_minutes, e.source_time_precision,
-				e.observed_at, e.created_at
+				e.observed_at, e.created_at, bm25(source_episodes_fts) AS fts_score
 			 FROM source_episodes_fts f
 			 JOIN source_episodes e ON e.rowid = f.rowid
 			 WHERE source_episodes_fts MATCH ? AND e.user_id = ?${project.sql}
-			 ORDER BY bm25(source_episodes_fts) LIMIT ?`,
+			 ORDER BY bm25(source_episodes_fts), e.source_time DESC, e.message_index ASC, e.id ASC
+			 LIMIT ?`,
 		).bind(match, userId, ...project.bindings, bounded).all();
-		return results ?? [];
+		return { rows: results ?? [], failed: false };
 	} catch (error) {
 		// A search failure is a degraded read, never a failed one: the semantic
 		// path already answered, and this layer is additional evidence.
-		console.warn("episode search failed:", error?.message ?? error);
-		return [];
+		// Keep the log content-free because a driver error can include SQL values.
+		console.warn("episode search failed");
+		return { rows: [], failed: true };
 	}
+}
+
+/** Compatibility surface used by the preservation tests and internal tools. */
+export async function findSourceEpisodes(env, userId, queryTokens = [], options = {}) {
+	return (await findSourceEpisodesDetailed(env, userId, queryTokens, options)).rows;
 }
 
 /**

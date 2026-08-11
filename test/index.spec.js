@@ -34,6 +34,7 @@ describe("GET /health", () => {
 				atomicCoalescing: { mode: "off", allowlistCount: 0 },
 				hybridRetrieval: { mode: "off", allowlistCount: 0 },
 				sourceExpansion: { mode: "off", allowlistCount: 0 },
+				episodeFallback: { mode: "off", allowlistCount: 0 },
 			},
 		});
 	});

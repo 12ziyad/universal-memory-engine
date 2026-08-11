@@ -130,7 +130,9 @@
 		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL": "allowlist",
 		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS": "mem_119e35f60838133e8b7f13f21bd07c01,mem_fcf7b96a90d7d84b89fe72562fb4aad0,mem_509271a5821597a9fc0b906e3cb53c0f,mem_2488d2eb264fe82a44078f9997051a48,mem_8e70b85407733111f9d58a26ae8e3dc8,mem_805e90584cff69885339d43eee178726,mem_abdb39d1a6f74328f214a126f73bbce2,mem_0a52a54229833f63cabf5910f807e6ab,mem_d5b5b605df9fe83e5fe41ecfa8c5d8bd,mem_7720821d8d2fc415cd0fe5d45f59c115",
 		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION": "off",
-		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS": ""
+		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS": "",
+		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK": "off",
+		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS": ""
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.
