@@ -213,13 +213,18 @@ export function deriveAtomicProjectionDecisions(plan = {}, candidates = []) {
 	const effects = new Map();
 	const record = (items, outcome, objectKind = null) => {
 		for (const item of items ?? []) {
+			const coalescedIds = new Set(Array.isArray(item?._atomic_coalesced_candidate_ids)
+				? item._atomic_coalesced_candidate_ids.map(String).filter(Boolean)
+				: []);
 			for (const id of candidateIds(item)) {
 				const priority = outcome === "promoted" ? 3 : outcome === "reinforced" ? 2 : 1;
 				if ((effects.get(id)?.priority ?? 0) >= priority) continue;
 				effects.set(id, {
 					priority,
 					outcome,
-					reason: outcome === "ignored" ? String(item.reason ?? "gate_rejected").slice(0, 96) : null,
+					reason: outcome === "ignored"
+						? String(item.reason ?? "gate_rejected").slice(0, 96)
+						: coalescedIds.has(id) ? "same_source_coalesced" : null,
 					objectKind,
 					objectId: objectKind ? String(item.id ?? "") || null : null,
 				});

@@ -607,6 +607,10 @@ export async function applyGates(
 	};
 	const recordAtomicCoalescence = (target, obj, kind) => {
 		decorateAtomic(target, obj);
+		target._atomic_coalesced_candidate_ids = [...new Set([
+			...(target._atomic_coalesced_candidate_ids ?? []),
+			...atomicIdsFor(obj),
+		])];
 		plan.atomicCoalesced.push({
 			kind,
 			object_id: target.id,

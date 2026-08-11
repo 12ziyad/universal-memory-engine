@@ -281,9 +281,9 @@ describe("E6 projection persistence", () => {
 			semantic_attribute: "migration convention",
 		});
 		const projection = await env.DB.prepare(
-			"SELECT object_id, outcome FROM semantic_atom_projections WHERE user_id = ?",
+			"SELECT object_id, outcome, reason FROM semantic_atom_projections WHERE user_id = ?",
 		).bind(f.userId).first();
-		expect(projection).toEqual({ object_id: slices[0].id, outcome: "promoted" });
+		expect(projection).toEqual({ object_id: slices[0].id, outcome: "promoted", reason: "same_source_coalesced" });
 	});
 
 	it("keeps the established exact-only behavior when the E6M flag is off", async () => {
@@ -419,9 +419,9 @@ describe("E6 projection persistence", () => {
 		});
 		expect(new Date(events[0].happened_at).toISOString().slice(0, 10)).toBe("2025-11-03");
 		const projection = await env.DB.prepare(
-			"SELECT object_id, object_kind, outcome FROM semantic_atom_projections WHERE user_id = ?",
+			"SELECT object_id, object_kind, outcome, reason FROM semantic_atom_projections WHERE user_id = ?",
 		).bind(f.userId).first();
-		expect(projection).toEqual({ object_id: events[0].id, object_kind: "event", outcome: "promoted" });
+		expect(projection).toEqual({ object_id: events[0].id, object_kind: "event", outcome: "promoted", reason: "same_source_coalesced" });
 	});
 
 	it("preserves deterministic year precision and records it as phrase-derived", async () => {
