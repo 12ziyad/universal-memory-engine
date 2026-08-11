@@ -8,7 +8,7 @@ import {
 	planExtractionChunks,
 	verifyChunkCoverage,
 } from "../src/pipeline/chunking.js";
-import { extractJson, normalize, responseTruncated, salvageObjects } from "../src/pipeline/llm.js";
+import { extractJson, normalize, responseText, responseTruncated, salvageObjects } from "../src/pipeline/llm.js";
 import { getConfig } from "../src/config.js";
 
 /**
@@ -27,6 +27,11 @@ const message = (id, chars, role = "user") => ({
 });
 
 describe("chunk planning: coverage", () => {
+	it("serializes schema-constrained Workers AI response objects", () => {
+		expect(responseText({ response: { captured_atom_ids: ["g1"] } }))
+			.toBe('{"captured_atom_ids":["g1"]}');
+	});
+
 	it("covers every message exactly once, in order", async () => {
 		for (const count of [0, 1, 2, 7, 8, 9, 10, 17, 31, 64]) {
 			const messages = Array.from({ length: count }, (_, i) => message(`m${i}`, 10));

@@ -353,6 +353,9 @@ export function responseText(res) {
 	if (typeof res === "string") return res;
 	// Llama family: { response: "…" }
 	if (typeof res.response === "string") return res.response;
+	// Schema-constrained Workers AI calls can return the validated value
+	// directly instead of serialised assistant text.
+	if (res.response && typeof res.response === "object") return JSON.stringify(res.response);
 	// OpenAI chat-completions shape (Gemma 4, Qwen3, Kimi, …):
 	//   { choices: [ { message: { content: "…", reasoning: "…" } } ] }
 	// The reasoning is a SEPARATE field, so content is clean.
