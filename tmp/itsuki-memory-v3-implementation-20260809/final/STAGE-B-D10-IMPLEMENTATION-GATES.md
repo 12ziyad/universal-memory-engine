@@ -11,4 +11,9 @@
 - The stale `vitest.unit.config.js` invocation failed before loading tests; the
   repository-authoritative `vitest.unit.config.mjs` command produced the valid
   539-pass result. This is invocation evidence, not a product result.
-- Production deployment and reattack: **pending**.
+- Production deployment: version `b0dfbaca-3807-4e18-8e66-b2d01ff5d468`,
+  deployment `26d82115-74df-47a0-89fa-cb8c32b6ed0d`, 100% traffic.
+- Propagation: **20/20 pass** across both production domains.
+- Exact production rules/erasure/replay reattack: **pass**.
+- Final production-primary cleanup: **622/622 packet fences minimized; zero
+  content rows and zero live V3 state**.

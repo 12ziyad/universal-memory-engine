@@ -1,0 +1,382 @@
+{
+  "schema": "itsuki.v3-work-ledger/v1",
+  "campaign": "itsuki-memory-v3-implementation-20260809",
+  "started": "2026-08-09",
+  "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
+  "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
+  "current_phase": "V3-D10 HIGH closed; clean Stage B final reattack replacement next",
+  "latest_verified_head": "3148a9c1dc3fb5f147a5234eb5119156f06d5b80",
+  "latest_verified_production": "b0dfbaca-3807-4e18-8e66-b2d01ff5d468",
+  "latest_verified_burn": 1906099,
+  "phases": [
+    {
+      "id": "A0",
+      "title": "Scaffolding, baseline freeze, frozen-context check, cost gate",
+      "status": "complete",
+      "outputs": [
+        "checkpoint.md",
+        "frozen-baselines.sha256 (20 artifacts)",
+        "results/frozen-context-check.json",
+        "cost-ledger.json (V3_NEURON_CEILING = null, UNVERIFIED)",
+        "decision-log.md D-001..D-005",
+        "ablations.md (E0-E10 armed, none run)",
+        "defects.md (BF-1..BF-4 carried in)"
+      ],
+      "findings": [
+        "Frozen context IS available for all 1540 judged questions - Experiment 0 is a true reader ablation.",
+        "Credit coverage could not be verified with any available credential; inference is blocked.",
+        "Pre-splitting, RRF fusion, MMR and 2-hop graph expansion already exist in the local source - V3 must not rebuild them."
+      ]
+    },
+    {
+      "id": "E2-IMPLEMENTATION",
+      "title": "Extraction mechanical correctness and isolated behavioral treatment",
+      "status": "complete",
+      "outputs": [
+        "e2/E2-PREREGISTRATION.md",
+        "e2/IMPLEMENTATION-EVIDENCE.md",
+        "e2/screen-subset-96.json",
+        "commit c78f5589aa9cbb7f1f199036e456c635dea6979d",
+        "production 3976b916-5efc-431e-b6ce-8d4b8c317131"
+      ],
+      "findings": [
+        "B0 has mandatory correctness/security semantics and no benchmark quality gate.",
+        "B1 is a nested default-OFF account-scoped treatment, so existing V3 benchmark accounts remain controls.",
+        "Worker 1212/1212 and unit 539 pass with one intentional skip after the final patch.",
+        "No E2 inference calls were made through this boundary; burn remains 1630107.",
+        "Production reports parent allowlist 10 and nested B1 off/count 0; selected-versus-legacy no-write routing proof passed."
+      ]
+    },
+    {
+      "id": "E2-ABLATION",
+      "title": "Three-seed paired extraction-mechanics holdout",
+      "status": "complete_b1_rejected",
+      "outputs": [
+        "e2/E2-RESULT.md",
+        "e2/results/holdout-summary.json",
+        "e2/evidence/e2-holdout-run-manifest.json",
+        "e2/evidence/e2-lock-proof.json",
+        "e2/evidence/holdout.seed1.cleanup.json",
+        "e2/evidence/holdout.seed2.cleanup.json",
+        "e2/evidence/holdout.seed3.cleanup.json"
+        ,"commit a4179beedf7c1dec975a1515eaa91d8a2b2598cd"
+        ,"production 2f7a31b8-3e1a-4c12-acd7-3db0b26bbefc"
+      ],
+      "findings": [
+        "KEEP B0 correctness/security mechanics.",
+        "REJECT B1: capture recall +3.03pp but precision -1.35pp violated the pre-registered -1.0pp safeguard.",
+        "Holdout judge improved +7.94pp and availability +7.14pp, but seed variance was high and cannot override the failed capture gate.",
+        "The 96Q and 399 LoCoMo screens were not run because the holdout gate failed.",
+        "Every seed cleaned zero live semantic/episode residue and zero non-terminal jobs; audit receipts remain for final complete reset.",
+        "Incremental inference was 31233 neurons; campaign burn is 1661340/3000000."
+        ,"Production nested B1 is OFF/count 0; parent remains scoped to 30 campaign tenants."
+      ]
+    },
+    {
+      "id": "E3",
+      "title": "Acceptance-atomic scrubbed source episodes",
+      "status": "complete_kept",
+      "outputs": [
+        "e3/E3-PREREGISTRATION.md",
+        "e3/IMPLEMENTATION-EVIDENCE.md",
+        "e3/E3-SCORER-V2-ATTRIBUTION.md",
+        "e3/E3-REPORT.md",
+        "e3/results-attempt-004/E3-PAIRED-SUMMARY.txt",
+        "e3/D06-PRODUCTION-REATTACK.json",
+        "commit 72a9b1a519009e7debb3dadb3efc4d2d0caa81ee",
+        "production ff9fbeb0-377b-4c3d-949e-d603202c3bd6"
+      ],
+      "findings": [
+        "KEEP acceptance-atomic episodes: exact permitted-message coverage was 100% and source-time-aware episode recall was 98.79%.",
+        "Episodes recovered 97.78% of the original semantic misses across three paired seeds, above the registered 90% gate.",
+        "The unchanged semantic control remained inside prior seed variance; episodes were not supplied to the reader.",
+        "Question-only FTS top-8/top-20 availability was 73.81% in every seed and remains diagnostic until E9.",
+        "All seeds ended with zero live semantic/episode residue and zero non-terminal jobs.",
+        "V3-D06 HIGH was closed through failing-first repair and production reattack.",
+        "E3 consumed 20807 neurons from the frozen pre-E3 boundary; campaign burn is 1682147/3000000."
+      ]
+    },
+    {
+      "id": "E4-BAKEOFF",
+      "title": "Source-grounded atomic capture model bakeoff",
+      "status": "complete_winner_confirmed",
+      "outputs": [
+        "e4/E4-PREREGISTRATION.md",
+        "e4/IMPLEMENTATION-EVIDENCE.md",
+        "e4/model-bakeoff/stage-a-summary-v2.json",
+        "e4/model-bakeoff/stage-b-summary.json"
+      ],
+      "findings": [
+        "A3 @cf/meta/llama-4-scout-17b-16e-instruct is the confirmed winner across three independent runs.",
+        "A3 mean recall 54.55%, precision 97.90%, F1 69.85%, schema validity 100%, duplicate rate 4.76%, and zero accepted safety failures.",
+        "Incumbent A1 atomic control failed recall, F1, and schema-validity gates.",
+        "Latest verified campaign burn after bakeoff is 1700453/3000000."
+      ]
+    },
+    {
+      "id": "E4-PRODUCT-INTEGRATION",
+      "title": "Append-only source-grounded semantic candidate lane",
+      "status": "complete_kept_deployed_off",
+      "outputs": [
+        "migration 0035_semantic_atom_candidates.sql",
+        "src/pipeline/atomic_candidates.mjs",
+        "test/atomic_capture_persistence.spec.js",
+        "commit 8111456387390ec332b0f09d8bc77a82aff83807",
+        "migration 0035 production applied",
+        "production 6c08fad9-1204-489b-95a4-03fd4b2b07fa",
+        "e4/E4-REPORT.md",
+        "e4/product-confirmation/summary.json",
+        "closure commit f4a6beb7b38a18fabfca4056e396b5eb5ab4d0a0",
+        "closure production 443c6e65-0066-42a3-8dca-2ccaa0bd0908"
+      ],
+      "findings": [
+        "Nested atomic-capture flag is independently default OFF and requires parent-V3 membership.",
+        "Candidates are exact episode-backed, scope-fenced, replay-idempotent, hard-erasable, and absent from recall.",
+        "V3-D07 LOW accounting defect was found failing-first and closed before deployment.",
+        "Final Worker 1244/1244 and unit 539 pass; migration 0035 succeeded and both production tables are empty.",
+        "Exact commit 8111456 is deployed at 100%; both domains report atomic capture OFF/count 0.",
+        "Three production-path seeds passed: mean recall 74.55%, precision 99.25%, F1 85.08%, schema 100%, duplicate rate 2.25%, contradictions 2.0.",
+        "Zero grounding, scope, secret, accounting, provenance, receipt, replay, erasure, routing, or cleanup failures.",
+        "Four reference-blind invalid attempts are preserved, unscored, erased, and fully charged; V3-H06 through H09 and V3-I03 are closed.",
+        "Confirmation consumed 14758 neurons and ended at 1715211/3000000.",
+        "Temporary atomic cohort is OFF/count 0 on both production domains; final live E4 residue is zero."
+      ]
+    },
+    {
+      "id": "E4-PRODUCT-CONFIRMATION",
+      "title": "Three-seed source-grounded atomic capture confirmation",
+      "status": "complete_kept",
+      "outputs": [
+        "e4/E4-PRODUCT-CONFIRMATION-PREREGISTRATION.md",
+        "e4/E4-REPORT.md",
+        "e4/product-confirmation/run-manifest.json",
+        "e4/product-confirmation/summary.json",
+        "e4/product-confirmation/seed1.product.json",
+        "e4/product-confirmation/seed2.product.json",
+        "e4/product-confirmation/seed3.product.json"
+      ],
+      "findings": [
+        "KEEP the A3 candidate lane as durable write-only evidence; E6 must separately earn semantic projection.",
+        "Seed recall 80.00/70.91/72.73%; precision 98.88/98.86/100.00%; F1 88.44/82.58/84.21%.",
+        "All three replay and erasure proofs converged; nested control never entered atomic capture.",
+        "Remaining general capture weaknesses are procedure rationale, skill, event/state, procedure, and plan.",
+        "No LoCoMo data or read-path change participated."
+      ]
+    },
+    {
+      "id": "E5",
+      "title": "Deterministic atomic temporal representation",
+      "status": "complete_kept_deployed_off",
+      "outputs": [
+        "e5/E5-PREREGISTRATION.md",
+        "e5/E5-REPORT.md",
+        "e5/score.json",
+        "e5/live-proof.json",
+        "migration 0036_atomic_temporal_representation.sql",
+        "implementation commit 7ee2282a737b0d147e372767c41d0b93df100704",
+        "V3-D08 repair commit bd06e80793d0fedcca822bfcffb67d43a84617bb",
+        "closure commit 525d4abe3a53771c6ab4ba59abf9af8661f514ea",
+        "closure production 46990d10-410e-4e17-b36d-a50583323d5d"
+      ],
+      "findings": [
+        "KEEP deterministic temporal representation: 16/16 direct frozen cases and 24/24 captured temporal targets normalized correctly with zero false precision.",
+        "The repaired live production path resolved 7/7 temporal candidates from authoritative source_time; replay, scope, receipt, erasure, and cleanup gates passed.",
+        "V3-D08 HIGH closed: UserMemory dropped source_time while rebuilding held/queued messages; failing-first and production evidence both isolated the boundary.",
+        "Full gates pass: Worker 1257/1257, unit 539 plus one intentional skip, focused 170/170, audit 0, and dry deploy.",
+        "Migration 0036 is applied and immutable under the recorded PITR bookmark; atomic capture is OFF/count 0 on both production domains.",
+        "E5 produced no read-path or LoCoMo claim; E6 must separately earn projection with fixed depth 200 and GPT-OSS-120B.",
+        "Campaign burn closed at 1716541/3000000; E5 live attempts consumed 1329 neurons and used only direct first-party Workers AI."
+      ]
+    },
+    {
+      "id": "E6-IMPLEMENTATION",
+      "title": "Governed atomic candidate projection into the proven semantic graph",
+      "status": "complete_modify_deployed_nested_off_clean",
+      "outputs": [
+        "e6/E6-PREREGISTRATION.md",
+        "e6/FAILING-FIRST.md",
+        "e6/IMPLEMENTATION-EVIDENCE.md",
+        "e6/E6-ABLATION-REPORT.md",
+        "e6/results/summary.json",
+        "e6/DEPLOYMENT-OFF-RESULT-EVIDENCE.md",
+        "migration 0037_governed_atomic_projection.sql",
+        "src/pipeline/atomic_projection.mjs",
+        "test/atomic_projection.spec.js",
+        "implementation commit bccda71e47addcf50fd53d8937ab23e8e81e8572",
+        "closure commit c874ddb35d8ba9edfa6a8b8c96281c47ce7519ae",
+        "closure production 17f01ba0-cddd-42d5-b41f-0040f3a4fbd2"
+      ],
+      "findings": [
+        "Projection is nested-off and routes exact episode-backed candidates through existing rules/entity/conflict gates and the atomic graph writer.",
+        "Exact same-batch legacy/atomic facts coalesce; single-valued state supersedes only the same semantic attribute; multi-valued state coexists.",
+        "Projection/source/object provenance commits atomically and converges to zero during source/account erasure.",
+        "Migration 0037 succeeded in production under the recorded Time Travel bookmark and is immutable; all target table/index/column readbacks passed.",
+        "Post-migration focused gates pass; unit/cross-door 539 pass plus one intentional skip; audit and dry deploy pass.",
+        "Three paired frozen non-LoCoMo seeds improved capture recall 55.76% to 90.30%, evidence availability 51.59% to 79.37%, judge 55.56% to 84.92%, and token-F1 37.96% to 58.66%.",
+        "All three seeds improved; conditional accuracy changed by -1.90pp; 264/264 projections had exact source/projection accounting and all cleanup converged.",
+        "Mechanical verdict is MODIFY because semantic redundancy was 49.09% treatment versus 41.33% control; exact physical duplicates were near zero and same-source legacy/atomic paraphrases explain the treatment increase.",
+        "Production closure is atomic capture/projection OFF/count 0 on both health domains; no benchmark driver remains active.",
+        "E6 consumed 49485 neurons including invalid harness overhead and closed at 1766026; latest live burn is 1766027/3000000. E6M must repair same-source paraphrase coalescence before E7."
+      ]
+    },
+    {
+      "id": "E6M-IMPLEMENTATION",
+      "title": "Conservative same-source legacy/atomic paraphrase coalescing",
+      "status": "complete_modify_not_adopted_disabled_clean",
+      "outputs": [
+        "e6m/E6M-PREREGISTRATION.md",
+        "e6m/FAILING-FIRST.md",
+        "e6m/IMPLEMENTATION-EVIDENCE.md",
+        "src/lib/memory_v3.js",
+        "src/pipeline/atomic_projection.mjs",
+        "src/pipeline/gates.js",
+        "src/pipeline/extract.js",
+        "src/pipeline/receipt.js",
+        "test/atomic_projection.spec.js",
+        "test/memory_v3_flag.spec.js",
+        "commit 1cf8226dfc190b1b91969d0f27e11c28c802e5cf",
+        "production de41f362-7e4a-4de1-8e8d-57201a92b2f3",
+        "deployment 6363856a-483f-44ab-864c-62974f448eec",
+        "e6m/E6M-REPORT.md",
+        "e6m/results/summary.json",
+        "e6m/DEPLOYMENT-CLOSURE.md",
+        "closure commit 9c9a17f6643026180141a0f0efd4137de962fd26",
+        "closure production 9b049028-90ba-4e04-bec8-2e0f9c79e610",
+        "closure deployment 56821ad0-8f39-47ae-8f3d-8b77ab156879"
+      ],
+      "findings": [
+        "The source-aware rule is deterministic, same-batch only, and requires matching node/class/source plus conservative assertion/evidence overlap, polarity and numeric guards.",
+        "E6M is independently default OFF and nested below parent V3, atomic capture and atomic projection; health exposes mode/count only.",
+        "Focused 60/60, complete Worker exit 0, unit 539 plus one intentional skip, security/scope/erasure/replay 143/143, audit 0 and dry deploy all pass.",
+        "Three paired seeds moved judge 82.54% to 84.13%, evidence availability 77.78% to 83.33%, and conditional accuracy 95.95% to 95.37%.",
+        "Same-source paraphrases fell 55.87% with zero registered false merges, but precision fell 6.73pp and rendered-context duplication remained 9.74%; the mechanical verdict is MODIFY.",
+        "The coalescer is not adopted; non-destructive fusion/context grouping is the next redundancy hypothesis.",
+        "No schema or migration was required; E6M consumed 45398 neurons and closed at 1811425/3000000.",
+        "All three seeds cleaned to zero and both production domains report atomic capture/projection/coalescing OFF/count 0."
+      ]
+    },
+    {
+      "id": "E7",
+      "title": "Bounded assertion-level hybrid retrieval and fusion",
+      "status": "complete_kept_allowlisted_d04_only",
+      "outputs": [
+        "e7/E7-PREREGISTRATION.md",
+        "e7/E7-HOLDOUT-REPORT.md",
+        "e7/E7-CONFIRMATION-399-REPORT.md",
+        "e7/results-confirmation-399/summary.json",
+        "e7/E7M-LATENCY-PREREGISTRATION.md",
+        "e7/E7M-LATENCY-REPORT.md",
+        "e7/results-latency-399/summary.json",
+        "implementation commit 2c1cddc",
+        "telemetry repair commit 02ab877",
+        "treatment-selection commit cc98dcf",
+        "production 966cf9ac-9e4c-4906-9431-da375ad6b35b",
+        "deployment 4d67253d-a011-422b-9185-08c0eeb64661"
+      ],
+      "findings": [
+        "Frozen-399 judge improved 46.87% to 54.64%, evidence availability 67.67% to 68.67%, conditional accuracy 58.52% to 64.60%, and temporal 33.73% to 57.83%.",
+        "All quality, category, scope, semantic-fingerprint, and stored-memory gates passed with no re-ingest or reranker.",
+        "V3-D09 MEDIUM observability defect closed: current invocation latency is separate from immutable receipt telemetry.",
+        "E7M reproduced all 798 historical arm contexts/item identities exactly; current server p95 increased only 0.48% (414 to 416ms), so the mechanical verdict is KEEP.",
+        "E7M consumed 58 neurons; settled campaign burn is 1882731/3000000 with the 500000 final reserve intact.",
+        "Hybrid retrieval remains allowlisted only for the ten retained d04 benchmark accounts; every write flag is OFF/0 and normal users remain outside V3."
+      ]
+    },
+    {
+      "id": "E9A",
+      "title": "Bounded exact source-evidence expansion",
+      "status": "complete_kept_default_off_clean",
+      "outputs": [
+        "e9/E9A-SOURCE-EXPANSION-PREREGISTRATION.md",
+        "e9/E9A-SOURCE-EXPANSION-RESULT.md",
+        "e9/results/summary.json",
+        "e9/results/detailed.json",
+        "e9/evidence/cleanup.json",
+        "implementation commit 5a01e84",
+        "final closure commit c34a345160b92bfc1c2272841b7b63e9ff337f63",
+        "final production eec4b955-ac88-4627-b834-a424c98069bb",
+        "final deployment 0268dfa2-7a03-4648-8818-e9cf7ea00983"
+      ],
+      "findings": [
+        "Exact source expansion improved frozen holdout judge 95.24% to 97.62%, token-F1 65.38% to 72.83%, and conditional accuracy 95% to 100% with unchanged 95.24% evidence availability.",
+        "Context remained bounded; recall p95 increased from 40 to 50ms, exactly the registered +25% maximum, with zero source lookup failures.",
+        "Both arms used one sealed state: 84 episodes, 89 candidates, 89 exact projections, zero non-terminal jobs, and identical fingerprint 9eb697f072ba55034e75e06392cceb6499d78adc049b94264f8ac3211d773628.",
+        "V3-H10 harness defect closed without re-ingest or affected score; direct read-only D1 HTTPS verification now enforces production-primary state and actual health_state schema.",
+        "Cleanup converged to zero across every live episode/semantic surface; source expansion and all write flags are OFF/0 in final production.",
+        "E9A consumed a settled 6647 neurons including ambient/delayed/harness overhead and closed at 1889378/3000000; final reserve remains intact.",
+        "E9B must separately test bounded episode FTS fallback on top of accepted E7+E9A; no episode vectors or full-conversation dumps."
+      ]
+    },
+    {
+      "id": "E9B",
+      "title": "Bounded semantic-thin episode FTS fallback",
+      "status": "complete_rejected_default_off_clean",
+      "outputs": [
+        "e9b/E9B-EPISODE-FALLBACK-PREREGISTRATION.md",
+        "e9b/E9B-IMPLEMENTATION-GATES.md",
+        "e9b/E9B-EPISODE-FALLBACK-RESULT.md",
+        "e9b/results/summary.json",
+        "e9b/results/detailed.json",
+        "e9b/evidence/cleanup.json",
+        "implementation commit 8385357cebfb493391b67c5a800ea655b31f1590",
+        "closure commit 6282988c92dba786d3b988fdb851861acb0a7319",
+        "final production b7fffb0e-357a-4f90-9f0e-31a644c6814c",
+        "final deployment 9daefc1d-a017-4d1d-9ac1-003b60f6c49e"
+      ],
+      "findings": [
+        "E9B triggered on 18/42 questions but rendered zero episodes: 23/24 bounded FTS candidates were already exact E9A duplicates and the one novel candidate failed the frozen overlap rule.",
+        "All 42 contexts and ordered item arrays were byte-identical; judge remained 41/42, availability 40/42, and conditional accuracy 40/40.",
+        "Recall p95 rose 68ms to 109ms (+60.29%), failing the registered +40% gate; verdict REJECT.",
+        "Two propagation-only preflights failed closed before inference/artifacts and remain explicitly invalid; valid arms used one sealed fingerprint and passed every scope/privacy/bounds gate.",
+        "Cleanup converged to zero and final production has E9B/source/write flags OFF/0 with E7 restored to the prior d04 ten.",
+        "E9B consumed 6825 neurons and closed at 1896203/3000000; E10 adaptive context is next."
+      ]
+    },
+    {
+      "id": "E10",
+      "title": "Deterministic adaptive assertion-level context compiler",
+      "status": "complete_rejected_default_off_clean",
+      "outputs": [
+        "e10/E10-ADAPTIVE-CONTEXT-PREREGISTRATION.md",
+        "e10/E10-IMPLEMENTATION-GATES.md",
+        "e10/E10-ADAPTIVE-CONTEXT-RESULT.md",
+        "e10/results/summary.json",
+        "e10/results/detailed.json",
+        "e10/evidence/cleanup.json",
+        "e10/LOCK-PROOF.json",
+        "implementation commit 9d2b4df19ea7ae35dfabb94c1ce3d9eb7ecb01f4",
+        "closure commit aa16f8a1eded327aaa2af95a933dcc88032b6433",
+        "final production 7bb3ac6b-8c50-48e7-aa33-b3250deef657",
+        "final deployment eaae0273-d09d-4e97-af95-f336315d040e"
+      ],
+      "findings": [
+        "Paired holdout selected item ids/order were identical for all 42 questions and semantic state fingerprint remained unchanged.",
+        "Context tokens fell 30.45%, but evidence availability fell 97.62% to 83.33%, judge fell 92.86% to 88.10%, and token-F1 fell 68.59% to 63.13%.",
+        "All assembly accounting, scope, bounds, lock, erasure, cleanup and flag gates passed; quality gates failed, so frozen-399 Stage C was not run.",
+        "Fixed per-object assertion caps are rejected; final candidate preserves E7 breadth and exact E9A source expansion.",
+        "E10 consumed a settled 7924 neurons and closed at 1904127/3000000 with zero synthetic state and E10/E9A/write flags OFF/0."
+      ]
+    },
+    {
+      "id": "FINAL-B",
+      "title": "Final live security, isolation, erasure, concurrency and bounded soak",
+      "status": "in_progress_clean_replacement_ready",
+      "outputs": [
+        "final/FINAL-VALIDATION-PREREGISTRATION.md",
+        "final/FINAL-LOCK-PROOF.json",
+        "final/STAGE-A-GATES.md",
+        "final/V3-D10-SOURCE-PACKET-PRIVACY.md",
+        "final/live/evidence/v3-d10-production-reattack.json",
+        "implementation commit 3148a9c1dc3fb5f147a5234eb5119156f06d5b80",
+        "production version b0dfbaca-3807-4e18-8e66-b2d01ff5d468",
+        "deployment 26d82115-74df-47a0-89fa-cb8c32b6ed0d"
+      ],
+      "findings": [
+        "V3-H11 harness-only idempotency accounting defect closed before replacement.",
+        "V3-D10 HIGH source-packet rules/erasure privacy defect completed the full lifecycle and is closed.",
+        "Production-primary cleanup proves 622 retained campaign packet fences are content-free and every live V3 memory/job count is zero.",
+        "The unchanged preregistered Stage B replacement is next; both prior attempts remain invalid and unscored."
+      ]
+    }
+  ]
+}

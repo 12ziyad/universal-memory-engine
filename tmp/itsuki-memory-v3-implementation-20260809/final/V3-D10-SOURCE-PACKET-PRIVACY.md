@@ -53,5 +53,17 @@ No migration or binding change is needed.
 | npm audit | 0 vulnerabilities |
 | Wrangler 4.120.0 dry deploy | pass |
 
-Production deployment, exact production reattack and fixed-path cleanup remain
-required before this HIGH can be marked closed.
+## Production closure
+
+- Commit/origin: `3148a9c1dc3fb5f147a5234eb5119156f06d5b80`.
+- Worker version: `b0dfbaca-3807-4e18-8e66-b2d01ff5d468`.
+- Deployment: `26d82115-74df-47a0-89fa-cb8c32b6ed0d`, 100% traffic.
+- Propagation: 20/20 exact health responses across both production domains.
+- Exact reattack: one admitted and one rule-filtered message; forbidden
+  plaintext absent from packet, episode, atom, staging, recall and export.
+- Erasure: retained packet became one content-free sentinel row; exact replay
+  returned `409 source_write_erased`, `retryable=false`.
+- Production-primary cohort audit: 622 packets, 622 minimized, zero content
+  rows, zero episodes, atoms, projections and non-terminal jobs.
+
+Verdict: **CLOSED**.

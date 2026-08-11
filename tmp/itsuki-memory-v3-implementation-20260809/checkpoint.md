@@ -1,5 +1,34 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 V3-D10 HIGH CLOSED / Stage B replacement ready
+
+- V3-D10 is **CLOSED** through the full HIGH lifecycle. Code commit/origin is
+  `3148a9c1dc3fb5f147a5234eb5119156f06d5b80`; production version is
+  `b0dfbaca-3807-4e18-8e66-b2d01ff5d468`, deployment
+  `26d82115-74df-47a0-89fa-cb8c32b6ed0d`, 100% traffic.
+- Propagation is 20/20 exact across both production domains. Parent allowlist
+  remains 30; accepted capture/projection/source-expansion treatment lanes are
+  10, hybrid historical+treatment is 20, rejected lanes are OFF, and no normal
+  user enters V3.
+- Exact production reattack: one permitted message and one request-rule-excluded
+  message produced one packet message, one episode and one rule-filter count;
+  forbidden hits were zero in packet, episode, atom, staging, recall and export.
+  Generic export secret audit passed and request-scoped rules did not mutate the
+  account configuration.
+- Confirmed erasure minimized the packet to its fixed non-content sentinel with
+  null preview, `{}` provenance and zero message count. Exact replay returned
+  **409 `source_write_erased`, retryable=false**.
+- Production-primary final audit at `2026-08-11T16:02:05.634Z`: all **622/622**
+  retained campaign packet fences are minimized; plaintext content rows 0;
+  episodes 0; atoms 0; projections 0; non-terminal jobs 0.
+- Billing guard remained first-party/non-partner Workers AI only. GraphQL's
+  settled snapshot is 1,906,099 / 3,000,000 neurons, 85,417 calls; the targeted
+  reattack observed zero additional settled neurons because usage was still
+  within reporting delay. The Stage B hard cap and 500,000 final reserve remain.
+- No migration or binding change occurred. Next exact action: rerun the same
+  preregistered Stage B security/isolation/concurrency/soak campaign from clean
+  state under the hard global lock. No gates or workload may change.
+
 ## 2026-08-11 V3-D10 HIGH repaired locally / production lifecycle next
 
 - The replacement Stage B run is **INVALID / UNSCORED** and stopped fail-closed
