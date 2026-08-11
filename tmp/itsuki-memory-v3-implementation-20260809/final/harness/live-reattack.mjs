@@ -44,6 +44,16 @@ const TERMINAL = new Set(["enriched", "completed"]);
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+async function waitForErasureDrain(slots, timeoutMs = 180_000) {
+	const started = Date.now();
+	let counts = await stateCounts(slots);
+	while (!memoryCountsAreZero(counts) && Date.now() - started < timeoutMs) {
+		await sleep(2_000);
+		counts = await stateCounts(slots);
+	}
+	return { counts, elapsedMs: Date.now() - started, drained: memoryCountsAreZero(counts) };
+}
+
 function marker(prefix, suffix, index = null) {
 	return `${prefix}${index == null ? "" : index}${suffix}`.toLowerCase();
 }
@@ -500,9 +510,13 @@ async function liveRun() {
 	});
 	assert(replay.status === 409 && replay.body?.code === "source_write_erased" && replay.body?.retryable === false,
 		`pre-erasure replay was not fenced: ${replay.status}/${replay.body?.code}`);
-	await sleep(15_000);
-	const raceAfter = await stateCounts([slots[3]]);
-	assert(memoryCountsAreZero(raceAfter), `late commit resurrected erased state: ${JSON.stringify(raceAfter)}`);
+	// A model call already in flight cannot be interrupted, but every commit is
+	// fenced and the durable job must reach a terminal state within a hard bound.
+	// Poll the complete residue vector instead of misclassifying a safe 15-second
+	// in-flight window as resurrection. Zero remains the only passing end state.
+	const raceDrain = await waitForErasureDrain([slots[3]]);
+	const raceAfter = raceDrain.counts;
+	assert(raceDrain.drained, `late commit did not converge to zero: ${JSON.stringify(raceAfter)}`);
 	const raceRecall = await recall(token, slots[3], "What was my pre-erasure race codename?");
 	assert(!contains(raceRecall.context, marks.race), "erased evidence survived recall/vector lane");
 	const freshBody = ingestBody(slots[3], `fresh-${suffix}`, [sourceMessage("fresh-m1",
@@ -596,6 +610,7 @@ async function liveRun() {
 		},
 		erasure: {
 			deleteDuringExtraction: true,
+			raceDrainMs: raceDrain.elapsedMs,
 			preBarrierReplayStatus: replay.status,
 			preBarrierReplayCode: replay.body.code,
 			lateCommitResidue: raceAfter,

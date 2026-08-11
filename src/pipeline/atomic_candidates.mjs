@@ -106,6 +106,25 @@ function terminalRunResult(row, { replayed = false } = {}) {
 	};
 }
 
+function cancelledBeforeClaimResult() {
+	return {
+		captureRunId: null,
+		outcome: "cancelled_by_delete",
+		complete: false,
+		proposed: 0,
+		accepted: 0,
+		stored: 0,
+		rejected: 0,
+		duplicates: 0,
+		truncated: false,
+		temporalPresent: 0,
+		temporalResolved: 0,
+		temporalUnresolved: 0,
+		temporalAnchorMissing: 0,
+		replayed: false,
+	};
+}
+
 async function failRun(env, userId, runId, errorCode, counts = {}) {
 	const now = Date.now();
 	const code = safeErrorCode(errorCode);
@@ -168,7 +187,10 @@ async function claimRun(env, {
 		`INSERT INTO semantic_atom_capture_runs
 		 (id, user_id, project_id, project_name, source_packet_id, extraction_run_id,
 		  chunk_key, status, model, schema_version, accepted_at, attempts, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, 1, ?, ?)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, 1, ?, ?
+		 WHERE NOT EXISTS (
+			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?
+		 )
 		 ON CONFLICT(user_id, source_packet_id, chunk_key) DO NOTHING`,
 	).bind(
 		id,
@@ -183,13 +205,25 @@ async function claimRun(env, {
 		acceptedAt,
 		now,
 		now,
+		userId,
+		acceptedAt,
 	).run();
 	let row = await env.DB.prepare(
 		`SELECT * FROM semantic_atom_capture_runs
 		 WHERE user_id = ? AND source_packet_id = ? AND chunk_key = ? LIMIT 1`,
 	).bind(userId, sourcePacketId, chunkKey).first();
+	// The barrier and this conditional claim are both D1 writes, so their order
+	// is authoritative. If deletion won, do not create even a content-free audit
+	// row after erasure and do not spend the atomic model call. The second check
+	// also covers a claim that cleanup removed between INSERT and SELECT.
+	if (!row) {
+		const barrier = await env.DB.prepare(
+			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at > ? LIMIT 1",
+		).bind(userId, acceptedAt).first();
+		if (barrier) return { claimed: false, row: null, cancelledByDelete: true };
+		throw new Error("atomic capture run claim disappeared");
+	}
 	if (Number(inserted.meta?.changes ?? 0) === 1) return { claimed: true, row };
-	if (!row) throw new Error("atomic capture run claim disappeared");
 	if (row.status === "running" && now - Number(row.updated_at ?? row.created_at ?? 0) > ATOMIC_CAPTURE_RUN_TTL_MS) {
 		await env.DB.prepare(
 			`UPDATE semantic_atom_capture_runs
@@ -511,6 +545,7 @@ async function captureChunk(env, options, plannedChunk) {
 		...options,
 		chunkKey: plannedChunk.key,
 	});
+	if (claim.cancelledByDelete) return cancelledBeforeClaimResult();
 	if (!claim.claimed) {
 		if (claim.row.status === "running") {
 			return {

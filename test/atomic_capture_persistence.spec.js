@@ -6,6 +6,7 @@ import { deleteSourceEpisodes, writeSourceEpisodes } from "../src/pipeline/episo
 import {
 	ATOMIC_CAPTURE_MODEL,
 	atomicCaptureSummaryForExtractionRun,
+	captureAtomicCandidates,
 	countSemanticAtomCandidates,
 } from "../src/pipeline/atomic_candidates.mjs";
 
@@ -338,6 +339,39 @@ describe("E4 atomic candidate persistence", () => {
 			atomic_capture_stored: 0,
 		});
 		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(0);
+	});
+
+	it("does not create a late capture-run residue when erasure wins before the atomic claim", async () => {
+		const f = await fixture("barrier-before-claim");
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, 'test')
+			 ON CONFLICT(user_id) DO UPDATE SET barrier_at = excluded.barrier_at`,
+		).bind(f.userId, f.message.ts + 1, f.message.ts + 1).run();
+		let modelCalls = 0;
+		const result = await captureAtomicCandidates(f.testEnv, {
+			userId: f.userId,
+			messages: [f.message],
+			recent: [],
+			rules: RULES,
+			projectId: f.projectId,
+			projectName: "Project A",
+			sourcePacketId: f.sourcePacketId,
+			extractionRunId: `run-${crypto.randomUUID()}`,
+			acceptedAt: f.message.ts,
+			override: () => {
+				modelCalls += 1;
+				return { atoms: [atom()] };
+			},
+		});
+
+		expect(result).toMatchObject({ outcome: "cancelled_by_delete", complete: false, stored: 0 });
+		expect(modelCalls).toBe(0);
+		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(0);
+		const runs = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?",
+		).bind(f.userId).first();
+		expect(Number(runs.n)).toBe(0);
 	});
 
 	it("records malformed output as a terminal typed failure without raw output", async () => {
