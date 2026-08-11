@@ -189,6 +189,31 @@ export function memoryV3HybridRetrievalEnabled(env, userId) {
 }
 
 /**
+ * E9A expands an already-selected semantic assertion to its exact permitted
+ * source episode. It is a read-only layer nested under E7: a stale expansion
+ * allowlist can neither opt a legacy account into V3 nor activate a different
+ * retrieval path by itself.
+ */
+export function memoryV3SourceExpansionConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_SOURCE_EXPANSION;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3SourceExpansionEnabled(env, userId) {
+	if (!memoryV3HybridRetrievalEnabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3SourceExpansionConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -199,6 +224,7 @@ export function memoryV3Status(env) {
 	const atomicProjection = memoryV3AtomicProjectionConfig(env);
 	const atomicCoalescing = memoryV3AtomicCoalescingConfig(env);
 	const hybridRetrieval = memoryV3HybridRetrievalConfig(env);
+	const sourceExpansion = memoryV3SourceExpansionConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
@@ -208,5 +234,6 @@ export function memoryV3Status(env) {
 		atomicProjection: { mode: atomicProjection.mode, allowlistCount: atomicProjection.allowlistCount },
 		atomicCoalescing: { mode: atomicCoalescing.mode, allowlistCount: atomicCoalescing.allowlistCount },
 		hybridRetrieval: { mode: hybridRetrieval.mode, allowlistCount: hybridRetrieval.allowlistCount },
+		sourceExpansion: { mode: sourceExpansion.mode, allowlistCount: sourceExpansion.allowlistCount },
 	};
 }

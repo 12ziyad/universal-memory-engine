@@ -13,6 +13,8 @@ import {
 	memoryV3AtomicCoalescingEnabled,
 	memoryV3HybridRetrievalConfig,
 	memoryV3HybridRetrievalEnabled,
+	memoryV3SourceExpansionConfig,
+	memoryV3SourceExpansionEnabled,
 	memoryV3ExtractionB1Config,
 	memoryV3ExtractionB1Enabled,
 	memoryV3Status,
@@ -175,6 +177,27 @@ describe("V3 hybrid retrieval experiment flag", () => {
 	});
 });
 
+describe("V3 exact source-expansion experiment flag", () => {
+	it("defaults off and requires exact parent V3, E7, and expansion membership", () => {
+		const treatment = {
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "allowlist",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: "control_user,treatment_user",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "allowlist",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS: "treatment_user",
+		};
+		expect(memoryV3SourceExpansionConfig({ ITSUKI_MEMORY_V3: "on" }).mode).toBe("off");
+		expect(memoryV3SourceExpansionEnabled(treatment, "control_user")).toBe(false);
+		expect(memoryV3SourceExpansionEnabled(treatment, "treatment_user")).toBe(true);
+		expect(memoryV3SourceExpansionEnabled(treatment, "treatment_user_suffix")).toBe(false);
+		expect(memoryV3SourceExpansionEnabled({ ...treatment, ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "off" }, "treatment_user")).toBe(false);
+		for (const value of ["yes", "enabled", "", null, 1, {}]) {
+			expect(memoryV3SourceExpansionEnabled({ ...treatment, ITSUKI_MEMORY_V3_SOURCE_EXPANSION: value }, "treatment_user")).toBe(false);
+		}
+	});
+});
+
 describe("V3 feature flag: allowlist mode", () => {
 	const allowlistEnv = {
 		ITSUKI_MEMORY_V3: "allowlist",
@@ -259,6 +282,7 @@ describe("V3 feature flag: observability", () => {
 			atomicProjection: { mode: "off", allowlistCount: 0 },
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
+			sourceExpansion: { mode: "off", allowlistCount: 0 },
 		});
 		const serialized = JSON.stringify(status);
 		expect(serialized).not.toContain("user_campaign");
@@ -275,6 +299,7 @@ describe("V3 feature flag: observability", () => {
 			atomicProjection: { mode: "off", allowlistCount: 0 },
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
+			sourceExpansion: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });
@@ -297,6 +322,7 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 			atomicProjection: { mode: "off", allowlistCount: 0 },
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
 			hybridRetrieval: { mode: "off", allowlistCount: 0 },
+			sourceExpansion: { mode: "off", allowlistCount: 0 },
 		});
 	});
 });

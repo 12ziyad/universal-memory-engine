@@ -13,8 +13,9 @@ import { resolveScope } from "./source.js";
 import { classifyMessage } from "./trigger.js";
 import { findStagedText } from "./staged_text.js";
 import { rerankEntries } from "./rerank.js";
-import { memoryV3HybridRetrievalEnabled } from "../lib/memory_v3.js";
+import { memoryV3HybridRetrievalEnabled, memoryV3SourceExpansionEnabled } from "../lib/memory_v3.js";
 import { orderNodeEvidence, rankHybridAssertions } from "./hybrid_retrieval.mjs";
+import { expandSelectedSourceEvidence } from "./source_expansion.mjs";
 
 const TOP_N = 8;
 const MAX_EVENTS_PER_NODE = 8;
@@ -497,7 +498,7 @@ function eventLine(event) {
 	return `${text} (${timing})`;
 }
 
-export function buildContext(entries, plan = recallGate("memory"), staged = []) {
+export function buildContext(entries, plan = recallGate("memory"), staged = [], sourceLines = []) {
 	const lines = [];
 	let nodeCount = 0;
 	let pageCount = 0;
@@ -506,6 +507,12 @@ export function buildContext(entries, plan = recallGate("memory"), staged = []) 
 	for (const row of staged.slice(0, 3)) {
 		const text = String(row?.text ?? "").replace(/\s+/g, " ").trim();
 		if (text) lines.push(`Just saved (still being organized): ${text}`);
+	}
+	// E9A exact sources follow read-your-writes but precede their lossy semantic
+	// summaries. The shared context cap below remains the only final byte budget.
+	for (const line of sourceLines) {
+		const text = String(line ?? "").replace(/\s+/g, " ").trim();
+		if (text) lines.push(text);
 	}
 	for (const entry of entries) {
 		if (entry.type === "node" && nodeCount < plan.maxContextNodes) {
@@ -838,6 +845,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const budget = candidateBudget(plan);
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
 	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId);
+	const sourceExpansionEnabled = memoryV3SourceExpansionEnabled(env, userId);
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";
 	const bindings = projectBindings(recallScope, projectId);
@@ -1163,9 +1171,19 @@ export async function recall(env, config, userId, query, opts = {}) {
 		entries = rerank.entries;
 	}
 
+	const sourceExpansion = sourceExpansionEnabled
+		? await expandSelectedSourceEvidence(env, userId, entries, {
+			maxLineItems: plan.maxLineItems,
+			recallScope,
+			projectId,
+		})
+		: {
+			lines: [], assertions: 0, linkedAssertions: 0, episodes: 0, chars: 0,
+			latencyMs: 0, episodeIds: [], assertionIds: [], failed: false,
+		};
 	const resultNodes = entries.filter((entry) => entry.type === "node").map((entry) => entry.item);
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
-	const context = buildContext(entries, plan, stagedRows);
+	const context = buildContext(entries, plan, stagedRows, sourceExpansion.lines);
 	const items = entries.map(itemSummary);
 	const hybridCandidateKeys = new Set(hybrid.candidates.map((candidate) => candidate.key));
 	const hybridOrderedIds = entries
@@ -1183,6 +1201,11 @@ export async function recall(env, config, userId, query, opts = {}) {
 			hybridEnabled ? {
 				hybrid_assertion_candidate_ids: hybrid.candidates.map((candidate) => candidate.key),
 				hybrid_assertion_ordered_ids: hybridOrderedIds,
+				...(sourceExpansionEnabled ? {
+					source_expansion_assertion_ids: sourceExpansion.assertionIds,
+					source_expansion_episode_ids: sourceExpansion.episodeIds,
+					source_expansion_failed: sourceExpansion.failed,
+				} : {}),
 			} : {},
 		)
 		: null;
@@ -1208,6 +1231,15 @@ export async function recall(env, config, userId, query, opts = {}) {
 		hybrid_assertion_candidates: hybrid.candidates.length,
 		hybrid_parent_candidates: hybrid.nodeRanks.length,
 		hybrid_lane_counts: hybrid.laneCounts,
+		...(sourceExpansionEnabled ? {
+			source_expansion_used: true,
+			source_expansion_assertions: sourceExpansion.assertions,
+			source_expansion_linked_assertions: sourceExpansion.linkedAssertions,
+			source_expansion_episodes: sourceExpansion.episodes,
+			source_expansion_chars: sourceExpansion.chars,
+			source_expansion_ms: sourceExpansion.latencyMs,
+			source_expansion_failed: sourceExpansion.failed,
+		} : {}),
 		rerank_used: rerank.used,
 		rerank_scored: rerank.scored,
 		rerank_keep: rerank.keep,
