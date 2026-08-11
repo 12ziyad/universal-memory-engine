@@ -21,5 +21,12 @@
   still requires the complete residue vector to reach absolute zero.
 - Failed-run cleanup: zero live memory/jobs; the one content-free cancelled run
   was removed; **699/699** retained packet fences are minimized/content-free.
-- Production deployment, exact D12 reattack and unchanged Stage B replacement
-  remain mandatory before V3-D12 can close.
+- Commit/origin: `cef9581902948e0d4a8cc55b46ed49298b8a3f49`.
+- Production version `e34b92bc-0577-4a16-b63d-7a1bc8b9a1f2`, deployment
+  `297b55ff-9668-4c11-8886-ba3d08bcbdfb`, 100% traffic; 20/20 propagation.
+- Production reattack: 20 episodes accepted; delete reported one pending job;
+  bounded drain reached absolute zero in 34,507ms; capture runs/candidates zero;
+  exact replay non-retryable `409 source_write_erased`; erased recall zero.
+- Final production-primary cleanup: zero live memory/jobs and **701/701**
+  retained packet fences minimized/content-free. V3-D12 is closed; the
+  unchanged clean Stage B replacement remains mandatory.

@@ -1,0 +1,252 @@
+{
+  "schema": "itsuki.v3-final-d12-production-reattack/v1",
+  "at": "2026-08-11T16:55:29.925Z",
+  "pass": true,
+  "health": [
+    {
+      "domain": "https://itsuki.app",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    }
+  ],
+  "markerDigest": "aa990c8084b8650ff84c3313f3a46d1b87c324b51926023d5cb3a0c964328574",
+  "accepted": {
+    "status": 200,
+    "packetId": "src_a90690d9-1f0b-427a-8c47-06836d3714b7",
+    "jobId": "job_0a58b5d4-3b05-4f06-99ba-cb3623383f6e",
+    "episodesWritten": 20
+  },
+  "delete": {
+    "status": 200,
+    "pendingJobs": 1
+  },
+  "replay": {
+    "status": 409,
+    "code": "source_write_erased",
+    "retryable": false
+  },
+  "drain": {
+    "counts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "elapsedMs": 34507,
+    "drained": true
+  },
+  "captureAfter": {
+    "runs": 0,
+    "running": 0,
+    "cancelled": 0,
+    "proposed": 0,
+    "accepted": 0,
+    "stored": 0
+  },
+  "recall": {
+    "status": 200,
+    "erasedMarkerAbsent": true
+  },
+  "finalCleanup": {
+    "counts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "packets": {
+      "packets": 701,
+      "minimized": 701,
+      "content_rows": 0
+    }
+  },
+  "rulesUnchanged": true,
+  "burnBefore": {
+    "label": "FINAL-B:D12-start",
+    "at": "2026-08-11T16:53:55.711Z",
+    "spent": 1909743,
+    "ceiling": 3000000,
+    "remaining": 1090257,
+    "stageSpent": 5616,
+    "stageRemaining": 34384,
+    "reservedForNextBlock": 8000,
+    "calls": 85711,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1202142,
+        "calls": 23774
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 7134,
+        "calls": 28013
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 28192,
+        "calls": 358
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 424173,
+        "calls": 22823
+      }
+    }
+  },
+  "burnAfter": {
+    "label": "FINAL-B:D12-complete",
+    "at": "2026-08-11T16:55:29.925Z",
+    "spent": 1909743,
+    "ceiling": 3000000,
+    "remaining": 1090257,
+    "stageSpent": 5616,
+    "stageRemaining": 34384,
+    "reservedForNextBlock": 1000,
+    "calls": 85711,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1202142,
+        "calls": 23774
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 7134,
+        "calls": 28013
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 28192,
+        "calls": 358
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 424173,
+        "calls": 22823
+      }
+    }
+  },
+  "neuronDeltaObserved": 0
+}
