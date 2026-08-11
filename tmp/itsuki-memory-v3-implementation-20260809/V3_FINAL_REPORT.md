@@ -1,5 +1,16 @@
 # ITSUKI MEMORY V3 — FINAL REPORT
 
+## 2026-08-11 Stage D safe closure — authoritative interim status
+
+Stage D is safely closed at Worker `c85c7844-9e2e-426e-8f87-ee468296b572`
+(deployment `cef8320d-afd0-4c9f-a4a5-690a2d149f68`). Propagation passed 20/20;
+all write/source/rejected lanes are OFF and E7 is historical d04 only. A final
+preflight found and removed 217 legacy pre-D10 plaintext packet rows from the
+otherwise empty middle/control cohort through the fixed product erasure API.
+Both control and treatment cohorts now have zero live state and 1,098/1,098
+content-free minimized packet fences. No inference or direct D1 mutation was
+used. Stage E harness construction is next.
+
 ## 2026-08-11 Stage D general holdout PASS — authoritative interim status
 
 The final candidate passed three independent fresh non-LoCoMo seeds. Mean

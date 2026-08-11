@@ -1,5 +1,13 @@
 # V3 DEFECT LEDGER
 
+## 2026-08-11 — V3-D10 residual cleanup extension CLOSED
+
+The otherwise empty middle/control synthetic cohort retained 217 plaintext
+packet rows written before the V3-D10 erasure repair. Current product erasure
+minimized all 217 without direct D1 mutation. Combined control+treatment now has
+1,098/1,098 content-free fences, zero live state and zero jobs. This closes old
+cleanup debt; it is not a new current-code defect.
+
 ## Final Stage C product finding (2026-08-11)
 
 | id | sev | classification | finding | status |

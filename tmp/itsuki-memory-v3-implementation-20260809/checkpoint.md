@@ -1,5 +1,25 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 Stage D safely closed / Stage E harness next
+
+- Stage D commit/origin `2484f772a79889dba0297f83b575d2c6fb2e99d9`
+  is live as Worker `c85c7844-9e2e-426e-8f87-ee468296b572`, deployment
+  `cef8320d-afd0-4c9f-a4a5-690a2d149f68`, 100% traffic.
+- Propagation is 20/20 exact: parent 30, write/source/rejected lanes OFF/0, E7
+  historical d04 ten only, normal users outside V3. Focused 4 files / 66 tests
+  and Wrangler dry deploy passed; no migration/binding/code change occurred.
+- Stage E cohort preflight found 217 pre-D10 plaintext packet rows in the
+  otherwise live-empty middle/control ten. The current product erasure API
+  minimized all 217; no direct D1 mutation occurred. Combined control+treatment
+  closure is now 1,098/1,098 minimized packet fences, zero content rows, zero
+  live V3/graph/staging/job state and no global lock.
+- Durable proof: `final/holdout/STAGE-D-CLOSURE.md` and
+  `final/holdout/evidence/stage-d-closure.json`. Burn remains
+  **1,933,582 / 3,000,000**; cleanup/health used no inference.
+- Exact next action: implement and freeze the one-shot Stage E harness against
+  the clean middle/control ten and project `v3-final-locomo`, prove its lock and
+  reference isolation, then activate only that cohort.
+
 ## 2026-08-11 Stage D PASS / safe closure deployment next
 
 - The preregistered three-seed final non-LoCoMo holdout is complete and

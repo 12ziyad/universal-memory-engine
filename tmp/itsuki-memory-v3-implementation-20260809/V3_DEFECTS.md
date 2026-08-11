@@ -1,5 +1,20 @@
 # V3 DEFECT LEDGER
 
+## 2026-08-11 — V3-D10 residual cleanup extension CLOSED
+
+Stage E preflight found 217 legacy source-packet rows with plaintext metadata in
+the middle/control synthetic cohort. Live semantic/episode/graph state was zero;
+these rows predated the already-closed V3-D10 erasure repair and had never been
+reprocessed by the repaired deletion path. This was residual cleanup debt, not
+a new current-code failure.
+
+The exact ten synthetic accounts were erased through the current product API.
+All 217 rows became minimized non-content fences; combined control+treatment is
+now 1,098/1,098 minimized with zero content rows and zero live state/jobs. No
+direct schema/data repair was used. Status: **CLOSED**; evidence in
+`final/holdout/evidence/stage-e-control-cleanup.json` and
+`final/holdout/evidence/stage-d-closure.json`.
+
 ## Final Stage C product finding (2026-08-11)
 
 | id | sev | classification | finding | status |

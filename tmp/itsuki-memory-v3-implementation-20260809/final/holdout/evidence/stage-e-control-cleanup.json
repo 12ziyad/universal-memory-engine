@@ -1,0 +1,338 @@
+{
+  "schema": "itsuki.v3-stage-e-control-cleanup/v1",
+  "at": "2026-08-11T19:52:50.702Z",
+  "throughProductErasureApi": true,
+  "slots": 10,
+  "erased": {
+    "rows": [
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      },
+      {
+        "dry": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "deleted": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residue": {
+          "runs": 0,
+          "nodes": 0,
+          "pages": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "candidates": 0
+        },
+        "residueClean": true,
+        "nonTerminalJobs": 0
+      }
+    ],
+    "directResidue": {
+      "projections": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "episodes": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0
+    },
+    "clean": true
+  },
+  "packets": {
+    "packets": 217,
+    "minimized": 217,
+    "content_rows": 0
+  },
+  "pass": true
+}

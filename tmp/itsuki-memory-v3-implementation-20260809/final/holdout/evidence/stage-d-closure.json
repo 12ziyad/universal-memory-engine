@@ -1,0 +1,47 @@
+{
+  "schema": "itsuki.v3-final-stage-d-closure/v1",
+  "at": "2026-08-11T19:52:53.015Z",
+  "pass": true,
+  "commit": "2484f772a79889dba0297f83b575d2c6fb2e99d9",
+  "workerVersion": "c85c7844-9e2e-426e-8f87-ee468296b572",
+  "deploymentId": "cef8320d-afd0-4c9f-a4a5-690a2d149f68",
+  "propagationPassed": 20,
+  "propagationChecked": 20,
+  "productionDomains": 2,
+  "parentAllowlist": 30,
+  "hybridHistoricalOnly": 10,
+  "writeSourceRejectedLanesOff": true,
+  "normalUsersEnabled": false,
+  "treatmentCounts": {
+    "episodes": 0,
+    "atomic_candidates": 0,
+    "atomic_runs": 0,
+    "projections": 0,
+    "nodes": 0,
+    "slices": 0,
+    "events": 0,
+    "edges": 0,
+    "pages": 0,
+    "live_staged": 0,
+    "nonterminal_jobs": 0
+  },
+  "controlCounts": {
+    "episodes": 0,
+    "atomic_candidates": 0,
+    "atomic_runs": 0,
+    "projections": 0,
+    "nodes": 0,
+    "slices": 0,
+    "events": 0,
+    "edges": 0,
+    "pages": 0,
+    "live_staged": 0,
+    "nonterminal_jobs": 0
+  },
+  "packets": {
+    "packets": 1098,
+    "minimized": 1098,
+    "content_rows": 0
+  },
+  "globalLockHeld": false
+}

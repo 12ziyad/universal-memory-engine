@@ -4,9 +4,9 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage D PASS; safe closure deployment pending before one decisive Stage E LoCoMo run",
-  "latest_verified_head": "faea0dbe0622e8964578f089cac29102dec2d501",
-  "latest_verified_production": "0dc9164e-cf44-4cf2-a61c-58ab598882e2",
+  "current_phase": "Stage D safely closed; one-shot Stage E LoCoMo harness construction next",
+  "latest_verified_head": "2484f772a79889dba0297f83b575d2c6fb2e99d9",
+  "latest_verified_production": "c85c7844-9e2e-426e-8f87-ee468296b572",
   "latest_verified_burn": 1933582,
   "stage_d_preflight": {
     "status": "COMPLETED_PASS_TO_STAGE_E",
@@ -38,6 +38,10 @@
     "observed_neurons": 18995,
     "all_gates_passed": true,
     "all_cleanup_zero": true,
+    "closure_deployment": "cef8320d-afd0-4c9f-a4a5-690a2d149f68",
+    "closure_propagation": "20/20",
+    "combined_packet_fences_minimized": 1098,
+    "combined_packet_content_rows": 0,
     "evidence": "final/holdout/results/summary.json"
   },
   "phases": [
@@ -472,8 +476,10 @@
         "final/holdout/STAGE-D-HOLDOUT-PREREGISTRATION.md",
         "final/holdout/STAGE-D-ACTIVATION.md",
         "final/holdout/STAGE-D-FINAL.md",
+        "final/holdout/STAGE-D-CLOSURE.md",
         "final/holdout/results/summary.json",
         "final/holdout/evidence/run-manifest.json",
+        "final/holdout/evidence/stage-d-closure.json",
         "three sealed products and score artifacts",
         "three zero-residue cleanup artifacts"
       ],
@@ -483,6 +489,7 @@
         "All 126 answers/verdicts reconciled with zero security, scope, provenance, durability, bounded-recall or assembly-accounting failure.",
         "All three seeds erased to zero; the global lock released and no campaign process remained.",
         "Valid Stage D burn was 18,995 neurons, ending at a settled 1,933,582 / 3,000,000.",
+        "Closure deployment cef8320d propagated 20/20; both synthetic cohorts have zero live state and all 1,098 packet fences are minimized/content-free.",
         "Stage D authorizes one frozen, complete Stage E LoCoMo measurement without retuning or repeat."
       ]
     }

@@ -1,0 +1,22 @@
+{
+  "schema": "itsuki.v3-stage-e-cohort-preflight-before/v1",
+  "at": "2026-08-11T19:50:38.301Z",
+  "nonMutating": true,
+  "cells": {
+    "treatment": {
+      "slots": 10,
+      "counts": { "episodes": 0, "atomic_candidates": 0, "atomic_runs": 0, "projections": 0, "nodes": 0, "slices": 0, "events": 0, "edges": 0, "pages": 0, "live_staged": 0, "nonterminal_jobs": 0 },
+      "packets": { "packets": 881, "minimized": 881, "content_rows": 0 },
+      "liveStateZero": true,
+      "packetContentZero": true
+    },
+    "control": {
+      "slots": 10,
+      "counts": { "episodes": 0, "atomic_candidates": 0, "atomic_runs": 0, "projections": 0, "nodes": 0, "slices": 0, "events": 0, "edges": 0, "pages": 0, "live_staged": 0, "nonterminal_jobs": 0 },
+      "packets": { "packets": 217, "minimized": 0, "content_rows": 217 },
+      "liveStateZero": true,
+      "packetContentZero": false
+    }
+  },
+  "conclusion": "CONTROL_LEGACY_PACKET_CONTENT_REQUIRES_API_ERASURE"
+}
