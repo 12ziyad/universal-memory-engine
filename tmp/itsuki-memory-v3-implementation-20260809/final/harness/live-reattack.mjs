@@ -542,8 +542,13 @@ async function liveRun() {
 		...marks.base, marks.beta, marks.global, marks.forbidden, marks.unauthorized, marks.duplicate,
 		marks.immediate, ...marks.burst, ...marks.soak, marks.race, marks.fresh,
 	];
-	const ftsErasure = await ftsErasureAudit(slots, allSafeMarkers);
+	// The post-erasure probes above are genuinely new read operations. Their
+	// query source packets necessarily contain the marker they are challenging,
+	// even though the marker is absent from every memory/index result. Erase those
+	// probe packets before the packet-content audit; otherwise the harness audits
+	// its own question as if it were resurrected memory (V3-H13).
 	const cleanupSecond = await eraseCohort(token, slots);
+	const ftsErasure = await ftsErasureAudit(slots, allSafeMarkers);
 	await sleep(30_000);
 	const cleanAfter = await stateCounts(slots);
 	assert(memoryCountsAreZero(cleanAfter), `Stage B residue after stability grace: ${JSON.stringify(cleanAfter)}`);

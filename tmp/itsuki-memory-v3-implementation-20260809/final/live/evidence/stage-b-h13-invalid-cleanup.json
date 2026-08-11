@@ -1,0 +1,27 @@
+{
+  "schema": "itsuki.v3-final-stage-b-h13-invalid-cleanup/v1",
+  "at": "2026-08-11T17:07:24.265Z",
+  "pass": true,
+  "classified": {
+    "query_recall_rows": 10,
+    "non_query_rows": 0
+  },
+  "counts": {
+    "episodes": 0,
+    "atomic_candidates": 0,
+    "atomic_runs": 0,
+    "projections": 0,
+    "nodes": 0,
+    "slices": 0,
+    "events": 0,
+    "edges": 0,
+    "pages": 0,
+    "live_staged": 0,
+    "nonterminal_jobs": 0
+  },
+  "packets": {
+    "packets": 756,
+    "minimized": 756,
+    "content_rows": 0
+  }
+}
