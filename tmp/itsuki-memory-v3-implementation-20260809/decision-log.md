@@ -1,5 +1,18 @@
 # V3 DECISION LOG
 
+## 2026-08-12 — D-024: freeze the reference-blind Stage E protocol
+
+The deterministic product-only input reconciles 10 samples, 272 sessions,
+5,882 turns, 301 legal wire batches and all 1,540 non-adversarial questions.
+It contains no reference, evidence, score or verdict field. The product dry run
+opens zero reference files; the lock contender exits 73 without artifact
+mutation; 10/10 production-primary schema probes pass; and the clean middle ten
+have zero live/derived/FTS rows with 217/217 packet fences minimized.
+
+**Decision:** freeze this one-shot protocol. Official references become readable
+only after all product answers are SHA-sealed. No architecture/prompt/model/
+denominator/seed change or benchmark-specific repeat is authorized.
+
 ## 2026-08-11 — D-023: Stage D passes; authorize one decisive Stage E run
 
 Three independent fresh non-LoCoMo seeds averaged 95.24% judge, 69.60%

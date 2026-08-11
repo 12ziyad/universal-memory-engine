@@ -108,6 +108,21 @@ const additions = [
 	"final/holdout/evidence/seed3.scores.json",
 	"final/holdout/evidence/seed3.cleanup.json",
 	"final/holdout/results/summary.json",
+	"final/locomo/LOCK-PROOF.json",
+	"final/locomo/REFERENCE-BOUNDARY-PROOF.json",
+	"final/locomo/SCHEMA-PREFLIGHT.json",
+	"final/locomo/STAGE-E-LOCOMO-PREREGISTRATION.md",
+	"final/locomo/harness-manifest.json",
+	"final/locomo/frozen/product-inputs.json",
+	"final/locomo/harness/common.mjs",
+	"final/locomo/harness/generate-product-inputs.mjs",
+	"final/locomo/harness/lock-proof.mjs",
+	"final/locomo/harness/product.mjs",
+	"final/locomo/harness/reference-boundary-proof.mjs",
+	"final/locomo/harness/run.mjs",
+	"final/locomo/harness/schema-preflight.mjs",
+	"final/locomo/harness/score.mjs",
+	"final/locomo/harness/verify-config.mjs",
 ];
 
 const existing = fs.readFileSync(MANIFEST, "utf8")

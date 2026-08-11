@@ -1,0 +1,12 @@
+{
+  "schema": "itsuki.v3-stage-e-lock-proof/v1",
+  "provedAt": "2026-08-11T20:15:21.930Z",
+  "firstDriverExit": 0,
+  "secondDriverExit": 73,
+  "expectedContenderExit": 73,
+  "artifactsBeforeContender": [],
+  "artifactsAfterContender": [],
+  "artifactMutationsByContender": 0,
+  "lockReleasedByOwner": true,
+  "verdict": "PASS"
+}

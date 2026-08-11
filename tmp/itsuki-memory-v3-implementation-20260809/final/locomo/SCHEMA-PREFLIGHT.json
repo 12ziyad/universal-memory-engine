@@ -1,0 +1,12 @@
+{
+  "schema": "itsuki.v3-stage-e-schema-preflight/v1",
+  "provedAt": "2026-08-11T20:14:35.325Z",
+  "statements": 10,
+  "servedBy": [
+    "v3-prod"
+  ],
+  "servedByPrimary": true,
+  "rowsReturned": 0,
+  "nonMutating": true,
+  "verdict": "PASS"
+}

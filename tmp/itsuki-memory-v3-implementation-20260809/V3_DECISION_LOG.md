@@ -4,6 +4,29 @@ Every entry records the evidence that forced the decision, not a preference.
 
 ---
 
+## D-024 — freeze the reference-blind one-shot Stage E protocol
+
+**Decision.** Freeze one complete 1,540-question Stage E run on the accepted
+candidate and clean middle/control ten. Product generation receives only the
+mechanically derived reference-free input; official references become readable
+only after the 1,540-answer product is SHA-sealed. Source time uses exact day
+precision because LoCoMo supplies local clock times without a timezone; the
+original local timestamp remains verbatim in source text.
+
+**Evidence.** Deterministic reconstruction reconciles 10 samples, 272 sessions,
+5,882 turns, 301 legal wire batches and category counts 282/321/96/841. The
+reference-boundary proof opens zero reference files, the atomic global-lock
+contender exits 73 before artifact mutation, all 10 production-primary schema
+probes pass, and the selected cohort has zero live/derived/FTS state with all
+217 historical packet fences minimized. No inference or flag change occurred.
+
+**Consequence.** The next product result is measurement, not a development
+screen. Harness repair may resume exact durable identities, but no changed
+architecture, prompt, model, denominator, ingestion seed or benchmark-specific
+repeat is authorized.
+
+---
+
 ## D-023 — accept the final candidate for one decisive Stage E measurement
 
 **Decision.** Stage D passes and authorizes exactly one fresh complete LoCoMo

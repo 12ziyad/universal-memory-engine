@@ -1,5 +1,33 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E harness frozen / activation next
+
+- The one-shot Stage E harness is frozen before activation or inference. Its
+  product-only input contains exactly 10 samples, 272 sessions, 5,882 turns and
+  1,540 non-adversarial questions; SHA-256 is
+  `e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd`.
+- Product input has zero reference/evidence/scoring fields. The product process
+  uses a dedicated validator that opens zero reference files; the scorer can
+  open official references only after the 1,540-answer product is SHA-sealed.
+- Global-lock proof passes: a contender exits 73, changes zero artifacts and
+  the owner releases the lock. Production-primary schema preflight passes 10/10
+  read-only statements. The deterministic wire plan is 301 batches, 29 split
+  sessions, complete chronological coverage and no source-time fabrication.
+- Stage E is preregistered at depth 200 with exact accepted E7+E9A, no reranker,
+  E9B or E10, GPT-OSS-120B reader/judge and a 500,000-neuron hard cap. No second
+  seed, retuning or benchmark-specific repeat is permitted.
+- Control/middle ten remain clean: zero live/derived/FTS state, 217/217 source
+  packet fences minimized and zero content rows. Config and production remain
+  safely closed; no inference occurred and settled burn remains
+  **1,933,582 / 3,000,000**.
+- Durable evidence: `final/locomo/STAGE-E-LOCOMO-PREREGISTRATION.md`,
+  `final/locomo/harness-manifest.json`, `final/locomo/LOCK-PROOF.json`,
+  `final/locomo/REFERENCE-BOUNDARY-PROOF.json` and
+  `final/locomo/SCHEMA-PREFLIGHT.json`.
+- Exact next action: commit/push the frozen harness, activate accepted nested
+  lanes for only the control ten, deploy/prove propagation, then execute the
+  single Stage E run.
+
 ## 2026-08-11 Stage D safely closed / Stage E harness next
 
 - Stage D commit/origin `2484f772a79889dba0297f83b575d2c6fb2e99d9`
