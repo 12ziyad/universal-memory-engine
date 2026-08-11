@@ -1,21 +1,29 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
-## 2026-08-11 V3-D13 HIGH / Stage C failing-first complete
+## 2026-08-11 V3-D13 implemented / exact Stage C PASS / deploy next
 
-- Isolated production-schema Stage C completed 1k/10k/100k with zero inference
-  and no production fixture. Scope, final item/context bounds, exact source
-  expansion, product deletion and episode/manual FTS erasure passed at all sizes.
-- V3 recall loaded every scoped node/slice/edge before fusion: 800 -> 8,000 ->
-  80,000 rows per lane. Broad latency was 3,154 -> 36,632 -> 510,978 ms;
-  target latency 483 -> 648 -> 3,044 ms; 100k local memory was about 898 MB.
-- **V3-D13 HIGH is OPEN.** Root cause is unbounded database-to-Worker corpus
-  loading before the nominal 200-candidate lane caps. Final output bounds do
-  not contain that availability/resource risk.
-- Durable failing-first: `final/scale/evidence/stage-c-scale-failing-first.json`
-  and `final/scale/V3-D13-FAILING-FIRST.md`.
-- Exact next action: implement bounded D1-first V3 exact/FTS/assertion/vector/
-  temporal/graph candidate generation behind E7, hydrate a bounded evidence
-  closure, exact-rerun Stage C, then full HIGH regression/deploy/reattack.
+- The failing-first production-schema cells proved that E7 copied 800/8,000/
+  80,000 scoped rows per lane into the Worker before applying its nominal
+  candidate bounds; 100k broad recall took 510,978 ms and about 898 MB locally.
+- The repair performs tenant/project filtering and candidate limits in D1,
+  fairly fuses bounded lane identities, walks a bounded graph, and hydrates only
+  a bounded evidence closure. It is active only under the nested E7 flag; the
+  legacy path remains unchanged. No migration or binding changed.
+- The exact repaired 1k/10k/100k run is **PASS** with zero inference and zero
+  production fixture. At 100k, target/broad recall was 1,356/2,596 ms, common
+  FTS was 130 ms, delete was 4,910 ms, and maximum node/slice/edge load remained
+  600. Scope, context bounds, source expansion, delete and both FTS erasure
+  gates passed; final fixture state was zero.
+- Full implementation gates pass: Worker **111 files / 1,313 tests**, unit/
+  cross-door **33 files / 539 pass + 1 skip**, zero audit vulnerabilities, and
+  Wrangler dry deploy PASS.
+- Durable proof: `final/scale/evidence/stage-c-scale-repaired.json`,
+  `final/scale/STAGE-C-SCALE-REPORT.md`, and
+  `final/scale/V3-D13-IMPLEMENTATION-GATES.md`.
+- **V3-D13 remains open only for deployment, live reattack and cleanup.** Exact
+  next action: commit/push the tested implementation, deploy with unchanged
+  safe flags, prove bounded live E7 behavior and legacy isolation, then close
+  the HIGH before Stage D repeated holdout.
 
 ## 2026-08-11 Final Stage B safely closed / Stage C next
 

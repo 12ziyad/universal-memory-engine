@@ -4,7 +4,13 @@
 
 | id | sev | classification | finding | status |
 |---|---|---|---|---|
-| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge into the Worker before its 200-candidate fusion bounds. The isolated production-schema scale cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k, reaching about 898 MB locally. Final context, scope, source expansion, delete and FTS erasure remained correct, isolating the defect to pre-fusion candidate generation. | **OPEN — FAILING-FIRST COMPLETE.** Durable artifact `final/scale/evidence/stage-c-scale-failing-first.json`; required lifecycle is bounded D1-first V3 candidate generation, exact rerun, regressions, deploy, production reattack and cleanup. |
+| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge into the Worker before its 200-candidate fusion bounds. The isolated production-schema scale cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k, reaching about 898 MB locally. Final context, scope, source expansion, delete and FTS erasure remained correct, isolating the defect to pre-fusion candidate generation. | **OPEN — IMPLEMENTED / PRODUCTION REATTACK PENDING.** Bounded D1-first E7 candidate generation and evidence hydration pass the exact repaired 1k/10k/100k run; 100k broad recall is 2.596s (~196.8x faster), maximum node/slice/edge load is 600, Worker 1,313/1,313 and unit 539/539 + one skip pass. Deploy, live reattack and cleanup remain before closure. |
+
+## Final Stage C harness finding (2026-08-11)
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-H14** | **MEDIUM** | **HARNESS DEFECT / STDOUT CAPTURE** | Passing Vitest scale cells had their stdout intercepted, so the aggregate received no JSON despite all three child exits being zero. | **CLOSED BEFORE SCORE.** `stage-c-scale-final.json` is retained INVALID/UNSCORED; `disableConsoleIntercept` was enabled and the filter-safe exact rerun produced authoritative PASS artifact `stage-c-scale-repaired.json`. |
 
 ## Final Stage B product finding (2026-08-11)
 

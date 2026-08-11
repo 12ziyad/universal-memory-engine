@@ -1,0 +1,1867 @@
+{
+  "schema": "itsuki.v3-final-stage-c-scale/v1",
+  "startedAt": "2026-08-11T17:53:08.479Z",
+  "completedAt": "2026-08-11T17:53:45.631Z",
+  "pass": true,
+  "localOnly": true,
+  "inferenceCalls": 0,
+  "sizes": [
+    1000,
+    10000,
+    100000
+  ],
+  "gates": {
+    "allArtifactsPresent": true,
+    "allProcessesPassed": true,
+    "scopeSafe": true,
+    "finalResultsBounded": true,
+    "finalContextBounded": true,
+    "rawCandidateLoadsBounded": true,
+    "productDeleteConverged": true,
+    "ftsDeleteConverged": true
+  },
+  "runs": [
+    {
+      "size": 1000,
+      "exitCode": 0,
+      "parseError": null,
+      "result": {
+        "schema": "itsuki.v3-final-stage-c-scale-cell/v1",
+        "size": 1000,
+        "userIdHashLabel": "deterministic-local-1000",
+        "startedAt": "2026-08-11T17:53:14.651Z",
+        "localOnly": true,
+        "inferenceCalls": 0,
+        "insertMs": {
+          "episodes": 10,
+          "nodes": 6,
+          "slices": 9,
+          "events": 7,
+          "edges": 6,
+          "profiles": 18
+        },
+        "before": {
+          "episodes": 1000,
+          "nodes": 1000,
+          "slices": 1000,
+          "events": 1000,
+          "edges": 1000,
+          "profiles": 1000,
+          "candidates": 1,
+          "projections": 1,
+          "runs": 1,
+          "episodeFtsTarget": 1,
+          "manualFtsTarget": 1
+        },
+        "expectedProjectRows": {
+          "alpha": 800,
+          "beta": 100,
+          "global": 100
+        },
+        "episodeFts": {
+          "ownMs": 3,
+          "ownRows": 1,
+          "ownFailed": false,
+          "crossMs": 3,
+          "crossRows": 0,
+          "crossFailed": false,
+          "commonMs": 4,
+          "commonRows": 50,
+          "commonFailed": false
+        },
+        "targetRecall": {
+          "ms": 619,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 199,
+          "sourceExpansionEpisodes": 1,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 1,
+            "exactNode": 1,
+            "exactPage": 0,
+            "lexicalSlice": 1,
+            "lexicalEvent": 1,
+            "temporalEvent": 199,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 201,
+            "pages": 0,
+            "slices": 201,
+            "events": 201,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 1
+            }
+          ]
+        },
+        "broadRecall": {
+          "ms": 1490,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 200,
+          "sourceExpansionEpisodes": 0,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 200,
+            "exactNode": 200,
+            "exactPage": 0,
+            "lexicalSlice": 200,
+            "lexicalEvent": 0,
+            "temporalEvent": 0,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 401,
+            "pages": 0,
+            "slices": 401,
+            "events": 401,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 0
+            }
+          ]
+        },
+        "queryPlans": {
+          "episodeFts": [
+            "SEARCH e USING INDEX idx_source_episodes_project (user_id=? AND project_id=?)",
+            "SCAN f VIRTUAL TABLE INDEX 0:=M1"
+          ],
+          "nodes": [
+            "SEARCH nodes USING INDEX idx_nodes_user_project (user_id=? AND project_id=?)"
+          ],
+          "slices": [
+            "SEARCH slices USING INDEX idx_slices_user_project_node (user_id=? AND project_id=?)"
+          ],
+          "edges": [
+            "SEARCH edges USING INDEX idx_edges_user_project (user_id=? AND project_id=?)"
+          ],
+          "deleteEpisodes": [
+            "SEARCH source_episodes USING COVERING INDEX idx_source_episodes_project (user_id=?)"
+          ]
+        },
+        "productDelete": {
+          "ms": 113,
+          "deleted": true,
+          "nodes": 1000
+        },
+        "after": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "final": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "completedAt": "2026-08-11T17:53:16.968Z",
+        "rawLoads": {
+          "maxNodeSliceEdgeRows": 600,
+          "maxEventRows": 200
+        },
+        "gates": {
+          "scopeSafe": true,
+          "finalResultsBounded": true,
+          "finalContextBounded": true,
+          "rawCandidateLoadsBounded": true,
+          "productDeleteConverged": true,
+          "ftsDeleteConverged": true
+        }
+      }
+    },
+    {
+      "size": 10000,
+      "exitCode": 0,
+      "parseError": null,
+      "result": {
+        "schema": "itsuki.v3-final-stage-c-scale-cell/v1",
+        "size": 10000,
+        "userIdHashLabel": "deterministic-local-10000",
+        "startedAt": "2026-08-11T17:53:23.077Z",
+        "localOnly": true,
+        "inferenceCalls": 0,
+        "insertMs": {
+          "episodes": 116,
+          "nodes": 40,
+          "slices": 78,
+          "events": 54,
+          "edges": 54,
+          "profiles": 53
+        },
+        "before": {
+          "episodes": 10000,
+          "nodes": 10000,
+          "slices": 10000,
+          "events": 10000,
+          "edges": 10000,
+          "profiles": 10000,
+          "candidates": 1,
+          "projections": 1,
+          "runs": 1,
+          "episodeFtsTarget": 1,
+          "manualFtsTarget": 1
+        },
+        "expectedProjectRows": {
+          "alpha": 8000,
+          "beta": 1000,
+          "global": 1000
+        },
+        "episodeFts": {
+          "ownMs": 3,
+          "ownRows": 1,
+          "ownFailed": false,
+          "crossMs": 5,
+          "crossRows": 0,
+          "crossFailed": false,
+          "commonMs": 14,
+          "commonRows": 50,
+          "commonFailed": false
+        },
+        "targetRecall": {
+          "ms": 518,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 199,
+          "sourceExpansionEpisodes": 1,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 1,
+            "exactNode": 1,
+            "exactPage": 0,
+            "lexicalSlice": 1,
+            "lexicalEvent": 1,
+            "temporalEvent": 199,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 201,
+            "pages": 0,
+            "slices": 201,
+            "events": 201,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 1
+            }
+          ]
+        },
+        "broadRecall": {
+          "ms": 1460,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 200,
+          "sourceExpansionEpisodes": 0,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 200,
+            "exactNode": 200,
+            "exactPage": 0,
+            "lexicalSlice": 200,
+            "lexicalEvent": 0,
+            "temporalEvent": 0,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 401,
+            "pages": 0,
+            "slices": 401,
+            "events": 401,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 0
+            }
+          ]
+        },
+        "queryPlans": {
+          "episodeFts": [
+            "SEARCH e USING INDEX idx_source_episodes_project (user_id=? AND project_id=?)",
+            "SCAN f VIRTUAL TABLE INDEX 0:=M1"
+          ],
+          "nodes": [
+            "SEARCH nodes USING INDEX idx_nodes_user_project (user_id=? AND project_id=?)"
+          ],
+          "slices": [
+            "SEARCH slices USING INDEX idx_slices_user_project_node (user_id=? AND project_id=?)"
+          ],
+          "edges": [
+            "SEARCH edges USING INDEX idx_edges_user_project (user_id=? AND project_id=?)"
+          ],
+          "deleteEpisodes": [
+            "SEARCH source_episodes USING COVERING INDEX idx_source_episodes_project (user_id=?)"
+          ]
+        },
+        "productDelete": {
+          "ms": 502,
+          "deleted": true,
+          "nodes": 10000
+        },
+        "after": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "final": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "completedAt": "2026-08-11T17:53:26.005Z",
+        "rawLoads": {
+          "maxNodeSliceEdgeRows": 600,
+          "maxEventRows": 200
+        },
+        "gates": {
+          "scopeSafe": true,
+          "finalResultsBounded": true,
+          "finalContextBounded": true,
+          "rawCandidateLoadsBounded": true,
+          "productDeleteConverged": true,
+          "ftsDeleteConverged": true
+        }
+      }
+    },
+    {
+      "size": 100000,
+      "exitCode": 0,
+      "parseError": null,
+      "result": {
+        "schema": "itsuki.v3-final-stage-c-scale-cell/v1",
+        "size": 100000,
+        "userIdHashLabel": "deterministic-local-100000",
+        "startedAt": "2026-08-11T17:53:31.994Z",
+        "localOnly": true,
+        "inferenceCalls": 0,
+        "insertMs": {
+          "episodes": 1398,
+          "nodes": 425,
+          "slices": 733,
+          "events": 733,
+          "edges": 431,
+          "profiles": 720
+        },
+        "before": {
+          "episodes": 100000,
+          "nodes": 100000,
+          "slices": 100000,
+          "events": 100000,
+          "edges": 100000,
+          "profiles": 100000,
+          "candidates": 1,
+          "projections": 1,
+          "runs": 1,
+          "episodeFtsTarget": 1,
+          "manualFtsTarget": 1
+        },
+        "expectedProjectRows": {
+          "alpha": 80000,
+          "beta": 10000,
+          "global": 10000
+        },
+        "episodeFts": {
+          "ownMs": 3,
+          "ownRows": 1,
+          "ownFailed": false,
+          "crossMs": 27,
+          "crossRows": 0,
+          "crossFailed": false,
+          "commonMs": 130,
+          "commonRows": 50,
+          "commonFailed": false
+        },
+        "targetRecall": {
+          "ms": 1356,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 199,
+          "sourceExpansionEpisodes": 1,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 1,
+            "exactNode": 1,
+            "exactPage": 0,
+            "lexicalSlice": 1,
+            "lexicalEvent": 1,
+            "temporalEvent": 199,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 201,
+            "pages": 0,
+            "slices": 201,
+            "events": 201,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 1
+            }
+          ]
+        },
+        "broadRecall": {
+          "ms": 2596,
+          "count": 200,
+          "items": 200,
+          "contextChars": 24000,
+          "contextBytes": 24002,
+          "hybridCandidates": 200,
+          "hybridParents": 200,
+          "sourceExpansionEpisodes": 0,
+          "sourceExpansionFailed": false,
+          "containsTarget": true,
+          "containsBetaCanary": false,
+          "boundedCorpusUsed": true,
+          "boundedLaneCounts": {
+            "fts": 200,
+            "exactNode": 200,
+            "exactPage": 0,
+            "lexicalSlice": 200,
+            "lexicalEvent": 0,
+            "temporalEvent": 0,
+            "lexicalEdge": 0,
+            "vector": 0,
+            "graph": 200
+          },
+          "boundedCorpusCounts": {
+            "nodes": 401,
+            "pages": 0,
+            "slices": 401,
+            "events": 401,
+            "edges": 600
+          },
+          "boundedFailures": 0,
+          "boundedLoadMs": null,
+          "trace": [
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 200
+            },
+            {
+              "operation": "all",
+              "tag": "pages",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "other",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 40
+            },
+            {
+              "operation": "all",
+              "tag": "nodes",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "slices",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "events",
+              "rows": 1
+            },
+            {
+              "operation": "all",
+              "tag": "edges",
+              "rows": 600
+            },
+            {
+              "operation": "all",
+              "tag": "profile",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "staged",
+              "rows": 0
+            },
+            {
+              "operation": "all",
+              "tag": "source_expansion",
+              "rows": 0
+            }
+          ]
+        },
+        "queryPlans": {
+          "episodeFts": [
+            "SEARCH e USING INDEX idx_source_episodes_project (user_id=? AND project_id=?)",
+            "SCAN f VIRTUAL TABLE INDEX 0:=M1"
+          ],
+          "nodes": [
+            "SEARCH nodes USING INDEX idx_nodes_user_project (user_id=? AND project_id=?)"
+          ],
+          "slices": [
+            "SEARCH slices USING INDEX idx_slices_user_project_node (user_id=? AND project_id=?)"
+          ],
+          "edges": [
+            "SEARCH edges USING INDEX idx_edges_user_project (user_id=? AND project_id=?)"
+          ],
+          "deleteEpisodes": [
+            "SEARCH source_episodes USING COVERING INDEX idx_source_episodes_project (user_id=?)"
+          ]
+        },
+        "productDelete": {
+          "ms": 4910,
+          "deleted": true,
+          "nodes": 100000
+        },
+        "after": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "final": {
+          "episodes": 0,
+          "nodes": 0,
+          "slices": 0,
+          "events": 0,
+          "edges": 0,
+          "profiles": 0,
+          "candidates": 0,
+          "projections": 0,
+          "runs": 0,
+          "episodeFtsTarget": 0,
+          "manualFtsTarget": 0
+        },
+        "completedAt": "2026-08-11T17:53:45.523Z",
+        "rawLoads": {
+          "maxNodeSliceEdgeRows": 600,
+          "maxEventRows": 200
+        },
+        "gates": {
+          "scopeSafe": true,
+          "finalResultsBounded": true,
+          "finalContextBounded": true,
+          "rawCandidateLoadsBounded": true,
+          "productDeleteConverged": true,
+          "ftsDeleteConverged": true
+        }
+      }
+    }
+  ]
+}

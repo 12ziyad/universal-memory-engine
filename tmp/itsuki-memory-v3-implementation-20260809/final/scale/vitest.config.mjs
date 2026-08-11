@@ -29,6 +29,7 @@ export default defineConfig({
 	test: {
 		include: ["tmp/itsuki-memory-v3-implementation-20260809/final/scale/scale.spec.js"],
 		setupFiles: [path.join(repo, "test", "apply-migrations.js")],
+		disableConsoleIntercept: true,
 		testTimeout: 900_000,
 		hookTimeout: 900_000,
 	},

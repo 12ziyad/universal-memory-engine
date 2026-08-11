@@ -20,7 +20,12 @@ import {
 	memoryV3SourceExpansionEnabled,
 } from "../lib/memory_v3.js";
 import { adaptiveContextPlan, compileAdaptiveContext } from "./adaptive_context.mjs";
-import { orderNodeEvidence, rankHybridAssertions } from "./hybrid_retrieval.mjs";
+import {
+	hybridTemporalIntent,
+	orderNodeEvidence,
+	rankHybridAssertions,
+} from "./hybrid_retrieval.mjs";
+import { loadBoundedV3RecallCorpus } from "./bounded_recall_candidates.mjs";
 import { expandSelectedSourceEvidence } from "./source_expansion.mjs";
 import {
 	emptyEpisodeFallbackResult,
@@ -918,42 +923,82 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const filteredByProject = recallScope !== "global";
 	const bindings = projectBindings(recallScope, projectId);
 
-	const [nodesRes, pagesRes, slicesRes, eventsRes, edgesRes, profileRes] = await env.DB.batch([
-		env.DB.prepare(
-			`SELECT n.id, n.label, n.category, n.state, n.summary, n.aliases_json, n.updated_at, n.last_seen_at,
-				 n.heat_score, n.cluster, n.project_id, n.project_name
-			 FROM nodes n
-			 WHERE n.user_id = ? AND n.deleted_at IS NULL AND n.archived_at IS NULL AND n.suppressed_at IS NULL${projectPredicate("n", recallScope)}`,
-		).bind(userId, ...bindings),
-		env.DB.prepare(
-			`SELECT p.id, p.title, p.topic_filter, p.short_summary, p.key_points_json, p.decisions_json,
-				 p.next_steps_json, p.related_concepts_json, p.updated_at, p.heat_score, p.source_mode, p.cluster,
-				 p.project_id, p.project_name
-			 FROM memory_pages p
-			 WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.suppressed_at IS NULL${projectPredicate("p", recallScope)}`,
-		).bind(userId, ...bindings),
-		env.DB.prepare(
-			`SELECT s.id, s.node_id, s.text, s.kind, s.created_at, s.project_id, s.project_name
-			 FROM slices s
-			 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
-		).bind(userId, ...bindings),
-		env.DB.prepare(
-			`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source,
-				e.event_time_end, e.event_time_precision, e.event_time_relation, e.created_at,
-				e.project_id, e.project_name
-			 FROM events e
-			 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
-			 ORDER BY e.created_at DESC LIMIT ?`,
-		).bind(userId, ...bindings, plan.eventScanLimit),
-		env.DB.prepare(
-			`SELECT e.id, e.from_node, e.to_node, e.type, e.weight, e.reinforcement_count, e.fact,
-				e.valid_at, e.invalid_at, e.project_id, e.project_name
-			 FROM edges e WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}`,
-		).bind(userId, ...bindings),
-		// memory_profiles is account-wide and has no project attribution. It may
-		// nudge account-wide results, but cannot safely influence a filtered rank.
-		env.DB.prepare("SELECT * FROM memory_profiles WHERE user_id = ? AND ? = 'global'").bind(userId, recallScope),
-	]);
+	// V3-D13: an output LIMIT is not a candidate bound if the full tenant graph
+	// has already crossed the D1 -> Worker boundary. E7 therefore shortlists in
+	// D1 and hydrates a capped evidence closure. The legacy path remains byte-
+	// stable for accounts outside the nested E7 flag.
+	let boundedCorpus = null;
+	let precomputedVectorMatches = null;
+	if (hybridEnabled) {
+		if (!filteredByProject) {
+			const vector = await embed(env, config, q);
+			precomputedVectorMatches = await queryNodeVectors(env, config, {
+				userId,
+				values: vector,
+				topK: budget.vectorTopK,
+			});
+		}
+		boundedCorpus = await loadBoundedV3RecallCorpus(env, userId, q, {
+			recallScope,
+			projectId,
+			candidateLimit: budget.bm25,
+			vectorNodeIds: (precomputedVectorMatches ?? []).map((match) => match.id),
+			temporalIntent: hybridTemporalIntent(q),
+			pastIntent: PAST_INTENT_RE.test(q),
+		});
+	}
+
+	let nodesRes;
+	let pagesRes;
+	let slicesRes;
+	let eventsRes;
+	let edgesRes;
+	let profileRes;
+	if (boundedCorpus) {
+		nodesRes = { results: boundedCorpus.nodes };
+		pagesRes = { results: boundedCorpus.pages };
+		slicesRes = { results: boundedCorpus.slices };
+		eventsRes = { results: boundedCorpus.events };
+		edgesRes = { results: boundedCorpus.edges };
+		profileRes = { results: boundedCorpus.profile };
+	} else {
+		[nodesRes, pagesRes, slicesRes, eventsRes, edgesRes, profileRes] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT n.id, n.label, n.category, n.state, n.summary, n.aliases_json, n.updated_at, n.last_seen_at,
+					 n.heat_score, n.cluster, n.project_id, n.project_name
+				 FROM nodes n
+				 WHERE n.user_id = ? AND n.deleted_at IS NULL AND n.archived_at IS NULL AND n.suppressed_at IS NULL${projectPredicate("n", recallScope)}`,
+			).bind(userId, ...bindings),
+			env.DB.prepare(
+				`SELECT p.id, p.title, p.topic_filter, p.short_summary, p.key_points_json, p.decisions_json,
+					 p.next_steps_json, p.related_concepts_json, p.updated_at, p.heat_score, p.source_mode, p.cluster,
+					 p.project_id, p.project_name
+				 FROM memory_pages p
+				 WHERE p.user_id = ? AND p.deleted_at IS NULL AND p.archived_at IS NULL AND p.suppressed_at IS NULL${projectPredicate("p", recallScope)}`,
+			).bind(userId, ...bindings),
+			env.DB.prepare(
+				`SELECT s.id, s.node_id, s.text, s.kind, s.created_at, s.project_id, s.project_name
+				 FROM slices s
+				 WHERE s.user_id = ? AND s.is_current = 1 AND s.deleted_at IS NULL${projectPredicate("s", recallScope)}`,
+			).bind(userId, ...bindings),
+			env.DB.prepare(
+				`SELECT e.id, e.node_id, e.action, e.text, e.importance, e.happened_at, e.happened_at_source,
+					e.event_time_end, e.event_time_precision, e.event_time_relation, e.created_at,
+					e.project_id, e.project_name
+				 FROM events e
+				 WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}
+				 ORDER BY e.created_at DESC LIMIT ?`,
+			).bind(userId, ...bindings, plan.eventScanLimit),
+			env.DB.prepare(
+				`SELECT e.id, e.from_node, e.to_node, e.type, e.weight, e.reinforcement_count, e.fact,
+					e.valid_at, e.invalid_at, e.project_id, e.project_name
+				 FROM edges e WHERE e.user_id = ? AND e.deleted_at IS NULL${projectPredicate("e", recallScope)}`,
+			).bind(userId, ...bindings),
+			// memory_profiles is account-wide and has no project attribution. It may
+			// nudge account-wide results, but cannot safely influence a filtered rank.
+			env.DB.prepare("SELECT * FROM memory_profiles WHERE user_id = ? AND ? = 'global'").bind(userId, recallScope),
+		]);
+	}
 
 	const nodes = nodesRes.results ?? [];
 	const pages = pagesRes.results ?? [];
@@ -1056,11 +1101,11 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// ---- signal 2: BM25 (D1 FTS5), keyword overlap as its tail ---------------
 	// FTS catches the rare terms vectors blur; the keyword scan keeps objects
 	// that predate their search profile reachable.
-	let bm25Rank = [];
+	let bm25Rank = boundedCorpus?.bm25Rank ?? [];
 	// Search profiles have no project column. Post-filtering a globally limited
 	// list would let another project starve the requested one, so scoped recall
 	// uses the already-filtered exact/keyword scan instead.
-	if (!filteredByProject) {
+	if (!boundedCorpus && !filteredByProject) {
 		try {
 			const ftsMatch = queryTokens
 				.filter((t) => t.length > 1)
@@ -1112,8 +1157,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// Disable this signal for filtered modes instead of post-filtering a top-K
 	// result that another project can fill before the requested project is seen.
 	if (!filteredByProject) {
-		const vector = await embed(env, config, q);
-		const matches = await queryNodeVectors(env, config, { userId, values: vector, topK: budget.vectorTopK });
+		const matches = precomputedVectorMatches ?? await (async () => {
+			const vector = await embed(env, config, q);
+			return queryNodeVectors(env, config, { userId, values: vector, topK: budget.vectorTopK });
+		})();
 		vectorRank = matches.filter((m) => byId.has(m.id)).map((m) => ({ key: `node:${m.id}` }));
 	}
 
@@ -1397,6 +1444,13 @@ export async function recall(env, config, userId, query, opts = {}) {
 		hybrid_assertion_candidates: hybrid.candidates.length,
 		hybrid_parent_candidates: hybrid.nodeRanks.length,
 		hybrid_lane_counts: hybrid.laneCounts,
+		...(boundedCorpus ? {
+			bounded_recall_corpus_used: true,
+			bounded_recall_query_terms: boundedCorpus.telemetry.queryTerms,
+			bounded_recall_lane_counts: boundedCorpus.telemetry.laneCounts,
+			bounded_recall_corpus_counts: boundedCorpus.telemetry.corpusCounts,
+			bounded_recall_failures: boundedCorpus.telemetry.failures.length,
+		} : {}),
 		...(sourceExpansionEnabled ? {
 			source_expansion_used: true,
 			source_expansion_assertions: sourceExpansion.assertions,

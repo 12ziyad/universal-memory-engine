@@ -4,7 +4,13 @@
 
 | id | sev | classification | finding | status |
 |---|---|---|---|---|
-| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge before bounded fusion. Production-schema local cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k. Final context, scope and erasure stayed correct. | **OPEN — FAILING-FIRST COMPLETE.** Repair with bounded D1-first V3 candidates, then exact rerun/regression/deploy/reattack. |
+| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge before bounded fusion. Production-schema local cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k. Final context, scope and erasure stayed correct. | **OPEN — IMPLEMENTED / PRODUCTION REATTACK PENDING.** Exact repaired scale and full gates pass; 100k broad recall is 2.596s with maximum node/slice/edge load 600. Deploy, reattack and cleanup remain. |
+
+## Final Stage C harness finding (2026-08-11)
+
+| id | sev | classification | finding | status |
+|---|---|---|---|---|
+| **V3-H14** | **MEDIUM** | **HARNESS DEFECT / STDOUT CAPTURE** | Passing scale-cell stdout was intercepted, leaving a result-less aggregate. | **CLOSED BEFORE SCORE.** The empty aggregate remains INVALID; the corrected exact rerun is authoritative PASS. |
 
 ## E9A harness finding (2026-08-11)
 

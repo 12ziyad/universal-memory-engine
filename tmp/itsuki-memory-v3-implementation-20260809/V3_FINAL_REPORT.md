@@ -1,5 +1,17 @@
 # ITSUKI MEMORY V3 — FINAL REPORT
 
+## 2026-08-11 Stage C bounded-recall repair - authoritative interim status
+
+V3-D13 is implemented and locally validated but remains open pending its live
+production reattack. The repaired production-schema 1k/10k/100k cells all pass
+with zero inference and zero final fixture state. At 100k, broad recall fell
+from 510,978 ms failing-first to 2,596 ms (about 196.8x), while the maximum
+node/slice/edge evidence load remained 600 and the reader-facing output stayed
+bounded to 200 items / 24,000 characters. Scope, exact source expansion,
+deletion and both FTS erasure gates passed. Full Worker 1,313/1,313, unit 539/
+539 + one skip, audit and dry-deploy gates pass. Deployment, exact production
+reattack and cleanup are next; Stage D/final benchmarks have not started.
+
 ## 2026-08-11 final Stage B closure — authoritative interim status
 
 Final live security/isolation/erasure/concurrency/bounded-soak validation is

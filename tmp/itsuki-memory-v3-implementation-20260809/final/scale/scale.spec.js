@@ -2,6 +2,14 @@ import { expect, test } from "vitest";
 import { env } from "cloudflare:test";
 
 import { getConfig } from "../../../../src/config.js";
+import {
+	V3_RECALL_EDGE_LOAD_MAX,
+	V3_RECALL_EVENT_LOAD_MAX,
+	V3_RECALL_LANE_MAX,
+	V3_RECALL_NODE_LOAD_MAX,
+	V3_RECALL_PAGE_LOAD_MAX,
+	V3_RECALL_SLICE_LOAD_MAX,
+} from "../../../../src/pipeline/bounded_recall_candidates.mjs";
 import { deleteAllMemories } from "../../../../src/pipeline/cleanup.js";
 import { findSourceEpisodesDetailed } from "../../../../src/pipeline/episodes.js";
 import { recall } from "../../../../src/pipeline/recall.js";
@@ -309,6 +317,11 @@ test("measures the preregistered production-schema scale cell", async () => {
 				sourceExpansionFailed: measured.value.source_expansion_failed ?? false,
 				containsTarget: /quartzanchor/i.test(measured.value.context),
 				containsBetaCanary: /betacanary/i.test(measured.value.context),
+				boundedCorpusUsed: measured.value.bounded_recall_corpus_used ?? false,
+				boundedLaneCounts: measured.value.bounded_recall_lane_counts ?? {},
+				boundedCorpusCounts: measured.value.bounded_recall_corpus_counts ?? {},
+				boundedFailures: measured.value.bounded_recall_failures ?? -1,
+				boundedLoadMs: measured.value.bounded_recall_ms ?? null,
 				trace: traced.trace,
 			};
 		};
@@ -350,6 +363,14 @@ test("measures the preregistered production-schema scale cell", async () => {
 	);
 	const eventMax = Math.max(loadRows(result.targetRecall, "events"), loadRows(result.broadRecall, "events"));
 	result.rawLoads = { maxNodeSliceEdgeRows: rawMax, maxEventRows: eventMax };
+	const boundedRows = (row) => row?.boundedCorpusUsed === true
+		&& row.boundedFailures === 0
+		&& Number(row.boundedCorpusCounts?.nodes) <= V3_RECALL_NODE_LOAD_MAX
+		&& Number(row.boundedCorpusCounts?.pages) <= V3_RECALL_PAGE_LOAD_MAX
+		&& Number(row.boundedCorpusCounts?.slices) <= V3_RECALL_SLICE_LOAD_MAX
+		&& Number(row.boundedCorpusCounts?.events) <= V3_RECALL_EVENT_LOAD_MAX
+		&& Number(row.boundedCorpusCounts?.edges) <= V3_RECALL_EDGE_LOAD_MAX
+		&& Object.values(row.boundedLaneCounts ?? {}).every((count) => Number(count) <= V3_RECALL_LANE_MAX);
 	result.gates = {
 		scopeSafe: result.episodeFts?.crossRows === 0
 			&& result.targetRecall?.containsBetaCanary === false
@@ -358,7 +379,8 @@ test("measures the preregistered production-schema scale cell", async () => {
 			&& row.items <= CANDIDATE_HARD_MAX && row.hybridCandidates <= CANDIDATE_HARD_MAX),
 		finalContextBounded: [result.targetRecall, result.broadRecall].every((row) => row
 			&& row.contextChars <= CONTEXT_HARD_MAX),
-		rawCandidateLoadsBounded: rawMax <= CANDIDATE_HARD_MAX && eventMax <= EVENT_HARD_MAX,
+		rawCandidateLoadsBounded: rawMax <= V3_RECALL_EDGE_LOAD_MAX && eventMax <= EVENT_HARD_MAX
+			&& [result.targetRecall, result.broadRecall].every(boundedRows),
 		productDeleteConverged,
 		ftsDeleteConverged: Number(result.final?.episodeFtsTarget ?? -1) === 0
 			&& Number(result.final?.manualFtsTarget ?? -1) === 0,
