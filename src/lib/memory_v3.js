@@ -165,6 +165,30 @@ export function memoryV3AtomicCoalescingEnabled(env, userId) {
 }
 
 /**
+ * E7 changes only retrieval/fusion and is independently reversible. Unlike
+ * projection it does not require a write-path flag to remain enabled after a
+ * memory has been accepted, so it is nested directly below the parent V3 flag.
+ */
+export function memoryV3HybridRetrievalConfig(env) {
+	const raw = env?.ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL;
+	const mode = typeof raw === "string" && MEMORY_V3_MODES.has(raw.trim().toLowerCase())
+		? raw.trim().toLowerCase()
+		: "off";
+	const allowlist = mode === "allowlist"
+		? parseAllowlist(env?.ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS)
+		: new Set();
+	return { mode, allowlist, allowlistCount: allowlist.size };
+}
+
+export function memoryV3HybridRetrievalEnabled(env, userId) {
+	if (!memoryV3Enabled(env, userId)) return false;
+	const { mode, allowlist } = memoryV3HybridRetrievalConfig(env);
+	if (mode === "on") return true;
+	if (mode === "allowlist") return allowlist.has(userId);
+	return false;
+}
+
+/**
  * Flag state for operators, carrying no private data: the mode and how many
  * accounts are selected, never which ones.
  */
@@ -174,6 +198,7 @@ export function memoryV3Status(env) {
 	const atomicCapture = memoryV3AtomicCaptureConfig(env);
 	const atomicProjection = memoryV3AtomicProjectionConfig(env);
 	const atomicCoalescing = memoryV3AtomicCoalescingConfig(env);
+	const hybridRetrieval = memoryV3HybridRetrievalConfig(env);
 	return {
 		schema: MEMORY_V3_FLAG_SCHEMA,
 		mode,
@@ -182,5 +207,6 @@ export function memoryV3Status(env) {
 		atomicCapture: { mode: atomicCapture.mode, allowlistCount: atomicCapture.allowlistCount },
 		atomicProjection: { mode: atomicProjection.mode, allowlistCount: atomicProjection.allowlistCount },
 		atomicCoalescing: { mode: atomicCoalescing.mode, allowlistCount: atomicCoalescing.allowlistCount },
+		hybridRetrieval: { mode: hybridRetrieval.mode, allowlistCount: hybridRetrieval.allowlistCount },
 	};
 }

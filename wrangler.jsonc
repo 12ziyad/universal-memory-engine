@@ -126,7 +126,9 @@
 		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION": "off",
 		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS": "",
 		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING": "off",
-		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS": ""
+		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS": "",
+		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL": "off",
+		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS": ""
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

@@ -13,6 +13,8 @@ import { resolveScope } from "./source.js";
 import { classifyMessage } from "./trigger.js";
 import { findStagedText } from "./staged_text.js";
 import { rerankEntries } from "./rerank.js";
+import { memoryV3HybridRetrievalEnabled } from "../lib/memory_v3.js";
+import { orderNodeEvidence, rankHybridAssertions } from "./hybrid_retrieval.mjs";
 
 const TOP_N = 8;
 const MAX_EVENTS_PER_NODE = 8;
@@ -241,6 +243,10 @@ function emptyRecall(plan, extras = {}) {
 		vector_used: false,
 		lexical_used: false,
 		graph_expansion_used: false,
+		hybrid_retrieval_used: false,
+		hybrid_assertion_candidates: 0,
+		hybrid_parent_candidates: 0,
+		hybrid_lane_counts: { lexical: 0, relation: 0, temporal: 0 },
 		compressed: false,
 		...extras,
 	};
@@ -504,12 +510,19 @@ export function buildContext(entries, plan = recallGate("memory"), staged = []) 
 	for (const entry of entries) {
 		if (entry.type === "node" && nodeCount < plan.maxContextNodes) {
 			const n = entry.item;
-			const sliceTexts = n.slices.map((s) => s.text);
-			const eventTexts = [...n.events].reverse().map(eventLine);
-			// Relations lead: an edge fact ("Amara works at Nova Systems") is
-			// usually the direct answer, and it is what the edge pass paid for.
-			const relationTexts = n.relations ?? [];
-			const items = [...relationTexts, ...sliceTexts, ...eventTexts].filter(Boolean).slice(0, plan.maxLineItems);
+			let items;
+			if (Array.isArray(n.evidence)) {
+				// E7: the assertion lane already ordered this node's evidence for
+				// the query. The same per-node ceiling remains in force.
+				items = n.evidence.map((item) => item.text).filter(Boolean).slice(0, plan.maxLineItems);
+			} else {
+				const sliceTexts = n.slices.map((s) => s.text);
+				const eventTexts = [...n.events].reverse().map(eventLine);
+				// Relations lead: an edge fact ("Amara works at Nova Systems") is
+				// usually the direct answer, and it is what the edge pass paid for.
+				const relationTexts = n.relations ?? [];
+				items = [...relationTexts, ...sliceTexts, ...eventTexts].filter(Boolean).slice(0, plan.maxLineItems);
+			}
 			const tail = items.length ? ` - ${items.join("; ")}` : "";
 			lines.push(`${n.label} (${n.category}, state: ${n.state})${tail}`);
 			nodeCount++;
@@ -600,7 +613,11 @@ function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
 	// The node's relations, validity-filtered: open windows always; closed ones
 	// only when the question asked about the past — rendered with their end
 	// date so "until mid-2026" is part of the answer, not a surprise.
-	let relations = [];
+	const relationEvidence = [];
+	const hybridRelationKeys = new Set((graph?.hybridByNode?.get(node.id) ?? [])
+		.filter((candidate) => candidate.kind === "relation")
+		.map((candidate) => candidate.key));
+	let unrankedRelations = 0;
 	if (graph?.edgeRows) {
 		for (const edge of graph.edgeRows) {
 			if (edge.from_node !== node.id && edge.to_node !== node.id) continue;
@@ -611,10 +628,26 @@ function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
 			const base = edge.fact
 				?? (other ? `${node.label} ${String(edge.type).toLowerCase().replace(/_/g, " ")} ${other.label}` : null);
 			if (!base) continue;
-			relations.push(closed ? `${base} (until ${new Date(edge.invalid_at).toISOString().slice(0, 10)})` : base);
-			if (relations.length >= 3) break;
+			const key = `edge:${edge.id}`;
+			const ranked = hybridRelationKeys.has(key);
+			// Legacy behavior retains its first-three cap exactly. E7 scans every
+			// relation but carries only ranked hits plus the same three defaults.
+			if (graph?.hybridEnabled === true && !ranked && unrankedRelations >= 3) continue;
+			const text = closed ? `${base} (until ${new Date(edge.invalid_at).toISOString().slice(0, 10)})` : base;
+			relationEvidence.push({ key, kind: "relation", text });
+			if (!ranked) unrankedRelations += 1;
+			if (graph?.hybridEnabled !== true && relationEvidence.length >= 3) break;
 		}
 	}
+	const slices = slicesByNode.get(node.id) ?? [];
+	const events = eventsByNode.get(node.id) ?? [];
+	const evidence = graph?.hybridEnabled === true
+		? orderNodeEvidence([
+			...relationEvidence,
+			...slices.filter((slice) => slice?.text).map((slice) => ({ key: `slice:${slice.id}`, kind: "slice", text: slice.text })),
+			...events.filter((event) => event?.text).map((event) => ({ key: `event:${event.id}`, kind: "event", text: eventLine(event) })),
+		], graph.hybridByNode?.get(node.id) ?? [])
+		: null;
 	return {
 		id: node.id,
 		label: node.label,
@@ -624,9 +657,10 @@ function nodeItem(node, slicesByNode, eventsByNode, graph = null) {
 		cluster: node.cluster,
 		project_id: node.project_id ?? null,
 		project_name: node.project_name ?? null,
-		slices: slicesByNode.get(node.id) ?? [],
-		events: eventsByNode.get(node.id) ?? [],
-		relations,
+		slices,
+		events,
+		relations: relationEvidence.map((entry) => entry.text),
+		...(evidence ? { evidence } : {}),
 	};
 }
 
@@ -669,7 +703,7 @@ function itemSummary(entry) {
 	};
 }
 
-async function internalReadTrace(candidateIds, selectedIds, context) {
+async function internalReadTrace(candidateIds, selectedIds, context, extras = {}) {
 	const bytes = new TextEncoder().encode(String(context ?? ""));
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
 	const contextHash = [...new Uint8Array(digest)]
@@ -681,6 +715,7 @@ async function internalReadTrace(candidateIds, selectedIds, context) {
 		selected_ids: selectedIds,
 		context_bytes: bytes.byteLength,
 		context_sha256: contextHash,
+		...extras,
 	};
 }
 
@@ -802,6 +837,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const plan = recallGate(q, opts);
 	const budget = candidateBudget(plan);
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
+	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId);
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";
 	const bindings = projectBindings(recallScope, projectId);
@@ -1028,6 +1064,20 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// Hop decay lands through rank order: nearer, heavier neighbours first.
 	graphRank.sort((a, b) => b.w - a.w);
 
+	// ---- E7: assertion-level lexical / relation / temporal fusion ----------
+	// Every row was already tenant/project/deletion filtered in SQL above. The
+	// lane is independently bounded and contributes only parent-node ranks; the
+	// corresponding assertion ordering is carried to nodeItem so a fifth fact
+	// cannot disappear after its node has been selected.
+	const hybrid = hybridEnabled
+		? rankHybridAssertions(q, {
+			nodes,
+			slices: slicesRes.results ?? [],
+			events: eventsRes.results ?? [],
+			edges: edgeRows.filter(edgeActive),
+		}, { candidateLimit: budget.bm25 })
+		: { candidates: [], byNode: new Map(), nodeRanks: [], laneCounts: { lexical: 0, relation: 0, temporal: 0 } };
+
 	const lexicalUsed = exactRank.length > 0 || lexicalRank.length > 0;
 	const vectorUsed = vectorRank.length > 0;
 	const graphExpansionUsed = graphRank.length > 0;
@@ -1035,7 +1085,7 @@ export async function recall(env, config, userId, query, opts = {}) {
 	// ---- RRF fusion ----------------------------------------------------------
 	const RRF_K = 60;
 	const fused = new Map();
-	for (const list of [exactRank, lexicalRank, vectorRank, graphRank]) {
+	for (const list of [exactRank, lexicalRank, vectorRank, graphRank, hybrid.nodeRanks]) {
 		list.forEach((entry, i) => {
 			fused.set(entry.key, (fused.get(entry.key) ?? 0) + 1 / (RRF_K + i + 1));
 		});
@@ -1081,7 +1131,13 @@ export async function recall(env, config, userId, query, opts = {}) {
 	let entries = [...fused.entries()].map(([key, score]) => {
 		const [type, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
 		return type === "node"
-			? { type, id, score, item: nodeItem(byId.get(id), slicesByNode, eventsByNode, { edgeRows, byId, pastIntent }) }
+			? { type, id, score, item: nodeItem(byId.get(id), slicesByNode, eventsByNode, {
+				edgeRows,
+				byId,
+				pastIntent,
+				hybridEnabled,
+				hybridByNode: hybrid.byNode,
+			}) }
 			: { type, id, score, item: pageItem(pageById.get(id)) };
 	}).filter((entry) => entry.item);
 	const traceCandidateIds = opts.internalTrace === true
@@ -1111,6 +1167,11 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const resultPages = entries.filter((entry) => entry.type === "page").map((entry) => entry.item);
 	const context = buildContext(entries, plan, stagedRows);
 	const items = entries.map(itemSummary);
+	const hybridCandidateKeys = new Set(hybrid.candidates.map((candidate) => candidate.key));
+	const hybridOrderedIds = entries
+		.filter((entry) => entry.type === "node")
+		.flatMap((entry) => (entry.item.evidence ?? []).slice(0, plan.maxLineItems).map((evidence) => evidence.key))
+		.filter((key) => hybridCandidateKeys.has(key));
 	const internalTrace = opts.internalTrace === true
 		? await internalReadTrace(
 			traceCandidateIds,
@@ -1119,6 +1180,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 				...stagedRows.map((row) => `staged:${row.id}`),
 			],
 			context,
+			hybridEnabled ? {
+				hybrid_assertion_candidate_ids: hybrid.candidates.map((candidate) => candidate.key),
+				hybrid_assertion_ordered_ids: hybridOrderedIds,
+			} : {},
 		)
 		: null;
 
@@ -1139,6 +1204,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 		vector_used: vectorUsed,
 		lexical_used: lexicalUsed,
 		graph_expansion_used: graphExpansionUsed,
+		hybrid_retrieval_used: hybridEnabled,
+		hybrid_assertion_candidates: hybrid.candidates.length,
+		hybrid_parent_candidates: hybrid.nodeRanks.length,
+		hybrid_lane_counts: hybrid.laneCounts,
 		rerank_used: rerank.used,
 		rerank_scored: rerank.scored,
 		rerank_keep: rerank.keep,
