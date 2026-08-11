@@ -4,7 +4,7 @@
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
   "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Final Stage B PASS and safely closed; Stage C local scale next",
+  "current_phase": "V3-D13 HIGH open; Stage C failing-first complete; bounded V3 recall repair in progress",
   "latest_verified_head": "3148a9c1dc3fb5f147a5234eb5119156f06d5b80",
   "latest_verified_production": "b0dfbaca-3807-4e18-8e66-b2d01ff5d468",
   "latest_verified_burn": 1906099,
@@ -390,6 +390,24 @@
         "The 10-write/200-recall soak drained, held a 30-second grace and cleaned to zero; final FTS/content audits across 34 markers were zero.",
         "Valid Stage B consumed 2227 neurons and ended at 1914246/3000000; mean ingest/recall latency was 1625.5/231.71 ms and recall p95 was 410 ms.",
         "Closure propagation passed 20/20: write/source/rejected lanes OFF/0, hybrid historical d04 only; production-primary live state is zero and all 809 packet fences are minimized/content-free."
+      ]
+    },
+    {
+      "id": "FINAL-C",
+      "title": "Local long-history scale and V3-D13 bounded-recall lifecycle",
+      "status": "in_progress_v3_d13_open",
+      "outputs": [
+        "final/scale/vitest.config.mjs",
+        "final/scale/scale.spec.js",
+        "final/scale/run-scale.mjs",
+        "final/scale/V3-D13-FAILING-FIRST.md",
+        "final/scale/evidence/stage-c-scale-failing-first.json"
+      ],
+      "findings": [
+        "The production-schema 1k/10k/100k cells were local-only and used zero inference.",
+        "Scope, final result/context bounds, exact source expansion, product deletion and both FTS erasure checks passed at every size.",
+        "Raw node/slice/edge loads grew 800/8000/80000; broad recall grew 3154/36632/510978 ms and 100k used about 898 MB locally.",
+        "V3-D13 HIGH is open: nominal lane limits were applied only after an unbounded scoped corpus had entered the Worker."
       ]
     }
   ]

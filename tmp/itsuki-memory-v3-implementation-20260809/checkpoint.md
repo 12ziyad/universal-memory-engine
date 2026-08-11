@@ -1,5 +1,22 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-11 V3-D13 HIGH / Stage C failing-first complete
+
+- Isolated production-schema Stage C completed 1k/10k/100k with zero inference
+  and no production fixture. Scope, final item/context bounds, exact source
+  expansion, product deletion and episode/manual FTS erasure passed at all sizes.
+- V3 recall loaded every scoped node/slice/edge before fusion: 800 -> 8,000 ->
+  80,000 rows per lane. Broad latency was 3,154 -> 36,632 -> 510,978 ms;
+  target latency 483 -> 648 -> 3,044 ms; 100k local memory was about 898 MB.
+- **V3-D13 HIGH is OPEN.** Root cause is unbounded database-to-Worker corpus
+  loading before the nominal 200-candidate lane caps. Final output bounds do
+  not contain that availability/resource risk.
+- Durable failing-first: `final/scale/evidence/stage-c-scale-failing-first.json`
+  and `final/scale/V3-D13-FAILING-FIRST.md`.
+- Exact next action: implement bounded D1-first V3 exact/FTS/assertion/vector/
+  temporal/graph candidate generation behind E7, hydrate a bounded evidence
+  closure, exact-rerun Stage C, then full HIGH regression/deploy/reattack.
+
 ## 2026-08-11 Final Stage B safely closed / Stage C next
 
 - Closure commit/origin is `d2da0fc813a19cad8d2b662d26831b2fe3f98a6b`;

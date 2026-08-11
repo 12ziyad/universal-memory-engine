@@ -4,23 +4,7 @@
 
 | id | sev | classification | finding | status |
 |---|---|---|---|---|
-| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge into the Worker before its 200-candidate fusion bounds. The isolated production-schema scale cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k, reaching about 898 MB locally. Final context, scope, source expansion, delete and FTS erasure remained correct, isolating the defect to pre-fusion candidate generation. | **OPEN — FAILING-FIRST COMPLETE.** Durable artifact `final/scale/evidence/stage-c-scale-failing-first.json`; required lifecycle is bounded D1-first V3 candidate generation, exact rerun, regressions, deploy, production reattack and cleanup. |
-
-## Final Stage B product finding (2026-08-11)
-
-| id | sev | classification | finding | status |
-|---|---|---|---|---|
-| **V3-D12** | **HIGH** | **PRODUCT ERASURE-CONVERGENCE DEFECT** | In the clean Stage B delete-during-extraction race, the account deletion barrier won 1.6s after acceptance, but the E4 atomic lane claimed a new `semantic_atom_capture_runs` row about 17s after that barrier. Its commit fence correctly produced `cancelled_by_delete` with zero atoms/content, yet the late audit row survived confirmed erasure because the deletion convergence passes had already completed. | **CLOSED** - failing-first 11/12 reproduced one model call and one surviving run after a pre-existing barrier. The fix makes run claim a single conditional D1 write against `deletion_barriers`, returns cancellation without model spend/row when deletion wins, and retains the commit fence for deletion racing after a claim. Exact 12/12, focused 110/110, Worker 1,312/1,312, unit/cross-door 539/539 + one skip, audit/dry deploy pass; commit `cef9581`, production version `e34b92bc-0577-4a16-b63d-7a1bc8b9a1f2`, deployment `297b55ff-9668-4c11-8886-ba3d08bcbdfb`, 20/20 propagation. Live reattack accepted 20 episodes, deletion reported one pending job, bounded drain reached zero in 34.5s, capture runs/candidates remained zero, replay stayed non-retryable `409 source_write_erased`, erased recall was zero, and final state was zero with 701/701 packet fences content-free. |
-| **V3-D11** | **HIGH** | **PRODUCT ERASURE / READ-DURABILITY REGRESSION** | D10's content-free erased-packet sentinel correctly fenced accepted writes, but it also made the deterministic packet key for an identical future `/v1/recall` collide forever. A genuine post-erasure read therefore returned `409 idempotency_conflict`; the clean Stage B replacement stopped at its immediate-read assertion. | **CLOSED** - production and failing-first test reproduced 409; the narrow fix permits only an erased `source_type=query, source_mode=recall` row to be renewed, while write/ingest replay fences remain immutable. Exact 32/32, focused 195/195, Worker 1,311/1,311, unit/cross-door 539/539 + one intentional skip, audit/dry deploy pass; commit `183d540`, production version `345cd4d7-c680-4e16-9a99-2fe59baa33bc`, deployment `1b13b0e9-68ae-4520-8353-33a27b1a343d`, 20/20 propagation. Live reattack returned 200 for the same recall across two erasure cycles while the erased write replay remained non-retryable `409 source_write_erased`; final production-primary state was zero live rows/jobs and 643/643 packet fences content-free. |
-| **V3-D10** | **HIGH** | **PRODUCT PRIVACY / ERASURE DEFECT** | Request-scoped rules correctly blocked a synthetic forbidden marker from episodes, FTS, semantic candidates, graph state, staging, recall and export, but `normalizeSourcePacket` had already copied every scrubbed message into `source_packets.content_preview` and `raw_meta_json` before rules admission. Confirmed erasure intentionally retained that packet as an idempotency/replay fence without minimizing its plaintext, so the audit row was a non-searchable but durable shadow copy. | **CLOSED** - failing-first 29/31; exact 31/31, focused 201/201, Worker 1,310/1,310, unit/cross-door 539/539 + one skip, audit/dry deploy pass; commit `3148a9c`, production version `b0dfbaca-3807-4e18-8e66-b2d01ff5d468`, deployment `26d82115-74df-47a0-89fa-cb8c32b6ed0d`; live rules test retained one permitted packet/episode and zero forbidden packet/episode/atom/staging/recall/export hits; erasure left one content-free sentinel packet and exact replay returned non-retryable `409 source_write_erased`; final production-primary audit found 622/622 retained campaign packets minimized, zero content rows, zero live episodes/atoms/projections/jobs. |
-
-## Final Stage B harness finding (2026-08-11)
-
-| id | sev | classification | finding | status |
-|---|---|---|---|---|
-| **V3-H13** | **MEDIUM** | **HARNESS DEFECT / ERASURE PRECONDITION** | After the first full cleanup, Stage B issued ten new post-erasure recalls whose queries explicitly contained the erased base markers, then audited all live source-packet text before cleaning those new query packets. D1 proved exactly ten hits and every one was `source_type=query, source_mode=recall`; the probe questions were misclassified as resurrected memory. | **CLOSED BEFORE REPLACEMENT** - the run is invalid/unscored. Post-erasure recalls still execute first and must return zero old evidence; the second product cleanup now minimizes those genuinely new query packets before FTS/semantic/packet-content audit, which still requires absolute zero. Failed-run cleanup independently leaves zero live state and all packet fences content-free. |
-| **V3-H12** | **MEDIUM** | **HARNESS DEFECT** | The delete-race assertion slept a fixed 15 seconds, then described any nonterminal job as a late commit. The production job was still safely in flight and reached terminal `failed/cancelled_by_delete` after about 37 seconds; no episode, atom, projection or graph row appeared. | **CLOSED BEFORE REPLACEMENT** - the driver now polls the complete residue vector for at most 180 seconds and still requires absolute zero. This separates bounded backlog drain from resurrection while preserving a hard failure if work never converges. The independent V3-D12 late atomic-run row remains a product HIGH and is not excused by this harness correction. |
-| **V3-H11** | **MEDIUM** | **HARNESS DEFECT** | The same-key concurrency audit counted every `memory_jobs` row for a packet and required one total row. Production correctly converged both accepts onto one packet, one scrubbed episode, one extract job and one capture run, then created one distinct downstream `pass2_rollup` job; the harness misclassified that valid rollup as duplicate work. | **CLOSED BEFORE CONTINUING THE REATTACK** - invalid run emitted no result and is unscored; exact logs retained; product rows were independently classified by job type; the audit now requires exactly one extract job, at most one pass-2 job and no other jobs; all failed-run synthetic state was erased through the public deletion contract and remained zero after the stability grace. |
+| **V3-D13** | **HIGH** | **PRODUCT AVAILABILITY / BOUNDEDNESS DEFECT** | V3 recall fetched every scoped node, slice and edge before bounded fusion. Production-schema local cells loaded 800/8,000/80,000 rows per lane and broad recall grew 3.154s/36.632s/510.978s at 1k/10k/100k. Final context, scope and erasure stayed correct. | **OPEN — FAILING-FIRST COMPLETE.** Repair with bounded D1-first V3 candidates, then exact rerun/regression/deploy/reattack. |
 
 ## E9A harness finding (2026-08-11)
 
@@ -69,33 +53,6 @@ Full evidence: `e5/HIGH-SOURCE-TIME-HANDOFF-DEFECT.md`,
 | V3-I01 | LOW | INFRASTRUCTURE FAILURE | ReasonLabs' filesystem filter indefinitely blocked long-name content opens of sealed `*-v2*` artifacts while NTFS 8.3 aliases remained readable. | CLOSED FOR CAMPAIGN — same file records read through 8.3 aliases; hashes retained; no artifact mutation |
 
 
-
-## E3 erasure/replay finding (2026-08-10)
-
-| id | sev | title | status |
-|---|---|---|---|
-| **V3-D06** | **HIGH (product)** | **An exact replay of an erased terminal V3 write returned the old HTTP 200 acceptance even though its semantic rows and source episodes were gone.** Terminal `enriched`/`completed` jobs went directly to `recordReplay`; only `failed` jobs carrying `cancelled_by_delete` were fenced. A durable sender could therefore discard its local copy after a false durability acknowledgement. | **FIXED** - `72a9b1a`; production `ff9fbeb0-377b-4c3d-949e-d603202c3bd6` |
-
-### V3-D06 - full lifecycle record
-
-| step | evidence |
-|---|---|
-| Found | E3 attempt 002 reused attempt 001's exact idempotency key after confirmed cleanup. The response was HTTP 200 with no fresh episode counters. D1 showed the terminal job and packet retained for audit/idempotency, `seen_count=2`, a later deletion barrier, and zero live episodes. |
-| Failing-first | Added `source_episodes.spec.js` test "refuses an acceptance-shaped exact replay after a terminal V3 write was erased". Before the fix: **29 pass / 1 fail**, expected 409 but received 200. |
-| Root cause | `ingestMessages` fenced only a `failed` job whose error started `cancelled_by_delete`; the earlier generic terminal branch returned `recordReplay` for `enriched`/`completed` without comparing packet acceptance time to `deletion_barriers`. Cleanup correctly retained audit state, but replay incorrectly treated that state as live durability. |
-| Fix | For V3 exact replays, compare retained packet `received_at`/`created_at` to the account's latest barrier before any repair or terminal replay. A pre-barrier (or unprovable) packet returns 409 `source_write_erased`; a packet accepted after the barrier remains normally idempotent. |
-| Exact rerun | Source episode suite: **30/30 pass**. |
-| Regressions | Replay/cleanup/ingest focused set: **4 files / 76 tests pass**. Full serialized Worker gate: **103 files / 1,218 tests pass**. `npm audit`: zero vulnerabilities. Wrangler 4.120 dry-run: pass. |
-| Deployment | Commit/origin `72a9b1a519009e7debb3dadb3efc4d2d0caa81ee`; Worker version `ff9fbeb0-377b-4c3d-949e-d603202c3bd6`; no migration or binding change. |
-| Production re-attack | Exact previously erased packet: **409**, code `source_write_erased`, `retryable=false` on the allowlisted V3 tenant. Both domains report allowlist 30 / B1 off. Post-attack D1: `seen_count=2` unchanged, zero episodes, zero non-terminal jobs. Artifact: `e3/D06-PRODUCTION-REATTACK.json`. |
-| Cleanup | Attempt 002 made no new extraction call or product artifact; emergency cleanup was clean. The old erased packet remained erased. |
-
-## E2 harness findings (2026-08-10)
-
-| id | sev | title | status |
-|---|---|---|---|
-| V3-H02 | MEDIUM (harness) | Reusing erased holdout slots retained historical audit receipts by design, so seed-2 exports contained both seed-1 and seed-2 extraction receipts. Unfiltered conservation counters would have mixed seeds. Detected before seed-2 scoring; scorer now requires the exact current idempotency prefix. Seed 1 had no prior receipts. | FIXED BEFORE AFFECTED SCORE |
-| V3-H03 | LOW (harness/external) | The post-seed-2 GraphQL burn snapshot returned transient authentication errors for all bounded attempts. The fail-closed guard stopped inference, released the lock, and shut down the evaluator. `wrangler whoami` refreshed the existing OAuth session; live usage then read 1,650,136 and the driver resumed completed artifacts without rerun. Resume accounting preserves the original pre-seed burn. | CLOSED / FAIL-CLOSED PROVEN |
 
 Severity: CRITICAL / HIGH / MEDIUM / LOW. Lifecycle for CRITICAL+HIGH:
 failing-first test → classify → root cause → safe fix → exact rerun →
