@@ -111,6 +111,7 @@ const additions = [
 	"final/locomo/LOCK-PROOF.json",
 	"final/locomo/REFERENCE-BOUNDARY-PROOF.json",
 	"final/locomo/SCHEMA-PREFLIGHT.json",
+	"final/locomo/STAGE-E-ACTIVATION.md",
 	"final/locomo/STAGE-E-LOCOMO-PREREGISTRATION.md",
 	"final/locomo/harness-manifest.json",
 	"final/locomo/frozen/product-inputs.json",

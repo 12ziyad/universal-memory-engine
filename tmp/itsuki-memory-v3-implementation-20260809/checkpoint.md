@@ -1,5 +1,20 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E active / one-shot execution next
+
+- Frozen harness commit/origin is `073e6526ff473241d1d18b28dad6a43496db6045`;
+  activation commit/origin is `517c36db5a6127f8613a08a65b1c92aab7ad92e8`.
+- Production deployment `825157fb-1456-4c99-9c4d-1ad41dca93cd`, Worker
+  `6781ae37-c8cf-4a2e-a3fb-ea9178d1b924`, carries the exact preregistered
+  control-ten write/source lanes and historical+control E7 lane.
+- Focused gates pass 104/104 and Wrangler dry deployment passes. Final uncached
+  propagation passes 20/20 across both production domains. An earlier mixed
+  propagation sample caused no ingest and was not accepted.
+- Rejected lanes remain OFF, normal users remain excluded, no schema/binding
+  changed, and no inference occurred.
+- Exact next action: execute the single reference-blind product run, seal all
+  1,540 answers, then score once and clean the cohort under the global lock.
+
 ## 2026-08-12 Stage E harness frozen / activation next
 
 - The one-shot Stage E harness is frozen before activation or inference. Its
