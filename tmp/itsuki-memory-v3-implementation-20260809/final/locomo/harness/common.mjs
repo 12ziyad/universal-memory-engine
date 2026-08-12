@@ -54,7 +54,12 @@ export const OUTPUT = path.join(STAGE_E, "evidence");
 export const RESULTS = path.join(STAGE_E, "results");
 export const DATASET = path.join(CAMPAIGN, "phase3-d04", "vendor", "locomo10.json");
 export const OFFICIAL_SCORER = path.join(CAMPAIGN, "phase3-d04", "harness", "score.py");
-export const PYTHON = path.join(CAMPAIGN, "phase3-d04", ".venv", "Scripts", "python.exe");
+const PYTHON_CANDIDATES = [
+	path.join(CAMPAIGN, "phase3-d04", ".venv", "Scripts", "python.exe"),
+	path.join(REPO, "tmp", "locomo-benchmark-20260808", ".venv", "Scripts", "python.exe"),
+];
+export const PYTHON = PYTHON_CANDIDATES.find((candidate) => fs.existsSync(candidate))
+	?? PYTHON_CANDIDATES[0];
 export const GLOBAL_LOCK = path.join(CAMPAIGN, "phase3-d04", "evidence", ".benchmark-driver.lock");
 export const GUARD_URL = pathToFileURL(path.join(CAMPAIGN, "harness", "billing-guard.mjs")).href;
 export const PROJECT = Object.freeze({ projectId: "v3-final-locomo", projectName: "V3 Final LoCoMo" });

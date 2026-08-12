@@ -2,6 +2,17 @@
 
 ## 2026-08-12 Stage E reference boundary authorized / final measurement next
 
+- The frozen reader phase is now sealed at **1,540/1,540 answers**. A harness-
+  only H21 failure then stopped before judge row 1 because the score bridge
+  referenced a removed campaign-local Python virtual environment. The exact
+  1,540-row official-scorer input is durable at SHA-256
+  `bdb33ccff379ca3e07982aab822245cdc4c2a847277d971e5e583b70451059f6`;
+  official output and judge ledger are absent.
+- H21 recovery uses the preserved original LoCoMo benchmark Python 3.12.10
+  environment, verifies `nltk`/`numpy`, revalidates the existing scorer input
+  against the sealed product/reference join, and resumes only the deterministic
+  scorer followed by the unchanged judge. No answer regeneration is allowed.
+
 - Repo/origin are exactly `fb1c7bc322a5fc26c04765b22d6fdb344317b2a3`.
   Production deployment `2b0c9086-36bf-4f30-a367-94b71cbc443c` serves Worker
   `24a9f822-e325-4ee6-91c1-1794e64ae857`; both production domains report the

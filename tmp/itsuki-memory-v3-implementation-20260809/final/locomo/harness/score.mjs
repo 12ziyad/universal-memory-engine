@@ -122,7 +122,7 @@ function runOfficialScorer(rows) {
 	fs.mkdirSync(RESULTS, { recursive: true });
 	const inputExists = fs.existsSync(SCORER_INPUT);
 	const outputExists = fs.existsSync(SCORER_OUTPUT);
-	assert(inputExists === outputExists, "partial official scorer artifact set; STOP");
+	assert(inputExists || !outputExists, "official scorer output exists without its sealed input; STOP");
 	const serialized = rows.map((row) => JSON.stringify({
 		question_id: row.questionId,
 		category: row.category,
@@ -132,12 +132,18 @@ function runOfficialScorer(rows) {
 	})).join("\n") + "\n";
 	if (!inputExists) {
 		fs.writeFileSync(SCORER_INPUT, serialized, { flag: "wx" });
-		execFileSync(PYTHON, [OFFICIAL_SCORER, "--in", SCORER_INPUT, "--out", SCORER_OUTPUT], {
-			stdio: "inherit", windowsHide: true,
-		});
 	} else {
 		assert(fs.readFileSync(SCORER_INPUT, "utf8") === serialized,
 			"official scorer input does not match sealed product/reference join");
+	}
+	// A local interpreter launch can fail after the immutable scorer input is
+	// durably written but before output exists. Re-running that deterministic,
+	// inference-free subprocess is safe; an output without its exact input is not.
+	if (!outputExists) {
+		assert(fs.existsSync(PYTHON), `official scorer Python runtime is missing: ${PYTHON}`);
+		execFileSync(PYTHON, [OFFICIAL_SCORER, "--in", SCORER_INPUT, "--out", SCORER_OUTPUT], {
+			stdio: "inherit", windowsHide: true,
+		});
 	}
 	const scored = readJson(SCORER_OUTPUT);
 	assert(scored.totals?.questions_scored === 1_540
