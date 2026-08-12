@@ -1,5 +1,21 @@
 # V3 DECISION LOG
 
+## 2026-08-12 — D-029: complete exact owner-authorized judge tail
+
+The owner raised only Stage E from 500,000 to 550,000 neurons while the global
+ceiling remained 3,000,000, authorizing only missing frozen judge identities
+961-1,540. No re-ingest, answer regeneration, completed-row rerun, retuning or
+new experiment occurred. Final judge is 60.45%, token-F1 36.08%, availability
+73.77%, conditional 71.13%, absent-evidence 30.45% and temporal judge 55.14%.
+Stage E settled at 511,288/550,000; campaign burn is 2,444,870/3,000,000.
+V3-H24's 40 transport placeholders had no model verdict and were quarantined;
+the complete active ledger has zero judge errors.
+
+**Decision:** accept Architecture, Security, Durability, Erasure and Isolation
+as PASS. D-028 is preserved as the prior fail-closed boundary but superseded by
+the owner's narrow cap authorization. Keep global production enablement gated
+to allowlisted/canary rollout. No Stage F/G or further inference.
+
 ## 2026-08-12 — D-028: terminal hard-cap closure
 
 The complete frozen product and 1,540-row official score are accepted as Stage

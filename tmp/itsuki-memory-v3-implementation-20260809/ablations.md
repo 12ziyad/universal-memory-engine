@@ -1,14 +1,16 @@
 # V3 ABLATION LEDGER
 
-## 2026-08-12 terminal Stage E result
+## 2026-08-12 terminal complete Stage E result
 
 The accepted E7 + E9A candidate completed the frozen 1,540-question product and
 official score: **36.08% token-F1** and **73.77% evidence availability**, versus
-V1 15.40% / 28.83%. Category token-F1: multi-hop 27.72%, temporal 33.63%,
-open-domain 17.56%, single-hop 41.94%. The unchanged judge completed 960/1,540
-before the hard Stage E 500,000-neuron guard fired; partial judge, conditional
-and absent-evidence accuracy are withheld. Cleanup is verified zero. No Stage
-F/G, retuning or replacement run is authorized.
+V1 15.40% / 28.83%. The complete unchanged judge reached **60.45%** overall,
+**71.13%** conditional and **30.45%** absent-evidence accuracy. Category judge:
+multi-hop 67.73%, temporal 55.14%, open-domain 35.42%, single-hop 62.90%.
+Category token-F1: 27.72%, 33.63%, 17.56%, 41.94%. The owner raised only the
+Stage E cap to 550,000 while the global ceiling stayed 3,000,000; final Stage E
+burn was 511,288. Cleanup is verified zero. No Stage F/G, retuning or
+replacement run is authorized.
 
 ## 2026-08-11 final repeated holdout — PASS_TO_STAGE_E
 

@@ -1,7 +1,15 @@
 {
-  "schema": "itsuki.v3-stage-e-terminal-summary/v1",
-  "completedAt": "2026-08-12T14:07:32.323Z",
-  "status": "TERMINAL_HARD_SPEND_CAP_AFTER_CLEANUP",
+  "schema": "itsuki.v3-stage-e-terminal-summary/v2",
+  "completedAt": "2026-08-12T15:48:03.601Z",
+  "status": "COMPLETE_AFTER_OWNER_AUTHORIZED_STAGE_CAP_EXTENSION",
+  "authorization": {
+    "priorStageCap": 500000,
+    "stageCap": 550000,
+    "globalCeilingUnchanged": 3000000,
+    "resumeRows": [961, 1540],
+    "priorTerminalSummarySha256": "944a5dc87d3b0418372b588b1b3c767d413f77a85db7ee193e762fe59428ff4e",
+    "scope": "exact frozen judge tail only; no re-ingest, answer regeneration, completed-row rerun, retuning, or new experiment"
+  },
   "product": {
     "sha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d",
     "bytes": 438114800,
@@ -43,8 +51,10 @@
         "tokenF1": 0.27715900049479647,
         "evidenceAvailable": 193,
         "evidenceAvailability": 0.6843971631205674,
-        "judgeAccuracy": null,
-        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+        "judgeCorrect": 191,
+        "judgeAccuracy": 0.6773049645390071,
+        "conditionalAccuracy": 0.8134715025906736,
+        "judgeStatus": "COMPLETE"
       },
       {
         "category": 2,
@@ -53,8 +63,10 @@
         "tokenF1": 0.33633241364137484,
         "evidenceAvailable": 275,
         "evidenceAvailability": 0.8566978193146417,
-        "judgeAccuracy": null,
-        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+        "judgeCorrect": 177,
+        "judgeAccuracy": 0.5514018691588785,
+        "conditionalAccuracy": 0.5854545454545454,
+        "judgeStatus": "COMPLETE"
       },
       {
         "category": 3,
@@ -63,8 +75,10 @@
         "tokenF1": 0.17555630821406643,
         "evidenceAvailable": 30,
         "evidenceAvailability": 0.3125,
-        "judgeAccuracy": null,
-        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+        "judgeCorrect": 34,
+        "judgeAccuracy": 0.3541666666666667,
+        "conditionalAccuracy": 0.5666666666666667,
+        "judgeStatus": "COMPLETE"
       },
       {
         "category": 4,
@@ -73,26 +87,33 @@
         "tokenF1": 0.4194188742854179,
         "evidenceAvailable": 638,
         "evidenceAvailability": 0.7586206896551724,
-        "judgeAccuracy": null,
-        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+        "judgeCorrect": 529,
+        "judgeAccuracy": 0.629013079667063,
+        "conditionalAccuracy": 0.7413793103448276,
+        "judgeStatus": "COMPLETE"
       }
     ],
     "scorerInputSha256": "bdb33ccff379ca3e07982aab822245cdc4c2a847277d971e5e583b70451059f6",
     "scorerOutputSha256": "66fe07811e2c4e7f0d39e7739c4c0261608034cb6fc3302788f190de7133e4fc"
   },
   "judge": {
-    "status": "INCOMPLETE_HARD_SPEND_CAP",
-    "completedRows": 960,
+    "status": "COMPLETE",
+    "completedRows": 1540,
     "requiredRows": 1540,
-    "missingRows": 580,
-    "accuracy": null,
-    "conditionalAccuracy": null,
-    "absentEvidenceAccuracy": null,
-    "partialAccuracyWithheld": true,
+    "missingRows": 0,
+    "correct": 931,
+    "accuracy": 0.6045454545454545,
+    "conditionalCorrect": 808,
+    "conditionalAccuracy": 0.7112676056338029,
+    "absentEvidenceCorrect": 123,
+    "absentEvidenceAccuracy": 0.30445544554455445,
+    "partialAccuracyWithheld": false,
     "extrapolationPerformed": false,
     "judgeModel": "@cf/openai/gpt-oss-120b",
-    "ledgerSha256": "1b01cf0573d84e5d0866dff5f8a163f94b43f9a48c009784235f1a643790a2b6",
-    "stopReason": "Stage E remaining 8720 neurons was below the 12000-neuron fail-closed reserve required for the next judge block"
+    "ledgerSha256": "411ff6161ee533c29b41872917e59f868a36f217bc8174c2be524a4a15c5f39b",
+    "scoresSha256": "870e3ccc2447cf04ec2ee5ced75d946112ed092048ed8584f46178eb17f4ce36",
+    "invalidTransportRowsQuarantined": 40,
+    "judgeErrorsCountedWrong": 0
   },
   "evidence": {
     "threshold": 0.5,
@@ -170,11 +191,11 @@
       "p95": 11005,
       "max": 36568
     },
-    "judgeCompletedRowsOnly": {
-      "n": 960,
-      "mean": 2301.903125,
-      "p50": 1732,
-      "p95": 5451,
+    "judge": {
+      "n": 1540,
+      "mean": 2469.735064935065,
+      "p50": 1879,
+      "p95": 5659,
       "max": 18311
     }
   },
@@ -200,18 +221,18 @@
     }
   },
   "inference": {
-    "campaignSpent": 2424862,
+    "campaignSpent": 2444870,
     "campaignCeiling": 3000000,
-    "campaignRemaining": 575138,
+    "campaignRemaining": 555130,
     "stageStartSpent": 1933582,
-    "stageSpent": 491280,
-    "stageCap": 500000,
-    "stageRemaining": 8720,
-    "calls": 102602,
+    "stageSpent": 511288,
+    "stageCap": 550000,
+    "stageRemaining": 38712,
+    "calls": 103184,
     "byModel": {
       "@cf/openai/gpt-oss-120b": {
-        "neurons": 1450074,
-        "calls": 26558
+        "neurons": 1470082,
+        "calls": 27140
       },
       "@cf/baai/bge-base-en-v1.5": {
         "neurons": 10067,
@@ -246,7 +267,7 @@
         "calls": 30694
       }
     },
-    "estimatedCampaignUsdAt0_011Per1k": 26.673482
+    "estimatedCampaignUsdAt0_011Per1k": 26.89357
   },
   "cleanup": {
     "status": "PASS_ZERO",
@@ -295,7 +316,7 @@
     },
     "finalV3": {
       "tokenF1": 0.3608481959616888,
-      "judgeAccuracy": null,
+      "judgeAccuracy": 0.6045454545454545,
       "evidenceAvailability": 0.7376623376623377
     }
   }

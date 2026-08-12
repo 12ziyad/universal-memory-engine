@@ -1,6 +1,6 @@
 {
   "schema": "itsuki.v3-stage-e-score-progress/v1",
-  "status": "stopped_hard_spend_cap_after_cleanup",
+  "status": "complete",
   "startedAt": "2026-08-12T11:59:58.094Z",
   "productSha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d",
   "stageStartSpent": 1933582,
@@ -55,29 +55,29 @@
       }
     }
   },
-  "officialScoreCompleteAt": "2026-08-12T13:19:41.658Z",
+  "officialScoreCompleteAt": "2026-08-12T15:38:19.276Z",
   "officialScores": 1540,
   "stoppedAt": "2026-08-12T14:07:32.323Z",
-  "judgeRows": 960,
+  "judgeRows": 1540,
   "requiredJudgeRows": 1540,
   "stopReason": "Stage E remaining 8720 neurons was below the 12000-neuron fail-closed reserve required for the next judge block",
   "terminalSummarySha256": "944a5dc87d3b0418372b588b1b3c767d413f77a85db7ee193e762fe59428ff4e",
   "finalBurn": {
-    "label": "StageE:cleanup-complete",
-    "at": "2026-08-12T13:56:11.834Z",
-    "spent": 2424862,
+    "label": "StageE:settle:11",
+    "at": "2026-08-12T15:47:49.694Z",
+    "spent": 2444870,
     "ceiling": 3000000,
-    "remaining": 575138,
+    "remaining": 555130,
     "stageStart": 1933582,
-    "stageSpent": 491280,
-    "stageRemaining": 8720,
+    "stageSpent": 511288,
+    "stageRemaining": 38712,
     "reservedForNextBlock": 1000,
     "threshold": "75%_decisive_only",
-    "calls": 102602,
+    "calls": 103184,
     "byModel": {
       "@cf/openai/gpt-oss-120b": {
-        "neurons": 1450074,
-        "calls": 26558
+        "neurons": 1470082,
+        "calls": 27140
       },
       "@cf/baai/bge-base-en-v1.5": {
         "neurons": 10067,
@@ -111,6 +111,93 @@
         "neurons": 591041,
         "calls": 30694
       }
+    },
+    "settledPolls": 11,
+    "settled": true
+  },
+  "priorSpendStop": {
+    "status": "stopped_hard_spend_cap_after_cleanup",
+    "stoppedAt": "2026-08-12T14:07:32.323Z",
+    "judgeRows": 960,
+    "stopReason": "Stage E remaining 8720 neurons was below the 12000-neuron fail-closed reserve required for the next judge block",
+    "terminalSummarySha256": "944a5dc87d3b0418372b588b1b3c767d413f77a85db7ee193e762fe59428ff4e",
+    "finalBurn": {
+      "label": "StageE:cleanup-complete",
+      "at": "2026-08-12T13:56:11.834Z",
+      "spent": 2424862,
+      "ceiling": 3000000,
+      "remaining": 575138,
+      "stageStart": 1933582,
+      "stageSpent": 491280,
+      "stageRemaining": 8720,
+      "reservedForNextBlock": 1000,
+      "threshold": "75%_decisive_only",
+      "calls": 102602,
+      "byModel": {
+        "@cf/openai/gpt-oss-120b": {
+          "neurons": 1450074,
+          "calls": 26558
+        },
+        "@cf/baai/bge-base-en-v1.5": {
+          "neurons": 10067,
+          "calls": 33081
+        },
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+          "neurons": 221995,
+          "calls": 5951
+        },
+        "@cf/baai/bge-reranker-base": {
+          "neurons": 23019,
+          "calls": 4762
+        },
+        "@cf/openai/gpt-oss-20b": {
+          "neurons": 1028,
+          "calls": 10
+        },
+        "@cf/meta/llama-4-scout-17b-16e-instruct": {
+          "neurons": 125579,
+          "calls": 1526
+        },
+        "@cf/zai-org/glm-4.7-flash": {
+          "neurons": 1122,
+          "calls": 10
+        },
+        "@cf/google/gemma-4-26b-a4b-it": {
+          "neurons": 938,
+          "calls": 10
+        },
+        "@cf/qwen/qwen3-30b-a3b-fp8": {
+          "neurons": 591041,
+          "calls": 30694
+        }
+      }
     }
-  }
+  },
+  "ownerAuthorization": {
+    "authorizedAt": "2026-08-12T15:17:05.280Z",
+    "priorStageCap": 500000,
+    "stageCap": 550000,
+    "globalCeiling": 3000000,
+    "resumeRows": [
+      961,
+      1540
+    ],
+    "scope": "exact frozen judge tail only; no re-ingest, answer regeneration, completed-row rerun, retuning, or new experiment"
+  },
+  "invalidAttempts": [
+    {
+      "id": "V3-H24",
+      "classification": "HARNESS_TRANSPORT_INVALID",
+      "at": "2026-08-12T15:25:42.570Z",
+      "rowsBefore": 1260,
+      "validRowsRetained": 1220,
+      "invalidRowsQuarantined": 40,
+      "invalidIdsSha256": "642091af6b9c37785932f1c0a6ae0071db94ee250fac23cc37c15c219d0d5af4",
+      "fullAttemptSha256": "622b7734155ae1ba77e3229368503298d50579a93a29b9d79abcced04c234cd6",
+      "activeLedgerSha256": "9d0f68d8f4c06efa81005116796524c132a10e7116409b688125f9911bc46f64",
+      "cause": "local Wrangler evaluator exited after internal loopback errors; no model verdict existed for fetch-failed rows"
+    }
+  ],
+  "completedAt": "2026-08-12T15:48:03.601Z",
+  "scoresSha256": "870e3ccc2447cf04ec2ee5ced75d946112ed092048ed8584f46178eb17f4ce36"
 }

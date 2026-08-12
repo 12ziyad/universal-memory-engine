@@ -9,9 +9,13 @@ import {
 	JUDGE_BLOCK,
 	OFFICIAL_SCORER,
 	OUTPUT,
+	PRIOR_STAGE_CAP,
+	PRIOR_TERMINAL_SHA256,
 	PYTHON,
 	READER_MODEL,
 	RESULTS,
+	STAGE_CAP,
+	AUTHORIZED_JUDGE_PREFIX,
 	assert,
 	appendJsonl,
 	burnSnapshot,
@@ -38,7 +42,12 @@ const SCORER_INPUT = path.join(RESULTS, "official-scorer-input.jsonl");
 const SCORER_OUTPUT = path.join(RESULTS, "official-scorer-output.json");
 const JUDGE_LEDGER = path.join(OUTPUT, "judge.jsonl");
 const SCORES = path.join(OUTPUT, "scores.json");
-const QUESTION_CONCURRENCY = 4;
+const TERMINAL = path.join(RESULTS, "stage-e-terminal-summary.json");
+const CLEANUP = path.join(OUTPUT, "cleanup.json");
+// Transport-only stability control. This does not alter the frozen prompt,
+// model, temperature, token budget, references, answers, or verdict semantics.
+const QUESTION_CONCURRENCY = 1;
+const JUDGE_TRANSPORT_DEADLINE_MS = 90_000;
 const RETRIEVED_THRESHOLD = 0.5;
 const STOPWORDS = new Set("a an the and or but of in on at to for with is are was were be been being it its this that these those he she they them his her their i you we my your our as from by".split(" "));
 
@@ -169,9 +178,33 @@ function assertJudgeLedger(rows, references, productSha256) {
 	return seen;
 }
 
+async function judgeWithTransportDeadline(judge, input, questionId) {
+	let timer;
+	try {
+		return await Promise.race([
+			judge.judge(input),
+			new Promise((_, reject) => {
+				timer = setTimeout(() => reject(new Error(
+					`${questionId}: evaluator transport exceeded ${JUDGE_TRANSPORT_DEADLINE_MS}ms; verdict not recorded`,
+				)), JUDGE_TRANSPORT_DEADLINE_MS);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function judgeAll(references, productSha256, start) {
 	let ledger = readJsonl(JUDGE_LEDGER);
 	let seen = assertJudgeLedger(ledger, references, productSha256);
+	if (process.env.STAGE_E_AUTHORIZED_JUDGE_TAIL === "1") {
+		assert(ledger.length >= AUTHORIZED_JUDGE_PREFIX && ledger.length <= 1_540,
+			`authorized tail ledger is outside rows ${AUTHORIZED_JUDGE_PREFIX + 1}-1540 (${ledger.length})`);
+		for (const row of references.slice(0, AUTHORIZED_JUDGE_PREFIX)) {
+			assert(seen.has(row.questionId), `authorized judge prefix omitted ${row.questionId}`);
+		}
+		console.log(`AUTHORIZED JUDGE TAIL resume=${ledger.length + 1} target=1540 baselinePrefix=${AUTHORIZED_JUDGE_PREFIX}`);
+	}
 	const apiKey = secret("API_KEY");
 	console.log("eval-door key: LOADED");
 	const judge = new Mem0StyleJudge({ model: READER_MODEL, apiKey });
@@ -184,12 +217,18 @@ async function judgeAll(references, productSha256, start) {
 		await Promise.all(Array.from({ length: Math.min(QUESTION_CONCURRENCY, block.length) }, async (_, worker) => {
 			for (let index = worker; index < block.length; index += QUESTION_CONCURRENCY) {
 				const row = block[index];
-				const verdict = await judge.judge({
+				const verdict = await judgeWithTransportDeadline(judge, {
 					category: row.category,
 					question: row.question,
 					referenceAnswer: row.reference,
 					generatedAnswer: row.prediction,
-				});
+				}, row.questionId);
+				// Mem0-compatible malformed model responses remain WRONG. A dead local
+				// evaluator is different: no model verdict occurred, so recording WRONG
+				// would corrupt the measurement. Abort before appending and resume this
+				// missing identity after the evaluator is healthy.
+				assert(verdict.error !== "fetch failed",
+					`${row.questionId}: evaluator transport unavailable; verdict not recorded`);
 				appendJsonl(JUDGE_LEDGER, {
 					schema: "itsuki.v3-stage-e-judge/v1",
 					product_sha256: productSha256,
@@ -383,7 +422,7 @@ function metrics(product, references, scored, judged, finalBurn, start) {
 			stageStartSpent: start,
 			finalSpent: finalBurn.spent,
 			stageNeuronDelta: finalBurn.spent - start,
-			stageCap: 500_000,
+			stageCap: STAGE_CAP,
 			settled: finalBurn.settled,
 			settledPolls: finalBurn.settledPolls,
 			campaignCeiling: finalBurn.ceiling,
@@ -410,8 +449,40 @@ async function main() {
 	if (fs.existsSync(PROGRESS)) {
 		progress = readJson(PROGRESS);
 		assert(progress.schema === "itsuki.v3-stage-e-score-progress/v1"
-			&& progress.status === "running" && progress.productSha256 === seal.productSha256
+			&& progress.productSha256 === seal.productSha256
 			&& progress.stageStartSpent === start, "score progress is not safely resumable");
+		if (progress.status === "stopped_hard_spend_cap_after_cleanup") {
+			assert(process.env.STAGE_E_AUTHORIZED_JUDGE_TAIL === "1",
+				"terminal score progress requires explicit owner-authorized tail resume");
+			assert(fs.existsSync(TERMINAL) && shaFile(TERMINAL) === PRIOR_TERMINAL_SHA256,
+				"prior terminal summary changed");
+			assert(fs.existsSync(CLEANUP), "prior zero-state cleanup proof is missing");
+			assert(progress.judgeRows === AUTHORIZED_JUDGE_PREFIX
+				&& progress.requiredJudgeRows === 1_540
+				&& progress.finalBurn?.stageSpent <= PRIOR_STAGE_CAP,
+			"prior hard-cap stop is inconsistent");
+			progress.priorSpendStop = {
+				status: progress.status,
+				stoppedAt: progress.stoppedAt,
+				judgeRows: progress.judgeRows,
+				stopReason: progress.stopReason,
+				terminalSummarySha256: progress.terminalSummarySha256,
+				finalBurn: progress.finalBurn,
+			};
+			progress.status = "running_authorized_tail";
+			progress.ownerAuthorization = {
+				authorizedAt: new Date().toISOString(),
+				priorStageCap: PRIOR_STAGE_CAP,
+				stageCap: STAGE_CAP,
+				globalCeiling: 3_000_000,
+				resumeRows: [AUTHORIZED_JUDGE_PREFIX + 1, 1_540],
+				scope: "exact frozen judge tail only; no re-ingest, answer regeneration, completed-row rerun, retuning, or new experiment",
+			};
+			writeJsonAtomic(PROGRESS, progress);
+		} else {
+			assert(progress.status === "running" || progress.status === "running_authorized_tail",
+				"score progress is not safely resumable");
+		}
 	} else {
 		progress = {
 			schema: "itsuki.v3-stage-e-score-progress/v1",
@@ -440,6 +511,8 @@ async function main() {
 	writeJsonExclusive(path.join(RESULTS, "summary.json"), { ...result, perQuestion: undefined });
 	progress.status = "complete";
 	progress.completedAt = new Date().toISOString();
+	progress.judgeRows = judged.length;
+	progress.requiredJudgeRows = 1_540;
 	progress.scoresSha256 = shaFile(SCORES);
 	progress.finalBurn = finalBurn;
 	writeJsonAtomic(PROGRESS, progress);

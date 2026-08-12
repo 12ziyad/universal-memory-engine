@@ -1,5 +1,26 @@
 # V3 DECISION LOG
 
+## D-029 — accept complete Stage E after the exact owner-authorized judge tail
+
+**Decision.** Accept the sealed 1,540-answer product, complete official score,
+complete unchanged semantic judge and existing zero cleanup as terminal Stage
+E. Architecture is PASS; security, durability, erasure and isolation remain
+PASS. Do not start Stage F/G, retune, or run another experiment.
+
+**Evidence.** The owner raised only Stage E from 500,000 to 550,000 neurons;
+the global ceiling remained 3,000,000. Only missing frozen judge identities
+961-1,540 were authorized. Final judge is 60.45%, token-F1 36.08%, availability
+73.77%, conditional 71.13%, absent-evidence 30.45%, and temporal judge 55.14%.
+Stage E settled at 511,288/550,000 and campaign burn at
+2,444,870/3,000,000. V3-H24 quarantined 40 transport placeholders that had no
+model verdict; the final 1,540-row ledger has zero judge errors and preserves
+all actual verdicts. Prompt, model, settings, product, references and
+denominator did not change.
+
+**Consequence.** D-028 remains the honest prior hard-cap boundary but is
+superseded by explicit owner authorization. Global production enablement is
+still not automatic; retain allowlisted/canary rollout.
+
 ## D-028 — close Stage E at the hard spend guard; withhold partial judge
 
 **Decision.** Accept the complete sealed product, complete official 1,540-row

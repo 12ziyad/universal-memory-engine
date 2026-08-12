@@ -2,13 +2,13 @@
 
 ## 2026-08-12 — ITSUKI MEMORY V3: FINAL VERDICT
 
-Stage E is terminal. The frozen product completed **1,540/1,540** answers and
-the official scorer completed **1,540/1,540** rows. The unchanged semantic
-judge completed 960 rows, then the fail-closed Stage E guard stopped before the
-next 20-row block: only 8,720 of the 500,000 Stage E neurons remained while the
-required reserve was 12,000. No partial judge accuracy is reported or
-extrapolated. Cleanup then reached verified zero across every live, derived,
-FTS, recall, export and source-content surface.
+Stage E is terminal and complete. The frozen product, official scorer and
+unchanged semantic judge each completed **1,540/1,540** rows. The owner raised
+only the Stage E cap from 500,000 to 550,000 neurons, leaving the 3,000,000
+campaign ceiling unchanged, and authorized only the exact frozen judge tail
+from row 961. No re-ingest, answer regeneration, completed-row rerun, retuning
+or new experiment occurred. Cleanup remains verified zero across every live,
+derived, FTS, recall, export and source-content surface.
 
 Terminal production closure is live from commit/origin `2816395`: Worker
 `a38142b9-842a-4c4c-83bf-41f68d5e205d`, deployment
@@ -19,31 +19,31 @@ users remain outside V3.
 
 | Dimension | Final verdict |
 |---|---|
-| **ARCHITECTURE** | **CONDITIONAL** — general holdout and complete token-F1/evidence results are strong; complete final semantic-judge attribution is unavailable because the hard Stage E spend guard fired. |
+| **ARCHITECTURE** | **PASS** — complete final judge reached 60.45%, token-F1 36.08%, evidence availability 73.77%, and the independent three-seed general holdout passed. |
 | **SECURITY** | **PASS** — final candidate preserves the fully reattacked Stage B security boundary; no current CRITICAL/HIGH remains open. |
 | **DURABILITY** | **PASS** — V3-D04 and V3-D15 are closed in production; final state audit reconciled 272 sessions, 5,882 episodes and 5,572/5,572 candidate/projection rows. |
 | **ERASURE** | **PASS** — all live/derived stores and both FTS surfaces are zero; 10/10 recall and 10/10 export proofs are empty; 2,096/2,096 packet fences are minimized with zero content rows. |
 | **TENANT / SUB-TENANT / PROJECT ISOLATION** | **PASS** |
 | **GENERAL HOLDOUT** | **PASS** — three fresh seeds: 95.24% mean judge, 69.60% token-F1, 96.83% availability, 96.71% conditional, 78.18% capture recall and 96.59% capture precision. |
 | **LOCOMO TOKEN-F1** | **15.40% → 36.08%** (+20.68 percentage points; complete 1,540-question official score). |
-| **LOCOMO LLM-JUDGE** | **25.65% → NOT COMPLETED** — 960/1,540 verdicts are durable but intentionally unscored as a final metric. |
+| **LOCOMO LLM-JUDGE** | **25.65% → 60.45%** (931/1,540; +34.80pp). |
 | **EVIDENCE AVAILABILITY** | **28.83% → 73.77%** (1,136/1,540; +44.94pp). |
-| **CONDITIONAL READER ACCURACY** | **61.04% → NOT AVAILABLE** — requires all 1,540 judge verdicts; the last complete comparable E1+E0 cell was 58.27%. |
-| **TEMPORAL** | Token-F1 **6.81% → 33.63%**; final temporal judge unavailable. |
-| **INFERENCE** | Campaign **2,424,862 / 3,000,000** neurons (~$26.67 at $0.011/1k); Stage E **491,280 / 500,000**; direct first-party Workers AI only. |
+| **CONDITIONAL READER ACCURACY** | **61.04% → 71.13%** (808/1,136); absent-evidence accuracy 30.45% (123/404). |
+| **TEMPORAL** | Token-F1 **6.81% → 33.63%**; judge **6.23% → 55.14%** (177/321). |
+| **INFERENCE** | Campaign **2,444,870 / 3,000,000** neurons (~$26.89 at $0.011/1k); Stage E **511,288 / 550,000**; direct first-party Workers AI only. |
 | **STORAGE** | Peak final fixture: 5,882 episodes, 5,572 candidates/projections, 1,296 nodes, 5,514 slices, 824 events and 324 edges; terminal synthetic residue **0**. |
 | **OPEN PRODUCT CRITICAL / HIGH / MEDIUM** | **0 / 0 / 0** |
 | **PRODUCTION ENABLEMENT** | **Do not enable globally.** Keep normal users on the proven path; V3 remains restricted to explicit allowlisted/canary scope. |
 
 ### Complete Stage E measurements
 
-| Category | n | Token-F1 | Evidence availability |
-|---|---:|---:|---:|
-| Multi-hop | 282 | 27.72% | 68.44% |
-| Temporal | 321 | 33.63% | 85.67% |
-| Open-domain | 96 | 17.56% | 31.25% |
-| Single-hop | 841 | 41.94% | 75.86% |
-| **Overall** | **1,540** | **36.08%** | **73.77%** |
+| Category | n | Token-F1 | Judge | Evidence | Conditional |
+|---|---:|---:|---:|---:|---:|
+| Multi-hop | 282 | 27.72% | 67.73% | 68.44% | 81.35% |
+| Temporal | 321 | 33.63% | 55.14% | 85.67% | 58.55% |
+| Open-domain | 96 | 17.56% | 35.42% | 31.25% | 56.67% |
+| Single-hop | 841 | 41.94% | 62.90% | 75.86% | 74.14% |
+| **Overall** | **1,540** | **36.08%** | **60.45%** | **73.77%** | **71.13%** |
 
 The evidence-loss audit separates the remaining failure pools: permitted source
 was available for 94.61% of questions, semantic candidates for 85.32%, selected
@@ -58,7 +58,8 @@ Mean final context was 77.06 items / 14,268 characters / 3,567 approximate
 tokens (p95 121 items / 21,094 characters / 5,274 tokens; hard maximum 24,000
 characters / 6,000 tokens). Duplicate-line rate was zero. Recall server latency
 was 274 ms mean / 481 ms p95; client recall was 797 ms mean / 1,361 ms p95;
-reader latency was 4.75 s mean / 11.01 s p95. Ingest requests were 558 ms mean /
+reader latency was 4.75 s mean / 11.01 s p95; judge latency was 2.47 s mean /
+5.66 s p95. Ingest requests were 558 ms mean /
 1.54 s p95, while asynchronous extraction settlement was 73.4 s mean / 149.1 s
 p95.
 
@@ -68,14 +69,24 @@ erasure. Product integrity recorded zero episode, grounding, scope, secret,
 run-accounting or projection failures; two bounded extraction retries completed.
 The largest measured quality win is evidence preservation and recovery
 (+44.94pp availability), translated into +20.68pp official token-F1. The largest
-remaining quality weakness is open-domain recall/capture, followed by the 332
-stored-but-not-retrieved cases and long asynchronous extraction latency.
+remaining quality weakness is open-domain recall/capture, followed by 328
+reader errors despite available evidence, 332 stored-but-not-retrieved cases,
+and long asynchronous extraction latency.
+
+V3-H24 is closed as a harness transport defect. A local Wrangler evaluator
+crash produced 40 `fetch failed` placeholders without model verdicts; the full
+attempt was retained privately and marked invalid, only those identities were
+quarantined, and all actual verdicts were preserved. The exact missing
+identities were completed at concurrency one with a 90-second no-verdict
+watchdog. The final 1,540-row ledger has zero judge errors; model, prompt,
+temperature, token budget, answers, references and verdict semantics did not
+change.
 
 Authoritative aggregate artifact:
 `final/locomo/results/stage-e-terminal-summary.json`. The 438,114,800-byte
 sealed product remains in the private local campaign evidence root at SHA-256
 `a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d`;
-reference-bearing scorer input and the incomplete judge ledger are intentionally
+reference-bearing scorer input and the complete judge ledger are intentionally
 not published.
 
 All dated sections below are retained as chronological campaign evidence. The

@@ -1,9 +1,9 @@
 # V3 ABLATION LEDGER
 
-**STATUS: TERMINAL. E0–E10, final repeated holdout, and the single Stage E
-product/official score are complete; E7/E9A KEEP; E8/E9B/E10 REJECT. The final
-semantic judge stopped at the preregistered hard Stage E spend guard and is not
-reported partially.** Historical armed definitions below remain immutable protocol evidence;
+**STATUS: TERMINAL COMPLETE. E0–E10, final repeated holdout, and the single
+Stage E product/official/judge score are complete; E7/E9A KEEP;
+E8/E9B/E10 REJECT. Final V3 is 60.45% judge, 36.08% token-F1, 73.77%
+availability and 71.13% conditional accuracy.** Historical armed definitions below remain immutable protocol evidence;
 later dated sections contain the valid measured results. The cost gate is open
 and fail-closed at `V3_NEURON_CEILING = 3,000,000` for direct first-party
 Workers AI only.
@@ -24,15 +24,17 @@ an abstention artefact.
 |---|---:|---:|---:|---:|
 | V1 historical | 15.40% | 25.65% | 28.83% | 61.04% |
 | E1+E0 full | 27.45% | 46.75% | 65.97% | 58.27% |
-| **Final V3 full** | **36.08%** | **NOT COMPLETED (960/1540)** | **73.77%** | **NOT AVAILABLE** |
+| **Final V3 full** | **36.08%** | **60.45% (931/1540)** | **73.77%** | **71.13%** |
 
 Final V3 used the accepted E7 assertion-level hybrid retrieval and E9A exact
 source expansion at bounded depth 200 with GPT-OSS-120B. Rejected E8 reranking,
 E9B episode fallback and E10 adaptive caps remained off. The product and
-official scorer completed all 1,540 questions. The judge stopped fail-closed at
-491,280 / 500,000 Stage E neurons; its 960-row prefix is retained but neither
-scored nor extrapolated. Official category token-F1 was multi-hop 27.72%,
-temporal 33.63%, open-domain 17.56% and single-hop 41.94%.
+official scorer and judge completed all 1,540 questions. The owner-authorized
+cap revision changed only Stage E from 500,000 to 550,000 neurons and resumed
+only missing frozen verdict identities; global ceiling stayed 3,000,000. Final
+Stage E burn was 511,288. Category judge was multi-hop 67.73%, temporal 55.14%,
+open-domain 35.42% and single-hop 62.90%; category token-F1 remained 27.72%,
+33.63%, 17.56% and 41.94% respectively.
 
 Complete attribution: source stored 94.61%, atomic candidate stored 85.32%,
 selected-before-render 75.65%, semantic-rendered 70.91%, final context 73.77%.

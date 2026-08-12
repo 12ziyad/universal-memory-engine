@@ -8,6 +8,8 @@ import {
 	GUARD_URL,
 	HERE,
 	OUTPUT,
+	PRIOR_STAGE_CAP,
+	PRIOR_TERMINAL_SHA256,
 	REPO,
 	READER_MODEL,
 	RESULTS,
@@ -34,6 +36,8 @@ const PRODUCT = path.join(OUTPUT, "product.json");
 const SEAL = path.join(OUTPUT, "product.seal.json");
 const SCORES = path.join(OUTPUT, "scores.json");
 const CLEANUP = path.join(OUTPUT, "cleanup.json");
+const PROGRESS = path.join(OUTPUT, "score-progress.json");
+const TERMINAL = path.join(RESULTS, "stage-e-terminal-summary.json");
 
 function runChild(name, args, env, log) {
 	return new Promise((resolve, reject) => {
@@ -127,6 +131,7 @@ function validateCleanup() {
 }
 
 async function main() {
+	const authorizedTail = process.argv.includes("--resume-authorized-judge-tail");
 	let lock;
 	try {
 		lock = acquireBenchmarkLock(GLOBAL_LOCK, { experiment: "final-stage-e-complete-locomo" });
@@ -162,8 +167,21 @@ async function main() {
 			manifest = readJson(MANIFEST);
 			assert(manifest.schema === "itsuki.v3-stage-e-run/v1" && manifest.status === "running",
 				"existing Stage E manifest is not resumable");
-			assert(manifest.stageCap === STAGE_CAP && Number.isInteger(manifest.stageStartSpent),
-				"Stage E resume manifest changed");
+			assert(Number.isInteger(manifest.stageStartSpent), "Stage E resume manifest changed");
+			if (manifest.stageCap !== STAGE_CAP) {
+				assert(authorizedTail && manifest.stageCap === PRIOR_STAGE_CAP
+					&& fs.existsSync(TERMINAL) && shaFile(TERMINAL) === PRIOR_TERMINAL_SHA256,
+				"Stage E cap changed without the exact owner-authorized judge-tail boundary");
+				manifest.stageCapRevision = {
+					authorizedAt: new Date().toISOString(),
+					from: PRIOR_STAGE_CAP,
+					to: STAGE_CAP,
+					globalCeiling: 3_000_000,
+					scope: "resume frozen judge rows 961-1540 only",
+					priorTerminalSha256: PRIOR_TERMINAL_SHA256,
+				};
+				manifest.stageCap = STAGE_CAP;
+			}
 			resume = true;
 			log = fs.createWriteStream(LOG, { flags: "a" });
 			manifest.resumeEvents = [...(manifest.resumeEvents ?? []), {
@@ -201,6 +219,7 @@ async function main() {
 			BENCHMARK_LOCK_DIR: GLOBAL_LOCK,
 			BENCHMARK_LOCK_TOKEN: lock.token,
 			STAGE_E_START_SPENT: String(manifest.stageStartSpent),
+			STAGE_E_AUTHORIZED_JUDGE_TAIL: authorizedTail ? "1" : "0",
 		};
 		lock.assertHeld();
 		if (!(fs.existsSync(PRODUCT) && fs.existsSync(SEAL))) {
@@ -228,7 +247,15 @@ async function main() {
 		}
 		manifest.cleanup = validateCleanup();
 		manifest.steps.cleanup = "complete";
-		manifest.finalBurn = manifest.cleanup.burnAfter;
+		const scoreProgress = readJson(PROGRESS);
+		assert(scoreProgress.status === "complete" && scoreProgress.judgeRows === 1_540,
+			"complete score progress is missing after judge tail");
+		manifest.finalBurn = scoreProgress.finalBurn;
+		manifest.authorizedJudgeTail = authorizedTail ? {
+			rows: [961, 1_540],
+			completedAt: scoreProgress.completedAt,
+			priorTerminalSha256: PRIOR_TERMINAL_SHA256,
+		} : null;
 		manifest.status = "complete";
 		manifest.completedAt = new Date().toISOString();
 		writeJsonAtomic(MANIFEST, manifest);

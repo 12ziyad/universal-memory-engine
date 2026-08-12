@@ -167,17 +167,30 @@
       "official_scores": 1540,
       "official_token_f1": 0.3608481959616888,
       "evidence_availability": 0.7376623376623377,
-      "judge_rows": 960,
+      "judge_rows": 1540,
       "judge_rows_required": 1540,
-      "judge_accuracy": null,
-      "conditional_accuracy": null,
-      "absent_evidence_accuracy": null,
-      "partial_judge_accuracy_withheld": true,
-      "stage_e_neurons": 491280,
-      "stage_e_cap": 500000,
-      "campaign_neurons": 2424862,
+      "judge_correct": 931,
+      "judge_accuracy": 0.6045454545454545,
+      "conditional_correct": 808,
+      "conditional_accuracy": 0.7112676056338029,
+      "absent_evidence_correct": 123,
+      "absent_evidence_accuracy": 0.30445544554455445,
+      "partial_judge_accuracy_withheld": false,
+      "judge_by_category": {
+        "multi_hop": 0.6773049645390071,
+        "temporal": 0.5514018691588785,
+        "open_domain": 0.3541666666666667,
+        "single_hop": 0.629013079667063
+      },
+      "judge_ledger_sha256": "411ff6161ee533c29b41872917e59f868a36f217bc8174c2be524a4a15c5f39b",
+      "scores_sha256": "870e3ccc2447cf04ec2ee5ced75d946112ed092048ed8584f46178eb17f4ce36",
+      "invalid_transport_rows_quarantined": 40,
+      "judge_errors_counted_wrong": 0,
+      "stage_e_neurons": 511288,
+      "stage_e_cap": 550000,
+      "campaign_neurons": 2444870,
       "all_cleanup_zero": true,
-      "verdict": "TERMINAL_HARD_SPEND_CAP_AFTER_COMPLETE_PRODUCT_AND_OFFICIAL_SCORE"
+      "verdict": "TERMINAL_COMPLETE_PASS"
     }
   ]
 }

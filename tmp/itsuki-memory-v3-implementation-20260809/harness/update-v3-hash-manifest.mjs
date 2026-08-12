@@ -131,6 +131,7 @@ const additions = [
 	"final/locomo/harness/run.mjs",
 	"final/locomo/harness/schema-preflight.mjs",
 	"final/locomo/harness/score.mjs",
+	"final/locomo/harness/quarantine-invalid-judge-transport.mjs",
 	"final/locomo/harness/verify-config.mjs",
 	"final/locomo/harness/verify-terminal-closure.mjs",
 	"final/locomo/evidence/cleanup.json",

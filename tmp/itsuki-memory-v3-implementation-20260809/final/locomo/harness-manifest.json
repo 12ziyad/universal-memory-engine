@@ -4,17 +4,26 @@
   "experiment": "one decisive complete 1540-question LoCoMo measurement",
   "product_reference_blind": true,
   "global_lock_exit_for_contender": 73,
-  "stage_neuron_cap": 500000,
+  "stage_neuron_cap": 550000,
+  "original_stage_neuron_cap": 500000,
+  "owner_authorized_judge_tail": {
+    "authorized_at": "2026-08-12",
+    "resume_rows": [961, 1540],
+    "global_ceiling_unchanged": 3000000,
+    "prior_terminal_summary_sha256": "944a5dc87d3b0418372b588b1b3c767d413f77a85db7ee193e762fe59428ff4e",
+    "scope": "exact frozen judge tail only; no re-ingest, answer regeneration, completed-row rerun, retuning, or new experiment"
+  },
   "scripts": {
-    "common.mjs": "56c231e1e9338ac22265933c001c454d28c87e3a2788c2443f8c626ba0d7288d",
+    "common.mjs": "d2fd27cd1185f7aa3d2238abbed347454695c024d8656d196a5ab6a208265b07",
     "generate-product-inputs.mjs": "7e1f48942e866830b7e2a8687c6c9148cf85c9de5ae083c646724a246d2dfaa6",
     "ingest-response.mjs": "987c72d01f0961514e64266e0ec8b0ffb02c149feb9eb77aaffcf925851991de",
     "lock-proof.mjs": "706bf9c48e26a09429cf8a7f66bf1c71e7aaea203930057047e8fe919b2ebf1b",
     "product.mjs": "6b94d029ea14b640b36a4ed5aaf10c08572a236ff48eb15121040eefb3be1d3e",
+    "quarantine-invalid-judge-transport.mjs": "a1667b2896bef87962229996e8397fa42a4290faa2478b1c93a63e95e200adcc",
     "reference-boundary-proof.mjs": "2b78c31064c81574d2c4b6a65992e1a5d42aa9ec88e79e1ddf8ca02f09d32aa4",
-    "run.mjs": "826d9e4595c8ffbf02fe00872b3807336840adc8c495b00ecdcf05955a7803b1",
+    "run.mjs": "c283438113588bbfce693b586cb64e34d058d2c8d3c718edf28757f3a3eccb1a",
     "schema-preflight.mjs": "092fb1b2f8fdae96692ad955337875c783fa4fd21fb0213612526e49c84ca42b",
-    "score.mjs": "2b24bad6929a41d203011500672a90592d973ccc5cdead65ad6b83b7dcc0faaa",
+    "score.mjs": "af6c7b983f9f53f384136a86db18e5af70c363f859a1123345845baeef7a435f",
     "verify-config.mjs": "03cb3535fe46e2639a03e12b6910f50765a5aa2edf49ea0b9fa7a4a66e4c4d7a"
   },
   "frozen_inputs": {

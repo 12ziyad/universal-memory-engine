@@ -21,7 +21,7 @@
   health checks prove accepted write/source lanes and all rejected lanes OFF;
   E7 is restored to the historical ten and normal users remain outside V3.
 - No temporary credential material was created or printed. The 438,114,800-byte
-  sealed product, reference-bearing scorer input and 960-row incomplete judge
+  sealed product, reference-bearing scorer input and complete 1,540-row judge
   ledger are retained intentionally in the private local campaign root and are
   hash-referenced; they are not publication artifacts.
 - Authoritative evidence: `final/locomo/evidence/cleanup.json`, SHA-256

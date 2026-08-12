@@ -1,6 +1,62 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
-## 2026-08-12 TERMINAL — Stage E closed at hard spend guard
+## 2026-08-12 TERMINAL COMPLETE — Stage E final result
+
+- The exact owner-authorized frozen judge tail completed without re-ingest,
+  answer regeneration, completed-row rerun, retuning or a new experiment.
+  Product SHA-256 remains
+  `a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d`.
+- Final 1,540-question result: **60.45% LLM-judge (931/1,540)**,
+  **36.08% official token-F1**, **73.77% evidence availability
+  (1,136/1,540)**, **71.13% conditional accuracy (808/1,136)** and
+  **30.45% absent-evidence accuracy (123/404)**.
+- Judge accuracy by category: multi-hop **67.73%**, temporal **55.14%**,
+  open-domain **35.42%**, single-hop **62.90%**. All 1,540 identities are
+  unique and complete; zero judge transport errors are counted as wrong.
+- V3-H24 HIGH is **CLOSED**. Forty rows without model verdicts from the invalid
+  transport attempt remain quarantined; every valid verdict was preserved and
+  the repaired exact retry completed cleanly.
+- Final settled inference: campaign **2,444,870 / 3,000,000** neurons; Stage E
+  **511,288 / 550,000**; 103,184 calls; direct first-party Workers AI only.
+  The inference gate is now closed and no further inference is authorized.
+- Terminal cleanup remains **PASS ZERO**: all live/derived/source/FTS state and
+  nonterminal jobs are zero; 10/10 recall and export proofs are empty;
+  2,096/2,096 retained packet fences are minimized and content-free.
+- Architecture, security, durability, erasure, tenant isolation and project
+  isolation are **PASS**. Normal users remain outside V3; production enablement
+  recommendation is allowlisted/canary only.
+
+## 2026-08-12 AUTHORIZATION HISTORY — frozen Stage E judge tail
+
+- Owner raised only the Stage E cap from **500,000 to 550,000 neurons**; the
+  campaign ceiling remains **3,000,000**. Authorization is limited to the exact
+  frozen GPT-OSS-120B judge tail, rows **961-1,540**. No re-ingest, answer
+  regeneration, completed-row rerun, retuning or new experiment is permitted.
+- Preflight proves: benchmark lock absent; evaluator port free; no benchmark,
+  judge or Wrangler process; **960 unique valid judge rows**; sealed product
+  SHA-256 still `a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d`;
+  complete score artifacts absent; global ceiling still 3,000,000.
+- Live GraphQL burn before resume is **2,424,862 / 3,000,000**, with Stage E at
+  **491,280 / 550,000**. The billing guard passes all 11 permitted models;
+  GPT-OSS-120B is `partner=false`, direct first-party Workers AI, with no AI
+  Gateway configured.
+- The resume harness refuses a changed terminal boundary, a non-960 baseline
+  prefix, duplicate/mismatched rows, a changed product seal, a non-first-party
+  model, an unreadable meter, or either cap. It resumes by identity and never
+  rewrites an existing judge row.
+- Exact next action: run the locked authorized tail, settle the GraphQL meter,
+  finalize complete semantic scores and reports, preserve zero cleanup, then
+  stop.
+- The first tail transport attempt exposed **V3-H24 HIGH**: local Wrangler
+  exited after internal loopback errors and the frozen client represented 40
+  exhausted `fetch failed` calls as WRONG despite no model verdict. The full
+  interrupted ledger is retained privately and invalid; only those 40 rows
+  were quarantined. The sealed 960-row prefix plus 260 actual new verdicts
+  remain (**1,220 unique rows, zero errors**). The scorer now aborts before a
+  transport failure can be appended and retries at concurrency one without
+  changing model, prompt, settings, answers, references or semantics.
+
+## 2026-08-12 SUPERSEDED TERMINAL STOP — original Stage E hard cap
 
 - Frozen product completed and sealed **1,540/1,540 answers**, 272 sessions and
   5,882 messages. Product SHA-256 is

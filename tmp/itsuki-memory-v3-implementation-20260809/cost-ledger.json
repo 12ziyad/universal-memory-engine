@@ -4,8 +4,9 @@
   "V3_NEURON_CEILING": 3000000,
   "ceiling_status": "VERIFIED_BY_OWNER_AUTHORIZATION",
   "ceiling_verdict": "APPROVED - Cloudflare Startup Program credits cover first-party Workers AI; owner raised the campaign ceiling to 3,000,000 neurons on 2026-08-10",
+  "stage_e_neuron_cap": 550000,
   "inference_permitted": false,
-  "terminal_reason": "Stage E is final and stopped fail-closed at 491280/500000 neurons; no Stage F/G or further inference is authorized.",
+  "terminal_reason": "Stage E is complete at 1540/1540 judge rows; 511288/550000 Stage E neurons and 2444870/3000000 campaign neurons. No further inference is authorized.",
   "verified_at": "2026-08-09 (second attempt)",
   "what_changed_since_the_first_attempt": [
     "The first attempt recorded 401s on the AI model catalogue and on the GraphQL neuron-usage query. BOTH were transient. On re-attempt they return 200, exactly as the D1 7403 did.",
@@ -395,6 +396,31 @@
       "cleanup": "PASS_ZERO",
       "gate": "TERMINAL - next unchanged judge block required a 12000-neuron reserve with only 8720 Stage E neurons remaining",
       "verified_at": "2026-08-12T14:07:32.323Z"
+    },
+    {
+      "phase": "Final Stage E owner-authorized frozen judge tail and complete terminal score",
+      "dataset": "same sealed 1540-answer non-adversarial LoCoMo product; only missing judge identities 961-1540",
+      "models": ["@cf/openai/gpt-oss-120b"],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 2424862,
+      "campaign_neurons_after": 2444870,
+      "stage_e_increment_total": 511288,
+      "stage_e_cap": 550000,
+      "stage_e_remaining": 38712,
+      "judge_rows_complete": 1540,
+      "judge_accuracy": 0.6045454545454545,
+      "conditional_accuracy": 0.7112676056338029,
+      "absent_evidence_accuracy": 0.30445544554455445,
+      "official_token_f1": 0.3608481959616888,
+      "evidence_availability": 0.7376623376623377,
+      "invalid_transport_rows_quarantined": 40,
+      "judge_errors_counted_wrong": 0,
+      "estimated_campaign_usd": 26.89,
+      "campaign_remaining": 555130,
+      "calls_after": 103184,
+      "cleanup": "PASS_ZERO",
+      "gate": "TERMINAL COMPLETE - no further inference authorized",
+      "verified_at": "2026-08-12T15:48:03.601Z"
     }
   ],
   "ceiling_revisions": [
@@ -409,6 +435,16 @@
       "from_neurons": 1500000,
       "to_neurons": 3000000,
       "basis": "Explicit owner instruction to rerun the four pre-registered reranking arms sequentially after invalid concurrent drivers corrupted trials 5-8."
+    }
+  ],
+  "stage_cap_revisions": [
+    {
+      "authorized_at": "2026-08-12",
+      "stage": "E",
+      "from_neurons": 500000,
+      "to_neurons": 550000,
+      "global_ceiling_unchanged": 3000000,
+      "basis": "Explicit owner authorization to resume only the exact frozen judge tail from row 961 through 1540, without re-ingest, answer regeneration, completed-row rerun, retuning, or another experiment."
     }
   ],
   "authorized_at": "2026-08-09",

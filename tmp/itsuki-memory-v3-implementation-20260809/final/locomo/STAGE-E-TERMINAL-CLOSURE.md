@@ -2,10 +2,26 @@
 
 Date: 2026-08-12
 
-Stage E is final. The frozen product and complete official score are retained;
-the semantic judge is terminally incomplete because the hard Stage E spend
-guard fired. No Stage F/G, retuning, replacement run, cap change or additional
-inference is authorized.
+Stage E is final. After the owner raised only the Stage E cap from 500,000 to
+550,000 neurons, the exact frozen semantic-judge tail resumed by identity and
+completed 1,540/1,540 rows. The global 3,000,000-neuron ceiling did not change.
+No re-ingest, answer regeneration, completed-row rerun, retuning, Stage F/G or
+new experiment occurred. No additional inference is authorized.
+
+## Final measurement
+
+- LLM-judge: **60.45% (931/1,540)**.
+- Official token-F1: **36.08%**.
+- Evidence availability: **73.77% (1,136/1,540)**.
+- Conditional accuracy: **71.13% (808/1,136)**.
+- Absent-evidence accuracy: **30.45% (123/404)**.
+- Category judge accuracy: multi-hop 67.73%, temporal 55.14%, open-domain
+  35.42%, single-hop 62.90%.
+- Settled inference: campaign 2,444,870/3,000,000 neurons; Stage E
+  511,288/550,000; 103,184 calls; direct first-party Workers AI only.
+- V3-H24 HIGH is closed: 40 transport-only rows with no model verdict were
+  quarantined, all valid verdicts were preserved, and the completed ledger has
+  zero judge errors counted wrong.
 
 ## Production-safe state
 

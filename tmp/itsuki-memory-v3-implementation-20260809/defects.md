@@ -2,6 +2,13 @@
 
 ## Terminal Stage E findings (2026-08-12)
 
+- **V3-H24 HIGH is CLOSED:** the local evaluator crashed after internal
+  Wrangler/Workers AI loopback errors. Forty `fetch failed` rows were
+  quarantined because no model verdict existed; every actual verdict remained.
+  The scorer now aborts before recording transport failure, applies a 90-second
+  no-verdict watchdog and runs one request at a time. The exact frozen ledger
+  then completed 1,540/1,540 unique verdicts with zero judge errors counted
+  wrong.
 - **V3-D04 HIGH, V3-D14 MEDIUM and V3-D15 HIGH are CLOSED** in production;
   the final reference-blind state audit reconciled 5,882 episodes and exact
   5,572/5,572 candidate/projection state.
