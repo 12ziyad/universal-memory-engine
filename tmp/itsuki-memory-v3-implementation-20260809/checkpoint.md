@@ -1,5 +1,34 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E reference boundary authorized / final measurement next
+
+- Repo/origin are exactly `fb1c7bc322a5fc26c04765b22d6fdb344317b2a3`.
+  Production deployment `2b0c9086-36bf-4f30-a367-94b71cbc443c` serves Worker
+  `24a9f822-e325-4ee6-91c1-1794e64ae857`; both production domains report the
+  expected tenant-bound V3 allowlists, with coalescing/fallback/adaptive OFF.
+- **V3-D15 HIGH is CLOSED.** The valid reference-blind production reattack
+  created exactly three bounded terminal runs across project reconsideration,
+  changed no other frozen tenant, and erased its disposable state to zero.
+- The erased `conv-43` sample was rebuilt alone under the validated
+  `containment-rebuild-v2` idempotency namespace: **29/29 sessions, 680/680
+  messages, 35/35 packets**. The immutable historical ingest ledger hash remains
+  `f979a8966c85e9917e76e33894bf10c44457e2f210f50d94dd600a41d3b4210d`.
+- The complete reference-blind state audit passed: **272 sessions, 5,882
+  episodes, 301 packets, 5,572 candidates and 5,572 projections**. All ten
+  tenants are settled; two authorized interrupted predecessors reconcile to
+  successful repair generations. Reference files opened, answers, judge rows
+  and scores remain zero at this boundary.
+- **V3-H20 is CLOSED as a harness false positive.** Confirmed erasure retains
+  extraction-run tombstones with `status='deleted'`; only active lineage is a
+  boundedness signal. The corrected audit proves 1,756 retired runs, zero active
+  runs, zero live rows and 60/60 minimized source packets before the rebuild.
+- Settled burn is **2,187,890 / 3,000,000 (72.9%)**. Stage E has spent 254,308
+  / 500,000 and has 245,692 neurons left. The direct first-party Workers AI
+  billing guard passes; no benchmark process or lock remains after the audit.
+- Exact next action: run the single frozen 1,540-question Stage E answer/judge/
+  score sequence, immediately clean all benchmark state, then issue the final
+  report. No Stage F/G, retuning or additional experiment is authorized.
+
 ## 2026-08-12 Stage E contained on V3-D15 HIGH / local repair fully gated
 
 - V3-D04 HIGH is now **CLOSED** at commit/origin `5b7ffec8fed8b2481340393b7615069ac9859306`,

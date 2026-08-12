@@ -1,0 +1,550 @@
+{
+  "schema": "itsuki.v3-stage-e-v3-d15-production-reattack/v1",
+  "createdAt": "2026-08-12T00:59:18.914Z",
+  "pass": true,
+  "failure": null,
+  "referenceBlind": true,
+  "referenceFilesOpened": 0,
+  "answers": 0,
+  "judgeRows": 0,
+  "scores": 0,
+  "frozen": {
+    "hashes": {
+      "productInputs": "e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd",
+      "preregistration": "7b8fbfe936c0967e449f07223c024aab85ee441da5241735f7a38d13a06d9f18",
+      "cohort": "555b01b4f5204a4cf3638801a1b0a3b1ca6e6cb1d1d71bbddb4e47fd44c04930",
+      "readerClient": "e1acd15497e555c3ab078c26ab1b0d1f4d47c8acfa25cb7a465568c6a79a448d"
+    },
+    "totals": {
+      "samples": 10,
+      "sessions": 272,
+      "messages": 5882,
+      "questions": 1540,
+      "byCategory": {
+        "1": 282,
+        "2": 321,
+        "3": 96,
+        "4": 841
+      }
+    },
+    "slots": 10,
+    "referenceFilesOpened": 0
+  },
+  "health": [
+    {
+      "domain": "https://itsuki.app",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "memoryV3": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    }
+  ],
+  "preconditions": {
+    "controlSlotIndex": 4,
+    "onlyErasedControlTenantUsed": true,
+    "untouchedTenantCount": 9,
+    "preclean": {
+      "rows": [
+        {
+          "dry": {
+            "runs": 0,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "deleted": {
+            "runs": 0,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "residue": {
+            "runs": 0,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "residueClean": true,
+          "nonTerminalJobs": 0
+        }
+      ],
+      "directResidue": {
+        "projections": 0,
+        "atomic_candidates": 0,
+        "atomic_runs": 0,
+        "episodes": 0,
+        "nodes": 0,
+        "slices": 0,
+        "events": 0,
+        "edges": 0,
+        "pages": 0
+      },
+      "clean": true
+    },
+    "initialClean": {
+      "counts": {
+        "episodes": 0,
+        "atomic_candidates": 0,
+        "atomic_runs": 0,
+        "projections": 0,
+        "nodes": 0,
+        "slices": 0,
+        "events": 0,
+        "edges": 0,
+        "pages": 0,
+        "live_staged": 0,
+        "nonterminal_jobs": 0
+      },
+      "derived": {
+        "profiles": 0,
+        "semantic_fts": 0,
+        "episode_fts": 0
+      },
+      "packets": {
+        "packets": 57,
+        "minimized": 57,
+        "content_rows": 0
+      }
+    },
+    "untouchedBefore": {
+      "episodes": 5202,
+      "atomic_candidates": 4952,
+      "atomic_runs": 845,
+      "projections": 4952,
+      "nodes": 1151,
+      "slices": 4945,
+      "events": 723,
+      "edges": 287,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    }
+  },
+  "inputs": {
+    "alpha": {
+      "packetId": "src_78cc79f4-e26a-4063-95b9-0c79263f98ab",
+      "jobId": "job_8c6f29cc-af53-4733-bb8c-6ff347eecad5",
+      "status": 200,
+      "projectId": "v3-d15-reattack-alpha",
+      "questionSha256": "a68e3452503fd719e64107146fcde1fe735e662922e5a2c069f1c1edc3b80f4d",
+      "ready": {
+        "jobFound": true,
+        "jobId": "job_8c6f29cc-af53-4733-bb8c-6ff347eecad5",
+        "status": "enriched",
+        "attempts": 0,
+        "cancelledByDelete": false,
+        "error": null,
+        "counts": {
+          "nodes": 0,
+          "edges": 0,
+          "slices": 0,
+          "events": 0,
+          "pages": 0
+        },
+        "projectId": "v3-d15-reattack-alpha",
+        "waitedMs": 7949
+      }
+    },
+    "beta": {
+      "packetId": "src_cb12fc0e-c05c-4056-95a5-bc7bcef46014",
+      "jobId": "job_85cf89ab-bebd-4255-8608-6cf3a0de34e6",
+      "status": 200,
+      "projectId": "v3-d15-reattack-beta",
+      "questionSha256": "f278c754e15687235f462cde6e8d1a4be3fbb33c739c869879a66af21028452c",
+      "ready": {
+        "jobFound": true,
+        "jobId": "job_85cf89ab-bebd-4255-8608-6cf3a0de34e6",
+        "status": "enriched",
+        "attempts": 0,
+        "cancelledByDelete": false,
+        "error": null,
+        "counts": {
+          "nodes": 0,
+          "edges": 0,
+          "slices": 0,
+          "events": 0,
+          "pages": 0
+        },
+        "projectId": "v3-d15-reattack-beta",
+        "waitedMs": 7903
+      }
+    },
+    "rawContentPersistedInArtifact": false
+  },
+  "observed": {
+    "alphaInitial": {
+      "packetId": "src_78cc79f4-e26a-4063-95b9-0c79263f98ab",
+      "runs": [
+        {
+          "id": "run_extract_5c1797e772a08994b6501506746aa39b709a46f8f053ec90",
+          "status": "skipped",
+          "receipt_id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c"
+        }
+      ],
+      "receipts": [
+        {
+          "id": "receipt_door_src_78cc79f4-e26a-4063-95b9-0c79263f98ab",
+          "outcome": "accepted",
+          "saved_total": 0
+        },
+        {
+          "id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c",
+          "outcome": "meaningful_no_write",
+          "saved_total": 0
+        }
+      ],
+      "jobs": [
+        {
+          "id": "job_8c6f29cc-af53-4733-bb8c-6ff347eecad5",
+          "status": "enriched",
+          "receipt_id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c"
+        }
+      ]
+    },
+    "alphaFinal": {
+      "packetId": "src_78cc79f4-e26a-4063-95b9-0c79263f98ab",
+      "runs": [
+        {
+          "id": "run_extract_5c1797e772a08994b6501506746aa39b709a46f8f053ec90",
+          "status": "skipped",
+          "receipt_id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c"
+        },
+        {
+          "id": "run_extract_23d19d91d2962fef6534517fedf354ffc4dbd6a72d2b8d07",
+          "status": "skipped",
+          "receipt_id": "receipt_extract_16d204aa4707c4d79cef1f8736fe46259ef5cb885be443260f3b39a17f9e07d9"
+        }
+      ],
+      "receipts": [
+        {
+          "id": "receipt_door_src_78cc79f4-e26a-4063-95b9-0c79263f98ab",
+          "outcome": "accepted",
+          "saved_total": 0
+        },
+        {
+          "id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c",
+          "outcome": "meaningful_no_write",
+          "saved_total": 0
+        },
+        {
+          "id": "receipt_extract_16d204aa4707c4d79cef1f8736fe46259ef5cb885be443260f3b39a17f9e07d9",
+          "outcome": "meaningful_no_write",
+          "saved_total": 0
+        }
+      ],
+      "jobs": [
+        {
+          "id": "job_8c6f29cc-af53-4733-bb8c-6ff347eecad5",
+          "status": "enriched",
+          "receipt_id": "receipt_extract_c34191c42d6c422545ec8479229c72abf6a57d055b561a7accd9df2d6cd82c7c"
+        }
+      ]
+    },
+    "betaFinal": {
+      "packetId": "src_cb12fc0e-c05c-4056-95a5-bc7bcef46014",
+      "runs": [
+        {
+          "id": "run_extract_3bd3e5ecc2fce857d0e6ef8ffc73f58f42df593ca3bdb5b7",
+          "status": "skipped",
+          "receipt_id": "receipt_extract_94674075c6ea188a1126e7d081358565da9117c61ba58d8d2dc0a03876088229"
+        }
+      ],
+      "receipts": [
+        {
+          "id": "receipt_door_src_cb12fc0e-c05c-4056-95a5-bc7bcef46014",
+          "outcome": "accepted",
+          "saved_total": 0
+        },
+        {
+          "id": "receipt_extract_94674075c6ea188a1126e7d081358565da9117c61ba58d8d2dc0a03876088229",
+          "outcome": "meaningful_no_write",
+          "saved_total": 0
+        }
+      ],
+      "jobs": [
+        {
+          "id": "job_85cf89ab-bebd-4255-8608-6cf3a0de34e6",
+          "status": "enriched",
+          "receipt_id": "receipt_extract_94674075c6ea188a1126e7d081358565da9117c61ba58d8d2dc0a03876088229"
+        }
+      ]
+    },
+    "stability": {
+      "graceMs": 45000,
+      "stable": true,
+      "totalRuns": 3
+    }
+  },
+  "cleanup": {
+    "cleanup": {
+      "rows": [
+        {
+          "dry": {
+            "runs": 3,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "deleted": {
+            "runs": 3,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "residue": {
+            "runs": 0,
+            "nodes": 0,
+            "pages": 0,
+            "slices": 0,
+            "events": 0,
+            "edges": 0,
+            "candidates": 0
+          },
+          "residueClean": true,
+          "nonTerminalJobs": 0
+        }
+      ],
+      "directResidue": {
+        "projections": 0,
+        "atomic_candidates": 0,
+        "atomic_runs": 0,
+        "episodes": 0,
+        "nodes": 0,
+        "slices": 0,
+        "events": 0,
+        "edges": 0,
+        "pages": 0
+      },
+      "clean": true
+    },
+    "finalClean": {
+      "counts": {
+        "episodes": 0,
+        "atomic_candidates": 0,
+        "atomic_runs": 0,
+        "projections": 0,
+        "nodes": 0,
+        "slices": 0,
+        "events": 0,
+        "edges": 0,
+        "pages": 0,
+        "live_staged": 0,
+        "nonterminal_jobs": 0
+      },
+      "derived": {
+        "profiles": 0,
+        "semantic_fts": 0,
+        "episode_fts": 0
+      },
+      "packets": {
+        "packets": 59,
+        "minimized": 59,
+        "content_rows": 0
+      }
+    },
+    "untouchedAfter": {
+      "episodes": 5202,
+      "atomic_candidates": 4952,
+      "atomic_runs": 845,
+      "projections": 4952,
+      "nodes": 1151,
+      "slices": 4945,
+      "events": 723,
+      "edges": 287,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    }
+  },
+  "burnBefore": {
+    "label": "StageE:V3-D15-reattack-start",
+    "at": "2026-08-12T00:57:42.272Z",
+    "spent": 2167465,
+    "ceiling": 3000000,
+    "remaining": 832535,
+    "stageStart": 1933582,
+    "stageSpent": 233883,
+    "stageRemaining": 266117,
+    "reservedForNextBlock": 3000,
+    "threshold": "50%_reviewed",
+    "calls": 99202,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9724,
+        "calls": 32537
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 115688,
+        "calls": 1411
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 580593,
+        "calls": 30453
+      }
+    }
+  },
+  "burnAfter": {
+    "label": "StageE:V3-D15-reattack-complete",
+    "at": "2026-08-12T00:59:18.914Z",
+    "spent": 2167465,
+    "ceiling": 3000000,
+    "remaining": 832535,
+    "stageStart": 1933582,
+    "stageSpent": 233883,
+    "stageRemaining": 266117,
+    "reservedForNextBlock": 1000,
+    "threshold": "50%_reviewed",
+    "calls": 99202,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9724,
+        "calls": 32537
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 115688,
+        "calls": 1411
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 580593,
+        "calls": 30453
+      }
+    }
+  },
+  "neuronDeltaObserved": 0
+}

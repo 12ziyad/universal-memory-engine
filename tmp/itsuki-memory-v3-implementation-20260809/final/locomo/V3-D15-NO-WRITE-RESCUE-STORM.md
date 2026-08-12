@@ -1,7 +1,9 @@
 # V3-D15 — Bounded no-write rescue lineage
 
-Status at this checkpoint: **HIGH IMPLEMENTED AND FULLY GATED LOCALLY;
-PRODUCTION DEPLOYMENT / REATTACK PENDING**.
+Status: **HIGH CLOSED** at commit/origin
+`fb1c7bc322a5fc26c04765b22d6fdb344317b2a3`, production Worker
+`24a9f822-e325-4ee6-91c1-1794e64ae857`, deployment
+`2b0c9086-36bf-4f30-a367-94b71cbc443c`.
 
 This incident and all investigation were reference-blind. Product reference
 files opened: **0**. Stage E still has **0 answers, 0 judge rows, and 0 scores**.
@@ -94,3 +96,21 @@ every held-to-queue transition created a fresh entry with fresh attempts.
    nine samples.
 5. Run the complete reference-blind state audit before any answer, reference,
    judge, or score phase.
+
+## Closure proof
+
+- The valid production reattack (`ATTEMPT-002`) proved exactly three terminal
+  runs: initial project alpha, one bounded alpha reconsideration after project
+  switch, and initial project beta. No further run appeared during the stable
+  observation window; zero semantic objects were written; all disposable state
+  was erased. The other nine frozen tenant counts remained byte-for-byte equal.
+- H20 corrected a harness-only false positive: confirmed deletion preserves
+  extraction-run tombstones as `status='deleted'`. The corrected containment
+  audit separates 1,756 retired rows from active work and proves zero active
+  runs, zero live memory, and 60/60 content-free minimized packet fences.
+- Only `conv-43` was rebuilt under a post-erasure idempotency namespace. The
+  rebuild passed 29/29 sessions, 680/680 messages and 35/35 packets while the
+  historical ledger hash remained unchanged.
+- The final reference-blind audit passed all 272 sessions, 5,882 episodes, 301
+  packets, and exact 5,572 candidate/projection conservation. It opened zero
+  reference files and generated zero answers, judge rows or scores.

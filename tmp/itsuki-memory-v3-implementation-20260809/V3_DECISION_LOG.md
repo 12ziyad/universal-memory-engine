@@ -1,5 +1,22 @@
 # V3 DECISION LOG
 
+## D-027 — authorize the single final Stage E reference boundary
+
+**Decision.** Close V3-D15 after the bounded production reattack, isolated
+`conv-43` rebuild and complete reference-blind state audit. Proceed exactly once
+through the frozen 1,540-question Stage E answer, judge, score and cleanup path.
+Do not add Stage F/G, retune, or start another experiment.
+
+**Evidence.** Production runs repair commit `fb1c7bc`; the valid reattack
+terminated at exactly three runs and erased to zero. The isolated rebuild
+restored 680 episodes in 35 packets without changing the immutable historical
+ledger or any other tenant. The final pre-reference audit reconciled 5,882
+episodes and 5,572 candidates/projections with zero reference/answer/judge/score
+access. Settled burn leaves 245,692 neurons inside the 500,000 Stage E cap.
+
+**Consequence.** Stage E is final. Its measured result is reported honestly and
+is followed immediately by complete benchmark cleanup and the campaign verdict.
+
 ## D-026 — bound semantic no-write rescue independently from transient retries
 
 **Decision.** Persist a no-write rescue generation across Durable Object

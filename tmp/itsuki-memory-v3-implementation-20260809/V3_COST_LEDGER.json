@@ -407,6 +407,26 @@
       "stage_e_remaining": 266117,
       "gate": "PAUSED - V3-D15 HIGH contained; inference prohibited until deploy/production reattack and exact conv-43 rebuild",
       "verified_at": "2026-08-12"
+    },
+    {
+      "phase": "Final Stage E V3-D15 production closure, isolated rebuild, and reference-blind state audit",
+      "dataset": "one disposable production reattack tenant plus frozen conv-43 rebuild; zero reference/answer/judge/score access",
+      "models": [
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/baai/bge-base-en-v1.5"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 2167465,
+      "campaign_neurons_after": 2187890,
+      "increment_all_including_reattack_harness_and_rebuild": 20425,
+      "valid_conv43_rebuild_delta": 19596,
+      "campaign_remaining": 812110,
+      "stage_e_spent": 254308,
+      "stage_e_remaining": 245692,
+      "calls_after": 99825,
+      "gate": "PASS - V3-D15 closed; 29/29 rebuild and complete 5882-episode reference-blind audit passed; final measurement authorized",
+      "verified_at": "2026-08-12T02:08:04.175Z"
     }
   ],
   "ceiling_revisions": [

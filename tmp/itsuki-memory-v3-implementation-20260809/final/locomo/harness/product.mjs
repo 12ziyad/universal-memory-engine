@@ -39,6 +39,7 @@ import {
 	writeJsonExclusive,
 } from "./common.mjs";
 import { classifySourceEpisodeAcknowledgement } from "./ingest-response.mjs";
+import { overlayContainmentRebuild } from "./rebuild-ledger.mjs";
 import { reconcileRetryAwareState } from "./state-accounting.mjs";
 
 const require = createRequire(import.meta.url);
@@ -46,6 +47,8 @@ const { requireBenchmarkLockFromEnv } = require("../../../e2/harness/benchmark-l
 
 const PROGRESS = path.join(OUTPUT, "product-progress.json");
 const INGEST_LEDGER = path.join(OUTPUT, "product-ingest.jsonl");
+const REBUILD_LEDGER = path.join(OUTPUT, "product-ingest-rebuild-conv-43-attempt-002.jsonl");
+const CONTAINMENT = path.join(OUTPUT, "V3-D15-CONTAINMENT.json");
 const ANSWER_LEDGER = path.join(OUTPUT, "product-answers.jsonl");
 const PRODUCT = path.join(OUTPUT, "product.json");
 const SEAL = path.join(OUTPUT, "product.seal.json");
@@ -162,6 +165,21 @@ function assertIngestLedger(rows, data) {
 	return { expected, seen };
 }
 
+function effectiveIngestLedger(data) {
+	const historical = readJsonl(INGEST_LEDGER);
+	assertIngestLedger(historical, data);
+	const rebuildRequired = fs.existsSync(CONTAINMENT);
+	const rebuild = readJsonl(REBUILD_LEDGER);
+	const merged = overlayContainmentRebuild({
+		historicalRows: historical,
+		rebuildRows: rebuild,
+		required: rebuildRequired,
+	});
+	const checked = assertIngestLedger(merged, data);
+	assert(checked.seen.size === 272, `effective ingest ledger ${checked.seen.size}/272 sessions`);
+	return merged;
+}
+
 async function ingestSession(token, sample, session, slot, start) {
 	await burnSnapshot(`StageE:${sample.sampleId}:s${session.index}:ingest`, 7_500, start);
 	const plan = planBatches(session);
@@ -244,7 +262,7 @@ async function ingestAll(token, data, slots, start) {
 	assert(checked.seen.size === 272, `ingest did not reconcile 272 sessions (${checked.seen.size})`);
 	assert(ledger.reduce((sum, row) => sum + row.messages, 0) === 5_882,
 		"ingest did not reconcile 5,882 messages");
-	return ledger;
+	return effectiveIngestLedger(data);
 }
 
 function packetIdsFor(sampleId, ingests) {
@@ -588,7 +606,7 @@ async function auditProductState() {
 	const frozen = validateProductInputs();
 	const data = productInputs();
 	const slots = cohorts().control;
-	const ingests = readJsonl(INGEST_LEDGER);
+	const ingests = effectiveIngestLedger(data);
 	const checked = assertIngestLedger(ingests, data);
 	assert(checked.seen.size === 272, "state audit requires all 272 accepted sessions");
 	const state = await collectState(data, slots, ingests);
@@ -901,6 +919,12 @@ async function runProduct() {
 		},
 		health: progress.health,
 		preflightClean: progress.clean,
+		containmentRecovery: {
+			historicalLedgerPreserved: true,
+			rebuiltSampleId: "conv-43",
+			rebuildLedger: path.basename(REBUILD_LEDGER),
+			rebuildLedgerSha256: shaFile(REBUILD_LEDGER),
+		},
 		ingests,
 		state,
 		afterRead,
@@ -910,7 +934,7 @@ async function runProduct() {
 		neuronDeltaObserved: burnAfter.spent - start,
 	};
 	writeJsonExclusive(PRODUCT, artifact);
-	sealProduct(PRODUCT, SEAL, [PRODUCT, INGEST_LEDGER, ANSWER_LEDGER, INPUT, PREREGISTRATION], {
+	sealProduct(PRODUCT, SEAL, [PRODUCT, INGEST_LEDGER, REBUILD_LEDGER, ANSWER_LEDGER, INPUT, PREREGISTRATION], {
 		questions: answers.length,
 		sessions: ingests.length,
 		messages: state.reduce((sum, row) => sum + row.episodes.length, 0),

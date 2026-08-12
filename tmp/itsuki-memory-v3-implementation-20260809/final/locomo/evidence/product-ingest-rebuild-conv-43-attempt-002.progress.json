@@ -1,0 +1,464 @@
+{
+  "schema": "itsuki.v3-stage-e-containment-rebuild-progress/v1",
+  "status": "complete",
+  "sampleId": "conv-43",
+  "startedAt": "2026-08-12T01:15:29.887Z",
+  "historicalLedgerSha256": "f979a8966c85e9917e76e33894bf10c44457e2f210f50d94dd600a41d3b4210d",
+  "dry": {
+    "schema": "itsuki.v3-stage-e-containment-rebuild-dry-run/v1",
+    "frozen": {
+      "hashes": {
+        "productInputs": "e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd",
+        "preregistration": "7b8fbfe936c0967e449f07223c024aab85ee441da5241735f7a38d13a06d9f18",
+        "cohort": "555b01b4f5204a4cf3638801a1b0a3b1ca6e6cb1d1d71bbddb4e47fd44c04930",
+        "readerClient": "e1acd15497e555c3ab078c26ab1b0d1f4d47c8acfa25cb7a465568c6a79a448d"
+      },
+      "totals": {
+        "samples": 10,
+        "sessions": 272,
+        "messages": 5882,
+        "questions": 1540,
+        "byCategory": {
+          "1": 282,
+          "2": 321,
+          "3": 96,
+          "4": 841
+        }
+      },
+      "slots": 10,
+      "referenceFilesOpened": 0
+    },
+    "sampleId": "conv-43",
+    "sessions": 29,
+    "messages": 680,
+    "batches": 35,
+    "historicalLedgerSha256": "f979a8966c85e9917e76e33894bf10c44457e2f210f50d94dd600a41d3b4210d",
+    "referenceBlind": true,
+    "referenceFilesOpened": 0
+  },
+  "health": [
+    {
+      "domain": "https://itsuki.app",
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicProjection": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 20
+        },
+        "sourceExpansion": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    }
+  ],
+  "burnBefore": {
+    "label": "StageE:conv-43-rebuild-start",
+    "at": "2026-08-12T01:15:28.909Z",
+    "spent": 2168037,
+    "ceiling": 3000000,
+    "remaining": 831963,
+    "stageStart": 1933582,
+    "stageSpent": 234455,
+    "stageRemaining": 265545,
+    "reservedForNextBlock": 20000,
+    "threshold": "50%_reviewed",
+    "calls": 99227,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9725,
+        "calls": 32546
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 115988,
+        "calls": 1416
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 580864,
+        "calls": 30464
+      }
+    }
+  },
+  "clean": {
+    "counts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "derived": {
+      "profiles": 0,
+      "semantic_fts": 0,
+      "episode_fts": 0
+    },
+    "packets": {
+      "packets": 60,
+      "minimized": 60,
+      "content_rows": 0
+    }
+  },
+  "untouchedBefore": {
+    "episodes": 5202,
+    "atomic_candidates": 4952,
+    "atomic_runs": 845,
+    "projections": 4952,
+    "nodes": 1151,
+    "slices": 4945,
+    "events": 723,
+    "edges": 287,
+    "pages": 0,
+    "live_staged": 0,
+    "nonterminal_jobs": 0
+  },
+  "referenceBlind": true,
+  "referenceFilesOpened": 0,
+  "sessionsCompleted": 29,
+  "messagesCompleted": 680,
+  "packetsCompleted": 35,
+  "lastLineageAudit": {
+    "counts": {
+      "audit_runs": 1806,
+      "retired_runs": 1756,
+      "extraction_runs": 50,
+      "nonterminal_runs": 0,
+      "nonterminal_jobs": 0,
+      "episodes": 680,
+      "episode_packets": 35,
+      "atomic_runs": 110,
+      "nonterminal_atomic_runs": 0,
+      "candidates": 620,
+      "projections": 620
+    },
+    "packets": [
+      {
+        "sourcePacketId": "src_0142e05b-e597-466b-a06e-2d9f4c500272",
+        "runs": 3,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_0d2dd7bb-2289-448f-865e-7cb6b6a6775a",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_1cfabe34-1630-4819-bef1-19d848a0c00d",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_242c718c-278c-45f9-a6ab-ad6502b97081",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_298f4356-4d52-4dd6-89ed-3c71b9737692",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_2f709538-dd1b-4afc-92ca-aa9cbfa8a509",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_30c6c456-f609-417b-8a86-b483e069fe67",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_3ce8bddc-1153-4976-8405-69aa5ca15b66",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_593f9517-5c45-48b0-ba87-7929053f270a",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_6cb714b7-cc4a-43d7-89b4-745309a0aea5",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_6ef2fbfc-2ec5-4f3b-8129-2124b9d40f4b",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_735587cd-726c-46a0-a88f-d250c5890a78",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_7d737272-c2c7-4930-a2ca-1bccd6fbb310",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_8100bdb8-0163-4189-99bb-e53540f16c1a",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_81041f78-f70c-4c20-beef-b2533d134ac9",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_87a7aad6-b523-4b82-8b41-aac9c3a0ad1a",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_88ec5613-a46c-4255-9be6-85904a01f32c",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_92f1a380-969f-4443-89c7-056d2949d339",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_9a7aa8bc-e9dc-41f1-b54c-9eb0a3a22291",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_9d06bb3e-a74d-4eba-a2a0-35648ef7d658",
+        "runs": 3,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_a299175e-ffd8-4d83-a6f0-639d0dc38b80",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_a38e825a-09d0-4d2a-b201-43bbc0b33899",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_a6dda0e0-0d35-45a5-ab34-3d1c1ac4b4f4",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_addaec86-d6c6-472d-aa47-5a669ec6c87b",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_b21a3ea5-ed49-474d-a1e2-bf455d149dad",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_b5406c51-848f-41cb-85c9-da235085f6f7",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_beb50cc3-d956-43ef-a784-86067ca2815a",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_cc39824c-4c8a-4342-b805-b08233cbd14b",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_cea71de6-593b-43b3-b839-2ed2571b829a",
+        "runs": 2,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_d2f83ca9-7052-49aa-8dc2-a4a979a5eea9",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_d44e59e2-8c40-4ee6-8234-4f0cea330fcd",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_d59256ff-4050-4a7d-a50c-9d1c1b6820da",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_e5d63964-dcec-4a08-8d93-0d50c5c43562",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_e62b616c-7b86-41b6-9bd3-40c70370cfe0",
+        "runs": 1,
+        "nonterminal": 0
+      },
+      {
+        "sourcePacketId": "src_fe6b1746-11cc-473d-9899-0450fc2d89c6",
+        "runs": 2,
+        "nonterminal": 0
+      }
+    ],
+    "maxRunsPerPacket": 3,
+    "stableForMs": 5000
+  },
+  "updatedAt": "2026-08-12T02:06:29.099Z",
+  "completedAt": "2026-08-12T02:06:56.284Z",
+  "rebuildLedgerSha256": "33187e810571749cc835f78321e5abc3a31109c08118465dcbd0cdb41ac44fbd",
+  "resultSha256": "a74d980c71bf7bfc7d13cb513215c77f2f82e278c10897c056bdf369c12278d9",
+  "burnAfter": {
+    "label": "StageE:conv-43-rebuild-complete",
+    "at": "2026-08-12T02:06:56.276Z",
+    "spent": 2187633,
+    "ceiling": 3000000,
+    "remaining": 812367,
+    "stageStart": 1933582,
+    "stageSpent": 254051,
+    "stageRemaining": 245949,
+    "reservedForNextBlock": 2000,
+    "threshold": "50%_reviewed",
+    "calls": 99820,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9947,
+        "calls": 32807
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 125349,
+        "calls": 1524
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 590877,
+        "calls": 30688
+      }
+    }
+  }
+}
