@@ -6,11 +6,54 @@
 <title>Itsuki — structured memory for AI applications</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
-<link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
+<link rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2" crossorigin />
 <!-- Self-hosted (v9.1.9, MIT). A CDN copy would send every visitor's IP to a
      third party — the same reason the fonts live in /assets/. -->
 <script src="/assets/vis-network.min.js"></script>
 <style>
+	/* Fustat (Kief Type Foundry, SIL OFL 1.1) is the signed-in product face.
+	   These are the unmodified Google Fonts v4 variable subsets, self-hosted so
+	   the dashboard never leaks a visitor request to a font CDN. The copyright
+	   and full license are in /assets/FUSTAT-LICENSE.txt. */
+	@font-face {
+		font-family: "Fustat";
+		src: url("/assets/fustat-arabic-variable.woff2") format("woff2");
+		font-weight: 200 800;
+		font-style: normal;
+		font-display: swap;
+		unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891,
+			U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F,
+			U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB,
+			U+10E60-10E7E, U+10EC2-10EC4, U+10EFC-10EFF, U+1EE00-1EE03,
+			U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32,
+			U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47, U+1EE49,
+			U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57,
+			U+1EE59, U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64,
+			U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C,
+			U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3,
+			U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+	}
+	@font-face {
+		font-family: "Fustat";
+		src: url("/assets/fustat-latin-ext-variable.woff2") format("woff2");
+		font-weight: 200 800;
+		font-style: normal;
+		font-display: swap;
+		unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+			U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+			U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+			U+2C60-2C7F, U+A720-A7FF;
+	}
+	@font-face {
+		font-family: "Fustat";
+		src: url("/assets/fustat-latin-variable.woff2") format("woff2");
+		font-weight: 200 800;
+		font-style: normal;
+		font-display: swap;
+		unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC,
+			U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+			U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	}
 	/* Geist (Vercel + basement.studio, SIL Open Font License 1.1 — the OFL
 	   explicitly allows fonts to be "bundled, embedded, redistributed and/or
 	   sold with any software"). Self-hosted Latin subsets, two STATIC weights,
@@ -78,6 +121,7 @@
 	/* The signed-in product is light: calm, high-contrast, closer to a tool than
 	   a console. Only the app shell flips — the landing page keeps its own art. */
 	body.app-mode {
+		--font-ui: "Fustat", "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7; --panel3: #f8fafc;
 		--border: #e4e7ec; --border2: #d0d5dd;
 		/* Three text levels, not two: primary (near-black) for headings, secondary
@@ -90,35 +134,33 @@
 	html, body { height: 100%; }
 	body { margin: 0; font: 13.5px/1.7 var(--font-ui);
 		-webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-		/* Geist ships here as two static weights. Without this, a rule asking for
-		   700+ could get a faux-bolded 600 rather than the real 600 face. */
+		/* Both UI faces ship real requested weights; never synthesize a fake bold. */
 		font-synthesis-weight: none;
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	code { font-family: var(--font-mono); }
 
 	/* ---- app type scale ----------------------------------------------------
-	   Two weights only: 600 for headings, 400 for body. 500 is reserved for tab
-	   labels, and those are the only three the page ever asks for. The negative
-	   tracking on headings still matters with Geist — it sets loose at display
-	   sizes. Scoped to body.app-mode so the landing art is untouched.
+	   Fustat gives the product the compact, friendly rhythm used by the reference
+	   UI: 600 for headings, 400 for body, 500 for tabs. It is scoped to the app,
+	   leaving the established Geist marketing art untouched.
 	   ------------------------------------------------------------------------ */
-	body.app-mode { font-size: 14px; line-height: 1.6; }
-	body.app-mode .page-title { font-size: 32px; font-weight: 600; letter-spacing: -.02em;
-		line-height: 1.18; margin: 0 0 6px; color: var(--text); }
-	body.app-mode .page-sub { font-size: 14px; font-weight: 400; letter-spacing: 0;
-		line-height: 1.6; color: var(--muted); margin: 0; max-width: 720px; }
+	body.app-mode { font-size: 13px; line-height: 1.5; }
+	body.app-mode .page-title { font-size: 24px; font-weight: 600; letter-spacing: 0;
+		line-height: 1.2; margin: 0 0 5px; color: var(--text); }
+	body.app-mode .page-sub { font-size: 13px; font-weight: 400; letter-spacing: 0;
+		line-height: 1.5; color: var(--muted); margin: 0; max-width: 640px; }
 	body.app-mode .page-head { margin-bottom: 24px; }
 	body.app-mode h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 	body.app-mode .box h3, body.app-mode .action-box h3, body.app-mode .detail h2,
 	body.app-mode .card .title, body.app-mode .section-h {
 		font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
 	body.app-mode .card .summary, body.app-mode .method-card .mc-text > span {
-		font-size: 14px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
-	body.app-mode .method-card b { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-	body.app-mode .step-title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+		font-size: 13px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
+	body.app-mode .method-card b { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+	body.app-mode .step-title { font-size: 14px; font-weight: 600; letter-spacing: 0; }
 	body.app-mode .step-desc, body.app-mode .help, body.app-mode .kv, body.app-mode .empty {
-		font-size: 14px; font-weight: 400; letter-spacing: 0; line-height: 1.6; max-width: 720px; }
+		font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1.5; max-width: 680px; }
 	body.app-mode .step-note, body.app-mode .install-foot, body.app-mode .hint,
 	body.app-mode .install-hint, body.app-mode .card .mini-line, body.app-mode .card .cat {
 		font-size: 12px; font-weight: 400; letter-spacing: 0; line-height: 1.6; color: var(--faint); }
@@ -365,10 +407,14 @@
 	   step title→description 6px, tabs→note 12px. Between groups: 28–32px.
 	   The earlier pass over-tightened everything to the inside-a-group scale,
 	   which is why the page read cramped. */
-	.install-intro { max-width: 1080px; }
+	/* Setup content is centered instead of pinned against the navigation rail.
+	   The fixed maximum creates the deliberate desktop gutter from the reference
+	   while still collapsing to the full available width on smaller screens. */
+	.install-layout { width: min(880px, 100%); margin: 0 auto; }
+	.install-intro { max-width: 880px; }
 	body.app-mode .install-intro.page-head { margin-bottom: 28px; }
 	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-		gap: 10px; max-width: 1080px; margin-bottom: 32px; }
+		gap: 16px; max-width: 880px; margin-bottom: 32px; }
 	.method-card { display: flex; align-items: center; gap: 11px; text-align: left; color: var(--text);
 		background: var(--panel); border: 1px solid var(--border);
 		border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
@@ -380,7 +426,7 @@
 	.method-card:hover { border-color: var(--border2); filter: none; }
 	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 	.method-card.active b, .method-card.active .mc-icon { color: var(--accent); }
-	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 1080px; margin-bottom: 12px; }
+	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 880px; margin-bottom: 12px; }
 	/* Without a plan note between them, tabs → steps still lands on the 32px
 	   between-groups gap (12 + 20). */
 	.client-tabs + .steps { margin-top: 20px; }
@@ -389,9 +435,9 @@
 	.client-tabs .term-tab svg { width: 15px; height: 15px; flex: 0 0 auto; opacity: .85; }
 	/* One muted line, no coloured box. A banner for a plan requirement was
 	   louder than the requirement deserves. */
-	.install-hint { max-width: 1080px; margin: 0 0 32px; }
-	.steps { max-width: 1080px; }
-	.step-row { position: relative; display: grid; grid-template-columns: minmax(170px, 280px) minmax(0, 1fr);
+	.install-hint { max-width: 880px; margin: 0 0 32px; }
+	.steps { max-width: 880px; }
+	.step-row { position: relative; display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr);
 		gap: 32px; padding: 0 0 32px; align-items: start; }
 	.step-row:last-child { padding-bottom: 0; }
 	.step-left { display: flex; gap: 12px; }
@@ -415,7 +461,7 @@
 	.step-done { border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
 		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 8px;
 		padding: 8px 11px; font-size: 13px; }
-	.install-foot { max-width: 1080px; margin-top: 20px; }
+	.install-foot { max-width: 880px; margin-top: 20px; }
 	@media (max-width: 780px) {
 		.step-row { grid-template-columns: 1fr; gap: 12px; padding-bottom: 20px; }
 		.step-row:not(:last-child) .step-left::before { display: none; }
@@ -2657,6 +2703,7 @@ function viewInstall(v) {
 	}).join("");
 
 	const wrap = el("div");
+	wrap.className = "install-layout";
 	wrap.innerHTML = `
 		<div class="install-intro page-head">
 			<h2 class="page-title">Get started with ${PRODUCT.name}</h2>

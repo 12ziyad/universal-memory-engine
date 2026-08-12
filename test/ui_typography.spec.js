@@ -13,20 +13,33 @@ import html from "../public/index.html?raw";
 const css = (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").replace(/\r\n/g, "\n");
 
 describe("app type scale", () => {
-	it("self-hosts Geist and Geist Mono and never reaches a font CDN", () => {
+	it("self-hosts Fustat, Geist, and Geist Mono and never reaches a font CDN", () => {
+		expect(css).toContain('src: url("/assets/fustat-arabic-variable.woff2") format("woff2")');
+		expect(css).toContain('src: url("/assets/fustat-latin-ext-variable.woff2") format("woff2")');
+		expect(css).toContain('src: url("/assets/fustat-latin-variable.woff2") format("woff2")');
 		for (const file of ["geist-400.woff2", "geist-600.woff2", "geist-mono-400.woff2"]) {
 			expect(css).toContain(`src: url("/assets/${file}") format("woff2")`);
 		}
 		expect(css).toContain('--font-ui: "Geist", "Inter"');
+		expect(css).toContain('--font-ui: "Fustat", "Geist", "Inter"');
 		expect(css).toContain('--font-mono: "Geist Mono", "JetBrains Mono"');
-		// Geist 400 is preloaded; body text is the first thing anyone reads.
-		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2"');
+		// The app's primary Latin subset is preloaded; body text is the first thing anyone reads.
+		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2"');
 		// The privacy promise on the landing page depends on this staying true.
 		// No third-party loads of any kind — fonts OR scripts. A CDN request
 		// sends every visitor's IP off-origin, which the landing page promises
 		// does not happen.
 		expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com|use\.typekit|fontawesome|cdn\.jsdelivr|unpkg\.com/i);
 		expect(html).not.toMatch(/<script[^>]+src="https?:\/\//i);
+	});
+
+	it("ships Fustat as three unicode-scoped variable subsets", () => {
+		const fustatFaces = css.match(/font-family: "Fustat";[\s\S]*?\}/g) ?? [];
+		expect(fustatFaces).toHaveLength(3);
+		for (const face of fustatFaces) {
+			expect(face).toContain("font-weight: 200 800;");
+			expect(face).toMatch(/unicode-range: U\+/);
+		}
 	});
 
 	it("ships two static Geist weights, not the variable font", () => {
@@ -63,10 +76,10 @@ describe("app type scale", () => {
 	});
 
 	it("defines the page / section / step / body / footnote steps", () => {
-		expect(css).toContain("body.app-mode { font-size: 14px; line-height: 1.6; }");
-		expect(css).toMatch(/\.page-title \{ font-size: 32px; font-weight: 600; letter-spacing: -\.02em;/);
-		expect(css).toMatch(/\.page-sub \{ font-size: 14px; font-weight: 400; letter-spacing: 0;/);
-		expect(css).toMatch(/\.step-title \{ font-size: 15px; font-weight: 600; letter-spacing: -\.01em; \}/);
+		expect(css).toContain("body.app-mode { font-size: 13px; line-height: 1.5; }");
+		expect(css).toMatch(/\.page-title \{ font-size: 24px; font-weight: 600; letter-spacing: 0;/);
+		expect(css).toMatch(/\.page-sub \{ font-size: 13px; font-weight: 400; letter-spacing: 0;/);
+		expect(css).toMatch(/\.step-title \{ font-size: 14px; font-weight: 600; letter-spacing: 0; \}/);
 		expect(css).toMatch(/font-size: 16px; font-weight: 600; letter-spacing: -\.01em; line-height: 1\.35;/);
 		expect(css).toMatch(/body\.app-mode \.step-note[\s\S]{0,220}font-size: 12px; font-weight: 400;/);
 		expect(css).toMatch(/font-family: var\(--font-mono\); font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1\.5;/);
@@ -81,9 +94,9 @@ describe("app type scale", () => {
 		expect(css).toMatch(/--text: #101828; --muted: #667085; --faint: #98a2b3;/);
 	});
 
-	it("caps text columns at 720px", () => {
-		expect(css).toMatch(/body\.app-mode \.step-desc[\s\S]{0,220}max-width: 720px;/);
-		expect(css).toMatch(/\.page-sub \{[\s\S]{0,160}max-width: 720px;/);
+	it("caps prose within the compact setup canvas", () => {
+		expect(css).toMatch(/body\.app-mode \.step-desc[\s\S]{0,220}max-width: 680px;/);
+		expect(css).toMatch(/\.page-sub \{[\s\S]{0,160}max-width: 640px;/);
 	});
 
 	it("uses the page title on the views that have one", () => {

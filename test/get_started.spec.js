@@ -196,6 +196,13 @@ describe("Cursor tab", () => {
 });
 
 describe("the visual redesign", () => {
+	it("centers a compact setup canvas instead of pinning it to the rail", () => {
+		expect(fnSource("viewInstall")).toContain('wrap.className = "install-layout";');
+		expect(fnSource("viewOverview")).not.toContain('wrap.className = "install-layout";');
+		expect(css).toContain(".install-layout { width: min(880px, 100%); margin: 0 auto; }");
+		expect(css).toMatch(/\.step-row \{[^}]*grid-template-columns: minmax\(200px, 320px\) minmax\(0, 1fr\)/s);
+	});
+
 	it("drops the panel that wrapped the steps", () => {
 		expect(script).toContain('<div class="steps">');
 		expect(script).not.toContain('class="steps-panel"');
