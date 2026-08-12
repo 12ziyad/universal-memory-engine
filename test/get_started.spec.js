@@ -230,8 +230,8 @@ describe("the visual redesign", () => {
 		expect(script).not.toContain("One link — Claude and ChatGPT remember you");
 	});
 
-	it("uses a small dark step badge, not a large accent one", () => {
-		expect(css).toMatch(/\.step-num \{[^}]*width: 22px; height: 22px[^}]*background: var\(--text\)/s);
+	it("uses a compact product-accent step badge", () => {
+		expect(css).toMatch(/\.step-num \{[^}]*width: 22px; height: 22px[^}]*background: var\(--accent\)[^}]*color: var\(--on-accent\)/s);
 	});
 
 	it("restyles code blocks: light surface, labelled header, copy icon", () => {

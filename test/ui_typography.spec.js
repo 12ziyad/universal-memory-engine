@@ -1,8 +1,8 @@
 /**
- * Typography + rhythm contract for the signed-in app shell.
+ * Typography + rhythm contract for the whole Itsuki surface.
  *
- * These assert the *scale*, not the look: two weights (600 headings / 400 body),
- * three text levels, one mono face, and the step
+ * These assert the *scale*, not the look: Fustat for every UI surface,
+ * three text levels, one mono face reserved for code, and the step
  * rhythm on Get started. They exist because the last three visual passes each
  * re-introduced a fourth weight or a second hardcoded mono stack.
  */
@@ -13,15 +13,15 @@ import html from "../public/index.html?raw";
 const css = (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").replace(/\r\n/g, "\n");
 
 describe("app type scale", () => {
-	it("self-hosts Fustat, Geist, and Geist Mono and never reaches a font CDN", () => {
+	it("self-hosts Fustat and Geist Mono and never reaches a font CDN", () => {
 		expect(css).toContain('src: url("/assets/fustat-arabic-variable.woff2") format("woff2")');
 		expect(css).toContain('src: url("/assets/fustat-latin-ext-variable.woff2") format("woff2")');
 		expect(css).toContain('src: url("/assets/fustat-latin-variable.woff2") format("woff2")');
-		for (const file of ["geist-400.woff2", "geist-600.woff2", "geist-mono-400.woff2"]) {
-			expect(css).toContain(`src: url("/assets/${file}") format("woff2")`);
-		}
-		expect(css).toContain('--font-ui: "Geist", "Inter"');
-		expect(css).toContain('--font-ui: "Fustat", "Geist", "Inter"');
+		expect(css).toContain('src: url("/assets/geist-mono-400.woff2") format("woff2")');
+		expect(css).not.toContain('src: url("/assets/geist-400.woff2") format("woff2")');
+		expect(css).not.toContain('src: url("/assets/geist-600.woff2") format("woff2")');
+		expect(css).toContain('--font-ui: "Fustat", "Inter"');
+		expect(css).not.toContain('--font-ui: "Geist"');
 		expect(css).toContain('--font-mono: "Geist Mono", "JetBrains Mono"');
 		// The app's primary Latin subset is preloaded; body text is the first thing anyone reads.
 		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2"');
@@ -42,14 +42,11 @@ describe("app type scale", () => {
 		}
 	});
 
-	it("ships two static Geist weights, not the variable font", () => {
-		const geistFaces = css.match(/font-family: "Geist";[\s\S]*?\}/g) ?? [];
-		expect(geistFaces).toHaveLength(2);
-		expect(geistFaces.filter((f) => /font-weight: 400;/.test(f))).toHaveLength(1);
-		expect(geistFaces.filter((f) => /font-weight: 600;/.test(f))).toHaveLength(1);
-		// A range like `font-weight: 100 900` would mean the variable file.
-		expect(css).not.toMatch(/font-family: "Geist";[\s\S]{0,160}font-weight: \d+ \d+/);
-		// Two real weights, so nothing should ever be faux-bolded into a third.
+	it("uses Fustat across public, auth, app, and form controls", () => {
+		expect(css.match(/--font-ui:/g)).toHaveLength(1);
+		expect(css).toContain('button, input, select, textarea { font-family: var(--font-ui); }');
+		expect(css).toContain('pre, code, kbd, samp { font-family: var(--font-mono); }');
+		// Fustat is variable and ships every requested weight, so nothing is faux-bolded.
 		expect(css).toContain("font-synthesis-weight: none;");
 	});
 
@@ -64,15 +61,17 @@ describe("app type scale", () => {
 		const fallbackFaces = css.match(/font-family: "(?:Inter|JetBrains Mono)";[\s\S]*?\}/g) ?? [];
 		expect(fallbackFaces).toHaveLength(2);
 		for (const face of fallbackFaces) expect(face).toMatch(/unicode-range: U\+0000-00FF/);
-		// Geist itself must stay unscoped — it is the primary face.
-		const geistFaces = css.match(/font-family: "Geist(?: Mono)?";[\s\S]*?\}/g) ?? [];
-		for (const face of geistFaces) expect(face).not.toMatch(/unicode-range/);
+		// Geist Mono itself must stay unscoped — it is the primary code face.
+		const geistMonoFaces = css.match(/font-family: "Geist Mono";[\s\S]*?\}/g) ?? [];
+		expect(geistMonoFaces).toHaveLength(1);
+		for (const face of geistMonoFaces) expect(face).not.toMatch(/unicode-range/);
 	});
 
 	it("keeps every code surface on the shared mono variable", () => {
 		// A second hardcoded stack is how the two faces drifted apart before.
 		const hardcoded = css.match(/font-family:\s*ui-monospace/g) ?? [];
 		expect(hardcoded).toHaveLength(0);
+		expect(html).not.toMatch(/font-family:\s*(?:ui-)?monospace/i);
 	});
 
 	it("defines the page / section / step / body / footnote steps", () => {
