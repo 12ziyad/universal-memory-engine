@@ -16,7 +16,7 @@ for (const file of required) {
 }
 for (const file of [
 	"V3_WORK_LEDGER.json", "work-ledger.json", "V3_COST_LEDGER.json", "cost-ledger.json",
-	"benchmark-ledger.json", "final/locomo/evidence/cleanup.json",
+	"benchmark-ledger.json", "V3_PUBLIC_BETA_ACTIVATION.json", "final/locomo/evidence/cleanup.json",
 	"final/locomo/evidence/product.seal.json", "final/locomo/evidence/score-progress.json",
 	"final/locomo/evidence/scores.json",
 	"final/locomo/evidence/judge-tail-invalid-transport-attempt-001.json",
@@ -79,6 +79,21 @@ if (invalidTransport.status !== "QUARANTINED_NOT_SCORED"
 	|| invalidTransport.invalidRowsQuarantined !== 40 || invalidTransport.validRowsRetained !== 1_220)
 	throw new Error("V3-H24 quarantine invariant failed");
 
+const activation = JSON.parse(fs.readFileSync(
+	path.join(ROOT, "V3_PUBLIC_BETA_ACTIVATION.json"), "utf8"));
+if (activation.status !== "PUBLIC_BETA_ACTIVE"
+	|| activation.workerVersion !== "e3391f6d-3b14-4091-8297-52d44053a693"
+	|| activation.trafficPercentage !== 100
+	|| activation.flags.memoryV3 !== "on" || activation.flags.atomicCapture !== "on"
+	|| activation.flags.atomicProjection !== "on" || activation.flags.hybridRetrieval !== "on"
+	|| activation.flags.sourceExpansion !== "on" || activation.flags.extractionB1 !== "off"
+	|| activation.flags.atomicCoalescing !== "off" || activation.flags.episodeFallback !== "off"
+	|| activation.flags.adaptiveContext !== "off"
+	|| activation.gates.worker.failed !== 0 || activation.gates.unitCrossDoor.failed !== 0
+	|| activation.propagation["itsuki.app"].passed !== 10
+	|| activation.propagation["uml.gpmai.workers.dev"].convergencePassed !== 6)
+	throw new Error("public-beta activation invariant failed");
+
 const closure = JSON.parse(fs.readFileSync(
 	path.join(ROOT, "final/locomo/evidence/terminal-production-closure.json"), "utf8"));
 if (closure.propagationPassed !== 20 || closure.writeAndSourceLanes !== "OFF"
@@ -91,5 +106,6 @@ console.log("TERMINAL_METRICS_AUDIT PASS");
 console.log("COMPLETE_SCORE_ACCOUNTING_AUDIT PASS 1540/1540");
 console.log("JUDGE_IDENTITY_AUDIT PASS 1540/1540; SEALED_PREFIX PASS 960/960");
 console.log("V3_H24_QUARANTINE_AUDIT PASS 40/40");
+console.log("PUBLIC_BETA_ACTIVATION_AUDIT PASS");
 console.log("PRODUCTION_CLOSURE_AUDIT PASS 20/20");
 console.log("BENCHMARK_LOCK_AUDIT PASS");

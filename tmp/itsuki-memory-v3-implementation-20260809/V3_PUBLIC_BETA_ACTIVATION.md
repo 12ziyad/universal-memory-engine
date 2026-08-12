@@ -39,7 +39,23 @@ no AI Gateway or partner-provider route.
 
 ## Deployment result
 
-Pending live deployment.
+- Commit/origin: `9d01dcdefde76102c72e3fabe24449dc1387c4ac`.
+- Deployment: `d6d6e7f2-55e7-4993-8df8-51e69f69771b`.
+- Worker version: `e3391f6d-3b14-4091-8297-52d44053a693` at 100% traffic.
+- `itsuki.app`: 10/10 uncached health checks returned the exact authorized
+  public-beta flag bundle.
+- `uml.gpmai.workers.dev`: after one ordinary propagation-lag response from the
+  prior version, 6/6 uncached convergence checks returned the exact bundle.
+- Current production modes: parent V3, atomic capture, atomic projection,
+  hybrid retrieval and exact source expansion ON; extraction B1, coalescing,
+  episode fallback and adaptive context OFF.
+- Rollback target remains Worker
+  `a38142b9-842a-4c4c-83bf-41f68d5e205d`. No storage resource or schema changed,
+  so behavioural rollback does not require data repair.
+- Activation used no synthetic product write and no inference call.
+
+**Result: PUBLIC BETA ACTIVE.** This validates configuration and propagation,
+not a high-volume ingestion SLA. The expected first cohort remains 5–10 users.
 
 ## Pre-deployment gates
 
@@ -57,3 +73,7 @@ The first complete Worker command was interrupted by a four-minute host command
 timeout before Vitest emitted a verdict. It left no test process behind. The
 exact clean rerun completed 1,325/1,325; the interrupted attempt is not counted
 as product evidence.
+
+One first convergence helper constructed an invalid local URL and made no
+request; its six null rows were discarded as harness output. The corrected
+workers.dev probe is the authoritative 6/6 evidence above.

@@ -1,5 +1,15 @@
 # V3 DECISION LOG
 
+## 2026-08-12 — D-030: activate the validated low-volume public beta
+
+Owner authorization places every valid account on the accepted candidate while
+expected traffic is approximately 5–10 early users. Parent V3, atomic capture,
+atomic projection, E7 hybrid retrieval and E9A source expansion are globally
+on; B1, coalescing, episode fallback and adaptive context remain off, with no
+reranker. One 100% deployment avoids mixed write/read versions. No migration or
+data rewrite occurred; Worker `a38142b9` is the immediate rollback target. This
+does not claim a high-volume burst SLA.
+
 ## 2026-08-12 — D-029: complete exact owner-authorized judge tail
 
 The owner raised only Stage E from 500,000 to 550,000 neurons while the global

@@ -5,6 +5,8 @@ import path from "node:path";
 const ROOT = path.dirname(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")));
 const MANIFEST = path.join(ROOT, "V3_HASH_MANIFEST.sha256");
 const additions = [
+	"V3_PUBLIC_BETA_ACTIVATION.md",
+	"V3_PUBLIC_BETA_ACTIVATION.json",
 	"harness/update-v3-hash-manifest.mjs",
 	"harness/final-audit.mjs",
 	"harness/verify-hash-manifests.mjs",

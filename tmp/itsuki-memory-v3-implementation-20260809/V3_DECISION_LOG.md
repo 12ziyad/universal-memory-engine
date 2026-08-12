@@ -1,5 +1,24 @@
 # V3 DECISION LOG
 
+## D-030 — activate the validated candidate as a low-volume public beta
+
+**Owner authorization.** After the campaign completed, the owner stated that
+the expected first public cohort is approximately 5–10 users and explicitly
+authorized V3 for every account.
+
+**Decision.** Set the parent V3 flag and the four accepted candidate lanes—
+atomic capture, atomic projection, E7 hybrid retrieval and E9A exact source
+expansion—to global `on`. Keep rejected extraction B1, coalescing, episode
+fallback and adaptive context off; do not introduce reranking. Use one 100%
+Worker deployment rather than a traffic split so one account cannot alternate
+between incompatible write/read versions.
+
+**Safety boundary.** No schema, binding, credential or data rewrite changed.
+The previous Worker `a38142b9` is the immediate rollback target. Complete gates
+passed 1,325 Worker and 539 cross-door tests, and both production domains
+converged to the exact flag bundle. This decision authorizes a low-volume public
+beta only; it does not assert a 10,000-message burst SLA.
+
 ## D-029 — accept complete Stage E after the exact owner-authorized judge tail
 
 **Decision.** Accept the sealed 1,540-answer product, complete official score,

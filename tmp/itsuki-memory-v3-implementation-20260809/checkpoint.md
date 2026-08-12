@@ -1,5 +1,24 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 POST-CAMPAIGN — PUBLIC BETA ACTIVE
+
+- Owner authorized the validated V3 architecture for every valid account while
+  expected traffic remains approximately 5–10 early users.
+- Commit/origin `9d01dcdefde76102c72e3fabe24449dc1387c4ac` is deployed as
+  Worker `e3391f6d-3b14-4091-8297-52d44053a693`, deployment
+  `d6d6e7f2-55e7-4993-8df8-51e69f69771b`, at 100% traffic.
+- Parent V3, atomic capture/projection, E7 hybrid retrieval and E9A exact source
+  expansion are ON. Rejected B1, coalescing, episode fallback and adaptive
+  context remain OFF; reranking remains absent.
+- Production propagation passed 10/10 on `itsuki.app` and 6/6 on workers.dev
+  after one ordinary prior-version response during propagation.
+- No migration, binding, credential, synthetic write or activation inference
+  call occurred. Immediate rollback target is Worker
+  `a38142b9-842a-4c4c-83bf-41f68d5e205d`.
+- This is a low-volume public beta, not a validated high-volume ingestion SLA.
+  Durable evidence: `V3_PUBLIC_BETA_ACTIVATION.md` and
+  `V3_PUBLIC_BETA_ACTIVATION.json`.
+
 ## 2026-08-12 TERMINAL COMPLETE — Stage E final result
 
 - The exact owner-authorized frozen judge tail completed without re-ingest,

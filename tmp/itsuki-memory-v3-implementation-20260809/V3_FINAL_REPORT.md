@@ -1,5 +1,17 @@
 # ITSUKI MEMORY V3 — FINAL REPORT
 
+## 2026-08-12 — POST-CAMPAIGN PUBLIC BETA ACTIVE
+
+After the final verdict, the owner authorized the exact validated V3 candidate
+for every account as a low-volume public beta with approximately 5–10 early
+users expected. Commit/origin `9d01dcd` is live as Worker `e3391f6d`, deployment
+`d6d6e7f2`, at 100% traffic. Parent V3, atomic capture/projection, hybrid
+retrieval and exact source expansion are ON; rejected B1, coalescing, episode
+fallback and adaptive context remain OFF. Propagation passed on both production
+domains. Rollback target is Worker `a38142b9`. No migration or data rewrite was
+performed. This operational activation does not change the frozen benchmark
+verdict below and does not claim a high-volume ingestion SLA.
+
 ## 2026-08-12 — ITSUKI MEMORY V3: FINAL VERDICT
 
 Stage E is terminal and complete. The frozen product, official scorer and
@@ -10,12 +22,13 @@ from row 961. No re-ingest, answer regeneration, completed-row rerun, retuning
 or new experiment occurred. Cleanup remains verified zero across every live,
 derived, FTS, recall, export and source-content surface.
 
-Terminal production closure is live from commit/origin `2816395`: Worker
+The Stage E terminal production closure before owner-authorized activation was
+commit/origin `2816395`: Worker
 `a38142b9-842a-4c4c-83bf-41f68d5e205d`, deployment
 `dc96a1df-0b65-497b-a674-f8ac9f90b5f6`, 100% traffic, 20/20 uncached
 propagation checks. Accepted write/source lanes and every rejected lane are
 OFF/empty; hybrid retrieval is restored to only the historical d04 ten. Normal
-users remain outside V3.
+users remained outside V3 at that historical boundary.
 
 | Dimension | Final verdict |
 |---|---|
@@ -33,7 +46,7 @@ users remain outside V3.
 | **INFERENCE** | Campaign **2,444,870 / 3,000,000** neurons (~$26.89 at $0.011/1k); Stage E **511,288 / 550,000**; direct first-party Workers AI only. |
 | **STORAGE** | Peak final fixture: 5,882 episodes, 5,572 candidates/projections, 1,296 nodes, 5,514 slices, 824 events and 324 edges; terminal synthetic residue **0**. |
 | **OPEN PRODUCT CRITICAL / HIGH / MEDIUM** | **0 / 0 / 0** |
-| **PRODUCTION ENABLEMENT** | **Do not enable globally.** Keep normal users on the proven path; V3 remains restricted to explicit allowlisted/canary scope. |
+| **PRODUCTION ENABLEMENT** | **Owner-authorized low-volume public beta ACTIVE.** Every valid account receives the validated candidate; expected initial traffic is 5–10 users. High-volume ingestion remains outside the proven SLA. |
 
 ### Complete Stage E measurements
 
