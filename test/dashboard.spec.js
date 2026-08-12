@@ -10,6 +10,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("function initReveal()");
 		expect(script).toContain("function renderAuth(");
 		expect(script).toContain("function hashView()");
+		expect(script.match(/setView\(S\.view, \{ updateHash: false \}\);/g)).toHaveLength(2);
 		expect(script).toContain('APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"])');
 		expect(script).toContain("function viewCandidates(");
 		expect(script).toContain("/v1/candidates");

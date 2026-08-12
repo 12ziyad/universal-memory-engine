@@ -417,35 +417,39 @@
 	/* Setup content is centered instead of pinned against the navigation rail.
 	   The fixed maximum creates the deliberate desktop gutter from the reference
 	   while still collapsing to the full available width on smaller screens. */
-	.install-layout { width: min(880px, 100%); margin: 0 auto; }
-	.install-intro { max-width: 880px; }
+	.install-layout { width: min(1080px, 100%); margin: 0 auto; }
+	.install-intro { max-width: 1080px; }
 	body.app-mode .install-intro.page-head { margin-bottom: 28px; }
 	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-		gap: 16px; max-width: 880px; margin-bottom: 32px; }
+		gap: 16px; max-width: 1080px; margin-bottom: 32px; }
 	.method-card { display: flex; align-items: center; gap: 11px; text-align: left; color: var(--text);
 		background: var(--panel); border: 1px solid var(--border);
-		border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+		border-radius: 12px; min-height: 78px; padding: 14px 16px; cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .12s; }
 	.method-card .mc-icon { flex: 0 0 auto; width: 18px; height: 18px; color: var(--faint); }
 	.method-card .mc-icon svg { width: 100%; height: 100%; display: block; }
 	.method-card .mc-text { min-width: 0; }
 	.method-card b { display: block; color: var(--text); margin-bottom: 4px; }
 	.method-card span.mc-text > span { display: block; color: var(--muted); }
-	.method-card:hover { border-color: var(--border2); filter: none; }
+	.method-card:hover { border-color: var(--border2); filter: none; transform: translateY(-1px); }
 	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 	.method-card.active b, .method-card.active .mc-icon { color: var(--accent); }
-	.client-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 880px; margin-bottom: 12px; }
+	.client-tabs { display: flex; gap: 3px; flex-wrap: wrap; width: fit-content; max-width: 1080px;
+		margin-bottom: 28px; padding: 4px; border-radius: 11px; background: var(--panel2); }
 	/* Without a plan note between them, tabs → steps still lands on the 32px
 	   between-groups gap (12 + 20). */
 	.client-tabs + .steps { margin-top: 20px; }
 	.variant-tabs + .steps { margin-top: 20px; }
-	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 7px; }
-	.client-tabs .term-tab svg { width: 15px; height: 15px; flex: 0 0 auto; opacity: .85; }
+	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; }
+	.client-tabs .term-tab svg, .client-tabs .term-tab .brand-icon { width: 18px; height: 18px; flex: 0 0 auto; }
+	.brand-icon { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
+		border-radius: 5px; }
+	.brand-icon.typescript { object-position: center top; }
 	/* One muted line, no coloured box. A banner for a plan requirement was
 	   louder than the requirement deserves. */
-	.install-hint { max-width: 880px; margin: 0 0 32px; }
-	.steps { max-width: 880px; }
-	.step-row { position: relative; display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr);
-		gap: 32px; padding: 0 0 32px; align-items: start; }
+	.install-hint { max-width: 1080px; margin: 0 0 32px; }
+	.steps { max-width: 1080px; }
+	.step-row { position: relative; display: grid; grid-template-columns: minmax(220px, 340px) minmax(0, 1fr);
+		gap: 48px; padding: 0 0 36px; align-items: start; }
 	.step-row:last-child { padding-bottom: 0; }
 	.step-left { display: flex; gap: 12px; }
 	/* A hairline joining the badges, instead of a divider under every step. */
@@ -470,8 +474,22 @@
 		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 8px;
 		padding: 8px 11px; font-size: 13px; }
 	.install-foot { max-width: 880px; margin-top: 20px; }
+	.plugin-stage { max-width: 1080px; border: 1px solid var(--border); border-radius: 14px;
+		background: var(--panel); padding: 18px 20px 22px; box-shadow: var(--shadow-sm); }
+	.plugin-stage-head { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+		padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+	.plugin-stage-title { display: inline-flex; align-items: center; gap: 9px; min-width: 0; font-weight: 600; }
+	.plugin-stage-title .brand-icon { width: 20px; height: 20px; }
+	.install-docs { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none;
+		border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; }
+	.install-docs:hover { color: var(--text); border-color: var(--border2); }
+	.install-docs svg { width: 13px; height: 13px; }
+	.plugin-stage .step-row { grid-template-columns: minmax(210px, 300px) minmax(0, 1fr); gap: 40px; }
+	.plugin-stage .step-row:last-child { padding-bottom: 0; }
 	@media (max-width: 780px) {
 		.step-row { grid-template-columns: 1fr; gap: 12px; padding-bottom: 20px; }
+		.plugin-stage { padding: 14px; }
+		.plugin-stage .step-row { grid-template-columns: 1fr; gap: 12px; }
 		.step-row:not(:last-child) .step-left::before { display: none; }
 	}
 	.install-card .install-head { margin-bottom: 4px; }
@@ -2503,41 +2521,62 @@ function installSnippets(key = MCP_KEY_PLACEHOLDER) {
   -H "authorization: Bearer ${apiKey}" \\
   -H "content-type: application/json" \\
   -d '{"query": "what am I learning?"}'`,
-		pythonInit: `from itsuki import MemoryClient
+		pythonInstall: "pip install itsuki",
+		pythonInit: `import os
 
-memory = MemoryClient(api_key="${apiKey}", base_url="${origin}")`,
-		python: `# save a durable fact
-memory.add("I started learning Kotlin this week.")
+from itsuki import MemoryClient
 
-# ask for it back
-print(memory.search("what am I learning?")["context"])`,
-		pythonTenants: `# One key, many end users. user_id is the isolation boundary:
-# each value is a separate memory space inside your account.
-memory.add("Ada's depot is in Porto.", user_id="ada")
-memory.add("Grace's depot is in Faro.", user_id="grace")
+memory = MemoryClient(api_key=os.environ["ITSUKI_API_KEY"])`,
+		pythonAdd: `messages = [
+    {"role": "user", "content": "Hi, I'm Alex. I'm vegetarian and allergic to nuts."},
+    {"role": "assistant", "content": "I'll remember your dietary needs."},
+]
 
-print(memory.search("where is my depot?", user_id="ada")["context"])
-# -> Porto. Grace's memory is unreachable from ada, and vice versa.`,
-		nodeTenants: `// One key, many end users. userId is the isolation boundary:
-// each value is a separate memory space inside your account.
-await memory.add("Ada's depot is in Porto.", { userId: "ada" });
-await memory.add("Grace's depot is in Faro.", { userId: "grace" });
+memory.add_conversation(
+    messages,
+    user_id="alex",
+    idempotency_key=MemoryClient.new_idempotency_key(),
+)`,
+		pythonSearch: `query = "What can I cook for dinner tonight?"
+result = memory.search(query, user_id="alex")
 
-const { context } = await memory.search("where is my depot?", { userId: "ada" });
-// -> Porto. Grace's memory is unreachable from ada, and vice versa.`,
-		curlTenant: `curl -X POST ${origin}/v1/save \\
+print(result["context"])`,
+		typescriptInstall: "npm install itsuki",
+		typescriptInit: `import { MemoryClient } from "itsuki";
+import type { MemoryMessage } from "itsuki";
+
+const apiKey = process.env.ITSUKI_API_KEY;
+if (!apiKey) throw new Error("ITSUKI_API_KEY is missing");
+
+const memory = new MemoryClient({ apiKey });`,
+		typescriptAdd: `const messages: MemoryMessage[] = [
+  { role: "user", content: "Hi, I'm Alex. I'm vegetarian and allergic to nuts." },
+  { role: "assistant", content: "I'll remember your dietary needs." },
+];
+
+await memory.addConversation(messages, {
+  userId: "alex",
+  idempotencyKey: MemoryClient.newIdempotencyKey(),
+});`,
+		typescriptSearch: `const query = "What can I cook for dinner tonight?";
+const result = await memory.search(query, { userId: "alex" });
+
+console.log(result.context);`,
+		curlAdd: `curl -X POST ${origin}/v1/save \\
   -H "authorization: Bearer ${apiKey}" \\
   -H "content-type: application/json" \\
-  -d '{"content": "Ada prefers email.", "userId": "ada"}'`,
-		nodeInit: `import { MemoryClient } from "itsuki";
-
-const memory = new MemoryClient({ apiKey: "${apiKey}", baseUrl: "${origin}" });`,
-		node: `// save a durable fact
-await memory.add("I started learning Kotlin this week.");
-
-// ask for it back
-const { context } = await memory.search("what am I learning?");
-console.log(context);`,
+  -d '{
+    "mode": "conversation",
+    "userId": "alex",
+    "messages": [
+      {"role": "user", "content": "Hi, I am Alex. I am vegetarian and allergic to nuts."},
+      {"role": "assistant", "content": "I will remember your dietary needs."}
+    ]
+  }'`,
+		curlSearch: `curl -X POST ${origin}/v1/recall \\
+  -H "authorization: Bearer ${apiKey}" \\
+  -H "content-type: application/json" \\
+  -d '{"query": "What can I cook for dinner tonight?", "userId": "alex"}'`,
 		claudeCode: `claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${origin}/mcp/${mcpToken}`,
 		cursor: `{
   "mcpServers": {
@@ -2548,8 +2587,18 @@ console.log(context);`,
 		// model calls a tool at all; standing instructions in the host app are the
 		// only other lever. One copy-paste block, same wording for every host.
 		autoInstructions: `You have an ${PRODUCT.name} memory tool. At the start of each conversation, call recall_memory to load what you already know about me. When I share something durable — a decision, preference, plan, person, or project — call save_memory without being asked. When a conversation produces lasting decisions or plans, call save_conversation with the relevant turns. Prefer sending my own words over your paraphrase. Never say you saved something unless you got the receipt back.`,
-		pluginMarketplace: `claude plugin marketplace add 12ziyad/universal-memory-engine`,
-		pluginInstall: `/plugin install ${PRODUCT.name.toLowerCase()}`,
+		claudePluginInstall: `claude plugin marketplace add 12ziyad/universal-memory-engine
+claude plugin install itsuki@itsuki-plugins`,
+		claudeConfigure: `/plugin configure itsuki@itsuki-plugins
+/reload-plugins`,
+		claudeVerify: "/itsuki:doctor",
+		codexMarketplace: "codex plugin marketplace add 12ziyad/universal-memory-engine",
+		codexInstall: "codex plugin add itsuki@itsuki-plugins",
+		codexCredential: `# ~/.codex/.env  (Windows: %USERPROFILE%\\.codex\\.env)
+ITSUKI_API_KEY=YOUR_API_KEY`,
+		codexTrust: "/hooks",
+		codexVerify: `codex plugin list --json
+codex mcp list --json`,
 		pythonTurn: `# one call per agent turn: recall + capture together
 result = memory.turn([
     {"role": "user", "content": "We picked Postgres for the new service."}
@@ -2563,13 +2612,7 @@ console.log(result.recall.context);`,
 	};
 }
 
-/**
- * Line icons, inline so nothing is fetched from an icon CDN.
- *
- * These are neutral glyphs, NOT brand logos: shipping an approximation of
- * someone's trademark drawn from memory would be both wrong and a worse thing
- * to be wrong about than a generic mark. They exist to make a tab row scannable.
- */
+/** Neutral interface glyphs. Product marks below are self-hosted assets. */
 const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]) =>
 	[name, `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`],
 )))({
@@ -2586,6 +2629,14 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
 	trash: `<path d="M4 6.5h16"/><path d="M9 6.5V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 6.5 7.5 20a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-13.5"/>`,
 	external: `<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 11 13"/><path d="M18 14.5v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6h4"/>`,
+});
+
+const BRAND = Object.freeze({
+	claude: `<img class="brand-icon claude" src="/assets/brands/claude.png" alt="" aria-hidden="true" />`,
+	chatgpt: `<img class="brand-icon chatgpt" src="/assets/brands/codex.png" alt="" aria-hidden="true" />`,
+	codex: `<img class="brand-icon codex" src="/assets/brands/codex.png" alt="" aria-hidden="true" />`,
+	python: `<img class="brand-icon python" src="/assets/brands/python.png" alt="" aria-hidden="true" />`,
+	typescript: `<img class="brand-icon typescript" src="/assets/brands/typescript.png" alt="" aria-hidden="true" />`,
 });
 
 /**
@@ -2615,7 +2666,7 @@ function installMethods() {
 			clients: {
 				claude: {
 					label: "Claude",
-					icon: ICON.spark,
+					icon: BRAND.claude,
 					hint: "Beta on all Claude plans; Free is limited to one custom connector.",
 					steps: [
 						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
@@ -2633,7 +2684,7 @@ function installMethods() {
 				},
 				chatgpt: {
 					label: "ChatGPT",
-					icon: ICON.hex,
+					icon: BRAND.chatgpt,
 					hint: "Full save + recall currently needs Business or Enterprise/Edu on the web.",
 					steps: [
 						{ title: "Open workspace Apps", body: "A workspace admin uses ChatGPT on the web." },
@@ -2669,32 +2720,31 @@ function installMethods() {
 			clients: {
 				python: {
 					label: "Python",
-					icon: ICON.terminal,
+					icon: BRAND.python,
 					steps: [
-						{ title: "Install the SDK", body: "One package, one dependency.", codeLabel: "bash", code: () => "pip install itsuki" },
-						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "python", code: (key) => installSnippets(key).pythonInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "python", code: (key) => installSnippets(key).python },
-						{ title: "Serving many users?", body: "Pass user_id and each of your end users gets an isolated memory space inside your one key.", codeLabel: "python", code: (key) => installSnippets(key).pythonTenants },
+						{ title: "Install the SDK", body: "Python 3.9 or newer.", codeLabel: "terminal", code: () => installSnippets().pythonInstall },
+						{ title: "Initialize the client", body: "Load the API key from your server environment.", action: apiKey, codeLabel: "python", code: () => installSnippets().pythonInit },
+						{ title: "Add memory", body: "Store a conversation for one isolated end user.", codeLabel: "python", code: () => installSnippets().pythonAdd },
+						{ title: "Retrieve memory", body: "Search that end-user memory and use the prompt-ready context.", codeLabel: "python", code: () => installSnippets().pythonSearch },
 					],
 				},
-				node: {
-					label: "Node.js",
-					icon: ICON.hexN,
+				typescript: {
+					label: "TypeScript",
+					icon: BRAND.typescript,
 					steps: [
-						{ title: "Install the SDK", body: "Zero dependencies, Node 18 or newer.", codeLabel: "bash", code: () => "npm install itsuki" },
-						{ title: "Initialize the client", body: "Point it at your key. Server-side only — keep keys out of browsers.", codeLabel: "js", code: (key) => installSnippets(key).nodeInit, note: "Need a key? <a href=\"#\" onclick=\"setView('keys');return false\">Create one in API Keys</a> — it is shown once." },
-						{ title: "Save and recall", body: "Two calls cover most of it — the turn() helper does both per agent turn.", codeLabel: "js", code: (key) => installSnippets(key).node },
-						{ title: "Serving many users?", body: "Pass userId and each of your end users gets an isolated memory space inside your one key.", codeLabel: "js", code: (key) => installSnippets(key).nodeTenants },
+						{ title: "Install the SDK", body: "Server-side Node 18 or newer, with first-party types included.", codeLabel: "terminal", code: () => installSnippets().typescriptInstall },
+						{ title: "Initialize the client", body: "Fail closed when the server credential is missing.", action: apiKey, codeLabel: "typescript", code: () => installSnippets().typescriptInit },
+						{ title: "Add memory", body: "Store a conversation for one isolated end user.", codeLabel: "typescript", code: () => installSnippets().typescriptAdd },
+						{ title: "Retrieve memory", body: "Search that end-user memory and use the prompt-ready context.", codeLabel: "typescript", code: () => installSnippets().typescriptSearch },
 					],
 				},
 				curl: {
-					label: "cURL",
+					label: "cURL API",
 					icon: ICON.chevron,
 					steps: [
-						{ title: "Create an API key", body: "Send it as a Bearer token on every request.", action: apiKey, note: "Shown once. Manage or revoke it any time in <a href=\"#\" onclick=\"setView('keys');return false\">API Keys</a>." },
-						{ title: "Save a memory", body: "Returns a receipt: what was stored, what was skipped, and why.", codeLabel: "bash", code: (key) => installSnippets(key).curlSave },
-						{ title: "Recall it", body: "The context field is the block you drop into your prompt.", codeLabel: "bash", code: (key) => installSnippets(key).curlRecall },
-						{ title: "Serving many users?", body: "Add userId and each of your end users gets an isolated memory space inside your one key.", codeLabel: "bash", code: (key) => installSnippets(key).curlTenant },
+						{ title: "Create an API key", body: "Use it only as a Bearer credential from your server.", action: apiKey },
+						{ title: "Add memory", body: "Send a conversation and bind it to one isolated end user.", codeLabel: "curl", code: () => installSnippets().curlAdd },
+						{ title: "Retrieve memory", body: "Search the same end-user memory and read the context field.", codeLabel: "curl", code: () => installSnippets().curlSearch },
 					],
 				},
 			},
@@ -2703,27 +2753,27 @@ function installMethods() {
 			label: "Plugin",
 			blurb: "Your coding agent",
 			icon: ICON.plug,
-			footnote: "Looking for Claude or ChatGPT? Those are chat apps — use <b>App Connect</b> above. Prefer a plain MCP connection for another agent? The <b>Cursor</b> tab's config works in any MCP-capable editor.",
 			clients: {
-				// One copy block per tab, no stepper: installing a plugin is one
-				// action, and dressing it as a journey made it look harder.
 				"claude-code": {
 					label: "Claude Code",
-					icon: ICON.terminal,
-					copyOnly: {
-						body: "Install the plugin, then run /plugin configure to select a trusted Node executable and configure your key. The plugin loads project memory when a session starts and queues captured, scrubbed content locally as ordered, idempotent batches when it ends.",
-						codeLabel: "terminal",
-						code: () => `${installSnippets().pluginMarketplace}\nclaude plugin install itsuki@itsuki-plugins`,
-						note:
-							`<b>The whole setup, in order:</b><br>` +
-							`1. Install Node 22 or 24 LTS and copy its absolute executable path: <code>(Get-Command node).Source</code> in PowerShell or <code>command -v node</code> on macOS/Linux.<br>` +
-							`2. <a href="#" onclick="setView('keys');return false">Create an API key</a> — it is shown once.<br>` +
-							`3. Run the two install commands above, then run <code>/plugin configure itsuki@itsuki-plugins</code> in Claude Code. Select the absolute Node executable and paste the full <code>itsuki_live_…</code> key only into the masked key prompt; do not put it in a shell profile. Then run <code>/reload-plugins</code>.<br>` +
-							`4. In a Claude Code session, run <code>/itsuki:doctor</code>. It checks the trusted runtime, installed files, protected outbox, production REST door, and the MCP lifecycle.<br><br>` +
-							`That is everything — <b>one runtime path and one protected key</b>. There is no service URL to configure. ` +
-							`SessionStart attempts up to four due batches in order before recall. Local queueing, server acceptance, and terminal enrichment are distinct states; offline or retryable work remains protected. <a href="/docs/#/install/plugin">See delivery limits and semantics</a>.<br><br>` +
-							`If either setting is missing or the key is rejected, the plugin reports it instead of failing quietly.`,
-					},
+					icon: BRAND.claude,
+					docsHref: "/docs/#/install/plugin",
+					steps: [
+						{ title: "Install the plugin", body: "Add the Itsuki marketplace, then install the canonical plugin.", codeLabel: "terminal", code: () => installSnippets().claudePluginInstall },
+						{ title: "Connect Itsuki", body: "Choose an absolute Node executable (22 or 24 LTS) and add your API key in the masked key prompt.", action: apiKey, codeLabel: "claude code", code: () => `/plugin configure itsuki@itsuki-plugins\n/reload-plugins` },
+						{ title: "Test connection", body: "Run the built-in diagnostic. It reports credential status without printing the key.", codeLabel: "claude code", code: () => installSnippets().claudeVerify },
+					],
+				},
+				codex: {
+					label: "Codex",
+					icon: BRAND.codex,
+					docsHref: "https://github.com/12ziyad/universal-memory-engine/tree/master/plugins/itsuki",
+					steps: [
+						{ title: "Install the plugin", body: "Add the Itsuki marketplace, then install the canonical plugin.", codeLabel: "terminal", code: () => `${installSnippets().codexMarketplace}\n${installSnippets().codexInstall}` },
+						{ title: "Connect Itsuki", body: "Node 22 or 24 LTS is required. Load the API key from Codex's private environment file.", action: apiKey, codeLabel: ".env", code: () => installSnippets().codexCredential },
+						{ title: "Trust lifecycle hooks", body: "Review Itsuki's SessionStart and SessionEnd commands before enabling them.", codeLabel: "codex", code: () => installSnippets().codexTrust },
+						{ title: "Test connection", body: "Verify the plugin and MCP server, then start a new Codex session.", codeLabel: "terminal", code: () => installSnippets().codexVerify },
+					],
 				},
 			},
 		},
@@ -2782,10 +2832,7 @@ function viewInstall(v) {
 	if (variants) state.variant = variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0];
 	const active = variants ? variants[state.variant] : client;
 
-	// A copy-only client is one action, not a journey: a line of context, one
-	// code block, one note. No stepper.
-	const copyOnly = active.copyOnly ?? null;
-	const steps = copyOnly ? "" : active.steps.map((step, i) => {
+	const steps = active.steps.map((step, i) => {
 		const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;
 		// A locked code block already carries the create-link button. Showing the
 		// step's own one above it would offer the same action twice.
@@ -2841,17 +2888,14 @@ function viewInstall(v) {
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		${copyOnly ? `
-			<div class="copy-only">
-				${copyOnly.body ? `<div class="step-desc" style="max-width:640px;margin-bottom:14px">${esc(copyOnly.body)}</div>` : ""}
-				${installCodeBlock(copyOnly.code(state.key ?? MCP_KEY_PLACEHOLDER), copyOnly.codeLabel)}
-				${copyOnly.note ? `<div class="step-note" style="max-width:640px">${copyOnly.note}</div>` : ""}
-			</div>` : `<div class="steps">${steps}</div>`}
-		${door.footnote ? `<div class="install-foot" style="margin-top:14px">${door.footnote}</div>` : ""}
-		<div class="install-foot">
-			Full reference, concepts, and troubleshooting live in the
-			<a href="/docs/" target="_blank" rel="noopener">documentation ↗</a>.
-		</div>`;
+		${state.method === "plugin" ? `
+			<div class="plugin-stage">
+				<div class="plugin-stage-head">
+					<div class="plugin-stage-title">${client.icon ?? ""}<span>${esc(client.label)}</span></div>
+					<a class="install-docs" href="${esc(client.docsHref)}" target="_blank" rel="noopener">View docs ${ICON.external}</a>
+				</div>
+				<div class="steps">${steps}</div>
+			</div>` : `<div class="steps">${steps}</div>`}`;
 	v.appendChild(wrap);
 }
 
@@ -6431,7 +6475,9 @@ async function initShell() {
 	if (mode === "login" || mode === "signup") {
 		if (S.me) {
 			pushUrl("/app");
+			S.view = hashView() || S.view || "overview";
 			setMode("app");
+			setView(S.view, { updateHash: false });
 			sendVisitBeacon("app");
 			await refreshTokens();
 			await load();
@@ -6451,6 +6497,7 @@ async function initShell() {
 		}
 		S.view = hashView() || S.view || "overview";
 		setMode("app");
+		setView(S.view, { updateHash: false });
 		sendVisitBeacon("app");
 		await refreshTokens();
 		await load();

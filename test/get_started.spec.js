@@ -107,9 +107,67 @@ describe("one config, one state, one renderer", () => {
 		expect((script.match(/class="method-card /g) ?? [])).toHaveLength(1);
 	});
 
-	it("does not advertise Codex before its clean save/recall proof passes", () => {
-		expect(script).not.toContain("codexMarketplace");
-		expect(script).not.toContain('label: "Codex"');
+	it("offers both validated coding-agent plugins", () => {
+		expect(script).toContain('label: "Claude Code"');
+		expect(script).toContain('label: "Codex"');
+		expect(script).toContain("codexMarketplace");
+		expect(script).toContain("codexInstall");
+	});
+});
+
+describe("SDK integration", () => {
+	it("uses the shipped Python, TypeScript, and REST contracts", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets")();
+
+		expect(script).toContain('label: "Python"');
+		expect(script).toContain('label: "TypeScript"');
+		expect(script).toContain('label: "cURL API"');
+		expect(script).not.toContain('label: "Node.js"');
+
+		expect(installSnippets.pythonInstall).toBe("pip install itsuki");
+		expect(installSnippets.pythonInit).toContain("from itsuki import MemoryClient");
+		expect(installSnippets.pythonAdd).toContain("memory.add_conversation(");
+		expect(installSnippets.pythonSearch).toContain('memory.search(query, user_id="alex")');
+
+		expect(installSnippets.typescriptInstall).toBe("npm install itsuki");
+		expect(installSnippets.typescriptInit).toContain('import { MemoryClient } from "itsuki";');
+		expect(installSnippets.typescriptAdd).toContain("memory.addConversation(messages,");
+		expect(installSnippets.typescriptSearch).toContain('memory.search(query, { userId: "alex" })');
+
+		expect(installSnippets.curlAdd).toContain(`${FIXTURE_ORIGIN}/v1/save`);
+		expect(installSnippets.curlAdd).toContain('\"mode\": \"conversation\"');
+		expect(installSnippets.curlSearch).toContain(`${FIXTURE_ORIGIN}/v1/recall`);
+	});
+
+	it("shows the four real integration steps instead of generic tenant filler", () => {
+		for (const title of ["Install the SDK", "Initialize the client", "Add memory", "Retrieve memory"]) {
+			expect(script).toContain(`title: "${title}"`);
+		}
+		expect(script).not.toContain('title: "Serving many users?"');
+	});
+});
+
+describe("coding-agent plugins", () => {
+	it("shows concise install, connect, trust, and verification actions", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets")();
+		expect(installSnippets.claudePluginInstall).toContain("claude plugin marketplace add 12ziyad/universal-memory-engine");
+		expect(installSnippets.claudePluginInstall).toContain("claude plugin install itsuki@itsuki-plugins");
+		expect(installSnippets.claudeConfigure).toContain("/plugin configure itsuki@itsuki-plugins");
+		expect(installSnippets.claudeVerify).toBe("/itsuki:doctor");
+
+		expect(installSnippets.codexMarketplace).toBe("codex plugin marketplace add 12ziyad/universal-memory-engine");
+		expect(installSnippets.codexInstall).toBe("codex plugin add itsuki@itsuki-plugins");
+		expect(installSnippets.codexCredential).toContain("ITSUKI_API_KEY=YOUR_API_KEY");
+		expect(installSnippets.codexTrust).toBe("/hooks");
+		expect(installSnippets.codexVerify).toContain("codex plugin list --json");
+		expect(installSnippets.codexVerify).toContain("codex mcp list --json");
+	});
+
+	it("removes the old paragraph-heavy plugin explanation", () => {
+		expect(script).not.toContain("The whole setup, in order:");
+		expect(script).not.toContain("That is everything");
+		expect(script).not.toContain("Looking for Claude or ChatGPT?");
+		expect(script).not.toContain("copyOnly:");
 	});
 });
 
@@ -199,8 +257,8 @@ describe("the visual redesign", () => {
 	it("centers a compact setup canvas instead of pinning it to the rail", () => {
 		expect(fnSource("viewInstall")).toContain('wrap.className = "install-layout";');
 		expect(fnSource("viewOverview")).not.toContain('wrap.className = "install-layout";');
-		expect(css).toContain(".install-layout { width: min(880px, 100%); margin: 0 auto; }");
-		expect(css).toMatch(/\.step-row \{[^}]*grid-template-columns: minmax\(200px, 320px\) minmax\(0, 1fr\)/s);
+		expect(css).toContain(".install-layout { width: min(1080px, 100%); margin: 0 auto; }");
+		expect(css).toMatch(/\.step-row \{[^}]*grid-template-columns: minmax\(220px, 340px\) minmax\(0, 1fr\)/s);
 	});
 
 	it("drops the panel that wrapped the steps", () => {
@@ -214,13 +272,17 @@ describe("the visual redesign", () => {
 
 	it("gives every method card and client tab an icon", () => {
 		for (const door of ["ICON.link", "ICON.code", "ICON.plug"]) expect(script).toContain(`icon: ${door}`);
-		for (const client of ["ICON.spark", "ICON.hex", "ICON.pointer", "ICON.terminal", "ICON.hexN", "ICON.chevron"]) {
+		for (const client of ["BRAND.claude", "BRAND.chatgpt", "ICON.pointer", "BRAND.python", "BRAND.typescript", "ICON.chevron", "BRAND.codex"]) {
 			expect(script).toContain(`icon: ${client}`);
 		}
 		expect(script).toContain('<span class="mc-icon">${m.icon ?? ""}</span>');
 		expect(script).toContain('">${c.icon ?? ""}${esc(c.label)}</button>');
-		// Inline SVG only — an icon CDN would undo the no-third-party promise.
+		// Neutral glyphs stay inline and product marks stay self-hosted; no icon CDN.
 		expect(script).toContain('const ICON = ((paths) =>');
+		expect(script).toContain('const BRAND = Object.freeze({');
+		for (const path of ["/assets/brands/claude.png", "/assets/brands/codex.png", "/assets/brands/python.png", "/assets/brands/typescript.png"]) {
+			expect(script).toContain(path);
+		}
 	});
 
 	it("shortens the method card subtitles", () => {
