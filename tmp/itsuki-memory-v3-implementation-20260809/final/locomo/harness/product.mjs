@@ -39,6 +39,7 @@ import {
 	writeJsonExclusive,
 } from "./common.mjs";
 import { classifySourceEpisodeAcknowledgement } from "./ingest-response.mjs";
+import { reconcileRetryAwareState } from "./state-accounting.mjs";
 
 const require = createRequire(import.meta.url);
 const { requireBenchmarkLockFromEnv } = require("../../../e2/harness/benchmark-lock.cjs");
@@ -49,6 +50,7 @@ const ANSWER_LEDGER = path.join(OUTPUT, "product-answers.jsonl");
 const PRODUCT = path.join(OUTPUT, "product.json");
 const SEAL = path.join(OUTPUT, "product.seal.json");
 const CLEANUP = path.join(OUTPUT, "cleanup.json");
+const STATE_AUDIT = path.join(OUTPUT, "state-audit.json");
 const REQUEST_TIMEOUT_MS = 300_000;
 const SAMPLE_CONCURRENCY = 5;
 const QUESTION_CONCURRENCY = 4;
@@ -62,6 +64,11 @@ function stageStart() {
 
 function noSecret(value) {
 	return Object.keys(scrubText(String(value ?? "")).redactions ?? {}).length === 0;
+}
+
+function atomicEvidenceSnippet(value) {
+	return Array.from(String(value ?? "").normalize("NFKC").replace(/\s+/gu, " ").trim())
+		.slice(0, 240).join("").slice(0, 240);
 }
 
 function planBatches(session) {
@@ -290,6 +297,7 @@ async function collectSampleState(sample, slot, ingests) {
 		 ORDER BY source_packet_id, chunk_key, id`,
 		`SELECT p.candidate_id, p.user_id, p.project_id, p.source_episode_id,
 		 p.source_packet_id, p.outcome, p.object_kind, p.object_id, p.schema_version,
+		 p.extraction_run_id AS projection_extraction_run_id,
 		 c.status AS candidate_status,
 		 COALESCE(s.id,v.id,g.id) AS live_object_id,
 		 COALESCE(s.user_id,v.user_id,g.user_id) AS object_user_id,
@@ -302,15 +310,19 @@ async function collectSampleState(sample, slot, ingests) {
 		 LEFT JOIN edges g ON p.object_kind='edge' AND g.id=p.object_id AND g.deleted_at IS NULL
 		 WHERE p.user_id=${user} AND p.project_id=${project}
 		 ORDER BY p.candidate_id`,
-		`SELECT id, source_packet_id, status, attempts, type,
-		 json_extract(payload_json,'$.project_id') AS project_id
+		`SELECT id, source_packet_id, status, attempts, type, receipt_id, error, extraction_run_id,
+		 json_extract(payload_json,'$.project_id') AS project_id,
+		 json_extract(payload_json,'$.repair_generation') AS repair_generation,
+		 json_array_length(json_extract(payload_json,'$.remaining')) AS remaining
 		 FROM memory_jobs WHERE user_id=${user} AND source_packet_id IN (${packetList})
 		 ORDER BY source_packet_id, id`,
-		`SELECT id, source_packet_id, status, job_id, error, created_at, updated_at
+		`SELECT id, source_packet_id, status, job_id, receipt_id, error, created_at, updated_at
 		 FROM extraction_runs WHERE user_id=${user} AND source_packet_id IN (${packetList})
 		 ORDER BY source_packet_id, created_at, id`,
 		`SELECT id, source_packet_id, outcome,
 		 json_extract(detail,'$.atomic_capture_enabled') AS atomic_enabled,
+		 json_extract(detail,'$.atomic_capture_complete') AS atomic_complete,
+		 json_extract(detail,'$.atomic_capture_chunks') AS atomic_chunks,
 		 json_extract(detail,'$.atomic_capture_stored') AS atomic_stored,
 		 json_extract(detail,'$.atomic_capture_truncated') AS atomic_truncated,
 		 json_extract(detail,'$.atomic_projection_enabled') AS projection_enabled,
@@ -401,7 +413,12 @@ async function collectSampleState(sample, slot, ingests) {
 	assert(projections.length === candidates.length,
 		`${sample.sampleId}: projection/candidate mismatch ${projections.length}/${candidates.length}`);
 	const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+	const episodeProvenanceSnippets = new Set(episodes.map((episode) => {
+		const text = String(episode.text ?? "");
+		return text.length > 240 ? `${text.slice(0, 239)}…` : text;
+	}));
 	let projectionFailures = 0;
+	const projectionDiagnostics = [];
 	const outcomes = { promoted: 0, reinforced: 0, ignored: 0 };
 	const snippetsByObject = new Map();
 	for (const projection of projections) {
@@ -411,39 +428,96 @@ async function collectSampleState(sample, slot, ingests) {
 			&& projection.source_episode_id === candidate.source_episode_id
 			&& projection.source_packet_id === candidate.source_packet_id
 			&& Object.hasOwn(outcomes, projection.outcome);
-		if (!validBase) { projectionFailures += 1; continue; }
+		if (!validBase) {
+			projectionFailures += 1;
+			if (projectionDiagnostics.length < 20) projectionDiagnostics.push({
+				type: "base", candidateId: projection.candidate_id,
+				objectKind: projection.object_kind, objectId: projection.object_id,
+				outcome: projection.outcome,
+			});
+			continue;
+		}
 		outcomes[projection.outcome] += 1;
 		if (projection.outcome === "ignored") {
 			if (projection.object_id != null || projection.object_kind != null
-				|| projection.candidate_status !== "ignored") projectionFailures += 1;
+				|| projection.candidate_status !== "ignored") {
+				projectionFailures += 1;
+				if (projectionDiagnostics.length < 20) projectionDiagnostics.push({
+					type: "ignored", candidateId: projection.candidate_id,
+					objectKind: projection.object_kind, objectId: projection.object_id,
+					outcome: projection.outcome,
+				});
+			}
 		} else if (!projection.object_id || projection.live_object_id !== projection.object_id
 			|| projection.object_user_id !== slot.memoryUserId
 			|| projection.object_project_id !== PROJECT.projectId
-			|| projection.candidate_status !== "promoted") projectionFailures += 1;
+			|| projection.candidate_status !== "promoted") {
+			projectionFailures += 1;
+			if (projectionDiagnostics.length < 20) projectionDiagnostics.push({
+				type: "live_object", candidateId: projection.candidate_id,
+				objectKind: projection.object_kind, objectId: projection.object_id,
+				outcome: projection.outcome,
+			});
+		}
 		else {
 			const key = `${projection.object_kind}:${projection.object_id}`;
 			const value = snippetsByObject.get(key)
-				?? { snippet: projection.object_source_snippet, quotes: [] };
+				?? { key, snippet: projection.object_source_snippet, quotes: [] };
 			value.quotes.push(candidate.evidence_quote);
 			snippetsByObject.set(key, value);
 		}
 	}
 	for (const value of snippetsByObject.values()) {
-		if (!value.quotes.includes(value.snippet)) projectionFailures += 1;
+		// A newly promoted atomic object carries its exact evidence quote. A
+		// reinforcement legitimately points at an existing legacy object, whose
+		// immutable provenance is the scrubbed source message (bounded to the
+		// legacy 240-character contract), not the later reinforcing quote.
+		if (!value.quotes.includes(value.snippet)
+			&& !value.quotes.some((quote) => atomicEvidenceSnippet(quote) === value.snippet)
+			&& !episodeProvenanceSnippets.has(value.snippet)) {
+			projectionFailures += 1;
+			if (projectionDiagnostics.length < 20) projectionDiagnostics.push({
+				type: "source_snippet", object: value.key,
+				snippetChars: String(value.snippet ?? "").length,
+				quoteChars: value.quotes.map((quote) => String(quote ?? "").length),
+			});
+		}
 	}
-	assert(projectionFailures === 0, `${sample.sampleId}: projection integrity failed`);
-	assert(jobs.length === packetIds.length && jobs.every((job) => TERMINAL.has(job.status)
-		&& job.status !== "failed" && job.project_id === PROJECT.projectId),
-	`${sample.sampleId}: job terminal/scope accounting failed`);
-	assert(extractionRuns.length > 0
-		&& extractionRuns.every((run) => run.status !== "failed"),
-	`${sample.sampleId}: extraction retry history invalid`);
-	const atomicReceipts = receipts.filter((receipt) => integer(receipt.atomic_enabled) === 1);
-	const projectionReceipts = receipts.filter((receipt) => integer(receipt.projection_enabled) === 1);
-	assert(atomicReceipts.reduce((sum, receipt) => sum + integer(receipt.atomic_stored), 0) === candidates.length,
+	assert(projectionFailures === 0,
+		`${sample.sampleId}: projection integrity failed ${JSON.stringify(projectionDiagnostics)}`);
+	const jobDiagnostics = {
+		packets: packetIds.length,
+		jobs: jobs.length,
+		statuses: Object.fromEntries([...new Set(jobs.map((job) => job.status))]
+			.map((status) => [status, jobs.filter((job) => job.status === status).length])),
+		types: Object.fromEntries([...new Set(jobs.map((job) => job.type))]
+			.map((type) => [type, jobs.filter((job) => job.type === type).length])),
+		badScope: jobs.filter((job) => job.project_id !== PROJECT.projectId).length,
+		missingPacketJobs: packetIds.filter((packetId) => !jobs.some((job) => job.source_packet_id === packetId)).length,
+		duplicatePacketJobs: packetIds.filter((packetId) => jobs.filter((job) => job.source_packet_id === packetId).length > 1).length,
+	};
+	const extractJobs = jobs.filter((job) => job.type === "extract");
+	const pass2Jobs = jobs.filter((job) => job.type === "pass2_rollup");
+	assert(extractJobs.length === packetIds.length
+		&& extractJobs.every((job) => job.status === "enriched" && job.project_id === PROJECT.projectId)
+		&& pass2Jobs.every((job) => ["completed", "skipped"].includes(job.status)
+			&& job.project_id === PROJECT.projectId)
+		&& extractJobs.length + pass2Jobs.length === jobs.length,
+	`${sample.sampleId}: job terminal/scope accounting failed ${JSON.stringify(jobDiagnostics)}`);
+	const { canonicalReceipts, retryHistory, receiptAccounting } = reconcileRetryAwareState({
+		sampleId: sample.sampleId,
+		packetIds,
+		expectedProjectId: PROJECT.projectId,
+		jobs,
+		extractionRuns,
+		receipts,
+		captureRuns: runs,
+		candidates,
+		projections,
+	});
+	assert(canonicalReceipts.reduce((sum, receipt) => sum + integer(receipt.atomic_stored), 0)
+		=== candidates.length,
 		`${sample.sampleId}: atomic receipt conservation failed`);
-	assert(projectionReceipts.reduce((sum, receipt) => sum + integer(receipt.projection_candidates), 0)
-		=== candidates.length, `${sample.sampleId}: projection receipt conservation failed`);
 	const counts = objects.reduce((out, row) => {
 		out[`${row.kind}s`] = (out[`${row.kind}s`] ?? 0) + 1;
 		return out;
@@ -466,6 +540,7 @@ async function collectSampleState(sample, slot, ingests) {
 		jobs,
 		extractionRuns,
 		receipts,
+		canonicalReceipts,
 		objects,
 		profiles,
 		fingerprintSha256: sha(JSON.stringify(fingerprintRows)),
@@ -484,7 +559,10 @@ async function collectSampleState(sample, slot, ingests) {
 			candidates: candidates.length,
 			projections: projections.length,
 			truncations: runs.reduce((sum, run) => sum + integer(run.truncated), 0),
-			extractionRetries: jobs.reduce((sum, job) => sum + Math.max(0, integer(job.attempts) - 1), 0),
+			extractionRetries: jobs.reduce((sum, job) => sum + Math.max(0, integer(job.attempts) - 1), 0)
+				+ retryHistory.repairGenerations,
+			retryHistory,
+			receiptAccounting,
 			outcomes,
 			counts: { episodes: episodes.length, candidates: candidates.length,
 				projections: projections.length, ...counts, profiles: profiles.length },
@@ -501,6 +579,58 @@ async function collectState(data, slots, ingests) {
 	assert(rows.reduce((sum, row) => sum + row.episodes.length, 0) === 5_882,
 		"state episode total changed");
 	return rows;
+}
+
+async function auditProductState() {
+	assert(!fs.existsSync(PRODUCT) && !fs.existsSync(SEAL),
+		"state audit is only valid before the product/reference boundary");
+	assert(readJsonl(ANSWER_LEDGER).length === 0, "state audit found answer rows");
+	const frozen = validateProductInputs();
+	const data = productInputs();
+	const slots = cohorts().control;
+	const ingests = readJsonl(INGEST_LEDGER);
+	const checked = assertIngestLedger(ingests, data);
+	assert(checked.seen.size === 272, "state audit requires all 272 accepted sessions");
+	const state = await collectState(data, slots, ingests);
+	const artifact = {
+		schema: "itsuki.v3-stage-e-state-audit/v1",
+		createdAt: new Date().toISOString(),
+		referenceBlind: true,
+		referenceFilesOpened: 0,
+		productInputSha256: frozen.productInputSha256,
+		sessions: ingests.length,
+		messages: state.reduce((sum, row) => sum + row.episodes.length, 0),
+		packets: state.reduce((sum, row) => sum + row.packetIds.length, 0),
+		candidates: state.reduce((sum, row) => sum + row.candidates.length, 0),
+		projections: state.reduce((sum, row) => sum + row.projections.length, 0),
+		captureRuns: state.reduce((sum, row) => sum + row.runs.length, 0),
+		retryHistory: state.reduce((out, row) => {
+			for (const [key, value] of Object.entries(row.integrity.retryHistory)) {
+				out[key] = (out[key] ?? 0) + integer(value);
+			}
+			return out;
+		}, {}),
+		receiptAccounting: state.reduce((out, row) => {
+			for (const [key, value] of Object.entries(row.integrity.receiptAccounting)) {
+				out[key] = (out[key] ?? 0) + integer(value);
+			}
+			return out;
+		}, {}),
+		stateFingerprintSha256: sha(JSON.stringify(state.map((row) => row.fingerprintSha256))),
+		samples: state.map((row) => ({
+			sampleId: row.sampleId,
+			packets: row.packetIds.length,
+			episodes: row.episodes.length,
+			candidates: row.candidates.length,
+			projections: row.projections.length,
+			captureRuns: row.runs.length,
+			retryHistory: row.integrity.retryHistory,
+			receiptAccounting: row.integrity.receiptAccounting,
+			fingerprintSha256: row.fingerprintSha256,
+		})),
+	};
+	writeJsonAtomic(STATE_AUDIT, artifact);
+	console.log(`STAGE E STATE AUDIT PASS packets=${artifact.packets} candidates=${artifact.candidates} repairs=${artifact.retryHistory.repairedPackets}`);
 }
 
 async function collectFingerprints(state) {
@@ -887,9 +1017,10 @@ async function main() {
 	}
 	requireBenchmarkLockFromEnv();
 	assert(process.env.BENCHMARK_LOCK_DIR === GLOBAL_LOCK, "wrong benchmark lock path");
+	if (command === "audit-state") return auditProductState();
 	if (command === "run") return runProduct();
 	if (command === "cleanup") return cleanupProduct();
-	throw new Error("usage: product.mjs <dry-run|run|cleanup>");
+	throw new Error("usage: product.mjs <dry-run|audit-state|run|cleanup>");
 }
 
 main().catch((error) => {

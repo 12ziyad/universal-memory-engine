@@ -22,6 +22,7 @@ import {
 	captureAtomicCandidates,
 } from "../src/pipeline/atomic_candidates.mjs";
 import { planExtractionChunks } from "../src/pipeline/chunking.js";
+import { runExtraction } from "../src/pipeline/extract.js";
 import { ingestMessages } from "../src/pipeline/ingest.js";
 import { writeSourceEpisodes } from "../src/pipeline/episodes.js";
 import { claimExtractionRun, settleMemoryJobs } from "../src/lib/db.js";
@@ -57,19 +58,95 @@ async function queueRows(stub) {
 	));
 }
 
-function testEnv(userId, { atomic = false } = {}) {
+function testEnv(userId, { atomic = false, projection = false } = {}) {
 	return {
 		...env,
 		ITSUKI_MEMORY_V3: "allowlist",
 		ITSUKI_MEMORY_V3_USERS: userId,
 		ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: atomic ? "allowlist" : "off",
 		ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: atomic ? userId : "",
-		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "off",
-		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS: "",
+		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: projection ? "allowlist" : "off",
+		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS: projection ? userId : "",
 		USE_VECTORS: "false",
 		ENABLE_PASS2: "false",
 	};
 }
+
+describe.sequential("post-commit extraction recovery accounting", () => {
+	it("reconstructs projection counters from the durable projection ledger", async () => {
+		const userId = `projection-recovery-${crypto.randomUUID()}`;
+		const sourcePacketId = `packet-${crypto.randomUUID()}`;
+		const projectId = "projection-recovery";
+		const runId = `run_projection_recovery_${crypto.randomUUID()}`;
+		const acceptedAt = Date.now();
+		const runtime = testEnv(userId, { atomic: true, projection: true });
+		const message = {
+			id: "m1",
+			role: "user",
+			content: "Northwind uses PostgreSQL for durable state.",
+			ts: acceptedAt,
+			source_time: { epoch_ms: acceptedAt, offset_minutes: 0, precision: "second" },
+		};
+		await writeSourceEpisodes(runtime, userId, {
+			sourcePacketId,
+			messages: [message],
+			projectId,
+			projectName: "Projection Recovery",
+			rules: RULES,
+			acceptedAt,
+			required: true,
+		});
+		const overrides = {
+			source: "ingest",
+			llmResponse: EMPTY_GRAPH,
+			edgeResponse: EMPTY_EDGES,
+			reflexionResponse: EMPTY_REFLEXION,
+			atomicLlmResponse: { atoms: [{
+				type: "decision",
+				entity: "Northwind",
+				entity_type: "project",
+				attribute: "database policy",
+				value: "PostgreSQL",
+				assertion: "Northwind uses PostgreSQL for durable state.",
+				source_message_id: "m1",
+				evidence_quote: "uses PostgreSQL for durable state",
+				cardinality: "single",
+				confidence: 0.99,
+			}] },
+			meta: {
+				source_packet_id: sourcePacketId,
+				idempotency_key: `projection-recovery:${sourcePacketId}`,
+				project_id: projectId,
+				project_name: "Projection Recovery",
+				scope_json: JSON.stringify({ project_id: projectId }),
+				accepted_at: acceptedAt,
+			},
+		};
+		const first = await runExtraction(runtime, userId, [message], [], overrides, { runId });
+		expect(first.outcome).toBe("wrote");
+		expect(first.receipt).toMatchObject({
+			atomic_projection_enabled: true,
+			atomic_projection_candidates: 1,
+		});
+		const durable = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_projections WHERE user_id=? AND extraction_run_id=?",
+		).bind(userId, runId).first();
+		expect(Number(durable.n)).toBe(1);
+
+		// Simulate a crash after the atomic graph/projection commit but before the
+		// caller durably publishes and links the receipt.
+		const recovered = await runExtraction(runtime, userId, [message], [], overrides, { runId });
+		expect(recovered.recovered).toBe(true);
+		expect(recovered.receipt).toMatchObject({
+			atomic_projection_enabled: true,
+			atomic_projection_outcome: "completed",
+			atomic_projection_candidates: 1,
+		});
+		expect(Number(recovered.receipt.atomic_projection_promoted)
+			+ Number(recovered.receipt.atomic_projection_reinforced)
+			+ Number(recovered.receipt.atomic_projection_ignored)).toBe(1);
+	});
+});
 
 function extractionOverrides(label) {
 	return {

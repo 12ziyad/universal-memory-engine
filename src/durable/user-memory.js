@@ -72,6 +72,11 @@ const MAX_REPAIR_GENERATION = 5;
 // 1.5 poison ceiling and 1.9 drain pacing.
 const MAX_ATTEMPTS = 3;
 const MAX_JOBS_PER_DRAIN = 3;
+// A meaningful no-write gets one deliberate second look when later activity
+// fires its settled rescue buffer. Persist this counter across held/queued
+// transitions: resetting it with `attempts` lets two contexts exchange rescue
+// buffers forever after their owning jobs are already terminal.
+const MAX_NO_WRITE_RESCUES = 1;
 
 // 1.2 lease: storage-backed concurrency guard. Long enough for one capped
 // extraction (multi-pass, slow model), short enough that a killed isolate
@@ -84,6 +89,17 @@ const BACKLOG_AGE_MS = 10 * 60 * 1000;
 const GLOBAL_SCOPE_KEY = "global";
 
 const backoffMs = (attempts) => Math.min(5000 * 2 ** Math.max(0, attempts - 1), 600_000);
+
+function noWriteRescueCount(value, rescuedFromNoWrite = false) {
+	const parsed = Number(value);
+	if (Number.isSafeInteger(parsed) && parsed >= 0) {
+		return Math.min(parsed, MAX_NO_WRITE_RESCUES);
+	}
+	// Entries/chunks created before the counter existed already consumed their
+	// first no-write settlement when this flag was set. Treat them as exhausted
+	// after their one queued reconsideration instead of reopening an old loop.
+	return rescuedFromNoWrite ? MAX_NO_WRITE_RESCUES : 0;
+}
 
 function unicodeLength(value) {
 	let length = 0;
@@ -1256,6 +1272,10 @@ export class UserMemory extends DurableObject {
 				? acceptState.contextSnapshot
 				: undefined;
 			const contextTrace = normalizeContextTrace(acceptState?.contextTrace);
+			const rescueCount = noWriteRescueCount(
+				acceptState?.noWriteRescueCount,
+				Boolean(acceptState?.rescuedFromNoWrite),
+			);
 			await txn.put(`q:${String(seq).padStart(10, "0")}-${suffix}`, {
 				kind: "extract",
 				messages: msgs.map(({ _settled, _job, _cls, _dedupe, _accept, ...message }) => message),
@@ -1266,7 +1286,10 @@ export class UserMemory extends DurableObject {
 				...(batchContextKey ? { contextKey: batchContextKey } : {}),
 				...(contextSnapshot ? { contextSnapshot } : {}),
 				...(contextTrace ? { contextTrace } : {}),
-				...(acceptState?.rescuedFromNoWrite ? { rescuedFromNoWrite: true } : {}),
+				...(rescueCount > 0 ? {
+					rescuedFromNoWrite: true,
+					noWriteRescueCount: rescueCount,
+				} : {}),
 				...(acceptState?.handoffMarkerKey
 					? { handoffMarkerKeys: [acceptState.handoffMarkerKey] }
 					: {}),
@@ -2277,6 +2300,21 @@ export class UserMemory extends DurableObject {
 		const contextKey = CONTEXT_KEY_RE.test(String(entry.contextKey ?? "")) ? entry.contextKey : null;
 		const markerKeys = await this.#terminalHandoffMarkerKeys(entry);
 		if (terminal.action === "rescue") {
+			const rescueCount = noWriteRescueCount(
+				entry.noWriteRescueCount,
+				Boolean(entry.rescuedFromNoWrite),
+			);
+			if (rescueCount >= MAX_NO_WRITE_RESCUES) {
+				// The original extraction and one deliberate reconsideration both
+				// produced no semantic write. The job is already terminal and the
+				// accepted source remains in its governed source packet/episode. End
+				// this semantic retry lineage instead of resetting attempts forever.
+				await this.ctx.storage.transaction(async (txn) => {
+					await txn.delete(key);
+					for (const markerKey of markerKeys) await txn.delete(markerKey);
+				});
+				return;
+			}
 			const rescueAcceptRef = `accept:v1:${await sha256Hex(`rescue\u0000${key}`)}`;
 			await this.ctx.blockConcurrencyWhile(async () => {
 				let chunk = (await this.ctx.storage.get("chunk")) ?? [];
@@ -2317,6 +2355,7 @@ export class UserMemory extends DurableObject {
 						...(normalizeContextTrace(entry.contextTrace) ? { contextTrace: normalizeContextTrace(entry.contextTrace) } : {}),
 						overrides: persistableOverrides(entry.overrides ?? {}),
 						rescuedFromNoWrite: true,
+						noWriteRescueCount: rescueCount + 1,
 					};
 					await txn.put("chunkAcceptState", acceptStates);
 					const jobIds = this.#extractJobIds(entry);

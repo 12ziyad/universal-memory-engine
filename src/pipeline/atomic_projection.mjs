@@ -200,6 +200,41 @@ export async function loadAtomicProjectionCandidates(env, {
 	return results ?? [];
 }
 
+/**
+ * Rebuild content-free projection counters after the graph commit won but the
+ * caller crashed before publishing its receipt. The append-only projection
+ * ledger is the authority; a zero-row result stays null so recovery never
+ * claims projection was enabled when no durable decision proves it.
+ */
+export async function atomicProjectionSummaryForExtractionRun(env, userId, extractionRunId) {
+	if (!env?.DB || typeof userId !== "string" || !userId
+		|| typeof extractionRunId !== "string" || !extractionRunId) return null;
+	const row = await env.DB.prepare(
+		`SELECT COUNT(*) AS candidates,
+			SUM(CASE WHEN outcome='promoted' THEN 1 ELSE 0 END) AS promoted,
+			SUM(CASE WHEN outcome='reinforced' THEN 1 ELSE 0 END) AS reinforced,
+			SUM(CASE WHEN outcome='ignored' THEN 1 ELSE 0 END) AS ignored,
+			SUM(CASE WHEN reason='same_source_coalesced' THEN 1 ELSE 0 END) AS coalesced
+		 FROM semantic_atom_projections
+		 WHERE user_id=? AND extraction_run_id=?`,
+	).bind(userId, extractionRunId).first();
+	const candidates = Number(row?.candidates ?? 0);
+	if (!Number.isSafeInteger(candidates) || candidates <= 0) return null;
+	const integer = (value) => {
+		const parsed = Number(value ?? 0);
+		return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+	};
+	return {
+		outcome: "completed",
+		candidates,
+		promoted: integer(row.promoted),
+		reinforced: integer(row.reinforced),
+		ignored: integer(row.ignored),
+		coalesced: integer(row.coalesced),
+		latencyMs: null,
+	};
+}
+
 function candidateIds(item) {
 	return Array.isArray(item?._atomic_candidate_ids)
 		? item._atomic_candidate_ids.map(String).filter(Boolean)

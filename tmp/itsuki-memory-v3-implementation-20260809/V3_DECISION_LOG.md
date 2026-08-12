@@ -1,5 +1,39 @@
 # V3 DECISION LOG
 
+## D-026 — bound semantic no-write rescue independently from transient retries
+
+**Decision.** Persist a no-write rescue generation across Durable Object
+held/queue transitions. Permit one deliberate reconsideration after the initial
+`meaningful_no_write`; if that reconsideration is also no-write, terminate the
+semantic retry lineage. Treat pre-counter `rescuedFromNoWrite` state as having
+consumed that generation.
+
+**Evidence.** Two project buffers exchanged places for 1,740 extraction runs
+after their jobs were terminal, adding 9,671 Qwen neurons. Ordinary attempts
+were bounded but reset on every re-enqueue. The repaired deterministic state
+machine uses exactly three calls for the two-project case and reaches zero
+queue state; complete Worker and cross-door gates pass. V3 source episodes—not
+unbounded stochastic retries—are the recoverability layer for allowed evidence
+that semantic promotion declines.
+
+**Consequence.** No inference or Stage E rebuild may resume until this HIGH is
+deployed and re-attacked. The erased sample alone will be rebuilt; the other
+nine frozen samples remain untouched.
+
+## D-025 — audit final state by durable run lineage, not receipt accumulation
+
+**Decision.** Canonical final accounting follows successful extraction-run
+receipt links and the append-only candidate/projection ledgers. Generation-
+authorized interrupted predecessors remain evidence but are never summed as
+new final output. Historical immutable receipt telemetry gaps are reported, not
+mistaken for missing durable memory.
+
+**Evidence.** D04 legitimately produced completed + empty + reclaimed atomic
+chunks; one post-commit crash left 392 durable candidates/projections but only
+372 projected candidates in immutable receipt telemetry. Retry-aware helper
+tests pass 4/4 and projection recovery now rebuilds response counters from D1.
+
+
 Every entry records the evidence that forced the decision, not a preference.
 
 ## D-025 - repair interrupted atomic suffixes from durable proof, never from terminal status alone

@@ -1,0 +1,448 @@
+{
+  "schema": "itsuki.v3-stage-e-v3-d04-production-reattack/v1",
+  "createdAt": "2026-08-11T23:24:02.035Z",
+  "deploymentId": "6d38a27a-972e-47f5-8bd6-9d7a6ac2df1d",
+  "workerVersion": "29bed9a0-78cb-44ee-a6b4-59cd4f8d7f3c",
+  "commit": "5b7ffec8fed8b2481340393b7615069ac9859306",
+  "referenceBlind": true,
+  "referenceFilesOpened": 0,
+  "productInputSha256": "e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd",
+  "burnBefore": {
+    "label": "StageE:V3-D04:before",
+    "at": "2026-08-11T23:23:25.531Z",
+    "spent": 2156475,
+    "ceiling": 3000000,
+    "remaining": 843525,
+    "stageStart": 1933582,
+    "stageSpent": 222893,
+    "stageRemaining": 277107,
+    "reservedForNextBlock": 30000,
+    "threshold": "50%_reviewed",
+    "calls": 97813,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9593,
+        "calls": 32166
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 115563,
+        "calls": 1410
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 569860,
+        "calls": 29436
+      }
+    }
+  },
+  "burnAfter": {
+    "label": "StageE:V3-D04:after",
+    "at": "2026-08-11T23:24:02.035Z",
+    "spent": 2156475,
+    "ceiling": 3000000,
+    "remaining": 843525,
+    "stageStart": 1933582,
+    "stageSpent": 222893,
+    "stageRemaining": 277107,
+    "reservedForNextBlock": 30000,
+    "threshold": "50%_reviewed",
+    "calls": 97813,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1213359,
+        "calls": 24058
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9593,
+        "calls": 32166
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 115563,
+        "calls": 1410
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 569860,
+        "calls": 29436
+      }
+    }
+  },
+  "neuronDeltaObserved": 0,
+  "repairs": [
+    {
+      "target": {
+        "sampleId": "conv-26",
+        "sessionIndex": 16,
+        "packetId": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+        "jobId": "job_0e7eea20-3437-475b-808b-f5897a99349d",
+        "originalCompletedStored": 11,
+        "expectedEpisodes": 20
+      },
+      "skippedAlreadyComplete": true,
+      "before": {
+        "complete": true,
+        "job": {
+          "id": "job_0e7eea20-3437-475b-808b-f5897a99349d",
+          "status": "enriched",
+          "attempts": 1,
+          "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+          "receipt_id": "receipt_extract_63369a5d1daa4c19641d7698da7f6cc6f1ba915d9d5059efe72222797400d56b",
+          "error": null,
+          "repair_generation": 1,
+          "remaining": 0,
+          "project_id": "v3-final-locomo",
+          "atomic_complete": 1,
+          "atomic_chunks": 3,
+          "atomic_stored": 20,
+          "projection_candidates": 20,
+          "projection_promoted": 9,
+          "projection_reinforced": 11,
+          "projection_ignored": 0
+        },
+        "extractionRuns": [
+          {
+            "id": "run_extract_47f2399a86453ab364fe8b6cfc42fc9f1e416b29269357e3",
+            "status": "failed",
+            "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+            "job_id": null,
+            "error": "inference_outcome_unknown: the extraction worker stopped before publishing a durable result",
+            "created_at": 1786481592040,
+            "updated_at": 1786482492522
+          },
+          {
+            "id": "run_extract_3674a5840cd517e0a491add26284b753c65b4dcc1d5c8d10",
+            "status": "wrote",
+            "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+            "job_id": "job_becbe690-b628-4c10-bdda-b69482d9d106",
+            "error": null,
+            "created_at": 1786490395849,
+            "updated_at": 1786490493781
+          }
+        ],
+        "atomicRuns": [
+          {
+            "id": "atomrun:v1:fb66c912b9fbab842169150cd483e8b8059b40c958065728858b9b60ef884c00",
+            "status": "completed",
+            "attempts": 1,
+            "replay_count": 1,
+            "stored_count": 11,
+            "error_code": null,
+            "candidate_rows": 11,
+            "projection_rows": 11
+          },
+          {
+            "id": "atomrun:v1:777743f261e7ba4a3f00503b8280c1f99ad0d73a495fd4b3b04303b83872aa48",
+            "status": "empty",
+            "attempts": 1,
+            "replay_count": 0,
+            "stored_count": 0,
+            "error_code": null,
+            "candidate_rows": 0,
+            "projection_rows": 0
+          },
+          {
+            "id": "atomrun:v1:d3b661b86797c591417f911b957e371f17ca9213a30bb1c8345871257f0ea9c0",
+            "status": "completed",
+            "attempts": 2,
+            "replay_count": 1,
+            "stored_count": 9,
+            "error_code": null,
+            "candidate_rows": 9,
+            "projection_rows": 9
+          }
+        ],
+        "counts": {
+          "episodes": 20,
+          "nonterminal_jobs": 0,
+          "candidates": 20,
+          "projections": 20
+        }
+      },
+      "after": {
+        "complete": true,
+        "job": {
+          "id": "job_0e7eea20-3437-475b-808b-f5897a99349d",
+          "status": "enriched",
+          "attempts": 1,
+          "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+          "receipt_id": "receipt_extract_63369a5d1daa4c19641d7698da7f6cc6f1ba915d9d5059efe72222797400d56b",
+          "error": null,
+          "repair_generation": 1,
+          "remaining": 0,
+          "project_id": "v3-final-locomo",
+          "atomic_complete": 1,
+          "atomic_chunks": 3,
+          "atomic_stored": 20,
+          "projection_candidates": 20,
+          "projection_promoted": 9,
+          "projection_reinforced": 11,
+          "projection_ignored": 0
+        },
+        "extractionRuns": [
+          {
+            "id": "run_extract_47f2399a86453ab364fe8b6cfc42fc9f1e416b29269357e3",
+            "status": "failed",
+            "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+            "job_id": null,
+            "error": "inference_outcome_unknown: the extraction worker stopped before publishing a durable result",
+            "created_at": 1786481592040,
+            "updated_at": 1786482492522
+          },
+          {
+            "id": "run_extract_3674a5840cd517e0a491add26284b753c65b4dcc1d5c8d10",
+            "status": "wrote",
+            "source_packet_id": "src_3bd5ea47-675f-418e-9e93-95f116ea9eb8",
+            "job_id": "job_becbe690-b628-4c10-bdda-b69482d9d106",
+            "error": null,
+            "created_at": 1786490395849,
+            "updated_at": 1786490493781
+          }
+        ],
+        "atomicRuns": [
+          {
+            "id": "atomrun:v1:fb66c912b9fbab842169150cd483e8b8059b40c958065728858b9b60ef884c00",
+            "status": "completed",
+            "attempts": 1,
+            "replay_count": 1,
+            "stored_count": 11,
+            "error_code": null,
+            "candidate_rows": 11,
+            "projection_rows": 11
+          },
+          {
+            "id": "atomrun:v1:777743f261e7ba4a3f00503b8280c1f99ad0d73a495fd4b3b04303b83872aa48",
+            "status": "empty",
+            "attempts": 1,
+            "replay_count": 0,
+            "stored_count": 0,
+            "error_code": null,
+            "candidate_rows": 0,
+            "projection_rows": 0
+          },
+          {
+            "id": "atomrun:v1:d3b661b86797c591417f911b957e371f17ca9213a30bb1c8345871257f0ea9c0",
+            "status": "completed",
+            "attempts": 2,
+            "replay_count": 1,
+            "stored_count": 9,
+            "error_code": null,
+            "candidate_rows": 9,
+            "projection_rows": 9
+          }
+        ],
+        "counts": {
+          "episodes": 20,
+          "nonterminal_jobs": 0,
+          "candidates": 20,
+          "projections": 20
+        }
+      }
+    },
+    {
+      "target": {
+        "sampleId": "conv-41",
+        "sessionIndex": 17,
+        "packetId": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+        "jobId": "job_253cc9ac-88ec-424c-96f5-33d90e86d956",
+        "originalCompletedStored": 8,
+        "expectedEpisodes": 16
+      },
+      "skippedAlreadyComplete": false,
+      "response": {
+        "status": 200,
+        "elapsedMs": 1537,
+        "fired": true,
+        "held": 16
+      },
+      "ready": {
+        "jobFound": true,
+        "jobId": "job_253cc9ac-88ec-424c-96f5-33d90e86d956",
+        "status": "enriched",
+        "attempts": 1,
+        "cancelledByDelete": false,
+        "error": null,
+        "counts": {
+          "nodes": 2,
+          "edges": 0,
+          "slices": 13,
+          "events": 0,
+          "pages": 0
+        },
+        "projectId": "v3-final-locomo",
+        "waitedMs": 27645
+      },
+      "before": {
+        "complete": false,
+        "job": {
+          "id": "job_253cc9ac-88ec-424c-96f5-33d90e86d956",
+          "status": "enriched",
+          "attempts": 0,
+          "source_packet_id": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+          "receipt_id": "receipt_extract_ba57e89ba2866c185dfea65954690d2ff4cf5af69c0bdb745049a932bed50523",
+          "error": null,
+          "repair_generation": null,
+          "remaining": 0,
+          "project_id": "v3-final-locomo",
+          "atomic_complete": 0,
+          "atomic_chunks": 2,
+          "atomic_stored": 8,
+          "projection_candidates": null,
+          "projection_promoted": null,
+          "projection_reinforced": null,
+          "projection_ignored": null
+        },
+        "extractionRuns": [
+          {
+            "id": "run_extract_90149bb2e479ece2414ea3fb131f703f009df7b32df4a12e",
+            "status": "failed",
+            "source_packet_id": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+            "job_id": null,
+            "error": "inference_outcome_unknown: the extraction worker stopped before publishing a durable result",
+            "created_at": 1786481618998,
+            "updated_at": 1786482519302
+          }
+        ],
+        "atomicRuns": [
+          {
+            "id": "atomrun:v1:72c0a371b7853eedaa71d490573957a033ee1bab10a9e980e5434714b6eac5b2",
+            "status": "completed",
+            "attempts": 1,
+            "replay_count": 0,
+            "stored_count": 8,
+            "error_code": null,
+            "candidate_rows": 8,
+            "projection_rows": 0
+          },
+          {
+            "id": "atomrun:v1:45d4d7681f13d08d6fd7ad1f76a95efd6ffa1269c6e827c259443c0e2c943a96",
+            "status": "running",
+            "attempts": 1,
+            "replay_count": 0,
+            "stored_count": 0,
+            "error_code": null,
+            "candidate_rows": 0,
+            "projection_rows": 0
+          }
+        ],
+        "counts": {
+          "episodes": 16,
+          "nonterminal_jobs": 0,
+          "candidates": 8,
+          "projections": 0
+        }
+      },
+      "after": {
+        "complete": true,
+        "job": {
+          "id": "job_253cc9ac-88ec-424c-96f5-33d90e86d956",
+          "status": "enriched",
+          "attempts": 1,
+          "source_packet_id": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+          "receipt_id": "receipt_extract_897c324d0e1e13356bef2b9b60735736d3dd02c999e3dd224d6ed82244c3f6af",
+          "error": null,
+          "repair_generation": 1,
+          "remaining": 0,
+          "project_id": "v3-final-locomo",
+          "atomic_complete": 1,
+          "atomic_chunks": 2,
+          "atomic_stored": 10,
+          "projection_candidates": 10,
+          "projection_promoted": 10,
+          "projection_reinforced": 0,
+          "projection_ignored": 0
+        },
+        "extractionRuns": [
+          {
+            "id": "run_extract_90149bb2e479ece2414ea3fb131f703f009df7b32df4a12e",
+            "status": "failed",
+            "source_packet_id": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+            "job_id": null,
+            "error": "inference_outcome_unknown: the extraction worker stopped before publishing a durable result",
+            "created_at": 1786481618998,
+            "updated_at": 1786482519302
+          },
+          {
+            "id": "run_extract_528ae27877dcd5d67ce540ac43cdd29264aed1169adbfbe3",
+            "status": "wrote",
+            "source_packet_id": "src_8e206a03-1996-4f5e-aba8-69a159a15150",
+            "job_id": "job_aa178726-f492-49eb-b965-0489b1ca85d7",
+            "error": null,
+            "created_at": 1786490611922,
+            "updated_at": 1786490637928
+          }
+        ],
+        "atomicRuns": [
+          {
+            "id": "atomrun:v1:72c0a371b7853eedaa71d490573957a033ee1bab10a9e980e5434714b6eac5b2",
+            "status": "completed",
+            "attempts": 1,
+            "replay_count": 1,
+            "stored_count": 8,
+            "error_code": null,
+            "candidate_rows": 8,
+            "projection_rows": 8
+          },
+          {
+            "id": "atomrun:v1:45d4d7681f13d08d6fd7ad1f76a95efd6ffa1269c6e827c259443c0e2c943a96",
+            "status": "completed",
+            "attempts": 2,
+            "replay_count": 1,
+            "stored_count": 2,
+            "error_code": null,
+            "candidate_rows": 2,
+            "projection_rows": 2
+          }
+        ],
+        "counts": {
+          "episodes": 16,
+          "nonterminal_jobs": 0,
+          "candidates": 10,
+          "projections": 10
+        }
+      }
+    }
+  ],
+  "verdict": "PASS"
+}

@@ -58,6 +58,7 @@ import {
 	captureAtomicCandidates,
 } from "./atomic_candidates.mjs";
 import {
+	atomicProjectionSummaryForExtractionRun,
 	buildAtomicProjection,
 	deriveAtomicProjectionDecisions,
 	loadAtomicProjectionCandidates,
@@ -100,6 +101,12 @@ function attachAtomicProjectionMeta(meta, result, enabled = false) {
 	meta.atomic_projection_latency_ms = Number.isFinite(Number(result.latencyMs))
 		? Number(result.latencyMs)
 		: null;
+}
+
+function atomicProjectionFieldsForRecovery(result) {
+	const fields = {};
+	attachAtomicProjectionMeta(fields, result, true);
+	return fields;
 }
 
 function jsonList(value) {
@@ -191,11 +198,23 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 
 	const atomicEnabled = memoryV3AtomicCaptureEnabled(env, userId);
 	let atomicSummary = null;
+	let atomicProjectionSummary = null;
 	if (atomicEnabled && current?.id) {
 		try {
 			atomicSummary = await atomicCaptureSummaryForExtractionRun(env, userId, current.id);
 		} catch (error) {
 			console.warn("atomic capture recovery summary failed:", error?.message ?? error);
+		}
+	}
+	if (current?.id) {
+		try {
+			atomicProjectionSummary = await atomicProjectionSummaryForExtractionRun(
+				env,
+				userId,
+				current.id,
+			);
+		} catch (error) {
+			console.warn("atomic projection recovery summary failed:", error?.message ?? error);
 		}
 	}
 	const recoveredMeta = {
@@ -209,18 +228,35 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		received: (chunk ?? []).filter((message) => (message?.role ?? "user") === "user").length,
 	};
 	attachAtomicCaptureMeta(recoveredMeta, atomicSummary, atomicEnabled);
+	if (atomicProjectionSummary) {
+		attachAtomicProjectionMeta(recoveredMeta, atomicProjectionSummary, true);
+	}
 	const plan = planFromExtractionRun(current);
 	if (current.status === "wrote") {
-		const receipt = await receiptFromExtractionRun(env, userId, current)
+		let receipt = await receiptFromExtractionRun(env, userId, current)
 			?? buildReceipt("wrote", plan, recoveredMeta);
+		if (atomicProjectionSummary
+			&& Number(receipt.atomic_projection_candidates ?? 0) !== atomicProjectionSummary.candidates) {
+			receipt = {
+				...receipt,
+				...atomicProjectionFieldsForRecovery(atomicProjectionSummary),
+			};
+		}
 		if (current.receipt_id) receipt.id = current.receipt_id;
 		receipt.created_at = Number(current.created_at ?? Date.now());
 		receipt.recovered_from_extraction_run = true;
 		return { outcome: "wrote", plan, receipt, recovered: true };
 	}
 	if (current.status === "skipped") {
-		const receipt = await receiptFromExtractionRun(env, userId, current)
+		let receipt = await receiptFromExtractionRun(env, userId, current)
 			?? buildReceipt("meaningful_no_write", plan, recoveredMeta);
+		if (atomicProjectionSummary
+			&& Number(receipt.atomic_projection_candidates ?? 0) !== atomicProjectionSummary.candidates) {
+			receipt = {
+				...receipt,
+				...atomicProjectionFieldsForRecovery(atomicProjectionSummary),
+			};
+		}
 		if (current.receipt_id) receipt.id = current.receipt_id;
 		receipt.created_at = Number(current.created_at ?? Date.now());
 		receipt.recovered_from_extraction_run = true;

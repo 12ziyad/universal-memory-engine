@@ -144,4 +144,61 @@ describe("UserMemory project-scope boundaries", () => {
 
 		await stub.resetAll();
 	}, 30_000);
+
+	it("does not ping-pong settled rescue buffers across project switches", async () => {
+		const userId = `project-rescue-ping-pong-${crypto.randomUUID()}`;
+		const stub = stubFor(userId);
+		const noWrite = {
+			llmResponse: { objects: [], notes: "nothing durable yet" },
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		};
+
+		await runInDurableObject(stub, async (instance, state) => {
+			await instance.addMessages(userId, [message(
+				"alpha-rescue-loop",
+				"Alpha has an early architecture thought that needs more context.",
+			)], { scopeKey: PROJECT_A, flush: true, overrides: noWrite });
+			await instance.drain({ userId, maxJobs: 1, ignoreBackoff: true, inlineOverrides: noWrite });
+			const alphaChunk = await state.storage.get("chunk");
+			expect(alphaChunk?.[0]?._settled).toBe(true);
+			const acceptStates = await state.storage.get("chunkAcceptState");
+			expect(acceptStates[alphaChunk[0]._accept]).toMatchObject({
+				rescuedFromNoWrite: true,
+				noWriteRescueCount: 1,
+			});
+			// Upgrade compatibility: pre-fix settled rescue chunks have the flag
+			// but not the persisted generation. They must inherit the exhausted
+			// generation instead of reopening the former infinite lineage.
+			delete acceptStates[alphaChunk[0]._accept].noWriteRescueCount;
+			await state.storage.put("chunkAcceptState", acceptStates);
+
+			await instance.addMessages(userId, [message(
+				"beta-rescue-loop",
+				"Beta has another early architecture thought that needs more context.",
+			)], { scopeKey: PROJECT_B, flush: true, overrides: noWrite });
+			const queuedBeforeDrain = await state.storage.list({ prefix: "q:" });
+			const alphaReconsideration = [...queuedBeforeDrain.values()].find(
+				(entry) => entry.messages?.[0]?.id === "alpha-rescue-loop",
+			);
+			expect(alphaReconsideration).toMatchObject({
+				rescuedFromNoWrite: true,
+				noWriteRescueCount: 1,
+			});
+			for (let index = 0; index < 6; index++) {
+				await instance.drain({ userId, maxJobs: 1, ignoreBackoff: true, inlineOverrides: noWrite });
+			}
+
+			const queued = await state.storage.list({ prefix: "q:" });
+			expect([...queued.values()].filter((entry) => entry.kind === "extract")).toHaveLength(0);
+			const chunk = (await state.storage.get("chunk")) ?? [];
+			expect(chunk.every((item) => item._settled === true)).toBe(true);
+		});
+
+		const runs = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM extraction_runs WHERE user_id=?",
+		).bind(userId).first();
+		expect(Number(runs.n)).toBe(3);
+		await stub.resetAll();
+	}, 30_000);
 });

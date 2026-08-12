@@ -88,9 +88,9 @@
     "requested_ceiling_rationale": "The original 1,500,000-neuron ceiling was owner-authorized on 2026-08-09. After the invalid concurrent reranking attempt consumed budget without producing evidence, the owner explicitly raised the hard campaign ceiling to 3,000,000 neurons on 2026-08-10 for the sequential frozen-subset rerun and later decisive V3 validation."
   },
   "spend": {
-    "inference_calls_made_this_campaign": 96212,
-    "neurons_consumed_this_campaign": 2142168,
-    "estimated_usd_at_published_rate": 23.56,
+    "inference_calls_made_this_campaign": 99202,
+    "neurons_consumed_this_campaign": 2167465,
+    "estimated_usd_at_published_rate": 23.84,
     "third_party_paid_apis_called": "none"
   },
   "entries": [
@@ -371,6 +371,42 @@
       "call_increment": 9507,
       "gate": "PAUSED - V3-D04 HIGH repair fully gated; production reattack required before answer/judge inference",
       "verified_at": "2026-08-12T04:16:00+05:30"
+    },
+    {
+      "phase": "Final Stage E V3-D04 deployment/reattack and settled meter boundary",
+      "dataset": "two exact frozen interrupted packets; reference-blind; zero answers/judges/scores",
+      "models": [
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/baai/bge-base-en-v1.5"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 2142168,
+      "settled_neurons_before_v3_d15": 2157792,
+      "increment_including_delayed_stage_e_metering": 15624,
+      "stage_e_spent_at_boundary": 224210,
+      "gate": "KEEP - V3-D04 production reattack PASS; exact 20/20 and 10/10 candidate/projection conservation; zero nonterminal state",
+      "verified_at": "2026-08-12"
+    },
+    {
+      "phase": "Final Stage E V3-D15 runaway rescue containment",
+      "dataset": "one exact synthetic frozen conv-43 account; reference-blind; tenant erased; zero answers/judges/scores",
+      "models": [
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/baai/bge-base-en-v1.5"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 2157792,
+      "campaign_neurons_after": 2167465,
+      "increment": 9673,
+      "runaway_qwen_neurons": 9671,
+      "cleanup_embedding_neurons": 2,
+      "runaway_qwen_calls_approx": 916,
+      "estimated_increment_usd": 0.11,
+      "stage_e_spent_after": 233883,
+      "stage_e_remaining": 266117,
+      "gate": "PAUSED - V3-D15 HIGH contained; inference prohibited until deploy/production reattack and exact conv-43 rebuild",
+      "verified_at": "2026-08-12"
     }
   ],
   "ceiling_revisions": [

@@ -1,5 +1,44 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 Stage E contained on V3-D15 HIGH / local repair fully gated
+
+- V3-D04 HIGH is now **CLOSED** at commit/origin `5b7ffec8fed8b2481340393b7615069ac9859306`,
+  Worker `29bed9a0-78cb-44ee-a6b4-59cd4f8d7f3c`, deployment
+  `6d38a27a-972e-47f5-8bd6-9d7a6ac2df1d`. Its reference-blind production
+  reattack proves exact 20/20 and 10/10 candidate/projection conservation with
+  zero nonterminal work.
+- A subsequent reference-blind state audit exposed **V3-D15 HIGH**: settled
+  `meaningful_no_write` rescue buffers from different projects could re-enqueue
+  each other forever while resetting attempts. Synthetic `conv-43` reached
+  1,740 extraction runs and added 9,671 Qwen neurons before containment.
+- The exact affected synthetic tenant was erased through the confirmed product
+  deletion contract: 1,740 runs, 100 nodes, 129 slices, 38 events, 8 edges and
+  20 candidates deleted; 56 packet fences minimized; final export/D1/jobs/live
+  state are zero. The other nine frozen tenants were not mutated.
+- The repair persists a no-write rescue generation across held/queue state,
+  permits one deliberate second chance, then terminates the lineage. Pre-fix
+  flag-only state is interpreted as already at generation one. Failing-first
+  3/4 becomes 4/4 with exactly three extraction runs and zero queued entries.
+- V3-D14 MEDIUM also repairs post-commit projection telemetry recovery from the
+  append-only projection ledger. One immutable historical receipt remains 20
+  below durable D1, but 392 candidates and 392 projections are exact; no memory
+  was lost.
+- Gates: adjacent 50/50; state-accounting helper 4/4; Worker **112 files / 1,324
+  pass**; unit/cross-door **539 pass + one intentional skip**; npm audit zero;
+  diff check and Wrangler 4.120.0 dry deploy pass. No migration is required.
+- Live burn is **2,167,465 / 3,000,000 (72.2%)**, approximately $23.84. Stage E
+  has spent 233,883 / 500,000, leaving 266,117. Inference is paused. There are
+  zero answers, references opened, judge rows or scores; no benchmark lock or
+  process is active.
+- Repo/origin and deployed production still equal `5b7ffec8...` /
+  `29bed9a0...` before this repair commit. Owner `AGENTS.md` remains unrelated
+  and must not be staged.
+- Exact next action: commit/push the D14/D15 repair and retry-aware audit,
+  deploy with flags unchanged, reattack bounded rescue behavior, then rebuild
+  only erased `conv-43` under a documented post-erasure idempotency namespace.
+  Run the complete reference-blind state audit before any answer/judge work.
+
+
 ## 2026-08-12 Stage E paused on V3-D04 HIGH / repair fully gated / production reattack next
 
 - The frozen Stage E write phase is complete: **272/272 sessions**, **5,882
