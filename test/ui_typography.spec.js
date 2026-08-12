@@ -20,10 +20,11 @@ describe("app type scale", () => {
 		for (const file of ["geist-400.woff2", "geist-600.woff2", "geist-mono-400.woff2"]) {
 			expect(css).toContain(`src: url("/assets/${file}") format("woff2")`);
 		}
-		expect(css).toContain('--font-ui: "Geist", "Fustat", "Inter"');
+		expect(css).toContain('--font-ui: "Geist", "Inter"');
+		expect(css).toContain('--font-ui: "Fustat", "Geist", "Inter"');
 		expect(css).toContain('--font-mono: "Geist Mono", "JetBrains Mono"');
 		// The app's primary Latin subset is preloaded; body text is the first thing anyone reads.
-		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2"');
+		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2"');
 		// The privacy promise on the landing page depends on this staying true.
 		// No third-party loads of any kind — fonts OR scripts. A CDN request
 		// sends every visitor's IP off-origin, which the landing page promises

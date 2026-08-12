@@ -6,7 +6,7 @@
 <title>Itsuki — structured memory for AI applications</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
-<link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
+<link rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2" crossorigin />
 <script src="/assets/theme-bootstrap.js"></script>
 <!-- Self-hosted (v9.1.9, MIT). A CDN copy would send every visitor's IP to a
      third party — the same reason the fonts live in /assets/. -->
@@ -111,7 +111,7 @@
 			U+2022, U+2026, U+2039-203A, U+20AC, U+2122, U+2212;
 	}
 	:root {
-		--font-ui: "Geist", "Fustat", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--font-ui: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		--font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
@@ -123,7 +123,7 @@
 	/* The signed-in product is light: calm, high-contrast, closer to a tool than
 	   a console. Only the app shell flips — the landing page keeps its own art. */
 	body.app-mode {
-		--font-ui: "Geist", "Fustat", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--font-ui: "Fustat", "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		--bg: #f3f4f6; --panel: #fbfbfc; --panel2: #eef0f3; --panel3: #f7f7f9;
 		--input-bg: #ffffff; --border: #e0e2e7; --border2: #cdd1d8;
 		/* Three text levels, not two: primary (near-black) for headings, secondary
@@ -165,7 +165,7 @@
 
 	/* ---- app type scale ----------------------------------------------------
 	   Fustat gives the product the compact, friendly rhythm used by the reference
-	   UI: 600 for headings, 400 for body, 500 for tabs. It is scoped to the app,
+	   UI: 600 for headings and active controls, 400 for body and tabs. It is scoped to the app,
 	   leaving the established Geist marketing art untouched.
 	   ------------------------------------------------------------------------ */
 	body.app-mode { font-size: 14px; line-height: 1.55; }
