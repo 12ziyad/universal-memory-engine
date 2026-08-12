@@ -6,7 +6,8 @@
 <title>Itsuki — structured memory for AI applications</title>
 <link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
-<link rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2" crossorigin />
+<link rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2" crossorigin />
+<script src="/assets/theme-bootstrap.js"></script>
 <!-- Self-hosted (v9.1.9, MIT). A CDN copy would send every visitor's IP to a
      third party — the same reason the fonts live in /assets/. -->
 <script src="/assets/vis-network.min.js"></script>
@@ -110,29 +111,51 @@
 			U+2022, U+2026, U+2039-203A, U+20AC, U+2122, U+2212;
 	}
 	:root {
-		--font-ui: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--font-ui: "Geist", "Fustat", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		--font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 		/* Marketing shell stays dark (the hero art is built for it). */
 		--bg: #0d1117; --panel: #161b22; --panel2: #1c2330; --panel3: #21283280;
 		--border: #2b333f; --border2: #3a4452;
 		--text: #e6edf3; --muted: #8b949e; --faint: #6e7681; --accent: #58a6ff;
 		--green: #3fb950; --amber: #d29922; --red: #f85149; --purple: #bc8cff;
+		--on-accent: #04121f; --focus-ring: rgba(88,166,255,.55);
 	}
 	/* The signed-in product is light: calm, high-contrast, closer to a tool than
 	   a console. Only the app shell flips — the landing page keeps its own art. */
 	body.app-mode {
-		--font-ui: "Fustat", "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7; --panel3: #f8fafc;
-		--border: #e4e7ec; --border2: #d0d5dd;
+		--font-ui: "Geist", "Fustat", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+		--bg: #f3f4f6; --panel: #fbfbfc; --panel2: #eef0f3; --panel3: #f7f7f9;
+		--input-bg: #ffffff; --border: #e0e2e7; --border2: #cdd1d8;
 		/* Three text levels, not two: primary (near-black) for headings, secondary
 		   for body prose, muted for hints and footnotes. Flat UI is usually two. */
-		--text: #101828; --muted: #667085; --faint: #98a2b3; --accent: #4f46b8;
-		--green: #12b76a; --amber: #dc6803; --red: #d92d20; --purple: #7a5af8;
+		--text: #17191f; --muted: #5f6672; --faint: #8a909b; --accent: #5b4fcf;
+		--accent-hover: #4b40bd; --on-accent: #ffffff; --focus-ring: rgba(91,79,207,.38);
+		--green: #067647; --amber: #b54708; --red: #b42318; --purple: #6941c6;
+		--success-bg: #ecfdf3; --warning-bg: #fffaeb; --danger-bg: #fef3f2;
+		--success-border: #abefc6; --warning-border: #fedf89; --danger-border: #fecdca;
+		--overlay: rgba(17,24,39,.52);
+		--shadow-sm: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.04);
+		--shadow-md: 0 10px 30px rgba(16,24,40,.10);
+		--shadow-lg: 0 24px 72px rgba(16,24,40,.18);
 		color-scheme: light;
+	}
+	html[data-theme="dark"] body.app-mode {
+		--bg: #111216; --panel: #17181d; --panel2: #1e2026; --panel3: #22242a;
+		--input-bg: #1b1d22; --border: #2a2d34; --border2: #3a3e48;
+		--text: #f3f4f6; --muted: #a7adb8; --faint: #777e8a; --accent: #8b7cf6;
+		--accent-hover: #a69af8; --on-accent: #ffffff; --focus-ring: rgba(139,124,246,.48);
+		--green: #6ce9a6; --amber: #fec84b; --red: #fda29b; --purple: #b692f6;
+		--success-bg: #102a20; --warning-bg: #30230f; --danger-bg: #321714;
+		--success-border: #157f4c; --warning-border: #8a5d13; --danger-border: #a63a32;
+		--overlay: rgba(0,0,0,.72);
+		--shadow-sm: 0 1px 2px rgba(0,0,0,.38), 0 1px 3px rgba(0,0,0,.24);
+		--shadow-md: 0 12px 34px rgba(0,0,0,.36);
+		--shadow-lg: 0 28px 84px rgba(0,0,0,.56);
+		color-scheme: dark;
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; }
-	body { margin: 0; font: 13.5px/1.7 var(--font-ui);
+	body { margin: 0; font: 14px/1.65 var(--font-ui);
 		-webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 		/* Both UI faces ship real requested weights; never synthesize a fake bold. */
 		font-synthesis-weight: none;
@@ -145,33 +168,37 @@
 	   UI: 600 for headings, 400 for body, 500 for tabs. It is scoped to the app,
 	   leaving the established Geist marketing art untouched.
 	   ------------------------------------------------------------------------ */
-	body.app-mode { font-size: 13px; line-height: 1.5; }
-	body.app-mode .page-title { font-size: 24px; font-weight: 600; letter-spacing: 0;
-		line-height: 1.2; margin: 0 0 5px; color: var(--text); }
-	body.app-mode .page-sub { font-size: 13px; font-weight: 400; letter-spacing: 0;
-		line-height: 1.5; color: var(--muted); margin: 0; max-width: 640px; }
+	body.app-mode { font-size: 14px; line-height: 1.55; }
+	body.app-mode .page-title { font-size: 28px; font-weight: 600; letter-spacing: -.025em;
+		line-height: 1.18; margin: 0 0 6px; color: var(--text); }
+	body.app-mode .page-sub { font-size: 14px; font-weight: 400; letter-spacing: -.005em;
+		line-height: 1.55; color: var(--muted); margin: 0; max-width: 640px; }
 	body.app-mode .page-head { margin-bottom: 24px; }
 	body.app-mode h1 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 	body.app-mode .box h3, body.app-mode .action-box h3, body.app-mode .detail h2,
 	body.app-mode .card .title, body.app-mode .section-h {
 		font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
 	body.app-mode .card .summary, body.app-mode .method-card .mc-text > span {
-		font-size: 13px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
+		font-size: 13.5px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
 	body.app-mode .method-card b { font-size: 15px; font-weight: 600; letter-spacing: 0; }
 	body.app-mode .step-title { font-size: 14px; font-weight: 600; letter-spacing: 0; }
 	body.app-mode .step-desc, body.app-mode .help, body.app-mode .kv, body.app-mode .empty {
-		font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1.5; max-width: 680px; }
+		font-size: 13.5px; font-weight: 400; letter-spacing: 0; line-height: 1.55; max-width: 680px; }
 	body.app-mode .step-note, body.app-mode .install-foot, body.app-mode .hint,
 	body.app-mode .install-hint, body.app-mode .card .mini-line, body.app-mode .card .cat {
-		font-size: 12px; font-weight: 400; letter-spacing: 0; line-height: 1.6; color: var(--faint); }
+		font-size: 12.5px; font-weight: 400; letter-spacing: 0; line-height: 1.6; color: var(--faint); }
 	body.app-mode pre, body.app-mode code, body.app-mode .install-code pre,
 	body.app-mode .pg-context, body.app-mode .mcp-url, body.app-mode .key-mono {
 		font-family: var(--font-mono); font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1.5; }
 	body.app-mode .term-tab, body.app-mode .tab {
-		font-size: 13px; font-weight: 500; letter-spacing: .01em; }
+		font-size: 13.5px; font-weight: 400; letter-spacing: .01em; }
 	body.app-mode .tab.active { font-weight: 600; }
 	body.app-mode th { font-size: 12px; font-weight: 600; letter-spacing: .04em; }
-	body.app-mode td { font-size: 13px; }
+	body.app-mode td { font-size: 13.5px; }
+	body.app-mode input, body.app-mode select, body.app-mode textarea,
+	body.app-mode button { font-family: var(--font-ui); }
+	::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+	:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 	/* ---- product shell ---- */
 	body.public-mode header, body.public-mode main, body.public-mode #banner,
@@ -604,26 +631,47 @@
 	.pg-result.err { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
 	.pg-context { margin: 0; padding: 14px; background: var(--panel2); border-radius: 10px; white-space: pre-wrap;
 		font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow-x: auto; max-height: 260px; overflow-y: auto; }
-	.onboard-card { border-color: rgba(132,233,255,.35); }
+	.onboard-card { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
 	.onboard-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 	.onboard-step:last-of-type { border-bottom: 0; }
-	.onboard-step > b { flex: 0 0 26px; height: 26px; border-radius: 50%; background: rgba(132,233,255,.14); color: #84e9ff; display: inline-flex; align-items: center; justify-content: center; }
+	.onboard-step > b { flex: 0 0 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 13%, var(--panel)); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 	.onboard-step > div { flex: 1; min-width: 180px; }
 	.onboard-step button { flex: 0 0 auto; }
 	.action-box textarea { width: 100%; min-height: 120px; resize: vertical; background: var(--panel2); border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 9px; }
 	.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--panel2); }
 	.token-row.revoked { opacity: .78; }
 	.token-row .token-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-	.token-secret { border: 1px solid rgba(255,198,91,.35); background: rgba(255,198,91,.08); color: #ffe4a3; border-radius: 8px; padding: 10px; margin: 10px 0; word-break: break-all; }
+	.token-secret { border: 1px solid var(--warning-border); background: var(--warning-bg); color: var(--amber); border-radius: 8px; padding: 10px; margin: 10px 0; word-break: break-all; }
 	.secret-toolbar, .section-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 	.connect-section { border-left: 3px solid var(--accent); }
 	.connect-section.api { border-left-color: var(--green); }
 	.settings-section { min-height: 148px; }
+	.theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+	.theme-choice { min-width: 0; min-height: 86px; display: flex; flex-direction: column; align-items: flex-start;
+		justify-content: space-between; gap: 10px; text-align: left; color: var(--text); background: var(--panel2);
+		border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-weight: 400; }
+	.theme-choice:hover { border-color: var(--border2); background: var(--panel3); filter: none; }
+	.theme-choice[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent); }
+	.theme-choice b { color: var(--text); font-size: 13px; font-weight: 600; }
+	.theme-preview { width: 100%; height: 30px; overflow: hidden; display: grid; grid-template-columns: 32% 1fr;
+		border: 1px solid var(--border2); border-radius: 6px; background: var(--panel); }
+	.theme-preview::before { content: ""; border-right: 1px solid var(--border2); background: var(--panel2); }
+	.theme-preview::after { content: ""; width: 48%; height: 7px; align-self: center; justify-self: center;
+		border-radius: 999px; background: var(--accent); }
+	.theme-preview.preview-light { --panel: #ffffff; --panel2: #eef0f3; --border2: #cdd1d8; --accent: #5b4fcf; }
+	.theme-preview.preview-dark { --panel: #17181d; --panel2: #1e2026; --border2: #3a3e48; --accent: #8b7cf6; }
+	.theme-preview.preview-system { background: linear-gradient(90deg, #ffffff 0 50%, #17181d 50% 100%); }
+	.theme-preview.preview-system::before { background: linear-gradient(90deg, #eef0f3 0 50%, #1e2026 50% 100%); }
+	.theme-quick { min-width: 92px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center;
+		gap: 7px; padding: 5px 10px; color: var(--muted); }
+	.theme-quick:hover { color: var(--text); }
+	.theme-quick-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; font-size: 15px; }
 	.policy-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
 	.policy-list li { margin: 5px 0; }
-	.modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(3,8,14,.74); backdrop-filter: blur(8px); }
+	.modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: var(--overlay); backdrop-filter: blur(8px); }
 	.modal-backdrop[hidden] { display: none; }
-	.policy-modal { width: min(760px, 100%); max-height: min(82vh, 760px); overflow: auto; background: var(--panel); border: 1px solid var(--border2); border-radius: 8px; box-shadow: 0 24px 80px rgba(0,0,0,.48); padding: 18px; }
+	.policy-modal { width: min(760px, 100%); max-height: min(82vh, 760px); overflow: auto; background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 18px; }
 	.policy-modal header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 0 0 12px; border: 0; background: transparent; }
 	.policy-modal h2 { margin: 0; font-size: 20px; }
 	.policy-modal p { color: var(--muted); margin: 8px 0; }
@@ -640,7 +688,7 @@
 		padding: 6px 9px; border-radius: 7px; font-size: 13px; outline: none; }
 	input:focus, select:focus { border-color: var(--accent); }
 	input#userId { width: 130px; } input#key { width: 120px; }
-	button { background: var(--accent); color: #04121f; border: 0; padding: 7px 13px; border-radius: 8px;
+	button { background: var(--accent); color: var(--on-accent); border: 0; padding: 7px 13px; border-radius: 8px;
 		font-weight: 600; cursor: pointer; font-size: 13px;
 		/* Hover/state changes ease over 150ms. Color-ish properties only — a
 		   transition that moves layout would make the whole shell feel loose. */
@@ -654,13 +702,14 @@
 	   white-on-white. :where() zeroes this rule's specificity contribution, so
 	   any button carrying a class wins on its own terms. Chasing this with
 	   :not() lists failed twice; specificity is the real fix. */
-	:where(body.app-mode) button { color: #fff; }
+	:where(body.app-mode) button { color: var(--on-accent); }
 	body.app-mode button.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border2); }
-	body.app-mode button.danger { background: #fef3f2; color: var(--red); border: 1px solid #fda29b; }
+	body.app-mode button.danger { background: var(--danger-bg); color: var(--red); border: 1px solid var(--danger-border); }
 	body.app-mode .box, body.app-mode .action-box, body.app-mode .browser-col {
-		box-shadow: 0 1px 2px rgba(16,24,40,.05); }
-	body.app-mode header { box-shadow: 0 1px 2px rgba(16,24,40,.04); }
-	body.app-mode input, body.app-mode select, body.app-mode textarea { background: var(--panel); }
+		box-shadow: var(--shadow-sm); }
+	body.app-mode header { box-shadow: var(--shadow-sm); }
+	body.app-mode input, body.app-mode select, body.app-mode textarea { background: var(--input-bg); }
+	body.app-mode input::placeholder, body.app-mode textarea::placeholder { color: var(--faint); opacity: 1; }
 	body.app-mode .badge { background: var(--panel2); }
 	/* The graph keeps its dark canvas: the 18 category colors are tuned for it,
 	   and a framed dark viewport reads as deliberate rather than washed out. */
@@ -747,12 +796,12 @@
 
 	/* ---- badges / chips ---- */
 	.badge { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; font-weight: 650; text-transform: capitalize; white-space: nowrap; }
-	.state-active { background: #14391f; color: var(--green); }
-	.state-inactive { background: #3a1d1b; color: var(--red); }
-	.state-paused { background: #3a2f12; color: var(--amber); }
-	.state-completed { background: #1b2a4a; color: var(--accent); }
-	.imp-life_significant { background: #3a1d1b; color: var(--red); }
-	.imp-important { background: #3a2f12; color: var(--amber); }
+	.state-active { background: var(--success-bg); color: var(--green); }
+	.state-inactive { background: var(--danger-bg); color: var(--red); }
+	.state-paused { background: var(--warning-bg); color: var(--amber); }
+	.state-completed { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
+	.imp-life_significant { background: var(--danger-bg); color: var(--red); }
+	.imp-important { background: var(--warning-bg); color: var(--amber); }
 	.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
 		background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
 
@@ -951,8 +1000,8 @@
 	body.app-mode .box:last-child { margin-bottom: 0; }
 	.box h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: .01em; }
 	.kv { line-height: 1.7; }
-	.danger-zone { border-color: rgba(248,81,73,.52); box-shadow: inset 0 0 0 1px rgba(248,81,73,.08); }
-	.danger-zone input { width: min(100%, 280px); border-color: rgba(248,81,73,.42); }
+	.danger-zone { border-color: var(--danger-border); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 8%, transparent); }
+	.danger-zone input { width: min(100%, 280px); border-color: var(--danger-border); }
 	.danger-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
 	.mcp-url { background: var(--bg); border: 1px solid var(--border2); border-radius: 8px; padding: 9px 11px;
 		font-family: var(--font-mono); font-size: 13px; word-break: break-all; color: var(--accent); }
@@ -967,7 +1016,7 @@
 	.toast { background: var(--panel); border: 1px solid var(--border2); border-left: 3px solid var(--accent);
 		border-radius: 9px; padding: 10px 15px; font-size: 13px; max-width: 560px; box-shadow: 0 8px 30px #0008; }
 	.toast.err { border-left-color: var(--red); }
-	.banner { background: #3a1d1b; color: #ffb4ad; border: 1px solid var(--red); border-radius: 8px; padding: 9px 13px; margin: 10px 14px; display: none; }
+	.banner { background: var(--danger-bg); color: var(--red); border: 1px solid var(--danger-border); border-radius: 8px; padding: 9px 13px; margin: 10px 14px; display: none; }
 	.kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
 	@media (max-width: 900px) {
 		.public-nav { padding: 12px 18px; align-items: flex-start; flex-direction: column; }
@@ -1270,6 +1319,9 @@
 	<button class="ghost dev-only" id="copyMcp">Copy legacy MCP URL</button>
 	<div class="spacer"></div>
 	<div class="stats dev-only" id="stats"></div>
+	<button class="ghost theme-quick" id="themeQuick" type="button" onclick="cycleTheme()" aria-label="Change appearance theme" title="Change appearance theme">
+		<span class="theme-quick-icon" id="themeQuickIcon" aria-hidden="true">&#9680;</span><span id="themeQuickLabel">System</span>
+	</button>
 </header>
 
 <div class="banner" id="banner"></div>
@@ -1381,6 +1433,76 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
+
+const THEME_STORAGE_KEY = "itsuki_theme";
+const THEME_VALUES = new Set(["light", "dark", "system"]);
+const THEME_MEDIA = window.matchMedia("(prefers-color-scheme: dark)");
+
+function themePreference() {
+	const value = document.documentElement.dataset.themePreference;
+	return THEME_VALUES.has(value) ? value : "system";
+}
+
+function resolvedTheme(preference = themePreference()) {
+	return preference === "system" ? (THEME_MEDIA.matches ? "dark" : "light") : preference;
+}
+
+function syncThemeControls() {
+	const preference = themePreference();
+	const resolved = resolvedTheme(preference);
+	const label = preference === "system" ? "System" : preference === "dark" ? "Dark" : "Light";
+	const icon = preference === "system" ? "\u25D0" : preference === "dark" ? "\u263E" : "\u2600";
+	const quick = document.getElementById("themeQuick");
+	const quickLabel = document.getElementById("themeQuickLabel");
+	const quickIcon = document.getElementById("themeQuickIcon");
+	if (quick) {
+		quick.title = `${label} appearance (${resolved}). Click to change.`;
+		quick.setAttribute("aria-label", `${label} appearance. Click to change theme.`);
+	}
+	if (quickLabel) quickLabel.textContent = label;
+	if (quickIcon) quickIcon.textContent = icon;
+	document.querySelectorAll("[data-theme-option]").forEach((button) => {
+		const active = button.dataset.themeOption === preference;
+		button.setAttribute("aria-pressed", active ? "true" : "false");
+	});
+}
+
+function applyTheme(theme, { persist = false, announce = false } = {}) {
+	const preference = THEME_VALUES.has(theme) ? theme : "system";
+	const resolved = resolvedTheme(preference);
+	document.documentElement.dataset.themePreference = preference;
+	document.documentElement.dataset.theme = resolved;
+	if (persist) {
+		try { localStorage.setItem(THEME_STORAGE_KEY, preference); } catch {}
+	}
+	syncThemeControls();
+	if (announce) {
+		const label = preference === "system" ? `System (${resolved})` : resolved[0].toUpperCase() + resolved.slice(1);
+		toast(`${label} theme selected.`);
+	}
+}
+
+function setTheme(theme) {
+	applyTheme(theme, { persist: true, announce: true });
+}
+
+function cycleTheme() {
+	const order = ["system", "light", "dark"];
+	const next = order[(order.indexOf(themePreference()) + 1) % order.length];
+	setTheme(next);
+}
+
+if (typeof THEME_MEDIA.addEventListener === "function") {
+	THEME_MEDIA.addEventListener("change", () => {
+		if (themePreference() === "system") applyTheme("system");
+	});
+} else if (typeof THEME_MEDIA.addListener === "function") {
+	THEME_MEDIA.addListener(() => {
+		if (themePreference() === "system") applyTheme("system");
+	});
+}
+
+applyTheme(themePreference());
 const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"]);
 
 const nodeKey = (id) => `node:${id}`;
@@ -4770,8 +4892,23 @@ function viewSettingsMain(v) {
 	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
 	const activeTokens = S.tokens.filter(t => !t.revoked_at && t.status !== "revoked").length;
 	const revokedTokens = Math.max(0, S.tokens.length - activeTokens);
+	const appearanceTheme = themePreference();
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="settings-grid">
+		<div class="action-box settings-section"><h3>Appearance</h3>
+			<div class="help">Choose a comfortable interface. System follows your device and updates automatically.</div>
+			<div class="theme-picker" role="group" aria-label="Appearance theme">
+				<button type="button" class="theme-choice" data-theme-option="light" aria-pressed="${appearanceTheme === "light"}" onclick='setTheme("light")'>
+					<span class="theme-preview preview-light" aria-hidden="true"></span><b>Light</b>
+				</button>
+				<button type="button" class="theme-choice" data-theme-option="dark" aria-pressed="${appearanceTheme === "dark"}" onclick='setTheme("dark")'>
+					<span class="theme-preview preview-dark" aria-hidden="true"></span><b>Dark</b>
+				</button>
+				<button type="button" class="theme-choice" data-theme-option="system" aria-pressed="${appearanceTheme === "system"}" onclick='setTheme("system")'>
+					<span class="theme-preview preview-system" aria-hidden="true"></span><b>System</b>
+				</button>
+			</div>
+		</div>
 		<div class="action-box settings-section"><h3>Account</h3>
 			<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "Itsuki user")}</span></div>
 			<div class="kv">Name: <b>${esc(u.name || "")}</b></div>
@@ -4818,6 +4955,7 @@ function viewSettingsMain(v) {
 	viewReset(danger);
 	wrap.appendChild(danger);
 	v.appendChild(wrap);
+	syncThemeControls();
 }
 
 function viewGraph(v) {

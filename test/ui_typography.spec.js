@@ -1,8 +1,8 @@
 /**
  * Typography + rhythm contract for the signed-in app shell.
  *
- * These assert the *scale*, not the look: two weights (600 headings / 400 body,
- * 500 reserved for tab labels), three text levels, one mono face, and the step
+ * These assert the *scale*, not the look: two weights (600 headings / 400 body),
+ * three text levels, one mono face, and the step
  * rhythm on Get started. They exist because the last three visual passes each
  * re-introduced a fourth weight or a second hardcoded mono stack.
  */
@@ -20,11 +20,10 @@ describe("app type scale", () => {
 		for (const file of ["geist-400.woff2", "geist-600.woff2", "geist-mono-400.woff2"]) {
 			expect(css).toContain(`src: url("/assets/${file}") format("woff2")`);
 		}
-		expect(css).toContain('--font-ui: "Geist", "Inter"');
-		expect(css).toContain('--font-ui: "Fustat", "Geist", "Inter"');
+		expect(css).toContain('--font-ui: "Geist", "Fustat", "Inter"');
 		expect(css).toContain('--font-mono: "Geist Mono", "JetBrains Mono"');
 		// The app's primary Latin subset is preloaded; body text is the first thing anyone reads.
-		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2"');
+		expect(html).toContain('rel="preload" as="font" type="font/woff2" href="/assets/geist-400.woff2"');
 		// The privacy promise on the landing page depends on this staying true.
 		// No third-party loads of any kind — fonts OR scripts. A CDN request
 		// sends every visitor's IP off-origin, which the landing page promises
@@ -76,22 +75,24 @@ describe("app type scale", () => {
 	});
 
 	it("defines the page / section / step / body / footnote steps", () => {
-		expect(css).toContain("body.app-mode { font-size: 13px; line-height: 1.5; }");
-		expect(css).toMatch(/\.page-title \{ font-size: 24px; font-weight: 600; letter-spacing: 0;/);
-		expect(css).toMatch(/\.page-sub \{ font-size: 13px; font-weight: 400; letter-spacing: 0;/);
+		expect(css).toContain("body.app-mode { font-size: 14px; line-height: 1.55; }");
+		expect(css).toMatch(/\.page-title \{ font-size: 28px; font-weight: 600; letter-spacing: -\.025em;/);
+		expect(css).toMatch(/\.page-sub \{ font-size: 14px; font-weight: 400; letter-spacing: -\.005em;/);
 		expect(css).toMatch(/\.step-title \{ font-size: 14px; font-weight: 600; letter-spacing: 0; \}/);
 		expect(css).toMatch(/font-size: 16px; font-weight: 600; letter-spacing: -\.01em; line-height: 1\.35;/);
-		expect(css).toMatch(/body\.app-mode \.step-note[\s\S]{0,220}font-size: 12px; font-weight: 400;/);
+		expect(css).toMatch(/body\.app-mode \.step-note[\s\S]{0,220}font-size: 12\.5px; font-weight: 400;/);
 		expect(css).toMatch(/font-family: var\(--font-mono\); font-size: 13px; font-weight: 400; letter-spacing: 0; line-height: 1\.5;/);
 	});
 
-	it("reserves weight 500 for tab labels only", () => {
-		expect(css).toContain("body.app-mode .term-tab, body.app-mode .tab {\n\t\tfont-size: 13px; font-weight: 500; letter-spacing: .01em; }");
+	it("uses only shipped 400 and 600 weights in navigation", () => {
+		expect(css).toContain("body.app-mode .term-tab, body.app-mode .tab {\n\t\tfont-size: 13.5px; font-weight: 400; letter-spacing: .01em; }");
 		expect(css).toContain("body.app-mode .tab.active { font-weight: 600; }");
+		expect(css).not.toContain("body.app-mode .term-tab, body.app-mode .tab {\n\t\tfont-size: 13px; font-weight: 500;");
 	});
 
 	it("gives the app shell three text levels", () => {
-		expect(css).toMatch(/--text: #101828; --muted: #667085; --faint: #98a2b3;/);
+		expect(css).toMatch(/--text: #17191f; --muted: #5f6672; --faint: #8a909b;/);
+		expect(css).toMatch(/--text: #f3f4f6; --muted: #a7adb8; --faint: #777e8a;/);
 	});
 
 	it("caps prose within the compact setup canvas", () => {
