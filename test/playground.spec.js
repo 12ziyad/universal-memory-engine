@@ -288,8 +288,16 @@ describe("the playground screen", () => {
 		const ids = [...block.matchAll(/\n\t\tid: "([a-z]+)", name: "/g)].map((m) => m[1]);
 		expect(ids).toEqual(["thesis", "platform", "training", "travel", "support"]);
 		// Every scenario needs a hub, follow-up prompts, and facts to show.
-		expect(block.match(/t: "hub"/g)?.length).toBe(5);
+		expect(block.match(/hub: true/g)?.length).toBe(5);
 		expect(block.match(/\n\t\t\t\tp: "/g)?.length).toBe(15);
+		// Nodes are tagged with real cluster ids, so a preview is drawn in the
+		// same vocabulary as the Graph view rather than a palette of its own.
+		const fallback = script.slice(script.indexOf("const CLUSTER_FALLBACK = {"), script.indexOf("\nfunction clusterInfo("));
+		const known = [...fallback.matchAll(/\n\t([a-z_]+): \{ label:/g)].map((m) => m[1]);
+		expect(known.length).toBeGreaterThan(8);
+		const clusters = new Set([...block.matchAll(/c: "([a-z_]+)"/g)].map((m) => m[1]));
+		for (const id of clusters) expect(known, `unknown cluster ${id}`).toContain(id);
+		expect(clusters.size).toBeGreaterThanOrEqual(8);
 		expect(script).toContain("function renderPgSuggest(");
 		expect(script).toContain("onclick=\"pgSendScripted(");
 	});
