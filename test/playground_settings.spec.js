@@ -184,6 +184,11 @@ describe("the settings tab", () => {
 		expect(script).toContain(">Reset configuration<");
 		expect(script).toContain("function playgroundCategoryAdd(");
 		expect(script).toContain('api("/v1/playground/settings"');
-		expect(script).toContain(`playgroundTab('settings')`);
+		// The panel moved out of a column and behind the header's Memory button
+		// when the Playground became graph + conversation. It is still reachable,
+		// and only reachable on a real chat — a preview has no settings to save.
+		expect(script).toContain(`pgTogglePanel('memory')`);
+		expect(script).toContain(`id="pgMemoryPanel"`);
+		expect(script).toMatch(/preview \? "" : `<button class="pg-icon-btn"[^`]*Memory<\/button>`/);
 	});
 });

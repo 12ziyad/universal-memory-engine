@@ -253,37 +253,83 @@ describe("limits", () => {
 describe("the playground screen", () => {
 	// The shipped page is one file with no build step, so the shell is asserted
 	// here rather than in a component test that does not exist.
-	it("is three columns: chats, conversation, memories", async () => {
+	it("is two columns: the graph and the conversation", async () => {
 		const { script, html } = await page();
 		expect(script).toContain("function viewPlayground(");
-		expect(script).toContain('class="pg-col pg-chats"');
-		expect(script).toContain('class="pg-col pg-conversation"');
-		expect(script).toContain('class="pg-col pg-memories"');
-		expect(html).toContain(".pg-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px;");
+		expect(script).toContain('class="pg-col pg-graph"');
+		expect(script).toContain('class="pg-col pg-chat"');
+		expect(html).toContain(".pg-shell { display: grid; grid-template-columns: minmax(0, 1fr) 468px;");
+		// Below 1180px the graph stops being readable beside a fixed chat column.
+		expect(html).toContain("@media (max-width: 1180px)");
+		expect(html).toContain(".pg-shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }");
 	});
 
-	it("has two states, and they switch on whether the thread has messages", async () => {
-		const { script, html } = await page();
-		expect(script).toContain("const empty = !PG.messages.length;");
-		expect(script).toContain("const bare = empty && !PG.threads.length");
-		expect(script).toContain('${empty ? " is-empty" : ""}${bare ? " is-bare" : ""}');
-		// Empty: a greeting and the composer, centred, and nothing else.
-		expect(script).toContain('class="pg-greeting"');
-		expect(html).toContain(".pg-shell.is-empty .pg-conversation { justify-content: center; }");
-		expect(html).toContain(".pg-shell.is-bare .pg-chats, .pg-shell.is-bare .pg-memories { display: none; }");
-		// No header block on this view at all, and no example prompts.
-		expect(script).not.toMatch(/viewPlayground[\s\S]{0,400}class="page-head"/);
-		expect(script).not.toContain("Say something you'd want an AI to remember next week");
-		expect(script).toContain("// Empty means empty: the greeting and the composer are the whole screen.");
-	});
-
-	it("shows the chat cap on the New chat button and the extraction inline", async () => {
+	/**
+	 * The load-bearing promise of the examples: they are a read-only world. If
+	 * either preview send path ever reaches the network, a "preview" would be
+	 * writing to somebody's real memory.
+	 */
+	it("never writes to memory from a preview", async () => {
 		const { script } = await page();
-		expect(script).toContain("${PG.threads.length} of ${PG.limits.maxThreads ?? 5} chats");
+		expect(script).toContain('mode: "preview"');
+		for (const fn of ["pgSendScripted", "pgSendTyped", "pgPickExample", "pgRestart"]) {
+			const body = script.slice(script.indexOf(`function ${fn}(`));
+			const source = body.slice(0, body.indexOf("\n}\n") + 2);
+			expect(source, `${fn} must not call the API`).not.toContain("api(");
+		}
+		// And the person is told, in the panel, before they type anything.
+		expect(script).toContain("Nothing here is saved to your account.");
+	});
+
+	it("offers five examples, each with its own graph and prompts", async () => {
+		const { script } = await page();
+		expect(script).toContain("const PG_SCENARIOS = [");
+		const block = script.slice(script.indexOf("const PG_SCENARIOS = ["), script.indexOf("\nfunction viewPlayground("));
+		const ids = [...block.matchAll(/\n\t\tid: "([a-z]+)", name: "/g)].map((m) => m[1]);
+		expect(ids).toEqual(["thesis", "platform", "training", "travel", "support"]);
+		// Every scenario needs a hub, follow-up prompts, and facts to show.
+		expect(block.match(/t: "hub"/g)?.length).toBe(5);
+		expect(block.match(/\n\t\t\t\tp: "/g)?.length).toBe(15);
+		expect(script).toContain("function renderPgSuggest(");
+		expect(script).toContain("onclick=\"pgSendScripted(");
+	});
+
+	it("shows the capture status and the context that produced the reply", async () => {
+		const { script } = await page();
+		expect(script).toContain("${PG.threads.length} of ${PG.limits.maxThreads ?? 5} used");
 		expect(script).toContain("messages left today");
 		expect(script).toContain('class="pg-capture"');
-		expect(script).toContain("<b>Added to memory</b>");
-		expect(script).toContain('class="pg-added">Added<');
+		expect(script).toContain("<b>Written to memory</b>");
+		// Acceptance is durable before enrichment finishes: say both, not neither.
+		expect(script).toContain("Captured · extracting");
+		expect(script).toContain("Assistant turns are not captured");
+		expect(script).toContain("function pgContextBlock(");
+		// A fact that stopped being true keeps its end date instead of vanishing.
+		expect(script).toContain('<span class="live">present</span>');
+	});
+
+	it("animates arrival without moving what was already there", async () => {
+		const { script, html } = await page();
+		// Positions are computed for every node the scenario will ever show, so a
+		// new memory lands in reserved space rather than re-shuffling the graph.
+		expect(script).toContain("function pgLayoutFor(");
+		expect(script).toContain("PG_LAYOUT.set(sc.id, pos)");
+		expect(html).toContain("@keyframes pgNodePop");
+		expect(html).toContain("@keyframes pgHalo");
+		expect(html).toContain("@keyframes pgWorldSettle");
+		expect(html).toContain("@media (prefers-reduced-motion: reduce)");
+	});
+
+	it("runs the tour on the first three visits and on request after that", async () => {
+		const { script } = await page();
+		expect(script).toContain("const PG_TOUR = [");
+		const tour = script.slice(script.indexOf("const PG_TOUR = ["), script.indexOf("\nfunction pgTourVisits("));
+		expect(tour.match(/\n\t\ttitle: "/g)?.length).toBe(5);
+		expect(script).toContain("if (pgTourVisits() >= 3 || PG.mode !== \"preview\") return;");
+		expect(script).toContain('onclick="pgTourStart(true)"');
+		// rAF never fires in a background tab, so the spotlight is placed inline.
+		expect(script).toContain("pgTourPosition();\n\troot.querySelector");
+		expect(script).toContain("function pgTourKeys(");
 	});
 
 	it("talks to the playground routes and nothing else", async () => {

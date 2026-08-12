@@ -554,15 +554,186 @@
 	@media (prefers-reduced-motion: reduce) {
 		.explore-card, .explore-card:hover { transition: none; transform: none; }
 	}
-	/* ---- playground: chats | conversation | memories ---- */
+	/* ---- playground: knowledge graph | conversation ---- */
 	/* No page header on this view — the rail and the top bar already name it,
 	   and a header block would push the conversation down the screen. */
-	.pg-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 320px; gap: 16px;
-		height: calc(100dvh - 146px); min-height: 520px; }
-	.pg-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+	.pg-shell { display: grid; grid-template-columns: minmax(0, 1fr) 468px; gap: 16px;
+		height: calc(100dvh - 146px); min-height: 580px; }
+	.pg-col { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
 		display: flex; flex-direction: column; min-height: 0; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
 	.pg-col-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
 	.pg-col-body { flex: 1; overflow-y: auto; min-height: 0; padding: 10px; }
+
+	/* --- graph panel --- */
+	.pg-graph { position: relative; overflow: hidden; }
+	.pg-graph-tools { position: absolute; inset: 14px 14px auto 14px; z-index: 3;
+		display: flex; gap: 10px; align-items: flex-start; pointer-events: none; }
+	.pg-graph-tools > * { pointer-events: auto; }
+	.pg-chip-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 6px 12px;
+		border-radius: 9px; border: 1px solid var(--border2); background: var(--panel);
+		color: var(--text); font: 500 13px/1 var(--font-ui); box-shadow: var(--shadow-sm); }
+	.pg-chip-btn:hover { border-color: var(--accent); filter: none; }
+	.pg-chip-btn .pg-caret { font-size: 10px; color: var(--faint); transition: transform .18s ease; }
+	.pg-chip-btn[aria-expanded="true"] .pg-caret { transform: rotate(180deg); }
+	.pg-graph-search { margin-left: auto; display: flex; align-items: center; min-height: 34px;
+		background: var(--panel); border: 1px solid var(--border2); border-radius: 9px;
+		box-shadow: var(--shadow-sm); overflow: hidden; max-width: 330px; flex: 1; }
+	.pg-graph-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text);
+		padding: 7px 10px; font: 400 13px/1 var(--font-ui); }
+	.pg-graph-search input:focus { outline: none; }
+	.pg-graph-search select { border: 0; border-left: 1px solid var(--border); background: transparent;
+		color: var(--muted); font: 500 12.5px/1 var(--font-ui); padding: 8px 6px; min-height: 32px; }
+	.pg-entity-types { position: absolute; top: 56px; left: 14px; z-index: 3; width: 208px; padding: 10px;
+		background: var(--panel); border: 1px solid var(--border2); border-radius: 11px; box-shadow: var(--shadow-md); }
+	.pg-entity-types .pg-et-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px;
+		font-size: 12.5px; color: var(--muted); }
+	.pg-et-swatch { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+	.pg-et-count { margin-left: auto; font: 500 11.5px/1 var(--font-mono); color: var(--faint); }
+	.pg-canvas { flex: 1; min-height: 0; position: relative; }
+	.pg-canvas svg { width: 100%; height: 100%; display: block; touch-action: none; }
+	.pg-canvas-bg { background-color: var(--panel2);
+		background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 9%, transparent) 1px, transparent 0);
+		background-size: 22px 22px; }
+	.pg-zoom { position: absolute; right: 14px; bottom: 14px; z-index: 3; display: flex; flex-direction: column;
+		border: 1px solid var(--border2); border-radius: 9px; overflow: hidden; box-shadow: var(--shadow-sm); }
+	.pg-zoom button { width: 32px; height: 32px; border: 0; border-radius: 0; background: var(--panel);
+		color: var(--muted); font-size: 16px; line-height: 1; padding: 0; }
+	.pg-zoom button + button { border-top: 1px solid var(--border); }
+	.pg-zoom button:hover { background: var(--panel3); color: var(--text); filter: none; }
+	.pg-graph-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+		gap: 6px; padding: 24px; pointer-events: none; }
+	.pg-graph-empty b { font-size: 14px; }
+	/* Node/edge visuals. The label plate keeps text readable over edges. */
+	.pgn-edge { stroke: color-mix(in srgb, var(--text) 26%, transparent); stroke-width: 1.4; fill: none; }
+	.pgn-edge.is-new { animation: pgEdgeDraw .55s ease-out both; }
+	.pgn-dot { stroke: var(--panel2); stroke-width: 2; transform-box: fill-box; transform-origin: center; }
+	.pgn-g.is-hub .pgn-dot { stroke-width: 2.5; }
+	.pgn-label { font: 500 11.5px/1 var(--font-ui); fill: var(--text); text-anchor: middle; paint-order: stroke;
+		stroke: var(--panel2); stroke-width: 3.5px; stroke-linejoin: round; }
+	.pgn-g.is-hub .pgn-label { font-size: 13px; font-weight: 600; }
+	.pgn-g { cursor: pointer; }
+	.pgn-g:hover .pgn-dot { stroke: var(--accent); }
+	/* Arrival: scale past 1 then settle, with a glow that pulses down. */
+	.pgn-g.is-new .pgn-dot { animation: pgNodePop .62s cubic-bezier(.34,1.56,.64,1) both; }
+	.pgn-g.is-new .pgn-label { animation: pgFadeUp .5s ease-out .16s both; }
+	.pgn-g.is-new .pgn-halo { animation: pgHalo 1.5s ease-out both; }
+	.pgn-halo { fill: none; stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+	@keyframes pgNodePop { 0% { transform: scale(0); } 60% { transform: scale(1.42); } 100% { transform: scale(1); } }
+	@keyframes pgHalo {
+		0% { opacity: .85; transform: scale(.6); }
+		45% { opacity: .38; transform: scale(2.1); }
+		100% { opacity: 0; transform: scale(2.9); } }
+	@keyframes pgFadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+	@keyframes pgEdgeDraw { from { stroke-dashoffset: var(--len, 200); opacity: 0; } to { stroke-dashoffset: 0; opacity: 1; } }
+	/* The whole field reacts when memory lands: a brief over-scale + settle. */
+	.pg-world { transition: transform .18s ease-out; }
+	.pg-world.is-settling { animation: pgWorldSettle 1.05s cubic-bezier(.22,1,.36,1) both; }
+	@keyframes pgWorldSettle {
+		0% { transform: var(--vt) scale(1.045) rotate(-1.1deg); }
+		55% { transform: var(--vt) scale(.995) rotate(.35deg); }
+		100% { transform: var(--vt) scale(1) rotate(0deg); } }
+	@media (prefers-reduced-motion: reduce) {
+		.pgn-g.is-new .pgn-dot, .pgn-g.is-new .pgn-label, .pgn-g.is-new .pgn-halo,
+		.pgn-edge.is-new, .pg-world.is-settling { animation: none; }
+		.pgn-halo { display: none; } }
+
+	/* --- chat panel --- */
+	.pg-chat-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px;
+		border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+	.pg-icon-btn { width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center;
+		border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 14px; }
+	.pg-icon-btn:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.pg-icon-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 10%, transparent); }
+	.pg-menu { position: absolute; z-index: 60; margin-top: 8px; min-width: 232px; max-width: 360px;
+		background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; padding: 10px;
+		box-shadow: var(--shadow-lg); }
+	.pg-menu-label { font: 600 11px/1 var(--font-ui); letter-spacing: .06em; text-transform: uppercase;
+		color: var(--faint); padding: 4px 8px 8px; }
+	.pg-menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+		background: transparent; color: var(--text); border: 0; border-radius: 8px; padding: 9px 10px;
+		font: 400 13.5px/1.35 var(--font-ui); }
+	.pg-menu button:hover { background: var(--panel2); filter: none; }
+	.pg-menu button.active { color: var(--accent); font-weight: 600;
+		background: color-mix(in srgb, var(--accent) 9%, transparent); }
+	.pg-menu button .pg-menu-check { margin-left: auto; color: var(--accent); }
+	.pg-menu button small { display: block; color: var(--faint); font-size: 12px; font-weight: 400; margin-top: 2px; }
+	.pg-preview-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12.5px;
+		color: var(--muted); background: color-mix(in srgb, var(--accent) 7%, transparent);
+		border-bottom: 1px solid var(--border); }
+	.pg-preview-bar b { color: var(--accent); font-weight: 600; }
+	.pg-stream { flex: 1; overflow-y: auto; min-height: 0; padding: 14px 12px; }
+	/* --- capture status line under a user turn --- */
+	.pg-status { display: flex; align-items: center; gap: 6px; justify-content: flex-end;
+		margin-top: 6px; font-size: 12px; color: var(--muted); }
+	.pg-status.ok { color: var(--green); }
+	.pg-status.skip, .pg-status.blocked { color: var(--faint); }
+	.pg-status.blocked { color: var(--amber); }
+	.pg-status .pg-spin { width: 11px; height: 11px; border-radius: 50%; border: 1.6px solid var(--border2);
+		border-top-color: var(--accent); animation: pgSpin .7s linear infinite; }
+	@keyframes pgSpin { to { transform: rotate(360deg); } }
+	/* --- context block --- */
+	.pg-ctx { border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 11px;
+		margin: 10px 0 12px; background: color-mix(in srgb, var(--accent) 5%, transparent); overflow: hidden; }
+	.pg-ctx-head { display: flex; align-items: center; gap: 9px; width: 100%; background: transparent;
+		border: 0; border-radius: 0; padding: 11px 13px; text-align: left; color: var(--text); }
+	.pg-ctx-head:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); filter: none; }
+	.pg-ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+	.pg-ctx-title { font-size: 13.5px; font-weight: 600; color: var(--accent); line-height: 1.3; }
+	.pg-ctx-title small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+	.pg-ctx-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+		font-size: 12.5px; color: var(--muted); }
+	.pg-ctx-body { border-top: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+		padding: 12px 13px; max-height: 340px; overflow-y: auto; }
+	.pg-ctx-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
+	.pg-ctx-sec { font: 600 11px/1 var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
+		color: var(--faint); margin: 14px 0 7px; }
+	.pg-ctx-sec:first-of-type { margin-top: 0; }
+	.pg-fact { display: grid; grid-template-columns: 6px minmax(0, 1fr); gap: 9px; align-items: start;
+		padding: 6px 0; font-size: 12.5px; line-height: 1.55; }
+	.pg-fact::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px;
+		background: color-mix(in srgb, var(--accent) 60%, transparent); }
+	.pg-fact span { color: var(--text); }
+	.pg-fact time { display: block; font: 400 11.5px/1.5 var(--font-mono); color: var(--faint); margin-top: 2px; }
+	.pg-fact time .live { color: var(--green); }
+	.pg-ent { border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; margin-bottom: 7px;
+		background: var(--panel); }
+	.pg-ent-top { display: flex; align-items: center; gap: 8px; }
+	.pg-ent-name { font-size: 13px; font-weight: 600; }
+	.pg-ent-label { font: 500 11px/1 var(--font-mono); color: var(--muted); background: var(--panel2);
+		border-radius: 5px; padding: 3px 6px; }
+	.pg-ent p { margin: 5px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+	.pg-ctx-empty { font-size: 12.5px; color: var(--faint); line-height: 1.6; }
+	/* --- suggestion chips + composer --- */
+	.pg-suggest { display: flex; gap: 8px; padding: 0 12px 10px; flex-wrap: wrap; }
+	.pg-suggest button { flex: 1 1 46%; min-width: 0; text-align: left; background: var(--panel2);
+		border: 1px solid var(--border); color: var(--muted); border-radius: 9px; padding: 9px 11px;
+		font: 400 12.5px/1.4 var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.pg-suggest button:hover { border-color: var(--accent); color: var(--text); background: var(--panel3); filter: none; }
+	.pg-suggest button:disabled { opacity: .5; }
+	/* --- tour --- */
+	.pg-tour-mask { position: fixed; inset: 0; z-index: 900; pointer-events: auto; }
+	.pg-tour-hole { position: fixed; z-index: 901; border-radius: 12px; pointer-events: none;
+		box-shadow: 0 0 0 9999px rgba(8,10,16,.58), 0 0 0 2px var(--accent);
+		transition: top .32s cubic-bezier(.22,1,.36,1), left .32s cubic-bezier(.22,1,.36,1),
+			width .32s cubic-bezier(.22,1,.36,1), height .32s cubic-bezier(.22,1,.36,1); }
+	.pg-tour-card { position: fixed; z-index: 902; width: min(360px, calc(100vw - 32px));
+		background: var(--panel); border: 1px solid var(--border2); border-radius: 14px; padding: 18px;
+		box-shadow: var(--shadow-lg);
+		transition: top .32s cubic-bezier(.22,1,.36,1), left .32s cubic-bezier(.22,1,.36,1); }
+	.pg-tour-step { font: 600 11px/1 var(--font-ui); letter-spacing: .09em; text-transform: uppercase;
+		color: var(--faint); }
+	.pg-tour-card h4 { margin: 9px 0 12px; font-size: 17px; font-weight: 600; letter-spacing: -.015em; }
+	.pg-tour-rail { height: 3px; border-radius: 3px; background: var(--border2); overflow: hidden; margin-bottom: 13px; }
+	.pg-tour-rail i { display: block; height: 100%; border-radius: 3px; background: var(--accent);
+		transition: width .34s cubic-bezier(.22,1,.36,1); }
+	.pg-tour-card p { margin: 0 0 16px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+	.pg-tour-actions { display: flex; align-items: center; gap: 8px; }
+	.pg-tour-actions .pg-tour-skip { margin-left: auto; }
+	.pg-tour-launch { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 5px 10px;
+		border-radius: 8px; border: 1px solid var(--border2); background: var(--panel); color: var(--muted);
+		font: 500 12.5px/1 var(--font-ui); }
+	.pg-tour-launch:hover { border-color: var(--accent); color: var(--accent); filter: none; }
 	.pg-thread { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
 		background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 8px;
 		padding: 9px 10px; margin-bottom: 2px; font-weight: 400; }
@@ -614,16 +785,22 @@
 		color: var(--text); border-radius: 8px; padding: 8px 10px; font: 400 13px/1.6 var(--font-ui); }
 	.pg-settings textarea { min-height: 96px; resize: vertical; }
 	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; margin-bottom: 6px; }
-	/* The form needs more room than a chat list does. */
-	.pg-shell.settings-open { grid-template-columns: 380px minmax(0, 1fr) 320px; }
-	@media (max-width: 1100px) {
-		.pg-shell { grid-template-columns: 200px minmax(0, 1fr); height: auto; }
-		.pg-shell .pg-col.pg-memories { grid-column: 1 / -1; max-height: 380px; }
+	/* Below 1180px the graph stops being readable beside a 468px chat: stack it,
+	   graph first, each with its own height rather than a shared viewport row. */
+	@media (max-width: 1180px) {
+		.pg-shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+		.pg-shell .pg-graph { height: 420px; }
+		.pg-shell .pg-chat { height: 620px; }
 	}
-	@media (max-width: 780px) {
-		.pg-shell { grid-template-columns: minmax(0, 1fr); }
-		.pg-shell .pg-col.pg-chats { max-height: 220px; }
-		.pg-conversation { min-height: 460px; }
+	@media (max-width: 760px) {
+		.pg-shell { gap: 12px; }
+		.pg-shell .pg-graph { height: 320px; }
+		.pg-shell .pg-chat { height: 560px; }
+		.pg-graph-tools { inset: 10px 10px auto 10px; gap: 8px; }
+		.pg-graph-search { max-width: none; }
+		.pg-entity-types { top: 52px; left: 10px; width: calc(100% - 20px); }
+		.pg-suggest button { flex: 1 1 100%; }
+		.pg-tour-card { left: 16px !important; right: 16px; width: auto; }
 	}
 	.pg-result { border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 13.5px; }
 	.pg-result.ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
@@ -1741,11 +1918,15 @@ function resetProjectBoundUiState() {
 	S.recallResult = null;
 	S.memoryQuery = "";
 	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
-	clearTimeout(PG.poll); Object.assign(PG, {
+	clearTimeout(PG.poll); pgTourEnd(); Object.assign(PG, {
 		threads: [], threadId: null, messages: [], limits: {},
 		settings: { customInstructions: "", customCategories: [] }, settingsDraft: null,
 		tab: "chats", draft: "", sending: false, loaded: false, notice: "",
 		poll: null, pollTries: 0, pollGaveUp: false,
+		// A preview belongs to no project, but a switch must still clear the live
+		// half and any panel/menu bound to the project that was open.
+		mode: "preview", turn: 0, thinking: false, preview: [], openCtx: null,
+		menu: null, panel: null, lastLiveAdd: 0,
 	});
 	clearTimeout(EX.poll); Object.assign(EX, { rows: [], loading: false, creating: false, error: "", poll: null });
 	Object.assign(RQ, { rows: [], loading: false, error: "" });
@@ -3262,60 +3443,431 @@ const PG = {
 	settings: { customInstructions: "", customCategories: [] },
 	tab: "chats", draft: "", sending: false, loaded: false, notice: "",
 	poll: null, pollTries: 0,
+	// --- preview layer ---
+	// mode "preview" is a read-only sandbox: a curated scenario, a scripted
+	// reply, and a graph that never touches the account's memory. mode "live" is
+	// the real chat — same panel, real capture, real receipts.
+	mode: "preview", scenario: 0, turn: 0, thinking: false, settling: false,
+	preview: [], openCtx: null, json: false, menu: null,
+	view: { x: 0, y: 0, k: 1 }, drag: null, entityTypesOpen: false, gsearch: "", gfilter: "all",
+	tour: { on: false, step: 0 },
 };
 
+/* The nine kinds a preview graph draws. Chosen to stay distinguishable in both
+   themes and against the dotted canvas, not to match any one brand. */
+const PG_TYPE_COLOR = {
+	hub: "#14b8a6", person: "#ec4899", topic: "#6366f1", decision: "#8b5cf6", event: "#f59e0b",
+	preference: "#10b981", place: "#3b82f6", artifact: "#f97316", org: "#0ea5e9",
+};
+const PG_TYPE_LABEL = {
+	hub: "Subject", person: "Person", topic: "Topic", decision: "Decision", event: "Event",
+	preference: "Preference", place: "Place", artifact: "Artifact", org: "Organization",
+};
+
+/**
+ * Five read-only scenarios. Each one is a hand-built world: a seeded graph, an
+ * opening exchange, and three follow-ups with the exact facts and entities the
+ * reader would have been given. Nothing here is written to memory — the preview
+ * exists so someone can see the shape of the product before connecting anything.
+ */
+const PG_SCENARIOS = [
+	{
+		id: "thesis", name: "Thesis research assistant",
+		blurb: "A doctoral project tracked across months",
+		seed: [
+			{ n: "Maya Okonkwo", t: "hub" },
+			{ n: "distributed systems", t: "topic" },
+			{ n: "Chapter 3", t: "artifact" },
+			{ n: "Prof. Adeyemi", t: "person" },
+			{ n: "SIGMOD deadline", t: "event" },
+			{ n: "Jepsen testing", t: "topic" },
+			{ n: "ETH Zürich", t: "place" },
+			{ n: "reading group", t: "event" },
+			{ n: "consistency models", t: "topic", of: "distributed systems" },
+			{ n: "evaluation section", t: "artifact", of: "Chapter 3" },
+			{ n: "weekly supervision", t: "event", of: "Prof. Adeyemi" },
+			{ n: "lab visit", t: "event", of: "ETH Zürich" },
+		],
+		opening: [
+			{ r: "user", c: "I'm writing up Chapter 3 of my thesis on replication under partition." },
+			{ r: "assistant", c: "Good place to be. You've been building toward that since the consistency-models survey — want me to pull the Jepsen notes you took during the ETH visit?" },
+		],
+		turns: [
+			{
+				p: "I've switched Chapter 3 from Raft to CRDTs.",
+				a: "Noted — that's a real change of direction from the consensus framing you had in February. It affects the evaluation section too: your Jepsen harness was written around a leader election you no longer have. Want me to flag the parts of Chapter 3 that assume a leader?",
+				add: [{ n: "CRDTs", t: "decision", of: "Chapter 3" }],
+				facts: [
+					{ f: "Maya Okonkwo's Chapter 3 now uses CRDTs instead of Raft.", from: "now" },
+					{ f: "Maya Okonkwo's Chapter 3 used Raft for replication.", from: "-172d", to: "now" },
+					{ f: "Chapter 3 concerns replication under network partition.", from: "-172d" },
+				],
+				ents: [
+					{ n: "CRDTs", l: "Decision", s: "Replaced Raft as the replication approach in Chapter 3, superseding the consensus-based framing held since February." },
+					{ n: "Chapter 3", l: "Artifact", s: "The thesis chapter on replication under partition; contains the evaluation section built on a Jepsen harness." },
+				],
+			},
+			{
+				p: "Prof. Adeyemi wants the evaluation done before the SIGMOD deadline.",
+				a: "That compresses things. The SIGMOD deadline is the fixed point, and the evaluation section still assumes the Raft harness — so the rewrite has to land before the experiments, not after. Your weekly supervision is the natural checkpoint.",
+				add: [{ n: "evaluation before deadline", t: "decision", of: "SIGMOD deadline" }],
+				facts: [
+					{ f: "Prof. Adeyemi requires the evaluation section completed before the SIGMOD deadline.", from: "now" },
+					{ f: "Prof. Adeyemi supervises Maya Okonkwo.", from: "-410d" },
+					{ f: "Maya Okonkwo meets Prof. Adeyemi at weekly supervision.", from: "-410d" },
+				],
+				ents: [
+					{ n: "Prof. Adeyemi", l: "Person", s: "Maya's doctoral supervisor since 2025; meets weekly and has set the evaluation section as the gating item for SIGMOD." },
+					{ n: "SIGMOD deadline", l: "Event", s: "The fixed submission date the evaluation work is now sequenced against." },
+				],
+			},
+			{
+				p: "The Jepsen report on etcd changed how I'll test.",
+				a: "Then the harness question is settled from two directions at once — the CRDT switch removed the leader, and the etcd report changes what you consider a passing run. Both point at rewriting the evaluation harness before the deadline rather than adapting it.",
+				add: [{ n: "etcd report", t: "artifact", of: "Jepsen testing" }],
+				facts: [
+					{ f: "Maya Okonkwo will change her testing approach based on the Jepsen etcd report.", from: "now" },
+					{ f: "Maya Okonkwo took Jepsen notes during the ETH Zürich lab visit.", from: "-61d" },
+				],
+				ents: [
+					{ n: "Jepsen testing", l: "Topic", s: "The verification approach behind Maya's evaluation harness; revisited after the etcd report." },
+					{ n: "ETH Zürich", l: "Place", s: "Site of the lab visit where the original Jepsen notes were taken." },
+				],
+			},
+		],
+	},
+	{
+		id: "platform", name: "Engineering team copilot",
+		blurb: "Architecture decisions across a platform team",
+		seed: [
+			{ n: "Platform team", t: "hub" },
+			{ n: "Priya Raghavan", t: "person" },
+			{ n: "checkout service", t: "artifact" },
+			{ n: "Postgres", t: "topic" },
+			{ n: "incident 412", t: "event" },
+			{ n: "on-call rotation", t: "event" },
+			{ n: "Northwind", t: "org" },
+			{ n: "read replicas", t: "topic", of: "Postgres" },
+			{ n: "payment retries", t: "topic", of: "checkout service" },
+			{ n: "postmortem", t: "artifact", of: "incident 412" },
+			{ n: "staff engineer", t: "person", of: "Priya Raghavan" },
+		],
+		opening: [
+			{ r: "user", c: "We're deciding whether checkout should keep talking to the primary database." },
+			{ r: "assistant", c: "You've circled this twice before. Incident 412 was traced to read amplification on the primary, and Priya argued then for moving checkout's reads to replicas. Want the postmortem's conclusion?" },
+		],
+		turns: [
+			{
+				p: "We're moving checkout reads to replicas next sprint.",
+				a: "That matches what the incident 412 postmortem recommended. The open risk it named was payment retries reading stale rows — worth deciding the staleness bound before the sprint rather than during it.",
+				add: [{ n: "replica cutover", t: "decision", of: "checkout service" }],
+				facts: [
+					{ f: "The checkout service will move read traffic to Postgres read replicas next sprint.", from: "now" },
+					{ f: "Incident 412 was caused by read amplification on the Postgres primary.", from: "-48d" },
+					{ f: "Priya Raghavan recommended moving checkout reads to replicas.", from: "-46d" },
+				],
+				ents: [
+					{ n: "replica cutover", l: "Decision", s: "Committed for next sprint; implements the recommendation the incident 412 postmortem made 46 days earlier." },
+					{ n: "checkout service", l: "Artifact", s: "The service whose read path caused incident 412; owner of the payment-retry logic sensitive to stale reads." },
+				],
+			},
+			{
+				p: "Priya is taking over the on-call rotation from me.",
+				a: "Recorded. That puts the person who wrote the replica recommendation on call during the sprint that implements it — probably the outcome you want, but it does concentrate the context in one person.",
+				add: [{ n: "rotation handover", t: "event", of: "on-call rotation" }],
+				facts: [
+					{ f: "Priya Raghavan is taking over the on-call rotation.", from: "now" },
+					{ f: "Priya Raghavan is a staff engineer on the Platform team.", from: "-300d" },
+				],
+				ents: [
+					{ n: "Priya Raghavan", l: "Person", s: "Staff engineer on the Platform team; authored the replica recommendation and is assuming the on-call rotation." },
+					{ n: "on-call rotation", l: "Event", s: "The rotation transferring to Priya, overlapping the replica cutover sprint." },
+				],
+			},
+			{
+				p: "Northwind is our largest customer on the checkout path.",
+				a: "Then the staleness bound isn't only a correctness question. Northwind sits on the same path as the cutover and the rotation handover, which makes it the natural blast-radius test for the sprint.",
+				add: [{ n: "largest account", t: "decision", of: "Northwind" }],
+				facts: [
+					{ f: "Northwind is the largest customer on the checkout path.", from: "now" },
+					{ f: "The checkout service handles payment retries.", from: "-300d" },
+				],
+				ents: [
+					{ n: "Northwind", l: "Organization", s: "Largest customer routed through the checkout service; the primary blast radius for the replica cutover." },
+					{ n: "payment retries", l: "Topic", s: "Checkout logic identified as sensitive to stale replica reads." },
+				],
+			},
+		],
+	},
+	{
+		id: "training", name: "Health & training coach",
+		blurb: "A training block with preferences that change",
+		seed: [
+			{ n: "Devi Raman", t: "hub" },
+			{ n: "marathon", t: "event" },
+			{ n: "knee injury", t: "event" },
+			{ n: "morning runs", t: "preference" },
+			{ n: "physiotherapist", t: "person" },
+			{ n: "Cubbon Park", t: "place" },
+			{ n: "swimming", t: "preference" },
+			{ n: "long run Sunday", t: "event", of: "marathon" },
+			{ n: "rehab plan", t: "artifact", of: "physiotherapist" },
+			{ n: "tempo sessions", t: "topic", of: "marathon" },
+		],
+		opening: [
+			{ r: "user", c: "I want to get back to marathon training." },
+			{ r: "assistant", c: "You stopped in March for the knee injury, and your physiotherapist's rehab plan replaced tempo sessions with swimming. Do you want to build back from that plan or restart the old block?" },
+		],
+		turns: [
+			{
+				p: "My knee is cleared — I'm back to running Sundays.",
+				a: "Then the Sunday long run comes back and swimming becomes optional rather than prescribed. Worth keeping one swim while the tempo sessions ramp, since that's the load your knee reacted to last time.",
+				add: [{ n: "cleared to run", t: "decision", of: "knee injury" }],
+				facts: [
+					{ f: "Devi Raman is cleared to run and has resumed Sunday long runs.", from: "now" },
+					{ f: "Devi Raman was restricted from running by a knee injury.", from: "-151d", to: "now" },
+					{ f: "Devi Raman's rehab plan substituted swimming for tempo sessions.", from: "-149d", to: "now" },
+				],
+				ents: [
+					{ n: "knee injury", l: "Event", s: "Sidelined Devi from March; resolved as of today, ending the running restriction." },
+					{ n: "swimming", l: "Preference", s: "Introduced as rehab substitution for tempo sessions; no longer prescribed now that running has resumed." },
+				],
+			},
+			{
+				p: "I prefer running early, before 7am at Cubbon Park.",
+				a: "That fits the Sunday long run and the tempo sessions both. Cubbon Park before 7am also keeps you off the road sections your physiotherapist flagged.",
+				add: [{ n: "before 7am", t: "preference", of: "morning runs" }],
+				facts: [
+					{ f: "Devi Raman prefers to run before 7am.", from: "now" },
+					{ f: "Devi Raman runs at Cubbon Park.", from: "now" },
+				],
+				ents: [
+					{ n: "morning runs", l: "Preference", s: "Devi's standing preference, now specified as before 7am at Cubbon Park." },
+					{ n: "Cubbon Park", l: "Place", s: "Devi's running location; avoids the road surfaces flagged during rehab." },
+				],
+			},
+			{
+				p: "The marathon is in Chennai this December.",
+				a: "That gives the ramp a fixed end. Working back from December, the tempo sessions have room to rebuild gradually rather than compressing into the weeks right after your clearance.",
+				add: [{ n: "Chennai, December", t: "event", of: "marathon" }],
+				facts: [
+					{ f: "Devi Raman's marathon is in Chennai in December.", from: "now" },
+					{ f: "Devi Raman does long runs on Sunday.", from: "now" },
+				],
+				ents: [
+					{ n: "marathon", l: "Event", s: "Target race, now dated to December in Chennai, anchoring the training ramp." },
+					{ n: "tempo sessions", l: "Topic", s: "Training component suspended during rehab, now rebuilding toward the December race." },
+				],
+			},
+		],
+	},
+	{
+		id: "travel", name: "Travel concierge",
+		blurb: "A trip assembled over many conversations",
+		seed: [
+			{ n: "Kyoto trip", t: "hub" },
+			{ n: "Noor", t: "person" },
+			{ n: "Fushimi Inari", t: "place" },
+			{ n: "ryokan", t: "place" },
+			{ n: "vegetarian", t: "preference" },
+			{ n: "November", t: "event" },
+			{ n: "JR Pass", t: "artifact" },
+			{ n: "Arashiyama", t: "place", of: "Kyoto trip" },
+			{ n: "early mornings", t: "preference", of: "Noor" },
+			{ n: "shojin ryori", t: "preference", of: "vegetarian" },
+			{ n: "Osaka day trip", t: "event", of: "JR Pass" },
+		],
+		opening: [
+			{ r: "user", c: "Help me plan the Kyoto trip properly." },
+			{ r: "assistant", c: "You've given me most of it already: November, travelling with Noor, vegetarian, and you both prefer early mornings. The open pieces are where you stay and whether the JR Pass is worth it." },
+		],
+		turns: [
+			{
+				p: "We booked the ryokan in Higashiyama for four nights.",
+				a: "Good — Higashiyama puts you walking distance from the early-morning Fushimi Inari climb you wanted, which was the main reason the location mattered. Four nights also leaves room for the Osaka day trip without moving hotels.",
+				add: [{ n: "Higashiyama, 4 nights", t: "decision", of: "ryokan" }],
+				facts: [
+					{ f: "Noor and the traveller booked a ryokan in Higashiyama for four nights.", from: "now" },
+					{ f: "The Kyoto trip takes place in November.", from: "-22d" },
+					{ f: "The traveller prefers early mornings.", from: "-22d" },
+				],
+				ents: [
+					{ n: "ryokan", l: "Place", s: "Booked in Higashiyama for four nights; chosen for walking access to early-morning Fushimi Inari." },
+					{ n: "Fushimi Inari", l: "Place", s: "Planned as an early-morning visit, which drove the Higashiyama accommodation choice." },
+				],
+			},
+			{
+				p: "Noor is vegetarian, so shojin ryori only for dinners.",
+				a: "Recorded as a constraint rather than a preference, then. That narrows Higashiyama's dinner options usefully — the temple kitchens near the ryokan are the obvious fit.",
+				add: [{ n: "dinner constraint", t: "preference", of: "shojin ryori" }],
+				facts: [
+					{ f: "Noor is vegetarian.", from: "now" },
+					{ f: "Dinners on the Kyoto trip will be shojin ryori.", from: "now" },
+				],
+				ents: [
+					{ n: "Noor", l: "Person", s: "Travelling companion; vegetarian, prefers early mornings, which shapes both dining and daily scheduling." },
+					{ n: "shojin ryori", l: "Preference", s: "Buddhist temple cuisine selected for all dinners to satisfy the vegetarian constraint." },
+				],
+			},
+			{
+				p: "Skip the JR Pass — we're staying in Kyoto.",
+				a: "Then the Osaka day trip either drops or gets paid per-leg. Given four nights in Higashiyama and early starts, staying local is the coherent version of this trip.",
+				add: [{ n: "no rail pass", t: "decision", of: "JR Pass" }],
+				facts: [
+					{ f: "The travellers will not purchase a JR Pass.", from: "now" },
+					{ f: "The travellers considered an Osaka day trip using the JR Pass.", from: "-14d", to: "now" },
+				],
+				ents: [
+					{ n: "JR Pass", l: "Artifact", s: "Rail pass considered and declined; its main justification was the Osaka day trip." },
+					{ n: "Osaka day trip", l: "Event", s: "Contingent on the JR Pass; now unfunded and effectively dropped." },
+				],
+			},
+		],
+	},
+	{
+		id: "support", name: "Customer support agent",
+		blurb: "One account remembered across tickets",
+		seed: [
+			{ n: "Northwind Retail", t: "hub" },
+			{ n: "Dana Whitfield", t: "person" },
+			{ n: "ticket 8841", t: "artifact" },
+			{ n: "SSO rollout", t: "event" },
+			{ n: "Enterprise plan", t: "org" },
+			{ n: "webhook failures", t: "topic" },
+			{ n: "Okta", t: "topic", of: "SSO rollout" },
+			{ n: "retry backlog", t: "topic", of: "webhook failures" },
+			{ n: "renewal Q1", t: "event", of: "Enterprise plan" },
+			{ n: "IT director", t: "person", of: "Dana Whitfield" },
+		],
+		opening: [
+			{ r: "user", c: "Northwind is on the line again about webhooks." },
+			{ r: "assistant", c: "Third time. Ticket 8841 covered the retry backlog, and Dana Whitfield — their IT director — asked then to be told before any change touching the SSO rollout. Their renewal is Q1." },
+		],
+		turns: [
+			{
+				p: "Dana says the webhook failures started after the Okta cutover.",
+				a: "That connects two threads that were separate until now. Ticket 8841 treated the retry backlog as a queue problem; if it begins at the Okta cutover, the cause sits in the SSO rollout instead.",
+				add: [{ n: "Okta cutover", t: "decision", of: "webhook failures" }],
+				facts: [
+					{ f: "Northwind Retail's webhook failures began after the Okta cutover.", from: "now" },
+					{ f: "Ticket 8841 attributed webhook failures to a retry backlog.", from: "-27d", to: "now" },
+					{ f: "Dana Whitfield is Northwind Retail's IT director.", from: "-119d" },
+				],
+				ents: [
+					{ n: "webhook failures", l: "Topic", s: "Recurring Northwind issue; cause reattributed from the retry backlog to the Okta cutover." },
+					{ n: "Okta", l: "Topic", s: "Identity provider in the SSO rollout; its cutover now correlates with the webhook failures." },
+				],
+			},
+			{
+				p: "They want a named engineer before the Q1 renewal.",
+				a: "Worth treating as a renewal condition rather than a preference. It arrives while an unresolved cause sits under three tickets, which is usually what a request like this is really about.",
+				add: [{ n: "named engineer", t: "decision", of: "renewal Q1" }],
+				facts: [
+					{ f: "Northwind Retail requires a named engineer before the Q1 renewal.", from: "now" },
+					{ f: "Northwind Retail is on the Enterprise plan.", from: "-365d" },
+				],
+				ents: [
+					{ n: "renewal Q1", l: "Event", s: "Northwind's Enterprise renewal, now carrying a named-engineer condition." },
+					{ n: "Dana Whitfield", l: "Person", s: "Northwind's IT director and the standing contact for anything touching the SSO rollout." },
+				],
+			},
+			{
+				p: "Escalate 8841 and tell Dana before we touch SSO.",
+				a: "Both are consistent with what Dana asked for on the first ticket. The notification is a standing instruction on this account, not a one-off for this escalation.",
+				add: [{ n: "escalated", t: "decision", of: "ticket 8841" }],
+				facts: [
+					{ f: "Ticket 8841 is escalated.", from: "now" },
+					{ f: "Dana Whitfield must be notified before changes touching the SSO rollout.", from: "-27d" },
+				],
+				ents: [
+					{ n: "ticket 8841", l: "Artifact", s: "The webhook-failure ticket, now escalated and reattributed to the Okta cutover." },
+					{ n: "SSO rollout", l: "Event", s: "Northwind's identity migration; carries a standing notify-Dana-first requirement." },
+				],
+			},
+		],
+	},
+];
+
 function viewPlayground(v) {
-	// Two states, one view. Empty: a greeting and the composer, centred, and
-	// nothing else — on a genuinely fresh account the side columns have nothing
-	// in them either, so they stay out of the way until there is something to
-	// show. Once the conversation starts, messages fill from the top and the
-	// composer sits at the bottom.
-	const empty = !PG.messages.length;
-	const bare = empty && !PG.threads.length && PG.tab === "chats";
-	const first = String(S.me?.user?.name || S.me?.user?.email || "").trim().split(/[\s@]/)[0];
+	const sc = pgScenario();
+	const preview = PG.mode === "preview";
 	const wrap = el("div");
 	wrap.innerHTML = `
-		<div class="pg-shell${PG.tab === "settings" ? " settings-open" : ""}${empty ? " is-empty" : ""}${bare ? " is-bare" : ""}">
-			<div class="pg-col pg-chats">
-				<div class="pg-col-head">
-					<div class="client-tabs" style="margin-bottom:10px">
-						<button class="term-tab ${PG.tab === "chats" ? "active" : ""}" onclick="playgroundTab('chats')">Chats</button>
-						<button class="term-tab ${PG.tab === "settings" ? "active" : ""}" onclick="playgroundTab('settings')">Settings</button>
+		<div class="pg-shell">
+			<div class="pg-col pg-graph">
+				<div class="pg-graph-tools">
+					<button class="pg-chip-btn" id="pgEntityBtn" aria-expanded="${PG.entityTypesOpen}"
+						onclick="pgToggleEntityTypes()">Entity types<span class="pg-caret">▾</span></button>
+					<div class="pg-graph-search">
+						<input id="pgGraphSearch" placeholder="Search graph" value="${esc(PG.gsearch)}"
+							aria-label="Search graph" oninput="pgSearch(this.value)" />
+						<select aria-label="Filter by type" onchange="pgFilter(this.value)">
+							<option value="all"${PG.gfilter === "all" ? " selected" : ""}>All</option>
+							${Object.keys(PG_TYPE_LABEL).filter((t) => t !== "hub").map((t) =>
+								`<option value="${t}"${PG.gfilter === t ? " selected" : ""}>${esc(PG_TYPE_LABEL[t])}</option>`).join("")}
+						</select>
 					</div>
-					${PG.tab === "chats" ? `
-						<button style="width:100%" onclick="playgroundNewChat()" ${PG.threads.length >= (PG.limits.maxThreads ?? 5) ? "disabled" : ""}>New chat</button>
-						<div class="pg-cap">${PG.threads.length} of ${PG.limits.maxThreads ?? 5} chats${PG.limits.dailyMessages ? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today` : ""}</div>
-					` : `<div class="pg-cap">What this chat should keep. It changes what the extractor is told and what the gates let through.</div>`}
 				</div>
-				<div class="pg-col-body" id="pgSide"></div>
+				${PG.entityTypesOpen ? `<div class="pg-entity-types" id="pgEntityTypes"></div>` : ""}
+				<div class="pg-canvas pg-canvas-bg" id="pgCanvas"></div>
+				<div class="pg-zoom">
+					<button onclick="pgZoom(1.25)" aria-label="Zoom in">+</button>
+					<button onclick="pgZoom(0.8)" aria-label="Zoom out">−</button>
+					<button onclick="pgResetView()" aria-label="Fit graph" title="Fit">⤾</button>
+				</div>
 			</div>
-			<div class="pg-col pg-conversation">
-				<div class="pg-col-body" id="pgMessages"></div>
-				<div class="pg-composer">
-					${empty ? `<div class="pg-greeting">${first ? `Hi ${esc(first)} — tell` : "Tell"} me something worth remembering.</div>` : ""}
+			<div class="pg-col pg-chat">
+				<div class="pg-chat-head" id="pgHeadControls">
+					<button class="pg-icon-btn" title="Restart this example" aria-label="Restart this example"
+						onclick="pgRestart()">↻</button>
+					<div style="position:relative">
+						<button class="pg-chip-btn" aria-expanded="${PG.menu === "example"}"
+							onclick="pgMenu('example')">${preview ? esc(sc.name) : "Pick example"}<span class="pg-caret">▾</span></button>
+						${PG.menu === "example" ? pgExampleMenu() : ""}
+					</div>
+					<div style="position:relative">
+						<button class="pg-chip-btn" aria-expanded="${PG.menu === "thread"}"
+							onclick="pgMenu('thread')">Threads<span class="pg-caret">▾</span></button>
+						${PG.menu === "thread" ? pgThreadMenu() : ""}
+					</div>
+					<button class="pg-icon-btn" aria-pressed="${PG.json}" title="Show raw extraction JSON"
+						onclick="pgToggleJson()" style="font:600 11px/1 var(--font-mono);width:auto;padding:0 9px">JSON</button>
+					${preview ? "" : `<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="What this chat remembers"
+						onclick="pgTogglePanel('memory')" style="width:auto;padding:0 9px;font-size:12.5px">Memory</button>`}
+					<button class="pg-tour-launch" style="margin-left:auto" onclick="pgTourStart(true)">
+						<span aria-hidden="true">◎</span>Tour</button>
+				</div>
+				${preview ? `<div class="pg-preview-bar"><b>Preview</b> — a sample world, so you can see how memory behaves. Nothing here is saved to your account.</div>` : ""}
+				${!preview && PG.panel === "memory"
+					? `<div class="pg-col-body pg-settings" id="pgMemoryPanel" style="flex:1"></div>`
+					: `<div class="pg-stream" id="pgMessages"></div>`}
+				<div class="pg-suggest" id="pgSuggest"></div>
+				<div class="pg-composer" id="pgComposer">
 					<div class="pg-composer-row">
-						<textarea id="pgInput" rows="1" placeholder="Tell it something worth remembering…"
+						<textarea id="pgInput" rows="1" placeholder="${preview ? "Say something to this example…" : "Tell it something worth remembering…"}"
 							oninput="PG.draft=this.value;playgroundGrow(this)"
 							onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();playgroundSend();}"></textarea>
 						<button id="pgSendBtn" onclick="playgroundSend()">Send</button>
 					</div>
 				</div>
 			</div>
-			<div class="pg-col pg-memories">
-				<div class="pg-col-head">
-					<div class="section-h">Memories</div>
-					<div class="pg-note">Written as you talk. Each one has a receipt in <a href="#" onclick="setView('receipts');return false">History</a>.</div>
-				</div>
-				<div class="pg-col-body" id="pgMemories"></div>
-			</div>
 		</div>`;
 	v.appendChild(wrap);
 	const input = $("#pgInput");
 	if (input) { input.value = PG.draft; playgroundGrow(input); }
-	renderPlaygroundSide();
+	renderPgGraph();
 	renderPlaygroundMessages();
-	renderPlaygroundMemories();
+	renderPgSuggest();
+	renderPgEntityTypes();
+	renderPlaygroundSide();
 	if (!PG.loaded) loadPlayground();
+	pgTourMaybeAutoStart();
+	pgTourPosition();
+}
+
+function pgTogglePanel(name) {
+	PG.panel = PG.panel === name ? null : name;
+	renderView();
 }
 
 function playgroundGrow(area) {
@@ -3323,10 +3875,452 @@ function playgroundGrow(area) {
 	area.style.height = `${Math.min(160, area.scrollHeight)}px`;
 }
 
-function playgroundTab(tab) {
-	PG.tab = tab;
+function playgroundTab(tab) { PG.tab = tab; renderView(); }
+
+/* ---------- preview scenarios ---------- */
+
+function pgScenario() { return PG_SCENARIOS[PG.scenario] ?? PG_SCENARIOS[0]; }
+
+/** Deterministic PRNG so a scenario's graph is identical on every visit. */
+function pgRng(seed) {
+	let h = 2166136261;
+	for (const ch of String(seed)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+	return () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 1e5) / 1e5; };
+}
+
+const PG_LAYOUT = new Map();
+const PG_VIEW_W = 1000, PG_VIEW_H = 680;
+
+/**
+ * Lay out every node the scenario will EVER show, including the ones later
+ * turns add, and cache it. Positions therefore never move when a memory lands:
+ * the new node arrives into a space that was always reserved for it, which is
+ * what makes the arrival read as growth rather than a re-shuffle.
+ */
+function pgLayoutFor(sc) {
+	if (PG_LAYOUT.has(sc.id)) return PG_LAYOUT.get(sc.id);
+	const all = [...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])];
+	const rnd = pgRng(sc.id);
+	const cx = PG_VIEW_W / 2, cy = PG_VIEW_H / 2;
+	const pos = new Map();
+	const hub = all.find((n) => n.t === "hub") ?? all[0];
+	pos.set(hub.n, { x: cx, y: cy, a: 0 });
+	const primary = all.filter((n) => n !== hub && !n.of);
+	primary.forEach((n, i) => {
+		const a = -Math.PI / 2 + (i / primary.length) * Math.PI * 2 + (rnd() - .5) * .2;
+		const f = 1 + (rnd() - .5) * .18;
+		pos.set(n.n, { x: cx + Math.cos(a) * 268 * f, y: cy + Math.sin(a) * 196 * f, a });
+	});
+	let pending = all.filter((n) => n.of);
+	for (let pass = 0; pending.length && pass < 6; pass++) {
+		const next = [];
+		for (const n of pending) {
+			const p = pos.get(n.of);
+			if (!p) { next.push(n); continue; }
+			const a = (p.a ?? 0) + (rnd() - .5) * .9;
+			const d = 116 + rnd() * 40;
+			pos.set(n.n, { x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d * .82, a });
+		}
+		pending = next;
+	}
+	// Radial placement alone lets a child land on top of an unrelated branch.
+	// Relax: push any pair closer than MIN_SEP apart, pinning the hub. It is
+	// deterministic and converges in a few dozen passes, so the layout is still
+	// byte-identical on every visit — just without collisions.
+	pos.get(hub.n).pinned = true;
+	const points = [...pos.values()];
+	const MIN_SEP = 76;
+	for (let iter = 0; iter < 140; iter++) {
+		let moved = 0;
+		for (let a = 0; a < points.length; a++) {
+			for (let b = a + 1; b < points.length; b++) {
+				const A = points[a], B = points[b];
+				let dx = B.x - A.x, dy = B.y - A.y;
+				let d = Math.hypot(dx, dy);
+				if (d >= MIN_SEP) continue;
+				if (d < 0.01) { dx = (a % 2 ? 1 : -1) * .7; dy = .7; d = 1; }
+				const push = ((MIN_SEP - d) / 2) * .58;
+				const ux = dx / d, uy = dy / d;
+				if (!A.pinned) { A.x -= ux * push; A.y -= uy * push; }
+				if (!B.pinned) { B.x += ux * push; B.y += uy * push; }
+				moved++;
+			}
+		}
+		for (const p of points) {
+			p.x = Math.max(58, Math.min(PG_VIEW_W - 58, p.x));
+			p.y = Math.max(42, Math.min(PG_VIEW_H - 52, p.y));
+		}
+		if (!moved) break;
+	}
+	PG_LAYOUT.set(sc.id, pos);
+	return pos;
+}
+
+/**
+ * What the canvas should draw right now. In preview that is the scenario's seed
+ * plus one group of nodes per turn taken. In live mode it is the memories this
+ * chat actually captured — same renderer, real data, no synthetic nodes.
+ */
+function pgGraphData() {
+	if (PG.mode === "live") {
+		const items = [];
+		for (const m of PG.messages) for (const it of m.extraction?.items ?? []) items.push(it);
+		const nodes = [{ n: "This chat", t: "hub", x: PG_VIEW_W / 2, y: PG_VIEW_H / 2 }];
+		const rnd = pgRng(PG.threadId || "live");
+		items.forEach((it, i) => {
+			const a = -Math.PI / 2 + (i / Math.max(items.length, 3)) * Math.PI * 2 + (rnd() - .5) * .18;
+			nodes.push({
+				n: String(it.text || "").slice(0, 42), t: "topic", of: "This chat",
+				x: PG_VIEW_W / 2 + Math.cos(a) * 250, y: PG_VIEW_H / 2 + Math.sin(a) * 180,
+				isNew: i >= items.length - (PG.lastLiveAdd ?? 0),
+			});
+		});
+		return nodes;
+	}
+	const sc = pgScenario();
+	const pos = pgLayoutFor(sc);
+	const shown = [...sc.seed];
+	for (let i = 0; i < PG.turn; i++) shown.push(...(sc.turns[i].add ?? []).map((n) => ({ ...n, turn: i })));
+	return shown.map((n) => ({ ...n, ...(pos.get(n.n) ?? { x: 500, y: 340 }), isNew: n.turn === PG.turn - 1 }));
+}
+
+function renderPgGraph(animate = false) {
+	const host = $("#pgCanvas");
+	if (!host) return;
+	const nodes = pgGraphData();
+	const byName = new Map(nodes.map((n) => [n.n, n]));
+	const hub = nodes.find((n) => n.t === "hub");
+	const q = PG.gsearch.trim().toLowerCase();
+	const dim = (n) => (q && !n.n.toLowerCase().includes(q)) || (PG.gfilter !== "all" && n.t !== PG.gfilter && n.t !== "hub");
+	const edges = [];
+	for (const n of nodes) {
+		if (n.t === "hub") continue;
+		const parent = byName.get(n.of) ?? hub;
+		if (parent && parent !== n) edges.push({ a: parent, b: n, isNew: n.isNew });
+	}
+	if (!nodes.length) {
+		host.innerHTML = `<div class="pg-graph-empty"><b>Nothing captured yet</b>
+			<span class="help">Send a message — anything durable in it appears here as it is written.</span></div>`;
+		return;
+	}
+	const radius = (n) => (n.t === "hub" ? 17 : 8.5);
+	host.innerHTML = `
+		<svg viewBox="0 0 ${PG_VIEW_W} ${PG_VIEW_H}" preserveAspectRatio="xMidYMid meet" role="img"
+			aria-label="Memory graph for this conversation"
+			onpointerdown="pgDragStart(event)" onpointermove="pgDragMove(event)"
+			onpointerup="pgDragEnd(event)" onpointercancel="pgDragEnd(event)">
+			<g class="pg-world" id="pgWorld" style="transform-origin:${PG_VIEW_W / 2}px ${PG_VIEW_H / 2}px">
+				${edges.map((e) => {
+					const len = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y).toFixed(0);
+					return `<line class="pgn-edge${e.isNew ? " is-new" : ""}" x1="${e.a.x.toFixed(1)}" y1="${e.a.y.toFixed(1)}"
+						x2="${e.b.x.toFixed(1)}" y2="${e.b.y.toFixed(1)}"
+						style="--len:${len};stroke-dasharray:${len};opacity:${dim(e.b) ? .18 : 1}"></line>`;
+				}).join("")}
+				${nodes.map((n) => {
+					const c = PG_TYPE_COLOR[n.t] ?? PG_TYPE_COLOR.topic;
+					const r = radius(n);
+					return `<g class="pgn-g${n.t === "hub" ? " is-hub" : ""}${n.isNew ? " is-new" : ""}"
+						style="opacity:${dim(n) ? .2 : 1}" tabindex="0" role="listitem"
+						aria-label="${esc(n.n)}, ${esc(PG_TYPE_LABEL[n.t] ?? n.t)}">
+						<title>${esc(n.n)} — ${esc(PG_TYPE_LABEL[n.t] ?? n.t)}</title>
+						${n.isNew ? `<circle class="pgn-halo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}" style="stroke:${c}"></circle>` : ""}
+						<circle class="pgn-dot" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}" style="fill:${c}"></circle>
+						<text class="pgn-label" x="${n.x.toFixed(1)}" y="${(n.y + r + 14).toFixed(1)}">${esc(n.n.length > 26 ? `${n.n.slice(0, 25)}…` : n.n)}</text>
+					</g>`;
+				}).join("")}
+			</g>
+		</svg>`;
+	pgApplyView();
+	if (animate) {
+		const world = $("#pgWorld");
+		if (world) {
+			world.classList.add("is-settling");
+			setTimeout(() => world.classList.remove("is-settling"), 1100);
+		}
+	}
+	renderPgEntityTypes();
+}
+
+function renderPgEntityTypes() {
+	const box = $("#pgEntityTypes");
+	if (!box) return;
+	const counts = new Map();
+	for (const n of pgGraphData()) counts.set(n.t, (counts.get(n.t) ?? 0) + 1);
+	const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+	box.innerHTML = rows.map(([t, c]) => `
+		<div class="pg-et-row">
+			<span class="pg-et-swatch" style="background:${PG_TYPE_COLOR[t] ?? PG_TYPE_COLOR.topic}"></span>
+			${esc(PG_TYPE_LABEL[t] ?? t)}<span class="pg-et-count">${c}</span>
+		</div>`).join("") || `<div class="pg-note">Nothing on the canvas yet.</div>`;
+}
+
+function pgToggleEntityTypes() { PG.entityTypesOpen = !PG.entityTypesOpen; renderView(); }
+function pgSearch(value) { PG.gsearch = value; renderPgGraph(); }
+function pgFilter(value) { PG.gfilter = value || "all"; renderPgGraph(); }
+
+function pgApplyView() {
+	const world = $("#pgWorld");
+	if (world) world.style.setProperty("--vt", `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`);
+}
+
+function pgZoom(factor) {
+	PG.view.k = Math.max(.45, Math.min(2.6, PG.view.k * factor));
+	pgApplyView();
+}
+
+function pgResetView() { PG.view = { x: 0, y: 0, k: 1 }; pgApplyView(); }
+
+function pgDragStart(event) {
+	if (event.button) return;
+	PG.drag = { x: event.clientX, y: event.clientY, ox: PG.view.x, oy: PG.view.y };
+	event.currentTarget.setPointerCapture?.(event.pointerId);
+}
+
+function pgDragMove(event) {
+	if (!PG.drag) return;
+	// Screen pixels are not user units once the SVG is scaled to fit: convert
+	// through the rendered width so a drag tracks the cursor at any zoom.
+	const rect = event.currentTarget.getBoundingClientRect();
+	const scale = PG_VIEW_W / (rect.width || PG_VIEW_W);
+	PG.view.x = PG.drag.ox + (event.clientX - PG.drag.x) * scale;
+	PG.view.y = PG.drag.oy + (event.clientY - PG.drag.y) * scale;
+	pgApplyView();
+}
+
+function pgDragEnd(event) {
+	PG.drag = null;
+	event.currentTarget.releasePointerCapture?.(event.pointerId);
+}
+
+/* ---------- header menus ---------- */
+
+function pgMenu(which) {
+	PG.menu = PG.menu === which ? null : which;
 	renderView();
 }
+
+function pgExampleMenu() {
+	return `<div class="pg-menu" role="menu">
+		<div class="pg-menu-label">Read-only examples</div>
+		${PG_SCENARIOS.map((s, i) => `
+			<button role="menuitem" class="${PG.mode === "preview" && PG.scenario === i ? "active" : ""}"
+				onclick="pgPickExample(${i})">
+				<span style="min-width:0"><span style="display:block">${esc(s.name)}</span><small>${esc(s.blurb)}</small></span>
+				${PG.mode === "preview" && PG.scenario === i ? `<span class="pg-menu-check">✓</span>` : ""}
+			</button>`).join("")}
+	</div>`;
+}
+
+function pgThreadMenu() {
+	const rows = PG.threads.map((t) => `
+		<button role="menuitem" class="${PG.mode === "live" && t.id === PG.threadId ? "active" : ""}"
+			onclick="pgOpenThread('${esc(t.id)}')">
+			<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title || "New chat")}</span>
+			${PG.mode === "live" && t.id === PG.threadId ? `<span class="pg-menu-check">✓</span>` : ""}
+		</button>`).join("");
+	const full = PG.threads.length >= (PG.limits.maxThreads ?? 5);
+	return `<div class="pg-menu" role="menu">
+		<div class="pg-menu-label">Your chats — these capture for real</div>
+		${rows || `<div class="pg-note" style="padding:4px 10px 10px">No chats yet. Start one to write to your own memory.</div>`}
+		<button role="menuitem" onclick="pgNewThread()" ${full ? "disabled" : ""} style="border-top:1px solid var(--border);margin-top:6px;padding-top:11px">
+			<span>+ New chat<small>${PG.threads.length} of ${PG.limits.maxThreads ?? 5} used${PG.limits.dailyMessages
+				? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today`
+				: ""}</small></span></button>
+	</div>`;
+}
+
+function pgPickExample(index) {
+	PG.mode = "preview"; PG.scenario = index; PG.turn = 0; PG.preview = [];
+	PG.menu = null; PG.openCtx = null; PG.thinking = false;
+	pgResetView();
+	renderView();
+}
+
+function pgRestart() {
+	if (PG.mode === "live") { loadPlayground(PG.threadId); return; }
+	PG.turn = 0; PG.preview = []; PG.openCtx = null; PG.thinking = false;
+	pgResetView();
+	renderView();
+}
+
+function pgToggleJson() { PG.json = !PG.json; renderView(); }
+
+async function pgOpenThread(id) {
+	PG.mode = "live"; PG.menu = null; PG.notice = "";
+	await loadPlayground(id);
+	renderView();
+}
+
+async function pgNewThread() {
+	PG.menu = null;
+	PG.mode = "live";
+	await playgroundNewChat();
+}
+
+/* ---------- guided tour ---------- */
+
+const PG_TOUR_KEY = "itsuki.playground.tour.v1";
+const PG_TOUR = [
+	{
+		title: "Start with a message",
+		body: "Everything begins with something worth remembering. Send the suggested line and watch what the engine does with it.",
+		sel: "#pgComposer", cta: "Send it",
+	},
+	{
+		title: "The graph grows",
+		body: "The sentence became an entity, typed and linked to what was already there. Nothing was re-arranged — the new node arrived into the space the graph had for it.",
+		sel: "#pgCanvas",
+	},
+	{
+		title: "The context is inspectable",
+		body: "This is exactly what the model was given: facts with validity ranges, and the entities behind them. A fact that stopped being true keeps an end date instead of quietly disappearing.",
+		sel: ".pg-ctx", open: true,
+	},
+	{
+		title: "A reply that knows the history",
+		body: "The answer refers to decisions from months earlier, because they were retrieved rather than re-stated. That difference is the whole product.",
+		sel: "#pgMessages",
+	},
+	{
+		title: "This is a preview — your memory is separate",
+		body: "Examples are read-only worlds for getting the idea. Open Threads to talk to your own memory instead, where every turn is captured for real and leaves a receipt.",
+		sel: "#pgHeadControls",
+	},
+];
+
+function pgTourVisits() {
+	try { return Number(localStorage.getItem(PG_TOUR_KEY) ?? 0) || 0; } catch { return 99; }
+}
+
+function pgTourMaybeAutoStart() {
+	if (PG.tour.on || PG.tour.autoChecked) return;
+	PG.tour.autoChecked = true;
+	// Three unprompted runs, then it only appears when asked for.
+	if (pgTourVisits() >= 3 || PG.mode !== "preview") return;
+	try { localStorage.setItem(PG_TOUR_KEY, String(pgTourVisits() + 1)); } catch {}
+	setTimeout(() => pgTourStart(false), 620);
+}
+
+function pgTourStart(manual) {
+	if (manual) {
+		PG.mode = "preview";
+		PG.turn = 0; PG.preview = []; PG.openCtx = null; PG.thinking = false;
+		try { localStorage.setItem(PG_TOUR_KEY, "3"); } catch {}
+	}
+	PG.tour = { ...PG.tour, on: true, step: 0 };
+	if (manual) renderView();
+	pgTourRender();
+}
+
+function pgTourEnd() {
+	PG.tour = { ...PG.tour, on: false, step: 0 };
+	document.getElementById("pgTourRoot")?.remove();
+	document.removeEventListener("keydown", pgTourKeys, true);
+}
+
+function pgTourKeys(event) {
+	if (event.key === "Escape") { event.preventDefault(); pgTourEnd(); }
+	else if (event.key === "ArrowRight") { event.preventDefault(); pgTourNext(); }
+	else if (event.key === "ArrowLeft") { event.preventDefault(); pgTourBack(); }
+}
+
+async function pgTourNext() {
+	const step = PG_TOUR[PG.tour.step];
+	// Step one does the thing it describes, so the later steps have something
+	// real to point at rather than an empty panel.
+	if (step?.cta && PG.mode === "preview" && !PG.preview.length) {
+		pgTourEnd();
+		await pgSendScripted(PG.turn);
+		PG.tour = { ...PG.tour, on: true, step: 1 };
+		pgTourRender();
+		return;
+	}
+	if (PG.tour.step >= PG_TOUR.length - 1) { pgTourEnd(); return; }
+	PG.tour = { ...PG.tour, step: PG.tour.step + 1 };
+	const next = PG_TOUR[PG.tour.step];
+	if (next?.open && PG.preview.length) { PG.openCtx = PG.preview.length - 1; renderPlaygroundMessages(); }
+	pgTourRender();
+}
+
+function pgTourBack() {
+	if (!PG.tour.step) return;
+	PG.tour = { ...PG.tour, step: PG.tour.step - 1 };
+	pgTourRender();
+}
+
+function pgTourAdvanceOnSend() {
+	if (PG.tour.on && PG.tour.step === 0) { PG.tour = { ...PG.tour, step: 1 }; pgTourRender(); }
+}
+
+function pgTourRender() {
+	if (!PG.tour.on) return;
+	let root = document.getElementById("pgTourRoot");
+	if (!root) {
+		root = el("div");
+		root.id = "pgTourRoot";
+		document.body.appendChild(root);
+		document.addEventListener("keydown", pgTourKeys, true);
+	}
+	const i = PG.tour.step;
+	const step = PG_TOUR[i];
+	const last = i === PG_TOUR.length - 1;
+	root.innerHTML = `
+		<div class="pg-tour-mask" onclick="pgTourEnd()"></div>
+		<div class="pg-tour-hole" id="pgTourHole"></div>
+		<div class="pg-tour-card" id="pgTourCard" role="dialog" aria-modal="true" aria-labelledby="pgTourTitle">
+			<div class="pg-tour-step">Step ${i + 1} of ${PG_TOUR.length}</div>
+			<h4 id="pgTourTitle">${esc(step.title)}</h4>
+			<div class="pg-tour-rail"><i style="width:${((i + 1) / PG_TOUR.length) * 100}%"></i></div>
+			<p>${esc(step.body)}</p>
+			<div class="pg-tour-actions">
+				${i ? `<button class="ghost mini" onclick="pgTourBack()">Back</button>` : ""}
+				<button class="ghost mini pg-tour-skip" onclick="pgTourEnd()">${last ? "Close" : "Skip tour"}</button>
+				<button onclick="pgTourNext()">${step.cta ?? (last ? "Done" : "Next")}</button>
+			</div>
+		</div>`;
+	// Position synchronously: getBoundingClientRect forces the layout this needs,
+	// and rAF never fires in a background or non-compositing tab — which would
+	// leave the spotlight sitting at 0×0 over nothing. The rAF pass afterwards
+	// only refines, once fonts and any in-flight transition have settled.
+	pgTourPosition();
+	root.querySelector(".pg-tour-card button:last-of-type")?.focus();
+	requestAnimationFrame(() => pgTourPosition());
+}
+
+function pgTourPosition() {
+	if (!PG.tour.on) return;
+	const step = PG_TOUR[PG.tour.step];
+	const hole = document.getElementById("pgTourHole");
+	const card = document.getElementById("pgTourCard");
+	const target = step && document.querySelector(step.sel);
+	if (!hole || !card) return;
+	if (!target) { hole.style.opacity = "0"; return; }
+	hole.style.opacity = "1";
+	const r = target.getBoundingClientRect();
+	const pad = 6;
+	hole.style.top = `${Math.max(4, r.top - pad)}px`;
+	hole.style.left = `${Math.max(4, r.left - pad)}px`;
+	hole.style.width = `${r.width + pad * 2}px`;
+	hole.style.height = `${r.height + pad * 2}px`;
+	const cw = card.offsetWidth || 360;
+	const ch = card.offsetHeight || 220;
+	const gap = 14;
+	const fits = (l) => l >= 12 && l + cw <= window.innerWidth - 12;
+	// Beside the target first — left, then right — so the card never covers the
+	// thing it is pointing at. The graph fills most of the viewport, and a card
+	// dropped below it would land on top of the very nodes step two describes.
+	let left = r.left - cw - gap;
+	let top = r.top;
+	if (!fits(left)) left = r.right + gap;
+	if (!fits(left)) {
+		left = Math.min(Math.max(12, r.left), window.innerWidth - cw - 12);
+		top = r.bottom + gap + ch > window.innerHeight ? r.top - ch - gap : r.bottom + gap;
+	}
+	card.style.left = `${Math.max(12, Math.min(left, window.innerWidth - cw - 12))}px`;
+	card.style.top = `${Math.max(12, Math.min(top, window.innerHeight - ch - 12))}px`;
+}
+
+window.addEventListener("resize", () => { pgTourPosition(); });
 
 async function loadPlayground(threadId) {
 	const projectEpoch = S.projectEpoch;
@@ -3370,21 +4364,7 @@ function schedulePlaygroundPoll() {
 	PG.poll = setTimeout(() => { if (S.view === "playground") loadPlayground(PG.threadId); }, 3000);
 }
 
-function renderPlaygroundSide() {
-	const side = $("#pgSide");
-	if (!side) return;
-	side.className = PG.tab === "settings" ? "pg-col-body pg-settings" : "pg-col-body";
-	if (PG.tab === "settings") return renderPlaygroundSettings(side);
-	if (!PG.threads.length) {
-		side.innerHTML = `<div class="pg-empty">No chats yet. Start one and say something about yourself — a plan, a preference, a person.</div>`;
-		return;
-	}
-	side.innerHTML = PG.threads.map((t) => `
-		<button class="pg-thread ${t.id === PG.threadId ? "active" : ""}" onclick="playgroundOpenThread('${esc(t.id)}')">
-			<span class="pg-thread-name">${esc(t.title || "New chat")}</span>
-			<span class="pg-thread-del" title="Delete chat" onclick="event.stopPropagation();playgroundDeleteThread('${esc(t.id)}')">✕</span>
-		</button>`).join("");
-}
+function renderPlaygroundSide() { renderPlaygroundSettings($("#pgMemoryPanel")); }
 
 /**
  * Settings for the open chat. These are NOT a second rules engine: the server
@@ -3392,6 +4372,7 @@ function renderPlaygroundSide() {
  * layers them over the account's saved rules before extraction runs.
  */
 function renderPlaygroundSettings(side) {
+	if (!side) return;
 	const draft = PG.settingsDraft ?? (PG.settingsDraft = {
 		customInstructions: PG.settings?.customInstructions ?? "",
 		customCategories: [...(PG.settings?.customCategories ?? [])],
@@ -3465,65 +4446,173 @@ async function playgroundResetSettings() {
 	else renderPlaygroundSide();
 }
 
+/** `-30d` / `now` → a wall-clock stamp, so preview facts read like real ones. */
+function pgStamp(offset) {
+	const days = offset === "now" ? 0 : Number(String(offset).replace(/[^-\d]/g, "")) || 0;
+	return new Date(Date.now() + days * 86400000).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * The context block: what the reader was actually given for this turn. Facts
+ * carry validity ranges because a fact that stopped being true is not the same
+ * as one that never was — an ended range is the visible half of that.
+ */
+function pgContextBlock(entry, index) {
+	const open = PG.openCtx === index;
+	const facts = entry.facts ?? [];
+	const ents = entry.ents ?? [];
+	return `<div class="pg-ctx"${index === 0 ? ` id="pgCtxFirst"` : ""}>
+		<button class="pg-ctx-head" aria-expanded="${open}" onclick="pgToggleCtx(${index})">
+			<span class="pg-ctx-dot"></span>
+			<span class="pg-ctx-title">Context block<small>used in the reply · ${facts.length} facts · ${ents.length} entities</small></span>
+			<span class="pg-ctx-toggle">${open ? "Collapse" : "Expand"} <span aria-hidden="true">${open ? "▴" : "▾"}</span></span>
+		</button>
+		${open ? `<div class="pg-ctx-body">
+			<p class="pg-ctx-note">Facts and entities assembled for this turn. A range ending in <b>present</b> is currently true; one with an end date used to be true and no longer is.</p>
+			<div class="pg-ctx-sec">Facts</div>
+			${facts.length ? facts.map((f) => `<div class="pg-fact"><span>${esc(f.f)}
+				<time>${esc(pgStamp(f.from))} → ${f.to ? esc(pgStamp(f.to)) : `<span class="live">present</span>`}</time></span></div>`).join("")
+				: `<div class="pg-ctx-empty">No facts were retrieved for this turn.</div>`}
+			<div class="pg-ctx-sec">Entities</div>
+			${ents.length ? ents.map((e) => `<div class="pg-ent">
+				<div class="pg-ent-top"><span class="pg-ent-name">${esc(e.n)}</span><span class="pg-ent-label">${esc(e.l)}</span></div>
+				<p>${esc(e.s)}</p></div>`).join("")
+				: `<div class="pg-ctx-empty">No entities were retrieved for this turn.</div>`}
+		</div>` : ""}
+	</div>`;
+}
+
+function pgToggleCtx(index) {
+	PG.openCtx = PG.openCtx === index ? null : index;
+	renderPlaygroundMessages();
+	pgTourPosition();
+}
+
+function pgJsonFor(entry) {
+	return JSON.stringify({
+		captured: (entry.add ?? []).map((n) => ({ entity: n.n, type: n.t, linked_to: n.of ?? null })),
+		facts: (entry.facts ?? []).map((f) => ({ fact: f.f, valid_from: pgStamp(f.from), valid_to: f.to ? pgStamp(f.to) : null })),
+		entities: (entry.ents ?? []).map((e) => ({ name: e.n, label: e.l, summary: e.s })),
+	}, null, 2);
+}
+
 function renderPlaygroundMessages() {
 	const box = $("#pgMessages");
 	if (!box) return;
-	if (PG.notice) {
-		box.innerHTML = `<div class="pg-empty">${esc(PG.notice)}</div>`;
-		return;
+	if (PG.notice && PG.mode === "live") { box.innerHTML = `<div class="pg-empty">${esc(PG.notice)}</div>`; return; }
+	box.innerHTML = PG.mode === "preview" ? pgPreviewStream() : pgLiveStream();
+	box.scrollTop = box.scrollHeight;
+}
+
+function pgPreviewStream() {
+	const sc = pgScenario();
+	const rows = sc.opening.map((m) => `<div class="pg-msg ${esc(m.r)}"><div class="pg-bubble">${esc(m.c)}</div></div>`);
+	PG.preview.forEach((entry, i) => {
+		rows.push(`<div class="pg-msg user"><div class="pg-bubble">${esc(entry.p)}</div>
+			<div class="pg-status ok"><span aria-hidden="true">✓</span>Added to graph${entry.add?.length ? ` · ${entry.add.length} new` : ""}</div></div>`);
+		if (entry.pending) {
+			rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>`);
+			return;
+		}
+		rows.push(pgContextBlock(entry, i));
+		rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">${esc(entry.a)}</div>
+			<div class="pg-status skip"><span aria-hidden="true">—</span>Assistant turns are not captured</div></div>`);
+		if (PG.json) rows.push(`<pre class="pg-context">${esc(pgJsonFor(entry))}</pre>`);
+	});
+	if (PG.thinking) rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>`);
+	return rows.join("");
+}
+
+function pgLiveStream() {
+	if (!PG.messages.length) {
+		return `<div class="pg-empty">This chat is empty. Anything durable you say here is captured into your real memory — a decision, a preference, a person, a plan.</div>`;
 	}
-	// Empty means empty: the greeting and the composer are the whole screen.
-	if (!PG.messages.length) { box.innerHTML = ""; return; }
-	box.innerHTML = PG.messages.map((m) => {
+	return PG.messages.map((m) => {
 		const items = m.extraction?.items ?? [];
 		// Extraction can outrun the poll window. When it does, say what is
 		// actually true — it finished in the background and left a receipt —
 		// rather than claiming to still be watching.
 		const stalled = PG.pollGaveUp || !m.extraction?.source_packet_id;
-		const capture = m.role === "user" && (items.length || m.extraction?.processing)
-			? `<div class="pg-capture">${items.length
-				? `<b>Added to memory</b><br>${items.map((i) => esc(i.text)).join("<br>")}`
-				: stalled
-					? `<b>Captured</b> — extraction finished in the background. The receipt is in <a href="#" onclick="setView('receipts');return false">History</a>.`
-					: `<b>Capturing…</b> extraction is still running for this message.`}</div>`
+		let status = "";
+		if (m.role === "user") {
+			if (items.length) {
+				status = `<div class="pg-status ok"><span aria-hidden="true">✓</span>Added to graph · ${items.length}</div>`;
+			} else if (m.extraction?.processing && !stalled) {
+				// Acceptance is synchronous and already durable; only enrichment is
+				// still running. Say both, rather than implying nothing was stored.
+				status = `<div class="pg-status"><span class="pg-spin"></span>Captured · extracting</div>`;
+			} else if (m.extraction) {
+				status = `<div class="pg-status ok"><span aria-hidden="true">✓</span>Captured — receipt in <a href="#" onclick="setView('receipts');return false">History</a></div>`;
+			}
+		} else {
+			status = `<div class="pg-status skip"><span aria-hidden="true">—</span>Assistant turns are not captured</div>`;
+		}
+		const captured = items.length
+			? `<div class="pg-capture"><b>Written to memory</b><br>${items.map((i) => esc(i.text)).join("<br>")}</div>`
 			: "";
-		return `<div class="pg-msg ${esc(m.role)}"><div class="pg-bubble">${esc(m.content)}</div>${capture}</div>`;
+		return `<div class="pg-msg ${esc(m.role)}"><div class="pg-bubble">${esc(m.content)}</div>${status}${captured}</div>`;
 	}).join("") + (PG.sending ? `<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>` : "");
-	box.scrollTop = box.scrollHeight;
 }
 
-function renderPlaygroundMemories() {
-	const box = $("#pgMemories");
+function renderPgSuggest() {
+	const box = $("#pgSuggest");
 	if (!box) return;
-	const entries = [];
-	for (const m of PG.messages) {
-		for (const item of m.extraction?.items ?? []) {
-			entries.push({ at: m.extraction.at || m.created_at, kind: item.kind, text: item.text });
-		}
-	}
-	if (!entries.length) {
-		box.innerHTML = `<div class="pg-empty">Nothing captured in this chat yet. Durable facts — decisions, people, plans, preferences — land here the moment they're written.</div>`;
+	if (PG.mode !== "preview") { box.innerHTML = ""; return; }
+	const sc = pgScenario();
+	const remaining = sc.turns.slice(PG.turn);
+	if (!remaining.length) {
+		box.innerHTML = `<button onclick="pgRestart()" style="flex:1 1 100%">↻ Replay this example from the start</button>`;
 		return;
 	}
-	box.innerHTML = entries.reverse().map((e) => `
-		<div class="pg-memory">
-			<div class="pg-memory-top"><span class="pg-added">Added</span><span class="pg-when">${esc(ago(e.at))}</span></div>
-			<p>${esc(e.text)}</p>
-			<span class="pg-kind">${esc(e.kind)}</span>
-		</div>`).join("");
+	box.innerHTML = remaining.slice(0, 2).map((t) => {
+		const i = sc.turns.indexOf(t);
+		return `<button onclick="pgSendScripted(${i})" ${PG.thinking ? "disabled" : ""} title="${esc(t.p)}">${esc(t.p)}</button>`;
+	}).join("");
 }
 
+/** A scripted preview turn: reply first, then the memory lands a beat later. */
+async function pgSendScripted(index) {
+	const sc = pgScenario();
+	const turn = sc.turns[index];
+	if (!turn || PG.thinking) return;
+	PG.thinking = true;
+	PG.preview = [...PG.preview, { ...turn, pending: true }];
+	renderPlaygroundMessages();
+	renderPgSuggest();
+	await pgWait(620 + Math.random() * 420);
+	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1 ? { ...e, pending: false } : e));
+	PG.openCtx = PG.preview.length - 1;
+	renderPlaygroundMessages();
+	await pgWait(420);
+	// The graph moves only once the turn has actually produced something.
+	PG.turn = Math.max(PG.turn, index + 1);
+	PG.thinking = false;
+	renderPgGraph(true);
+	renderPgSuggest();
+	pgTourAdvanceOnSend();
+}
+
+function pgWait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+/**
+ * A typed message. In preview it matches against the scenario's own turns so a
+ * paraphrase still lands somewhere sensible, and otherwise answers honestly
+ * that the preview only knows its own world. In live mode it is the real turn.
+ */
 async function playgroundSend() {
 	const input = $("#pgInput");
 	const message = (input?.value || "").trim();
-	if (!message || PG.sending) return;
-	PG.sending = true;
+	if (!message || PG.sending || PG.thinking) return;
 	PG.draft = "";
 	if (input) { input.value = ""; playgroundGrow(input); }
+	if (PG.mode === "preview") return pgSendTyped(message);
+
+	PG.sending = true;
 	PG.messages = [...PG.messages, { id: `local-${Date.now()}`, role: "user", content: message, created_at: Date.now() }];
 	renderPlaygroundMessages();
 	const btn = $("#pgSendBtn");
 	if (btn) btn.disabled = true;
+	const before = PG.messages.reduce((n, m) => n + (m.extraction?.items?.length ?? 0), 0);
 	try {
 		const res = await api("/v1/playground/chat", {
 			method: "POST",
@@ -3548,8 +4637,37 @@ async function playgroundSend() {
 		PG.pollGaveUp = false;
 		if (btn) btn.disabled = false;
 		await loadPlayground(PG.threadId);
+		const after = PG.messages.reduce((n, m) => n + (m.extraction?.items?.length ?? 0), 0);
+		PG.lastLiveAdd = Math.max(0, after - before);
+		renderPgGraph(PG.lastLiveAdd > 0);
 		load().catch(() => {});
 	}
+}
+
+async function pgSendTyped(message) {
+	const sc = pgScenario();
+	const words = message.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+	let best = -1, bestScore = 0;
+	sc.turns.forEach((t, i) => {
+		if (i < PG.turn) return;
+		const hay = `${t.p} ${(t.add ?? []).map((n) => n.n).join(" ")}`.toLowerCase();
+		const score = words.filter((w) => hay.includes(w)).length;
+		if (score > bestScore) { bestScore = score; best = i; }
+	});
+	if (best >= 0 && bestScore >= 1) return pgSendScripted(best);
+	// No pretending: a preview world cannot answer outside itself.
+	PG.thinking = true;
+	PG.preview = [...PG.preview, { p: message, pending: true, add: [], facts: [], ents: [] }];
+	renderPlaygroundMessages();
+	renderPgSuggest();
+	await pgWait(560 + Math.random() * 380);
+	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1
+		? { ...e, pending: false, a: `This is a read-only preview of "${sc.name}", so I can only answer inside that scenario — nothing here is written to your memory. Try one of the suggestions below, or open a chat from Threads to talk to your own memory for real.` }
+		: e));
+	PG.thinking = false;
+	PG.openCtx = null;
+	renderPlaygroundMessages();
+	renderPgSuggest();
 }
 
 async function playgroundNewChat() {
