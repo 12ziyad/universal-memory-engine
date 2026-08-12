@@ -1,0 +1,837 @@
+{
+  "schema": "itsuki.v3-stage-e-terminal-production-closure/v1",
+  "verifiedAt": "2026-08-12T14:28:47.340Z",
+  "commit": "2816395",
+  "workerVersion": "a38142b9-842a-4c4c-83bf-41f68d5e205d",
+  "deploymentId": "dc96a1df-0b65-497b-a674-f8ac9f90b5f6",
+  "trafficPercent": 100,
+  "localConfig": "PASS_SAFE",
+  "propagationPassed": 20,
+  "propagationChecked": 20,
+  "normalUsersEnabled": false,
+  "writeAndSourceLanes": "OFF",
+  "rejectedLanes": "OFF",
+  "hybridHistoricalAllowlistCount": 10,
+  "checks": [
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 1,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 2,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 3,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 4,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 5,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 6,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 7,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 8,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 9,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://itsuki.app",
+      "attempt": 10,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 1,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 2,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 3,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 4,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 5,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 6,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 7,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 8,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 9,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    },
+    {
+      "domain": "https://uml.gpmai.workers.dev",
+      "attempt": 10,
+      "status": {
+        "schema": "itsuki.memory-v3-flag/v1",
+        "mode": "allowlist",
+        "allowlistCount": 30,
+        "extractionB1": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCapture": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicProjection": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "atomicCoalescing": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "hybridRetrieval": {
+          "mode": "allowlist",
+          "allowlistCount": 10
+        },
+        "sourceExpansion": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "episodeFallback": {
+          "mode": "off",
+          "allowlistCount": 0
+        },
+        "adaptiveContext": {
+          "mode": "off",
+          "allowlistCount": 0
+        }
+      }
+    }
+  ]
+}

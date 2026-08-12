@@ -1,0 +1,302 @@
+{
+  "schema": "itsuki.v3-stage-e-terminal-summary/v1",
+  "completedAt": "2026-08-12T14:07:32.323Z",
+  "status": "TERMINAL_HARD_SPEND_CAP_AFTER_CLEANUP",
+  "product": {
+    "sha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d",
+    "bytes": 438114800,
+    "answers": 1540,
+    "sessions": 272,
+    "messages": 5882,
+    "stateFingerprintSha256": "7419482990d95469e32c66a18da9a30844b3b78608aafd17145b08828c32f88c",
+    "fixed": {
+      "cohort": "control",
+      "project": {
+        "projectId": "v3-final-locomo",
+        "projectName": "V3 Final LoCoMo"
+      },
+      "atomicModel": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "projection": true,
+      "coalescing": false,
+      "recallLimit": 200,
+      "hybridRetrieval": true,
+      "sourceExpansion": true,
+      "reranker": false,
+      "episodeFallback": false,
+      "adaptiveContext": false,
+      "reader": "@cf/openai/gpt-oss-120b",
+      "answerTemperature": 0,
+      "answerMaxTokens": 1024,
+      "provider": "direct_first_party_workers_ai_binding"
+    },
+    "productNeuronDeltaObserved": 453761
+  },
+  "officialTokenF1": {
+    "status": "COMPLETE",
+    "questions": 1540,
+    "overall": 0.3608481959616888,
+    "byCategory": [
+      {
+        "category": 1,
+        "name": "multi-hop",
+        "n": 282,
+        "tokenF1": 0.27715900049479647,
+        "evidenceAvailable": 193,
+        "evidenceAvailability": 0.6843971631205674,
+        "judgeAccuracy": null,
+        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+      },
+      {
+        "category": 2,
+        "name": "temporal-reasoning",
+        "n": 321,
+        "tokenF1": 0.33633241364137484,
+        "evidenceAvailable": 275,
+        "evidenceAvailability": 0.8566978193146417,
+        "judgeAccuracy": null,
+        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+      },
+      {
+        "category": 3,
+        "name": "open-domain-knowledge",
+        "n": 96,
+        "tokenF1": 0.17555630821406643,
+        "evidenceAvailable": 30,
+        "evidenceAvailability": 0.3125,
+        "judgeAccuracy": null,
+        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+      },
+      {
+        "category": 4,
+        "name": "single-hop",
+        "n": 841,
+        "tokenF1": 0.4194188742854179,
+        "evidenceAvailable": 638,
+        "evidenceAvailability": 0.7586206896551724,
+        "judgeAccuracy": null,
+        "judgeStatus": "INCOMPLETE_HARD_SPEND_CAP"
+      }
+    ],
+    "scorerInputSha256": "bdb33ccff379ca3e07982aab822245cdc4c2a847277d971e5e583b70451059f6",
+    "scorerOutputSha256": "66fe07811e2c4e7f0d39e7739c4c0261608034cb6fc3302788f190de7133e4fc"
+  },
+  "judge": {
+    "status": "INCOMPLETE_HARD_SPEND_CAP",
+    "completedRows": 960,
+    "requiredRows": 1540,
+    "missingRows": 580,
+    "accuracy": null,
+    "conditionalAccuracy": null,
+    "absentEvidenceAccuracy": null,
+    "partialAccuracyWithheld": true,
+    "extrapolationPerformed": false,
+    "judgeModel": "@cf/openai/gpt-oss-120b",
+    "ledgerSha256": "1b01cf0573d84e5d0866dff5f8a163f94b43f9a48c009784235f1a643790a2b6",
+    "stopReason": "Stage E remaining 8720 neurons was below the 12000-neuron fail-closed reserve required for the next judge block"
+  },
+  "evidence": {
+    "threshold": 0.5,
+    "available": 1136,
+    "availability": 0.7376623376623377,
+    "sourceStoredAvailable": 1457,
+    "sourceStoredAvailability": 0.9461038961038961,
+    "candidateStoredAvailable": 1314,
+    "candidateStoredAvailability": 0.8532467532467533,
+    "selectedBeforeRenderAvailable": 1165,
+    "selectedBeforeRenderAvailability": 0.7564935064935064,
+    "semanticRenderedAvailable": 1092,
+    "semanticRenderedAvailability": 0.7090909090909091,
+    "neverStoredSource": 83,
+    "neverCapturedSemantic": 226,
+    "storedButNotRetrieved": 332,
+    "evidenceLostDuringAssembly": 73,
+    "sourceRecoveredEvidence": 44
+  },
+  "context": {
+    "itemsMean": 77.05844155844156,
+    "itemsP95": 121,
+    "itemsMax": 143,
+    "linesMean": 80.6422077922078,
+    "charsMean": 14267.824025974027,
+    "charsP95": 21094,
+    "charsMax": 24000,
+    "tokensApproxMean": 3567.3305194805193,
+    "tokensApproxP95": 5274,
+    "tokensApproxMax": 6000,
+    "duplicateRateMean": 0,
+    "hybridAssertionCandidatesMean": 140.37272727272727,
+    "hybridParentCandidatesMean": 71.4512987012987,
+    "sourceExpansionAssertions": 18472,
+    "sourceExpansionEpisodes": 5524
+  },
+  "latencyMs": {
+    "ingestRequest": {
+      "n": 301,
+      "mean": 557.5249169435216,
+      "p95": 1535,
+      "max": 4694
+    },
+    "extractionWait": {
+      "n": 301,
+      "mean": 73422.70764119602,
+      "p95": 149097,
+      "max": 188780
+    },
+    "recallServer": {
+      "n": 1540,
+      "mean": 273.5487012987013,
+      "p50": 242,
+      "p95": 481,
+      "max": 1198
+    },
+    "recallClient": {
+      "n": 1540,
+      "mean": 797.074025974026,
+      "p50": 711,
+      "p95": 1361,
+      "max": 33844
+    },
+    "sourceExpansion": {
+      "n": 1540,
+      "mean": 24.177922077922076,
+      "p50": 19,
+      "p95": 40,
+      "max": 623
+    },
+    "reader": {
+      "n": 1540,
+      "mean": 4747.79025974026,
+      "p50": 3667,
+      "p95": 11005,
+      "max": 36568
+    },
+    "judgeCompletedRowsOnly": {
+      "n": 960,
+      "mean": 2301.903125,
+      "p50": 1732,
+      "p95": 5451,
+      "max": 18311
+    }
+  },
+  "integrity": {
+    "episodeFailures": 0,
+    "groundingFailures": 0,
+    "scopeFailures": 0,
+    "secretFailures": 0,
+    "runAccountingFailures": 0,
+    "projectionFailures": 0,
+    "truncations": 0,
+    "extractionRetries": 2,
+    "storage": {
+      "episodes": 5882,
+      "candidates": 5572,
+      "projections": 5572,
+      "nodes": 1296,
+      "slices": 5514,
+      "events": 824,
+      "edges": 324,
+      "pages": 0,
+      "profiles": 0
+    }
+  },
+  "inference": {
+    "campaignSpent": 2424862,
+    "campaignCeiling": 3000000,
+    "campaignRemaining": 575138,
+    "stageStartSpent": 1933582,
+    "stageSpent": 491280,
+    "stageCap": 500000,
+    "stageRemaining": 8720,
+    "calls": 102602,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1450074,
+        "calls": 26558
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 10067,
+        "calls": 33081
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 125579,
+        "calls": 1526
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 591041,
+        "calls": 30694
+      }
+    },
+    "estimatedCampaignUsdAt0_011Per1k": 26.673482
+  },
+  "cleanup": {
+    "status": "PASS_ZERO",
+    "cleanedAt": "2026-08-12T13:56:11.834Z",
+    "counts": {
+      "episodes": 0,
+      "atomic_candidates": 0,
+      "atomic_runs": 0,
+      "projections": 0,
+      "nodes": 0,
+      "slices": 0,
+      "events": 0,
+      "edges": 0,
+      "pages": 0,
+      "live_staged": 0,
+      "nonterminal_jobs": 0
+    },
+    "derived": {
+      "profiles": 0,
+      "semantic_fts": 0,
+      "episode_fts": 0
+    },
+    "fts": {
+      "episodeFts": 0,
+      "semanticFts": 0
+    },
+    "recallProofs": 10,
+    "exportProofs": 10,
+    "packets": {
+      "packets": 2096,
+      "minimized": 2096,
+      "content_rows": 0
+    },
+    "sha256": "b2340a202a586f0f2ac26aee3c99609793bafc0e83ab49eb659b8d1fdf031106"
+  },
+  "comparison": {
+    "v1": {
+      "tokenF1": 0.154,
+      "judgeAccuracy": 0.2565,
+      "evidenceAvailability": 0.2883
+    },
+    "combinedE1E0": {
+      "tokenF1": 0.2745108589005224,
+      "judgeAccuracy": 0.4675,
+      "evidenceAvailability": 0.6597402597402597
+    },
+    "finalV3": {
+      "tokenF1": 0.3608481959616888,
+      "judgeAccuracy": null,
+      "evidenceAvailability": 0.7376623376623377
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "itsuki.v3-stage-e-product-seal/v1",
+  "productFile": "product.json",
+  "productSha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d",
+  "files": {
+    "product.json": {
+      "bytes": 438114800,
+      "sha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d"
+    },
+    "product-ingest.jsonl": {
+      "bytes": 329796,
+      "sha256": "f979a8966c85e9917e76e33894bf10c44457e2f210f50d94dd600a41d3b4210d"
+    },
+    "product-ingest-rebuild-conv-43-attempt-002.jsonl": {
+      "bytes": 41546,
+      "sha256": "33187e810571749cc835f78321e5abc3a31109c08118465dcbd0cdb41ac44fbd"
+    },
+    "product-answers.jsonl": {
+      "bytes": 273428231,
+      "sha256": "f6ea661b9b65fd3115d3145c70c71e32680bc4a73c8686bb21debaed301c6107"
+    },
+    "product-inputs.json": {
+      "bytes": 2466630,
+      "sha256": "e9818f2070e6b5a4860e3a7e0cbd706433a0c95c00049980f405fe34cccf10dd"
+    },
+    "STAGE-E-LOCOMO-PREREGISTRATION.md": {
+      "bytes": 5584,
+      "sha256": "7b8fbfe936c0967e449f07223c024aab85ee441da5241735f7a38d13a06d9f18"
+    }
+  },
+  "sealedAt": "2026-08-12T11:59:51.481Z",
+  "questions": 1540,
+  "sessions": 272,
+  "messages": 5882,
+  "stateFingerprintSha256": "7419482990d95469e32c66a18da9a30844b3b78608aafd17145b08828c32f88c",
+  "stageStartSpent": 1933582
+}

@@ -1,0 +1,116 @@
+{
+  "schema": "itsuki.v3-stage-e-score-progress/v1",
+  "status": "stopped_hard_spend_cap_after_cleanup",
+  "startedAt": "2026-08-12T11:59:58.094Z",
+  "productSha256": "a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d",
+  "stageStartSpent": 1933582,
+  "burnBefore": {
+    "label": "StageE:score-start",
+    "at": "2026-08-12T11:59:59.467Z",
+    "spent": 2387764,
+    "ceiling": 3000000,
+    "remaining": 612236,
+    "stageStart": 1933582,
+    "stageSpent": 454182,
+    "stageRemaining": 45818,
+    "reservedForNextBlock": 15000,
+    "threshold": "75%_decisive_only",
+    "calls": 101346,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1413096,
+        "calls": 25575
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 9947,
+        "calls": 32808
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 125579,
+        "calls": 1526
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 591041,
+        "calls": 30694
+      }
+    }
+  },
+  "officialScoreCompleteAt": "2026-08-12T13:19:41.658Z",
+  "officialScores": 1540,
+  "stoppedAt": "2026-08-12T14:07:32.323Z",
+  "judgeRows": 960,
+  "requiredJudgeRows": 1540,
+  "stopReason": "Stage E remaining 8720 neurons was below the 12000-neuron fail-closed reserve required for the next judge block",
+  "terminalSummarySha256": "944a5dc87d3b0418372b588b1b3c767d413f77a85db7ee193e762fe59428ff4e",
+  "finalBurn": {
+    "label": "StageE:cleanup-complete",
+    "at": "2026-08-12T13:56:11.834Z",
+    "spent": 2424862,
+    "ceiling": 3000000,
+    "remaining": 575138,
+    "stageStart": 1933582,
+    "stageSpent": 491280,
+    "stageRemaining": 8720,
+    "reservedForNextBlock": 1000,
+    "threshold": "75%_decisive_only",
+    "calls": 102602,
+    "byModel": {
+      "@cf/openai/gpt-oss-120b": {
+        "neurons": 1450074,
+        "calls": 26558
+      },
+      "@cf/baai/bge-base-en-v1.5": {
+        "neurons": 10067,
+        "calls": 33081
+      },
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+        "neurons": 221995,
+        "calls": 5951
+      },
+      "@cf/baai/bge-reranker-base": {
+        "neurons": 23019,
+        "calls": 4762
+      },
+      "@cf/openai/gpt-oss-20b": {
+        "neurons": 1028,
+        "calls": 10
+      },
+      "@cf/meta/llama-4-scout-17b-16e-instruct": {
+        "neurons": 125579,
+        "calls": 1526
+      },
+      "@cf/zai-org/glm-4.7-flash": {
+        "neurons": 1122,
+        "calls": 10
+      },
+      "@cf/google/gemma-4-26b-a4b-it": {
+        "neurons": 938,
+        "calls": 10
+      },
+      "@cf/qwen/qwen3-30b-a3b-fp8": {
+        "neurons": 591041,
+        "calls": 30694
+      }
+    }
+  }
+}

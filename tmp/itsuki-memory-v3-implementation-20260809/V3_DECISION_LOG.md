@@ -1,5 +1,23 @@
 # V3 DECISION LOG
 
+## D-028 — close Stage E at the hard spend guard; withhold partial judge
+
+**Decision.** Accept the complete sealed product, complete official 1,540-row
+token-F1/evidence analysis and zero-state cleanup as terminal Stage E evidence.
+Do not resume, raise the cap, replace the judge, extrapolate, or publish an
+accuracy from the 960-row judge prefix.
+
+**Evidence.** Official token-F1 is 36.08% and evidence availability is 73.77%.
+The unchanged judge completed 960/1,540 rows. Stage E had only 8,720 of 500,000
+neurons remaining while the next unchanged block required a fail-closed 12,000-
+neuron reserve. Cleanup subsequently passed every store, FTS, recall, export,
+job and source-content zero gate.
+
+**Consequence.** Architecture is CONDITIONAL because complete final semantic-
+judge attribution is unavailable. Security, durability, erasure and isolation
+remain PASS; global production enablement is not recommended. The campaign is
+terminal with no Stage F/G, retuning, replacement run or additional inference.
+
 ## D-027 — authorize the single final Stage E reference boundary
 
 **Decision.** Close V3-D15 after the bounded production reattack, isolated

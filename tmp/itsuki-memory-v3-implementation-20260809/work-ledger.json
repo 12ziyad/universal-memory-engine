@@ -3,23 +3,31 @@
   "campaign": "itsuki-memory-v3-implementation-20260809",
   "started": "2026-08-09",
   "head_at_start": "42bf6d5aea0e9ea6bd8565e4689b266e60e0b045",
-  "inference_gate": "OPEN_FAIL_CLOSED_3000000_NEURONS",
-  "current_phase": "Stage E exact resume after closed V3-H16 harness repair",
-  "latest_verified_head": "517c36db5a6127f8613a08a65b1c92aab7ad92e8",
-  "latest_verified_production": "6781ae37-c8cf-4a2e-a3fb-ea9178d1b924",
-  "latest_verified_burn": 2010503,
+  "inference_gate": "CLOSED_TERMINAL_STAGE_E_HARD_CAP",
+  "current_phase": "TERMINAL - Stage E official score complete, judge incomplete at hard spend cap, cleanup zero",
+  "latest_verified_head": "2816395",
+  "latest_verified_production": "a38142b9-842a-4c4c-83bf-41f68d5e205d",
+  "latest_verified_deployment": "dc96a1df-0b65-497b-a674-f8ac9f90b5f6",
+  "latest_verified_burn": 2424862,
   "stage_e_runtime": {
-    "status": "RESUMABLE_AFTER_HARNESS_REPAIR",
-    "ledgered_sessions": 111,
-    "answers": 0,
-    "scores": 0,
+    "status": "TERMINAL_HARD_SPEND_CAP_AFTER_CLEANUP",
+    "ledgered_sessions": 272,
+    "answers": 1540,
+    "judge_rows": 960,
+    "scores": 1540,
     "stage_spent_at_diagnosis": 76921,
     "stage_remaining_at_diagnosis": 423079,
-    "infrastructure_transient": "V3-I04",
-    "harness_defect": "V3-H16_CLOSED",
-    "reference_files_opened": 0,
-    "resume_identity": "same_manifest_same_idempotency_keys",
-    "evidence": "final/locomo/HARNESS-REPAIR-01.md"
+    "stage_spent_final": 491280,
+    "stage_remaining_final": 8720,
+    "infrastructure_transient": "V3-I04_RECLASSIFIED_AS_TRIGGER",
+    "harness_defects": ["V3-H16_CLOSED", "V3-H21_CLOSED", "V3-H22_CLOSED", "V3-H23_CLOSED"],
+    "reference_files_opened": 1,
+    "resume_identity": "terminal; no resume authorized",
+    "official_token_f1": 0.3608481959616888,
+    "evidence_availability": 0.7376623376623377,
+    "judge_status": "INCOMPLETE_HARD_SPEND_CAP",
+    "cleanup": "PASS_ZERO",
+    "evidence": "final/locomo/results/stage-e-terminal-summary.json"
   },
   "stage_e_preflight": {
     "status": "ACTIVATED_NO_INFERENCE",
@@ -411,7 +419,29 @@
         "Capture recall averaged 78.18% and precision 96.59%; all 126 answers/verdicts and every safety/accounting/cleanup gate reconciled.",
         "Closure propagated 20/20 and both synthetic cohorts now have zero live state plus 1,098/1,098 minimized packet fences.",
         "Valid burn was 18,995 neurons; Stage D passes to one unchanged decisive Stage E LoCoMo measurement."
-      ]
-    }
+    ]
+  },
+  {
+    "id": "FINAL-E-TERMINAL",
+    "title": "Frozen full LoCoMo product, official score, hard-cap judge stop, and terminal cleanup",
+    "status": "terminal_hard_spend_cap_after_cleanup_zero",
+    "outputs": [
+      "final/locomo/evidence/product.seal.json",
+      "final/locomo/results/official-scorer-output.json",
+      "final/locomo/results/stage-e-terminal-summary.json",
+      "final/locomo/evidence/cleanup.json",
+      "final/locomo/STAGE-E-TERMINAL-CLOSURE.md",
+      "final/locomo/evidence/terminal-production-closure.json",
+      "V3_FINAL_REPORT.md",
+      "V3_BENCHMARK_REPORT.md"
+    ],
+    "findings": [
+      "Complete official token-F1 is 36.08% and evidence availability is 73.77% over all 1540 questions.",
+      "Judge stopped fail-closed at 960/1540 when the 500000-neuron Stage E cap could no longer reserve the next block; partial accuracy is withheld.",
+      "Cleanup is zero across all stores, FTS, recall, export, jobs and packet content.",
+      "Campaign inference is terminal at 2424862/3000000 neurons; no Stage F/G or replacement run is authorized.",
+      "Closure commit/origin 2816395 is live as Worker a38142b9 / deployment dc96a1df with 20/20 terminal-safe propagation checks."
+    ]
+  }
   ]
 }

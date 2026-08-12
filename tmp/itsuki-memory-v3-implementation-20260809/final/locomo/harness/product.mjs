@@ -19,10 +19,8 @@ import {
 	burnSnapshot,
 	cohorts,
 	d1Select,
-	eraseCohort,
 	expectedHealthActive,
 	integer,
-	packetCounts,
 	pool,
 	productInputs,
 	readJson,
@@ -67,6 +65,47 @@ function stageStart() {
 
 function noSecret(value) {
 	return Object.keys(scrubText(String(value ?? "")).redactions ?? {}).length === 0;
+}
+
+function cleanWouldDelete(value) {
+	return value && typeof value === "object"
+		&& Object.values(value).every((count) => integer(count) === 0);
+}
+
+async function eraseFinalCohort(token, slots) {
+	// A complete Stage E tenant can take longer than the generic harness's
+	// 90-second request window to erase. The confirmed delete is idempotent and
+	// product-fenced; wait for that same operation rather than substituting a
+	// schema repair or treating a client timeout as a failed remote delete.
+	const rows = await pool(slots, 3, async (slot) => {
+		const dry = await request(token, "DELETE", "/v1/memories", {
+			query: { userId: slot.externalId },
+		});
+		const confirmed = await request(token, "DELETE", "/v1/memories", {
+			query: { userId: slot.externalId, confirm: "true" },
+			attempts: 1,
+			timeoutMs: 300_000,
+		});
+		assert(dry.ok && confirmed.ok,
+			`final erase(${slot.externalId}) failed ${dry.status}/${confirmed.status}`);
+		const residue = await request(token, "DELETE", "/v1/memories", {
+			query: { userId: slot.externalId },
+		});
+		const jobs = await request(token, "GET", "/v1/jobs", {
+			query: { userId: slot.externalId, limit: 200 },
+		});
+		assert(residue.ok && jobs.ok, `final erase verification(${slot.externalId}) failed`);
+		return {
+			dry: dry.body?.would_delete ?? null,
+			deleted: confirmed.body?.deleted ?? null,
+			residue: residue.body?.would_delete ?? null,
+			residueClean: cleanWouldDelete(residue.body?.would_delete ?? {}),
+			nonTerminalJobs: (jobs.body?.jobs ?? []).filter((job) => !TERMINAL.has(job.status)).length,
+		};
+	});
+	assert(rows.every((row) => row.residueClean && row.nonTerminalJobs === 0),
+		"final API erasure did not converge");
+	return { rows, clean: true };
 }
 
 function atomicEvidenceSnippet(value) {
@@ -984,8 +1023,8 @@ async function cleanupProduct() {
 	const token = secret("ITSUKI_API_KEY");
 	console.log("ITSUKI_API_KEY: LOADED");
 	const slots = cohorts().control;
-	const erased = await eraseCohort(token, slots);
-	const clean = await assertCleanCohort(slots);
+	const erased = await eraseFinalCohort(token, slots);
+	const preVerificationClean = await assertCleanCohort(slots);
 	const fts = await ftsResidue(product.state);
 	assert(fts.episodeFts === 0 && fts.semanticFts === 0,
 		`FTS cleanup did not converge: ${JSON.stringify(fts)}`);
@@ -1013,15 +1052,20 @@ async function cleanupProduct() {
 			`cleanup export ${index + 1} retained live state: ${JSON.stringify(counts)}`);
 		return { sampleId: product.state[index].sampleId, counts };
 	});
-	const packets = await packetCounts(slots);
-	assert(packets.content_rows === 0 && packets.packets === packets.minimized,
-		"cleanup left source packet content");
+	// Recall is intentionally audited as a governed query source packet even
+	// when it returns no memory. Remove the cleanup proof's own ten query packets
+	// after the proof, then require every live/derived/source store to be zero.
+	const verificationErase = await eraseFinalCohort(token, slots);
+	const clean = await assertCleanCohort(slots);
+	const packets = clean.packets;
 	const burnAfter = await burnSnapshot("StageE:cleanup-complete", 1_000, stageStart());
 	writeJsonExclusive(CLEANUP, {
 		schema: "itsuki.v3-stage-e-cleanup/v1",
 		cleanedAt: new Date().toISOString(),
 		productSha256: shaFile(PRODUCT),
 		erased,
+		preVerificationClean,
+		verificationErase,
 		clean,
 		fts,
 		recall,

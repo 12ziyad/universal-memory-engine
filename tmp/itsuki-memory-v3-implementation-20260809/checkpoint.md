@@ -1,5 +1,41 @@
 # ITSUKI MEMORY V3 — CAMPAIGN CHECKPOINT
 
+## 2026-08-12 TERMINAL — Stage E closed at hard spend guard
+
+- Frozen product completed and sealed **1,540/1,540 answers**, 272 sessions and
+  5,882 messages. Product SHA-256 is
+  `a87a4785ae863a30159479e3c76bc2951a6b753360198c7d9616e40d7bf0497d`.
+- Official LoCoMo scorer completed **1,540/1,540**: token-F1 **36.08%**;
+  multi-hop 27.72%, temporal 33.63%, open-domain 17.56%, single-hop 41.94%.
+- Complete evidence availability is **73.77% (1,136/1,540)**. Source stored is
+  94.61%, semantic candidate stored 85.32%, selected-before-render 75.65%, and
+  semantic-rendered 70.91%.
+- The unchanged GPT-OSS-120B judge completed **960/1,540**, then stopped
+  fail-closed. Stage E had 8,720 neurons remaining and the next block required
+  a 12,000-neuron reserve. Final judge/conditional/absent/category accuracy is
+  **NOT AVAILABLE**; the partial prefix is not scored or extrapolated.
+- Final settled burn: campaign **2,424,862 / 3,000,000**; Stage E **491,280 /
+  500,000**; 102,602 calls; first-party direct Workers AI only.
+- Terminal cleanup **PASS ZERO**: all live/derived/source/FTS counts zero; 10/10
+  recall and 10/10 export proofs empty; 2,096/2,096 packet fences minimized and
+  content-free; benchmark lock and campaign process absent.
+- Terminal config commit/origin `2816395` is live as Worker
+  `a38142b9-842a-4c4c-83bf-41f68d5e205d`, deployment
+  `dc96a1df-0b65-497b-a674-f8ac9f90b5f6`, at 100% traffic. Focused gates pass
+  104/104, dry deployment passes, and 20/20 uncached production checks prove
+  accepted write/source lanes OFF, rejected lanes OFF, and E7 restored to the
+  historical ten only. Normal users remain outside V3.
+- V3-H21/H22/H23 are closed harness defects. Product open CRITICAL/HIGH are
+  both zero. V3-D04, D14 and D15 are closed in production.
+- Authoritative aggregate evidence:
+  `final/locomo/results/stage-e-terminal-summary.json`; cleanup:
+  `final/locomo/evidence/cleanup.json`. The reference-bearing scorer input,
+  sealed product and incomplete judge ledger remain private local evidence and
+  are not publication artifacts.
+- **Campaign status: TERMINAL.** No Stage F/G, new experiment, retuning or
+  further inference is authorized. Production recommendation remains
+  allowlisted/canary only; normal users stay on the proven path.
+
 ## 2026-08-12 Stage E reference boundary authorized / final measurement next
 
 - The frozen reader phase is now sealed at **1,540/1,540 answers**. A harness-

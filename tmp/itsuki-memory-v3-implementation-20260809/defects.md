@@ -1,5 +1,21 @@
 # V3 DEFECT LEDGER
 
+## Terminal Stage E findings (2026-08-12)
+
+- **V3-D04 HIGH, V3-D14 MEDIUM and V3-D15 HIGH are CLOSED** in production;
+  the final reference-blind state audit reconciled 5,882 episodes and exact
+  5,572/5,572 candidate/projection state.
+- **V3-H21 MEDIUM is CLOSED:** deterministic official-scoring recovery uses the
+  preserved accepted Python environment and revalidates the immutable scorer
+  input before running; no judge/input/protocol changed.
+- **V3-H22 MEDIUM is CLOSED:** Stage E confirmed deletion now uses a 300-second
+  client window for full tenants and verifies residue/jobs after each idempotent
+  product-fenced erase.
+- **V3-H23 MEDIUM is CLOSED:** cleanup's own governed zero-recall query packets
+  are erased after the proof and before the terminal packet audit.
+- Open product **CRITICAL: 0; HIGH: 0**. Final cleanup is zero across all stores,
+  FTS, recall, export and packet content.
+
 ## Final Stage E harness/infrastructure findings (2026-08-11)
 
 | id | sev | classification | finding | status |

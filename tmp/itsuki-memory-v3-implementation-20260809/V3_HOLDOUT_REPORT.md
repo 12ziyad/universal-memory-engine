@@ -1,6 +1,7 @@
 # V3 HOLDOUT REPORT — non-LoCoMo general memory
 
-**Final repeated-holdout verdict: PASS_TO_STAGE_E (2026-08-11).**
+**Final repeated-holdout verdict: PASS (2026-08-11; retained as terminal
+generalization evidence).**
 
 Three independent fresh accepted-path seeds produced mean judge **95.24%**,
 token-F1 **69.60%**, evidence availability **96.83%**, conditional accuracy

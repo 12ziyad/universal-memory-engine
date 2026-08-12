@@ -1,5 +1,32 @@
 # V3 CLEANUP LEDGER
 
+## 2026-08-12 terminal Stage E cleanup — PASS ZERO
+
+- The frozen ten-tenant final LoCoMo cohort was erased through the confirmed
+  product deletion contract after the hard Stage E spend stop.
+- Final live counts are zero for episodes, atomic candidates/runs, projections,
+  nodes, slices, events, edges, pages, staging and nonterminal jobs.
+- Derived profiles, semantic FTS and episode FTS are all zero.
+- Ten post-erasure recalls returned zero items / zero context; ten exports
+  returned zero nodes, slices, events, edges, pages and candidates.
+- Those recall proofs intentionally created governed query audit packets. The
+  same product erasure contract then minimized them before the terminal audit:
+  2,096/2,096 packet fences are content-free and content row count is zero.
+- Global benchmark lock is absent. No benchmark, judge, evaluator, Wrangler or
+  campaign inference process remains. Only Codex desktop runtime processes are
+  present.
+- Closure commit/origin `2816395` is deployed as Worker
+  `a38142b9-842a-4c4c-83bf-41f68d5e205d`, deployment
+  `dc96a1df-0b65-497b-a674-f8ac9f90b5f6`, at 100% traffic. Twenty uncached
+  health checks prove accepted write/source lanes and all rejected lanes OFF;
+  E7 is restored to the historical ten and normal users remain outside V3.
+- No temporary credential material was created or printed. The 438,114,800-byte
+  sealed product, reference-bearing scorer input and 960-row incomplete judge
+  ledger are retained intentionally in the private local campaign root and are
+  hash-referenced; they are not publication artifacts.
+- Authoritative evidence: `final/locomo/evidence/cleanup.json`, SHA-256
+  `b2340a202a586f0f2ac26aee3c99609793bafc0e83ab49eb659b8d1fdf031106`.
+
 ## 2026-08-11 Stage D closure
 
 - Three holdout seeds each erased to verified zero before reuse.

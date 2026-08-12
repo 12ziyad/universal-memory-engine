@@ -1,5 +1,15 @@
 # V3 ABLATION LEDGER
 
+## 2026-08-12 terminal Stage E result
+
+The accepted E7 + E9A candidate completed the frozen 1,540-question product and
+official score: **36.08% token-F1** and **73.77% evidence availability**, versus
+V1 15.40% / 28.83%. Category token-F1: multi-hop 27.72%, temporal 33.63%,
+open-domain 17.56%, single-hop 41.94%. The unchanged judge completed 960/1,540
+before the hard Stage E 500,000-neuron guard fired; partial judge, conditional
+and absent-evidence accuracy are withheld. Cleanup is verified zero. No Stage
+F/G, retuning or replacement run is authorized.
+
 ## 2026-08-11 final repeated holdout — PASS_TO_STAGE_E
 
 Three fresh non-LoCoMo seeds averaged 95.24% judge, 69.60% token-F1, 96.83%

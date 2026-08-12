@@ -1,5 +1,11 @@
 # V3 SOAK REPORT
 
+**Terminal confirmation (2026-08-12): PASS within the preregistered bounded
+scope.** Stage E accumulated 5,882 episodes, 5,572 candidates/projections and
+the associated graph state, then terminal cleanup reduced every live/derived
+store, both FTS surfaces and nonterminal jobs to zero. This supplements, but
+does not expand, the final Stage B bounded soak claim.
+
 **Current status: PASS — bounded final live Stage B soak, 2026-08-11.**
 
 The valid run completed ten writes plus 200 recalls, drained the backlog, then

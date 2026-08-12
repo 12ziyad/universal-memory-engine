@@ -1,5 +1,15 @@
 # V3 DECISION LOG
 
+## 2026-08-12 — D-028: terminal hard-cap closure
+
+The complete frozen product and 1,540-row official score are accepted as Stage
+E terminal evidence. The unchanged semantic judge stopped at 960/1,540 because
+only 8,720 Stage E neurons remained and the next block required a 12,000-neuron
+reserve. No cap change, resume, replacement judge, partial accuracy or
+extrapolation is allowed. Cleanup is zero. Architecture is CONDITIONAL;
+security, durability, erasure and isolation remain PASS; global enablement is
+not recommended. No Stage F/G or further inference is authorized.
+
 ## 2026-08-12 — D-024: freeze the reference-blind Stage E protocol
 
 The deterministic product-only input reconciles 10 samples, 272 sessions,

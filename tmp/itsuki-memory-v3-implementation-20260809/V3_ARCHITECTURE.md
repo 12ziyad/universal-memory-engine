@@ -1,5 +1,23 @@
 # V3 ARCHITECTURE
 
+## Terminal accepted architecture (2026-08-12)
+
+The final candidate keeps acceptance-atomic scrubbed source episodes,
+source-grounded zero-to-many atomic capture with deterministic temporal fields,
+governed projection into the proven semantic/graph core, bounded D1-first
+exact/lexical/vector/entity/temporal/graph candidate lanes, deterministic
+assertion-level fusion, and exact scope-bound source expansion. It uses a hard
+depth-200 candidate budget and a 24,000-character / 6,000-approximate-token
+reader context with GPT-OSS-120B. Measured-rejected components remain out:
+reranking, broad episode fallback, write-time coalescing and fixed adaptive
+assertion caps.
+
+The complete final run achieved 73.77% evidence availability and 36.08%
+official token-F1 with zero product integrity failures; the complete final
+semantic judge is unavailable because the Stage E spend guard fired. Therefore
+this architecture is accepted **CONDITIONALLY for allowlisted/canary use**, not
+for global production enablement. The legacy path remains the safe default.
+
 The authoritative trace of the pre-V3 (V1) implementation is in
 `checkpoint.md` §4. This file records what V3 added and where it sits.
 

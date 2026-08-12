@@ -1,7 +1,9 @@
 # V3 ABLATION LEDGER
 
-**STATUS: E0–E10 and final repeated holdout complete; E7/E9A KEEP;
-E8/E9B/E10 REJECT; Stage D PASS_TO_STAGE_E.** Historical armed definitions below remain immutable protocol evidence;
+**STATUS: TERMINAL. E0–E10, final repeated holdout, and the single Stage E
+product/official score are complete; E7/E9A KEEP; E8/E9B/E10 REJECT. The final
+semantic judge stopped at the preregistered hard Stage E spend guard and is not
+reported partially.** Historical armed definitions below remain immutable protocol evidence;
 later dated sections contain the valid measured results. The cost gate is open
 and fail-closed at `V3_NEURON_CEILING = 3,000,000` for direct first-party
 Workers AI only.
@@ -15,6 +17,30 @@ Workers AI only.
 Per category (judge): multi-hop 40.78% · single-hop 28.42% · open-domain 21.88% ·
 temporal 6.23%. Adversarial excluded (Mem0 protocol), and its 86.77% token-F1 is
 an abstention artefact.
+
+## FINAL V3 — Stage E terminal measurement (2026-08-12)
+
+| Cell | Token-F1 | LLM-judge | Evidence availability | Conditional |
+|---|---:|---:|---:|---:|
+| V1 historical | 15.40% | 25.65% | 28.83% | 61.04% |
+| E1+E0 full | 27.45% | 46.75% | 65.97% | 58.27% |
+| **Final V3 full** | **36.08%** | **NOT COMPLETED (960/1540)** | **73.77%** | **NOT AVAILABLE** |
+
+Final V3 used the accepted E7 assertion-level hybrid retrieval and E9A exact
+source expansion at bounded depth 200 with GPT-OSS-120B. Rejected E8 reranking,
+E9B episode fallback and E10 adaptive caps remained off. The product and
+official scorer completed all 1,540 questions. The judge stopped fail-closed at
+491,280 / 500,000 Stage E neurons; its 960-row prefix is retained but neither
+scored nor extrapolated. Official category token-F1 was multi-hop 27.72%,
+temporal 33.63%, open-domain 17.56% and single-hop 41.94%.
+
+Complete attribution: source stored 94.61%, atomic candidate stored 85.32%,
+selected-before-render 75.65%, semantic-rendered 70.91%, final context 73.77%.
+The final write/read system therefore adds +20.68pp official token-F1 and
++44.94pp evidence availability over V1 while preserving zero-residue cleanup.
+Verdict: **architecture CONDITIONAL, security/durability/erasure/isolation PASS,
+global production enablement NOT recommended** because the complete final
+semantic-judge metric is unavailable.
 
 ---
 

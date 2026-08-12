@@ -4,7 +4,8 @@
   "V3_NEURON_CEILING": 3000000,
   "ceiling_status": "VERIFIED_BY_OWNER_AUTHORIZATION",
   "ceiling_verdict": "APPROVED - Cloudflare Startup Program credits cover first-party Workers AI; owner raised the campaign ceiling to 3,000,000 neurons on 2026-08-10",
-  "inference_permitted": true,
+  "inference_permitted": false,
+  "terminal_reason": "Stage E is final and stopped fail-closed at 491280/500000 neurons; no Stage F/G or further inference is authorized.",
   "verified_at": "2026-08-09 (second attempt)",
   "what_changed_since_the_first_attempt": [
     "The first attempt recorded 401s on the AI model catalogue and on the GraphQL neuron-usage query. BOTH were transient. On re-attempt they return 200, exactly as the D1 7403 did.",
@@ -88,9 +89,9 @@
     "requested_ceiling_rationale": "The original 1,500,000-neuron ceiling was owner-authorized on 2026-08-09. After the invalid concurrent reranking attempt consumed budget without producing evidence, the owner explicitly raised the hard campaign ceiling to 3,000,000 neurons on 2026-08-10 for the sequential frozen-subset rerun and later decisive V3 validation."
   },
   "spend": {
-    "inference_calls_made_this_campaign": 99202,
-    "neurons_consumed_this_campaign": 2167465,
-    "estimated_usd_at_published_rate": 23.84,
+    "inference_calls_made_this_campaign": 102602,
+    "neurons_consumed_this_campaign": 2424862,
+    "estimated_usd_at_published_rate": 26.67,
     "third_party_paid_apis_called": "none"
   },
   "entries": [
@@ -427,6 +428,35 @@
       "calls_after": 99825,
       "gate": "PASS - V3-D15 closed; 29/29 rebuild and complete 5882-episode reference-blind audit passed; final measurement authorized",
       "verified_at": "2026-08-12T02:08:04.175Z"
+    },
+    {
+      "phase": "Terminal Stage E frozen 1540-question product, official score, partial judge spend stop, and zero-state cleanup",
+      "dataset": "frozen non-adversarial LoCoMo: 272 sessions, 5882 messages, 1540 sealed product answers and official scores; unchanged judge stopped at 960 rows",
+      "models": [
+        "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/baai/bge-base-en-v1.5",
+        "@cf/openai/gpt-oss-120b"
+      ],
+      "path": "direct first-party Workers AI binding; partner=false; no AI Gateway",
+      "campaign_neurons_before": 1933582,
+      "campaign_neurons_after": 2424862,
+      "stage_e_increment": 491280,
+      "stage_e_cap": 500000,
+      "stage_e_remaining": 8720,
+      "product_neuron_delta_observed": 453761,
+      "judge_rows_complete": 960,
+      "judge_rows_required": 1540,
+      "judge_accuracy": null,
+      "partial_judge_accuracy_withheld": true,
+      "official_token_f1": 0.3608481959616888,
+      "evidence_availability": 0.7376623376623377,
+      "estimated_stage_e_usd": 5.40,
+      "campaign_remaining": 575138,
+      "calls_after": 102602,
+      "cleanup": "PASS_ZERO",
+      "gate": "TERMINAL - next unchanged judge block required a 12000-neuron reserve with only 8720 Stage E neurons remaining",
+      "verified_at": "2026-08-12T14:07:32.323Z"
     }
   ],
   "ceiling_revisions": [

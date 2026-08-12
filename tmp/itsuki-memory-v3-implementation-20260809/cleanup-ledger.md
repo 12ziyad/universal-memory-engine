@@ -1,5 +1,18 @@
 # V3 CLEANUP LEDGER
 
+## 2026-08-12 terminal Stage E cleanup — PASS ZERO
+
+All ten final benchmark tenants were erased through the product contract.
+Episodes, atomic candidates/runs, projections, graph state, staging,
+nonterminal jobs, profiles and both FTS surfaces are zero. Ten recall proofs and
+ten export proofs are empty. Their governed query packets were then erased, so
+all 2,096 retained packet fences are minimized and content-free. The benchmark
+lock and campaign processes are absent; no temporary credential material
+exists. Closure commit/origin `2816395` is live as Worker `a38142b9` /
+deployment `dc96a1df` and passed 20/20 terminal-safe propagation checks.
+Authoritative evidence is `final/locomo/evidence/cleanup.json` and
+`final/locomo/evidence/terminal-production-closure.json`.
+
 ## 2026-08-11 Stage D closure
 
 All three holdout seeds cleaned to zero. A final cohort preflight then found 217
