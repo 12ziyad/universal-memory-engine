@@ -224,6 +224,7 @@ export function resolveScope(userId, input = {}) {
 	const scope = input && typeof input === "object" ? input : {};
 	const project = normalizeProjectScope(scope);
 	const ownerUserId = cleanKey(scope.owner_user_id ?? scope.ownerUserId ?? scope.ownerId, userId);
+	const accountUserId = cleanKey(scope.account_user_id ?? scope.accountUserId, ownerUserId);
 	const externalUserId = cleanKey(scope.external_user_id ?? scope.externalUserId ?? scope.endUserId ?? scope.userId, userId);
 	const sessionId = cleanKey(scope.session_id ?? scope.sessionId ?? scope.session ?? scope.threadId, null);
 	const threadId = cleanKey(scope.thread_id ?? scope.threadId, null);
@@ -231,6 +232,8 @@ export function resolveScope(userId, input = {}) {
 		user_id: userId,
 		memory_user_id: cleanKey(scope.memory_user_id ?? scope.memoryUserId, userId),
 		owner_user_id: ownerUserId,
+		account_user_id: accountUserId,
+		managed_project_id: cleanKey(scope.managed_project_id ?? scope.managedProjectId, null),
 		external_user_id: externalUserId,
 		scope_user_id: userId,
 		workspace_id: cleanKey(scope.workspace_id ?? scope.workspaceId, "default"),
@@ -396,7 +399,13 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	// Keep the pre-project global hash byte-for-byte stable across this deploy.
 	// Project identity participates, but project_name is display-only and must
 	// never turn a rename into a second write of identical content.
-	const { project_id: hashProjectId, project_name: _hashProjectName, ...legacyHashScope } = scope;
+	const {
+		project_id: hashProjectId,
+		project_name: _hashProjectName,
+		account_user_id: _hashAccountUserId,
+		managed_project_id: _hashManagedProjectId,
+		...legacyHashScope
+	} = scope;
 	const hashScope = hashProjectId
 		? { ...legacyHashScope, project_id: hashProjectId }
 		: legacyHashScope;
@@ -442,6 +451,8 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const rawMeta = {
 		delivery,
 		session_id_explicit: Boolean(explicitSession),
+		account_user_id: scope.account_user_id,
+		managed_project_id: scope.managed_project_id,
 		...(packetSourceTime ? { source_time: packetSourceTime } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
@@ -743,6 +754,8 @@ export function sourceMeta(sourcePacket) {
 			user_id: sourcePacket.scope_user_id,
 			memory_user_id: sourcePacket.memory_user_id,
 			owner_user_id: sourcePacket.owner_user_id,
+			account_user_id: rawMeta.account_user_id ?? sourcePacket.owner_user_id,
+			managed_project_id: rawMeta.managed_project_id ?? null,
 			external_user_id: sourcePacket.external_user_id,
 			workspace_id: sourcePacket.workspace_id,
 			app_id: sourcePacket.app_id,
@@ -759,6 +772,8 @@ export function sourceMeta(sourcePacket) {
 			source_mode: sourcePacket.source_mode,
 			delivery,
 		}),
+		account_user_id: rawMeta.account_user_id ?? sourcePacket.owner_user_id ?? null,
+		managed_project_id: rawMeta.managed_project_id ?? null,
 		project_id: sourcePacket.project_id ?? null,
 		project_name: sourcePacket.project_name ?? null,
 		delivery,

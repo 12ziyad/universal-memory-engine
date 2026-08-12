@@ -5,6 +5,7 @@ import {
 	MEMORY_V3_MODES,
 	memoryV3Config,
 	memoryV3Enabled,
+	memoryV3RolloutUserId,
 	memoryV3AtomicCaptureConfig,
 	memoryV3AtomicCaptureEnabled,
 	memoryV3AtomicProjectionConfig,
@@ -250,6 +251,23 @@ describe("V3 feature flag: allowlist mode", () => {
 		expect(memoryV3Enabled(allowlistEnv, "user_campaign")).toBe(true);
 		expect(memoryV3Enabled(allowlistEnv, "user_bench")).toBe(true);
 		expect(memoryV3Enabled(allowlistEnv, "user_test")).toBe(true);
+	});
+
+	it("keeps managed projects on their owning account's rollout state", () => {
+		const nested = {
+			...allowlistEnv,
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "allowlist",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: "user_campaign",
+		};
+		const derivedProjectOwner = "mem_derived_project_owner";
+		const trustedScope = { accountUserId: "user_campaign", managedProjectId: "proj_example123" };
+		expect(memoryV3RolloutUserId(derivedProjectOwner, trustedScope)).toBe("user_campaign");
+		expect(memoryV3Enabled(nested, derivedProjectOwner, trustedScope)).toBe(true);
+		expect(memoryV3AtomicCaptureEnabled(nested, derivedProjectOwner, trustedScope)).toBe(true);
+		expect(memoryV3Enabled(nested, derivedProjectOwner, {
+			scope_json: JSON.stringify({ account_user_id: "user_campaign" }),
+		})).toBe(true);
+		expect(memoryV3Enabled(nested, derivedProjectOwner, { accountUserId: "user_not_selected" })).toBe(false);
 	});
 
 	it("leaves every other account on the legacy path", () => {

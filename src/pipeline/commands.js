@@ -508,7 +508,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 	}
 	// Narrowing is safe on any architecture; widening changes retrieval depth,
 	// which is V3 behaviour and stays behind the flag.
-	const limitMode = memoryV3Enabled(env, userId) ? "depth" : "narrow";
+	const limitMode = memoryV3Enabled(env, userId, input.memoryScope) ? "depth" : "narrow";
 	try {
 		validateRecallScope(userId, {
 			memoryScope: input.memoryScope,

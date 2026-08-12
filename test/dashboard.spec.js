@@ -169,7 +169,8 @@ describe("dashboard script", () => {
 		expect(script).toContain("function setInstallMethod(");
 		expect(script).toContain('class="method-card');
 		expect(script).toContain('class="step-num"');
-		expect(script).toContain("Three supported setup paths, all routed through the same account and scope model.");
+		expect(script).toContain("Connections created here access only");
+		expect(script).toContain("x-itsuki-project");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [

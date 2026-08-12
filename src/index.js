@@ -25,6 +25,13 @@ import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/s
 import { memoryV3Enabled, memoryV3Status } from "./lib/memory_v3.js";
 import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
+	createManagedProject,
+	listManagedProjects,
+	ManagedProjectError,
+	resolveManagedProject,
+	updateManagedProject,
+} from "./lib/managed_projects.js";
+import {
 	archiveObject,
 	bulkDeleteBySource,
 	cleanJunkMemories,
@@ -114,6 +121,14 @@ function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
 }
 
+function configurationOwnerUserId(auth) {
+	// The legacy operator door already receives the exact target identity; it
+	// has no managed-project context. Session/token callers use the managed
+	// project's root so configuration is shared by that project's sub-tenants.
+	if (auth.auth?.type === "legacy") return auth.userId;
+	return auth.memoryScope?.ownerUserId ?? auth.auth?.userId ?? auth.userId;
+}
+
 /**
  * The door decides the lens. Bearer-key callers are the SDK profile (their own
  * rules take priority); a caller declaring source:"plugin" gets the coding
@@ -131,7 +146,7 @@ async function doorOverrides(env, auth, body = {}) {
 	// rules up under it silently returned defaults — an integrator's
 	// excludes:["salary"] applied to their own memory and to none of their
 	// end users', which is the only place it actually matters.
-	const ownerUserId = auth.auth?.userId ?? auth.userId;
+	const ownerUserId = configurationOwnerUserId(auth);
 	const keyRules = isToken ? auth.auth.token?.rules : null;
 	const bodyRules = body.rules && typeof body.rules === "object" ? body.rules : null;
 	const scoped = ownerUserId !== auth.userId;
@@ -236,14 +251,14 @@ async function readBody(request, path, { maxBytes = INGEST_LIMITS.maxRequestByte
  *
  * Returns a Response to send, or null when the request may proceed.
  */
-function refuseUngatedSourceTime(env, userId, body) {
+function refuseUngatedSourceTime(env, userId, body, memoryScope = null) {
 	const onBody = body && Object.prototype.hasOwnProperty.call(body, "sourceTime");
 	const onMessage = Array.isArray(body?.messages) && body.messages.some(
 		(message) => message && typeof message === "object" && !Array.isArray(message)
 			&& Object.prototype.hasOwnProperty.call(message, "sourceTime"),
 	);
 	if (!onBody && !onMessage) return null;
-	if (memoryV3Enabled(env, userId)) return null;
+	if (memoryV3Enabled(env, userId, memoryScope)) return null;
 	return json({
 		error: "source_time_not_enabled",
 		code: "source_time_not_enabled",
@@ -338,11 +353,13 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 			}
 		}
 		try {
-			const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput);
+			const managedProject = await resolveManagedProject(env, request, auth);
+			const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput, managedProject);
 			const project = normalizeProjectScope(scoped.memoryScope);
 			return {
 				auth,
 				userId: scoped.userId,
+				managedProject: managedProject?.project ?? null,
 				memoryScope: {
 					...scoped.memoryScope,
 					projectId: project.projectId,
@@ -350,10 +367,15 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 				},
 			};
 		} catch (error) {
-			if (error instanceof ProjectScopeError || error?.name === "ProjectScopeError") {
+			if (
+				error instanceof ProjectScopeError
+				|| error?.name === "ProjectScopeError"
+				|| error instanceof ManagedProjectError
+				|| error?.name === "ManagedProjectError"
+			) {
 				return { response: json({
-					error: error.code ?? "invalid_project_id",
-					code: error.code ?? "invalid_project_id",
+					error: error.code ?? "invalid_project",
+					code: error.code ?? "invalid_project",
 					message: String(error.message ?? "Invalid project scope."),
 				}, Number(error.status ?? 400)) };
 			}
@@ -388,7 +410,7 @@ export async function scopedMemoryUserId(ownerUserId, externalUserId) {
 	return `mem_${digest.slice(0, 32)}`;
 }
 
-async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}) {
+async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}, managedProject = null) {
 	const input = scopeInput && typeof scopeInput === "object" ? scopeInput : {};
 	if (auth.type === "legacy") {
 		const externalUserId = cleanScopeValue(explicitUserId, auth.userId);
@@ -403,9 +425,15 @@ async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}) {
 			},
 		};
 	}
-	const ownerUserId = auth.userId;
-	const externalUserId = cleanScopeValue(explicitUserId ?? input.externalUserId ?? input.userId, ownerUserId);
-	const memoryUserId = await scopedMemoryUserId(ownerUserId, externalUserId);
+	const accountUserId = auth.userId;
+	const ownerUserId = managedProject?.memoryOwnerUserId ?? accountUserId;
+	const externalUserId = cleanScopeValue(
+		explicitUserId ?? input.externalUserId ?? input.userId,
+		accountUserId,
+	);
+	const memoryUserId = externalUserId === accountUserId || externalUserId === ownerUserId
+		? ownerUserId
+		: await scopedMemoryUserId(ownerUserId, externalUserId);
 	return {
 		userId: memoryUserId,
 		memoryScope: {
@@ -413,6 +441,9 @@ async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}) {
 			authType: auth.type,
 			memoryUserId,
 			ownerUserId,
+			accountUserId,
+			managedProjectId: managedProject?.project?.id ?? null,
+			managedProjectName: managedProject?.project?.name ?? null,
 			externalUserId,
 		},
 	};
@@ -427,6 +458,35 @@ function authPayload(auth) {
 		authenticated: true,
 		user: auth.user,
 		session: auth.session ?? null,
+	};
+}
+
+function managedProjectFailure(error) {
+	if (error instanceof ManagedProjectError || error?.name === "ManagedProjectError") {
+		return json({
+			error: error.code ?? "invalid_project",
+			code: error.code ?? "invalid_project",
+			message: String(error.message ?? "The project request is invalid."),
+		}, Number(error.status ?? 400));
+	}
+	throw error;
+}
+
+async function requireSessionProject(request, env) {
+	const auth = await getSessionUser(env, request);
+	if (!auth) return { response: json({ error: "unauthorized" }, 401) };
+	try {
+		const managed = await resolveManagedProject(env, request, auth);
+		return { auth, ...managed };
+	} catch (error) {
+		return { response: managedProjectFailure(error) };
+	}
+}
+
+function tokenProjectOptions(context) {
+	return {
+		projectId: context.project.id,
+		isDefault: context.project.is_default,
 	};
 }
 
@@ -511,17 +571,41 @@ const routes = {
 		return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(request) });
 	},
 
-	"GET /auth/tokens": async (request, env) => {
+	"GET /auth/projects": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		return json({ tokens: await listConnectionTokens(env, auth.userId) });
+		try {
+			return json({ projects: await listManagedProjects(env, auth.userId) });
+		} catch (error) {
+			return managedProjectFailure(error);
+		}
 	},
 
-	"POST /auth/tokens": async (request, env) => {
+	"POST /auth/projects": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		const body = await request.json().catch(() => ({}));
-		const result = await createConnectionToken(env, auth.userId, body);
+		try {
+			return json({ project: await createManagedProject(env, auth.userId, body) }, 201);
+		} catch (error) {
+			return managedProjectFailure(error);
+		}
+	},
+
+	"GET /auth/tokens": async (request, env) => {
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		return json({
+			project: context.project,
+			tokens: await listConnectionTokens(env, context.auth.userId, tokenProjectOptions(context)),
+		});
+	},
+
+	"POST /auth/tokens": async (request, env) => {
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		const body = await request.json().catch(() => ({}));
+		const result = await createConnectionToken(env, context.auth.userId, body, tokenProjectOptions(context));
 		return json(result, 201);
 	},
 
@@ -592,7 +676,7 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
-		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
@@ -855,7 +939,7 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
-		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
 
@@ -1051,11 +1135,24 @@ const routes = {
 		const query = String(new URL(request.url).searchParams.get("query") ?? "").trim().toLocaleLowerCase("en-US");
 		const like = `%${query.replace(/[%_]/g, "")}%`;
 		const { results } = await env.DB.prepare(
-			`SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, u.terms_accepted_at,
+			`WITH account_spaces(account_user_id, memory_user_id) AS (
+				SELECT id, id FROM users
+				UNION
+				SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
+				UNION
+				SELECT mp.owner_user_id, sp.memory_user_id
+				FROM managed_projects mp
+				JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+				WHERE mp.status = 'active' AND sp.memory_user_id IS NOT NULL
+			)
+			 SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, u.terms_accepted_at,
 				u.email_verified_at, (u.google_sub IS NOT NULL) AS google_linked,
-				(SELECT COUNT(*) FROM nodes n WHERE n.user_id = u.id AND n.deleted_at IS NULL) AS nodes,
-				(SELECT COUNT(*) FROM memory_pages p WHERE p.user_id = u.id AND p.deleted_at IS NULL) AS pages,
-				(SELECT COUNT(*) FROM receipts r WHERE r.user_id = u.id) AS receipts,
+				(SELECT COUNT(*) FROM nodes n JOIN account_spaces s ON s.memory_user_id = n.user_id
+				 WHERE s.account_user_id = u.id AND n.deleted_at IS NULL) AS nodes,
+				(SELECT COUNT(*) FROM memory_pages p JOIN account_spaces s ON s.memory_user_id = p.user_id
+				 WHERE s.account_user_id = u.id AND p.deleted_at IS NULL) AS pages,
+				(SELECT COUNT(*) FROM receipts r JOIN account_spaces s ON s.memory_user_id = r.user_id
+				 WHERE s.account_user_id = u.id) AS receipts,
 				(SELECT COUNT(*) FROM connection_tokens t WHERE t.user_id = u.id AND t.revoked_at IS NULL) AS tokens,
 				(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 			 FROM users u
@@ -1167,9 +1264,21 @@ const routes = {
 					(SELECT COUNT(*) FROM connection_tokens WHERE revoked_at IS NULL) AS active_tokens`,
 			),
 			env.DB.prepare(
-				`SELECT u.id, u.email, u.name, u.created_at,
-					(SELECT COUNT(*) FROM nodes n WHERE n.user_id = u.id AND n.deleted_at IS NULL) AS nodes,
-					(SELECT COUNT(*) FROM receipts r WHERE r.user_id = u.id) AS receipts,
+				`WITH account_spaces(account_user_id, memory_user_id) AS (
+					SELECT id, id FROM users
+					UNION
+					SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
+					UNION
+					SELECT mp.owner_user_id, sp.memory_user_id
+					FROM managed_projects mp
+					JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+					WHERE mp.status = 'active' AND sp.memory_user_id IS NOT NULL
+				 )
+				 SELECT u.id, u.email, u.name, u.created_at,
+					(SELECT COUNT(*) FROM nodes n JOIN account_spaces s ON s.memory_user_id = n.user_id
+					 WHERE s.account_user_id = u.id AND n.deleted_at IS NULL) AS nodes,
+					(SELECT COUNT(*) FROM receipts r JOIN account_spaces s ON s.memory_user_id = r.user_id
+					 WHERE s.account_user_id = u.id) AS receipts,
 					(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 				 FROM users u ORDER BY receipts DESC LIMIT 20`,
 			),
@@ -1179,13 +1288,33 @@ const routes = {
 				 FROM receipts WHERE created_at > ? GROUP BY day, source ORDER BY day`,
 			).bind(since14),
 			env.DB.prepare(
-				`SELECT er.id, er.tool_name, er.status, er.error, er.created_at, u.email
-				 FROM extraction_runs er LEFT JOIN users u ON u.id = er.user_id
+				`WITH account_spaces(account_user_id, memory_user_id) AS (
+					SELECT id, id FROM users
+					UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects
+					UNION
+					SELECT mp.owner_user_id, sp.memory_user_id FROM managed_projects mp
+					JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+					WHERE sp.memory_user_id IS NOT NULL
+				 )
+				 SELECT er.id, er.tool_name, er.status, er.error, er.created_at, u.email
+				 FROM extraction_runs er
+				 LEFT JOIN account_spaces s ON s.memory_user_id = er.user_id
+				 LEFT JOIN users u ON u.id = COALESCE(s.account_user_id, er.user_id)
 				 WHERE er.status = 'failed' ORDER BY er.created_at DESC LIMIT 12`,
 			),
 			env.DB.prepare(
-				`SELECT r.created_at, r.source, r.summary, u.email
-				 FROM receipts r LEFT JOIN users u ON u.id = r.user_id
+				`WITH account_spaces(account_user_id, memory_user_id) AS (
+					SELECT id, id FROM users
+					UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects
+					UNION
+					SELECT mp.owner_user_id, sp.memory_user_id FROM managed_projects mp
+					JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+					WHERE sp.memory_user_id IS NOT NULL
+				 )
+				 SELECT r.created_at, r.source, r.summary, u.email
+				 FROM receipts r
+				 LEFT JOIN account_spaces s ON s.memory_user_id = r.user_id
+				 LEFT JOIN users u ON u.id = COALESCE(s.account_user_id, r.user_id)
 				 WHERE COALESCE(r.source, '') != 'recall'
 				 ORDER BY r.created_at DESC LIMIT 30`,
 			),
@@ -1226,9 +1355,15 @@ const routes = {
 			 GROUP BY day ORDER BY day`,
 		).bind(since14).all().catch(() => ({ results: [] }));
 		const activation = await env.DB.prepare(
-			`SELECT
+			`WITH account_spaces(account_user_id, memory_user_id) AS (
+				SELECT id, id FROM users
+				UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
+			)
+			 SELECT
 				(SELECT COUNT(*) FROM users) AS accounts,
-				(SELECT COUNT(DISTINCT user_id) FROM nodes WHERE deleted_at IS NULL) AS with_memories`,
+				(SELECT COUNT(DISTINCT s.account_user_id) FROM nodes n
+				 JOIN account_spaces s ON s.memory_user_id = n.user_id
+				 WHERE n.deleted_at IS NULL) AS with_memories`,
 		).all().catch(() => ({ results: [{}] }));
 		// Part 2.4 — the queue-health numbers the cron sweep alerts on.
 		const queue = await queueCounters(env).catch((error) => {
@@ -1281,11 +1416,30 @@ const routes = {
 				 ORDER BY created_at DESC LIMIT 40`,
 			).bind(targetId),
 			env.DB.prepare(
-				`SELECT date(created_at / 1000, 'unixepoch') AS day, source, outcome, COUNT(*) AS n
-				 FROM receipts WHERE user_id = ? GROUP BY day, source, outcome ORDER BY day DESC LIMIT 60`,
+				`WITH account_spaces(memory_user_id) AS (
+					SELECT ?1
+					UNION SELECT memory_owner_user_id FROM managed_projects WHERE owner_user_id = ?1
+					UNION
+					SELECT sp.memory_user_id FROM managed_projects mp
+					JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+					WHERE mp.owner_user_id = ?1 AND sp.memory_user_id IS NOT NULL
+				 )
+				 SELECT date(created_at / 1000, 'unixepoch') AS day, source, outcome, COUNT(*) AS n
+				 FROM receipts WHERE user_id IN (SELECT memory_user_id FROM account_spaces)
+				 GROUP BY day, source, outcome ORDER BY day DESC LIMIT 60`,
 			).bind(targetId),
 			env.DB.prepare(
-				"SELECT created_at AS at, side, scope, substr(message, 1, 200) AS message FROM error_reports WHERE user_id = ? ORDER BY created_at DESC LIMIT 25",
+				`WITH account_spaces(memory_user_id) AS (
+					SELECT ?1
+					UNION SELECT memory_owner_user_id FROM managed_projects WHERE owner_user_id = ?1
+					UNION
+					SELECT sp.memory_user_id FROM managed_projects mp
+					JOIN source_packets sp ON sp.owner_user_id = mp.memory_owner_user_id
+					WHERE mp.owner_user_id = ?1 AND sp.memory_user_id IS NOT NULL
+				 )
+				 SELECT created_at AS at, side, scope, substr(message, 1, 200) AS message
+				 FROM error_reports WHERE user_id IN (SELECT memory_user_id FROM account_spaces)
+				 ORDER BY created_at DESC LIMIT 25`,
 			).bind(targetId),
 			env.DB.prepare(
 				"SELECT label, type, created_at, last_used_at, revoked_at FROM connection_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 20",
@@ -1310,7 +1464,7 @@ const routes = {
 			requiredScope: MEMORY_READ_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		const ownerUserId = configurationOwnerUserId(auth);
 		return json({ ok: true, rules: await getMemoryRules(env, ownerUserId) });
 	},
 
@@ -1320,7 +1474,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		const ownerUserId = configurationOwnerUserId(auth);
 		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
 		return json({ ok: true, rules });
 	},
@@ -1332,7 +1486,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		const ownerUserId = auth.auth?.userId ?? auth.userId;
+		const ownerUserId = configurationOwnerUserId(auth);
 		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
 		return json({ ok: true, rules });
 	},
@@ -1350,7 +1504,7 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
-		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body);
+		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const messages = Array.isArray(body.messages) ? body.messages : [];
 		if (!messages.length && !body.query) {
@@ -1423,13 +1577,14 @@ const routes = {
 	// Session auth ONLY. An API key or MCP token must not be able to spend a
 	// free model call: those doors reach memory, not the chat model.
 	"GET /v1/playground": async (request, env) => {
-		const auth = await getSessionUser(env, request);
-		if (!auth) return json({ error: "unauthorized" }, 401);
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		const userId = context.memoryOwnerUserId;
 		const url = new URL(request.url);
-		const threads = await listThreads(env, auth.userId);
+		const threads = await listThreads(env, userId);
 		const requested = url.searchParams.get("thread");
-		const active = (await getThread(env, auth.userId, requested)) ?? (threads[0]
-			? await getThread(env, auth.userId, threads[0].id)
+		const active = (await getThread(env, userId, requested)) ?? (threads[0]
+			? await getThread(env, userId, threads[0].id)
 			: null);
 		const limits = playgroundLimits(env);
 		return json({
@@ -1441,23 +1596,24 @@ const routes = {
 					title: active.title,
 					settings: normalizeThreadSettings(JSON.parse(active.settings_json || "{}")),
 					// Extraction that outran the turn's wait budget lands here.
-					messages: await reconcileExtractions(env, auth.userId, await getThreadMessages(env, auth.userId, active.id)),
+					messages: await reconcileExtractions(env, userId, await getThreadMessages(env, userId, active.id)),
 				}
 				: null,
 			limits: {
 				...limits,
 				threadsUsed: threads.length,
-				usedToday: await countMessagesToday(env, auth.userId),
+				usedToday: await countMessagesToday(env, userId),
 			},
 		});
 	},
 
 	"POST /v1/playground/chat": async (request, env, ctx) => {
-		const auth = await getSessionUser(env, request);
-		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.SAVE_LIMITER, `pg:${auth.userId}`))) return tooMany();
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		const userId = context.memoryOwnerUserId;
+		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`))) return tooMany();
 		const body = await request.json().catch(() => ({}));
-		return json(await playgroundTurn(env, ctx, auth.userId, {
+		return json(await playgroundTurn(env, ctx, userId, {
 			message: body.message,
 			threadId: body.threadId,
 			overrides: testOnlyOverrides(env, body._test),
@@ -1465,22 +1621,24 @@ const routes = {
 	},
 
 	"POST /v1/playground/thread": async (request, env) => {
-		const auth = await getSessionUser(env, request);
-		if (!auth) return json({ error: "unauthorized" }, 401);
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		const userId = context.memoryOwnerUserId;
 		const body = await request.json().catch(() => ({}));
-		if (body.delete) return json(await deleteThread(env, auth.userId, body.threadId));
-		return json(await createThread(env, auth.userId, body.title || "New chat"));
+		if (body.delete) return json(await deleteThread(env, userId, body.threadId));
+		return json(await createThread(env, userId, body.title || "New chat"));
 	},
 
 	"PUT /v1/playground/settings": async (request, env) => {
-		const auth = await getSessionUser(env, request);
-		if (!auth) return json({ error: "unauthorized" }, 401);
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		const userId = context.memoryOwnerUserId;
 		const body = await request.json().catch(() => ({}));
-		const thread = await getThread(env, auth.userId, body.threadId);
+		const thread = await getThread(env, userId, body.threadId);
 		if (!thread) return json({ ok: false, message: "Open a chat first, then apply settings to it." }, 404);
 		const settings = normalizeThreadSettings(body.settings ?? body);
 		await env.DB.prepare("UPDATE playground_threads SET settings_json = ?, updated_at = ? WHERE id = ? AND user_id = ?")
-			.bind(JSON.stringify(settings), Date.now(), thread.id, auth.userId).run();
+			.bind(JSON.stringify(settings), Date.now(), thread.id, userId).run();
 		return json({ ok: true, settings });
 	},
 
@@ -1883,7 +2041,7 @@ export default {
 // admin, and control routes stay same-origin.
 const CORS_HEADERS = {
 	"access-control-allow-methods": "GET,POST,PUT,OPTIONS",
-	"access-control-allow-headers": "authorization, content-type, x-uml-token",
+	"access-control-allow-headers": "authorization, content-type, x-uml-token, x-itsuki-project",
 	"access-control-max-age": "86400",
 };
 
@@ -1946,21 +2104,44 @@ async function handleRequestInner(request, env, ctx, url) {
 			return handleMcp(request, env, ctx, url);
 		}
 
-		if (request.method === "POST" && url.pathname.startsWith("/auth/tokens/") && url.pathname.endsWith("/revoke")) {
+		if (request.method === "PATCH" && url.pathname.startsWith("/auth/projects/")) {
 			const auth = await getSessionUser(env, request);
 			if (!auth) return json({ error: "unauthorized" }, 401);
+			const id = decodeURIComponent(url.pathname.slice("/auth/projects/".length));
+			if (!id || id.includes("/")) return json({ error: "not found" }, 404);
+			const body = await request.json().catch(() => ({}));
+			try {
+				return json({ project: await updateManagedProject(env, auth.userId, id, body) });
+			} catch (error) {
+				return managedProjectFailure(error);
+			}
+		}
+
+		if (request.method === "POST" && url.pathname.startsWith("/auth/tokens/") && url.pathname.endsWith("/revoke")) {
+			const context = await requireSessionProject(request, env);
+			if (context.response) return context.response;
 			const id = url.pathname.slice("/auth/tokens/".length).replace(/\/revoke$/, "");
-			return json(await revokeConnectionToken(env, auth.userId, id));
+			return json(await revokeConnectionToken(
+				env,
+				context.auth.userId,
+				id,
+				tokenProjectOptions(context),
+			));
 		}
 
 		// The app offers one action per key now: delete. Revoke stays reachable
 		// above for anything already scripted against it.
 		if (request.method === "DELETE" && url.pathname.startsWith("/auth/tokens/")) {
-			const auth = await getSessionUser(env, request);
-			if (!auth) return json({ error: "unauthorized" }, 401);
+			const context = await requireSessionProject(request, env);
+			if (context.response) return context.response;
 			const id = url.pathname.slice("/auth/tokens/".length);
 			if (!id) return json({ error: "not found" }, 404);
-			return json(await deleteConnectionToken(env, auth.userId, decodeURIComponent(id)));
+			return json(await deleteConnectionToken(
+				env,
+				context.auth.userId,
+				decodeURIComponent(id),
+				tokenProjectOptions(context),
+			));
 		}
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
@@ -2026,9 +2207,29 @@ function unauthorizedMcp(message) {
 	});
 }
 
+async function serveProjectBoundMcp(request, env, ctx, url, auth) {
+	try {
+		const managed = await resolveManagedProject(env, request, auth);
+		return serveMcp(request, env, ctx, url, managed.memoryOwnerUserId, {
+			scopes: auth.token?.scopes ?? [],
+			memoryScope: {
+				authType: auth.type,
+				memoryUserId: managed.memoryOwnerUserId,
+				ownerUserId: managed.memoryOwnerUserId,
+				accountUserId: managed.accountUserId,
+				managedProjectId: managed.project.id,
+				managedProjectName: managed.project.name,
+				externalUserId: managed.accountUserId,
+			},
+		});
+	} catch (error) {
+		return managedProjectFailure(error);
+	}
+}
+
 /** Build the server for an identity and hand a bounded request to the transport. */
-async function serveMcp(request, env, ctx, url, userId, scopes) {
-	const server = buildMemoryServer(env, ctx, userId, scopes ? { scopes } : undefined);
+async function serveMcp(request, env, ctx, url, userId, authz = {}) {
+	const server = buildMemoryServer(env, ctx, userId, authz);
 	// Normalize the path to /mcp so the transport never depends on the token suffix.
 	let normalized;
 	if (!["GET", "HEAD"].includes(request.method) && request.body) {
@@ -2083,7 +2284,7 @@ async function handleMcp(request, env, ctx, url) {
 			}
 			return unauthorizedMcp("That MCP link is revoked, expired, or not an MCP token.");
 		}
-		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
+		return serveProjectBoundMcp(request, env, ctx, url, auth);
 	}
 
 	// Header door. `api` is allowed as well as `mcp`; clients keep the credential
@@ -2096,7 +2297,7 @@ async function handleMcp(request, env, ctx, url) {
 				"That key is revoked or not valid. Create one at https://itsuki.app under API keys, then configure it in your client (Claude plugin users: use /plugin).",
 			);
 		}
-		return serveMcp(request, env, ctx, url, auth.userId, auth.token?.scopes ?? []);
+		return serveProjectBoundMcp(request, env, ctx, url, auth);
 	}
 
 	const id = decodeMcpToken(pathToken);
@@ -2108,7 +2309,7 @@ async function handleMcp(request, env, ctx, url) {
 		);
 	}
 
-	return serveMcp(request, env, ctx, url, id.userId, null);
+	return serveMcp(request, env, ctx, url, id.userId);
 }
 
 /**
@@ -2117,9 +2318,9 @@ async function handleMcp(request, env, ctx, url) {
  * silently point a user's memory events somewhere new).
  */
 async function handleWebhookRoutes(request, env, ctx, url) {
-	const auth = await getSessionUser(env, request);
-	if (!auth) return json({ error: "unauthorized" }, 401);
-	const userId = auth.userId;
+	const context = await requireSessionProject(request, env);
+	if (context.response) return context.response;
+	const userId = context.memoryOwnerUserId;
 
 	if (request.method === "GET" && url.pathname === "/v1/webhooks") {
 		return json({ webhooks: await listWebhooks(env, userId) });

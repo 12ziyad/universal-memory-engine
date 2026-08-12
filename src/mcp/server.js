@@ -176,6 +176,16 @@ function ensureScope(authz, mode, source, requiredScope) {
 	return mcpForbidden(mode, source, requiredScope);
 }
 
+function projectBoundMemoryScope(authz, publicScope) {
+	if (!authz?.memoryScope) return publicScope;
+	// Public fields remain source/repository attribution inside a managed
+	// project. Tenant ownership comes last from the authenticated server scope.
+	return {
+		...(publicScope ?? {}),
+		...authz.memoryScope,
+	};
+}
+
 /**
  * Build a fresh McpServer for this request, closing over env + the authenticated
  * userId. A new instance per request is required by the MCP SDK (a server cannot
@@ -219,7 +229,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				threadId,
 				sourceId,
 				idempotencyKey,
-				memoryScope,
+				memoryScope: projectBoundMemoryScope(authz, memoryScope),
 				overrides: { profile: "mcp", lightPath: true },
 			});
 			return mcpResult(res);
@@ -264,7 +274,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				threadId,
 				sourceId,
 				idempotencyKey,
-				memoryScope,
+				memoryScope: projectBoundMemoryScope(authz, memoryScope),
 			});
 			return mcpResult(res);
 		},
@@ -298,7 +308,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				idempotencyKey,
 				topic,
 				recallScope,
-				memoryScope,
+				memoryScope: projectBoundMemoryScope(authz, memoryScope),
 			});
 			return mcpResult(res);
 		},

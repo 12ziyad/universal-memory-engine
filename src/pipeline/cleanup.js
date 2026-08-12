@@ -1,6 +1,7 @@
 import { getConfig } from "../config.js";
 import { addSuppression, storeReceipt } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
+import { managedProjectMemoryOwnerId } from "../lib/managed_projects.js";
 import { normalizeLabel } from "../lib/text.js";
 import { deleteNodeVectors } from "../lib/vectorize.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
@@ -538,16 +539,76 @@ export async function archiveObject(env, userId, { kind, id }) {
  * all memory rows (via deleteAllMemories), then auth rows, then the user row.
  */
 export async function deleteAccountCompletely(env, userId) {
-	const memory = await deleteAllMemories(env, userId, "DELETE ALL");
-	for (const table of ["sessions", "connection_tokens", "login_events"]) {
+	// A managed project is implemented as a separate proven memory identity,
+	// with optional end-user sub-tenants below it. Account erasure must discover
+	// and erase every one of those identities before removing the control plane.
+	const roots = new Set([userId]);
+	try {
+		const { results: projects } = await env.DB.prepare(
+			"SELECT id, is_default, memory_owner_user_id FROM managed_projects WHERE owner_user_id = ?",
+		).bind(userId).all();
+		for (const project of projects ?? []) {
+			roots.add(project.memory_owner_user_id ?? await managedProjectMemoryOwnerId(userId, project));
+		}
+	} catch (error) {
+		console.warn("account teardown: managed project inventory failed:", error?.message ?? error);
+		throw error;
+	}
+
+	const memoryIds = new Set(roots);
+	for (const root of roots) {
+		const [packets, episodes, atoms] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT DISTINCT COALESCE(memory_user_id, user_id) AS id
+				 FROM source_packets
+				 WHERE owner_user_id = ? OR scope_user_id = ?`,
+			).bind(root, root),
+			env.DB.prepare(
+				"SELECT DISTINCT COALESCE(memory_user_id, user_id) AS id FROM source_episodes WHERE owner_user_id = ?",
+			).bind(root),
+			env.DB.prepare(
+				"SELECT DISTINCT COALESCE(memory_user_id, user_id) AS id FROM semantic_atom_candidates WHERE owner_user_id = ?",
+			).bind(root),
+		]);
+		for (const row of [...(packets.results ?? []), ...(episodes.results ?? []), ...(atoms.results ?? [])]) {
+			if (row.id) memoryIds.add(row.id);
+		}
+	}
+
+	const memoryResults = [];
+	for (const memoryId of memoryIds) {
+		memoryResults.push({ user_id: memoryId, ...(await deleteAllMemories(env, memoryId, "DELETE ALL")) });
+	}
+
+	// Project-owned configuration and secondary copies are not part of a normal
+	// "delete memories" reset, but they are part of complete account erasure.
+	const projectTables = [
+		"webhook_deliveries",
+		"webhooks",
+		"playground_messages",
+		"playground_threads",
+		"memory_exports",
+		"memory_rules",
+		"ai_calls",
+		"deletion_barriers",
+		"manual_page_write_epochs",
+	];
+	for (const memoryId of memoryIds) {
+		for (const table of projectTables) {
+			await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(memoryId).run();
+		}
+	}
+
+	for (const table of ["sessions", "connection_tokens", "login_events", "error_reports"]) {
 		try {
 			await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId).run();
 		} catch (error) {
 			console.warn(`account teardown: ${table} delete failed:`, error?.message ?? error);
 		}
 	}
+	await env.DB.prepare("DELETE FROM managed_projects WHERE owner_user_id = ?").bind(userId).run();
 	await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
-	return { deleted: true, memory };
+	return { deleted: true, memory: memoryResults[0], memory_spaces: memoryResults.length };
 }
 
 export async function deleteAllMemories(env, userId, confirm) {

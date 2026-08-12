@@ -419,6 +419,7 @@ export function publicToken(row) {
 	const tail = String(row.token_prefix_tail ?? row.token_tail ?? "").slice(-4);
 	return {
 		id: row.id,
+		project_id: row.project_id ?? null,
 		label: row.label,
 		type: row.type,
 		token_prefix: row.token_prefix,
@@ -431,19 +432,28 @@ export function publicToken(row) {
 	};
 }
 
-export async function listConnectionTokens(env, userId) {
-	const { results } = await env.DB.prepare(
-		`SELECT id, label, type, token_prefix, token_tail, scopes_json, created_at, last_used_at, revoked_at, status
-		 FROM connection_tokens
-		 WHERE user_id = ?
-		 ORDER BY created_at DESC`,
-	)
-		.bind(userId)
-		.all();
+export async function listConnectionTokens(env, userId, options = {}) {
+	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
+	const columns = "id, project_id, label, type, token_prefix, token_tail, scopes_json, created_at, last_used_at, revoked_at, status";
+	const statement = !scoped
+		? env.DB.prepare(`SELECT ${columns} FROM connection_tokens WHERE user_id = ? ORDER BY created_at DESC`)
+			.bind(userId)
+		: options.isDefault
+			? env.DB.prepare(
+				`SELECT ${columns} FROM connection_tokens
+				 WHERE user_id = ? AND (project_id = ? OR project_id IS NULL)
+				 ORDER BY created_at DESC`,
+			).bind(userId, options.projectId)
+			: env.DB.prepare(
+				`SELECT ${columns} FROM connection_tokens
+				 WHERE user_id = ? AND project_id = ?
+				 ORDER BY created_at DESC`,
+			).bind(userId, options.projectId);
+	const { results } = await statement.all();
 	return (results ?? []).map(publicToken);
 }
 
-export async function createConnectionToken(env, userId, body = {}) {
+export async function createConnectionToken(env, userId, body = {}, options = {}) {
 	const type = ["mcp", "api"].includes(body.type) ? body.type : "api";
 	const label = String(body.label ?? "").trim().slice(0, 80) || (type === "mcp" ? "MCP client" : "API client");
 	const token = `${CONNECTION_TOKEN_PREFIX}${base64Url(randomBytes(32))}`;
@@ -451,6 +461,7 @@ export async function createConnectionToken(env, userId, body = {}) {
 	const createdAt = now();
 	const row = {
 		id: newId("tok"),
+		project_id: options.projectId ?? null,
 		label,
 		type,
 		token_prefix: token.slice(0, 18),
@@ -464,12 +475,13 @@ export async function createConnectionToken(env, userId, body = {}) {
 	};
 	await env.DB.prepare(
 		`INSERT INTO connection_tokens
-			(id, user_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status, rules_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, user_id, project_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status, rules_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			row.id,
 			userId,
+			row.project_id,
 			row.label,
 			tokenHash,
 			row.token_prefix,
@@ -484,12 +496,20 @@ export async function createConnectionToken(env, userId, body = {}) {
 	return { token, tokenRecord: publicToken(row) };
 }
 
-export async function revokeConnectionToken(env, userId, tokenId) {
-	const result = await env.DB.prepare(
-		"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
-	)
-		.bind(now(), tokenId, userId)
-		.run();
+export async function revokeConnectionToken(env, userId, tokenId, options = {}) {
+	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
+	const statement = !scoped
+		? env.DB.prepare(
+			"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+		).bind(now(), tokenId, userId)
+		: options.isDefault
+			? env.DB.prepare(
+				"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND (project_id = ? OR project_id IS NULL) AND revoked_at IS NULL",
+			).bind(now(), tokenId, userId, options.projectId)
+			: env.DB.prepare(
+				"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND project_id = ? AND revoked_at IS NULL",
+			).bind(now(), tokenId, userId, options.projectId);
+	const result = await statement.run();
 	return { revoked: (result.meta?.changes ?? 0) > 0 };
 }
 
@@ -499,12 +519,19 @@ export async function revokeConnectionToken(env, userId, tokenId) {
  * no row. Either way the secret stops working immediately — resolveConnectionToken
  * matches on the hash, and there is nothing left to match.
  */
-export async function deleteConnectionToken(env, userId, tokenId) {
-	const result = await env.DB.prepare(
-		"DELETE FROM connection_tokens WHERE id = ? AND user_id = ?",
-	)
-		.bind(tokenId, userId)
-		.run();
+export async function deleteConnectionToken(env, userId, tokenId, options = {}) {
+	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
+	const statement = !scoped
+		? env.DB.prepare("DELETE FROM connection_tokens WHERE id = ? AND user_id = ?")
+			.bind(tokenId, userId)
+		: options.isDefault
+			? env.DB.prepare(
+				"DELETE FROM connection_tokens WHERE id = ? AND user_id = ? AND (project_id = ? OR project_id IS NULL)",
+			).bind(tokenId, userId, options.projectId)
+			: env.DB.prepare(
+				"DELETE FROM connection_tokens WHERE id = ? AND user_id = ? AND project_id = ?",
+			).bind(tokenId, userId, options.projectId);
+	const result = await statement.run();
 	return { deleted: (result.meta?.changes ?? 0) > 0 };
 }
 
@@ -513,7 +540,7 @@ export async function resolveConnectionToken(env, token, { allowedTypes = ["api"
 	const tokenHash = await sha256Hex(token);
 	const row = await env.DB.prepare(
 		`SELECT
-			t.id AS token_id, t.user_id, t.label, t.type, t.scopes_json, t.status, t.revoked_at, t.rules_json,
+			t.id AS token_id, t.user_id, t.project_id, t.label, t.type, t.scopes_json, t.status, t.revoked_at, t.rules_json,
 			u.id, u.email, u.name, u.role, u.status AS user_status, u.created_at, u.updated_at, u.email_verified_at
 		 FROM connection_tokens t
 		 JOIN users u ON u.id = t.user_id
@@ -533,6 +560,7 @@ export async function resolveConnectionToken(env, token, { allowedTypes = ["api"
 		user: publicUser({ ...row, status: row.user_status }),
 		token: {
 			id: row.token_id,
+			projectId: row.project_id ?? null,
 			label: row.label,
 			type: row.type,
 			scopes: JSON.parse(row.scopes_json || "[]"),

@@ -669,6 +669,37 @@
 		gap: 7px; padding: 5px 10px; color: var(--muted); }
 	.theme-quick:hover { color: var(--text); }
 	.theme-quick-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; font-size: 15px; }
+	.project-switcher { position: relative; flex: 0 0 auto; }
+	.project-switcher-button { min-width: 190px; max-width: 280px; min-height: 36px; display: grid;
+		grid-template-columns: 20px minmax(0, 1fr) 14px; align-items: center; gap: 8px; padding: 6px 10px;
+		background: var(--panel); color: var(--text); border: 1px solid var(--border2); box-shadow: var(--shadow-sm); }
+	.project-switcher-button:hover { border-color: var(--accent); filter: none; }
+	.project-switcher-button .project-folder { color: var(--muted); display: inline-grid; place-items: center; }
+	.project-switcher-button .project-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+		text-align: left; font-size: 13.5px; font-weight: 600; }
+	.project-switcher-button .project-chevron { color: var(--faint); font-size: 11px; }
+	.project-menu { position: absolute; z-index: 70; top: calc(100% + 8px); left: 0; width: min(360px, calc(100vw - 32px));
+		background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 10px; }
+	.project-menu[hidden] { display: none; }
+	.project-menu-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; }
+	.project-menu-head input { width: 100%; min-width: 0; }
+	.project-list { max-height: 320px; overflow-y: auto; display: grid; gap: 3px; }
+	.project-option { width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) 18px; align-items: center;
+		gap: 8px; padding: 9px 10px; color: var(--text); background: transparent; border: 1px solid transparent; text-align: left; }
+	.project-option:hover { background: var(--panel2); filter: none; }
+	.project-option.active { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
+	.project-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+	.project-option-check { color: var(--accent); text-align: right; }
+	.project-empty { padding: 18px 10px; color: var(--muted); text-align: center; }
+	.project-modal { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--border2);
+		border-radius: 14px; box-shadow: var(--shadow-lg); padding: 20px; }
+	.project-modal h3 { margin: 0 0 5px; font-size: 19px; }
+	.project-modal > p { color: var(--muted); margin: 0 0 18px; }
+	.project-modal textarea { width: 100%; min-height: 96px; resize: vertical; background: var(--input-bg);
+		border: 1px solid var(--border2); color: var(--text); border-radius: 8px; padding: 9px 10px; }
+	.project-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+	.project-error { margin-top: 10px; color: var(--red); font-size: 13px; }
+	#appHeader .header-divider { width: 1px; height: 24px; background: var(--border); }
 	.policy-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
 	.policy-list li { margin: 5px 0; }
 	.modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: var(--overlay); backdrop-filter: blur(8px); }
@@ -778,6 +809,8 @@
 			transition: transform .18s ease; box-shadow: 0 0 40px rgba(16,24,40,.18); }
 		body.rail-open #rail { transform: none; }
 		.rail-toggle { display: inline-grid; place-items: center; }
+		.project-switcher-button { min-width: 0; width: min(210px, 48vw); }
+		#appHeader .header-divider, #pageTitle { display: none; }
 		.view { padding: 24px 18px 36px; }
 		#memoryBrowser { width: calc(100% - 36px); margin-top: 18px; }
 	}
@@ -1322,6 +1355,16 @@
 
 <header id="appHeader">
 	<button class="rail-toggle" id="railToggle" aria-label="Menu" onclick="toggleRail()">☰</button>
+	<div class="project-switcher" id="projectSwitcher">
+		<button class="project-switcher-button" id="projectSwitcherButton" type="button"
+			onclick="toggleProjectMenu()" aria-haspopup="menu" aria-expanded="false">
+			<span class="project-folder" aria-hidden="true">&#128193;</span>
+			<span class="project-current" id="projectCurrentName">Default project</span>
+			<span class="project-chevron" aria-hidden="true">&#9662;</span>
+		</button>
+		<div class="project-menu" id="projectMenu" role="menu" hidden></div>
+	</div>
+	<span class="header-divider" aria-hidden="true"></span>
 	<h1 id="pageTitle">Home</h1>
 	<input id="userId" class="dev-only" placeholder="userId" autocomplete="off" />
 	<input id="key" class="dev-only" type="password" placeholder="API key" autocomplete="off" />
@@ -1393,6 +1436,7 @@
 <div id="toast"></div>
 <div id="keyModal" class="modal-backdrop" hidden></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
+<div id="projectModal" class="modal-backdrop" hidden></div>
 <div id="legalView" class="legal-shell" hidden></div>
 
 <script>
@@ -1438,6 +1482,7 @@ const S = {
 	graphMode: "clean",
 	focusCluster: "",
 	me: null, tokens: [], oneTimeToken: null, oneTimeVisible: true, recallResult: null, memoryQuery: "", resetConfirmOpen: false,
+	projects: [], projectId: "", projectEpoch: 0, projectController: null, projectSwitching: false, projectSettingsBusy: false,
 	devMode: new URLSearchParams(location.search).has("dev") || localStorage.getItem("uml_dev") === "1",
 	data: null, receipts: [], candidates: [], selected: null, network: null,
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
@@ -1513,6 +1558,259 @@ if (typeof THEME_MEDIA.addEventListener === "function") {
 }
 
 applyTheme(themePreference());
+
+const PROJECT_CREATE = { open: false, busy: false, name: "", description: "", error: "" };
+
+function projectStorageKey() {
+	return `itsuki_project:${S.me?.user?.id || "anonymous"}`;
+}
+
+function selectedManagedProject() {
+	return S.projects.find((project) => project.id === S.projectId) || S.projects.find((project) => project.is_default) || null;
+}
+
+function renderProjectSwitcher() {
+	const current = selectedManagedProject();
+	const name = document.getElementById("projectCurrentName");
+	if (name) name.textContent = current?.name || "Default project";
+	const button = document.getElementById("projectSwitcherButton");
+	if (button) {
+		button.disabled = S.projectSwitching || !S.projects.length;
+		button.title = current ? `Current project: ${current.name}` : "Loading projects";
+	}
+	if (!document.getElementById("projectMenu")?.hidden) renderProjectMenu();
+}
+
+function projectSearch(value) {
+	const input = document.getElementById("projectSearch");
+	if (input && input.value !== value) input.value = value;
+	renderProjectMenu(value);
+}
+
+function renderProjectMenu(query = document.getElementById("projectSearch")?.value || "") {
+	const menu = document.getElementById("projectMenu");
+	if (!menu) return;
+	const needle = String(query).trim().toLocaleLowerCase("en-US");
+	const projects = S.projects.filter((project) => !needle || project.name.toLocaleLowerCase("en-US").includes(needle));
+	menu.innerHTML = `
+		<div class="project-menu-head">
+			<input id="projectSearch" value="${esc(query)}" placeholder="Search projects" aria-label="Search projects"
+				oninput="projectSearch(this.value)" />
+			<button type="button" onclick="openProjectModal()">Create</button>
+		</div>
+		<div class="project-list" role="menu">
+			${projects.length ? projects.map((project) => `
+				<button type="button" class="project-option ${project.id === S.projectId ? "active" : ""}"
+					role="menuitemradio" aria-checked="${project.id === S.projectId ? "true" : "false"}"
+					onclick="switchManagedProject('${esc(project.id)}')">
+					<span aria-hidden="true">&#128193;</span>
+					<span class="project-option-name">${esc(project.name)}</span>
+					<span class="project-option-check">${project.id === S.projectId ? "✓" : ""}</span>
+				</button>`).join("") : `<div class="project-empty">No matching projects.</div>`}
+		</div>`;
+	requestAnimationFrame(() => {
+		const input = document.getElementById("projectSearch");
+		if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+	});
+}
+
+function toggleProjectMenu(force) {
+	const menu = document.getElementById("projectMenu");
+	const button = document.getElementById("projectSwitcherButton");
+	if (!menu || button?.disabled) return;
+	const open = typeof force === "boolean" ? force : menu.hidden;
+	menu.hidden = !open;
+	button?.setAttribute("aria-expanded", open ? "true" : "false");
+	if (open) renderProjectMenu("");
+}
+
+function projectSwitchBlocked() {
+	return Boolean(
+		PROJECT_CREATE.busy
+		|| S.projectSettingsBusy
+		|| KEYMODAL.open
+		|| PG.sending
+		|| String(PG.draft || "").trim()
+		|| WH.creating
+		|| EX.creating
+	);
+}
+
+function openProjectModal() {
+	toggleProjectMenu(false);
+	PROJECT_CREATE.open = true;
+	PROJECT_CREATE.busy = false;
+	PROJECT_CREATE.name = "";
+	PROJECT_CREATE.description = "";
+	PROJECT_CREATE.error = "";
+	renderProjectModal();
+}
+
+function closeProjectModal() {
+	if (PROJECT_CREATE.busy) return;
+	PROJECT_CREATE.open = false;
+	renderProjectModal();
+}
+
+function projectModalField(field, value) {
+	PROJECT_CREATE[field] = value;
+	PROJECT_CREATE.error = "";
+	const error = document.getElementById("projectModalError");
+	if (error) error.textContent = "";
+}
+
+function renderProjectModal() {
+	const host = document.getElementById("projectModal");
+	if (!host) return;
+	host.hidden = !PROJECT_CREATE.open;
+	if (!PROJECT_CREATE.open) { host.innerHTML = ""; return; }
+	host.innerHTML = `
+		<form class="project-modal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle"
+			onsubmit="event.preventDefault(); submitProjectModal();">
+			<h3 id="projectModalTitle">Create project</h3>
+			<p>Memories, keys, rules, requests, exports, and integrations stay isolated inside this project.</p>
+			<div class="form-row"><label for="projectModalName">Project name</label>
+				<input id="projectModalName" maxlength="80" required value="${esc(PROJECT_CREATE.name)}"
+					placeholder="e.g. Production agent" oninput="projectModalField('name', this.value)" /></div>
+			<div class="form-row"><label for="projectModalDescription">Description <span class="help">(optional)</span></label>
+				<textarea id="projectModalDescription" maxlength="500" placeholder="What this project contains"
+					oninput="projectModalField('description', this.value)">${esc(PROJECT_CREATE.description)}</textarea></div>
+			<div class="project-error" id="projectModalError">${esc(PROJECT_CREATE.error)}</div>
+			<div class="project-modal-actions">
+				<button class="ghost" type="button" onclick="closeProjectModal()" ${PROJECT_CREATE.busy ? "disabled" : ""}>Cancel</button>
+				<button type="submit" ${PROJECT_CREATE.busy ? "disabled" : ""}>${PROJECT_CREATE.busy ? "Creating…" : "Create project"}</button>
+			</div>
+		</form>`;
+	if (!PROJECT_CREATE.busy) requestAnimationFrame(() => document.getElementById("projectModalName")?.focus());
+}
+
+async function submitProjectModal() {
+	if (PROJECT_CREATE.busy) return;
+	PROJECT_CREATE.name = (document.getElementById("projectModalName")?.value || PROJECT_CREATE.name).trim();
+	PROJECT_CREATE.description = (document.getElementById("projectModalDescription")?.value || PROJECT_CREATE.description).trim();
+	if (!PROJECT_CREATE.name) {
+		PROJECT_CREATE.error = "Enter a project name.";
+		renderProjectModal();
+		return;
+	}
+	PROJECT_CREATE.busy = true;
+	PROJECT_CREATE.error = "";
+	renderProjectModal();
+	try {
+		const result = await api("/auth/projects", {
+			method: "POST",
+			projectBound: false,
+			body: JSON.stringify({ name: PROJECT_CREATE.name, description: PROJECT_CREATE.description }),
+		});
+		S.projects.push(result.project);
+		PROJECT_CREATE.open = false;
+		PROJECT_CREATE.busy = false;
+		renderProjectModal();
+		await switchManagedProject(result.project.id);
+		toast(`${result.project.name} created.`);
+	} catch (error) {
+		PROJECT_CREATE.error = error.message || "Could not create that project.";
+	} finally {
+		PROJECT_CREATE.busy = false;
+		renderProjectModal();
+	}
+}
+
+async function refreshProjects() {
+	if (!S.me?.user?.id || S.devMode) return;
+	const result = await api("/auth/projects", { projectBound: false });
+	S.projects = result.projects || [];
+	const stored = localStorage.getItem(projectStorageKey());
+	const selected = S.projects.find((project) => project.id === S.projectId)
+		|| S.projects.find((project) => project.id === stored)
+		|| S.projects.find((project) => project.is_default)
+		|| S.projects[0];
+	S.projectId = selected?.id || "";
+	if (S.projectId) localStorage.setItem(projectStorageKey(), S.projectId);
+	if (!S.projectController) S.projectController = new AbortController();
+	renderProjectSwitcher();
+}
+
+function resetProjectBoundUiState() {
+	S.data = null;
+	S.receipts = [];
+	S.candidates = [];
+	S.selected = null;
+	S.tokens = [];
+	S.oneTimeToken = null;
+	S.recallResult = null;
+	S.memoryQuery = "";
+	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
+	clearTimeout(PG.poll); Object.assign(PG, {
+		threads: [], threadId: null, messages: [], limits: {},
+		settings: { customInstructions: "", customCategories: [] }, settingsDraft: null,
+		tab: "chats", draft: "", sending: false, loaded: false, notice: "",
+		poll: null, pollTries: 0, pollGaveUp: false,
+	});
+	clearTimeout(EX.poll); Object.assign(EX, { rows: [], loading: false, creating: false, error: "", poll: null });
+	Object.assign(RQ, { rows: [], loading: false, error: "" });
+	Object.assign(WH, {
+		rows: [], deliveries: [], loading: false, creating: false, openLog: null, error: "", listError: "",
+		form: { name: "", url: "", events: [...WH_EVENTS], metadataOnly: false },
+	});
+	closeDetail();
+}
+
+async function switchManagedProject(projectId) {
+	const project = S.projects.find((candidate) => candidate.id === projectId);
+	if (!project || S.projectSwitching) return;
+	if (projectSwitchBlocked()) {
+		toast("Finish the current create or send action before switching projects.", true);
+		return;
+	}
+	if (S.oneTimeToken && !confirm("A newly created secret is still visible. Switch projects only after you have copied it. Continue?")) return;
+	toggleProjectMenu(false);
+	if (project.id === S.projectId) return;
+	S.projectSwitching = true;
+	S.projectEpoch += 1;
+	S.projectController?.abort();
+	S.projectController = new AbortController();
+	S.projectId = project.id;
+	localStorage.setItem(projectStorageKey(), project.id);
+	resetProjectBoundUiState();
+	renderProjectSwitcher();
+	renderAll();
+	try {
+		await Promise.all([refreshTokens(), load()]);
+	} finally {
+		S.projectSwitching = false;
+		renderProjectSwitcher();
+	}
+}
+
+async function saveManagedProjectDetails() {
+	const project = selectedManagedProject();
+	if (!project || S.projectSettingsBusy) return;
+	const name = (document.getElementById("managedProjectName")?.value || "").trim();
+	const description = (document.getElementById("managedProjectDescription")?.value || "").trim();
+	const status = document.getElementById("managedProjectStatus");
+	if (!name) { if (status) status.textContent = "Project name is required."; return; }
+	S.projectSettingsBusy = true;
+	const button = document.getElementById("managedProjectSave");
+	if (button) { button.disabled = true; button.textContent = "Saving…"; }
+	try {
+		const result = await api(`/auth/projects/${encodeURIComponent(project.id)}`, {
+			method: "PATCH",
+			projectBound: false,
+			body: JSON.stringify({ name, description }),
+		});
+		S.projects = S.projects.map((candidate) => candidate.id === result.project.id ? result.project : candidate);
+		renderProjectSwitcher();
+		if (status) status.textContent = "Saved.";
+		toast("Project details saved.");
+	} catch (error) {
+		if (status) status.textContent = error.message || "Could not save project details.";
+	} finally {
+		S.projectSettingsBusy = false;
+		if (button) { button.disabled = false; button.textContent = "Save project"; }
+	}
+}
+
 const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"]);
 
 const nodeKey = (id) => `node:${id}`;
@@ -1725,6 +2023,9 @@ async function submitAuth(mode) {
 		pushUrl("/app");
 		setMode("app");
 		renderAppUser();
+		try { await refreshProjects(); }
+		catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
+		await refreshTokens();
 		await load();
 	} catch (e) {
 		if (err) {
@@ -1848,13 +2149,27 @@ function initHeroReel() {
 }
 
 async function api(path, opts={}) {
-	const headers = { "content-type": "application/json", ...(opts.headers||{}) };
+	const { projectBound = true, ...fetchOptions } = opts;
+	const headers = { "content-type": "application/json", ...(fetchOptions.headers||{}) };
 	if (S.devMode && S.key) headers["x-api-key"] = S.key;
+	if (!S.devMode && projectBound && S.projectId) headers["x-itsuki-project"] = S.projectId;
+	const projectEpoch = S.projectEpoch;
+	const signal = projectBound ? (fetchOptions.signal || S.projectController?.signal) : fetchOptions.signal;
 	let res;
 	try {
-		res = await fetch(path, { ...opts, credentials: "include", headers });
-	} catch {
+		res = await fetch(path, { ...fetchOptions, credentials: "include", headers, ...(signal ? { signal } : {}) });
+	} catch (error) {
+		if (projectBound && (error?.name === "AbortError" || projectEpoch !== S.projectEpoch)) {
+			const changed = new Error("Project changed; the previous response was ignored.");
+			changed.projectChanged = true;
+			throw changed;
+		}
 		throw new Error(FRIENDLY_NETWORK);
+	}
+	if (projectBound && projectEpoch !== S.projectEpoch) {
+		const changed = new Error("Project changed; the previous response was ignored.");
+		changed.projectChanged = true;
+		throw changed;
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => null);
@@ -1869,6 +2184,7 @@ function scopedPayload(payload = {}) {
 }
 
 async function load() {
+	const projectEpoch = S.projectEpoch;
 	if (S.devMode) {
 		S.userId = $("#userId").value.trim(); S.key = $("#key").value.trim();
 		localStorage.setItem("uml_user", S.userId); localStorage.setItem("uml_key", S.key);
@@ -1889,6 +2205,7 @@ async function load() {
 			api(receiptsPath).catch(() => ({ receipts: [] })),
 			api(candidatesPath).catch(() => ({ candidates: [] })),
 		]);
+		if (projectEpoch !== S.projectEpoch) return;
 		S.data = graph; S.receipts = receipts.receipts || []; S.candidates = candidates.candidates || graph.candidates || [];
 		updateReceiptsBadge();
 		if (S.selected && !graph.nodes.find((n) => nodeKey(n.id) === S.selected) && !(graph.pages || []).find((p) => pageKey(p.id) === S.selected)) {
@@ -1896,7 +2213,10 @@ async function load() {
 		}
 		renderAll();
 		toast(`Loaded ${(graph.pages || []).length} page(s), ${graph.nodes.length} node(s).`);
-	} catch (e) { banner("Load failed: " + e.message); }
+	} catch (e) {
+		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
+		banner("Load failed: " + e.message);
+	}
 }
 
 function candidateItems() {
@@ -2472,10 +2792,13 @@ function renderRecallResults() {
 
 async function refreshTokens() {
 	if (!S.me && !S.devMode) return;
+	const projectEpoch = S.projectEpoch;
 	try {
 		const body = await api("/auth/tokens");
+		if (projectEpoch !== S.projectEpoch) return;
 		S.tokens = body.tokens || [];
-	} catch {
+	} catch (error) {
+		if (error?.projectChanged || projectEpoch !== S.projectEpoch) return;
 		S.tokens = [];
 	}
 }
@@ -2816,6 +3139,7 @@ function installKeyGuard() {
 
 /** The Get started renderer. Reads { method, client, variant, key } and nothing else. */
 function viewInstall(v) {
+	const project = selectedManagedProject();
 	const doors = installMethods();
 	const state = {
 		method: doors[S.installMethod] ? S.installMethod : "appConnect",
@@ -2868,7 +3192,7 @@ function viewInstall(v) {
 	wrap.innerHTML = `
 		<div class="install-intro page-head">
 			<h2 class="page-title">Get started with ${PRODUCT.name}</h2>
-			<p class="page-sub">Three supported setup paths, all routed through the same account and scope model.</p>
+			<p class="page-sub">Connections created here access only <b>${esc(project?.name || "the selected project")}</b>. Switch projects before creating a connection for another workspace.</p>
 		</div>
 		<div class="method-cards">
 			${Object.entries(doors).map(([id, m]) => `
@@ -3005,8 +3329,10 @@ function playgroundTab(tab) {
 }
 
 async function loadPlayground(threadId) {
+	const projectEpoch = S.projectEpoch;
 	try {
 		const res = await api(`/v1/playground${threadId ? `?thread=${encodeURIComponent(threadId)}` : ""}`);
+		if (projectEpoch !== S.projectEpoch) return;
 		const switched = PG.threadId !== (res.thread?.id ?? null);
 		PG.threads = res.threads || [];
 		PG.limits = res.limits || {};
@@ -3020,6 +3346,7 @@ async function loadPlayground(threadId) {
 		if (S.view === "playground") renderView();
 		schedulePlaygroundPoll();
 	} catch (e) {
+		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
 		PG.loaded = true;
 		PG.notice = e.message || "Could not load your chats. Try again in a moment.";
 		if (S.view === "playground") renderView();
@@ -3248,17 +3575,18 @@ async function playgroundDeleteThread(id) {
 }
 
 function viewKeys(v) {
+	const project = selectedManagedProject();
 	const wrap = el("div");
 	wrap.innerHTML = `
 		<div class="page-head">
 			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
 				<div><h2 class="page-title">API keys</h2>
-					<p class="page-sub">Keys let tools and apps reach your memory. API keys are Bearer tokens for the HTTP API and SDK. To connect a chat app, create an MCP link in <a href="#" onclick="setView('install');return false">Get started</a>.</p></div>
+					<p class="page-sub">Every key created here is permanently bound to <b>${esc(project?.name || "this project")}</b>. It cannot read or write another project. To connect a chat app, create an MCP link in <a href="#" onclick="setView('install');return false">Get started</a>.</p></div>
 				<button onclick="openKeyModal('api')">Create API key</button>
 			</div>
 		</div>
 		<div class="box" style="max-width:1080px">
-			<h3>Your keys</h3>
+			<h3>Keys in ${esc(project?.name || "this project")}</h3>
 			<div class="keys-table-wrap"><table class="keys-table">
 				<thead><tr><th>Name</th><th>Key</th><th>Type</th><th>Created</th><th>Last used</th><th></th></tr></thead>
 				<tbody id="keysTableBody"></tbody>
@@ -3570,15 +3898,19 @@ function setRequestRange(range) {
 }
 
 async function loadRequests() {
+	const projectEpoch = S.projectEpoch;
 	RQ.loading = true;
 	if (S.view === "requests") renderView();
 	try {
 		const res = await api(`/v1/requests?range=${encodeURIComponent(RQ.range)}`);
+		if (projectEpoch !== S.projectEpoch) return;
 		RQ.rows = res.requests || [];
 		RQ.error = "";
 	} catch (e) {
+		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
 		RQ.error = e.message || "Could not load your requests. Try refreshing in a moment.";
 	} finally {
+		if (projectEpoch !== S.projectEpoch) return;
 		RQ.loading = false;
 		if (S.view === "requests") renderView();
 	}
@@ -3672,17 +4004,21 @@ function viewWebhooks(v) {
 }
 
 async function loadWebhooks() {
+	const projectEpoch = S.projectEpoch;
 	WH.loading = true;
 	try {
 		const res = await api("/v1/webhooks");
+		if (projectEpoch !== S.projectEpoch) return;
 		WH.rows = res.webhooks || [];
 		// NOTE: this must never touch WH.error. That slot belongs to the create
 		// form; a background list refresh landing mid-edit used to wipe the
 		// message explaining why a submit had just been refused.
 		WH.listError = "";
 	} catch (e) {
+		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
 		WH.listError = e.message || "Could not load your webhooks. Try refreshing in a moment.";
 	} finally {
+		if (projectEpoch !== S.projectEpoch) return;
 		WH.loading = false;
 		if (S.view === "webhooks") renderWebhooksTable();
 	}
@@ -3929,22 +4265,59 @@ function renderExportsTable() {
 			<td>${esc(row.started_at ? ago(row.started_at) : "—")}</td>
 			<td>${esc(row.completed_at ? ago(row.completed_at) : "—")}</td>
 			<td>${row.status === "complete"
-				? `<a class="install-btn" style="padding:5px 11px;font-size:12px" href="/v1/exports/download?id=${encodeURIComponent(row.id)}">Download</a>`
+				? `<button class="install-btn" style="padding:5px 11px;font-size:12px" onclick="downloadPreparedExport('${esc(row.id)}')">Download</button>`
 				: `<span class="hint">—</span>`}</td>
 		</tr>`;
 	}).join("");
 }
 
+async function downloadPreparedExport(id) {
+	const projectEpoch = S.projectEpoch;
+	const headers = {};
+	if (S.projectId) headers["x-itsuki-project"] = S.projectId;
+	try {
+		const response = await fetch(`/v1/exports/download?id=${encodeURIComponent(id)}`, {
+			credentials: "include",
+			headers,
+			signal: S.projectController?.signal,
+		});
+		if (projectEpoch !== S.projectEpoch) return;
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({}));
+			throw new Error(friendlyHttpError(response.status, body));
+		}
+		const blob = await response.blob();
+		if (projectEpoch !== S.projectEpoch) return;
+		const disposition = response.headers.get("content-disposition") || "";
+		const fileName = /filename="([^"]+)"/i.exec(disposition)?.[1] || `itsuki-export-${id}.json`;
+		const href = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = href;
+		link.download = fileName;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(href), 1000);
+	} catch (error) {
+		if (error?.name === "AbortError" || projectEpoch !== S.projectEpoch) return;
+		toast(error.message || "Could not download that export.", true);
+	}
+}
+
 async function loadExports() {
+	const projectEpoch = S.projectEpoch;
 	EX.loading = true;
 	if (S.view === "exports") renderView();
 	try {
 		const res = await api("/v1/exports");
+		if (projectEpoch !== S.projectEpoch) return;
 		EX.rows = res.exports || [];
 		EX.error = "";
 	} catch (e) {
+		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
 		EX.error = e.message || "Could not load your exports. Try refreshing in a moment.";
 	} finally {
+		if (projectEpoch !== S.projectEpoch) return;
 		EX.loading = false;
 		if (S.view === "exports") renderView();
 		scheduleExportPoll();
@@ -4110,7 +4483,9 @@ function viewRules(v) {
 		</div>`;
 	wrap.appendChild(form);
 	v.appendChild(wrap);
+	const rulesProjectEpoch = S.projectEpoch;
 	loadRules().then((rules) => {
+		if (rulesProjectEpoch !== S.projectEpoch) return;
 		$("#rule-instructions").value = rules.customInstructions || "";
 		$("#rule-includes").value = (rules.includes || []).join(", ");
 		$("#rule-excludes").value = (rules.excludes || []).join(", ");
@@ -4121,6 +4496,7 @@ function viewRules(v) {
 		$("#rule-autocollect").checked = rules.autoCollect !== false;
 		renderRulesSummary(rules);
 	}).catch((err) => {
+		if (err?.projectChanged || rulesProjectEpoch !== S.projectEpoch) return;
 		const box = $("#rules-active");
 		if (box) box.textContent = `Could not load rules: ${err.message}`;
 	});
@@ -4502,13 +4878,19 @@ function connectTab(button, name) {
 
 // ---- Data export -----------------------------------------------------------
 async function downloadExport() {
+	const projectEpoch = S.projectEpoch;
 	try {
 		toast("Preparing your export…");
 		const path = S.devMode ? `/v1/export?userId=${encodeURIComponent(S.userId)}` : "/v1/export";
 		const headers = S.devMode && S.key ? { "x-api-key": S.key } : {};
+		if (!S.devMode && S.projectId) headers["x-itsuki-project"] = S.projectId;
 		let res;
-		try { res = await fetch(path, { credentials: "include", headers }); }
-		catch { throw new Error(FRIENDLY_NETWORK); }
+		try { res = await fetch(path, { credentials: "include", headers, signal: S.projectController?.signal }); }
+		catch (error) {
+			if (error?.name === "AbortError" || projectEpoch !== S.projectEpoch) return;
+			throw new Error(FRIENDLY_NETWORK);
+		}
+		if (projectEpoch !== S.projectEpoch) return;
 		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
 		const blob = await res.blob();
 		const link = document.createElement("a");
@@ -4518,6 +4900,7 @@ async function downloadExport() {
 		URL.revokeObjectURL(link.href);
 		toast("Export downloaded.");
 	} catch (err) {
+		if (err?.name === "AbortError" || projectEpoch !== S.projectEpoch) return;
 		toast(`Export failed: ${err.message}`);
 	}
 }
@@ -4929,8 +5312,18 @@ function viewSettingsMain(v) {
 	const activeTokens = S.tokens.filter(t => !t.revoked_at && t.status !== "revoked").length;
 	const revokedTokens = Math.max(0, S.tokens.length - activeTokens);
 	const appearanceTheme = themePreference();
+	const project = selectedManagedProject();
 	const wrap = el("div");
 	wrap.innerHTML = `<div class="settings-grid">
+		<div class="action-box settings-section"><h3>Project</h3>
+			<div class="help">Everything under this selector—memory, keys, rules, requests, exports, webhooks, queues, and indexes—is isolated from every other project.</div>
+			<div class="form-row" style="margin-top:12px"><label for="managedProjectName">Project name</label>
+				<input id="managedProjectName" maxlength="80" value="${esc(project?.name || "")}" /></div>
+			<div class="form-row"><label for="managedProjectDescription">Description <span class="help">(optional)</span></label>
+				<input id="managedProjectDescription" maxlength="500" value="${esc(project?.description || "")}" placeholder="What this project contains" /></div>
+			<div class="kv">Project ID: <b>${esc(project?.id || "")}</b>${project?.is_default ? " · default" : ""}</div>
+			<div class="section-actions"><button class="ghost mini" id="managedProjectSave" onclick="saveManagedProjectDetails()">Save project</button><span id="managedProjectStatus" class="help"></span></div>
+		</div>
 		<div class="action-box settings-section"><h3>Appearance</h3>
 			<div class="help">Choose a comfortable interface. System follows your device and updates automatically.</div>
 			<div class="theme-picker" role="group" aria-label="Appearance theme">
@@ -6445,7 +6838,8 @@ async function copyText(t, msg) {
 
 async function logoutNow() {
 	await fetch("/auth/logout", { method:"POST", credentials:"include" }).catch(() => {});
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null;
+	S.projectController?.abort();
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.projectId = ""; S.projectController = null;
 	pushUrl("/");
 	setMode("public");
 }
@@ -6453,7 +6847,8 @@ async function logoutNow() {
 async function logoutAllNow() {
 	if (!confirm("Log out all browser sessions for this account?")) return;
 	await fetch("/auth/logout-all", { method:"POST", credentials:"include" }).catch(() => {});
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null;
+	S.projectController?.abort();
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.projectId = ""; S.projectController = null;
 	pushUrl("/");
 	setMode("public");
 }
@@ -6479,6 +6874,8 @@ async function initShell() {
 			setMode("app");
 			setView(S.view, { updateHash: false });
 			sendVisitBeacon("app");
+			try { await refreshProjects(); }
+			catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
 			await refreshTokens();
 			await load();
 			return;
@@ -6499,6 +6896,8 @@ async function initShell() {
 		setMode("app");
 		setView(S.view, { updateHash: false });
 		sendVisitBeacon("app");
+		try { await refreshProjects(); }
+		catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
 		await refreshTokens();
 		await load();
 		return;
@@ -6515,7 +6914,10 @@ $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t && t.dataset.view) setView(t.dataset.view); });
 window.addEventListener("popstate", () => initShell());
 window.addEventListener("hashchange", () => { const v = hashView(); if (v && document.body.classList.contains("app-mode")) setView(v, { updateHash: false }); });
-window.addEventListener("keydown", (event) => { if (event.key === "Escape") { closePolicyModal(); closeKeyModal(); } });
+window.addEventListener("keydown", (event) => { if (event.key === "Escape") { closePolicyModal(); closeKeyModal(); closeProjectModal(); toggleProjectMenu(false); } });
+document.addEventListener("click", (event) => {
+	if (!event.target.closest("#projectSwitcher")) toggleProjectMenu(false);
+});
 initConnectWidget();
 initHeroReel();
 installKeyGuard();

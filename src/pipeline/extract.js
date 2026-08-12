@@ -196,7 +196,7 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		).bind(current.id, userId).first();
 	}
 
-	const atomicEnabled = memoryV3AtomicCaptureEnabled(env, userId);
+	const atomicEnabled = memoryV3AtomicCaptureEnabled(env, userId, meta);
 	let atomicSummary = null;
 	let atomicProjectionSummary = null;
 	if (atomicEnabled && current?.id) {
@@ -749,12 +749,12 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	const profile = overrides.profile
 		?? ({ plugin: "plugin", sdk: "sdk" }[overrides.source] ?? null);
 	if (profile) meta.profile = profile;
-	const extractionV3 = memoryV3ExtractionB1Enabled(env, userId);
+	const extractionV3 = memoryV3ExtractionB1Enabled(env, userId, meta);
 	meta.extraction_v3_b1 = extractionV3;
 	const withRules = { ...overrides, rules, profile, extractionV3 };
-	const atomicCaptureEnabled = memoryV3AtomicCaptureEnabled(env, userId);
-	const atomicProjectionEnabled = memoryV3AtomicProjectionEnabled(env, userId);
-	const atomicCoalescingEnabled = memoryV3AtomicCoalescingEnabled(env, userId);
+	const atomicCaptureEnabled = memoryV3AtomicCaptureEnabled(env, userId, meta);
+	const atomicProjectionEnabled = memoryV3AtomicProjectionEnabled(env, userId, meta);
+	const atomicCoalescingEnabled = memoryV3AtomicCoalescingEnabled(env, userId, meta);
 	attachAtomicCaptureMeta(meta, null, atomicCaptureEnabled);
 	attachAtomicProjectionMeta(meta, null, atomicProjectionEnabled);
 	meta.atomic_projection_coalescing_enabled = atomicCoalescingEnabled;
@@ -986,7 +986,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// BF-1 / P1: the authoritative anchor for relative phrases. Only accounts on
 	// the V3 timestamp contract can supply one, and without it the gates fall
 	// back to `lastTs` exactly as before.
-	const temporalAnchor = memoryV3Enabled(env, userId) ? chunkAnchor(chunk) : null;
+	const temporalAnchor = memoryV3Enabled(env, userId, meta) ? chunkAnchor(chunk) : null;
 	if (temporalAnchor) meta.temporal_anchor = temporalAnchor.kind;
 	const plan = await applyGates(env, config, userId, { ...proposal, objects }, shortlist, overrides.settings, {
 		manual: Boolean(overrides.manual),

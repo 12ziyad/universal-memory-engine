@@ -914,10 +914,10 @@ export async function recall(env, config, userId, query, opts = {}) {
 	const plan = recallGate(q, opts);
 	const budget = candidateBudget(plan);
 	const { recallScope, projectId } = resolveRecallScope(userId, opts);
-	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId);
-	const sourceExpansionEnabled = memoryV3SourceExpansionEnabled(env, userId);
-	const episodeFallbackEnabled = memoryV3EpisodeFallbackEnabled(env, userId);
-	const adaptiveContextEnabled = memoryV3AdaptiveContextEnabled(env, userId);
+	const hybridEnabled = memoryV3HybridRetrievalEnabled(env, userId, opts.memoryScope);
+	const sourceExpansionEnabled = memoryV3SourceExpansionEnabled(env, userId, opts.memoryScope);
+	const episodeFallbackEnabled = memoryV3EpisodeFallbackEnabled(env, userId, opts.memoryScope);
+	const adaptiveContextEnabled = memoryV3AdaptiveContextEnabled(env, userId, opts.memoryScope);
 	const adaptivePlan = adaptiveContextEnabled ? adaptiveContextPlan(q, plan) : null;
 	if (plan.mode === "no_recall") return emptyRecall(plan);
 	const filteredByProject = recallScope !== "global";

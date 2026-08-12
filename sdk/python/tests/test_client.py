@@ -598,7 +598,11 @@ def test_retry_after_sleep_is_capped_to_the_request_budget(monkeypatch):
         make_client(handler, timeout=0.05).status()
 
     assert sleeps
-    assert all(0 <= seconds <= 0.05 for seconds in sleeps)
+    # The deadline is built by adding then subtracting monotonic floats. On
+    # Windows that can round a 50 ms remainder a few picoseconds above 0.05;
+    # keep the assertion strict at human/OS timer precision without treating
+    # binary floating-point noise as a request-budget overrun.
+    assert all(0 <= seconds <= 0.05 + 1e-9 for seconds in sleeps)
 
 
 def test_retry_after_http_date_is_converted_to_seconds(monkeypatch):

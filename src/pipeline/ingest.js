@@ -314,7 +314,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			sourcePacket: null,
 		};
 	}
-	const sourceEpisodesRequired = memoryV3Enabled(env, userId);
+	const sourceEpisodesRequired = memoryV3Enabled(env, userId, memoryScope);
 	let admissionRules = pipelineOverrides.rules;
 	if (sourceEpisodesRequired) {
 		try {
@@ -415,7 +415,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		replay?.job?.status === "enriched"
 		&& replay.job.type === "extract"
 		&& sourceEpisodesRequired
-		&& memoryV3AtomicCaptureEnabled(env, userId)
+		&& memoryV3AtomicCaptureEnabled(env, userId, memoryScope)
 		&& await hasRecoverableAtomicCaptureInterruption(
 			env,
 			userId,

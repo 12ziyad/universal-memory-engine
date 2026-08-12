@@ -28,6 +28,36 @@ export const MEMORY_V3_FLAG_SCHEMA = "itsuki.memory-v3-flag/v1";
 
 export const MEMORY_V3_MODES = new Set(["off", "allowlist", "on"]);
 
+/**
+ * Managed projects and external sub-tenants use derived memory-owner ids for
+ * physical isolation, but rollout membership belongs to the owning account.
+ * The optional context is internal, server-built provenance; public request
+ * bodies never reach this resolver directly. Function defaults preserve the
+ * legacy two-argument contract for every existing caller and test.
+ */
+export function memoryV3RolloutUserId(userId, context = null) {
+	let candidate = null;
+	if (typeof context === "string") candidate = context;
+	else if (context && typeof context === "object" && !Array.isArray(context)) {
+		candidate = context.accountUserId ?? context.account_user_id ?? null;
+		if (!candidate) {
+			const encoded = context.scope_json ?? context.scopeJson;
+			if (typeof encoded === "string" && encoded.trim()) {
+				try {
+					const parsed = JSON.parse(encoded);
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+						candidate = parsed.accountUserId ?? parsed.account_user_id ?? null;
+					}
+				} catch {
+					// Malformed provenance cannot opt a derived identity into a flag.
+				}
+			}
+		}
+	}
+	if (typeof candidate === "string" && candidate.trim() === candidate && candidate) return candidate;
+	return typeof userId === "string" ? userId : "";
+}
+
 /** Split the allowlist var into exact account ids. Blank entries are dropped. */
 function parseAllowlist(raw) {
 	if (typeof raw !== "string") return new Set();
@@ -58,11 +88,12 @@ export function memoryV3Config(env) {
  * the same identity every scoped query binds — so the answer cannot differ
  * between the write that stores something and the read that finds it.
  */
-export function memoryV3Enabled(env, userId) {
-	if (typeof userId !== "string" || !userId.trim()) return false;
+export function memoryV3Enabled(env, userId, context = null) {
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
+	if (!rolloutUserId) return false;
 	const { mode, allowlist } = memoryV3Config(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -84,11 +115,12 @@ export function memoryV3ExtractionB1Config(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3ExtractionB1Enabled(env, userId) {
-	if (!memoryV3Enabled(env, userId)) return false;
+export function memoryV3ExtractionB1Enabled(env, userId, context = null) {
+	if (!memoryV3Enabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3ExtractionB1Config(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -108,11 +140,12 @@ export function memoryV3AtomicCaptureConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3AtomicCaptureEnabled(env, userId) {
-	if (!memoryV3Enabled(env, userId)) return false;
+export function memoryV3AtomicCaptureEnabled(env, userId, context = null) {
+	if (!memoryV3Enabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3AtomicCaptureConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -132,11 +165,12 @@ export function memoryV3AtomicProjectionConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3AtomicProjectionEnabled(env, userId) {
-	if (!memoryV3AtomicCaptureEnabled(env, userId)) return false;
+export function memoryV3AtomicProjectionEnabled(env, userId, context = null) {
+	if (!memoryV3AtomicCaptureEnabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3AtomicProjectionConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -156,11 +190,12 @@ export function memoryV3AtomicCoalescingConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3AtomicCoalescingEnabled(env, userId) {
-	if (!memoryV3AtomicProjectionEnabled(env, userId)) return false;
+export function memoryV3AtomicCoalescingEnabled(env, userId, context = null) {
+	if (!memoryV3AtomicProjectionEnabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3AtomicCoalescingConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -180,11 +215,12 @@ export function memoryV3HybridRetrievalConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3HybridRetrievalEnabled(env, userId) {
-	if (!memoryV3Enabled(env, userId)) return false;
+export function memoryV3HybridRetrievalEnabled(env, userId, context = null) {
+	if (!memoryV3Enabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3HybridRetrievalConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -205,11 +241,12 @@ export function memoryV3SourceExpansionConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3SourceExpansionEnabled(env, userId) {
-	if (!memoryV3HybridRetrievalEnabled(env, userId)) return false;
+export function memoryV3SourceExpansionEnabled(env, userId, context = null) {
+	if (!memoryV3HybridRetrievalEnabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3SourceExpansionConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -230,11 +267,12 @@ export function memoryV3EpisodeFallbackConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3EpisodeFallbackEnabled(env, userId) {
-	if (!memoryV3SourceExpansionEnabled(env, userId)) return false;
+export function memoryV3EpisodeFallbackEnabled(env, userId, context = null) {
+	if (!memoryV3SourceExpansionEnabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3EpisodeFallbackConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 
@@ -255,11 +293,12 @@ export function memoryV3AdaptiveContextConfig(env) {
 	return { mode, allowlist, allowlistCount: allowlist.size };
 }
 
-export function memoryV3AdaptiveContextEnabled(env, userId) {
-	if (!memoryV3HybridRetrievalEnabled(env, userId)) return false;
+export function memoryV3AdaptiveContextEnabled(env, userId, context = null) {
+	if (!memoryV3HybridRetrievalEnabled(env, userId, context)) return false;
+	const rolloutUserId = memoryV3RolloutUserId(userId, context);
 	const { mode, allowlist } = memoryV3AdaptiveContextConfig(env);
 	if (mode === "on") return true;
-	if (mode === "allowlist") return allowlist.has(userId);
+	if (mode === "allowlist") return allowlist.has(rolloutUserId);
 	return false;
 }
 

@@ -146,24 +146,37 @@ the rename (`uml_live_...`) keep working; a rename must never break someone's in
 | `/v1/rules` | `GET` `PUT` | What to collect, and what never to. |
 | `/v1/export` | `GET` | Everything you own, streamed as one JSON file. |
 | `/mcp` or `/mcp/<token>` | MCP | Streamable HTTP endpoint; Bearer auth is preferred, path tokens support generated links. |
+| `/auth/projects` | `GET` `POST` | List or create dashboard-managed projects (session auth). |
+| `/auth/projects/<id>` | `PATCH` | Rename a managed project or update its description (session auth). |
 
 Auth is a session cookie (app), an `itsuki_live_` Bearer key (API/SDK), or the legacy
 `x-api-key` + explicit `userId` (admin/tools). Passing a `userId` different from the key owner
 creates an **isolated sub-tenant memory space** — that is how one key serves many end users.
 
-### Account, project, and recall scope
+### Account, managed project, end user, and source scope
 
-`userId` remains a true end-user/sub-tenant boundary. A coding project is not another user:
-send it as `memoryScope: { projectId, projectName }`. Project rows stay in the authenticated
-account graph with explicit `project_id` / `project_name` provenance, so the dashboard, MCP,
-and SDK doors query the same account graph, subject to their explicit project and recall scopes,
-without weakening account isolation.
+A dashboard **managed project** is a server-owned isolation boundary. Selecting one changes the
+memory graph, source episodes and FTS, vectors, entities, receipts, jobs, requests, exports,
+webhooks, Playground threads/rules, API keys, MCP credentials, and usage shown by the app. A
+project-bound key cannot switch projects with a request header. Keys created before managed
+projects existed remain bound to the default project, which maps to the historical account
+memory identity so existing data does not move or disappear.
+
+Browser sessions select a project with `x-itsuki-project`. SDK, REST, and MCP users normally do
+not send that header: the `itsuki_live_` key itself selects its immutable project. `userId`
+remains the optional end-user/sub-tenant boundary *inside* that selected project, so the same
+external user id in two projects still resolves to two unrelated memory spaces.
+
+The older `memoryScope: { projectId, projectName }` field has a different purpose: it is optional
+source/repository provenance inside the selected managed project. It does not select a dashboard
+project and can never override the project bound to the session or key. This preserves coding-
+repository attribution and explicit recall modes without trusting client metadata as tenancy.
 
 Recall is explicit:
 
-- omit `recallScope` (or use `global`) for the whole account memory, including every project;
-- use `project_only` with `memoryScope.projectId` for exactly one project;
-- use `project_then_global` for that project plus account-global rows, excluding other projects.
+- omit `recallScope` (or use `global`) for all memories in the selected managed project;
+- use `project_only` with `memoryScope.projectId` for one source/repository tag inside it;
+- use `project_then_global` for that source tag plus untagged rows, excluding other source tags.
 
 The Claude plugin writes project metadata under the account and uses `project_then_global` at
 SessionStart. Older plugin versions wrote `project:<basename>` as isolated sub-tenants; the
