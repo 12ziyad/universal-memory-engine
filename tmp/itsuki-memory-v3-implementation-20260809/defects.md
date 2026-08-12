@@ -100,9 +100,9 @@ regressions → deploy → production re-attack → cleanup.
 
 | id | sev | title | status |
 |---|---|---|---|
-| BF-1 | HIGH | `/v1/ingest` has no authoritative source/session timestamp field. `ts` is accepted by `normalizeMessageBatch` but is not on the wire contract and defaults to `Date.now()` (`src/pipeline/source.js:201,270`), so it records *ingested_at*, not *source_time*. Relative phrases ("yesterday", "last week") have no anchor. Leading explanation for temporal at 6.23%. | OPEN |
-| BF-2 | HIGH | `/v1/recall` allowlists `limit` (`src/lib/params.js:47`) but the handler never forwards it (`src/index.js:1631-1640`), and `runRecallCommand` never forwards it to `recall` (`src/pipeline/commands.js:527-531`). A documented parameter silently does nothing. | OPEN |
-| BF-3 | HIGH | Extraction coverage is the binding constraint: 64.6% of judge-misses are Stage A (never stored). ~1 memory per 7.5 turns; whole-conversation graphs average 78 nodes. | OPEN |
+| BF-1 | HIGH | `/v1/ingest` has no authoritative source/session timestamp field. `ts` is accepted by `normalizeMessageBatch` but is not on the wire contract and defaults to `Date.now()` (`src/pipeline/source.js:201,270`), so it records *ingested_at*, not *source_time*. Relative phrases ("yesterday", "last week") have no anchor. Leading explanation for temporal at 6.23%. | **CLOSED / HISTORICAL V1 FINDING.** Source-time persistence and deterministic temporal normalization shipped; final temporal token-F1 is 33.63%. |
+| BF-2 | HIGH | `/v1/recall` allowlists `limit` (`src/lib/params.js:47`) but the handler never forwards it (`src/index.js:1631-1640`), and `runRecallCommand` never forwards it to `recall` (`src/pipeline/commands.js:527-531`). A documented parameter silently does nothing. | **CLOSED / HISTORICAL V1 FINDING.** Bounded candidate/final limits shipped; final depth 200 remained bounded to 200 items and 24,000 characters, and V3-D13 closed unbounded pre-fusion loading. |
+| BF-3 | HIGH | Extraction coverage is the binding constraint: 64.6% of judge-misses are Stage A (never stored). ~1 memory per 7.5 turns; whole-conversation graphs average 78 nodes. | **ADDRESSED / NOT AN OPEN PRODUCT DEFECT.** Atomic capture plus episodes produced 94.61% source storage and 85.32% semantic candidate availability; residual misses are reported as quality weakness. |
 | BF-4 | INFO | When retrieval succeeds the pipeline works (61.04% with reference in context vs 11.31% without). Effort belongs upstream of retrieval. | ACCEPTED AS DIRECTION |
 
 ## New defects found by this campaign
