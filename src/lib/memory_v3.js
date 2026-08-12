@@ -20,7 +20,7 @@
  * Modes:
  *   off        — everybody on the legacy path. THE PRODUCTION DEFAULT.
  *   allowlist  — only the accounts named in ITSUKI_MEMORY_V3_USERS.
- *   on         — every account. Development and test only; enabling this in
+ *   on         — every account. Global rollout only; enabling this in
  *                production is a deliberate act, never a side effect of a deploy.
  */
 

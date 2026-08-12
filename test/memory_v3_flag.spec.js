@@ -307,6 +307,42 @@ describe("V3 feature flag: global on", () => {
 		// Still needs a real account id.
 		expect(memoryV3Enabled(on, "")).toBe(false);
 	});
+
+	it("enables the exact accepted public-beta bundle while rejected lanes remain off", () => {
+		const publicBeta = {
+			ITSUKI_MEMORY_V3: "on",
+			ITSUKI_MEMORY_V3_EXTRACTION_B1: "off",
+			ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "on",
+			ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "on",
+			ITSUKI_MEMORY_V3_ATOMIC_COALESCING: "off",
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "on",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "on",
+			ITSUKI_MEMORY_V3_EPISODE_FALLBACK: "off",
+			ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT: "off",
+		};
+		for (const userId of ["first_public_user", "second_public_user"]) {
+			expect(memoryV3Enabled(publicBeta, userId)).toBe(true);
+			expect(memoryV3AtomicCaptureEnabled(publicBeta, userId)).toBe(true);
+			expect(memoryV3AtomicProjectionEnabled(publicBeta, userId)).toBe(true);
+			expect(memoryV3HybridRetrievalEnabled(publicBeta, userId)).toBe(true);
+			expect(memoryV3SourceExpansionEnabled(publicBeta, userId)).toBe(true);
+			expect(memoryV3ExtractionB1Enabled(publicBeta, userId)).toBe(false);
+			expect(memoryV3AtomicCoalescingEnabled(publicBeta, userId)).toBe(false);
+			expect(memoryV3EpisodeFallbackEnabled(publicBeta, userId)).toBe(false);
+			expect(memoryV3AdaptiveContextEnabled(publicBeta, userId)).toBe(false);
+		}
+		expect(memoryV3Status(publicBeta)).toMatchObject({
+			mode: "on",
+			atomicCapture: { mode: "on" },
+			atomicProjection: { mode: "on" },
+			hybridRetrieval: { mode: "on" },
+			sourceExpansion: { mode: "on" },
+			extractionB1: { mode: "off" },
+			atomicCoalescing: { mode: "off" },
+			episodeFallback: { mode: "off" },
+			adaptiveContext: { mode: "off" },
+		});
+	});
 });
 
 describe("V3 feature flag: observability", () => {
