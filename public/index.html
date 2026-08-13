@@ -604,6 +604,12 @@
 	.pgn-hull.is-latest .pgn-hull-edge { animation: pgHullEdge 2.6s ease-in-out infinite; }
 	@keyframes pgHullBreathe { 0%,100% { fill-opacity: .095; } 50% { fill-opacity: .2; } }
 	@keyframes pgHullEdge { 0%,100% { stroke-opacity: .32; } 50% { stroke-opacity: .78; } }
+	/* Relation labels ride the edge and only appear once there is room to read
+	   them — at fit-scale they would be a grey smear over the whole field. */
+	.pgn-rel { font: 600 8px/1 var(--font-ui); fill: #cbd5e1; text-anchor: middle;
+		paint-order: stroke; stroke: rgba(3,7,13,.9); stroke-width: 2.5px; stroke-linejoin: round;
+		opacity: 0; transition: opacity .2s ease; pointer-events: none; }
+	.pg-canvas.is-close .pgn-rel { opacity: .9; }
 	.pgn-pill rect { fill: rgba(3,8,14,.78); stroke: var(--c); stroke-opacity: .46; stroke-width: 1; }
 	.pgn-pill text { fill: #f7fbff; font: 700 11px/1 var(--font-ui); text-anchor: middle; }
 	.pgn-legend { position: absolute; right: 12px; bottom: 12px; z-index: 3; display: flex; flex-wrap: wrap;
@@ -614,11 +620,17 @@
 	.pgn-legend i { width: 8px; height: 8px; border-radius: 50%; background: var(--c);
 		box-shadow: 0 0 10px var(--c); }
 	.pg-zoom { position: absolute; right: 14px; bottom: 14px; z-index: 3; display: flex; flex-direction: column;
-		border: 1px solid var(--border2); border-radius: 9px; overflow: hidden; box-shadow: var(--shadow-sm); }
-	.pg-zoom button { width: 32px; height: 32px; border: 0; border-radius: 0; background: var(--panel);
+		align-items: stretch; border: 1px solid var(--border2); border-radius: 9px; overflow: hidden;
+		box-shadow: var(--shadow-sm); background: var(--panel); }
+	.pg-zoom button { width: 34px; height: 32px; border: 0; border-radius: 0; background: transparent;
 		color: var(--muted); font-size: 16px; line-height: 1; padding: 0; }
-	.pg-zoom button + button { border-top: 1px solid var(--border); }
+	.pg-zoom span { font: 500 10px/1 var(--font-mono); color: var(--faint); text-align: center;
+		padding: 5px 0; border-block: 1px solid var(--border); }
+	.pg-zoom button:last-child { border-top: 1px solid var(--border); font-size: 13px; }
 	.pg-zoom button:hover { background: var(--panel3); color: var(--text); filter: none; }
+	/* The tour sits with the thing it explains, out of the conversation header. */
+	#pgTourBtn { position: absolute; left: 14px; bottom: 14px; z-index: 3; background: var(--panel);
+		box-shadow: var(--shadow-sm); }
 	.pg-graph-empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
 		gap: 6px; padding: 24px; pointer-events: none; }
 	.pg-graph-empty b { font-size: 14px; }
@@ -657,11 +669,19 @@
 	@keyframes pgFadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 	@keyframes pgEdgeDraw { from { stroke-dashoffset: var(--len, 200); opacity: 0; } to { stroke-dashoffset: 0; opacity: 1; } }
 	/* The whole field reacts when memory lands: a brief over-scale + settle. */
-	.pg-world { transition: transform .18s ease-out; }
-	.pg-world.is-settling { animation: pgWorldSettle 1.05s cubic-bezier(.22,1,.36,1) both; }
+	/* The view transform has to be APPLIED here, not only written as a variable.
+	   Without this rule pgApplyView() set --vt on every zoom and pan and nothing
+	   consumed it, so the numbers moved and the graph did not. */
+	.pg-world { transform: var(--vt, none); transition: transform .16s ease-out; }
+	.pg-world.is-zooming { transition: none; }
+	.pg-world.is-settling { animation: pgWorldSettle 1.25s cubic-bezier(.22,1,.36,1) both; }
+	/* Arrival: the field turns a little, swells, and settles back. Long enough
+	   to notice a memory landed, short enough not to be in the way. */
 	@keyframes pgWorldSettle {
-		0% { transform: var(--vt) scale(1.045) rotate(-1.1deg); }
-		55% { transform: var(--vt) scale(.995) rotate(.35deg); }
+		0%   { transform: var(--vt) scale(1) rotate(0deg); }
+		22%  { transform: var(--vt) scale(1.06) rotate(-2.2deg); }
+		48%  { transform: var(--vt) scale(1.075) rotate(1.4deg); }
+		72%  { transform: var(--vt) scale(1.01) rotate(-.5deg); }
 		100% { transform: var(--vt) scale(1) rotate(0deg); } }
 	@media (prefers-reduced-motion: reduce) {
 		.pgn-g.is-new .pgn-dot, .pgn-g.is-new .pgn-label, .pgn-g.is-new .pgn-halo,
@@ -820,6 +840,37 @@
 		color: var(--text); border-radius: 8px; padding: 8px 10px; font: 400 13px/1.6 var(--font-ui); }
 	.pg-settings textarea { min-height: 96px; resize: vertical; }
 	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; margin-bottom: 6px; }
+	/* --- chat memory policy --- */
+	.pg-policy-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 11px;
+		background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px;
+		font-size: 12.5px; color: var(--muted); }
+	.pg-policy-scope b { color: var(--text); font-weight: 600; }
+	.pg-policy-badge { margin-left: auto; border-radius: 999px; padding: 3px 9px; font: 500 11px/1.5 var(--font-ui);
+		color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); }
+	.pg-mode { display: grid; gap: 6px; margin-bottom: 4px; }
+	.pg-mode button { display: block; width: 100%; text-align: left; background: var(--panel);
+		border: 1px solid var(--border2); border-radius: 9px; padding: 9px 11px; color: var(--text); }
+	.pg-mode button:hover { border-color: var(--accent); filter: none; }
+	.pg-mode button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
+	.pg-mode button b { display: block; font-size: 13px; font-weight: 600; }
+	.pg-mode button span { display: block; font-size: 12px; color: var(--faint); margin-top: 2px; }
+	.pg-topics { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+	.pg-topic { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 6px 3px 10px;
+		font: 500 12px/1.6 var(--font-ui); border: 1px solid var(--border2); }
+	.pg-topic.keep { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent);
+		background: color-mix(in srgb, var(--green) 8%, transparent); }
+	.pg-topic.drop { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+		background: color-mix(in srgb, var(--amber) 8%, transparent); }
+	.pg-topic button { background: transparent; border: 0; color: inherit; padding: 0 2px; min-height: 0;
+		font-size: 14px; line-height: 1; opacity: .65; }
+	.pg-topic button:hover { opacity: 1; filter: none; }
+	.pg-policy-explain { margin-top: 18px; padding: 11px 12px; border-radius: 10px; background: var(--panel2);
+		border: 1px solid var(--border); font-size: 12px; line-height: 1.6; color: var(--muted); }
+	.pg-policy-explain b { color: var(--text); font-weight: 600; }
+	.pg-policy-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px;
+		position: sticky; bottom: 0; background: var(--panel); padding-top: 12px;
+		border-top: 1px solid var(--border); }
 	/* Below 1180px the graph stops being readable beside a 468px chat: stack it,
 	   graph first, each with its own height rather than a shared viewport row. */
 	@media (max-width: 1180px) {
@@ -2044,7 +2095,8 @@ function resetProjectBoundUiState() {
 	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
 	clearTimeout(PG.poll); pgTourEnd(); Object.assign(PG, {
 		threads: [], threadId: null, messages: [], limits: {},
-		settings: { customInstructions: "", customCategories: [] }, settingsDraft: null,
+		settings: { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] },
+		settingsDraft: null, settingsStatus: "",
 		tab: "chats", draft: "", sending: false, loaded: false, notice: "",
 		poll: null, pollTries: 0, pollGaveUp: false,
 		// A preview belongs to no project, but a switch must still clear the live
@@ -3572,7 +3624,8 @@ async function copyCode(button, text) {
  */
 const PG = {
 	threads: [], threadId: null, messages: [], limits: {},
-	settings: { customInstructions: "", customCategories: [] },
+	settings: { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] },
+	settingsStatus: "",
 	tab: "chats", draft: "", sending: false, loaded: false, notice: "",
 	poll: null, pollTries: 0,
 	// --- preview layer ---
@@ -3658,17 +3711,17 @@ const PG_SCENARIOS = [
 			{ n: "sister's wedding", c: "life_family", of: "Lagos visit" },
 		],
 		links: [
-			["Maya Okonkwo", "thesis draft"], ["Maya Okonkwo", "SIGMOD deadline"],
-			["Chapter 3", "distributed systems"], ["Chapter 3", "SIGMOD deadline"],
-			["Prof. Adeyemi", "evaluation section"], ["Prof. Adeyemi", "thesis defence"],
-			["benchmark harness", "Jepsen testing"], ["failure injection", "fault injection"],
-			["lab visit", "Jepsen testing"], ["Prof. Baumgartner", "second reader"],
-			["reading group", "consistency models"], ["replication papers", "causal consistency"],
-			["Raft", "Chapter 3"], ["partition tolerance", "linearizability"],
-			["submission draft", "thesis draft"], ["doctoral committee", "thesis defence"],
-			["teaching duty", "SIGMOD deadline"], ["funding renewal", "thesis defence"],
-			["related work", "Paxos"], ["result tables", "SIGMOD deadline"],
-			["Lagos visit", "rebuttal window"],
+			["Maya Okonkwo", "thesis draft", "writes"], ["Maya Okonkwo", "SIGMOD deadline", "targets"],
+			["Chapter 3", "distributed systems", "about"], ["Chapter 3", "SIGMOD deadline", "due for"],
+			["Prof. Adeyemi", "evaluation section", "requires"], ["Prof. Adeyemi", "thesis defence", "chairs"],
+			["benchmark harness", "Jepsen testing", "derived from"], ["failure injection", "fault injection", "implements"],
+			["lab visit", "Jepsen testing", "produced notes on"], ["Prof. Baumgartner", "second reader", "serves as"],
+			["reading group", "consistency models", "studies"], ["replication papers", "causal consistency", "cover"],
+			["Raft", "Chapter 3", "superseded in"], ["partition tolerance", "linearizability", "trades off"],
+			["submission draft", "thesis draft", "extracted from"], ["doctoral committee", "thesis defence", "examines"],
+			["teaching duty", "SIGMOD deadline", "competes with"], ["funding renewal", "thesis defence", "contingent on"],
+			["related work", "Paxos", "cites"], ["result tables", "SIGMOD deadline", "due for"],
+			["Lagos visit", "rebuttal window", "clashes with"],
 		],
 		opening: [
 			{ r: "user", c: "I'm writing up Chapter 3 of my thesis on replication under partition." },
@@ -3679,7 +3732,7 @@ const PG_SCENARIOS = [
 				p: "I've switched Chapter 3 from Raft to CRDTs.",
 				a: "Noted — that's a real change of direction from the consensus framing you had in February. It affects the evaluation section too: your benchmark harness was written around a leader election you no longer have. Want me to flag the parts of Chapter 3 that assume a leader?",
 				add: [{ n: "CRDTs", c: "skills_tech", of: "consistency models" }],
-				links: [["CRDTs", "Chapter 3"], ["CRDTs", "Raft"], ["CRDTs", "causal consistency"]],
+				links: [["CRDTs", "Chapter 3", "now used in"], ["CRDTs", "Raft", "supersedes"], ["CRDTs", "causal consistency", "provides"]],
 				facts: [
 					{ f: "Maya Okonkwo's Chapter 3 now uses CRDTs instead of Raft.", from: "now" },
 					{ f: "Maya Okonkwo's Chapter 3 used Raft for replication.", from: "-172d", to: "now" },
@@ -3694,7 +3747,7 @@ const PG_SCENARIOS = [
 				p: "Prof. Adeyemi wants the evaluation done before the SIGMOD deadline.",
 				a: "That compresses things. The SIGMOD deadline is the fixed point, and the evaluation section still assumes the leader-based harness — so the rewrite has to land before the experiments, not after. Your weekly supervision is the natural checkpoint, and the teaching duty sits in the same weeks.",
 				add: [{ n: "evaluation before deadline", c: "active_goals", of: "SIGMOD deadline" }],
-				links: [["evaluation before deadline", "evaluation section"], ["evaluation before deadline", "weekly supervision"]],
+				links: [["evaluation before deadline", "evaluation section", "gates"], ["evaluation before deadline", "weekly supervision", "tracked at"]],
 				facts: [
 					{ f: "Prof. Adeyemi requires the evaluation section completed before the SIGMOD deadline.", from: "now" },
 					{ f: "Prof. Adeyemi supervises Maya Okonkwo.", from: "-410d" },
@@ -3709,7 +3762,7 @@ const PG_SCENARIOS = [
 				p: "The Jepsen report on etcd changed how I'll test.",
 				a: "Then the harness question is settled from two directions at once — the CRDT switch removed the leader, and the etcd report changes what counts as a passing run. Both point at rewriting failure injection before the deadline rather than adapting it.",
 				add: [{ n: "etcd report", c: "skills_tech", of: "Jepsen testing" }],
-				links: [["etcd report", "fault injection"], ["etcd report", "benchmark harness"], ["etcd report", "linearizability"]],
+				links: [["etcd report", "fault injection", "changes"], ["etcd report", "benchmark harness", "invalidates"], ["etcd report", "linearizability", "tests"]],
 				facts: [
 					{ f: "Maya Okonkwo will change her testing approach based on the Jepsen etcd report.", from: "now" },
 					{ f: "Maya Okonkwo took Jepsen notes during the ETH Zürich lab visit.", from: "-61d" },
@@ -3772,21 +3825,21 @@ const PG_SCENARIOS = [
 			{ n: "Q4 renewal", c: "business_product", of: "Northwind" },
 		],
 		links: [
-			["Platform team", "checkout service"], ["Platform team", "Postgres"], ["Platform team", "on-call rotation"],
-			["incident 412", "read replicas"], ["read amplification", "primary node"],
-			["postmortem", "read replicas"], ["postmortem", "Priya Raghavan"],
-			["checkout service", "Postgres"], ["payment retries", "replication lag"],
-			["staleness bound", "replication lag"], ["cart service", "checkout service"],
-			["inventory service", "order events"], ["stock reservations", "primary node"],
-			["webhook fanout", "logical decoding"], ["incident 388", "PgBouncer"],
-			["connection pool", "PgBouncer"], ["Priya Raghavan", "on-call rotation"],
-			["Priya Raghavan", "migration plan"], ["Marcus Bell", "hiring loop"],
-			["Northwind", "checkout service"], ["uptime SLA", "incident 412"],
-			["Q4 renewal", "uptime SLA"], ["migration plan", "read replicas"],
-			["rollback runbook", "escalation policy"], ["query planner", "read amplification"],
-			["capacity review", "read replicas"], ["load test", "staleness bound"],
-			["SLO dashboard", "uptime SLA"], ["error budget", "incident 412"],
-			["chaos drill", "rollback runbook"], ["SLO dashboard", "replication lag"],
+			["Platform team", "checkout service", "owns"], ["Platform team", "Postgres", "operates"], ["Platform team", "on-call rotation", "staffs"],
+			["incident 412", "read replicas", "motivated"], ["read amplification", "primary node", "overloaded"],
+			["postmortem", "read replicas", "recommends"], ["postmortem", "Priya Raghavan", "authored by"],
+			["checkout service", "Postgres", "reads from"], ["payment retries", "replication lag", "sensitive to"],
+			["staleness bound", "replication lag", "bounds"], ["cart service", "checkout service", "calls"],
+			["inventory service", "order events", "emits"], ["stock reservations", "primary node", "writes to"],
+			["webhook fanout", "logical decoding", "driven by"], ["incident 388", "PgBouncer", "traced to"],
+			["connection pool", "PgBouncer", "managed by"], ["Priya Raghavan", "on-call rotation", "joins"],
+			["Priya Raghavan", "migration plan", "owns"], ["Marcus Bell", "hiring loop", "in"],
+			["Northwind", "checkout service", "routed through"], ["uptime SLA", "incident 412", "breached by"],
+			["Q4 renewal", "uptime SLA", "conditioned on"], ["migration plan", "read replicas", "moves to"],
+			["rollback runbook", "escalation policy", "referenced by"], ["query planner", "read amplification", "caused"],
+			["capacity review", "read replicas", "sizes"], ["load test", "staleness bound", "validates"],
+			["SLO dashboard", "uptime SLA", "measures"], ["error budget", "incident 412", "consumed by"],
+			["chaos drill", "rollback runbook", "exercises"], ["SLO dashboard", "replication lag", "tracks"],
 		],
 		opening: [
 			{ r: "user", c: "We're deciding whether checkout should keep talking to the primary database." },
@@ -3797,7 +3850,7 @@ const PG_SCENARIOS = [
 				p: "We're moving checkout reads to replicas next sprint.",
 				a: "That matches what the incident 412 postmortem recommended. The open risk it named was payment retries reading stale rows — worth fixing the staleness bound before the sprint rather than during it, since Northwind's uptime SLA hangs off the same path.",
 				add: [{ n: "replica cutover", c: "software_product", of: "checkout service" }],
-				links: [["replica cutover", "read replicas"], ["replica cutover", "migration plan"], ["replica cutover", "staleness bound"]],
+				links: [["replica cutover", "read replicas", "targets"], ["replica cutover", "migration plan", "part of"], ["replica cutover", "staleness bound", "requires"]],
 				facts: [
 					{ f: "The checkout service will move read traffic to Postgres read replicas next sprint.", from: "now" },
 					{ f: "Incident 412 was caused by read amplification on the Postgres primary.", from: "-48d" },
@@ -3812,7 +3865,7 @@ const PG_SCENARIOS = [
 				p: "Priya is taking over the on-call rotation from me.",
 				a: "Recorded. That puts the person who wrote the replica recommendation on call during the sprint that implements it — probably what you want, though it does concentrate the context in one person while Marcus is still in the hiring loop.",
 				add: [{ n: "rotation handover", c: "identity_career", of: "on-call rotation" }],
-				links: [["rotation handover", "Priya Raghavan"], ["rotation handover", "escalation policy"]],
+				links: [["rotation handover", "Priya Raghavan", "to"], ["rotation handover", "escalation policy", "updates"]],
 				facts: [
 					{ f: "Priya Raghavan is taking over the on-call rotation.", from: "now" },
 					{ f: "Priya Raghavan is a staff engineer on the Platform team.", from: "-300d" },
@@ -3826,7 +3879,7 @@ const PG_SCENARIOS = [
 				p: "Northwind is our largest customer on the checkout path.",
 				a: "Then the staleness bound isn't only a correctness question. Northwind sits on the same path as the cutover and the rotation handover, its Enterprise tier carries the uptime SLA that incident 412 already dented, and the Q4 renewal is behind it.",
 				add: [{ n: "largest account", c: "business_product", of: "Northwind" }],
-				links: [["largest account", "checkout service"], ["largest account", "Q4 renewal"], ["largest account", "uptime SLA"]],
+				links: [["largest account", "checkout service", "depends on"], ["largest account", "Q4 renewal", "at stake in"], ["largest account", "uptime SLA", "covered by"]],
 				facts: [
 					{ f: "Northwind is the largest customer on the checkout path.", from: "now" },
 					{ f: "The checkout service handles payment retries.", from: "-300d" },
@@ -3878,17 +3931,17 @@ const PG_SCENARIOS = [
 			{ n: "Anil", c: "life_family", of: "running club" },
 		],
 		links: [
-			["Devi Raman", "marathon"], ["Devi Raman", "morning runs"], ["Devi Raman", "physiotherapist"],
-			["knee injury", "tempo sessions"], ["knee injury", "weekly mileage"],
-			["rehab plan", "swimming"], ["rehab plan", "tempo sessions"],
-			["load management", "weekly mileage"], ["patellar tendon", "strength work"],
-			["long run Sunday", "Cubbon Park"], ["morning runs", "Cubbon Park"],
-			["interval track", "race pace"], ["tempo sessions", "sub-4 target"],
-			["half marathon", "race pace"], ["taper weeks", "weekly mileage"],
-			["running club", "long run Sunday"], ["Anil", "half marathon"],
-			["cycling", "load management"], ["running shoes", "patellar tendon"],
-			["sleep tracking", "load management"], ["resting heart rate", "easy pace"],
-			["MRI scan", "physiotherapist"],
+			["Devi Raman", "marathon", "training for"], ["Devi Raman", "morning runs", "prefers"], ["Devi Raman", "physiotherapist", "sees"],
+			["knee injury", "tempo sessions", "suspended"], ["knee injury", "weekly mileage", "reduced"],
+			["rehab plan", "swimming", "prescribed"], ["rehab plan", "tempo sessions", "replaced"],
+			["load management", "weekly mileage", "caps"], ["patellar tendon", "strength work", "rehabilitated by"],
+			["long run Sunday", "Cubbon Park", "runs at"], ["morning runs", "Cubbon Park", "held at"],
+			["interval track", "race pace", "builds"], ["tempo sessions", "sub-4 target", "builds toward"],
+			["half marathon", "race pace", "tests"], ["taper weeks", "weekly mileage", "reduce"],
+			["running club", "long run Sunday", "meets for"], ["Anil", "half marathon", "running"],
+			["cycling", "load management", "supports"], ["running shoes", "patellar tendon", "affects"],
+			["sleep tracking", "load management", "informs"], ["resting heart rate", "easy pace", "guides"],
+			["MRI scan", "physiotherapist", "ordered by"],
 		],
 		opening: [
 			{ r: "user", c: "I want to get back to marathon training." },
@@ -3899,7 +3952,7 @@ const PG_SCENARIOS = [
 				p: "My knee is cleared — I'm back to running Sundays.",
 				a: "Then the Sunday long run comes back and swimming becomes optional rather than prescribed. Worth keeping one swim while tempo sessions ramp, since that's the load your patellar tendon reacted to last time — and the running club meets on the same morning.",
 				add: [{ n: "cleared to run", c: "health_fitness", of: "knee injury" }],
-				links: [["cleared to run", "long run Sunday"], ["cleared to run", "tempo sessions"], ["cleared to run", "rehab plan"]],
+				links: [["cleared to run", "long run Sunday", "resumes"], ["cleared to run", "tempo sessions", "unblocks"], ["cleared to run", "rehab plan", "ends"]],
 				facts: [
 					{ f: "Devi Raman is cleared to run and has resumed Sunday long runs.", from: "now" },
 					{ f: "Devi Raman was restricted from running by a knee injury.", from: "-151d", to: "now" },
@@ -3914,7 +3967,7 @@ const PG_SCENARIOS = [
 				p: "I prefer running early, before 7am at Cubbon Park.",
 				a: "That fits the Sunday long run and the tempo sessions both. Cubbon Park before 7am also keeps you off the road surfaces your physiotherapist flagged during load management.",
 				add: [{ n: "before 7am", c: "fitness_habits", of: "morning runs" }],
-				links: [["before 7am", "Cubbon Park"], ["before 7am", "long run Sunday"], ["before 7am", "running club"]],
+				links: [["before 7am", "Cubbon Park", "at"], ["before 7am", "long run Sunday", "applies to"], ["before 7am", "running club", "aligns with"]],
 				facts: [
 					{ f: "Devi Raman prefers to run before 7am.", from: "now" },
 					{ f: "Devi Raman runs at Cubbon Park.", from: "now" },
@@ -3928,7 +3981,7 @@ const PG_SCENARIOS = [
 				p: "The marathon is in Chennai this December.",
 				a: "That gives the ramp a fixed end. Working back from December, taper weeks land in November and the tempo sessions have room to rebuild gradually rather than compressing into the weeks right after your clearance.",
 				add: [{ n: "Chennai, December", c: "active_goals", of: "marathon" }],
-				links: [["Chennai, December", "taper weeks"], ["Chennai, December", "sub-4 target"], ["Chennai, December", "weekly mileage"]],
+				links: [["Chennai, December", "taper weeks", "dates"], ["Chennai, December", "sub-4 target", "for"], ["Chennai, December", "weekly mileage", "paces"]],
 				facts: [
 					{ f: "Devi Raman's marathon is in Chennai in December.", from: "now" },
 					{ f: "Devi Raman does long runs on Sunday.", from: "now" },
@@ -3980,17 +4033,17 @@ const PG_SCENARIOS = [
 			{ n: "luggage forwarding", c: "projects_systems" },
 		],
 		links: [
-			["Kyoto trip", "November"], ["Kyoto trip", "ryokan"], ["Kyoto trip", "vegetarian"],
-			["Noor", "vegetarian"], ["early mornings", "Fushimi Inari"], ["early mornings", "no crowds"],
-			["Fushimi Inari", "torii gates"], ["ryokan", "Gion"], ["onsen", "walking pace"],
-			["Arashiyama", "early mornings"], ["bamboo grove", "no crowds"],
-			["Philosopher's Path", "autumn leaves"], ["Nishiki market", "vegetarian"],
-			["matcha tasting", "Gion"], ["shojin ryori", "temple kitchens"],
-			["four nights", "ryokan"], ["autumn leaves", "Arashiyama"],
-			["flight booking", "November"], ["JR Pass", "Osaka day trip"],
-			["Nara detour", "walking pace"], ["luggage forwarding", "four nights"],
-			["anniversary", "November"], ["postcards home", "Nishiki market"],
-			["Kiyomizu-dera", "early mornings"], ["Kiyomizu-dera", "Gion"],
+			["Kyoto trip", "November", "scheduled"], ["Kyoto trip", "ryokan", "stays at"], ["Kyoto trip", "vegetarian", "constrained by"],
+			["Noor", "vegetarian", "is"], ["early mornings", "Fushimi Inari", "suits"], ["early mornings", "no crowds", "achieves"],
+			["Fushimi Inari", "torii gates", "known for"], ["ryokan", "Gion", "near"], ["onsen", "walking pace", "paces"],
+			["Arashiyama", "early mornings", "best at"], ["bamboo grove", "no crowds", "needs"],
+			["Philosopher's Path", "autumn leaves", "lined with"], ["Nishiki market", "vegetarian", "caters to"],
+			["matcha tasting", "Gion", "in"], ["shojin ryori", "temple kitchens", "served at"],
+			["four nights", "ryokan", "booked at"], ["autumn leaves", "Arashiyama", "peak at"],
+			["flight booking", "November", "for"], ["JR Pass", "Osaka day trip", "funds"],
+			["Nara detour", "walking pace", "suits"], ["luggage forwarding", "four nights", "avoids move during"],
+			["anniversary", "November", "falls in"], ["postcards home", "Nishiki market", "bought at"],
+			["Kiyomizu-dera", "early mornings", "visited at"], ["Kiyomizu-dera", "Gion", "walk from"],
 		],
 		opening: [
 			{ r: "user", c: "Help me plan the Kyoto trip properly." },
@@ -4001,7 +4054,7 @@ const PG_SCENARIOS = [
 				p: "We booked the ryokan in Higashiyama for four nights.",
 				a: "Good — Higashiyama puts you walking distance from the early-morning Fushimi Inari climb, which was the main reason location mattered. Four nights also leaves room for the Osaka day trip without moving hotels, and Gion is on the same side for the matcha tasting.",
 				add: [{ n: "Higashiyama, 4 nights", c: "general_memory", of: "ryokan" }],
-				links: [["Higashiyama, 4 nights", "Fushimi Inari"], ["Higashiyama, 4 nights", "four nights"], ["Higashiyama, 4 nights", "Gion"]],
+				links: [["Higashiyama, 4 nights", "Fushimi Inari", "walking distance to"], ["Higashiyama, 4 nights", "four nights", "confirms"], ["Higashiyama, 4 nights", "Gion", "beside"]],
 				facts: [
 					{ f: "Noor and the traveller booked a ryokan in Higashiyama for four nights.", from: "now" },
 					{ f: "The Kyoto trip takes place in November.", from: "-22d" },
@@ -4016,7 +4069,7 @@ const PG_SCENARIOS = [
 				p: "Noor is vegetarian, so shojin ryori only for dinners.",
 				a: "Recorded as a constraint rather than a preference, then. That narrows Higashiyama's dinner options usefully — the temple kitchens near the ryokan are the obvious fit, and Nishiki market covers lunches.",
 				add: [{ n: "dinner constraint", c: "preferences_research", of: "shojin ryori" }],
-				links: [["dinner constraint", "Noor"], ["dinner constraint", "temple kitchens"], ["dinner constraint", "Nishiki market"]],
+				links: [["dinner constraint", "Noor", "set by"], ["dinner constraint", "temple kitchens", "met at"], ["dinner constraint", "Nishiki market", "lunch at"]],
 				facts: [
 					{ f: "Noor is vegetarian.", from: "now" },
 					{ f: "Dinners on the Kyoto trip will be shojin ryori.", from: "now" },
@@ -4030,7 +4083,7 @@ const PG_SCENARIOS = [
 				p: "Skip the JR Pass — we're staying in Kyoto.",
 				a: "Then the Osaka day trip and the Nara detour either drop or get paid per-leg. Given four nights in Higashiyama, early starts and a preference for no crowds, staying local is the coherent version of this trip.",
 				add: [{ n: "no rail pass", c: "projects_systems", of: "JR Pass" }],
-				links: [["no rail pass", "Osaka day trip"], ["no rail pass", "Nara detour"], ["no rail pass", "walking pace"]],
+				links: [["no rail pass", "Osaka day trip", "drops"], ["no rail pass", "Nara detour", "drops"], ["no rail pass", "walking pace", "keeps"]],
 				facts: [
 					{ f: "The travellers will not purchase a JR Pass.", from: "now" },
 					{ f: "The travellers considered an Osaka day trip using the JR Pass.", from: "-14d", to: "now" },
@@ -4091,20 +4144,20 @@ const PG_SCENARIOS = [
 			{ n: "call recording", c: "general_memory", of: "ticket 9114" },
 		],
 		links: [
-			["Northwind Retail", "SSO rollout"], ["Northwind Retail", "webhook failures"], ["Northwind Retail", "Dana Whitfield"],
-			["Dana Whitfield", "SSO rollout"], ["notify first", "SSO rollout"], ["notify first", "ticket 8841"],
-			["Raj Patel", "Okta"], ["security review", "SAML assertions"], ["procurement", "renewal Q1"],
-			["ticket 8841", "webhook failures"], ["ticket 8602", "retry backlog"], ["ticket 9114", "delivery latency"],
-			["support history", "churn risk"], ["retry backlog", "dead letter queue"],
-			["signature mismatch", "endpoint rotation"], ["endpoint rotation", "identity migration"],
-			["legacy logins", "seat count"], ["SCIM provisioning", "seat count"],
-			["support SLA", "delivery latency"], ["churn risk", "renewal Q1"],
-			["account review", "Dana Whitfield"], ["call recording", "Dana Whitfield"],
-			["webhook logs", "delivery latency"], ["payload schema", "SAML assertions"],
-			["retry policy", "support SLA"], ["batch replay", "ticket 8602"],
-			["alert rule", "status page"], ["Q1 business review", "renewal Q1"],
-			["remediation plan", "webhook failures"], ["status page", "support SLA"],
-			["Okta", "identity migration"],
+			["Northwind Retail", "SSO rollout", "running"], ["Northwind Retail", "webhook failures", "reporting"], ["Northwind Retail", "Dana Whitfield", "represented by"],
+			["Dana Whitfield", "SSO rollout", "owns"], ["notify first", "SSO rollout", "applies to"], ["notify first", "ticket 8841", "requested on"],
+			["Raj Patel", "Okta", "administers"], ["security review", "SAML assertions", "covers"], ["procurement", "renewal Q1", "handles"],
+			["ticket 8841", "webhook failures", "about"], ["ticket 8602", "retry backlog", "about"], ["ticket 9114", "delivery latency", "about"],
+			["support history", "churn risk", "informs"], ["retry backlog", "dead letter queue", "overflows to"],
+			["signature mismatch", "endpoint rotation", "caused by"], ["endpoint rotation", "identity migration", "during"],
+			["legacy logins", "seat count", "inflates"], ["SCIM provisioning", "seat count", "syncs"],
+			["support SLA", "delivery latency", "measured by"], ["churn risk", "renewal Q1", "threatens"],
+			["account review", "Dana Whitfield", "with"], ["call recording", "Dana Whitfield", "of"],
+			["webhook logs", "delivery latency", "records"], ["payload schema", "SAML assertions", "changed by"],
+			["retry policy", "support SLA", "bounded by"], ["batch replay", "ticket 8602", "resolves"],
+			["alert rule", "status page", "feeds"], ["Q1 business review", "renewal Q1", "precedes"],
+			["remediation plan", "webhook failures", "addresses"], ["status page", "support SLA", "reports"],
+			["Okta", "identity migration", "provider for"],
 		],
 		opening: [
 			{ r: "user", c: "Northwind is on the line again about webhooks." },
@@ -4115,7 +4168,7 @@ const PG_SCENARIOS = [
 				p: "Dana says the webhook failures started after the Okta cutover.",
 				a: "That connects two threads that were separate until now. Ticket 8841 treated the retry backlog as a queue problem; if it begins at the Okta cutover, the cause sits in the identity migration instead — and endpoint rotation happened in the same window.",
 				add: [{ n: "Okta cutover", c: "software_product", of: "Okta" }],
-				links: [["Okta cutover", "webhook failures"], ["Okta cutover", "endpoint rotation"], ["Okta cutover", "identity migration"]],
+				links: [["Okta cutover", "webhook failures", "began"], ["Okta cutover", "endpoint rotation", "coincided with"], ["Okta cutover", "identity migration", "part of"]],
 				facts: [
 					{ f: "Northwind Retail's webhook failures began after the Okta cutover.", from: "now" },
 					{ f: "Ticket 8841 attributed webhook failures to a retry backlog.", from: "-27d", to: "now" },
@@ -4130,7 +4183,7 @@ const PG_SCENARIOS = [
 				p: "They want a named engineer before the Q1 renewal.",
 				a: "Worth treating as a renewal condition rather than a preference. It arrives while an unresolved cause sits under three tickets and the account review already flags churn risk — which is usually what a request like this is really about.",
 				add: [{ n: "named engineer", c: "business_product", of: "renewal Q1" }],
-				links: [["named engineer", "churn risk"], ["named engineer", "support SLA"], ["named engineer", "Dana Whitfield"]],
+				links: [["named engineer", "churn risk", "mitigates"], ["named engineer", "support SLA", "backs"], ["named engineer", "Dana Whitfield", "requested by"]],
 				facts: [
 					{ f: "Northwind Retail requires a named engineer before the Q1 renewal.", from: "now" },
 					{ f: "Northwind Retail is on the Enterprise plan.", from: "-365d" },
@@ -4144,7 +4197,7 @@ const PG_SCENARIOS = [
 				p: "Escalate 8841 and tell Dana before we touch SSO.",
 				a: "Both are consistent with what Dana asked for on the first ticket. The notification is a standing instruction on this account, not a one-off for this escalation — and it now covers the identity migration work the cutover implicates.",
 				add: [{ n: "escalated", c: "general_memory", of: "ticket 8841" }],
-				links: [["escalated", "webhook failures"], ["escalated", "support SLA"], ["escalated", "notify first"]],
+				links: [["escalated", "webhook failures", "for"], ["escalated", "support SLA", "under"], ["escalated", "notify first", "triggers"]],
 				facts: [
 					{ f: "Ticket 8841 is escalated.", from: "now" },
 					{ f: "Dana Whitfield must be notified before changes touching the SSO rollout.", from: "-27d" },
@@ -4175,10 +4228,13 @@ function viewPlayground(v) {
 				</div>
 				<div class="pg-canvas pg-canvas-bg" id="pgCanvas"></div>
 				<div class="pg-zoom">
-					<button onclick="pgZoom(1.25)" aria-label="Zoom in">+</button>
-					<button onclick="pgZoom(0.8)" aria-label="Zoom out">−</button>
-					<button onclick="pgResetView()" aria-label="Fit graph" title="Fit">⤾</button>
+					<button onclick="pgZoom(1.3)" aria-label="Zoom in" title="Zoom in">+</button>
+					<span id="pgZoomLevel" aria-live="off">100%</span>
+					<button onclick="pgZoom(0.77)" aria-label="Zoom out" title="Zoom out">−</button>
+					<button onclick="pgResetView()" aria-label="Fit graph" title="Fit to view">⤾</button>
 				</div>
+				<button class="pg-tour-launch" id="pgTourBtn" onclick="pgTourStart(true)"
+					title="Walk through how this works"><span aria-hidden="true">◎</span>Take the tour</button>
 			</div>
 			<div class="pg-col pg-chat">
 				<div class="pg-chat-head" id="pgHeadControls">
@@ -4194,15 +4250,13 @@ function viewPlayground(v) {
 							onclick="pgMenu('thread')">Threads<span class="pg-caret">▾</span></button>
 						${PG.menu === "thread" ? pgThreadMenu() : ""}
 					</div>
-					<button class="pg-icon-btn" aria-pressed="${PG.json}" title="Show raw extraction JSON"
-						onclick="pgToggleJson()" style="font:600 11px/1 var(--font-mono);width:auto;padding:0 9px">JSON</button>
-					${preview ? "" : `<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="What this chat remembers"
-						onclick="pgTogglePanel('memory')" style="width:auto;padding:0 9px;font-size:12.5px">Memory</button>`}
-					<button class="pg-tour-launch" style="margin-left:auto" onclick="pgTourStart(true)">
-						<span aria-hidden="true">◎</span>Tour</button>
+					<button class="pg-icon-btn" aria-pressed="${PG.json}" title="Show what was extracted, as JSON"
+						onclick="pgToggleJson()" style="font:600 11px/1 var(--font-mono);width:auto;padding:0 10px">JSON</button>
+					<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="What this chat remembers"
+						onclick="pgTogglePanel('memory')" style="width:auto;padding:0 10px;font-size:12.5px">Memory</button>
 				</div>
 				${preview ? `<div class="pg-preview-bar"><b>Preview</b> — a sample world, so you can see how memory behaves. Nothing here is saved to your account.</div>` : ""}
-				${!preview && PG.panel === "memory"
+				${PG.panel === "memory"
 					? `<div class="pg-col-body pg-settings" id="pgMemoryPanel" style="flex:1"></div>`
 					: `<div class="pg-stream" id="pgMessages"></div>`}
 				<div class="pg-suggest" id="pgSuggest"></div>
@@ -4455,24 +4509,24 @@ function renderPgGraph(animate = false) {
 	// lighter so structure stays readable underneath them.
 	const edges = [];
 	const seen = new Set();
-	const push = (a, b, kind, isNew) => {
+	const push = (a, b, kind, isNew, verb = null) => {
 		if (!a || !b || a === b) return;
 		const key = a.n < b.n ? `${a.n}|${b.n}` : `${b.n}|${a.n}`;
 		if (seen.has(key)) return;
 		seen.add(key);
-		edges.push({ a, b, kind, isNew });
+		edges.push({ a, b, kind, isNew, verb });
 	};
-	for (const n of nodes) push(byName.get(n.of) ?? anchors.get(n.c), n, "own", n.isNew);
+	for (const n of nodes) push(byName.get(n.of) ?? anchors.get(n.c), n, "own", n.isNew, n.of ? "part of" : "in");
 	const scenarioLinks = PG.mode === "preview"
 		? [...(pgScenario().links ?? []),
 			...pgScenario().turns.slice(0, PG.turn).flatMap((t) => t.links ?? [])]
 		: [];
-	for (const [from, to] of scenarioLinks) {
+	for (const [from, to, verb] of scenarioLinks) {
 		const a = byName.get(from), b = byName.get(to);
-		push(a, b, "rel", Boolean(a?.isNew || b?.isNew));
+		push(a, b, "rel", Boolean(a?.isNew || b?.isNew), verb ?? "relates to");
 	}
 	const hub = nodes.find((n) => n.hub);
-	if (hub) for (const anchor of anchors.values()) push(hub, anchor, "span", false);
+	if (hub) for (const anchor of anchors.values()) push(hub, anchor, "span", false, "connects");
 
 	// Labelling everything at this density is a wall of text. Name the hub, each
 	// cluster's anchor and whatever just landed; the rest answer on hover, on
@@ -4500,6 +4554,15 @@ function renderPgGraph(animate = false) {
 					x1="${e.a.x.toFixed(1)}" y1="${e.a.y.toFixed(1)}" x2="${e.b.x.toFixed(1)}" y2="${e.b.y.toFixed(1)}"
 					style="--c:${pgCluster(e.b.c).color};stroke-width:${width[e.kind]};opacity:${
 						dim(e.a) && dim(e.b) ? .06 : alpha[e.kind]}"></line>`).join("")}
+				${edges.filter((e) => e.verb && !(dim(e.a) && dim(e.b))).map((e) => {
+					// Rotate the label along its edge, flipping any that would end up
+					// upside down — a graph of mirror-written words is unreadable.
+					let angle = Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x) * 180 / Math.PI;
+					if (angle > 90 || angle < -90) angle += 180;
+					const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2;
+					return `<text class="pgn-rel" x="${mx.toFixed(1)}" y="${(my - 3).toFixed(1)}"
+						transform="rotate(${angle.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})">${esc(e.verb)}</text>`;
+				}).join("")}
 				${hulls.map((h) => {
 					const on = PG.gfilter === "all" || PG.gfilter === h.id;
 					const text = `${h.label} (${h.count})`;
@@ -4530,7 +4593,7 @@ function renderPgGraph(animate = false) {
 		const world = $("#pgWorld");
 		if (world) {
 			world.classList.add("is-settling");
-			setTimeout(() => world.classList.remove("is-settling"), 1100);
+			setTimeout(() => world.classList.remove("is-settling"), 1300);
 		}
 	}
 }
@@ -4545,9 +4608,19 @@ function pgClusterOptions() {
 function pgSearch(value) { PG.gsearch = value; renderPgGraph(); }
 function pgFilter(value) { PG.gfilter = value || "all"; renderPgGraph(); }
 
-function pgApplyView() {
+function pgApplyView({ live = false } = {}) {
 	const world = $("#pgWorld");
-	if (world) world.style.setProperty("--vt", `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`);
+	if (world) {
+		world.style.setProperty("--vt", `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`);
+		// A drag or pinch must track the finger exactly; easing a gesture makes
+		// the graph feel like it is lagging behind the hand.
+		world.classList.toggle("is-zooming", live);
+	}
+	// Relation labels are unreadable at fit-scale and essential once you are in
+	// close, so they follow the zoom rather than being a separate toggle.
+	$("#pgCanvas")?.classList.toggle("is-close", PG.view.k >= 1.6);
+	const readout = $("#pgZoomLevel");
+	if (readout) readout.textContent = `${Math.round(PG.view.k * 100)}%`;
 }
 
 const PG_ZOOM_MIN = 0.5, PG_ZOOM_MAX = 6;
@@ -4581,7 +4654,7 @@ function pgZoomAt(nextK, user) {
 	PG.view.x += (user.x - cx) * (k - clamped);
 	PG.view.y += (user.y - cy) * (k - clamped);
 	PG.view.k = clamped;
-	pgApplyView();
+	pgApplyView({ live: true });
 }
 
 function pgZoom(factor) {
@@ -4643,7 +4716,7 @@ function pgPointerMove(event) {
 	const per = 1 / (scale * PG.view.k);
 	PG.view.x = PG.drag.ox + (event.clientX - PG.drag.x) * per;
 	PG.view.y = PG.drag.oy + (event.clientY - PG.drag.y) * per;
-	pgApplyView();
+	pgApplyView({ live: true });
 }
 
 function pgPointerUp(event) {
@@ -4699,6 +4772,15 @@ function pgPickExample(index) {
 
 function pgRestart() {
 	if (PG.mode === "live") { loadPlayground(PG.threadId); return; }
+	// Replaying throws away the turns taken in this example. Cheap to redo, but
+	// silently wiping a conversation somebody is reading is still a surprise.
+	if (PG.preview.length && !confirm(
+		`Replay "${pgScenario().name}" from the start?
+
+`
+		+ `The ${PG.preview.length} message${PG.preview.length === 1 ? "" : "s"} in this example and the memories they added will be cleared. `
+		+ `Nothing in your own memory is affected.`,
+	)) return;
 	PG.turn = 0; PG.preview = []; PG.openCtx = new Set(); PG.thinking = false;
 	pgResetView();
 	renderView();
@@ -4893,7 +4975,7 @@ async function loadPlayground(threadId) {
 		PG.limits = res.limits || {};
 		PG.threadId = res.thread?.id ?? null;
 		PG.messages = res.thread?.messages ?? [];
-		PG.settings = res.thread?.settings ?? { customInstructions: "", customCategories: [] };
+		PG.settings = res.thread?.settings ?? { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] };
 		// Settings belong to one chat: opening a different one re-derives the
 		// form, but sending a message must not wipe what someone is typing.
 		if (switched) PG.settingsDraft = null;
@@ -4932,38 +5014,121 @@ function renderPlaygroundSide() { renderPlaygroundSettings($("#pgMemoryPanel"));
  * normalizes them with the same normalizeMemoryRules() /v1/rules uses and
  * layers them over the account's saved rules before extraction runs.
  */
+/**
+ * The chat's memory policy.
+ *
+ * This panel used to be a free-text box. The engine stopped reading that field
+ * when policy became structured, so anything typed into it was accepted and
+ * silently discarded — a control that looked like it protected your memory and
+ * did nothing. It is now the shape the engine actually enforces: a capture
+ * mode and two topic lists, sent as `includeTopics` / `excludeTopics`.
+ *
+ * Nothing here is badged "enforced" unless the server compiled it into a term
+ * the admission filter checks. Guidance that could not be compiled is labelled
+ * as guidance.
+ */
 function renderPlaygroundSettings(side) {
 	if (!side) return;
+	const saved = PG.settings ?? {};
 	const draft = PG.settingsDraft ?? (PG.settingsDraft = {
-		customInstructions: PG.settings?.customInstructions ?? "",
-		customCategories: [...(PG.settings?.customCategories ?? [])],
+		captureMode: saved.captureMode ?? "standard",
+		includeTopics: [...(saved.includeTopics ?? [])],
+		excludeTopics: [...(saved.excludeTopics ?? [])],
+		customCategories: (saved.customCategories ?? []).map((c) => ({ ...c })),
 	});
+	const chips = (list, kind) => list.length
+		? list.map((term, i) => `<span class="pg-topic ${kind === "includeTopics" ? "keep" : "drop"}">${esc(term)}
+			<button aria-label="Remove ${esc(term)}" onclick="pgPolicyRemove('${kind}',${i})">×</button></span>`).join("")
+		: `<span class="pg-note">None yet.</span>`;
+	const mode = draft.captureMode;
 	const rows = draft.customCategories.map((c, i) => `
 		<div class="pg-cat-row">
 			<input placeholder="name" value="${esc(c.name || "")}" oninput="playgroundCategoryEdit(${i},'name',this.value)" />
 			<input placeholder="what it means" value="${esc(c.description || "")}" oninput="playgroundCategoryEdit(${i},'description',this.value)" />
-			<button class="ghost mini" title="Remove" onclick="playgroundCategoryRemove(${i})">✕</button>
+			<button class="ghost mini" title="Remove" onclick="playgroundCategoryRemove(${i})">×</button>
 		</div>`).join("");
+
 	side.innerHTML = `
-		<label for="pgInstructions">Custom instructions</label>
-		<textarea id="pgInstructions" placeholder="Keep everything about my thesis. Never save anything about politics."
-			oninput="PG.settingsDraft.customInstructions=this.value">${esc(draft.customInstructions)}</textarea>
-		<div class="pg-note" style="margin-top:6px">Plain language. "Never save anything about X" is enforced, not just suggested — the gates drop it even if the model proposes it.</div>
+		<div class="pg-policy-scope">
+			<b>${esc(selectedManagedProject()?.name ?? "This project")}</b>
+			<span>${esc(PG.threads.find((t) => t.id === PG.threadId)?.title || "this chat")}</span>
+			<span class="pg-policy-badge">This chat only</span>
+		</div>
+
+		<label>Capture</label>
+		<div class="pg-mode" role="radiogroup" aria-label="Capture mode">
+			${[["standard", "Standard", "Keep anything durable"],
+			   ["only_topics", "Only these topics", "Nothing outside the list"],
+			   ["off", "Off", "Capture nothing from this chat"]].map(([value, title, hint]) => `
+				<button role="radio" aria-checked="${mode === value}" class="${mode === value ? "active" : ""}"
+					onclick="pgPolicyMode('${value}')"><b>${esc(title)}</b><span>${esc(hint)}</span></button>`).join("")}
+		</div>
+
+		${mode === "off" ? "" : `
+			${mode === "only_topics" ? `
+				<label for="pgIncludeInput">Remember only</label>
+				<div class="pg-topics">${chips(draft.includeTopics, "includeTopics")}</div>
+				<input id="pgIncludeInput" placeholder="Add a topic, then Enter" maxlength="80"
+					onkeydown="if(event.key==='Enter'){event.preventDefault();pgPolicyAdd('includeTopics',this)}" />
+				<div class="pg-note" style="margin-top:6px">Anything not matching one of these is not stored.</div>
+			` : ""}
+
+			<label for="pgExcludeInput">Never remember</label>
+			<div class="pg-topics">${chips(draft.excludeTopics, "excludeTopics")}</div>
+			<input id="pgExcludeInput" placeholder="Add a topic, then Enter" maxlength="80"
+				onkeydown="if(event.key==='Enter'){event.preventDefault();pgPolicyAdd('excludeTopics',this)}" />
+			<div class="pg-note" style="margin-top:6px">Always wins, including over the list above.</div>
+		`}
 
 		<label>Custom categories</label>
 		<div id="pgCategories">${rows || `<div class="pg-note">None yet. Add one to file memories under a name that means something to you.</div>`}</div>
 		<button class="ghost mini" style="margin-top:6px" onclick="playgroundCategoryAdd()">Add category</button>
 
-		<details style="margin-top:16px">
-			<summary style="cursor:pointer;font-size:13px;font-weight:600">Advanced settings</summary>
-			<div class="pg-note" style="margin-top:8px">Nothing here yet. Account-wide controls live in <a href="#" onclick="setView('settings');return false">Settings</a>.</div>
-		</details>
-
-		<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">
-			<button onclick="playgroundApplySettings()" ${PG.threadId ? "" : "disabled"}>Apply settings to this chat</button>
-			<button class="ghost" onclick="playgroundResetSettings()">Reset configuration</button>
+		<div class="pg-policy-explain">
+			Topic rules are enforced before anything is written — a model that proposes
+			an excluded fact still cannot store it. This applies to <b>future turns in this
+			chat only</b>, and can narrow your account rules but never widen them.
+			Messages already sent are unaffected.
 		</div>
-		${PG.threadId ? "" : `<div class="pg-note" style="margin-top:8px">Open or start a chat first — settings attach to one conversation.</div>`}`;
+
+		<div class="pg-policy-actions">
+			<button onclick="playgroundApplySettings()" ${PG.threadId ? "" : "disabled"}>Apply to this chat</button>
+			<button class="ghost" onclick="playgroundResetSettings()">Reset</button>
+			<span class="pg-note" id="pgPolicyStatus">${esc(PG.settingsStatus ?? "")}</span>
+		</div>
+		${PG.threadId ? "" : `<div class="pg-note" style="margin-top:8px">Open a chat from Threads first — a policy attaches to one conversation.</div>`}`;
+}
+
+function pgPolicyMode(mode) {
+	PG.settingsDraft.captureMode = mode;
+	PG.settingsStatus = "";
+	renderPlaygroundSide();
+}
+
+function pgPolicyAdd(kind, input) {
+	const term = String(input?.value ?? "").trim();
+	if (!term) return;
+	const list = PG.settingsDraft[kind];
+	if (!list.some((existing) => existing.toLowerCase() === term.toLowerCase())) list.push(term);
+	input.value = "";
+	// Choosing a topic for the allow-list is the whole point of that mode, so
+	// adding the first one switches to it rather than making them find a radio.
+	if (kind === "includeTopics" && PG.settingsDraft.captureMode === "standard") {
+		PG.settingsDraft.captureMode = "only_topics";
+	}
+	PG.settingsStatus = "";
+	renderPlaygroundSide();
+}
+
+function pgPolicyRemove(kind, index) {
+	PG.settingsDraft[kind].splice(index, 1);
+	// Emptying the allow-list would mean "capture nothing", which nobody means.
+	if (kind === "includeTopics" && !PG.settingsDraft.includeTopics.length
+		&& PG.settingsDraft.captureMode === "only_topics") {
+		PG.settingsDraft.captureMode = "standard";
+	}
+	PG.settingsStatus = "";
+	renderPlaygroundSide();
 }
 
 function playgroundCategoryEdit(index, field, value) {
@@ -4972,7 +5137,6 @@ function playgroundCategoryEdit(index, field, value) {
 }
 
 function playgroundCategoryAdd() {
-	PG.settingsDraft = PG.settingsDraft ?? { customInstructions: "", customCategories: [] };
 	PG.settingsDraft.customCategories.push({ name: "", description: "" });
 	renderPlaygroundSide();
 }
@@ -4984,26 +5148,39 @@ function playgroundCategoryRemove(index) {
 
 async function playgroundApplySettings() {
 	if (!PG.threadId) { toast("Open or start a chat first."); return; }
+	PG.settingsStatus = "Applying…";
+	renderPlaygroundSide();
 	try {
 		const res = await api("/v1/playground/settings", {
 			method: "PUT",
 			body: JSON.stringify({ threadId: PG.threadId, settings: PG.settingsDraft }),
 		});
-		if (!res.ok) { toast(res.message || "Could not apply those settings."); return; }
+		if (!res.ok) { PG.settingsStatus = res.message || "Could not apply."; renderPlaygroundSide(); return; }
+		// Re-seed the draft from what the SERVER normalized, so the panel shows
+		// what is actually in force rather than what was typed.
 		PG.settings = res.settings;
-		PG.settingsDraft = { customInstructions: res.settings.customInstructions, customCategories: [...res.settings.customCategories] };
+		PG.settingsDraft = {
+			captureMode: res.settings.captureMode,
+			includeTopics: [...res.settings.includeTopics],
+			excludeTopics: [...res.settings.excludeTopics],
+			customCategories: res.settings.customCategories.map((c) => ({ ...c })),
+		};
+		PG.settingsStatus = "Applied to this chat.";
 		renderPlaygroundSide();
-		toast("Settings applied to this chat.");
-	} catch (e) { toast(e.message || "Could not apply those settings. Try again.", true); }
+	} catch (error) {
+		PG.settingsStatus = error.message || "Could not apply. Try again.";
+		renderPlaygroundSide();
+	}
 }
 
 async function playgroundResetSettings() {
-	// This used to erase saved settings on the server the instant it was
-	// clicked — no confirmation, no undo, next to a button called "Apply".
-	const saved = (PG.settings?.customInstructions || "").trim() || (PG.settings?.customCategories ?? []).length;
-	if (saved && !confirm("Clear the custom instructions and categories saved for this chat?")) return;
-	PG.settingsDraft = { customInstructions: "", customCategories: [] };
-	if (PG.threadId && saved) await playgroundApplySettings();
+	const saved = PG.settings ?? {};
+	const hasSaved = (saved.captureMode && saved.captureMode !== "standard")
+		|| (saved.includeTopics ?? []).length || (saved.excludeTopics ?? []).length
+		|| (saved.customCategories ?? []).length;
+	if (hasSaved && !confirm("Clear the memory policy saved for this chat? Future turns go back to your account rules.")) return;
+	PG.settingsDraft = { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] };
+	if (PG.threadId && hasSaved) await playgroundApplySettings();
 	else renderPlaygroundSide();
 }
 
@@ -5064,7 +5241,8 @@ function pgOpenCtx(index) {
 
 function pgJsonFor(entry) {
 	return JSON.stringify({
-		captured: (entry.add ?? []).map((n) => ({ entity: n.n, type: n.t, linked_to: n.of ?? null })),
+		captured: (entry.add ?? []).map((n) => ({ entity: n.n, cluster: n.c, linked_to: n.of ?? null })),
+		relations: (entry.links ?? []).map(([from, to, verb]) => ({ from, verb: verb ?? "relates to", to })),
 		facts: (entry.facts ?? []).map((f) => ({ fact: f.f, valid_from: pgStamp(f.from), valid_to: f.to ? pgStamp(f.to) : null })),
 		entities: (entry.ents ?? []).map((e) => ({ name: e.n, label: e.l, summary: e.s })),
 	}, null, 2);
@@ -5094,7 +5272,36 @@ function pgPreviewStream() {
 		if (PG.json) rows.push(`<pre class="pg-context">${esc(pgJsonFor(entry))}</pre>`);
 	});
 	if (PG.thinking) rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>`);
+	// JSON has to answer before the first turn too. Showing nothing until you
+	// happen to send something reads as a broken toggle, so the panel leads with
+	// the world as it stands and then appends each turn's extraction.
+	if (PG.json) rows.unshift(`<pre class="pg-context">${esc(pgJsonSnapshot())}</pre>`);
 	return rows.join("");
+}
+
+/** The current graph and policy, as the API would describe them. */
+function pgJsonSnapshot() {
+	const sc = pgScenario();
+	const nodes = pgGraphData();
+	const clusters = {};
+	for (const n of nodes) clusters[pgCluster(n.c).label] = (clusters[pgCluster(n.c).label] ?? 0) + 1;
+	const links = [
+		...(sc.links ?? []),
+		...sc.turns.slice(0, PG.turn).flatMap((t) => t.links ?? []),
+	];
+	return JSON.stringify({
+		example: sc.id,
+		mode: "preview",
+		persisted: false,
+		graph: {
+			nodes: nodes.length,
+			clusters,
+			relations: links.length,
+			latest: nodes.filter((n) => n.isNew).map((n) => n.n),
+		},
+		relations: links.slice(0, 12).map(([from, to, verb]) => ({ from, verb: verb ?? "relates to", to })),
+		turns_taken: PG.turn,
+	}, null, 2);
 }
 
 function pgLiveStream() {

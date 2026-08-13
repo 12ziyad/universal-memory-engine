@@ -195,11 +195,30 @@ describe("the settings tab", () => {
 		const { default: html } = await import("../public/index.html?raw");
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(script).toContain("function renderPlaygroundSettings(");
+		// The free-text box is gone. It stopped being read when policy became
+		// structured, so it accepted what people typed and silently dropped it —
+		// exactly the kind of control this stage exists to remove.
+		const panel = script.slice(
+			script.indexOf("function renderPlaygroundSettings("),
+			script.indexOf("function pgPolicyMode("),
+		);
+		expect(panel).not.toContain("Custom instructions");
+		expect(panel).not.toContain("pgInstructions");
+		// The account-wide rules page keeps its own instructions field; only the
+		// per-chat panel drops it, because only the per-chat path stopped reading it.
 		expect(script).toContain(">Custom instructions<");
+		// What replaced it is the shape the engine actually enforces.
+		expect(script).toContain(">Remember only<");
+		expect(script).toContain(">Never remember<");
+		// The three modes are templated from one list rather than hand-written.
+		expect(panel).toContain('["only_topics", "Only these topics"');
+		expect(panel).toContain('["off", "Off"');
+		expect(panel).toContain("pgPolicyMode('${value}')");
+		expect(script).toContain("pgPolicyAdd('includeTopics'");
+		expect(script).toContain("pgPolicyAdd('excludeTopics'");
+		expect(script).toContain("includeTopics: [...(saved.includeTopics ?? [])]");
 		expect(script).toContain(">Custom categories<");
-		expect(script).toContain(">Advanced settings<");
-		expect(script).toContain(">Apply settings to this chat<");
-		expect(script).toContain(">Reset configuration<");
+		expect(script).toContain(">Apply to this chat<");
 		expect(script).toContain("function playgroundCategoryAdd(");
 		expect(script).toContain('api("/v1/playground/settings"');
 		// The panel moved out of a column and behind the header's Memory button
@@ -207,6 +226,8 @@ describe("the settings tab", () => {
 		// and only reachable on a real chat — a preview has no settings to save.
 		expect(script).toContain(`pgTogglePanel('memory')`);
 		expect(script).toContain(`id="pgMemoryPanel"`);
-		expect(script).toMatch(/preview \? "" : `<button class="pg-icon-btn"[^`]*Memory<\/button>`/);
+		// Reachable in both modes now: in a preview it explains that a policy
+		// attaches to a real chat, rather than being a button that does nothing.
+		expect(script).toContain('aria-pressed="${PG.panel === "memory"}"');
 	});
 });

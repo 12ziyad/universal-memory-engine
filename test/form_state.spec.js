@@ -207,7 +207,11 @@ describe("the rules form", () => {
 
 describe("destructive actions ask first", () => {
 	it("Reset configuration confirms before erasing saved playground settings", async () => {
-		const PG = { threadId: "t1", settings: { customInstructions: "Keep everything about my thesis.", customCategories: [] }, settingsDraft: null };
+		const PG = {
+			threadId: "t1",
+			settings: { captureMode: "only_topics", includeTopics: ["thesis"], excludeTopics: [], customCategories: [] },
+			settingsDraft: null,
+		};
 		let applied = 0;
 		let asked = null;
 		const built = build(["playgroundResetSettings"], {
@@ -218,13 +222,18 @@ describe("destructive actions ask first", () => {
 		});
 
 		await built.playgroundResetSettings();
-		expect(asked).toContain("Clear the custom instructions");
+		expect(asked).toContain("Clear the memory policy saved for this chat");
 		expect(applied).toBe(0);                                        // declined → nothing erased
-		expect(PG.settings.customInstructions).toBe("Keep everything about my thesis.");
+		expect(PG.settings.includeTopics).toEqual(["thesis"]);
+		expect(PG.settings.captureMode).toBe("only_topics");
 	});
 
 	it("with nothing saved it just clears the draft, no pointless prompt", async () => {
-		const PG = { threadId: "t1", settings: { customInstructions: "", customCategories: [] }, settingsDraft: { customInstructions: "typed but never applied", customCategories: [] } };
+		const PG = {
+			threadId: "t1",
+			settings: { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] },
+			settingsDraft: { captureMode: "standard", includeTopics: ["typed but never applied"], excludeTopics: [], customCategories: [] },
+		};
 		let asked = false;
 		const built = build(["playgroundResetSettings"], {
 			PG,
@@ -234,7 +243,8 @@ describe("destructive actions ask first", () => {
 		});
 		await built.playgroundResetSettings();
 		expect(asked).toBe(false);
-		expect(PG.settingsDraft.customInstructions).toBe("");
+		expect(PG.settingsDraft.includeTopics).toEqual([]);
+		expect(PG.settingsDraft.captureMode).toBe("standard");
 	});
 });
 
