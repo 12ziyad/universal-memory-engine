@@ -329,14 +329,19 @@ describe("managing your chats", () => {
 
 describe("the memory rules panel", () => {
 	it("returns to the conversation once the rules are applied or cleared", async () => {
-		const { script } = await page();
+		const { script, html } = await page();
 		// Rules only change what you say NEXT, so parking somebody on the form
 		// after they save leaves them hunting for the one place it can show.
 		expect(await fnSource("pgReturnToChat")).toContain("PG.panel = null;");
 		expect(await fnSource("playgroundApplySettings")).toContain("pgReturnToChat(pgPolicySummaryLine(res.settings))");
 		expect(await fnSource("playgroundResetSettings")).toContain("pgReturnToChat(");
-		// And the button that opens it no longer promises a list of memories.
-		expect(script).toContain('title="Memory rules for this chat"');
+		// And the control that opens it no longer promises a list of memories: it
+		// is named for the thing it actually decides, and it sits in the view
+		// group on the right rather than being a fifth undifferentiated chip.
+		expect(script).toContain('title="What this chat may and may not remember"');
+		expect(script).toContain(">Rules</button>");
+		expect(script).toContain('<div class="pg-head-views">');
+		expect(html).toContain(".pg-head-views { display: flex; flex: 0 0 auto;");
 	});
 
 	it("confirms what was actually saved, not just that something was", async () => {

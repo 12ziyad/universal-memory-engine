@@ -716,8 +716,26 @@
 		.pgn-halo { display: none; } }
 
 	/* --- chat panel --- */
-	.pg-chat-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px;
+	.pg-chat-head { display: flex; align-items: center; gap: 6px; padding: 10px var(--pg-3);
 		border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+	/* The example picker carries a scenario name of any length. Let it be the
+	   thing that gives way, or it pushes the view switches onto a second row and
+	   the header silently doubles in height. */
+	.pg-head-menu { position: relative; min-width: 0; }
+	.pg-chip-label { display: block; min-width: 0; max-width: 104px; overflow: hidden;
+		text-overflow: ellipsis; white-space: nowrap; }
+	/* The view switches sit apart from the pickers, behind a hairline, so the
+	   header reads as two groups rather than five equal chips. */
+	.pg-head-views { display: flex; flex: 0 0 auto; align-items: center; gap: var(--pg-1); margin-left: auto;
+		padding-left: var(--pg-2); border-left: 1px solid var(--border); }
+	.pg-view-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px;
+		border-radius: var(--pg-2); border: 1px solid transparent; background: transparent;
+		color: var(--muted); font: 500 var(--pg-meta)/1 var(--font-ui); white-space: nowrap; }
+	.pg-view-btn.is-mono { font: 600 var(--pg-micro)/1 var(--font-mono); letter-spacing: .04em; }
+	.pg-view-btn:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.pg-view-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 10%, transparent); }
+	.pg-view-btn span { font-size: 12px; opacity: .9; }
 	.pg-icon-btn { width: 32px; height: 32px; padding: 0; display: inline-grid; place-items: center;
 		border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 14px; }
 	.pg-icon-btn:hover { background: var(--panel2); color: var(--text); filter: none; }
@@ -1848,6 +1866,21 @@
 
 <script>
 const PRODUCT = { name: "Itsuki", tokenPrefix: "itsuki_live_", repo: "https://github.com/12ziyad/universal-memory-engine" };
+
+/**
+ * The app's typeface, as a string, for the one surface that cannot inherit it.
+ *
+ * vis-network paints the Graph onto a canvas and takes a font stack as a value
+ * rather than reading CSS, so every node, page, candidate and edge label was
+ * rendering in the system font while the app around it was in Fustat. Kept in
+ * step with --font-ui by hand, because canvas cannot read a custom property.
+ */
+const GRAPH_FONT_FACE = "Fustat, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+
+// A canvas cannot use a webfont that has not finished loading, so the first
+// paint of the Graph would otherwise fall back and stay fallen back until
+// something happened to force a redraw.
+if (document.fonts?.ready) document.fonts.ready.then(() => S?.network?.redraw?.()).catch(() => {});
 
 const $ = (s, r=document) => r.querySelector(s);
 const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
@@ -4295,20 +4328,29 @@ function viewPlayground(v) {
 				<div class="pg-chat-head" id="pgHeadControls">
 					<button class="pg-icon-btn" title="Restart this example" aria-label="Restart this example"
 						onclick="pgRestart()">↻</button>
-					<div style="position:relative">
-						<button class="pg-chip-btn" aria-expanded="${PG.menu === "example"}"
-							onclick="pgMenu('example')">${preview ? esc(sc.name) : "Pick example"}<span class="pg-caret">▾</span></button>
+					<div class="pg-head-menu">
+						<button class="pg-chip-btn" aria-expanded="${PG.menu === "example"}" onclick="pgMenu('example')"
+							title="${preview ? esc(sc.name) : "Pick example"}"><span
+							class="pg-chip-label">${preview ? esc(sc.name) : "Pick example"}</span><span class="pg-caret">▾</span></button>
 						${PG.menu === "example" ? pgExampleMenu() : ""}
 					</div>
-					<div style="position:relative">
+					<div class="pg-head-menu">
 						<button class="pg-chip-btn" aria-expanded="${PG.menu === "thread"}"
 							onclick="pgMenu('thread')">Threads<span class="pg-caret">▾</span></button>
 						${PG.menu === "thread" ? pgThreadMenu() : ""}
 					</div>
-					<button class="pg-icon-btn" aria-pressed="${PG.json}" title="Show what was extracted, as JSON"
-						onclick="pgToggleJson()" style="font:600 11px/1 var(--font-mono);width:auto;padding:0 10px">JSON</button>
-					<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="Memory rules for this chat"
-						onclick="pgTogglePanel('memory')" style="width:auto;padding:0 10px;font-size:12.5px">Memory</button>
+					<!-- Which conversation is on the left; how you are looking at it is on
+					     the right. Five controls in one undifferentiated row made the
+					     rules panel just another chip, and it was named "Memory", which
+					     reads as a list of memories rather than the switch that decides
+					     what becomes one. -->
+					<div class="pg-head-views">
+						<button class="pg-view-btn is-mono" aria-pressed="${PG.json}"
+							title="Show what was extracted, as JSON" onclick="pgToggleJson()">JSON</button>
+						<button class="pg-view-btn" aria-pressed="${PG.panel === "memory"}"
+							title="What this chat may and may not remember" onclick="pgTogglePanel('memory')">
+							<span aria-hidden="true">⚖</span>Rules</button>
+					</div>
 				</div>
 				${preview ? `<div class="pg-preview-bar"><b>Preview</b> — a sample world, so you can see how memory behaves. Nothing here is saved to your account.</div>` : ""}
 				${PG.panel === "memory"
@@ -8358,7 +8400,10 @@ function graphNode(n, sortedIndex, total, hasEdges) {
 		font: {
 			color: "#f8fafc",
 			size: selected ? 16 : 13,
-			face: "ui-sans-serif, system-ui, Segoe UI, sans-serif",
+			// vis-network paints labels onto a canvas, so it takes a font stack as a
+			// string rather than inheriting one. Left on the system stack, the whole
+			// Graph view rendered in a different typeface from the app around it.
+			face: GRAPH_FONT_FACE,
 			strokeWidth: 5,
 			strokeColor: "rgba(9,13,19,.92)",
 		},
@@ -8396,7 +8441,10 @@ function graphPage(p, sortedIndex, total) {
 		font: {
 			color: "#f8fafc",
 			size: selected ? 16 : 14,
-			face: "ui-sans-serif, system-ui, Segoe UI, sans-serif",
+			// vis-network paints labels onto a canvas, so it takes a font stack as a
+			// string rather than inheriting one. Left on the system stack, the whole
+			// Graph view rendered in a different typeface from the app around it.
+			face: GRAPH_FONT_FACE,
 			strokeWidth: 5,
 			strokeColor: "rgba(9,13,19,.92)",
 		},
@@ -8428,7 +8476,7 @@ function graphCandidate(c, sortedIndex, total) {
 			highlight: { background: "#1f2937", border: color },
 			hover: { background: "#172033", border: color },
 		},
-		font: { color: "#cbd5e1", size: 11, strokeWidth: 4, strokeColor: "rgba(9,13,19,.92)" },
+		font: { color: "#cbd5e1", size: 11, face: GRAPH_FONT_FACE, strokeWidth: 4, strokeColor: "rgba(9,13,19,.92)" },
 		shadow: false,
 		...layoutPosition(c, c.cluster || "general_memory", sortedIndex, total, "candidate"),
 	};
@@ -8527,7 +8575,7 @@ function edgeStyle(e, i) {
 		width: Math.max(1, Math.min(4, 1.2 + Number(e.weight || 1) * .4)),
 		selectionWidth: 2.8,
 		smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
-		font: { color: "#cbd5e1", size: 10, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
+		font: { color: "#cbd5e1", size: 10, face: GRAPH_FONT_FACE, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
 	};
 	const styles = {
 		part_of: { dashes: false, color: "rgba(210,168,255,.62)" },
@@ -8624,7 +8672,7 @@ function guideEdgesForPages(pages, nodes) {
 				selectionWidth: 1.4,
 				smooth: { enabled: true, type: "curvedCW", roundness: .28 },
 				color: { color: "rgba(148,163,184,.26)", highlight: "#8b949e", hover: "#8b949e" },
-				font: { color: "#8b949e", size: 9, strokeWidth: 3, strokeColor: "rgba(9,13,19,.9)" },
+				font: { color: "#8b949e", size: 9, face: GRAPH_FONT_FACE, strokeWidth: 3, strokeColor: "rgba(9,13,19,.9)" },
 				title: "Visual-only related concept guide; not a persisted edge.",
 			});
 		}

@@ -178,19 +178,28 @@ describe("thread settings are the account's rules, scoped", () => {
 		expect(merged.customCategories.map((c) => c.name)).toEqual(["work", "thesis"]);
 	});
 
-	it("keeps the account's allow-list when the chat declares its own", () => {
-		// "Matches one of A AND one of B" is not any single term list, so the
-		// flat object carries the ACCOUNT's list — the one a chat must not be
-		// able to widen — and threadRefusal() enforces the chat's on top.
+	it("two allow-lists become the terms they agree on", () => {
+		// Narrower than either, and expressible as one term list, so the pipeline
+		// enforces it per extracted item like any other allow-list.
+		const accountRules = normalizeMemoryRules({ includes: ["work", "thesis"] });
+		const settings = normalizeThreadSettings({ captureMode: "only_topics", includeTopics: ["thesis", "cats"] });
+		const merged = threadRulesFrom(accountRules, settings);
+		expect(merged.includes).toEqual(["thesis"]);
+		expect(threadRefusal(accountRules, settings)).toBeNull();
+
+		expect(rulesAllowText(merged, "the thesis chapter is done")).toBe(true);
+		expect(rulesAllowText(merged, "the work rota changed")).toBe(false);   // account's, not agreed
+		expect(rulesAllowText(merged, "the cats are fed")).toBe(false);        // chat's, not agreed
+	});
+
+	it("refuses the turn when two allow-lists agree on nothing", () => {
+		// Their intersection is empty, and an empty `includes` reads as "no
+		// allow-list" — which would capture everything. Refusing is the only
+		// honest answer, and it must not depend on what the message happens to say.
 		const accountRules = normalizeMemoryRules({ includes: ["work"] });
 		const settings = normalizeThreadSettings({ captureMode: "only_topics", includeTopics: ["thesis"] });
-		const merged = threadRulesFrom(accountRules, settings);
-		expect(merged.includes).toEqual(["work"]);
-
-		// The chat's own list is what the boundary judges; the account's rides
-		// down in the flat object and is enforced per extracted item behind it.
-		expect(threadRefusal(accountRules, settings, "the work thesis chapter is done")).toBeNull();
-		expect(threadRefusal(accountRules, settings, "the work rota changed")).toBe("outside_include_rules");
+		expect(threadRulesFrom(accountRules, settings).includes).toEqual([]);
+		expect(threadRefusal(accountRules, settings)).toBe("outside_include_rules");
 	});
 
 	it("leaves the per-item rules to the pipeline instead of judging whole messages", () => {
@@ -200,7 +209,7 @@ describe("thread settings are the account's rules, scoped", () => {
 		// the work.
 		const accountRules = normalizeMemoryRules({ excludes: ["passwords"] });
 		const settings = normalizeThreadSettings({ excludeTopics: ["cats"] });
-		expect(threadRefusal(accountRules, settings, "I love cats and my passwords are in 1password")).toBeNull();
+		expect(threadRefusal(accountRules, settings)).toBeNull();
 
 		const merged = threadRulesFrom(accountRules, settings);
 		expect(rulesAllowText(merged, "I love cats")).toBe(false);
@@ -212,7 +221,7 @@ describe("thread settings are the account's rules, scoped", () => {
 		const accountRules = normalizeMemoryRules({});
 		const off = normalizeThreadSettings({ captureMode: "off" });
 		expect(threadCaptureDisabled(off)).toBe(true);
-		expect(threadRefusal(accountRules, off, "anything at all")).toBe("capture_off");
+		expect(threadRefusal(accountRules, off)).toBe("capture_off");
 		expect(threadCaptureDisabled(normalizeThreadSettings({}))).toBe(false);
 	});
 

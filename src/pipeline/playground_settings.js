@@ -12,20 +12,18 @@
  * Composition is narrowing in every branch:
  *
  *   excludes   union — a chat may add denials, never drop one the account made.
- *   includes   the account's allow-list when it has one, because that is the
- *              one the flat shape can express. The chat's own allow-list is
- *              enforced here instead, by threadRefusal(), since "matches one of
- *              A and one of B" is not any single term list.
+ *   includes   whichever side has one; when BOTH do, the terms they agree on,
+ *              which is narrower than either. Two lists that agree on nothing
+ *              cannot be written as one, so threadRefusal() refuses the turn.
  *   capture    "off" is not a rule at all: the caller simply does not run the
  *              capture lane. Nothing downstream needs to know.
  *   categories union — a category is classification metadata, never permission.
  *
- * threadRefusal() is the authority on whether a message may be captured, and it
- * checks the account FIRST. The shared pipeline then re-checks the account's
- * rules independently, so a mistake in this file can only ever store less.
+ * The shared pipeline then enforces the resulting object per extracted item,
+ * independently, so a mistake in this file can only ever store less.
  */
 
-import { normalizeMemoryRules, rulesRejection } from "./rules.js";
+import { normalizeMemoryRules } from "./rules.js";
 
 export const CAPTURE_MODES = new Set(["standard", "only_topics", "off"]);
 
@@ -72,12 +70,25 @@ export function threadCaptureDisabled(settings) {
 	return normalizeThreadSettings(settings ?? {}).captureMode === "off";
 }
 
-/** The chat's own allow-list as a rules object — its policy, not the account's. */
-function threadOwnRules(settings) {
-	// Includes only. The chat's excludes are unioned into threadRulesFrom()'s
-	// flat object and enforced downstream per item; repeating them here would
-	// refuse the whole message over one refused fact inside it.
-	return normalizeMemoryRules({ includes: settings.includeTopics ?? [] });
+/** The terms two allow-lists agree on, compared the way the matcher compares. */
+function agreedTerms(a = [], b = []) {
+	const other = new Set(b.map((term) => term.toLocaleLowerCase("en-US")));
+	return a.filter((term) => other.has(term.toLocaleLowerCase("en-US")));
+}
+
+/**
+ * True when a chat's allow-list and the account's cannot both be satisfied.
+ *
+ * Two allow-lists that share no term admit nothing in common, and an empty
+ * intersection cannot be written into the flat object — an empty `includes`
+ * means "no allow-list", which would capture EVERYTHING. So the pair is
+ * detected here and refused, and threadRulesFrom() and threadRefusal() read the
+ * same helper so the two can never drift into that silent widening.
+ */
+function allowListsConflict(accountRules, settings) {
+	const account = accountRules?.includes ?? [];
+	const chat = settings.includeTopics ?? [];
+	return Boolean(account.length && chat.length && !agreedTerms(account, chat).length);
 }
 
 /**
@@ -89,10 +100,20 @@ export function threadRulesFrom(accountRules, threadSettings) {
 	const settings = normalizeThreadSettings(threadSettings ?? {});
 	if (threadSettingsAreEmpty(settings)) return null;
 	const accountIncludes = accountRules?.includes ?? [];
+	const chatIncludes = settings.includeTopics ?? [];
+	// Two allow-lists are the one case a single term list cannot express. The
+	// terms they AGREE on can be, and that set is narrower than either — so it
+	// goes down and gets enforced per extracted item like any other allow-list.
+	// Passing the account's list alone was a hole: a chat saying "only Mochi"
+	// still kept a boxing fact, because the account's list is what reached the
+	// filter and the chat's was only ever judged against the whole message.
+	const includes = accountIncludes.length && chatIncludes.length
+		? agreedTerms(accountIncludes, chatIncludes)
+		: (accountIncludes.length ? accountIncludes : chatIncludes);
 	return normalizeMemoryRules({
 		...accountRules,
 		excludes: [...(accountRules?.excludes ?? []), ...settings.excludeTopics],
-		includes: accountIncludes.length ? accountIncludes : settings.includeTopics,
+		includes,
 		customCategories: [
 			...(accountRules?.customCategories ?? []),
 			...settings.customCategories,
@@ -112,17 +133,19 @@ export function threadRulesFrom(accountRules, threadSettings) {
  *
  * Two things genuinely cannot ride down there:
  *
- *   capture off      there is nothing to enforce; the lane is not called.
- *   a chat allow-list when the account already has one, because "matches one of
- *                    A and one of B" is not any single term list. Judged here,
- *                    on the message, which errs toward storing less.
+ *   capture off        there is nothing to enforce; the lane is not called.
+ *   two allow-lists    that share no term. Their intersection is empty, an
+ *                      empty `includes` reads as "no allow-list" and would
+ *                      capture everything, so the turn is refused instead.
+ *
+ * Everything else — including two allow-lists that DO overlap — is expressible
+ * as a flat rules object and is enforced per extracted item behind this.
  */
-export function threadRefusal(accountRules, threadSettings, ...texts) {
+export function threadRefusal(accountRules, threadSettings) {
 	const settings = normalizeThreadSettings(threadSettings ?? {});
 	if (settings.captureMode === "off") return "capture_off";
-	if (!settings.includeTopics.length) return null;
-	if (!(accountRules?.includes ?? []).length) return null;
-	return rulesRejection(threadOwnRules(settings), ...texts);
+	if (allowListsConflict(accountRules, settings)) return "outside_include_rules";
+	return null;
 }
 
 /**

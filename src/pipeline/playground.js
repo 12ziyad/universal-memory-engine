@@ -405,7 +405,7 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 	// subtract, and a mistake in it cannot widen what any lane stores.
 	const refusal = rulesUnavailable
 		? "rules_unavailable"
-		: threadRefusal(accountRules, threadSettings, message);
+		: threadRefusal(accountRules, threadSettings);
 	const rules = rulesUnavailable
 		? null
 		: threadRulesFrom(accountRules, threadSettings) ?? accountRules;
