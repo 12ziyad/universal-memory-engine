@@ -55,6 +55,27 @@ async function page() {
 	return { html, script: html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "" };
 }
 
+/**
+ * One top-level function's source out of the single-file app, so a spec can
+ * assert what a handler does rather than only that its name appears somewhere.
+ */
+async function fnSource(name) {
+	const { script } = await page();
+	let start = script.indexOf(`function ${name}(`);
+	if (start === -1) throw new Error(`no function ${name} in the page`);
+	if (script.slice(Math.max(0, start - 6), start) === "async ") start -= 6;
+	let depth = 0;
+	let seenBody = false;
+	for (let i = start; i < script.length; i++) {
+		if (script[i] === "{") { depth++; seenBody = true; }
+		else if (script[i] === "}") {
+			depth--;
+			if (seenBody && depth === 0) return script.slice(start, i + 1);
+		}
+	}
+	throw new Error(`unbalanced braces reading ${name}`);
+}
+
 async function send(cookie, message, extra = {}) {
 	const res = await request("/v1/playground/chat", post({ message, _test: kotlinProposal(), ...extra }, cookie));
 	expect(res.status).toBe(200);
@@ -247,6 +268,98 @@ describe("limits", () => {
 		const body = await res.json();
 		expect(body.threads).toEqual([]);
 		expect(body.thread).toBe(null);
+	});
+});
+
+describe("managing your chats", () => {
+	it("gives every chat a delete control that does not depend on hover", async () => {
+		const { script, html } = await page();
+		// playgroundDeleteThread() existed with no caller anywhere in the page, so
+		// there was no way to remove a chat from the product at all.
+		expect(script).toContain("playgroundDeleteThread('${esc(t.id)}')");
+		expect(script).toContain('aria-label="Delete ${esc(t.title || "New chat")}"');
+		// Visible without a pointer. A hover-only control does not exist on touch.
+		expect(html).toContain(".pg-menu .pg-thread-del {");
+		expect(html).not.toMatch(/\.pg-thread-del \{[^}]*opacity: 0/);
+		// The row's own button must not swallow the delete click.
+		expect(script).toContain("event.stopPropagation();playgroundDeleteThread(");
+	});
+
+	it("says what delete removes and what it does not", async () => {
+		const { script } = await page();
+		const body = await fnSource("playgroundDeleteThread");
+		expect(body).toContain("confirm(");
+		// Deleting the transcript looks like deleting everything it produced. It
+		// is not, and the dialog has to say so.
+		expect(body).toContain("stay in your memory");
+		expect(script).toContain("PG.settings = null; PG.settingsDraft = null;");
+	});
+
+	it("scrolls a long chat list instead of pushing New chat off the menu", async () => {
+		const { html } = await page();
+		expect(html).toContain(".pg-thread-list { max-height: min(46vh, 320px); overflow-y: auto;");
+	});
+
+	it("really deletes the chat over HTTP", async () => {
+		const me = await account("pg-del");
+		const made = await (await request("/v1/playground/thread", post({ title: "throwaway" }, me.cookie))).json();
+		expect(made.ok).toBe(true);
+
+		const before = await (await request("/v1/playground", { headers: { cookie: me.cookie } })).json();
+		expect(before.threads.map((t) => t.id)).toContain(made.thread.id);
+
+		const gone = await (await request("/v1/playground/thread", post({ threadId: made.thread.id, delete: true }, me.cookie))).json();
+		expect(gone.ok).toBe(true);
+
+		const after = await (await request("/v1/playground", { headers: { cookie: me.cookie } })).json();
+		expect(after.threads.map((t) => t.id)).not.toContain(made.thread.id);
+	});
+
+	it("cannot delete a chat belonging to somebody else", async () => {
+		const mine = await account("pg-del-mine");
+		const theirs = await account("pg-del-theirs");
+		const made = await (await request("/v1/playground/thread", post({ title: "mine" }, mine.cookie))).json();
+
+		await request("/v1/playground/thread", post({ threadId: made.thread.id, delete: true }, theirs.cookie));
+
+		const still = await (await request("/v1/playground", { headers: { cookie: mine.cookie } })).json();
+		expect(still.threads.map((t) => t.id)).toContain(made.thread.id);
+	});
+});
+
+describe("the memory rules panel", () => {
+	it("returns to the conversation once the rules are applied or cleared", async () => {
+		const { script } = await page();
+		// Rules only change what you say NEXT, so parking somebody on the form
+		// after they save leaves them hunting for the one place it can show.
+		expect(await fnSource("pgReturnToChat")).toContain("PG.panel = null;");
+		expect(await fnSource("playgroundApplySettings")).toContain("pgReturnToChat(pgPolicySummaryLine(res.settings))");
+		expect(await fnSource("playgroundResetSettings")).toContain("pgReturnToChat(");
+		// And the button that opens it no longer promises a list of memories.
+		expect(script).toContain('title="Memory rules for this chat"');
+	});
+
+	it("confirms what was actually saved, not just that something was", async () => {
+		const { script } = await page();
+		const body = await fnSource("pgPolicySummaryLine");
+		expect(body).toContain("Capture is off for this chat.");
+		expect(body).toContain("only ${includes.join");
+		expect(body).toContain("never ${excludes.join");
+	});
+});
+
+describe("an empty chat", () => {
+	it("offers openers that fill the composer rather than sending", async () => {
+		const { script } = await page();
+		expect(script).toContain("PG_LIVE_OPENERS");
+		const seed = await fnSource("pgSeedMessage");
+		// It must NOT send: this writes to their real memory, so the send stays
+		// their decision.
+		expect(seed).not.toContain("playgroundSend");
+		expect(seed).toContain("input.focus()");
+		expect(seed).toContain("PG.draft = input.value;");
+		// And they disappear the moment there is a conversation to read.
+		expect(await fnSource("renderPgSuggest")).toContain("PG.messages.length || PG.sending || PG.notice");
 	});
 });
 

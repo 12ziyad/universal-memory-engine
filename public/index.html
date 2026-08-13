@@ -821,14 +821,28 @@
 		border-radius: 8px; border: 1px solid var(--border2); background: var(--panel); color: var(--muted);
 		font: 500 12.5px/1 var(--font-ui); }
 	.pg-tour-launch:hover { border-color: var(--accent); color: var(--accent); filter: none; }
-	.pg-thread { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-		background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 8px;
-		padding: 9px 10px; margin-bottom: 2px; font-weight: 400; }
-	.pg-thread:hover { background: var(--panel2); filter: none; }
-	.pg-thread.active { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-weight: 600; }
-	.pg-thread .pg-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.pg-thread .pg-thread-del { opacity: 0; background: transparent; color: var(--faint); padding: 0 4px; }
-	.pg-thread:hover .pg-thread-del { opacity: 1; }
+	/* A chat row: open on the left, delete on the right. The list scrolls once
+	   there are more chats than fit, so the New chat button below it stays
+	   reachable instead of being pushed off the bottom of the menu. */
+	.pg-thread-list { max-height: min(46vh, 320px); overflow-y: auto; overscroll-behavior: contain;
+		margin: 0 -2px; padding: 0 2px; }
+	/* Scoped under .pg-menu: the menu's own `button { width: 100% }` is one
+	   specificity step above a bare class and was stretching the delete icon to
+	   the full row width. */
+	.pg-menu .pg-thread-row { display: flex; align-items: center; gap: 2px; border-radius: var(--pg-2); }
+	.pg-menu .pg-thread-row:hover { background: var(--panel2); }
+	.pg-menu .pg-thread-row.active { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+	.pg-menu .pg-thread-row.active .pg-thread-open { color: var(--accent); font-weight: 600; }
+	.pg-menu .pg-thread-open { flex: 1 1 auto; width: auto; min-width: 0; display: flex; align-items: center;
+		gap: var(--pg-2); }
+	.pg-menu .pg-thread-row:hover .pg-thread-open { background: transparent; }
+	.pg-menu .pg-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	/* Always visible. Hover-only would hide it from every touch device. */
+	.pg-menu .pg-thread-del { flex: 0 0 30px; width: 30px; height: 30px; margin-right: 6px; padding: 0;
+		display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent;
+		color: var(--faint); font-size: 12px; line-height: 1; }
+	.pg-menu .pg-thread-del:hover { background: color-mix(in srgb, var(--red) 14%, transparent);
+		color: var(--red); filter: none; }
 	.pg-cap { font-size: 12px; color: var(--faint); margin-top: 8px; }
 	.pg-msg { max-width: 84%; margin-bottom: var(--pg-4); }
 	.pg-msg.user { margin-left: auto; }
@@ -869,31 +883,36 @@
 	.pg-memory .pg-kind { display: block; margin-top: 4px; font-size: 12px; color: var(--faint); }
 	.pg-note { font-size: 12px; color: var(--faint); line-height: 1.55; }
 	.pg-empty { padding: 18px 12px; font-size: 13px; line-height: 1.6; color: var(--muted); }
-	.pg-settings { padding: 12px; overflow-y: auto; }
-	.pg-settings label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; }
+	.pg-settings { padding: var(--pg-4) var(--pg-3); overflow-y: auto; }
+	.pg-settings label { display: block; font-size: var(--pg-body); font-weight: 600;
+		margin: var(--pg-5) 0 var(--pg-2); letter-spacing: -.005em; }
 	.pg-settings label:first-child { margin-top: 0; }
 	.pg-settings textarea, .pg-settings input { width: 100%; background: var(--panel); border: 1px solid var(--border2);
-		color: var(--text); border-radius: 8px; padding: 8px 10px; font: 400 13px/1.6 var(--font-ui); }
+		color: var(--text); border-radius: var(--pg-2); padding: 9px 11px;
+		font: 400 var(--pg-body)/var(--pg-lh-body) var(--font-ui); }
 	.pg-settings textarea { min-height: 96px; resize: vertical; }
-	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; margin-bottom: 6px; }
+	.pg-cat-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px;
+		margin-bottom: 6px; }
 	/* --- chat memory policy --- */
-	.pg-policy-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 11px;
-		background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px;
-		font-size: 12.5px; color: var(--muted); }
+	.pg-policy-scope { display: flex; align-items: center; gap: var(--pg-2); flex-wrap: wrap; padding: 10px var(--pg-3);
+		background: var(--panel2); border: 1px solid var(--border); border-radius: var(--pg-2);
+		font-size: var(--pg-meta); color: var(--muted); }
 	.pg-policy-scope b { color: var(--text); font-weight: 600; }
-	.pg-policy-badge { margin-left: auto; border-radius: 999px; padding: 3px 9px; font: 500 11px/1.5 var(--font-ui);
+	.pg-policy-badge { margin-left: auto; border-radius: 999px; padding: 3px 9px;
+		font: 500 var(--pg-micro)/1.5 var(--font-ui);
 		color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); }
-	.pg-mode { display: grid; gap: 6px; margin-bottom: 4px; }
+	.pg-mode { display: grid; gap: 6px; }
 	.pg-mode button { display: block; width: 100%; text-align: left; background: var(--panel);
-		border: 1px solid var(--border2); border-radius: 9px; padding: 9px 11px; color: var(--text); }
+		border: 1px solid var(--border2); border-radius: var(--pg-2); padding: 10px var(--pg-3); color: var(--text); }
 	.pg-mode button:hover { border-color: var(--accent); filter: none; }
 	.pg-mode button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent); }
-	.pg-mode button b { display: block; font-size: 13px; font-weight: 600; }
-	.pg-mode button span { display: block; font-size: 12px; color: var(--faint); margin-top: 2px; }
-	.pg-topics { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+	.pg-mode button b { display: block; font-size: var(--pg-body); font-weight: 600; }
+	.pg-mode button span { display: block; font-size: var(--pg-meta); color: var(--faint); margin-top: 2px; }
+	.pg-topics { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+	.pg-topics:not(:empty) { margin-bottom: var(--pg-2); }
 	.pg-topic { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 6px 3px 10px;
-		font: 500 12px/1.6 var(--font-ui); border: 1px solid var(--border2); }
+		font: 500 var(--pg-meta)/1.6 var(--font-ui); border: 1px solid var(--border2); }
 	.pg-topic.keep { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent);
 		background: color-mix(in srgb, var(--green) 8%, transparent); }
 	.pg-topic.drop { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
@@ -901,12 +920,12 @@
 	.pg-topic button { background: transparent; border: 0; color: inherit; padding: 0 2px; min-height: 0;
 		font-size: 14px; line-height: 1; opacity: .65; }
 	.pg-topic button:hover { opacity: 1; filter: none; }
-	.pg-policy-explain { margin-top: 18px; padding: 11px 12px; border-radius: 10px; background: var(--panel2);
-		border: 1px solid var(--border); font-size: 12px; line-height: 1.6; color: var(--muted); }
-	.pg-policy-explain b { color: var(--text); font-weight: 600; }
-	.pg-policy-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px;
-		position: sticky; bottom: 0; background: var(--panel); padding-top: 12px;
-		border-top: 1px solid var(--border); }
+	.pg-policy-explain { margin-top: var(--pg-5); font-size: var(--pg-meta); line-height: var(--pg-lh-body);
+		color: var(--faint); }
+	.pg-policy-explain b { color: var(--muted); font-weight: 600; }
+	.pg-policy-actions { display: flex; gap: var(--pg-2); flex-wrap: wrap; align-items: center;
+		margin-top: var(--pg-5); position: sticky; bottom: calc(var(--pg-4) * -1); background: var(--panel);
+		padding: var(--pg-3) 0 var(--pg-4); border-top: 1px solid var(--border); }
 	/* Below 1180px the graph stops being readable beside a 468px chat: stack it,
 	   graph first, each with its own height rather than a shared viewport row. */
 	@media (max-width: 1180px) {
@@ -4288,7 +4307,7 @@ function viewPlayground(v) {
 					</div>
 					<button class="pg-icon-btn" aria-pressed="${PG.json}" title="Show what was extracted, as JSON"
 						onclick="pgToggleJson()" style="font:600 11px/1 var(--font-mono);width:auto;padding:0 10px">JSON</button>
-					<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="What this chat remembers"
+					<button class="pg-icon-btn" aria-pressed="${PG.panel === "memory"}" title="Memory rules for this chat"
 						onclick="pgTogglePanel('memory')" style="width:auto;padding:0 10px;font-size:12.5px">Memory</button>
 				</div>
 				${preview ? `<div class="pg-preview-bar"><b>Preview</b> — a sample world, so you can see how memory behaves. Nothing here is saved to your account.</div>` : ""}
@@ -4862,7 +4881,7 @@ function pgMenu(which) {
 
 function pgExampleMenu() {
 	return `<div class="pg-menu" role="menu">
-		<div class="pg-menu-label">Read-only examples</div>
+		<div class="pg-menu-label" role="none">Read-only examples</div>
 		${PG_SCENARIOS.map((s, i) => `
 			<button role="menuitem" class="${PG.mode === "preview" && PG.scenario === i ? "active" : ""}"
 				onclick="pgPickExample(${i})">
@@ -4873,16 +4892,31 @@ function pgExampleMenu() {
 }
 
 function pgThreadMenu() {
-	const rows = PG.threads.map((t) => `
-		<button role="menuitem" class="${PG.mode === "live" && t.id === PG.threadId ? "active" : ""}"
-			onclick="pgOpenThread('${esc(t.id)}')">
-			<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title || "New chat")}</span>
-			${PG.mode === "live" && t.id === PG.threadId ? `<span class="pg-menu-check">✓</span>` : ""}
-		</button>`).join("");
+	// Delete sits on the row, always visible. It used to exist only as CSS for a
+	// list that was never built, and playgroundDeleteThread() had no caller at
+	// all — so there was no way to remove a chat from anywhere in the product.
+	// Not hover-only either: on a touch screen there is no hover, and a control
+	// that only appears to a mouse does not exist for half the people using it.
+	const rows = PG.threads.map((t) => {
+		const open = PG.mode === "live" && t.id === PG.threadId;
+		// role="none" on the wrapper: a role="menu" may only contain menuitems, and
+		// a bare div between them breaks the menu for a screen reader.
+		return `<div class="pg-thread-row${open ? " active" : ""}" role="none">
+			<button role="menuitem" class="pg-thread-open" onclick="pgOpenThread('${esc(t.id)}')">
+				<span class="pg-thread-name">${esc(t.title || "New chat")}</span>
+				${open ? `<span class="pg-menu-check">✓</span>` : ""}
+			</button>
+			<button role="menuitem" class="pg-thread-del" title="Delete this chat"
+				aria-label="Delete ${esc(t.title || "New chat")}"
+				onclick="event.stopPropagation();playgroundDeleteThread('${esc(t.id)}')">✕</button>
+		</div>`;
+	}).join("");
 	const full = PG.threads.length >= (PG.limits.maxThreads ?? 5);
 	return `<div class="pg-menu" role="menu">
-		<div class="pg-menu-label">Your chats — these capture for real</div>
-		${rows || `<div class="pg-note" style="padding:4px 10px 10px">No chats yet. Start one to write to your own memory.</div>`}
+		<div class="pg-menu-label" role="none">Your chats — these capture for real</div>
+		${rows
+			? `<div class="pg-thread-list" role="none">${rows}</div>`
+			: `<div class="pg-note" style="padding:4px 10px 10px">No chats yet. Start one to write to your own memory.</div>`}
 		<button role="menuitem" onclick="pgNewThread()" ${full ? "disabled" : ""} style="border-top:1px solid var(--border);margin-top:6px;padding-top:11px">
 			<span>+ New chat<small>${PG.threads.length} of ${PG.limits.maxThreads ?? 5} used${PG.limits.dailyMessages
 				? ` · ${Math.max(0, PG.limits.dailyMessages - (PG.limits.usedToday ?? 0))} messages left today`
@@ -5197,14 +5231,12 @@ function renderPlaygroundSettings(side) {
 				<div class="pg-topics">${chips(draft.includeTopics, "includeTopics")}</div>
 				<input id="pgIncludeInput" placeholder="Add a topic, then Enter" maxlength="80"
 					onkeydown="if(event.key==='Enter'){event.preventDefault();pgPolicyAdd('includeTopics',this)}" />
-				<div class="pg-note" style="margin-top:6px">Anything not matching one of these is not stored.</div>
 			` : ""}
 
 			<label for="pgExcludeInput">Never remember</label>
 			<div class="pg-topics">${chips(draft.excludeTopics, "excludeTopics")}</div>
 			<input id="pgExcludeInput" placeholder="Add a topic, then Enter" maxlength="80"
 				onkeydown="if(event.key==='Enter'){event.preventDefault();pgPolicyAdd('excludeTopics',this)}" />
-			<div class="pg-note" style="margin-top:6px">Always wins, including over the list above.</div>
 		`}
 
 		<label>Custom categories</label>
@@ -5212,10 +5244,8 @@ function renderPlaygroundSettings(side) {
 		<button class="ghost mini" style="margin-top:6px" onclick="playgroundCategoryAdd()">Add category</button>
 
 		<div class="pg-policy-explain">
-			Topic rules are enforced before anything is written — a model that proposes
-			an excluded fact still cannot store it. This applies to <b>future turns in this
-			chat only</b>, and can narrow your account rules but never widen them.
-			Messages already sent are unaffected.
+			Enforced before anything is written, on <b>future turns in this chat only</b>.
+			Can narrow your account rules, never widen them.
 		</div>
 
 		<div class="pg-policy-actions">
@@ -5292,12 +5322,33 @@ async function playgroundApplySettings() {
 			excludeTopics: [...res.settings.excludeTopics],
 			customCategories: res.settings.customCategories.map((c) => ({ ...c })),
 		};
-		PG.settingsStatus = "Applied to this chat.";
-		renderPlaygroundSide();
+		PG.settingsStatus = "";
+		// Back to the conversation. Rules only affect what you say NEXT, so
+		// leaving somebody parked on the form after they saved makes them hunt
+		// for the way back to the only place the change can show itself.
+		pgReturnToChat(pgPolicySummaryLine(res.settings));
 	} catch (error) {
 		PG.settingsStatus = error.message || "Could not apply. Try again.";
 		renderPlaygroundSide();
 	}
+}
+
+/** What was actually saved, in one line, for the confirmation. */
+function pgPolicySummaryLine(settings) {
+	const includes = settings?.includeTopics ?? [];
+	const excludes = settings?.excludeTopics ?? [];
+	if (settings?.captureMode === "off") return "Capture is off for this chat.";
+	const parts = [];
+	if (settings?.captureMode === "only_topics" && includes.length) parts.push(`only ${includes.join(", ")}`);
+	if (excludes.length) parts.push(`never ${excludes.join(", ")}`);
+	return parts.length ? `Applied — ${parts.join("; ")}.` : "Applied — back to your account rules.";
+}
+
+/** Close the Memory panel and put the chat back on screen. */
+function pgReturnToChat(message) {
+	PG.panel = null;
+	renderView();
+	if (message) toast(message);
 }
 
 async function playgroundResetSettings() {
@@ -5307,8 +5358,10 @@ async function playgroundResetSettings() {
 		|| (saved.customCategories ?? []).length;
 	if (hasSaved && !confirm("Clear the memory policy saved for this chat? Future turns go back to your account rules.")) return;
 	PG.settingsDraft = { captureMode: "standard", includeTopics: [], excludeTopics: [], customCategories: [] };
+	// A reset with nothing saved is just clearing the form — there is nothing to
+	// send, but it still returns you to the chat, because the button did its job.
 	if (PG.threadId && hasSaved) await playgroundApplySettings();
-	else renderPlaygroundSide();
+	else pgReturnToChat("Cleared — this chat uses your account rules.");
 }
 
 /** `-30d` / `now` → a wall-clock stamp, so preview facts read like real ones. */
@@ -5529,10 +5582,41 @@ function pgLiveStream() {
 	}).join("") + (PG.sending ? `<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>` : "");
 }
 
+/**
+ * Openers for a real chat that has nothing in it yet.
+ *
+ * A new live chat used to be one grey paragraph and an empty box — every prompt
+ * vanished the moment somebody left the examples, at exactly the point they had
+ * least idea what to say. These fill the composer rather than sending: this
+ * writes to their real memory, so the send stays their decision.
+ */
+const PG_LIVE_OPENERS = [
+	"I've decided to use Postgres for the new service.",
+	"My co-founder is Aisha and she runs design.",
+	"We ship on Fridays, never on Mondays.",
+	"I'm allergic to shellfish.",
+];
+
+function pgSeedMessage(index) {
+	const input = $("#pgInput");
+	if (!input) return;
+	input.value = PG_LIVE_OPENERS[index] ?? "";
+	PG.draft = input.value;
+	playgroundGrow(input);
+	input.focus();
+	input.setSelectionRange(input.value.length, input.value.length);
+}
+
 function renderPgSuggest() {
 	const box = $("#pgSuggest");
 	if (!box) return;
-	if (PG.mode !== "preview") { box.innerHTML = ""; return; }
+	if (PG.mode !== "preview") {
+		box.innerHTML = PG.messages.length || PG.sending || PG.notice
+			? ""
+			: PG_LIVE_OPENERS.slice(0, 2).map((text, i) =>
+				`<button onclick="pgSeedMessage(${i})" title="${esc(text)}">${esc(text)}</button>`).join("");
+		return;
+	}
 	const sc = pgScenario();
 	const remaining = sc.turns.slice(PG.turn);
 	if (!remaining.length) {
@@ -5715,10 +5799,18 @@ async function playgroundOpenThread(id) {
 }
 
 async function playgroundDeleteThread(id) {
+	const thread = PG.threads.find((t) => t.id === id);
+	const name = thread?.title || "this chat";
+	// Say exactly what goes and what stays. Deleting the transcript looks like
+	// deleting everything it produced, and it is not: the memories captured from
+	// those turns are in your memory and this does not touch them. Implying
+	// otherwise would be the worst kind of quiet lie in a memory product.
+	if (!confirm(`Delete "${name}"?\n\nThe conversation is removed.\n\nMemories it already captured stay in your memory — remove those from the Memories page.`)) return;
 	try {
 		await api("/v1/playground/thread", { method: "POST", body: JSON.stringify({ threadId: id, delete: true }) });
-		if (PG.threadId === id) { PG.threadId = null; PG.messages = []; }
+		if (PG.threadId === id) { PG.threadId = null; PG.messages = []; PG.settings = null; PG.settingsDraft = null; }
 		await loadPlayground(PG.threadId);
+		toast(`Deleted "${name}".`);
 	} catch (e) { toast(e.message || "Could not delete that chat.", true); }
 }
 
@@ -6601,7 +6693,9 @@ function viewRules(v) {
 	form.style.maxWidth = "920px";
 	form.innerHTML = `
 		<div class="form-row"><h3>Custom instructions</h3>
-			<div class="help">Plain-language guidance for the extractors, e.g. "Always save exam and study progress. Never save jokes or small talk."</div>
+			<div class="help">Plain-language guidance for the extractors, e.g. "Always save exam and study progress. Never save jokes or small talk."
+				A <b>"never save X"</b> sentence is also compiled into a hard rule and enforced. Anything else here is guidance a model can miss —
+				to keep memory to certain topics only, use <b>Only collect</b> below, where it is enforced.</div>
 			<textarea id="rule-instructions" placeholder="Always save… Never save…" oninput="rulesStatusClear()"></textarea></div>
 		<div class="form-row" style="margin-top:12px"><h3>Only collect (includes)</h3>
 			<div class="help">Comma-separated topics/keywords. When set, only content matching at least one term is saved.</div>

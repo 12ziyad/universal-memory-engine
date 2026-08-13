@@ -214,16 +214,19 @@ describe("destructive actions ask first", () => {
 		};
 		let applied = 0;
 		let asked = null;
+		let returned = 0;
 		const built = build(["playgroundResetSettings"], {
 			PG,
 			confirm: (msg) => { asked = msg; return false; },
 			playgroundApplySettings: async () => { applied++; },
+			pgReturnToChat: () => { returned++; },
 			renderPlaygroundSide: () => {},
 		});
 
 		await built.playgroundResetSettings();
 		expect(asked).toContain("Clear the memory policy saved for this chat");
 		expect(applied).toBe(0);                                        // declined → nothing erased
+		expect(returned).toBe(0);                                       // and they stay on the form
 		expect(PG.settings.includeTopics).toEqual(["thesis"]);
 		expect(PG.settings.captureMode).toBe("only_topics");
 	});
@@ -235,16 +238,20 @@ describe("destructive actions ask first", () => {
 			settingsDraft: { captureMode: "standard", includeTopics: ["typed but never applied"], excludeTopics: [], customCategories: [] },
 		};
 		let asked = false;
+		let returnedWith = null;
 		const built = build(["playgroundResetSettings"], {
 			PG,
 			confirm: () => { asked = true; return true; },
 			playgroundApplySettings: async () => {},
+			pgReturnToChat: (msg) => { returnedWith = msg; },
 			renderPlaygroundSide: () => {},
 		});
 		await built.playgroundResetSettings();
 		expect(asked).toBe(false);
 		expect(PG.settingsDraft.includeTopics).toEqual([]);
 		expect(PG.settingsDraft.captureMode).toBe("standard");
+		// The button still did its job, so it still hands the conversation back.
+		expect(returnedWith).toContain("account rules");
 	});
 });
 
