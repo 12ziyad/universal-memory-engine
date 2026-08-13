@@ -383,6 +383,36 @@ describe("the playground screen", () => {
 		expect(script).toContain('<span class="live">present</span>');
 	});
 
+	/**
+	 * The context block did not collapse itself — the stream scrolled it out of
+	 * view. Every render jumped to the bottom, so a block somebody had opened
+	 * and was reading vanished the moment the next turn landed, which is
+	 * indistinguishable from it having closed.
+	 */
+	it("does not scroll a reader away from an open context block", async () => {
+		const { script, html } = await page();
+		expect(script).toContain("const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;");
+		expect(script).toContain("box.scrollTop = wasAtBottom ? box.scrollHeight : keptTop;");
+		// And it must not be a scrollable panel inside a scrollable stream.
+		expect(html).not.toMatch(/\.pg-ctx-body \{[^}]*overflow-y: auto/);
+		// Opening one brings it into view rather than fighting the scroll.
+		expect(script).toContain('blocks[index]?.scrollIntoView({ block: "nearest"');
+	});
+
+	it("can be zoomed by pointer and by keyboard alone", async () => {
+		const { script, html } = await page();
+		// The transform has to be APPLIED, not only written as a variable — it
+		// was not, so every zoom moved the number and nothing on screen.
+		expect(html).toContain(".pg-world { transform: var(--vt, none);");
+		expect(script).toContain("function pgZoomInAt(");
+		expect(script).toContain("function pgGraphKeys(");
+		expect(script).toContain('ArrowLeft: () => { PG.view.x += step; pgApplyView(); }');
+		expect(script).toContain('ondblclick="pgZoomInAt(event)"');
+		// Relation labels ride the edges and appear once there is room to read them.
+		expect(html).toContain(".pg-canvas.is-close .pgn-rel { opacity: .9; }");
+		expect(script).toContain('classList.toggle("is-close", PG.view.k >= 1.6)');
+	});
+
 	it("animates arrival without moving what was already there", async () => {
 		const { script, html } = await page();
 		// Positions are computed for every node the scenario will ever show, so a

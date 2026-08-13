@@ -588,6 +588,7 @@
 		font: 500 13px/1 var(--font-ui); box-shadow: var(--shadow-sm); }
 	.pg-canvas { flex: 1; min-height: 0; position: relative; }
 	.pg-canvas svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+	.pg-canvas svg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.pg-canvas svg:active { cursor: grabbing; }
 	/* The graph keeps its own dark canvas in both themes, exactly as the Graph
 	   view does: the cluster colours are tuned for it and lose their separation
@@ -622,8 +623,8 @@
 	.pg-zoom { position: absolute; right: 14px; bottom: 14px; z-index: 3; display: flex; flex-direction: column;
 		align-items: stretch; border: 1px solid var(--border2); border-radius: 9px; overflow: hidden;
 		box-shadow: var(--shadow-sm); background: var(--panel); }
-	.pg-zoom button { width: 34px; height: 32px; border: 0; border-radius: 0; background: transparent;
-		color: var(--muted); font-size: 16px; line-height: 1; padding: 0; }
+	.pg-zoom button { width: 40px; height: 38px; border: 0; border-radius: 0; background: transparent;
+		color: var(--text); font-size: 19px; line-height: 1; padding: 0; }
 	.pg-zoom span { font: 500 10px/1 var(--font-mono); color: var(--faint); text-align: center;
 		padding: 5px 0; border-block: 1px solid var(--border); }
 	.pg-zoom button:last-child { border-top: 1px solid var(--border); font-size: 13px; }
@@ -738,8 +739,10 @@
 	.pg-ctx-title small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
 	.pg-ctx-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
 		font-size: 12.5px; color: var(--muted); }
+	/* No inner scroll: a scrollable panel inside a scrollable stream hides its
+	   own content and feels like it is collapsing. It expands to fit instead. */
 	.pg-ctx-body { border-top: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-		padding: 12px 13px; max-height: 340px; overflow-y: auto; }
+		padding: 12px 13px; }
 	.pg-ctx-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
 	.pg-ctx-sec { font: 600 11px/1 var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
 		color: var(--faint); margin: 14px 0 7px; }
@@ -4540,7 +4543,8 @@ function renderPgGraph(animate = false) {
 			aria-label="Memory graph: ${hulls.length} clusters, ${nodes.length} nodes, ${edges.length} relations"
 			onpointerdown="pgPointerDown(event)" onpointermove="pgPointerMove(event)"
 			onpointerup="pgPointerUp(event)" onpointercancel="pgPointerUp(event)"
-			onwheel="pgWheel(event)" ondblclick="pgResetView()">
+			onwheel="pgWheel(event)" ondblclick="pgZoomInAt(event)"
+			tabindex="0" onkeydown="pgGraphKeys(event)">
 			<g class="pg-world" id="pgWorld" style="transform-origin:${PG_VIEW_W / 2}px ${PG_VIEW_H / 2}px">
 				${hulls.map((h) => {
 					const on = PG.gfilter === "all" || PG.gfilter === h.id;
@@ -4663,11 +4667,36 @@ function pgZoom(factor) {
 
 function pgResetView() { PG.view = { x: 0, y: 0, k: 1 }; pgApplyView(); }
 
+/** Double-click to go in, where you clicked. Fit is its own button. */
+function pgZoomInAt(event) {
+	pgZoomAt(PG.view.k * 1.6, pgToUser(event.currentTarget, event.clientX, event.clientY));
+}
+
+/**
+ * Keyboard control for the graph. +/- zoom, 0 fits, arrows pan. The canvas is
+ * focusable so this is reachable without a pointer at all.
+ */
+function pgGraphKeys(event) {
+	const step = event.shiftKey ? 120 : 60;
+	const handled = {
+		"+": () => pgZoom(1.3), "=": () => pgZoom(1.3),
+		"-": () => pgZoom(0.77), "_": () => pgZoom(0.77),
+		"0": () => pgResetView(),
+		ArrowLeft: () => { PG.view.x += step; pgApplyView(); },
+		ArrowRight: () => { PG.view.x -= step; pgApplyView(); },
+		ArrowUp: () => { PG.view.y += step; pgApplyView(); },
+		ArrowDown: () => { PG.view.y -= step; pgApplyView(); },
+	}[event.key];
+	if (!handled) return;
+	event.preventDefault();
+	handled();
+}
+
 function pgWheel(event) {
 	event.preventDefault();
 	// Trackpads report fractional deltas and mice report ~100 per notch; the
 	// exponential keeps both feeling like the same gesture.
-	const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.002));
+	const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.08 : 0.0035));
 	pgZoomAt(PG.view.k * factor, pgToUser(event.currentTarget, event.clientX, event.clientY));
 }
 
@@ -5228,9 +5257,15 @@ function pgContextBlock(entry, index) {
  */
 function pgToggleCtx(index) {
 	if (!(PG.openCtx instanceof Set)) PG.openCtx = new Set();
-	if (PG.openCtx.has(index)) PG.openCtx.delete(index);
-	else PG.openCtx.add(index);
+	const opening = !PG.openCtx.has(index);
+	if (opening) PG.openCtx.add(index);
+	else PG.openCtx.delete(index);
 	renderPlaygroundMessages();
+	// Keep the block the person just opened where they can see it.
+	if (opening) {
+		const blocks = document.querySelectorAll("#pgMessages .pg-ctx");
+		blocks[index]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	}
 	pgTourPosition();
 }
 
@@ -5252,8 +5287,13 @@ function renderPlaygroundMessages() {
 	const box = $("#pgMessages");
 	if (!box) return;
 	if (PG.notice && PG.mode === "live") { box.innerHTML = `<div class="pg-empty">${esc(PG.notice)}</div>`; return; }
+	// Follow the conversation only if they were already at the bottom. Scrolling
+	// unconditionally rips an expanded context block out of view the moment the
+	// next turn lands, which reads as the block having collapsed itself.
+	const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+	const keptTop = box.scrollTop;
 	box.innerHTML = PG.mode === "preview" ? pgPreviewStream() : pgLiveStream();
-	box.scrollTop = box.scrollHeight;
+	box.scrollTop = wasAtBottom ? box.scrollHeight : keptTop;
 }
 
 function pgPreviewStream() {
