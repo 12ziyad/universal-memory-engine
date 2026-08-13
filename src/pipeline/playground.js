@@ -18,7 +18,7 @@ import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
 import { responseText } from "./llm.js";
 import { runObserveMessagesCommand, runRecallCommand } from "./commands.js";
-import { getMemoryRules } from "./rules.js";
+import { getMemoryRules, rulesRejection } from "./rules.js";
 import { threadRulesFrom } from "./playground_settings.js";
 import { runAi } from "../lib/ai_meter.js";
 
@@ -233,6 +233,94 @@ function buildChatMessages(history, message, context) {
 
 const REPLY_FALLBACK = "I could not think of a reply just then. Your message was still read for memory — try sending it again.";
 
+/**
+ * Preview extraction: what Itsuki WOULD take from a sentence, without taking it.
+ *
+ * The preview examples are scripted, so a typed sentence used to fall through
+ * to a canned apology with no entities and no graph movement — which reads as
+ * the product not working rather than as the example running out of script.
+ *
+ * This runs one real model call and persists NOTHING: no source packet, no
+ * episode, no node, no receipt. It is the honest way to answer "what would you
+ * remember from this?" inside a world that is explicitly read-only. The rules
+ * filter runs first, so a preview cannot show a fact the account's own policy
+ * would have refused.
+ */
+const PREVIEW_SYSTEM = `You read one sentence and say what is worth remembering long term.
+
+Answer in plain lines, nothing else, in this exact format:
+REPLY: one or two warm sentences about what they said
+FACT: a short third-person statement that will still be true next month
+ENTITY: name | kind
+
+Use at most 3 FACT lines and 3 ENTITY lines, and omit them entirely if the
+sentence holds nothing durable. kind is one word: person, place, project,
+decision, preference, event, organization. Never invent anything not stated.`;
+
+/**
+ * Line output, not JSON.
+ *
+ * The small instruct model this runs on is fast and warm but unreliable at
+ * emitting a closed JSON object — it truncates mid-string, and a half-written
+ * object parses to nothing at all. Line prefixes degrade instead: a truncated
+ * response loses its last line and keeps every complete one before it.
+ */
+function parsePreviewLines(raw) {
+	const reply = [];
+	const facts = [];
+	const entities = [];
+	for (const line of String(raw ?? "").split(/\r?\n/)) {
+		const text = line.trim();
+		const value = text.replace(/^[A-Z]+:\s*/, "").trim();
+		if (!value) continue;
+		if (/^REPLY:/i.test(text)) reply.push(value);
+		else if (/^FACT:/i.test(text) && facts.length < 3) facts.push(value.slice(0, 200));
+		else if (/^ENTITY:/i.test(text) && entities.length < 3) {
+			const [name, kind] = value.split("|").map((part) => part.trim());
+			if (name) entities.push({ name: name.slice(0, 40), kind: (kind || "entity").slice(0, 24), summary: "" });
+		}
+	}
+	// A small model often ignores the format and simply answers. That prose is
+	// still a real reply, so it is used rather than showing an empty turn — but
+	// facts and entities stay empty, because nothing was actually structured and
+	// inventing them from prose would be making memory up.
+	const spoken = reply.join(" ").trim()
+		|| String(raw ?? "").split(/\r?\n/).map((l) => l.trim())
+			.filter((l) => l && !/^(FACT|ENTITY):/i.test(l)).join(" ").trim();
+	return { reply: spoken.replace(/^REPLY:\s*/i, "").slice(0, 400), facts, entities };
+}
+
+export async function playgroundPreviewExtract(env, text, { rules = null } = {}) {
+	const message = String(text ?? "").trim().slice(0, MAX_MESSAGE_CHARS);
+	if (!message) return { ok: false, reason: "empty" };
+	// The account's own policy still applies to what a preview may echo back.
+	const refusal = rules ? rulesRejection(rules, message) : null;
+	if (refusal) return { ok: true, blocked: refusal, reply: null, entities: [], facts: [] };
+	if (!env.AI) return { ok: true, unavailable: true, reply: null, entities: [], facts: [] };
+	try {
+		const res = await runAi(env, chatModel(env), {
+			messages: [
+				{ role: "system", content: PREVIEW_SYSTEM },
+				{ role: "user", content: message },
+			],
+			temperature: 0.2,
+			max_tokens: 300,
+		}, undefined, { task: "playground_preview" });
+		const parsed = parsePreviewLines(responseText(res));
+		return {
+			ok: true,
+			persisted: false,
+			reply: parsed.reply || null,
+			entities: parsed.entities.map((e) => ({ ...e, summary: `Named in this message as a ${e.kind}.` })),
+			facts: parsed.facts,
+		};
+	} catch (error) {
+		// Log the shape, never the content: this runs on whatever a person typed.
+		console.warn("playground preview extract failed:", error?.message ?? error);
+		return { ok: true, unavailable: true, reply: null, entities: [], facts: [] };
+	}
+}
+
 async function chatReply(env, messages) {
 	if (!env.AI) return REPLY_FALLBACK;
 	try {
@@ -250,11 +338,6 @@ async function chatReply(env, messages) {
 	}
 }
 
-/**
- * One playground turn: recall → reply → capture. Both memory steps are the
- * shared commands, so anything captured here is identical to what a connected
- * Claude or ChatGPT would have captured from the same sentence.
- */
 export async function playgroundTurn(env, ctx, userId, input = {}) {
 	const limits = playgroundLimits(env);
 	const message = String(input.message ?? "").trim().slice(0, MAX_MESSAGE_CHARS);

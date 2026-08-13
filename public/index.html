@@ -3636,7 +3636,7 @@ const PG = {
 	// reply, and a graph that never touches the account's memory. mode "live" is
 	// the real chat — same panel, real capture, real receipts.
 	mode: "preview", scenario: 0, turn: 0, thinking: false, settling: false,
-	preview: [], openCtx: new Set(), json: false, menu: null,
+	preview: [], openCtx: new Set(), json: false, menu: null, typedNodes: [], scrollToLatest: false,
 	view: { x: 0, y: 0, k: 1 }, drag: null, pinch: null, pointers: new Map(), gsearch: "", gfilter: "all",
 	tour: { on: false, step: 0 },
 };
@@ -4461,7 +4461,24 @@ function pgGraphData() {
 	const pos = pgLayoutFor(sc);
 	const shown = [...sc.seed];
 	for (let i = 0; i < PG.turn; i++) shown.push(...(sc.turns[i].add ?? []).map((n) => ({ ...n, turn: i })));
-	return shown.map((n) => ({ ...n, ...(pos.get(n.n) ?? { x: 500, y: 340 }), isNew: n.turn === PG.turn - 1 }));
+	const placed = shown.map((n) => ({ ...n, ...(pos.get(n.n) ?? { x: 500, y: 340 }), isNew: n.turn === PG.turn - 1 }));
+
+	// Entities the engine pulled out of something typed. They belong to no
+	// scripted cluster, so they ring the field's edge rather than pretending to
+	// have been part of the scenario all along.
+	const typed = PG.typedNodes ?? [];
+	if (!typed.length) return placed;
+	const newest = typed.length ? typed[typed.length - 1].turn : null;
+	const rnd = pgRng(`${sc.id}:typed`);
+	return placed.concat(typed.map((n, i) => {
+		const a = -Math.PI / 2 + (i / Math.max(typed.length, 5)) * Math.PI * 2 + (rnd() - .5) * .3;
+		return {
+			...n,
+			x: PG_VIEW_W / 2 + Math.cos(a) * 500,
+			y: PG_VIEW_H / 2 + Math.sin(a) * 350,
+			isNew: n.turn === newest,
+		};
+	}));
 }
 
 /** Hulls sized to their members, so a cluster grows when a memory joins it. */
@@ -4794,7 +4811,7 @@ function pgThreadMenu() {
 
 function pgPickExample(index) {
 	PG.mode = "preview"; PG.scenario = index; PG.turn = 0; PG.preview = [];
-	PG.menu = null; PG.openCtx = new Set(); PG.thinking = false;
+	PG.menu = null; PG.openCtx = new Set(); PG.thinking = false; PG.typedNodes = [];
 	pgResetView();
 	renderView();
 }
@@ -4810,7 +4827,7 @@ function pgRestart() {
 		+ `The ${PG.preview.length} message${PG.preview.length === 1 ? "" : "s"} in this example and the memories they added will be cleared. `
 		+ `Nothing in your own memory is affected.`,
 	)) return;
-	PG.turn = 0; PG.preview = []; PG.openCtx = new Set(); PG.thinking = false;
+	PG.turn = 0; PG.preview = []; PG.openCtx = new Set(); PG.thinking = false; PG.typedNodes = [];
 	pgResetView();
 	renderView();
 }
@@ -4876,7 +4893,7 @@ function pgTourMaybeAutoStart() {
 function pgTourStart(manual) {
 	if (manual) {
 		PG.mode = "preview";
-		PG.turn = 0; PG.preview = []; PG.openCtx = new Set(); PG.thinking = false;
+		PG.turn = 0; PG.preview = []; PG.openCtx = new Set(); PG.thinking = false; PG.typedNodes = [];
 		try { localStorage.setItem(PG_TOUR_KEY, "3"); } catch {}
 	}
 	PG.tour = { ...PG.tour, on: true, step: 0 };
@@ -5293,7 +5310,17 @@ function renderPlaygroundMessages() {
 	const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 	const keptTop = box.scrollTop;
 	box.innerHTML = PG.mode === "preview" ? pgPreviewStream() : pgLiveStream();
-	box.scrollTop = wasAtBottom ? box.scrollHeight : keptTop;
+	if (PG.scrollToLatest) {
+		// They just sent something, so put THEIR message at the top: the reply
+		// and its context block then read downward from it. Jumping to the very
+		// bottom would bury the context block that explains the answer.
+		PG.scrollToLatest = false;
+		const mine = box.querySelectorAll(".pg-msg.user");
+		const last = mine[mine.length - 1];
+		box.scrollTop = last ? Math.max(0, last.offsetTop - box.offsetTop - 8) : box.scrollHeight;
+	} else {
+		box.scrollTop = wasAtBottom ? box.scrollHeight : keptTop;
+	}
 }
 
 function pgPreviewStream() {
@@ -5397,14 +5424,15 @@ async function pgSendScripted(index) {
 	const turn = sc.turns[index];
 	if (!turn || PG.thinking) return;
 	PG.thinking = true;
+	PG.scrollToLatest = true;
 	PG.preview = [...PG.preview, { ...turn, pending: true }];
 	renderPlaygroundMessages();
 	renderPgSuggest();
-	await pgWait(620 + Math.random() * 420);
+	await pgWait(340 + Math.random() * 200);
 	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1 ? { ...e, pending: false } : e));
 	pgOpenCtx(PG.preview.length - 1);
 	renderPlaygroundMessages();
-	await pgWait(420);
+	await pgWait(260);
 	// The graph moves only once the turn has actually produced something.
 	PG.turn = Math.max(PG.turn, index + 1);
 	PG.thinking = false;
@@ -5476,17 +5504,50 @@ async function pgSendTyped(message) {
 		if (score > bestScore) { bestScore = score; best = i; }
 	});
 	if (best >= 0 && bestScore >= 1) return pgSendScripted(best);
-	// No pretending: a preview world cannot answer outside itself.
+
+	// Outside the script, so ask the engine what it would take from this. The
+	// answer is real — one model call, nothing persisted — which is the whole
+	// point of a preview that is honest about being read-only.
 	PG.thinking = true;
+	PG.scrollToLatest = true;
 	PG.preview = [...PG.preview, { p: message, pending: true, add: [], facts: [], ents: [] }];
 	renderPlaygroundMessages();
 	renderPgSuggest();
-	await pgWait(560 + Math.random() * 380);
-	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1
-		? { ...e, pending: false, a: `This is a read-only preview of "${sc.name}", so I can only answer inside that scenario — nothing here is written to your memory. Try one of the suggestions below, or open a chat from Threads to talk to your own memory for real.` }
-		: e));
+	let result = null;
+	try {
+		result = await api("/v1/playground/preview", { method: "POST", body: JSON.stringify({ message }) });
+	} catch { result = null; }
+
+	const index = PG.preview.length - 1;
+	const entities = result?.entities ?? [];
+	const facts = result?.facts ?? [];
+	// Anything the model named becomes a node in a cluster of its own, so the
+	// graph moves for a typed sentence exactly as it does for a scripted one.
+	const add = entities.map((e) => ({ n: e.name, c: "general_memory", of: null, typed: true }));
+	const entry = {
+		p: message,
+		pending: false,
+		add,
+		links: [],
+		facts: facts.map((f) => ({ f, from: "now" })),
+		ents: entities.map((e) => ({ n: e.name, l: e.kind || "Entity", s: e.summary || "Named in this message." })),
+		a: result?.blocked
+			? `That one is blocked by your own memory rules (${esc(result.blocked).replace(/_/g, " ")}), so nothing was read from it — which is the rule doing its job.`
+			: result?.unavailable
+				? "I could not reach the extraction model just then, so there is nothing to show for that message. Nothing was stored either way."
+				: result?.reply
+					|| (entities.length || facts.length
+						? "Here is what I would keep from that."
+						: "Nothing in that would still be true next month, so I would keep none of it."),
+		previewOnly: true,
+	};
+	PG.preview = PG.preview.map((e, i) => (i === index ? entry : e));
+	pgOpenCtx(index);
+	PG.typedNodes = [...(PG.typedNodes ?? []), ...add.map((n) => ({ ...n, turn: `typed-${index}` }))];
 	PG.thinking = false;
+	PG.scrollToLatest = true;
 	renderPlaygroundMessages();
+	renderPgGraph(add.length > 0);
 	renderPgSuggest();
 }
 

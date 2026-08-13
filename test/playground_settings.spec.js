@@ -231,3 +231,58 @@ describe("the settings tab", () => {
 		expect(script).toContain('aria-pressed="${PG.panel === "memory"}"');
 	});
 });
+
+describe("preview extraction writes nothing", () => {
+	/**
+	 * The preview answers "what would you remember from this?" by running the
+	 * model for real. The whole claim rests on it persisting nothing, so this
+	 * counts rows rather than trusting the handler to be careful.
+	 */
+	it("leaves no memory, packet, episode or receipt behind", async () => {
+		const me = await account("pg-preview");
+		const tables = ["nodes", "slices", "events", "source_packets", "receipts", "playground_messages", "playground_threads"];
+		const countAll = async () => {
+			const out = {};
+			for (const table of tables) {
+				const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = ?`)
+					.bind(me.user.id).first();
+				out[table] = Number(row?.n ?? 0);
+			}
+			return out;
+		};
+
+		const before = await countAll();
+		const res = await request("/v1/playground/preview", post({
+			message: "I just moved to Lisbon and started running with a club there.",
+		}, me.cookie));
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.ok).toBe(true);
+		// Never claims to have stored anything.
+		expect(body.persisted ?? false).toBe(false);
+
+		expect(await countAll()).toEqual(before);
+	});
+
+	it("refuses what the account's own rules refuse, before the model sees it", async () => {
+		const me = await account("pg-preview-rules");
+		await saveMemoryRules(env, me.user.id, { excludes: ["politics"] });
+		const res = await request("/v1/playground/preview", post({
+			message: "I follow politics podcasts every night.",
+		}, me.cookie));
+		const body = await res.json();
+		expect(body.blocked).toBe("excluded_by_rule");
+		expect(body.entities).toEqual([]);
+		expect(body.facts).toEqual([]);
+		expect(body.reply).toBeNull();
+	});
+
+	it("needs a session — a bearer key must not spend a model call", async () => {
+		const res = await request("/v1/playground/preview", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ message: "hello" }),
+		});
+		expect(res.status).toBe(401);
+	});
+});

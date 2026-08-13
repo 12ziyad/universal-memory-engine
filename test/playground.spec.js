@@ -272,10 +272,19 @@ describe("the playground screen", () => {
 	it("never writes to memory from a preview", async () => {
 		const { script } = await page();
 		expect(script).toContain('mode: "preview"');
-		for (const fn of ["pgSendScripted", "pgSendTyped", "pgPickExample", "pgRestart"]) {
+		for (const fn of ["pgSendScripted", "pgPickExample", "pgRestart"]) {
 			const body = script.slice(script.indexOf(`function ${fn}(`));
 			const source = body.slice(0, body.indexOf("\n}\n") + 2);
 			expect(source, `${fn} must not call the API`).not.toContain("api(");
+		}
+		// A typed sentence DOES reach the server — it asks the engine what it
+		// would remember. That endpoint persists nothing; what a preview must
+		// never touch is the door that writes.
+		const typed = script.slice(script.indexOf("async function pgSendTyped("));
+		const typedBody = typed.slice(0, typed.indexOf("\n}\n") + 2);
+		expect(typedBody).toContain('api("/v1/playground/preview"');
+		for (const writeDoor of ["/v1/playground/chat", "/v1/save", "/v1/ingest", "/v1/playground/thread"]) {
+			expect(typedBody, `a preview must never call ${writeDoor}`).not.toContain(writeDoor);
 		}
 		// And the person is told, in the panel, before they type anything.
 		expect(script).toContain("Nothing here is saved to your account.");

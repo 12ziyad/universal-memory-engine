@@ -100,6 +100,7 @@ import {
 	getThreadMessages,
 	listThreads,
 	playgroundLimits,
+	playgroundPreviewExtract,
 	playgroundTurn,
 	reconcileExtractions,
 } from "./pipeline/playground.js";
@@ -1956,6 +1957,23 @@ const routes = {
 			threadId: body.threadId,
 			overrides: testOnlyOverrides(env, body._test),
 		}));
+	},
+
+	/**
+	 * What Itsuki WOULD remember from a sentence, without remembering it.
+	 *
+	 * The preview examples are scripted; this is what makes a typed sentence do
+	 * something real inside one. It runs the model and writes nothing — no source
+	 * packet, no episode, no node, no receipt — so a read-only world stays
+	 * read-only while still answering honestly.
+	 */
+	"POST /v1/playground/preview": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.view");
+		if (context.response) return context.response;
+		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`))) return tooMany();
+		const body = await request.json().catch(() => ({}));
+		const rules = await getMemoryRules(env, context.memoryOwnerUserId);
+		return json(await playgroundPreviewExtract(env, body.message, { rules }));
 	},
 
 	"POST /v1/playground/thread": async (request, env) => {
