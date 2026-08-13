@@ -557,8 +557,25 @@
 	/* ---- playground: knowledge graph | conversation ---- */
 	/* No page header on this view — the rail and the top bar already name it,
 	   and a header block would push the conversation down the screen. */
-	.pg-shell { display: grid; grid-template-columns: minmax(0, 1fr) 468px; gap: 16px;
-		height: calc(100dvh - 146px); min-height: 580px; }
+	/* One type scale and one spacing rhythm for the whole view. These sizes were
+	   previously chosen per rule — 11, 11.5, 12, 12.5, 13, 13.5, 14 — which is
+	   invisible individually and reads as noise across a screen, and left every
+	   new element a guess. Four steps, four gaps, named for what they are. */
+	.pg-shell {
+		--pg-micro: 11px;   /* uppercase section labels */
+		--pg-meta: 12px;    /* counts, stamps, captions */
+		--pg-body: 13px;    /* secondary prose */
+		--pg-ui: 13.5px;    /* controls and titles */
+		--pg-chat: 14.5px;  /* the conversation itself */
+		--pg-lh-tight: 1.35;
+		--pg-lh-body: 1.6;
+		--pg-1: 4px; --pg-2: 8px; --pg-3: 12px; --pg-4: 16px; --pg-5: 22px;
+		display: grid; grid-template-columns: minmax(0, 1fr) 468px; gap: var(--pg-4);
+		height: calc(100dvh - 146px); min-height: 580px;
+		/* Numbers that change in place — the zoom readout, fact timestamps — must
+		   not reflow their neighbours as digits swap width. */
+		font-variant-numeric: tabular-nums;
+	}
 	.pg-col { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
 		display: flex; flex-direction: column; min-height: 0; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
 	.pg-col-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
@@ -673,7 +690,12 @@
 	/* The view transform has to be APPLIED here, not only written as a variable.
 	   Without this rule pgApplyView() set --vt on every zoom and pan and nothing
 	   consumed it, so the numbers moved and the graph did not. */
-	.pg-world { transform: var(--vt, none); transition: transform .16s ease-out; }
+	/* will-change keeps the transformed group on its own layer, so a pan or pinch
+	   re-composites it instead of re-rasterising ~40 nodes and ~70 labelled edges
+	   every frame. Declared once rather than toggled: adding it at gesture start
+	   forces the promotion inside the first frame of the gesture, which is the
+	   frame that most needs to be cheap. */
+	.pg-world { transform: var(--vt, none); transition: transform .16s ease-out; will-change: transform; }
 	.pg-world.is-zooming { transition: none; }
 	.pg-world.is-settling { animation: pgWorldSettle 1.25s cubic-bezier(.22,1,.36,1) both; }
 	/* Arrival: the field turns a little, swells, and settles back. Long enough
@@ -718,10 +740,10 @@
 		color: var(--muted); background: color-mix(in srgb, var(--accent) 7%, transparent);
 		border-bottom: 1px solid var(--border); }
 	.pg-preview-bar b { color: var(--accent); font-weight: 600; }
-	.pg-stream { flex: 1; overflow-y: auto; min-height: 0; padding: 14px 12px; }
+	.pg-stream { flex: 1; overflow-y: auto; min-height: 0; padding: var(--pg-4) var(--pg-3); }
 	/* --- capture status line under a user turn --- */
 	.pg-status { display: flex; align-items: center; gap: 6px; justify-content: flex-end;
-		margin-top: 6px; font-size: 12px; color: var(--muted); }
+		margin-top: 6px; font-size: var(--pg-meta); line-height: var(--pg-lh-tight); color: var(--muted); }
 	.pg-status.ok { color: var(--green); }
 	.pg-status.skip, .pg-status.blocked { color: var(--faint); }
 	.pg-status.blocked { color: var(--amber); }
@@ -729,44 +751,51 @@
 		border-top-color: var(--accent); animation: pgSpin .7s linear infinite; }
 	@keyframes pgSpin { to { transform: rotate(360deg); } }
 	/* --- context block --- */
-	.pg-ctx { border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 11px;
-		margin: 10px 0 12px; background: color-mix(in srgb, var(--accent) 5%, transparent); overflow: hidden; }
+	.pg-ctx { border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: var(--pg-3);
+		margin: var(--pg-3) 0; background: color-mix(in srgb, var(--accent) 5%, transparent); overflow: hidden; }
 	.pg-ctx-head { display: flex; align-items: center; gap: 9px; width: 100%; background: transparent;
-		border: 0; border-radius: 0; padding: 11px 13px; text-align: left; color: var(--text); }
+		border: 0; border-radius: 0; padding: var(--pg-3); text-align: left; color: var(--text); }
 	.pg-ctx-head:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); filter: none; }
 	.pg-ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
-	.pg-ctx-title { font-size: 13.5px; font-weight: 600; color: var(--accent); line-height: 1.3; }
-	.pg-ctx-title small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
-	.pg-ctx-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-		font-size: 12.5px; color: var(--muted); }
+	.pg-ctx-title { font-size: var(--pg-ui); font-weight: 600; color: var(--accent); line-height: var(--pg-lh-tight); }
+	.pg-ctx-title small { display: block; font-size: var(--pg-meta); font-weight: 400; color: var(--muted);
+		margin-top: 1px; }
+	/* The affordance has to keep its size across both words, or the header
+	   twitches every time somebody opens or closes a block. */
+	.pg-ctx-toggle { margin-left: auto; display: inline-flex; align-items: center; justify-content: flex-end;
+		gap: 6px; min-width: 78px; font-size: var(--pg-meta); color: var(--muted); }
 	/* No inner scroll: a scrollable panel inside a scrollable stream hides its
 	   own content and feels like it is collapsing. It expands to fit instead. */
 	.pg-ctx-body { border-top: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-		padding: 12px 13px; }
-	.pg-ctx-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
-	.pg-ctx-sec { font: 600 11px/1 var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
-		color: var(--faint); margin: 14px 0 7px; }
+		padding: var(--pg-3); }
+	.pg-ctx-note { font-size: var(--pg-meta); color: var(--muted); line-height: var(--pg-lh-body);
+		margin: 0 0 var(--pg-3); }
+	.pg-ctx-sec { font: 600 var(--pg-micro)/1 var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
+		color: var(--faint); margin: var(--pg-4) 0 var(--pg-2); }
 	.pg-ctx-sec:first-of-type { margin-top: 0; }
 	.pg-fact { display: grid; grid-template-columns: 6px minmax(0, 1fr); gap: 9px; align-items: start;
-		padding: 6px 0; font-size: 12.5px; line-height: 1.55; }
-	.pg-fact::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px;
+		padding: 5px 0; font-size: var(--pg-body); line-height: var(--pg-lh-body); }
+	.pg-fact::before { content: ""; width: 6px; height: 6px; border-radius: 50%; margin-top: 7px;
 		background: color-mix(in srgb, var(--accent) 60%, transparent); }
 	.pg-fact span { color: var(--text); }
-	.pg-fact time { display: block; font: 400 11.5px/1.5 var(--font-mono); color: var(--faint); margin-top: 2px; }
+	.pg-fact time { display: block; font: 400 var(--pg-micro)/1.5 var(--font-mono); color: var(--faint);
+		margin-top: 3px; letter-spacing: .01em; }
 	.pg-fact time .live { color: var(--green); }
-	.pg-ent { border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; margin-bottom: 7px;
-		background: var(--panel); }
-	.pg-ent-top { display: flex; align-items: center; gap: 8px; }
-	.pg-ent-name { font-size: 13px; font-weight: 600; }
-	.pg-ent-label { font: 500 11px/1 var(--font-mono); color: var(--muted); background: var(--panel2);
+	.pg-ent { border: 1px solid var(--border); border-radius: var(--pg-2); padding: 10px var(--pg-3);
+		margin-bottom: var(--pg-2); background: var(--panel); }
+	.pg-ent:last-child { margin-bottom: 0; }
+	.pg-ent-top { display: flex; align-items: center; gap: var(--pg-2); }
+	.pg-ent-name { font-size: var(--pg-body); font-weight: 600; letter-spacing: -.005em; }
+	.pg-ent-label { font: 500 var(--pg-micro)/1 var(--font-mono); color: var(--muted); background: var(--panel2);
 		border-radius: 5px; padding: 3px 6px; }
-	.pg-ent p { margin: 5px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
-	.pg-ctx-empty { font-size: 12.5px; color: var(--faint); line-height: 1.6; }
+	.pg-ent p { margin: 5px 0 0; font-size: var(--pg-body); line-height: var(--pg-lh-body); color: var(--muted); }
+	.pg-ctx-empty { font-size: var(--pg-body); color: var(--faint); line-height: var(--pg-lh-body); }
 	/* --- suggestion chips + composer --- */
-	.pg-suggest { display: flex; gap: 8px; padding: 0 12px 10px; flex-wrap: wrap; }
+	.pg-suggest { display: flex; gap: var(--pg-2); padding: 0 var(--pg-3) var(--pg-2); flex-wrap: wrap; }
 	.pg-suggest button { flex: 1 1 46%; min-width: 0; text-align: left; background: var(--panel2);
-		border: 1px solid var(--border); color: var(--muted); border-radius: 9px; padding: 9px 11px;
-		font: 400 12.5px/1.4 var(--font-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		border: 1px solid var(--border); color: var(--muted); border-radius: var(--pg-2); padding: 9px 11px;
+		font: 400 var(--pg-body)/var(--pg-lh-tight) var(--font-ui);
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.pg-suggest button:hover { border-color: var(--accent); color: var(--text); background: var(--panel3); filter: none; }
 	.pg-suggest button:disabled { opacity: .5; }
 	/* --- tour --- */
@@ -801,20 +830,24 @@
 	.pg-thread .pg-thread-del { opacity: 0; background: transparent; color: var(--faint); padding: 0 4px; }
 	.pg-thread:hover .pg-thread-del { opacity: 1; }
 	.pg-cap { font-size: 12px; color: var(--faint); margin-top: 8px; }
-	.pg-msg { max-width: 84%; margin-bottom: 14px; }
+	.pg-msg { max-width: 84%; margin-bottom: var(--pg-4); }
 	.pg-msg.user { margin-left: auto; }
-	.pg-bubble { border-radius: 12px; padding: 10px 13px; white-space: pre-wrap; line-height: 1.6; }
-	.pg-msg.user .pg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+	.pg-bubble { border-radius: var(--pg-3); padding: 10px var(--pg-3); white-space: pre-wrap;
+		font-size: var(--pg-chat); line-height: var(--pg-lh-body); letter-spacing: -.003em;
+		/* Prose, so it wraps on a measure rather than on the panel edge. */
+		max-width: 58ch; overflow-wrap: anywhere; }
+	.pg-msg.user .pg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px;
+		margin-left: auto; }
 	.pg-msg.assistant .pg-bubble { background: var(--panel2); color: var(--text); border-bottom-left-radius: 4px; }
 	/* The capture that came out of the message directly above it. */
 	.pg-capture { margin-top: 6px; border-left: 2px solid var(--green); padding: 4px 0 4px 10px;
-		font-size: 12px; color: var(--muted); line-height: 1.55; }
+		font-size: var(--pg-meta); color: var(--muted); line-height: var(--pg-lh-body); }
 	.pg-capture b { color: var(--green); font-weight: 600; }
-	.pg-composer { border-top: 1px solid var(--border); padding: 12px; }
-	.pg-composer-row { display: flex; gap: 8px; align-items: flex-end; }
-	.pg-composer textarea { flex: 1; resize: none; min-height: 42px; max-height: 160px; padding: 10px 12px;
-		border-radius: 10px; border: 1px solid var(--border2); background: var(--panel); color: var(--text);
-		font: 400 14px/1.6 var(--font-ui); }
+	.pg-composer { border-top: 1px solid var(--border); padding: var(--pg-3); }
+	.pg-composer-row { display: flex; gap: var(--pg-2); align-items: flex-end; }
+	.pg-composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 160px; padding: 11px var(--pg-3);
+		border-radius: var(--pg-3); border: 1px solid var(--border2); background: var(--panel); color: var(--text);
+		font: 400 var(--pg-chat)/var(--pg-lh-body) var(--font-ui); }
 	/* Empty state: a greeting and the input, centred, and nothing else. The
 	   message list collapses rather than showing prompts nobody asked for. */
 	.pg-greeting { font-size: 32px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2;
@@ -4609,6 +4642,8 @@ function renderPgGraph(animate = false) {
 		</svg>
 		<div class="pgn-legend">${hulls.map((h) => `<span${PG.gfilter === "all" || PG.gfilter === h.id ? "" : ` style="opacity:.38"`}>
 			<i style="--c:${h.color}"></i>${esc(h.label)} (${h.count})</span>`).join("")}</div>`;
+	// A fresh #pgWorld carries none of what the cache says it does.
+	pgInvalidateViewCache();
 	pgApplyView();
 	if (animate) {
 		const world = $("#pgWorld");
@@ -4629,19 +4664,60 @@ function pgClusterOptions() {
 function pgSearch(value) { PG.gsearch = value; renderPgGraph(); }
 function pgFilter(value) { PG.gfilter = value || "all"; renderPgGraph(); }
 
-function pgApplyView({ live = false } = {}) {
+/**
+ * Push the current view onto the DOM, at most once per frame.
+ *
+ * A trackpad emits pointermove and wheel far faster than the screen refreshes,
+ * and this used to write the transform, re-toggle two classes and rewrite the
+ * zoom readout on every one of them — most of that work thrown away before
+ * anything was painted, all of it invalidating style across a graph of ~40
+ * nodes and ~70 labelled edges. Coalescing into one frame is the difference
+ * between a gesture that tracks the hand and one that trails it.
+ *
+ * Only what actually changed is written: re-assigning an identical class or the
+ * same readout string still costs style work on a subtree this size.
+ */
+const PG_VIEW_DOM = { vt: null, live: null, close: null, zoom: null, queued: false };
+
+function pgFlushView() {
+	PG_VIEW_DOM.queued = false;
 	const world = $("#pgWorld");
 	if (world) {
-		world.style.setProperty("--vt", `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`);
+		const vt = `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`;
+		if (vt !== PG_VIEW_DOM.vt) { world.style.setProperty("--vt", vt); PG_VIEW_DOM.vt = vt; }
 		// A drag or pinch must track the finger exactly; easing a gesture makes
 		// the graph feel like it is lagging behind the hand.
-		world.classList.toggle("is-zooming", live);
+		const live = Boolean(PG.viewLive);
+		if (PG_VIEW_DOM.live !== live) {
+			world.classList.toggle("is-zooming", live);
+			PG_VIEW_DOM.live = live;
+		}
 	}
 	// Relation labels are unreadable at fit-scale and essential once you are in
 	// close, so they follow the zoom rather than being a separate toggle.
-	$("#pgCanvas")?.classList.toggle("is-close", PG.view.k >= 1.6);
-	const readout = $("#pgZoomLevel");
-	if (readout) readout.textContent = `${Math.round(PG.view.k * 100)}%`;
+	const close = PG.view.k >= 1.6;
+	if (PG_VIEW_DOM.close !== close) {
+		$("#pgCanvas")?.classList.toggle("is-close", close);
+		PG_VIEW_DOM.close = close;
+	}
+	const zoom = `${Math.round(PG.view.k * 100)}%`;
+	if (PG_VIEW_DOM.zoom !== zoom) {
+		const readout = $("#pgZoomLevel");
+		if (readout) readout.textContent = zoom;
+		PG_VIEW_DOM.zoom = zoom;
+	}
+}
+
+function pgApplyView({ live = false } = {}) {
+	PG.viewLive = live;
+	if (PG_VIEW_DOM.queued) return;
+	PG_VIEW_DOM.queued = true;
+	requestAnimationFrame(pgFlushView);
+}
+
+/** Re-render replaces #pgWorld, so the cached DOM state no longer describes it. */
+function pgInvalidateViewCache() {
+	PG_VIEW_DOM.vt = PG_VIEW_DOM.live = PG_VIEW_DOM.close = PG_VIEW_DOM.zoom = null;
 }
 
 const PG_ZOOM_MIN = 0.5, PG_ZOOM_MAX = 6;
@@ -4768,7 +4844,12 @@ function pgPointerMove(event) {
 function pgPointerUp(event) {
 	PG.pointers.delete(event.pointerId);
 	if (PG.pointers.size < 2) PG.pinch = null;
-	if (!PG.pointers.size) PG.drag = null;
+	if (!PG.pointers.size) {
+		PG.drag = null;
+		// The hand is off it, so easing comes back — leaving the gesture class on
+		// makes every later programmatic zoom snap instead of glide.
+		pgApplyView();
+	}
 	pgCapture(event.currentTarget, event.pointerId, true);
 }
 
@@ -5267,10 +5348,10 @@ function pgContextBlock(entry, index) {
 }
 
 /**
- * Only a tap changes this. An arriving turn opens its OWN block and leaves
- * every other one exactly as the person left it — a context block that
- * collapsed itself because a later message arrived would be throwing away
- * something they had deliberately opened to read.
+ * Every context block starts collapsed and only a tap changes that. Nothing
+ * opens one on the reader's behalf — not a new turn, not the turn that
+ * produced it — and nothing closes one they opened. The single exception is
+ * the tour, which opens the block it is in the middle of explaining.
  */
 function pgToggleCtx(index) {
 	if (!(PG.openCtx instanceof Set)) PG.openCtx = new Set();
@@ -5323,12 +5404,40 @@ function renderPlaygroundMessages() {
 	}
 }
 
+/**
+ * What actually happened to this message, on the message itself.
+ *
+ * This used to print "Added to graph" unconditionally, before extraction had
+ * run and whatever it returned — so the one piece of feedback the person gets
+ * was green whether the engine had found three facts, none, or never answered.
+ * Each state now says its own name.
+ */
+function pgCaptureChip(entry) {
+	if (entry.extracting) return `<div class="pg-status"><span class="pg-spin"></span>Extracting…</div>`;
+	if (entry.blocked) {
+		return `<div class="pg-status blocked"><span aria-hidden="true">▲</span>Blocked by your memory rules</div>`;
+	}
+	if (entry.unavailable) {
+		return `<div class="pg-status skip"><span aria-hidden="true">—</span>Extraction model unreachable</div>`;
+	}
+	const added = entry.add?.length ?? 0;
+	if (added) return `<div class="pg-status ok"><span aria-hidden="true">✓</span>Added to graph · ${added} new</div>`;
+	// Facts without a new entity are still a real result — the sentence said
+	// something durable about things the graph already knew. Reporting that as
+	// "nothing" would contradict the context block sitting directly under it.
+	const facts = entry.facts?.length ?? 0;
+	if (facts) {
+		return `<div class="pg-status ok"><span aria-hidden="true">✓</span>Captured · ${facts} fact${facts === 1 ? "" : "s"}</div>`;
+	}
+	return `<div class="pg-status skip"><span aria-hidden="true">—</span>Nothing durable to capture</div>`;
+}
+
 function pgPreviewStream() {
 	const sc = pgScenario();
 	const rows = sc.opening.map((m) => `<div class="pg-msg ${esc(m.r)}"><div class="pg-bubble">${esc(m.c)}</div></div>`);
 	PG.preview.forEach((entry, i) => {
 		rows.push(`<div class="pg-msg user"><div class="pg-bubble">${esc(entry.p)}</div>
-			<div class="pg-status ok"><span aria-hidden="true">✓</span>Added to graph${entry.add?.length ? ` · ${entry.add.length} new` : ""}</div></div>`);
+			${pgCaptureChip(entry)}</div>`);
 		if (entry.pending) {
 			rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>`);
 			return;
@@ -5338,7 +5447,10 @@ function pgPreviewStream() {
 			<div class="pg-status skip"><span aria-hidden="true">—</span>Assistant turns are not captured</div></div>`);
 		if (PG.json) rows.push(`<pre class="pg-context">${esc(pgJsonFor(entry))}</pre>`);
 	});
-	if (PG.thinking) rows.push(`<div class="pg-msg assistant"><div class="pg-bubble">…</div></div>`);
+	// No trailing "…" here. A turn still waiting on its reply renders its own,
+	// above; adding a second one meant that once the reply had landed and only
+	// the extraction was still running, the stream showed an answer followed by
+	// a thinking bubble promising another one that was never coming.
 	// JSON has to answer before the first turn too. Showing nothing until you
 	// happen to send something reads as a broken toggle, so the panel leads with
 	// the world as it stands and then appends each turn's extraction.
@@ -5371,6 +5483,16 @@ function pgJsonSnapshot() {
 	}, null, 2);
 }
 
+/** Why a real turn captured nothing, in the words of the setting that did it. */
+function pgBlockedReason(code) {
+	return {
+		capture_off: "Capture is off for this chat",
+		outside_include_rules: "Outside this chat's topics — not captured",
+		excluded_by_rule: "Blocked by your memory rules",
+		rules_unavailable: "Your memory rules could not be read, so nothing was captured",
+	}[code] ?? "Not captured";
+}
+
 function pgLiveStream() {
 	if (!PG.messages.length) {
 		return `<div class="pg-empty">This chat is empty. Anything durable you say here is captured into your real memory — a decision, a preference, a person, a plan.</div>`;
@@ -5383,7 +5505,12 @@ function pgLiveStream() {
 		const stalled = PG.pollGaveUp || !m.extraction?.source_packet_id;
 		let status = "";
 		if (m.role === "user") {
-			if (items.length) {
+			if (m.extraction?.blocked) {
+				// Nothing ran for this turn. Saying "Captured — receipt in History"
+				// would send them looking for a receipt that was never written.
+				status = `<div class="pg-status blocked"><span aria-hidden="true">▲</span>${
+					esc(pgBlockedReason(m.extraction.blocked))}</div>`;
+			} else if (items.length) {
 				status = `<div class="pg-status ok"><span aria-hidden="true">✓</span>Added to graph · ${items.length}</div>`;
 			} else if (m.extraction?.processing && !stalled) {
 				// Acceptance is synchronous and already durable; only enrichment is
@@ -5418,24 +5545,31 @@ function renderPgSuggest() {
 	}).join("");
 }
 
-/** A scripted preview turn: reply first, then the memory lands a beat later. */
+/**
+ * How long the "Extracting…" state is held before the outcome replaces it.
+ *
+ * Long enough to read, and the floor rather than the duration: a real preview
+ * call that takes longer holds the state until it actually finishes. The reply
+ * never waits on it — it renders the moment it exists.
+ */
+const PG_EXTRACT_DWELL_MS = 2000;
+
+/** A scripted preview turn: reply immediately, extraction resolves after it. */
 async function pgSendScripted(index) {
 	const sc = pgScenario();
 	const turn = sc.turns[index];
 	if (!turn || PG.thinking) return;
 	PG.thinking = true;
 	PG.scrollToLatest = true;
-	PG.preview = [...PG.preview, { ...turn, pending: true }];
+	PG.preview = [...PG.preview, { ...turn, pending: false, extracting: true }];
 	renderPlaygroundMessages();
 	renderPgSuggest();
-	await pgWait(340 + Math.random() * 200);
-	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1 ? { ...e, pending: false } : e));
-	pgOpenCtx(PG.preview.length - 1);
-	renderPlaygroundMessages();
-	await pgWait(260);
+	await pgWait(PG_EXTRACT_DWELL_MS);
+	PG.preview = PG.preview.map((e, i) => (i === PG.preview.length - 1 ? { ...e, extracting: false } : e));
 	// The graph moves only once the turn has actually produced something.
 	PG.turn = Math.max(PG.turn, index + 1);
 	PG.thinking = false;
+	renderPlaygroundMessages();
 	renderPgGraph(true);
 	renderPgSuggest();
 	pgTourAdvanceOnSend();
@@ -5493,26 +5627,31 @@ async function playgroundSend() {
 	}
 }
 
+/** Punctuation- and case-insensitive form, for comparing typed text to a script. */
+function pgTypedKey(text) {
+	return String(text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 async function pgSendTyped(message) {
 	const sc = pgScenario();
-	const words = message.toLowerCase().match(/[a-z]{4,}/g) ?? [];
-	let best = -1, bestScore = 0;
-	sc.turns.forEach((t, i) => {
-		if (i < PG.turn) return;
-		const hay = `${t.p} ${(t.add ?? []).map((n) => n.n).join(" ")}`.toLowerCase();
-		const score = words.filter((w) => hay.includes(w)).length;
-		if (score > bestScore) { bestScore = score; best = i; }
-	});
-	if (best >= 0 && bestScore >= 1) return pgSendScripted(best);
+	// The script only claims a typed message when it IS that scripted line —
+	// somebody re-typing a suggestion rather than writing their own sentence.
+	// Matching on a single shared word used to hand back a canned turn for
+	// anything vaguely on topic, so a sentence the person actually wrote was
+	// never extracted at all and the reply belonged to a different message.
+	const typed = pgTypedKey(message);
+	const scripted = sc.turns.findIndex((t, i) => i >= PG.turn && pgTypedKey(t.p) === typed);
+	if (scripted >= 0) return pgSendScripted(scripted);
 
-	// Outside the script, so ask the engine what it would take from this. The
+	// Their own sentence, so ask the engine what it would take from it. The
 	// answer is real — one model call, nothing persisted — which is the whole
 	// point of a preview that is honest about being read-only.
 	PG.thinking = true;
 	PG.scrollToLatest = true;
-	PG.preview = [...PG.preview, { p: message, pending: true, add: [], facts: [], ents: [] }];
+	PG.preview = [...PG.preview, { p: message, pending: true, extracting: true, add: [], facts: [], ents: [] }];
 	renderPlaygroundMessages();
 	renderPgSuggest();
+	const startedAt = Date.now();
 	let result = null;
 	try {
 		result = await api("/v1/playground/preview", { method: "POST", body: JSON.stringify({ message }) });
@@ -5527,13 +5666,17 @@ async function pgSendTyped(message) {
 	const entry = {
 		p: message,
 		pending: false,
+		// The reply is ready, so it goes up now. Only the chip is still waiting.
+		extracting: true,
+		blocked: result?.blocked ?? null,
+		unavailable: Boolean(result?.unavailable) || !result,
 		add,
 		links: [],
 		facts: facts.map((f) => ({ f, from: "now" })),
 		ents: entities.map((e) => ({ n: e.name, l: e.kind || "Entity", s: e.summary || "Named in this message." })),
 		a: result?.blocked
 			? `That one is blocked by your own memory rules (${esc(result.blocked).replace(/_/g, " ")}), so nothing was read from it — which is the rule doing its job.`
-			: result?.unavailable
+			: !result || result.unavailable
 				? "I could not reach the extraction model just then, so there is nothing to show for that message. Nothing was stored either way."
 				: result?.reply
 					|| (entities.length || facts.length
@@ -5542,10 +5685,16 @@ async function pgSendTyped(message) {
 		previewOnly: true,
 	};
 	PG.preview = PG.preview.map((e, i) => (i === index ? entry : e));
-	pgOpenCtx(index);
 	PG.typedNodes = [...(PG.typedNodes ?? []), ...add.map((n) => ({ ...n, turn: `typed-${index}` }))];
-	PG.thinking = false;
 	PG.scrollToLatest = true;
+	renderPlaygroundMessages();
+
+	// Hold the extracting state to its floor, measured from the send — a call
+	// that already took longer than that has served the same purpose and is not
+	// padded further.
+	await pgWait(Math.max(0, PG_EXTRACT_DWELL_MS - (Date.now() - startedAt)));
+	PG.preview = PG.preview.map((e, i) => (i === index ? { ...e, extracting: false } : e));
+	PG.thinking = false;
 	renderPlaygroundMessages();
 	renderPgGraph(add.length > 0);
 	renderPgSuggest();

@@ -258,7 +258,11 @@ describe("the playground screen", () => {
 		expect(script).toContain("function viewPlayground(");
 		expect(script).toContain('class="pg-col pg-graph"');
 		expect(script).toContain('class="pg-col pg-chat"');
-		expect(html).toContain(".pg-shell { display: grid; grid-template-columns: minmax(0, 1fr) 468px;");
+		// The shell rule now opens with the view's type and spacing tokens, so the
+		// layout is asserted by what it declares rather than by where it sits in
+		// the block.
+		expect(html).toContain(".pg-shell {");
+		expect(html).toContain("display: grid; grid-template-columns: minmax(0, 1fr) 468px;");
 		// Below 1180px the graph stops being readable beside a fixed chat column.
 		expect(html).toContain("@media (max-width: 1180px)");
 		expect(html).toContain(".pg-shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }");
@@ -419,7 +423,13 @@ describe("the playground screen", () => {
 		expect(script).toContain('ondblclick="pgZoomInAt(event)"');
 		// Relation labels ride the edges and appear once there is room to read them.
 		expect(html).toContain(".pg-canvas.is-close .pgn-rel { opacity: .9; }");
-		expect(script).toContain('classList.toggle("is-close", PG.view.k >= 1.6)');
+		// The threshold and the class it drives, asserted separately: the view is
+		// now pushed to the DOM once per frame, so the toggle reads a computed
+		// flag instead of re-deriving it on every pointer event.
+		expect(script).toContain("const close = PG.view.k >= 1.6;");
+		expect(script).toContain('classList.toggle("is-close", close)');
+		// One frame, one write — the coalescing is the point of that indirection.
+		expect(script).toContain("requestAnimationFrame(pgFlushView)");
 	});
 
 	it("animates arrival without moving what was already there", async () => {
