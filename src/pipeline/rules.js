@@ -229,40 +229,11 @@ export async function saveMemoryRules(env, userId, patch = {}) {
  */
 const NEVER_SAVE_RE = /\b(?:never|do\s+not|don['’]t)\s+(?:save|store|capture|keep|record|remember)\s+(?:anything\s+)?(?:about\s+|related\s+to\s+|regarding\s+|to\s+do\s+with\s+)?([^.;\n]+)/gi;
 
-/**
- * The allow-list half of the same problem. "Only remember X" was guidance only
- * until now: a model that ignored it wrote whatever it liked. These compile to
- * `includes` and are enforced by the same filter.
- *
- * Two shapes, because people write it both ways round — "only remember X" and
- * "remember only X".
- */
-const ONLY_SAVE_RES = [
-	/\b(?:only|just)\s+(?:save|store|capture|keep|record|remember|extract)\s+(?:things?\s+|stuff\s+|content\s+|memories\s+|anything\s+)?(?:about\s+|related\s+to\s+|regarding\s+|to\s+do\s+with\s+|involving\s+)?([^.;\n]+)/gi,
-	/\b(?:save|store|capture|keep|record|remember|extract)\s+only\s+(?:things?\s+|stuff\s+|content\s+|memories\s+|anything\s+)?(?:about\s+|related\s+to\s+|regarding\s+|to\s+do\s+with\s+|involving\s+)?([^.;\n]+)/gi,
-];
-
 // Terms so broad that enforcing them would silently disable memory entirely.
 const GENERIC_DENY_TERMS = new Set([
 	"anything", "everything", "it", "that", "this", "them", "these", "those",
 	"me", "us", "things", "stuff", "information", "data", "info", "details",
 ]);
-
-/** Split one captured clause into the individual topics it names. */
-function termsFromCapture(capture, seen, terms) {
-	for (const part of String(capture ?? "").split(/\s*(?:,|\bor\b|\band\b)\s*/i)) {
-		const term = cleanTerm(part)
-			.replace(/^(?:any|all|my|our|the|a|an)\s+/i, "")
-			.replace(/[.!?]+$/, "")
-			.trim();
-		const key = term.toLocaleLowerCase("en-US");
-		if (term.length < 3 || GENERIC_DENY_TERMS.has(key) || seen.has(key)) continue;
-		seen.add(key);
-		terms.push(term);
-		if (terms.length >= MAX_TERMS) return true;
-	}
-	return false;
-}
 
 export function instructionDenyTerms(instructions) {
 	const text = String(instructions ?? "");
@@ -270,25 +241,16 @@ export function instructionDenyTerms(instructions) {
 	const terms = [];
 	const seen = new Set();
 	for (const match of text.matchAll(NEVER_SAVE_RE)) {
-		if (termsFromCapture(match[1], seen, terms)) break;
-	}
-	return terms;
-}
-
-/**
- * Topics an instruction restricts capture TO. An empty result means the prose
- * named no enforceable allow-list, which is not the same as "allow nothing" —
- * callers must not treat it as an empty allow-list, or one unparsed sentence
- * would silently switch memory off.
- */
-export function instructionIncludeTerms(instructions) {
-	const text = String(instructions ?? "");
-	if (!text.trim()) return [];
-	const terms = [];
-	const seen = new Set();
-	for (const re of ONLY_SAVE_RES) {
-		for (const match of text.matchAll(re)) {
-			if (termsFromCapture(match[1], seen, terms)) return terms;
+		for (const part of String(match[1] ?? "").split(/\s*(?:,|\bor\b|\band\b)\s*/i)) {
+			const term = cleanTerm(part)
+				.replace(/^(?:any|all|my|our|the|a|an)\s+/i, "")
+				.replace(/[.!?]+$/, "")
+				.trim();
+			const key = term.toLocaleLowerCase("en-US");
+			if (term.length < 3 || GENERIC_DENY_TERMS.has(key) || seen.has(key)) continue;
+			seen.add(key);
+			terms.push(term);
+			if (terms.length >= MAX_TERMS) return terms;
 		}
 	}
 	return terms;
@@ -297,7 +259,6 @@ export function instructionIncludeTerms(instructions) {
 // Compiling on every gated object would re-run the regex thousands of times per
 // extraction; rules objects are stable for the length of one run.
 const denyCache = new WeakMap();
-const includeCache = new WeakMap();
 
 function denyTermsFor(rules) {
 	if (!rules || typeof rules !== "object") return [];
@@ -305,15 +266,6 @@ function denyTermsFor(rules) {
 	if (cached) return cached;
 	const terms = [...(rules.excludes ?? []), ...instructionDenyTerms(rules.customInstructions)];
 	denyCache.set(rules, terms);
-	return terms;
-}
-
-function includeTermsFor(rules) {
-	if (!rules || typeof rules !== "object") return [];
-	const cached = includeCache.get(rules);
-	if (cached) return cached;
-	const terms = [...(rules.includes ?? []), ...instructionIncludeTerms(rules.customInstructions)];
-	includeCache.set(rules, terms);
 	return terms;
 }
 
@@ -334,93 +286,26 @@ function termMatches(text, term) {
 
 /** True when this text may become memory under the user's include/exclude rules. */
 export function rulesAllowText(rules, ...texts) {
-	return rulesRejection(rules, ...texts) === null;
+	if (!rules) return true;
+	const combined = texts.filter(Boolean).join(" ");
+	if (!combined.trim()) return true;
+	if (denyTermsFor(rules).some((term) => termMatches(combined, term))) return false;
+	if ((rules.includes ?? []).length) {
+		return rules.includes.some((term) => termMatches(combined, term));
+	}
+	return true;
 }
 
-/**
- * Reason string used everywhere a rule drops something, so receipts explain it.
- *
- * `rules.parent` is how a narrower policy layers over a wider one — a Playground
- * chat over its project, a project over the account. The parent is evaluated
- * FIRST and its verdict is final: a child can add restrictions but can never
- * hand back something its parent refused. That is the difference between this
- * and mergeRuleOverride(), which replaces field by field and would let a child
- * drop a parent's deny list simply by declaring a shorter one.
- */
+/** Reason string used everywhere a rule drops something, so receipts explain it. */
 export function rulesRejection(rules, ...texts) {
 	if (!rules) return null;
 	const combined = texts.filter(Boolean).join(" ");
 	if (!combined.trim()) return null;
-	if (rules.parent) {
-		const inherited = rulesRejection(rules.parent, combined);
-		if (inherited) return inherited;
-	}
-	if (rules.captureMode === "off") return "capture_off";
 	if (denyTermsFor(rules).some((term) => termMatches(combined, term))) return "excluded_by_rule";
-	const includes = includeTermsFor(rules);
-	if (includes.length && !includes.some((term) => termMatches(combined, term))) {
+	if ((rules.includes ?? []).length && !rules.includes.some((term) => termMatches(combined, term))) {
 		return "outside_include_rules";
 	}
 	return null;
-}
-
-/**
- * Sentences, then clauses within a sentence, with their offsets in the original.
- *
- * One message routinely carries two unrelated facts — "I love cats, and my
- * thesis now uses Postgres" — and judging the whole string admits or refuses
- * both together. Under an allow-list that is a leak, not a nuisance: the
- * message matches "thesis", so the cat half would be stored and indexed too.
- */
-export function segmentSpans(text) {
-	const source = String(text ?? "");
-	if (!source.trim()) return [];
-	const spans = [];
-	let cursor = 0;
-	// Sentence terminators, keeping the terminator with the sentence it ends.
-	for (const sentence of source.split(/(?<=[.!?…])\s+|\s*[;\n]+\s*/u)) {
-		if (!sentence) continue;
-		const at = source.indexOf(sentence, cursor);
-		const start = at === -1 ? cursor : at;
-		cursor = start + sentence.length;
-		// Coordinating conjunctions join independent clauses; the conjunction
-		// belongs to the clause it introduces.
-		let inner = 0;
-		const parts = sentence.split(/,\s+(?=(?:and|but|so|yet|though|although|while|whereas)\s)/iu);
-		for (const part of parts) {
-			const offset = sentence.indexOf(part, inner);
-			const from = start + (offset === -1 ? inner : offset);
-			inner = (offset === -1 ? inner : offset) + part.length;
-			if (part.trim()) spans.push({ text: part.trim(), start: from, end: from + part.length });
-		}
-	}
-	return spans;
-}
-
-/**
- * The permitted part of a message, span by span.
- *
- * Returns the text that may become durable evidence, plus how much was removed.
- * `text` is null when nothing survived — the caller must then omit the message
- * entirely rather than store an empty husk that still carries its provenance.
- */
-export function rulesAdmitText(rules, text) {
-	const source = String(text ?? "");
-	if (!rules || !source.trim()) return { text: source || null, dropped: 0, partial: false, reason: null };
-	// Whole-message verdict first: the common case is all-or-nothing, and this
-	// keeps the exact reason for a receipt rather than a generic partial.
-	const verdict = rulesRejection(rules, source);
-	if (!verdict) return { text: source, dropped: 0, partial: false, reason: null };
-	const spans = segmentSpans(source);
-	if (spans.length < 2) return { text: null, dropped: 1, partial: false, reason: verdict };
-	const kept = spans.filter((span) => rulesAllowText(rules, span.text));
-	if (!kept.length) return { text: null, dropped: spans.length, partial: false, reason: verdict };
-	return {
-		text: kept.map((span) => span.text).join(" "),
-		dropped: spans.length - kept.length,
-		partial: kept.length !== spans.length,
-		reason: null,
-	};
 }
 
 /** Compact rules block for extraction/digest prompts (guidance, not enforcement). */

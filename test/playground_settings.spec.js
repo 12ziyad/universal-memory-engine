@@ -11,7 +11,13 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, expect, it } from "vitest";
 import worker from "../src";
 import { instructionDenyTerms, normalizeMemoryRules, rulesAllowText, saveMemoryRules } from "../src/pipeline/rules.js";
-import { normalizeThreadSettings, threadRulesFrom, threadSettingsAreEmpty } from "../src/pipeline/playground_settings.js";
+import {
+	normalizeThreadSettings,
+	threadCaptureDisabled,
+	threadRefusal,
+	threadRulesFrom,
+	threadSettingsAreEmpty,
+} from "../src/pipeline/playground_settings.js";
 
 async function request(path, init = {}) {
 	const req = new Request(`http://example.com${path}`, init);
@@ -158,17 +164,56 @@ describe("thread settings are the account's rules, scoped", () => {
 			excludeTopics: ["cats"],
 			customCategories: [{ name: "thesis", description: "chapters and deadlines" }],
 		}));
-		// The chat's own deny list is what it declared...
-		expect(merged.excludes).toEqual(["cats"]);
-		// ...but the account is its parent, so the account's denies still bite.
-		// A chat may only ever narrow; replacing "passwords" would hand back
-		// exactly what the account refused.
-		expect(merged.parent).toBe(accountRules);
+		// Union, not replacement. A chat may add a denial; dropping "passwords"
+		// would hand back exactly what the account refused.
+		expect(merged.excludes).toEqual(["passwords", "cats"]);
+		// The result is the ordinary flat rules shape — nothing the shared
+		// pipeline has to learn a new concept to read.
+		expect(merged.parent).toBeUndefined();
+		expect(merged.captureMode).toBeUndefined();
 		expect(rulesAllowText(merged, "my passwords are in 1password")).toBe(false);
 		expect(rulesAllowText(merged, "I love cats")).toBe(false);
 		expect(rulesAllowText(merged, "the thesis uses Postgres")).toBe(true);
 		// Categories are classification, not permission, so they union.
 		expect(merged.customCategories.map((c) => c.name)).toEqual(["work", "thesis"]);
+	});
+
+	it("keeps the account's allow-list when the chat declares its own", () => {
+		// "Matches one of A AND one of B" is not any single term list, so the
+		// flat object carries the ACCOUNT's list — the one a chat must not be
+		// able to widen — and threadRefusal() enforces the chat's on top.
+		const accountRules = normalizeMemoryRules({ includes: ["work"] });
+		const settings = normalizeThreadSettings({ captureMode: "only_topics", includeTopics: ["thesis"] });
+		const merged = threadRulesFrom(accountRules, settings);
+		expect(merged.includes).toEqual(["work"]);
+
+		// The chat's own list is what the boundary judges; the account's rides
+		// down in the flat object and is enforced per extracted item behind it.
+		expect(threadRefusal(accountRules, settings, "the work thesis chapter is done")).toBeNull();
+		expect(threadRefusal(accountRules, settings, "the work rota changed")).toBe("outside_include_rules");
+	});
+
+	it("leaves the per-item rules to the pipeline instead of judging whole messages", () => {
+		// A chat exclude must drop the fact it names, not the whole message
+		// around it — the same granularity an account exclude has always had.
+		// So the boundary stays out of it and the union in the flat object does
+		// the work.
+		const accountRules = normalizeMemoryRules({ excludes: ["passwords"] });
+		const settings = normalizeThreadSettings({ excludeTopics: ["cats"] });
+		expect(threadRefusal(accountRules, settings, "I love cats and my passwords are in 1password")).toBeNull();
+
+		const merged = threadRulesFrom(accountRules, settings);
+		expect(rulesAllowText(merged, "I love cats")).toBe(false);
+		expect(rulesAllowText(merged, "my passwords are in 1password")).toBe(false);
+		expect(rulesAllowText(merged, "the deploy moved to Friday")).toBe(true);
+	});
+
+	it("treats capture off as not capturing at all", () => {
+		const accountRules = normalizeMemoryRules({});
+		const off = normalizeThreadSettings({ captureMode: "off" });
+		expect(threadCaptureDisabled(off)).toBe(true);
+		expect(threadRefusal(accountRules, off, "anything at all")).toBe("capture_off");
+		expect(threadCaptureDisabled(normalizeThreadSettings({}))).toBe(false);
 	});
 
 	it("stays invisible when the thread adds nothing", () => {

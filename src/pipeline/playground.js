@@ -19,7 +19,7 @@ import { newId } from "../lib/ids.js";
 import { responseText } from "./llm.js";
 import { runObserveMessagesCommand, runRecallCommand } from "./commands.js";
 import { getMemoryRules, rulesRejection } from "./rules.js";
-import { threadRulesFrom } from "./playground_settings.js";
+import { threadRefusal, threadRulesFrom } from "./playground_settings.js";
 import { runAi } from "../lib/ai_meter.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -398,10 +398,18 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		console.warn("playground rules unavailable:", error?.message ?? error);
 		rulesUnavailable = true;
 	}
+	const threadSettings = parseJson(thread.settings_json, null);
+	// The chat's own policy is enforced HERE, at the Playground's own boundary,
+	// and the account's rules are enforced AGAIN by the pipeline behind it. That
+	// ordering is what keeps this a sandbox: a per-chat panel can only ever
+	// subtract, and a mistake in it cannot widen what any lane stores.
+	const refusal = rulesUnavailable
+		? "rules_unavailable"
+		: threadRefusal(accountRules, threadSettings, message);
 	const rules = rulesUnavailable
 		? null
-		: threadRulesFrom(accountRules, parseJson(thread.settings_json, null)) ?? accountRules;
-	const capture = rulesUnavailable ? null : await runObserveMessagesCommand(env, ctx, userId, [
+		: threadRulesFrom(accountRules, threadSettings) ?? accountRules;
+	const capture = refusal ? null : await runObserveMessagesCommand(env, ctx, userId, [
 		{ id: userMessage.id, role: "user", content: message, ts: userMessage.created_at },
 	], {
 		flush: true,
@@ -428,7 +436,7 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		source_packet_id: capture?.source_packet_id ?? null,
 		// Typed so the UI can say which of the several honest things happened,
 		// rather than showing "nothing captured" for four different reasons.
-		blocked: rulesUnavailable ? "rules_unavailable" : null,
+		blocked: refusal,
 		at: Date.now(),
 	};
 

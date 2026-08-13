@@ -2,7 +2,7 @@ import { newId } from "../lib/ids.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeSourceTime, parseSourceTime, persistedSourceTime } from "../lib/source_time.mjs";
-import { rulesAdmitText } from "./rules.js";
+import { rulesAllowText } from "./rules.js";
 import {
 	canonicalizeSourceEvent,
 	normalizeSourceEventTrace,
@@ -516,31 +516,14 @@ export async function normalizeSourcePacket(userId, input = {}) {
  */
 export function sourcePacketWithAdmissionRules(packet, messages = [], rules = null) {
 	if (!packet || !rules) return packet;
-	// Span-level, not message-level. Judging the whole message admits or refuses
-	// all of it together, and under an allow-list that is a leak: "I love cats,
-	// and my thesis uses Postgres" matches "thesis", so the cat half would land
-	// in a searchable source episode alongside it. Each span is judged on its
-	// own and only the permitted ones become durable.
-	const admitted = (messages ?? []).map((message) => rulesAdmitText(rules, message?.content));
-	if (admitted.every((result) => result.text !== null && !result.partial)) return packet;
-	const permitted = admitted.map((result) => result.text !== null);
-	const allowedMessages = (messages ?? [])
-		.map((message, index) => (permitted[index] ? { ...message, content: admitted[index].text } : null))
-		.filter(Boolean);
+	const permitted = (messages ?? []).map((message) => rulesAllowText(rules, message?.content));
+	if (permitted.every(Boolean)) return packet;
+	const allowedMessages = (messages ?? []).filter((_, index) => permitted[index]);
 	const rawMeta = parseRecord(packet.raw_meta_json);
 	const storedMessages = Array.isArray(rawMeta.messages) ? rawMeta.messages : [];
 	const nextRawMeta = {
 		...rawMeta,
-		messages: storedMessages
-			.map((message, index) => (permitted[index]
-				// Redaction is recorded, not hidden: a span that was removed has
-				// to be visible as a removal or the provenance claims the stored
-				// text is what the person said.
-				? (admitted[index].partial
-					? { ...message, content: admitted[index].text, redacted_spans: admitted[index].dropped }
-					: message)
-				: null))
-			.filter(Boolean),
+		messages: storedMessages.filter((_, index) => permitted[index]),
 	};
 	const sourceEventTrace = sourceEventTraceFromMessages(allowedMessages);
 	if (sourceEventTrace) nextRawMeta.source_event_trace = sourceEventTrace;
