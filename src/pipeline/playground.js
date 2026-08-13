@@ -287,11 +287,28 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 	});
 	const reply = await chatReply(env, buildChatMessages(history, message, String(recall.context ?? "").trim()));
 
-	// Capture through the shared auto-collect lane. Thread settings are merged
-	// over the account's saved rules — one rules system, scoped to this chat.
-	const accountRules = await getMemoryRules(env, userId);
-	const rules = threadRulesFrom(accountRules, parseJson(thread.settings_json, null));
-	const capture = await runObserveMessagesCommand(env, ctx, userId, [
+	// Capture through the shared auto-collect lane. Thread policy is layered
+	// UNDER the account's saved rules — one rules system, scoped to this chat.
+	//
+	// FAIL CLOSED. This load used to be the fail-open one: an unreadable rules
+	// row came back as defaults, and because a resolved rules object short
+	// -circuits resolveAdmissionRules(), the fail-closed reload every lane
+	// downstream relies on could never fire. A transient D1 error therefore
+	// turned "never keep my salary" into "keep everything" for this turn. The
+	// reply still goes out — losing the conversation helps nobody — but nothing
+	// is captured, and the receipt says so rather than staying silent.
+	let accountRules = null;
+	let rulesUnavailable = false;
+	try {
+		accountRules = await getMemoryRules(env, userId, { failClosed: true });
+	} catch (error) {
+		console.warn("playground rules unavailable:", error?.message ?? error);
+		rulesUnavailable = true;
+	}
+	const rules = rulesUnavailable
+		? null
+		: threadRulesFrom(accountRules, parseJson(thread.settings_json, null)) ?? accountRules;
+	const capture = rulesUnavailable ? null : await runObserveMessagesCommand(env, ctx, userId, [
 		{ id: userMessage.id, role: "user", content: message, ts: userMessage.created_at },
 	], {
 		flush: true,
@@ -306,16 +323,19 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		overrides: { ...(input.overrides ?? {}), ...(rules ? { rules } : {}) },
 	});
 
-	const items = capture.receipt ? await extractionItems(env, userId, capture.receipt) : [];
+	const items = capture?.receipt ? await extractionItems(env, userId, capture.receipt) : [];
 	const extraction = {
 		items,
-		summary: capture.summary ?? null,
-		saved_total: capture.counts?.savedTotal ?? 0,
-		processing: Boolean(capture.processing),
-		receipt_id: capture.receipt_id ?? null,
+		summary: capture?.summary ?? null,
+		saved_total: capture?.counts?.savedTotal ?? 0,
+		processing: Boolean(capture?.processing),
+		receipt_id: capture?.receipt_id ?? null,
 		// The handle reconcileExtractions() uses to find the real receipt once
 		// extraction outruns the wait budget, which on a live model it often does.
-		source_packet_id: capture.source_packet_id ?? null,
+		source_packet_id: capture?.source_packet_id ?? null,
+		// Typed so the UI can say which of the several honest things happened,
+		// rather than showing "nothing captured" for four different reasons.
+		blocked: rulesUnavailable ? "rules_unavailable" : null,
 		at: Date.now(),
 	};
 

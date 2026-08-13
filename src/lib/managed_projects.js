@@ -82,7 +82,41 @@ function publicProject(row) {
 		status: row.status,
 		created_at: row.created_at,
 		updated_at: row.updated_at,
+		// Governance identity, needed by membership resolution. The memory owner
+		// is deliberately NOT exposed here: it is a storage id, never a field an
+		// ordinary client should see or be able to echo back.
+		owner_user_id: row.owner_user_id ?? null,
+		organization_id: row.organization_id ?? null,
 	};
+}
+
+const PROJECT_COLUMNS =
+	"id, owner_user_id, organization_id, name, description, is_default, status, created_at, updated_at";
+
+/**
+ * A project this user may reach, whether they own it or were given access.
+ *
+ * The subtle half is that OWNERSHIP still decides the memory namespace. A
+ * member reads and writes the owner's memory space, never one derived from
+ * their own id — deriving from the caller would silently give every member a
+ * private, empty copy of the project and quietly break the whole feature.
+ */
+export async function getManagedProjectForUser(env, userId, projectId) {
+	const row = await env.DB.prepare(
+		`SELECT ${PROJECT_COLUMNS} FROM managed_projects
+		  WHERE id = ? AND status = 'active'
+		    AND (
+		      owner_user_id = ?
+		      OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = managed_projects.id AND pm.user_id = ?)
+		      OR EXISTS (
+		        SELECT 1 FROM organization_members om
+		         WHERE om.org_id = managed_projects.organization_id
+		           AND om.user_id = ? AND om.role IN ('owner', 'admin')
+		      )
+		    )
+		  LIMIT 1`,
+	).bind(projectId, userId, userId, userId).first();
+	return publicProject(row);
 }
 
 function projectIdFromHeader(request) {
@@ -105,8 +139,7 @@ export async function defaultManagedProjectId(ownerUserId) {
 
 export async function ensureDefaultManagedProject(env, ownerUserId) {
 	const existing = await env.DB.prepare(
-		`SELECT id, name, description, is_default, status, created_at, updated_at
-		 FROM managed_projects
+		`SELECT ${PROJECT_COLUMNS} FROM managed_projects
 		 WHERE owner_user_id = ? AND is_default = 1 AND status = 'active'
 		 LIMIT 1`,
 	).bind(ownerUserId).first();
@@ -121,8 +154,7 @@ export async function ensureDefaultManagedProject(env, ownerUserId) {
 	).bind(id, ownerUserId, ownerUserId, at, at).run();
 
 	const row = await env.DB.prepare(
-		`SELECT id, name, description, is_default, status, created_at, updated_at
-		 FROM managed_projects
+		`SELECT ${PROJECT_COLUMNS} FROM managed_projects
 		 WHERE owner_user_id = ? AND is_default = 1 AND status = 'active'
 		 LIMIT 1`,
 	).bind(ownerUserId).first();
@@ -132,21 +164,36 @@ export async function ensureDefaultManagedProject(env, ownerUserId) {
 	return publicProject(row);
 }
 
+/**
+ * Every project this user can open: their own first, then the ones membership
+ * opens up. Someone else's project is marked `shared` so the selector can say
+ * whose it is rather than implying they own it.
+ */
 export async function listManagedProjects(env, ownerUserId) {
 	await ensureDefaultManagedProject(env, ownerUserId);
 	const { results } = await env.DB.prepare(
-		`SELECT id, name, description, is_default, status, created_at, updated_at
-		 FROM managed_projects
-		 WHERE owner_user_id = ? AND status = 'active'
-		 ORDER BY is_default DESC, created_at ASC, name COLLATE NOCASE ASC`,
-	).bind(ownerUserId).all();
-	return (results ?? []).map(publicProject);
+		`SELECT ${PROJECT_COLUMNS} FROM managed_projects
+		  WHERE status = 'active'
+		    AND (
+		      owner_user_id = ?
+		      OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = managed_projects.id AND pm.user_id = ?)
+		      OR EXISTS (
+		        SELECT 1 FROM organization_members om
+		         WHERE om.org_id = managed_projects.organization_id
+		           AND om.user_id = ? AND om.role IN ('owner', 'admin')
+		      )
+		    )
+		  ORDER BY (owner_user_id = ?) DESC, is_default DESC, created_at ASC, name COLLATE NOCASE ASC`,
+	).bind(ownerUserId, ownerUserId, ownerUserId, ownerUserId).all();
+	return (results ?? []).map((row) => ({
+		...publicProject(row),
+		shared: row.owner_user_id !== ownerUserId,
+	}));
 }
 
 export async function getManagedProject(env, ownerUserId, projectId) {
 	const row = await env.DB.prepare(
-		`SELECT id, name, description, is_default, status, created_at, updated_at
-		 FROM managed_projects
+		`SELECT ${PROJECT_COLUMNS} FROM managed_projects
 		 WHERE id = ? AND owner_user_id = ? AND status = 'active'
 		 LIMIT 1`,
 	).bind(projectId, ownerUserId).first();
@@ -259,19 +306,26 @@ export async function resolveManagedProject(env, request, auth) {
 		);
 	}
 
-	// Explicit project ids take one indexed ownership lookup. Only historical
-	// keys with NULL project_id and sessions with no selection need the lazy,
+	// Explicit project ids take one indexed lookup. Only historical keys with
+	// NULL project_id and sessions with no selection need the lazy,
 	// deterministic default-project bootstrap.
 	if (explicitTokenProjectId || requestedId) {
 		const selectedId = explicitTokenProjectId ?? requestedId;
-		const project = await getManagedProject(env, auth.userId, selectedId);
+		// A bearer key is bound to one project and its holder is the owner by
+		// construction; a browser session may be a member of someone else's.
+		const project = auth.type === "token"
+			? await getManagedProject(env, auth.userId, selectedId)
+			: await getManagedProjectForUser(env, auth.userId, selectedId);
 		if (!project) {
 			throw new ManagedProjectError("project_not_found", "That project does not exist.", 404);
 		}
 		return {
 			project,
 			accountUserId: auth.userId,
-			memoryOwnerUserId: await managedProjectMemoryOwnerId(auth.userId, project),
+			// Derived from the project's OWNER, never from the caller. A member
+			// works inside the owner's memory space; deriving from whoever is
+			// signed in would hand each member a private empty copy.
+			memoryOwnerUserId: await managedProjectMemoryOwnerId(project.owner_user_id ?? auth.userId, project),
 		};
 	}
 

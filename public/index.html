@@ -857,6 +857,94 @@
 	.secret-toolbar, .section-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 	.connect-section { border-left: 3px solid var(--accent); }
 	.connect-section.api { border-left-color: var(--green); }
+	/* ---- settings workspace: scope nav | one section ---- */
+	.set-shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 32px; align-items: start; }
+	.set-nav { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 2px; }
+	.set-nav-group { font: 600 11px/1 var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
+		color: var(--faint); padding: 16px 10px 7px; }
+	.set-nav-group:first-child { padding-top: 0; }
+	.set-nav button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px;
+		text-align: left; background: transparent; color: var(--muted); border: 1px solid transparent;
+		border-radius: 9px; padding: 8px 10px; font: 400 13.5px/1.3 var(--font-ui); }
+	.set-nav button:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.set-nav button.active { background: color-mix(in srgb, var(--accent) 10%, transparent);
+		color: var(--accent); font-weight: 600; }
+	.set-main { min-width: 0; max-width: 920px; }
+	.set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+		flex-wrap: wrap; margin-bottom: 8px; }
+	.set-head h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+	.set-head .set-sub { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
+	.set-section { border-top: 1px solid var(--border); margin-top: 32px; padding-top: 24px; }
+	.set-section:first-of-type { border-top: 0; margin-top: 20px; padding-top: 0; }
+	.set-section h4 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+	.set-section .set-note { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0 0 16px; }
+	.set-field { margin-bottom: 16px; max-width: 680px; }
+	.set-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+	.set-field input, .set-field textarea, .set-field select { width: 100%; background: var(--input-bg);
+		border: 1px solid var(--border2); color: var(--text); border-radius: 9px; padding: 9px 11px;
+		font: 400 14px/1.5 var(--font-ui); }
+	.set-field textarea { min-height: 96px; resize: vertical; }
+	.set-field .set-hint { font-size: 12.5px; color: var(--faint); margin-top: 6px; line-height: 1.5; }
+	.set-readonly { display: flex; align-items: center; gap: 8px; background: var(--panel2);
+		border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; }
+	.set-readonly code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+		font: 400 13px/1.5 var(--font-mono); color: var(--muted); }
+	.set-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+	.set-actions .set-status { font-size: 12.5px; color: var(--muted); }
+	.set-table { width: 100%; border-collapse: collapse; }
+	.set-table th { text-align: left; font: 600 11.5px/1 var(--font-ui); letter-spacing: .05em;
+		text-transform: uppercase; color: var(--faint); padding: 0 10px 10px; }
+	.set-table td { padding: 12px 10px; border-top: 1px solid var(--border); font-size: 13.5px; vertical-align: middle; }
+	.set-table td:first-child, .set-table th:first-child { padding-left: 0; }
+	.set-table td:last-child, .set-table th:last-child { padding-right: 0; text-align: right; }
+	.set-table select { background: var(--input-bg); border: 1px solid var(--border2); color: var(--text);
+		border-radius: 7px; padding: 5px 8px; font: 400 13px/1 var(--font-ui); min-height: 30px; }
+	.set-who { display: flex; flex-direction: column; gap: 2px; }
+	.set-who b { font-weight: 600; }
+	.set-who span { font-size: 12.5px; color: var(--faint); }
+	.set-pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 9px;
+		font: 500 11.5px/1.5 var(--font-ui); border: 1px solid var(--border2); color: var(--muted); }
+	.set-pill.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 42%, transparent); }
+	.set-pill.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 42%, transparent); }
+	.set-pill.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+	/* Danger sits last and looks unlike everything above it. */
+	.set-danger { border: 1px solid var(--danger-border); background: var(--danger-bg); border-radius: 12px;
+		padding: 4px 18px; margin-top: 32px; }
+	.set-danger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+		flex-wrap: wrap; padding: 16px 0; border-top: 1px solid color-mix(in srgb, var(--red) 22%, transparent); }
+	.set-danger-row:first-of-type { border-top: 0; }
+	.set-danger-row b { display: block; font-size: 13.5px; font-weight: 600; }
+	.set-danger-row span { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+	.set-danger-row > div { min-width: 220px; flex: 1; }
+	/* The invite link is shown exactly once; it must look like a thing to copy now. */
+	.set-invite { border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 11px;
+		background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 16px; margin: 16px 0; }
+	.set-invite b { display: block; font-size: 13.5px; color: var(--accent); margin-bottom: 4px; }
+	.set-invite p { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+	.set-cat { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--border); }
+	.set-cat:first-of-type { border-top: 0; }
+	.set-cat-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+	.set-cat-name { font: 500 13px/1.4 var(--font-mono); }
+	.set-cat-desc { font-size: 12.5px; color: var(--faint); flex: 1; min-width: 0; }
+	.set-preview-row { display: flex; align-items: center; gap: 12px; padding: 10px 0;
+		border-top: 1px solid var(--border); font-size: 13px; }
+	.set-preview-row:first-of-type { border-top: 0; }
+	.set-preview-row q { flex: 1; min-width: 0; color: var(--text); font-style: normal; }
+	.set-empty { padding: 20px 0; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+	@media (max-width: 980px) {
+		.set-shell { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+		.set-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+		.set-nav-group { width: 100%; padding: 10px 0 2px; }
+		.set-nav button { width: auto; }
+	}
+	@media (max-width: 640px) {
+		.set-table thead { display: none; }
+		.set-table tr { display: block; border-top: 1px solid var(--border); padding: 12px 0; }
+		.set-table td { display: block; border: 0; padding: 4px 0; text-align: left; }
+		.set-table td:last-child { text-align: left; padding-top: 10px; }
+		.set-danger-row { flex-direction: column; align-items: stretch; }
+		.set-danger-row button { width: 100%; }
+	}
 	.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 		gap: 20px; align-items: stretch; }
 	.settings-section { min-height: 148px; }
@@ -1964,6 +2052,11 @@ function resetProjectBoundUiState() {
 		mode: "preview", turn: 0, thinking: false, preview: [], openCtx: new Set(),
 		menu: null, panel: null, lastLiveAdd: 0,
 	});
+	// Roles, members and rules are all project-scoped. A stale draft submitted
+	// after a switch would write one project's policy into another's.
+	Object.assign(SET, {
+		data: null, draft: null, audit: null, invite: null, preview: null, status: "", error: "", loading: false,
+	});
 	clearTimeout(EX.poll); Object.assign(EX, { rows: [], loading: false, creating: false, error: "", poll: null });
 	Object.assign(RQ, { rows: [], loading: false, error: "" });
 	Object.assign(WH, {
@@ -2601,6 +2694,9 @@ function setView(v, { updateHash = true } = {}) {
 	}
 	// Re-entering the Playground refetches: another door may have written since.
 	if (v === "playground" && S.view !== v) PG.loaded = false;
+	// Settings is entirely project-scoped, so re-entering it refetches: roles,
+	// members and rules all belong to whichever project is selected now.
+	if (v === "settings" && S.view !== v) { SET.data = null; SET.draft = null; SET.audit = null; }
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
@@ -6891,14 +6987,628 @@ function closePolicyModal() {
 	modal.innerHTML = "";
 }
 
+/**
+ * Settings — one workspace, three scopes.
+ *
+ * Every control here is disabled unless the server said this person holds the
+ * capability behind it. The disable is a courtesy, not the enforcement: the
+ * same capability is checked again server-side on every route, because a
+ * hidden button is not a permission.
+ */
+const SET = {
+	section: "project-general",
+	data: null,
+	loading: false,
+	error: "",
+	draft: null,
+	status: "",
+	invite: null,
+	inviteForm: { email: "", org_role: "member", project_role: "viewer" },
+	preview: null,
+	previewText: "I'm allergic to peanuts\nEmail me, I never pick up the phone\nThanks, that's all for today",
+	audit: null,
+};
+
+const SET_SECTIONS = [
+	{ group: "Project", items: [
+		["project-general", "General"],
+		["project-extraction", "Memory extraction"],
+		["project-categories", "Categories"],
+		["project-members", "Members"],
+		["project-audit", "Audit history"],
+	] },
+	{ group: "Organization", items: [
+		["org-general", "General"],
+		["org-members", "Members & invitations"],
+	] },
+	{ group: "Personal", items: [
+		["personal-account", "Account & security"],
+		["personal-memory", "What to remember"],
+	] },
+];
+
+/** True when the signed-in person holds this capability in the loaded scope. */
+function setCan(capability) {
+	return (SET.data?.membership?.capabilities ?? []).includes(capability);
+}
+
 function viewSettings(v) {
-	// "What to remember" (formerly the Rules tab) now lives in Settings: it is a
-	// preference, not a place people visit.
-	viewSettingsMain(v);
-	const rulesWrap = el("div");
-	rulesWrap.innerHTML = `<h3 style="margin:22px 0 10px">What to remember</h3>`;
-	v.appendChild(rulesWrap);
-	viewRules(v);
+	const wrap = el("div");
+	wrap.innerHTML = `
+		<div class="page-head">
+			<h2 class="page-title">Settings</h2>
+			<p class="page-sub" id="setScope"></p>
+		</div>
+		<div class="set-shell">
+			<nav class="set-nav" aria-label="Settings sections">
+				${SET_SECTIONS.map((group) => `
+					<div class="set-nav-group">${esc(group.group)}</div>
+					${group.items.map(([id, label]) => `
+						<button class="${SET.section === id ? "active" : ""}" aria-current="${SET.section === id}"
+							onclick="setSection('${id}')">${esc(label)}</button>`).join("")}
+				`).join("")}
+			</nav>
+			<div class="set-main" id="setMain"></div>
+		</div>`;
+	v.appendChild(wrap);
+	renderSettingsScope();
+	renderSettingsSection();
+	if (!SET.data && !SET.loading) loadSettings();
+}
+
+function setSection(id) {
+	SET.section = id;
+	SET.status = "";
+	SET.invite = null;
+	// Each section builds its own draft shape from the loaded data. Carrying one
+	// across means the next section reads fields that were never there — and an
+	// unsaved edit silently following you into an unrelated form is not
+	// something anyone wants either way.
+	SET.draft = null;
+	SET.preview = null;
+	renderView();
+}
+
+async function loadSettings() {
+	SET.loading = true;
+	const projectEpoch = S.projectEpoch;
+	try {
+		const res = await api("/v1/settings");
+		if (projectEpoch !== S.projectEpoch) return;
+		SET.data = res;
+		SET.draft = null;
+		SET.error = "";
+	} catch (error) {
+		if (error?.projectChanged || projectEpoch !== S.projectEpoch) return;
+		SET.error = error.message || "Settings could not be loaded.";
+	} finally {
+		SET.loading = false;
+		if (S.view === "settings") renderView();
+	}
+}
+
+function renderSettingsScope() {
+	const box = $("#setScope");
+	if (!box) return;
+	if (!SET.data) { box.textContent = SET.error || "Loading…"; return; }
+	const role = SET.data.membership.project_role ?? SET.data.membership.org_role ?? "no access";
+	box.innerHTML = `${esc(SET.data.organization?.name ?? "Your organization")}
+		· ${esc(SET.data.project?.name ?? "")} · <span class="set-pill accent">${esc(role)}</span>`;
+}
+
+function renderSettingsSection() {
+	const box = $("#setMain");
+	if (!box) return;
+	if (SET.error) { box.innerHTML = `<div class="set-empty">${esc(SET.error)}</div>`; return; }
+	if (!SET.data) { box.innerHTML = `<div class="set-empty">Loading settings…</div>`; return; }
+	const render = {
+		"project-general": setProjectGeneral,
+		"project-extraction": setProjectExtraction,
+		"project-categories": setProjectCategories,
+		"project-members": setProjectMembers,
+		"project-audit": setProjectAudit,
+		"org-general": setOrgGeneral,
+		"org-members": setOrgMembers,
+		"personal-account": setPersonalAccount,
+		"personal-memory": setPersonalMemory,
+	}[SET.section];
+	box.innerHTML = render ? render() : `<div class="set-empty">Nothing here.</div>`;
+	if (SET.section === "personal-account") mountPersonalAccount(box);
+	if (SET.section === "project-audit" && !SET.audit) loadAuditPage();
+}
+
+/** A disabled control has to say why, or it reads as a bug. */
+function setLocked(capability, label = "You need a higher role in this project to change this.") {
+	return setCan(capability) ? "" : ` disabled title="${esc(label)}"`;
+}
+
+function setProjectGeneral() {
+	const p = SET.data.project ?? {};
+	const draft = SET.draft ?? (SET.draft = { name: p.name ?? "", description: p.description ?? "" });
+	const editable = setCan("project.edit");
+	return `
+		<div class="set-head"><div><h3>General</h3>
+			<div class="set-sub">Everything under this project — memory, keys, rules, requests, exports and webhooks — is isolated from every other project.</div></div></div>
+		<div class="set-section">
+			<div class="set-field"><label for="setProjName">Project name</label>
+				<input id="setProjName" maxlength="80" value="${esc(draft.name)}"
+					oninput="SET.draft.name=this.value"${editable ? "" : " disabled"} /></div>
+			<div class="set-field"><label for="setProjDesc">Description</label>
+				<textarea id="setProjDesc" maxlength="500" placeholder="What this project contains"
+					oninput="SET.draft.description=this.value"${editable ? "" : " disabled"}>${esc(draft.description)}</textarea></div>
+			<div class="set-field"><label>Project ID</label>
+				<div class="set-readonly"><code>${esc(p.id ?? "")}</code>
+					<button class="ghost mini" onclick="copyText('${esc(p.id ?? "")}')">Copy</button></div>
+				<div class="set-hint">${p.is_default ? "This is your default project." : "Created project."}
+					Keys are bound to this id and cannot be pointed at another project.</div></div>
+			<div class="set-actions">
+				<button onclick="saveProjectGeneral()"${setLocked("project.edit")}>Save changes</button>
+				<span class="set-status">${esc(SET.status)}</span>
+			</div>
+		</div>
+		${setDangerZone()}`;
+}
+
+function setDangerZone() {
+	const canDeleteMemory = setCan("project.memory.delete");
+	const canDeleteProject = setCan("project.delete");
+	return `
+		<div class="set-danger">
+			<div class="set-danger-row">
+				<div><b>Delete all memories</b>
+					<span>Removes every memory in this project. The project, its keys and its settings stay. This cannot be undone.</span></div>
+				<button class="danger" onclick="setView('memory')"${canDeleteMemory ? "" : ' disabled title="Only a project admin can delete memory."'}>Review in Memories</button>
+			</div>
+			<div class="set-danger-row">
+				<div><b>Delete project</b>
+					<span>Permanently deletes this project and everything in it. Not available yet — safe project deletion is a convergent workflow across memory, indexes and queues, and shipping the button before the workflow would risk leaving data stranded.</span></div>
+				<button class="danger" disabled title="${canDeleteProject ? "Coming with project lifecycle." : "Only the organization owner can delete a project."}">Delete project</button>
+			</div>
+		</div>`;
+}
+
+async function saveProjectGeneral() {
+	SET.status = "Saving…";
+	renderSettingsSection();
+	try {
+		const res = await api("/v1/settings/project", { method: "PATCH", body: JSON.stringify(SET.draft) });
+		SET.data.project = res.project;
+		SET.status = "Saved.";
+		await refreshProjects().catch(() => {});
+	} catch (error) {
+		SET.status = error.message || "Could not save.";
+	}
+	renderSettingsSection();
+}
+
+function setProjectExtraction() {
+	const rules = SET.data.rules ?? {};
+	const draft = SET.draft ?? (SET.draft = {
+		captureDefault: rules.captureDefault ?? "auto",
+		captureDensity: rules.captureDensity ?? "standard",
+		autoCollect: rules.autoCollect !== false,
+		includes: [...(rules.includes ?? [])],
+		excludes: [...(rules.excludes ?? [])],
+	});
+	const editable = setCan("project.rules.edit");
+	const chips = (list, kind) => list.length
+		? list.map((term, i) => `<span class="set-pill ${kind === "includes" ? "ok" : "warn"}">${esc(term)}
+			<button class="ghost mini" style="padding:0 2px;min-height:0" aria-label="Remove ${esc(term)}"
+				onclick="setRemoveTerm('${kind}',${i})"${editable ? "" : " disabled"}>×</button></span>`).join(" ")
+		: `<span class="set-hint">None yet.</span>`;
+	return `
+		<div class="set-head"><div><h3>Memory extraction</h3>
+			<div class="set-sub">What this project keeps from a conversation. Topic rules are enforced before anything durable is written — a model that proposes an excluded fact still cannot store it.</div></div></div>
+
+		<div class="set-section">
+			<h4>Only remember</h4>
+			<p class="set-note">When this list is non-empty, nothing outside it becomes memory. Leave it empty to keep everything that is not excluded.</p>
+			<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${chips(draft.includes, "includes")}</div>
+			<div style="display:flex;gap:8px;max-width:520px">
+				<input id="setIncludeInput" placeholder="Add a topic, then press Enter" maxlength="80"
+					onkeydown="if(event.key==='Enter'){event.preventDefault();setAddTerm('includes',this)}"${editable ? "" : " disabled"} />
+				<button class="ghost" onclick="setAddTerm('includes',document.getElementById('setIncludeInput'))"${setLocked("project.rules.edit")}>Add</button>
+			</div>
+		</div>
+
+		<div class="set-section">
+			<h4>Never remember</h4>
+			<p class="set-note">Always wins over everything else, including anything above.</p>
+			<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${chips(draft.excludes, "excludes")}</div>
+			<div style="display:flex;gap:8px;max-width:520px">
+				<input id="setExcludeInput" placeholder="Add a topic, then press Enter" maxlength="80"
+					onkeydown="if(event.key==='Enter'){event.preventDefault();setAddTerm('excludes',this)}"${editable ? "" : " disabled"} />
+				<button class="ghost" onclick="setAddTerm('excludes',document.getElementById('setExcludeInput'))"${setLocked("project.rules.edit")}>Add</button>
+			</div>
+		</div>
+
+		<div class="set-section">
+			<h4>Capture behaviour</h4>
+			<div class="set-field"><label for="setDensity">Capture density</label>
+				<select id="setDensity" onchange="SET.draft.captureDensity=this.value"${editable ? "" : " disabled"}>
+					<option value="standard"${draft.captureDensity === "standard" ? " selected" : ""}>Standard — selective, high precision</option>
+					<option value="dense"${draft.captureDensity === "dense" ? " selected" : ""}>Dense — keep every durable detail</option>
+				</select>
+				<div class="set-hint">Dense lowers the gate floor and asks the extractor to enumerate. It captures more, and more of what it captures is marginal.</div></div>
+			<div class="set-field"><label for="setCaptureDefault">Capture pages</label>
+				<select id="setCaptureDefault" onchange="SET.draft.captureDefault=this.value"${editable ? "" : " disabled"}>
+					<option value="auto"${draft.captureDefault === "auto" ? " selected" : ""}>Auto — allow whole-conversation pages</option>
+					<option value="graph_only"${draft.captureDefault === "graph_only" ? " selected" : ""}>Graph only — never build capture pages</option>
+				</select></div>
+			<div class="set-field"><label><input type="checkbox" style="width:auto;margin-right:8px"
+				${draft.autoCollect ? "checked" : ""} onchange="SET.draft.autoCollect=this.checked"${editable ? "" : " disabled"} />
+				Auto-collect from <code>/v1/turn</code></label></div>
+		</div>
+
+		<div class="set-section">
+			<h4>Test these rules</h4>
+			<p class="set-note">A dry run against the real admission filter — the same code the pipeline uses. Nothing is written.</p>
+			<div class="set-field"><label for="setPreviewText">Sample lines, one per line</label>
+				<textarea id="setPreviewText" oninput="SET.previewText=this.value">${esc(SET.previewText)}</textarea></div>
+			<button class="ghost" onclick="setRunPreview()">Run test</button>
+			${SET.preview ? `<div style="margin-top:16px">${SET.preview.map((row) => `
+				<div class="set-preview-row"><q>${esc(row.text)}</q>
+					<span class="set-pill ${row.kept ? "ok" : ""}">${row.kept ? "kept" : esc(setReasonLabel(row.reason))}</span></div>`).join("")}</div>` : ""}
+		</div>
+
+		<div class="set-actions">
+			<button onclick="saveExtractionRules()"${setLocked("project.rules.edit")}>Save changes</button>
+			<span class="set-status">${esc(SET.status)}</span>
+		</div>`;
+}
+
+function setReasonLabel(reason) {
+	return {
+		excluded_by_rule: "excluded",
+		outside_include_rules: "outside your topics",
+	}[reason] ?? "not kept";
+}
+
+function setAddTerm(kind, input) {
+	const term = String(input?.value ?? "").trim();
+	if (!term) return;
+	if (!SET.draft[kind].includes(term)) SET.draft[kind].push(term);
+	input.value = "";
+	renderSettingsSection();
+}
+
+function setRemoveTerm(kind, index) {
+	SET.draft[kind].splice(index, 1);
+	renderSettingsSection();
+}
+
+async function setRunPreview() {
+	try {
+		const res = await api("/v1/settings/rules/preview", {
+			method: "POST",
+			body: JSON.stringify({
+				samples: String(SET.previewText || "").split("\n").map((line) => line.trim()).filter(Boolean),
+				rules: { includes: SET.draft?.includes ?? [], excludes: SET.draft?.excludes ?? [] },
+			}),
+		});
+		SET.preview = res.results ?? [];
+	} catch (error) {
+		toast(error.message || "Could not run the test.", true);
+	}
+	renderSettingsSection();
+}
+
+async function saveExtractionRules() {
+	SET.status = "Saving…";
+	renderSettingsSection();
+	try {
+		const res = await api("/v1/settings/rules", {
+			method: "PUT",
+			body: JSON.stringify({ rules: SET.draft, expected_version: SET.data.rules_version }),
+		});
+		SET.data.rules = res.rules;
+		SET.data.rules_version = res.rules_version;
+		SET.status = "Saved.";
+	} catch (error) {
+		// A conflict is not a failure to retry blindly: somebody else's change is
+		// already saved, and overwriting it silently is the thing to avoid.
+		SET.status = error.message || "Could not save.";
+	}
+	renderSettingsSection();
+}
+
+function setProjectCategories() {
+	const cats = SET.data.categories ?? [];
+	const builtin = SET.data.builtin_categories ?? [];
+	return `
+		<div class="set-head"><div><h3>Categories</h3>
+			<div class="set-sub">How memories are filed. Categories are labels for finding things — they never decide what may be stored; that is what the extraction rules are for.</div></div>
+			<button onclick="setCreateCategory()"${setLocked("project.categories.edit")}>Add category</button></div>
+
+		<div class="set-section">
+			<h4>Your categories</h4>
+			<p class="set-note">Names you added for this project. The extractor is offered these alongside the built-in set.</p>
+			${cats.length ? cats.map((c) => `
+				<div class="set-cat">
+					<span class="set-cat-dot" style="background:${esc(catColor(c.slug) || "var(--accent)")}"></span>
+					<span class="set-cat-name">${esc(c.slug)}</span>
+					<span class="set-cat-desc">${esc(c.description || "")}</span>
+					${c.status === "archived" ? `<span class="set-pill">archived</span>` : ""}
+					${c.legacy ? `<span class="set-pill">from rules</span>` : `
+						<button class="ghost mini" onclick="setArchiveCategory('${esc(c.id)}','${c.status === "archived" ? "active" : "archived"}')"${setLocked("project.categories.edit")}>
+							${c.status === "archived" ? "Restore" : "Archive"}</button>`}
+				</div>`).join("") : `<div class="set-empty">None yet. The built-in set below is being used.</div>`}
+		</div>
+
+		<div class="set-section">
+			<h4>Built in</h4>
+			<p class="set-note">Always active, and the colours the graph draws with. These cannot be edited — the extractor and the graph both depend on this exact set.</p>
+			<div style="display:flex;flex-wrap:wrap;gap:8px">
+				${builtin.map((name) => `<span class="set-pill">
+					<span class="set-cat-dot" style="background:${esc(catColor(name))}"></span>${esc(name)}</span>`).join("")}
+			</div>
+		</div>`;
+}
+
+async function setCreateCategory() {
+	const name = prompt("Category name (letters, numbers and spaces)");
+	if (!name) return;
+	try {
+		await api("/v1/settings/categories", { method: "POST", body: JSON.stringify({ name }) });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not add that category.", true); }
+}
+
+async function setArchiveCategory(id, status) {
+	try {
+		await api(`/v1/settings/categories/${encodeURIComponent(id)}/status`, {
+			method: "PATCH", body: JSON.stringify({ status }),
+		});
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not update that category.", true); }
+}
+
+function setMemberTable(rows, { roles, onChange, onRemove, empty }) {
+	if (!rows.length) return `<div class="set-empty">${esc(empty)}</div>`;
+	return `<table class="set-table"><thead><tr>
+			<th>Member</th><th>Role</th><th>Joined</th><th></th>
+		</tr></thead><tbody>
+		${rows.map((m) => `<tr>
+			<td><div class="set-who"><b>${esc(m.name || m.email || m.user_id)}</b><span>${esc(m.email || "")}</span></div></td>
+			<td>${m.role === "owner"
+				? `<span class="set-pill accent">owner</span>`
+				: `<select onchange="${onChange}('${esc(m.user_id)}',this.value)"${setLocked("org.members.manage")}>
+						${roles.map((r) => `<option value="${r}"${m.role === r ? " selected" : ""}>${r}</option>`).join("")}
+					</select>`}</td>
+			<td><span class="set-hint">${esc(ago(m.joined_at))}</span></td>
+			<td>${m.role === "owner" ? `<span class="set-hint">Cannot be removed</span>`
+				: `<button class="ghost mini danger" onclick="${onRemove}('${esc(m.user_id)}')"${setLocked("org.members.manage")}>Remove</button>`}</td>
+		</tr>`).join("")}
+	</tbody></table>`;
+}
+
+function setProjectMembers() {
+	return `
+		<div class="set-head"><div><h3>Members</h3>
+			<div class="set-sub">Who can open this project. A project role grants access to this project only — never to another one in the organization.</div></div>
+			<button onclick="setSection('org-members')"${setLocked("org.members.manage")}>Invite member</button></div>
+		<div class="set-section">
+			${setMemberTable(SET.data.members ?? [], {
+				roles: ["admin", "member", "viewer"],
+				onChange: "setChangeProjectRole",
+				onRemove: "setRemoveProjectMember",
+				empty: "Only you. Invite someone from Organization → Members to give them access.",
+			})}
+		</div>
+		<div class="set-section">
+			<h4>What each role can do</h4>
+			<table class="set-table"><thead><tr><th>Role</th><th>Can</th><th>Cannot</th></tr></thead><tbody>
+				<tr><td><b>admin</b></td><td>Settings, members, keys, rules, delete memory</td><td>Delete or transfer the project</td></tr>
+				<tr><td><b>member</b></td><td>Read and write memory, manage their own keys</td><td>Change rules, categories or members</td></tr>
+				<tr><td><b>viewer</b></td><td>Read memory, graph and history</td><td>Write anything, or create keys</td></tr>
+			</tbody></table>
+		</div>`;
+}
+
+async function setChangeProjectRole(userId, role) {
+	try {
+		await api(`/v1/settings/members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify({ role }) });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not change that role.", true); }
+}
+
+async function setRemoveProjectMember(userId) {
+	if (!confirm("Remove this person's access to this project?")) return;
+	try {
+		await api(`/v1/settings/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not remove that member.", true); }
+}
+
+function setOrgGeneral() {
+	const org = SET.data.organization ?? {};
+	const draft = SET.draft ?? (SET.draft = { name: org.name ?? "", description: org.description ?? "" });
+	const editable = setCan("org.edit");
+	return `
+		<div class="set-head"><div><h3>Organization</h3>
+			<div class="set-sub">The account everything belongs to. Projects, members and invitations all live inside it.</div></div></div>
+		<div class="set-section">
+			<div class="set-field"><label for="setOrgName">Organization name</label>
+				<input id="setOrgName" maxlength="80" value="${esc(draft.name)}"
+					oninput="SET.draft.name=this.value"${editable ? "" : " disabled"} /></div>
+			<div class="set-field"><label for="setOrgDesc">Description</label>
+				<textarea id="setOrgDesc" maxlength="500" oninput="SET.draft.description=this.value"${editable ? "" : " disabled"}>${esc(draft.description ?? "")}</textarea></div>
+			<div class="set-field"><label>Organization ID</label>
+				<div class="set-readonly"><code>${esc(org.id ?? "")}</code>
+					<button class="ghost mini" onclick="copyText('${esc(org.id ?? "")}')">Copy</button></div></div>
+			<div class="set-actions">
+				<button onclick="saveOrgGeneral()"${setLocked("org.edit")}>Save changes</button>
+				<span class="set-status">${esc(SET.status)}</span>
+			</div>
+		</div>`;
+}
+
+async function saveOrgGeneral() {
+	SET.status = "Saving…";
+	renderSettingsSection();
+	try {
+		const res = await api("/v1/settings/organization", { method: "PATCH", body: JSON.stringify(SET.draft) });
+		SET.data.organization = res.organization;
+		SET.status = "Saved.";
+	} catch (error) { SET.status = error.message || "Could not save."; }
+	renderSettingsSection();
+}
+
+function setOrgMembers() {
+	const invites = SET.data.invitations ?? [];
+	const form = SET.inviteForm;
+	return `
+		<div class="set-head"><div><h3>Members & invitations</h3>
+			<div class="set-sub">Everyone in this organization. Organization admins can reach every project; a member reaches only the projects they are given a role in.</div></div></div>
+
+		${SET.invite ? `<div class="set-invite">
+			<b>Invitation link — copy it now</b>
+			<p>Itsuki does not send email, so this link is shown once and cannot be retrieved again. Send it to
+				<b>${esc(SET.invite.invitation.email)}</b> however you normally reach them. It expires in 7 days and works once.</p>
+			<div class="set-readonly"><code>${esc(SET.invite.link)}</code>
+				<button onclick="copyText('${esc(SET.invite.link)}')">Copy link</button></div>
+		</div>` : ""}
+
+		<div class="set-section">
+			<h4>Invite someone</h4>
+			<p class="set-note">They will need an Itsuki account on the same email address to accept.</p>
+			<div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;max-width:760px">
+				<div class="set-field" style="margin:0"><label for="setInviteEmail">Email</label>
+					<input id="setInviteEmail" type="email" placeholder="colleague@company.com" value="${esc(form.email)}"
+						oninput="SET.inviteForm.email=this.value"${setLocked("org.members.manage")} /></div>
+				<div class="set-field" style="margin:0"><label for="setInviteOrgRole">Organization</label>
+					<select id="setInviteOrgRole" onchange="SET.inviteForm.org_role=this.value"${setLocked("org.members.manage")}>
+						<option value="member"${form.org_role === "member" ? " selected" : ""}>member</option>
+						<option value="admin"${form.org_role === "admin" ? " selected" : ""}>admin</option>
+					</select></div>
+				<div class="set-field" style="margin:0"><label for="setInviteProjRole">This project</label>
+					<select id="setInviteProjRole" onchange="SET.inviteForm.project_role=this.value"${setLocked("org.members.manage")}>
+						<option value="">no access</option>
+						<option value="viewer"${form.project_role === "viewer" ? " selected" : ""}>viewer</option>
+						<option value="member"${form.project_role === "member" ? " selected" : ""}>member</option>
+						<option value="admin"${form.project_role === "admin" ? " selected" : ""}>admin</option>
+					</select></div>
+				<button onclick="setSendInvite()"${setLocked("org.members.manage")}>Create link</button>
+			</div>
+		</div>
+
+		<div class="set-section">
+			<h4>Members</h4>
+			${setMemberTable(SET.data.org_members ?? [], {
+				roles: ["admin", "member"],
+				onChange: "setChangeOrgRole",
+				onRemove: "setRemoveOrgMember",
+				empty: "Just you.",
+			})}
+		</div>
+
+		<div class="set-section">
+			<h4>Pending invitations</h4>
+			${invites.length ? `<table class="set-table"><thead><tr>
+					<th>Email</th><th>Roles</th><th>Status</th><th></th></tr></thead><tbody>
+				${invites.map((i) => `<tr>
+					<td>${esc(i.email)}</td>
+					<td><span class="set-pill">${esc(i.org_role)}</span>${i.project_role ? ` <span class="set-pill">${esc(i.project_role)}</span>` : ""}</td>
+					<td><span class="set-pill ${i.status === "pending" ? "warn" : ""}">${esc(i.status)}</span>
+						<span class="set-hint">expires ${esc(ago(i.expires_at))}</span></td>
+					<td><button class="ghost mini danger" onclick="setRevokeInvite('${esc(i.id)}')"${setLocked("org.members.manage")}>Revoke</button></td>
+				</tr>`).join("")}
+			</tbody></table>` : `<div class="set-empty">No invitations outstanding.</div>`}
+		</div>`;
+}
+
+async function setSendInvite() {
+	const form = SET.inviteForm;
+	if (!form.email.trim()) { toast("Enter an email address."); return; }
+	try {
+		const res = await api("/v1/settings/invitations", {
+			method: "POST",
+			body: JSON.stringify({
+				email: form.email.trim(),
+				org_role: form.org_role,
+				project_role: form.project_role || null,
+			}),
+		});
+		SET.invite = res;
+		SET.inviteForm = { email: "", org_role: "member", project_role: "viewer" };
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not create that invitation.", true); }
+}
+
+async function setRevokeInvite(id) {
+	try {
+		await api(`/v1/settings/invitations/${encodeURIComponent(id)}`, { method: "DELETE" });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not revoke that invitation.", true); }
+}
+
+async function setChangeOrgRole(userId, role) {
+	try {
+		await api(`/v1/settings/org-members/${encodeURIComponent(userId)}`, { method: "PATCH", body: JSON.stringify({ role }) });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not change that role.", true); }
+}
+
+async function setRemoveOrgMember(userId) {
+	if (!confirm("Remove this person from the organization? Their access to every project in it goes too.")) return;
+	try {
+		await api(`/v1/settings/org-members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+		await loadSettings();
+	} catch (error) { toast(error.message || "Could not remove that member.", true); }
+}
+
+function setProjectAudit() {
+	const events = SET.audit?.events ?? [];
+	return `
+		<div class="set-head"><div><h3>Audit history</h3>
+			<div class="set-sub">Who changed what in this project. Records ids, actions and outcomes — never memory content, instructions, keys or invitation tokens.</div></div></div>
+		<div class="set-section">
+			${events.length ? `<table class="set-table"><thead><tr>
+					<th>Time</th><th>Actor</th><th>Action</th><th>Outcome</th></tr></thead><tbody>
+				${events.map((e) => `<tr>
+					<td><span class="set-hint">${esc(ago(e.created_at))}</span></td>
+					<td>${esc(e.actor)}</td>
+					<td><span class="set-cat-name">${esc(e.action)}</span>
+						${e.metadata ? `<div class="set-hint">${esc(Object.entries(e.metadata)
+							.map(([k, val]) => `${k}: ${val?.from ?? "—"} → ${val?.to ?? "—"}`).join(", "))}</div>` : ""}</td>
+					<td><span class="set-pill ${e.outcome === "ok" ? "ok" : "warn"}">${esc(e.outcome)}</span></td>
+				</tr>`).join("")}
+			</tbody></table>` : `<div class="set-empty">Nothing recorded yet. Changes to this project's settings, members and categories appear here.</div>`}
+		</div>`;
+}
+
+async function loadAuditPage() {
+	try {
+		SET.audit = await api("/v1/settings/audit");
+	} catch (error) {
+		SET.audit = { events: [] };
+	}
+	if (S.view === "settings" && SET.section === "project-audit") renderSettingsSection();
+}
+
+function setPersonalAccount() {
+	return `<div class="set-head"><div><h3>Account & security</h3>
+		<div class="set-sub">Your own profile, appearance, sessions and connected apps.</div></div></div>
+		<div id="setPersonalMount"></div>`;
+}
+
+/** The existing account cards, unchanged, mounted inside the new workspace. */
+function mountPersonalAccount(box) {
+	const mount = box.querySelector("#setPersonalMount");
+	if (mount) viewSettingsMain(mount);
+}
+
+function setPersonalMemory() {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="set-head"><div><h3>What to remember</h3>
+		<div class="set-sub">Account-wide rules. A project can narrow these; it can never widen them.</div></div></div>
+		<div id="setRulesMount"></div>`;
+	// viewRules writes into a container, so it is rendered after the shell.
+	setTimeout(() => {
+		const mount = $("#setRulesMount");
+		if (mount) viewRules(mount);
+	}, 0);
+	return wrap.innerHTML;
 }
 
 function viewSettingsMain(v) {

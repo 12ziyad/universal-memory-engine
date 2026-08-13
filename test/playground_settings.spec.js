@@ -102,7 +102,7 @@ describe("the same input, extracted differently", () => {
 		const a = await (await request("/v1/playground/thread", post({ title: "guarded" }, me.cookie))).json();
 		const applied = await request("/v1/playground/settings", post({
 			threadId: a.thread.id,
-			settings: { customInstructions: "Never save anything about politics." },
+			settings: { excludeTopics: ["politics"] },
 		}, me.cookie, "PUT"));
 		expect(applied.status).toBe(200);
 
@@ -128,28 +128,46 @@ describe("the same input, extracted differently", () => {
 });
 
 describe("thread settings are the account's rules, scoped", () => {
-	it("normalizes with the same rules normalizer", () => {
+	it("normalizes topics with the same rules normalizer", () => {
 		const settings = normalizeThreadSettings({
-			customInstructions: "  Keep exam progress.  ",
+			captureMode: "only_topics",
+			includeTopics: ["  thesis decisions  ", "thesis decisions"],
+			excludeTopics: ["Politics"],
 			customCategories: [{ name: "Study Progress!", description: "units done" }],
 		});
-		expect(settings.customInstructions).toBe("Keep exam progress.");
+		// Same trimming, same de-duplication, same bounds as an account rule.
+		expect(settings.includeTopics).toEqual(["thesis decisions"]);
+		expect(settings.excludeTopics).toEqual(["Politics"]);
+		expect(settings.captureMode).toBe("only_topics");
 		expect(settings.customCategories).toEqual([{ name: "study_progress", description: "units done" }]);
 	});
 
-	it("layers over the account rather than replacing it", () => {
+	it("refuses an allow-list mode with no topics in it", () => {
+		// "Only these topics" with none listed reads as "capture nothing", which
+		// nobody means while they are still filling the field in.
+		expect(normalizeThreadSettings({ captureMode: "only_topics" }).captureMode).toBe("standard");
+		expect(normalizeThreadSettings({ captureMode: "nonsense" }).captureMode).toBe("standard");
+	});
+
+	it("narrows the account rather than replacing it", () => {
 		const accountRules = normalizeMemoryRules({
-			customInstructions: "Never save anything about politics.",
 			excludes: ["passwords"],
 			customCategories: [{ name: "work", description: "job things" }],
 		});
 		const merged = threadRulesFrom(accountRules, normalizeThreadSettings({
-			customInstructions: "Keep every detail about my thesis.",
+			excludeTopics: ["cats"],
 			customCategories: [{ name: "thesis", description: "chapters and deadlines" }],
 		}));
-		expect(merged.customInstructions).toContain("Never save anything about politics.");
-		expect(merged.customInstructions).toContain("Keep every detail about my thesis.");
-		expect(merged.excludes).toEqual(["passwords"]);
+		// The chat's own deny list is what it declared...
+		expect(merged.excludes).toEqual(["cats"]);
+		// ...but the account is its parent, so the account's denies still bite.
+		// A chat may only ever narrow; replacing "passwords" would hand back
+		// exactly what the account refused.
+		expect(merged.parent).toBe(accountRules);
+		expect(rulesAllowText(merged, "my passwords are in 1password")).toBe(false);
+		expect(rulesAllowText(merged, "I love cats")).toBe(false);
+		expect(rulesAllowText(merged, "the thesis uses Postgres")).toBe(true);
+		// Categories are classification, not permission, so they union.
 		expect(merged.customCategories.map((c) => c.name)).toEqual(["work", "thesis"]);
 	});
 
@@ -166,7 +184,7 @@ describe("thread settings are the account's rules, scoped", () => {
 		const thread = await (await request("/v1/playground/thread", post({ title: "mine" }, mine.cookie))).json();
 		const res = await request("/v1/playground/settings", post({
 			threadId: thread.thread.id,
-			settings: { customInstructions: "Never save anything about boxing." },
+			settings: { excludeTopics: ["boxing"] },
 		}, theirs.cookie, "PUT"));
 		expect(res.status).toBe(404);
 	});

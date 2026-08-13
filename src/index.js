@@ -9,7 +9,7 @@
 
 import { createMcpHandler } from "agents/mcp";
 
-import { getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
+import { CATEGORIES, getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
 import { runAi } from "./lib/ai_meter.js";
 import { getUserReceipts } from "./lib/db.js";
@@ -28,9 +28,40 @@ import {
 	createManagedProject,
 	listManagedProjects,
 	ManagedProjectError,
+	managedProjectMemoryOwnerId,
 	resolveManagedProject,
 	updateManagedProject,
 } from "./lib/managed_projects.js";
+import {
+	can,
+	capabilitiesFor,
+	ensureDefaultOrganization,
+	getOrganization,
+	listOrganizationMembers,
+	listProjectMembers,
+	OrgError,
+	removeOrganizationMember,
+	removeProjectMember,
+	resolveMembership,
+	setOrganizationRole,
+	setProjectRole,
+	updateOrganization,
+} from "./lib/organizations.js";
+import {
+	acceptInvitation,
+	createInvitation,
+	describeInvitation,
+	listInvitations,
+	revokeInvitation,
+} from "./lib/invitations.js";
+import { auditDiff, emailDomain, listAuditEvents, writeAudit } from "./lib/audit.js";
+import {
+	createProjectCategory,
+	deleteProjectCategory,
+	listProjectCategories,
+	setProjectCategoryStatus,
+	updateProjectCategory,
+} from "./lib/project_categories.js";
 import {
 	archiveObject,
 	bulkDeleteBySource,
@@ -56,7 +87,7 @@ import {
 	runRecallCommand,
 } from "./pipeline/commands.js";
 import { resolveAdmissionRules } from "./pipeline/admission.js";
-import { getMemoryRules, mergeRuleOverride, saveMemoryRules } from "./pipeline/rules.js";
+import { getMemoryRules, mergeRuleOverride, rulesRejection, saveMemoryRules } from "./pipeline/rules.js";
 import { credentialShapeHint, validateBody } from "./lib/params.js";
 import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
 import { listJobs, packetStatus, queueCounters } from "./pipeline/jobs_api.js";
@@ -472,15 +503,67 @@ function managedProjectFailure(error) {
 	throw error;
 }
 
-async function requireSessionProject(request, env) {
+/**
+ * The single door for every session route. Resolving membership here — rather
+ * than at each endpoint — is what makes it impossible for a new route to
+ * forget: the roles are already on the context, and asking for a capability is
+ * one call.
+ */
+async function requireSessionProject(request, env, capability = null) {
 	const auth = await getSessionUser(env, request);
 	if (!auth) return { response: json({ error: "unauthorized" }, 401) };
 	try {
 		const managed = await resolveManagedProject(env, request, auth);
-		return { auth, ...managed };
+		const membership = await resolveMembership(env, {
+			userId: auth.userId,
+			project: managed?.project ?? null,
+		});
+		const context = { auth, membership, ...managed };
+		if (capability && !can(capability, membership)) return { response: forbidden(capability) };
+		return context;
 	} catch (error) {
 		return { response: managedProjectFailure(error) };
 	}
+}
+
+/**
+ * A capability refusal says which capability was missing, because "forbidden"
+ * with no reason is the kind of error that takes an afternoon to diagnose. It
+ * says nothing about who DOES hold it, which would leak the member list.
+ */
+function forbidden(capability) {
+	return json({
+		error: "forbidden",
+		capability,
+		message: "You do not have permission to do that in this project.",
+	}, 403);
+}
+
+/** Guard a capability on a context that is already resolved. */
+function requireCapability(context, capability) {
+	return can(capability, context.membership ?? {}) ? null : forbidden(capability);
+}
+
+function orgFailure(error) {
+	if (error instanceof OrgError) {
+		return json({ error: error.code, message: error.message }, Number(error.status ?? 400));
+	}
+	console.error("organization route failed:", error?.message ?? error);
+	return json({ error: "organization_unavailable", message: "That could not be completed. Try again." }, 500);
+}
+
+/**
+ * The organization a session acts in: the selected project's, falling back to
+ * the account's own. Bootstraps lazily, so an account that never opens a team
+ * feature still has no organization row.
+ */
+async function sessionOrganization(env, context) {
+	const explicit = context.project?.organization_id;
+	if (explicit) {
+		const org = await getOrganization(env, explicit);
+		if (org) return org;
+	}
+	return ensureDefaultOrganization(env, context.auth.userId);
 }
 
 function tokenProjectOptions(context) {
@@ -592,8 +675,263 @@ const routes = {
 		}
 	},
 
+	// ---- Settings: organization, membership, categories, audit --------------
+	// Every route here resolves membership at the door and then names the exact
+	// capability it needs. Hiding a control in the browser is not authorization.
+
+	/** Everything the Settings workspace renders in one round trip. */
+	"GET /v1/settings": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.view");
+		if (context.response) return context.response;
+		try {
+			const org = await sessionOrganization(env, context);
+			const rules = await getMemoryRules(env, context.memoryOwnerUserId);
+			return json({
+				ok: true,
+				project: context.project,
+				organization: org,
+				membership: {
+					org_role: context.membership.orgRole,
+					project_role: context.membership.projectRole,
+					capabilities: context.membership.capabilities,
+				},
+				rules,
+				// The saved-at timestamp doubles as the concurrency token: a stale
+				// tab sends what it loaded and gets a conflict instead of silently
+				// overwriting whatever landed in between.
+				rules_version: rules.updated_at ?? null,
+				categories: await listProjectCategories(env, {
+					projectId: context.project.id,
+					memoryOwnerUserId: context.memoryOwnerUserId,
+					legacy: rules.customCategories ?? [],
+				}),
+				builtin_categories: CATEGORIES,
+				members: can("project.members.view", context.membership)
+					? await listProjectMembers(env, context.project.id)
+					: [],
+				org_members: can("org.members.view", context.membership)
+					? await listOrganizationMembers(env, org.id)
+					: [],
+				invitations: can("org.members.manage", context.membership)
+					? await listInvitations(env, org.id)
+					: [],
+			});
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"PATCH /v1/settings/organization": async (request, env) => {
+		const context = await requireSessionProject(request, env, "org.edit");
+		if (context.response) return context.response;
+		try {
+			const org = await sessionOrganization(env, context);
+			const body = await request.json().catch(() => ({}));
+			const next = await updateOrganization(env, org.id, body);
+			await writeAudit(env, {
+				orgId: org.id, actorUserId: context.auth.userId, action: "org.updated",
+				targetType: "organization", targetId: org.id, metadata: auditDiff(org, next),
+			});
+			return json({ ok: true, organization: next });
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"PATCH /v1/settings/project": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.edit");
+		if (context.response) return context.response;
+		try {
+			const before = context.project;
+			const body = await request.json().catch(() => ({}));
+			const next = await updateManagedProject(env, before.owner_user_id, before.id, body);
+			await writeAudit(env, {
+				orgId: context.membership.orgId, projectId: before.id, actorUserId: context.auth.userId,
+				action: "project.updated", targetType: "project", targetId: before.id,
+				metadata: auditDiff(before, next),
+			});
+			return json({ ok: true, project: next });
+		} catch (error) { return managedProjectFailure(error); }
+	},
+
+	/**
+	 * Extraction rules for the selected project. `expected_version` is the
+	 * optimistic-concurrency check: two tabs editing the same policy must not
+	 * silently last-write-win, because the thing being overwritten is what the
+	 * user believes is protecting their memory.
+	 */
+	"PUT /v1/settings/rules": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.rules.edit");
+		if (context.response) return context.response;
+		try {
+			const body = await request.json().catch(() => ({}));
+			const current = await getMemoryRules(env, context.memoryOwnerUserId);
+			const expected = body.expected_version;
+			if (expected !== undefined && expected !== null && Number(expected) !== Number(current.updated_at ?? 0)) {
+				return json({
+					error: "settings_conflict",
+					message: "These settings changed in another tab. Reload to see the current values before saving.",
+					rules: current,
+					rules_version: current.updated_at ?? null,
+				}, 409);
+			}
+			const next = await saveMemoryRules(env, context.memoryOwnerUserId, body.rules ?? body);
+			await writeAudit(env, {
+				orgId: context.membership.orgId, projectId: context.project.id, actorUserId: context.auth.userId,
+				action: "project.rules.updated", targetType: "rules", targetId: context.project.id,
+				// Counts, never the terms themselves: an audit log must not become
+				// a readable copy of what somebody asked us never to store.
+				metadata: auditDiff(
+					{
+						includes_count: current.includes.length, excludes_count: current.excludes.length,
+						categories_count: current.customCategories.length,
+						instructions_present: Boolean(current.customInstructions),
+						capture_default: current.captureDefault, capture_density: current.captureDensity,
+						auto_collect: current.autoCollect,
+					},
+					{
+						includes_count: next.includes.length, excludes_count: next.excludes.length,
+						categories_count: next.customCategories.length,
+						instructions_present: Boolean(next.customInstructions),
+						capture_default: next.captureDefault, capture_density: next.captureDensity,
+						auto_collect: next.autoCollect,
+					},
+				),
+			});
+			return json({ ok: true, rules: next, rules_version: next.updated_at ?? Date.now() });
+		} catch (error) { return orgFailure(error); }
+	},
+
+	/**
+	 * Dry run: what would these rules do to this text? Runs the real admission
+	 * filter, writes nothing. This is what lets the Settings page show a
+	 * truthful "kept / not kept" instead of a promise.
+	 */
+	"POST /v1/settings/rules/preview": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.view");
+		if (context.response) return context.response;
+		const body = await request.json().catch(() => ({}));
+		const samples = Array.isArray(body.samples) ? body.samples.slice(0, 10) : [];
+		const rules = body.rules && typeof body.rules === "object"
+			? mergeRuleOverride(await getMemoryRules(env, context.memoryOwnerUserId), body.rules)
+			: await getMemoryRules(env, context.memoryOwnerUserId);
+		return json({
+			ok: true,
+			results: samples.map((raw) => {
+				const text = String(raw ?? "").slice(0, 400);
+				const reason = rulesRejection(rules, text);
+				return { text, kept: !reason, reason: reason ?? null };
+			}),
+		});
+	},
+
+	"GET /v1/settings/categories": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.view");
+		if (context.response) return context.response;
+		const rules = await getMemoryRules(env, context.memoryOwnerUserId);
+		return json({
+			ok: true,
+			builtin: CATEGORIES,
+			categories: await listProjectCategories(env, {
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+				legacy: rules.customCategories ?? [],
+			}),
+		});
+	},
+
+	"POST /v1/settings/categories": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.categories.edit");
+		if (context.response) return context.response;
+		try {
+			const body = await request.json().catch(() => ({}));
+			const rules = await getMemoryRules(env, context.memoryOwnerUserId);
+			const result = await createProjectCategory(env, {
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+				legacy: rules.customCategories ?? [],
+				name: body.name, description: body.description, actorUserId: context.auth.userId,
+			});
+			await writeAudit(env, {
+				orgId: context.membership.orgId, projectId: context.project.id, actorUserId: context.auth.userId,
+				action: "project.category.created", targetType: "category", targetId: result.slug,
+				metadata: { slug: { from: null, to: result.slug } },
+			});
+			return json({ ok: true }, 201);
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"GET /v1/settings/audit": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.audit.view");
+		if (context.response) return context.response;
+		const url = new URL(request.url);
+		return json({
+			ok: true,
+			...await listAuditEvents(env, {
+				projectId: context.project.id,
+				action: url.searchParams.get("action"),
+				limit: Number(url.searchParams.get("limit")) || 50,
+				before: url.searchParams.get("before"),
+			}),
+		});
+	},
+
+	/**
+	 * Invite. There is no mail server, so this returns a link ONCE and says so
+	 * plainly — a "we emailed them" that never sent would be worse than asking
+	 * someone to paste a link.
+	 */
+	"POST /v1/settings/invitations": async (request, env) => {
+		const context = await requireSessionProject(request, env, "org.members.manage");
+		if (context.response) return context.response;
+		if (!(await allowRate(env.AUTH_LIMITER, `invite:${context.auth.userId}`))) return tooMany();
+		try {
+			const org = await sessionOrganization(env, context);
+			const body = await request.json().catch(() => ({}));
+			const created = await createInvitation(env, {
+				orgId: org.id,
+				projectId: body.project_role ? context.project.id : null,
+				email: body.email,
+				orgRole: body.org_role ?? "member",
+				projectRole: body.project_role ?? null,
+				invitedByUserId: context.auth.userId,
+				origin: new URL(request.url).origin,
+			});
+			await writeAudit(env, {
+				orgId: org.id, projectId: context.project.id, actorUserId: context.auth.userId,
+				action: "org.invitation.created", targetType: "invitation", targetId: created.invitation.id,
+				metadata: {
+					email_domain: { from: null, to: emailDomain(body.email) },
+					org_role: { from: null, to: created.invitation.org_role },
+					project_role: { from: null, to: created.invitation.project_role },
+				},
+			});
+			return json({ ok: true, ...created }, 201);
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"POST /v1/settings/invitations/accept": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `accept:${clientIp(request)}`))) return tooMany();
+		const body = await request.json().catch(() => ({}));
+		const user = await env.DB.prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
+			.bind(auth.userId).first();
+		if (!user) return json({ error: "unauthorized" }, 401);
+		const result = await acceptInvitation(env, body.token, user);
+		await writeAudit(env, {
+			orgId: result.org_id ?? null, actorUserId: auth.userId,
+			action: "org.invitation.accepted", targetType: "invitation",
+			outcome: result.ok ? "ok" : "denied", reason: result.ok ? null : result.reason,
+		});
+		return json(result, result.ok ? 200 : 409);
+	},
+
+	"POST /v1/settings/invitations/describe": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const body = await request.json().catch(() => ({}));
+		return json(await describeInvitation(env, body.token));
+	},
+
 	"GET /auth/tokens": async (request, env) => {
-		const context = await requireSessionProject(request, env);
+		const context = await requireSessionProject(request, env, "project.keys.view");
 		if (context.response) return context.response;
 		return json({
 			project: context.project,
@@ -2172,6 +2510,11 @@ async function handleRequestInner(request, env, ctx, url) {
 			return handleWebhookRoutes(request, env, ctx, url);
 		}
 
+		if (url.pathname.startsWith("/v1/settings/")) {
+			const settingsResponse = await handleSettingsMemberRoutes(request, env, url);
+			if (settingsResponse) return settingsResponse;
+		}
+
 		const handler = routes[`${request.method} ${url.pathname}`];
 
 		if (!handler) {
@@ -2310,6 +2653,107 @@ async function handleMcp(request, env, ctx, url) {
 	}
 
 	return serveMcp(request, env, ctx, url, id.userId);
+}
+
+/**
+ * Settings routes that carry an id in the path. Returns null when nothing here
+ * matches, so the caller falls through to the exact-match route table rather
+ * than swallowing a 404 that belongs to somebody else.
+ *
+ * Removing a member and revoking an invitation are the two places where a
+ * missing permission check would be an actual breach, so both name their
+ * capability explicitly rather than relying on having got here at all.
+ */
+async function handleSettingsMemberRoutes(request, env, url) {
+	const rest = url.pathname.slice("/v1/settings/".length);
+	const [group, rawId, sub] = rest.split("/").map((part) => (part ? decodeURIComponent(part) : part));
+	if (!["members", "org-members", "invitations", "categories"].includes(group) || !rawId) return null;
+	if (group === "invitations" && ["accept", "describe"].includes(rawId)) return null;
+
+	const context = await requireSessionProject(request, env);
+	if (context.response) return context.response;
+	const body = request.method === "PATCH" || request.method === "POST"
+		? await request.json().catch(() => ({}))
+		: {};
+
+	try {
+		const org = await sessionOrganization(env, context);
+		const audit = (action, extra = {}) => writeAudit(env, {
+			orgId: org.id, projectId: context.project.id, actorUserId: context.auth.userId,
+			action, ...extra,
+		});
+
+		if (group === "members") {
+			const denied = requireCapability(context, "project.members.manage");
+			if (denied) return denied;
+			if (request.method === "PATCH") {
+				await setProjectRole(env, context.project.id, org.id, rawId, body.role, context.auth.userId);
+				await audit("project.member.role_changed", {
+					targetType: "member", targetId: rawId, metadata: { project_role: { from: null, to: body.role } },
+				});
+				return json({ ok: true });
+			}
+			if (request.method === "DELETE") {
+				await removeProjectMember(env, context.project.id, rawId);
+				await audit("project.member.removed", { targetType: "member", targetId: rawId });
+				return json({ ok: true });
+			}
+		}
+
+		if (group === "org-members") {
+			const denied = requireCapability(context, "org.members.manage");
+			if (denied) return denied;
+			if (request.method === "PATCH") {
+				await setOrganizationRole(env, org.id, rawId, body.role);
+				await audit("org.member.role_changed", {
+					targetType: "member", targetId: rawId, metadata: { org_role: { from: null, to: body.role } },
+				});
+				return json({ ok: true });
+			}
+			if (request.method === "DELETE") {
+				await removeOrganizationMember(env, org.id, rawId);
+				await audit("org.member.removed", { targetType: "member", targetId: rawId });
+				return json({ ok: true });
+			}
+		}
+
+		if (group === "invitations") {
+			const denied = requireCapability(context, "org.members.manage");
+			if (denied) return denied;
+			if (request.method === "DELETE") {
+				await revokeInvitation(env, org.id, rawId);
+				await audit("org.invitation.revoked", { targetType: "invitation", targetId: rawId });
+				return json({ ok: true });
+			}
+		}
+
+		if (group === "categories") {
+			const denied = requireCapability(context, "project.categories.edit");
+			if (denied) return denied;
+			if (request.method === "PATCH" && sub === "status") {
+				await setProjectCategoryStatus(env, { projectId: context.project.id, categoryId: rawId, status: body.status });
+				await audit("project.category.status_changed", {
+					targetType: "category", targetId: rawId, metadata: { status: { from: null, to: body.status } },
+				});
+				return json({ ok: true });
+			}
+			if (request.method === "PATCH") {
+				await updateProjectCategory(env, {
+					projectId: context.project.id, categoryId: rawId, name: body.name, description: body.description,
+				});
+				await audit("project.category.updated", { targetType: "category", targetId: rawId });
+				return json({ ok: true });
+			}
+			if (request.method === "DELETE") {
+				await deleteProjectCategory(env, { projectId: context.project.id, categoryId: rawId });
+				await audit("project.category.deleted", { targetType: "category", targetId: rawId });
+				return json({ ok: true });
+			}
+		}
+		return null;
+	} catch (error) {
+		return orgFailure(error);
+	}
 }
 
 /**
