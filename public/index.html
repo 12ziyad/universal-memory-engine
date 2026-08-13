@@ -587,7 +587,8 @@
 		border: 1px solid var(--border2); background: var(--panel); color: var(--text);
 		font: 500 13px/1 var(--font-ui); box-shadow: var(--shadow-sm); }
 	.pg-canvas { flex: 1; min-height: 0; position: relative; }
-	.pg-canvas svg { width: 100%; height: 100%; display: block; touch-action: none; }
+	.pg-canvas svg { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+	.pg-canvas svg:active { cursor: grabbing; }
 	/* The graph keeps its own dark canvas in both themes, exactly as the Graph
 	   view does: the cluster colours are tuned for it and lose their separation
 	   on a light ground. */
@@ -622,8 +623,9 @@
 		gap: 6px; padding: 24px; pointer-events: none; }
 	.pg-graph-empty b { font-size: 14px; }
 	/* Node/edge visuals. The label plate keeps text readable over edges. */
-	.pgn-edge { stroke: var(--c, #84e9ff); stroke-width: 1.3; fill: none; }
-	.pgn-edge.is-long { stroke-dasharray: 5 6; stroke-width: 1; }
+	.pgn-edge { stroke: var(--c, #84e9ff); fill: none; stroke-linecap: round; }
+	.pgn-edge.is-rel { stroke-dasharray: 3 4; }
+	.pgn-edge.is-span { stroke-dasharray: 6 8; }
 	.pgn-edge.is-new { animation: pgEdgeDraw .55s ease-out both; }
 	.pgn-dot { fill: #101827; stroke: var(--c); stroke-width: 3;
 		filter: drop-shadow(0 0 7px color-mix(in srgb, var(--c) 68%, transparent));
@@ -3483,7 +3485,7 @@ const PG = {
 	// the real chat — same panel, real capture, real receipts.
 	mode: "preview", scenario: 0, turn: 0, thinking: false, settling: false,
 	preview: [], openCtx: new Set(), json: false, menu: null,
-	view: { x: 0, y: 0, k: 1 }, drag: null, gsearch: "", gfilter: "all",
+	view: { x: 0, y: 0, k: 1 }, drag: null, pinch: null, pointers: new Map(), gsearch: "", gfilter: "all",
 	tour: { on: false, step: 0 },
 };
 
@@ -3497,10 +3499,16 @@ const PG = {
 function pgCluster(id) { return CLUSTER_FALLBACK[id] ?? CLUSTER_FALLBACK.general_memory; }
 
 /**
- * Five read-only scenarios. Each one is a hand-built world: a seeded graph, an
- * opening exchange, and three follow-ups with the exact facts and entities the
- * reader would have been given. Nothing here is written to memory — the preview
- * exists so someone can see the shape of the product before connecting anything.
+ * Five read-only scenarios. Each one is a hand-built world: a clustered graph
+ * of uneven density (the way a real memory is — a person's work fills a
+ * cluster, their travel fills three nodes), an opening exchange, and three
+ * follow-ups carrying the exact facts and entities the reader was given.
+ *
+ * `of` is structural containment and draws an edge to the parent. `links` are
+ * the cross-cutting relations that make a memory a graph rather than a set of
+ * trees: the deadline that governs a chapter, the incident that indicted a
+ * database. Every link is a relation someone could state in a sentence — a
+ * graph padded with decorative edges teaches nothing.
  */
 const PG_SCENARIOS = [
 	{
@@ -3510,18 +3518,61 @@ const PG_SCENARIOS = [
 			{ n: "Maya Okonkwo", c: "identity_career", hub: true },
 			{ n: "Prof. Adeyemi", c: "identity_career" },
 			{ n: "weekly supervision", c: "identity_career", of: "Prof. Adeyemi" },
+			{ n: "second reader", c: "identity_career", of: "Prof. Adeyemi" },
+			{ n: "doctoral committee", c: "identity_career" },
+			{ n: "funding renewal", c: "identity_career", of: "doctoral committee" },
+			{ n: "progress review", c: "identity_career", of: "doctoral committee" },
 			{ n: "ETH Zürich", c: "identity_career" },
 			{ n: "lab visit", c: "identity_career", of: "ETH Zürich" },
-			{ n: "Chapter 3", c: "projects_systems" },
+			{ n: "Prof. Baumgartner", c: "identity_career", of: "ETH Zürich" },
+			{ n: "teaching duty", c: "identity_career" },
+			{ n: "office 4.12", c: "identity_career" },
+
+			{ n: "thesis draft", c: "projects_systems" },
+			{ n: "Chapter 2", c: "projects_systems", of: "thesis draft" },
+			{ n: "Chapter 3", c: "projects_systems", of: "thesis draft" },
+			{ n: "Chapter 4", c: "projects_systems", of: "thesis draft" },
+			{ n: "appendix B", c: "projects_systems", of: "thesis draft" },
+			{ n: "related work", c: "projects_systems", of: "Chapter 2" },
 			{ n: "evaluation section", c: "projects_systems", of: "Chapter 3" },
 			{ n: "partition tolerance", c: "projects_systems", of: "Chapter 3" },
+			{ n: "benchmark harness", c: "projects_systems", of: "evaluation section" },
+			{ n: "failure injection", c: "projects_systems", of: "benchmark harness" },
+			{ n: "result tables", c: "projects_systems", of: "evaluation section" },
+
 			{ n: "distributed systems", c: "skills_tech" },
 			{ n: "consistency models", c: "skills_tech", of: "distributed systems" },
+			{ n: "linearizability", c: "skills_tech", of: "consistency models" },
+			{ n: "causal consistency", c: "skills_tech", of: "consistency models" },
+			{ n: "Raft", c: "skills_tech", of: "distributed systems" },
+			{ n: "Paxos", c: "skills_tech", of: "distributed systems" },
 			{ n: "Jepsen testing", c: "skills_tech" },
+			{ n: "fault injection", c: "skills_tech", of: "Jepsen testing" },
+
 			{ n: "SIGMOD deadline", c: "active_goals" },
 			{ n: "submission draft", c: "active_goals", of: "SIGMOD deadline" },
+			{ n: "rebuttal window", c: "active_goals", of: "SIGMOD deadline" },
+			{ n: "thesis defence", c: "active_goals" },
+
 			{ n: "reading group", c: "preferences_research" },
 			{ n: "replication papers", c: "preferences_research", of: "reading group" },
+			{ n: "weekly summaries", c: "preferences_research", of: "reading group" },
+
+			{ n: "Lagos visit", c: "life_family" },
+			{ n: "sister's wedding", c: "life_family", of: "Lagos visit" },
+		],
+		links: [
+			["Maya Okonkwo", "thesis draft"], ["Maya Okonkwo", "SIGMOD deadline"],
+			["Chapter 3", "distributed systems"], ["Chapter 3", "SIGMOD deadline"],
+			["Prof. Adeyemi", "evaluation section"], ["Prof. Adeyemi", "thesis defence"],
+			["benchmark harness", "Jepsen testing"], ["failure injection", "fault injection"],
+			["lab visit", "Jepsen testing"], ["Prof. Baumgartner", "second reader"],
+			["reading group", "consistency models"], ["replication papers", "causal consistency"],
+			["Raft", "Chapter 3"], ["partition tolerance", "linearizability"],
+			["submission draft", "thesis draft"], ["doctoral committee", "thesis defence"],
+			["teaching duty", "SIGMOD deadline"], ["funding renewal", "thesis defence"],
+			["related work", "Paxos"], ["result tables", "SIGMOD deadline"],
+			["Lagos visit", "rebuttal window"],
 		],
 		opening: [
 			{ r: "user", c: "I'm writing up Chapter 3 of my thesis on replication under partition." },
@@ -3530,8 +3581,9 @@ const PG_SCENARIOS = [
 		turns: [
 			{
 				p: "I've switched Chapter 3 from Raft to CRDTs.",
-				a: "Noted — that's a real change of direction from the consensus framing you had in February. It affects the evaluation section too: your Jepsen harness was written around a leader election you no longer have. Want me to flag the parts of Chapter 3 that assume a leader?",
-				add: [{ n: "CRDTs", c: "projects_systems", of: "Chapter 3" }],
+				a: "Noted — that's a real change of direction from the consensus framing you had in February. It affects the evaluation section too: your benchmark harness was written around a leader election you no longer have. Want me to flag the parts of Chapter 3 that assume a leader?",
+				add: [{ n: "CRDTs", c: "skills_tech", of: "consistency models" }],
+				links: [["CRDTs", "Chapter 3"], ["CRDTs", "Raft"], ["CRDTs", "causal consistency"]],
 				facts: [
 					{ f: "Maya Okonkwo's Chapter 3 now uses CRDTs instead of Raft.", from: "now" },
 					{ f: "Maya Okonkwo's Chapter 3 used Raft for replication.", from: "-172d", to: "now" },
@@ -3539,13 +3591,14 @@ const PG_SCENARIOS = [
 				],
 				ents: [
 					{ n: "CRDTs", l: "Decision", s: "Replaced Raft as the replication approach in Chapter 3, superseding the consensus-based framing held since February." },
-					{ n: "Chapter 3", l: "Artifact", s: "The thesis chapter on replication under partition; contains the evaluation section built on a Jepsen harness." },
+					{ n: "Chapter 3", l: "Artifact", s: "The thesis chapter on replication under partition; contains the evaluation section built on a Jepsen-derived benchmark harness." },
 				],
 			},
 			{
 				p: "Prof. Adeyemi wants the evaluation done before the SIGMOD deadline.",
-				a: "That compresses things. The SIGMOD deadline is the fixed point, and the evaluation section still assumes the Raft harness — so the rewrite has to land before the experiments, not after. Your weekly supervision is the natural checkpoint.",
+				a: "That compresses things. The SIGMOD deadline is the fixed point, and the evaluation section still assumes the leader-based harness — so the rewrite has to land before the experiments, not after. Your weekly supervision is the natural checkpoint, and the teaching duty sits in the same weeks.",
 				add: [{ n: "evaluation before deadline", c: "active_goals", of: "SIGMOD deadline" }],
+				links: [["evaluation before deadline", "evaluation section"], ["evaluation before deadline", "weekly supervision"]],
 				facts: [
 					{ f: "Prof. Adeyemi requires the evaluation section completed before the SIGMOD deadline.", from: "now" },
 					{ f: "Prof. Adeyemi supervises Maya Okonkwo.", from: "-410d" },
@@ -3553,20 +3606,21 @@ const PG_SCENARIOS = [
 				],
 				ents: [
 					{ n: "Prof. Adeyemi", l: "Person", s: "Maya's doctoral supervisor since 2025; meets weekly and has set the evaluation section as the gating item for SIGMOD." },
-					{ n: "SIGMOD deadline", l: "Event", s: "The fixed submission date the evaluation work is now sequenced against." },
+					{ n: "SIGMOD deadline", l: "Event", s: "The fixed submission date the evaluation work is now sequenced against; also governs the rebuttal window." },
 				],
 			},
 			{
 				p: "The Jepsen report on etcd changed how I'll test.",
-				a: "Then the harness question is settled from two directions at once — the CRDT switch removed the leader, and the etcd report changes what you consider a passing run. Both point at rewriting the evaluation harness before the deadline rather than adapting it.",
+				a: "Then the harness question is settled from two directions at once — the CRDT switch removed the leader, and the etcd report changes what counts as a passing run. Both point at rewriting failure injection before the deadline rather than adapting it.",
 				add: [{ n: "etcd report", c: "skills_tech", of: "Jepsen testing" }],
+				links: [["etcd report", "fault injection"], ["etcd report", "benchmark harness"], ["etcd report", "linearizability"]],
 				facts: [
 					{ f: "Maya Okonkwo will change her testing approach based on the Jepsen etcd report.", from: "now" },
 					{ f: "Maya Okonkwo took Jepsen notes during the ETH Zürich lab visit.", from: "-61d" },
 				],
 				ents: [
-					{ n: "Jepsen testing", l: "Topic", s: "The verification approach behind Maya's evaluation harness; revisited after the etcd report." },
-					{ n: "ETH Zürich", l: "Place", s: "Site of the lab visit where the original Jepsen notes were taken." },
+					{ n: "Jepsen testing", l: "Topic", s: "The verification approach behind Maya's benchmark harness; revisited after the etcd report." },
+					{ n: "ETH Zürich", l: "Place", s: "Site of the lab visit where the original Jepsen notes were taken, and of Prof. Baumgartner, her second reader." },
 				],
 			},
 		],
@@ -3579,17 +3633,64 @@ const PG_SCENARIOS = [
 			{ n: "incident 412", c: "projects_systems" },
 			{ n: "postmortem", c: "projects_systems", of: "incident 412" },
 			{ n: "read amplification", c: "projects_systems", of: "incident 412" },
+			{ n: "pager storm", c: "projects_systems", of: "incident 412" },
+			{ n: "incident 388", c: "projects_systems" },
+			{ n: "connection pool", c: "projects_systems", of: "incident 388" },
+			{ n: "Q3 roadmap", c: "projects_systems" },
+			{ n: "migration plan", c: "projects_systems", of: "Q3 roadmap" },
+			{ n: "rollback runbook", c: "projects_systems", of: "migration plan" },
+			{ n: "capacity review", c: "projects_systems" },
+			{ n: "load test", c: "projects_systems", of: "capacity review" },
+			{ n: "SLO dashboard", c: "projects_systems" },
+			{ n: "error budget", c: "projects_systems", of: "SLO dashboard" },
+			{ n: "chaos drill", c: "projects_systems", of: "capacity review" },
+
 			{ n: "checkout service", c: "software_product" },
 			{ n: "payment retries", c: "software_product", of: "checkout service" },
 			{ n: "staleness bound", c: "software_product", of: "checkout service" },
+			{ n: "idempotency keys", c: "software_product", of: "payment retries" },
+			{ n: "cart service", c: "software_product" },
+			{ n: "inventory service", c: "software_product" },
+			{ n: "stock reservations", c: "software_product", of: "inventory service" },
+			{ n: "order events", c: "software_product" },
+			{ n: "webhook fanout", c: "software_product", of: "order events" },
+
 			{ n: "Postgres", c: "skills_tech" },
 			{ n: "read replicas", c: "skills_tech", of: "Postgres" },
 			{ n: "primary node", c: "skills_tech", of: "Postgres" },
+			{ n: "replication lag", c: "skills_tech", of: "read replicas" },
+			{ n: "logical decoding", c: "skills_tech", of: "Postgres" },
+			{ n: "PgBouncer", c: "skills_tech" },
+			{ n: "query planner", c: "skills_tech", of: "Postgres" },
+
 			{ n: "Priya Raghavan", c: "identity_career" },
 			{ n: "staff engineer", c: "identity_career", of: "Priya Raghavan" },
 			{ n: "on-call rotation", c: "identity_career" },
+			{ n: "escalation policy", c: "identity_career", of: "on-call rotation" },
+			{ n: "Marcus Bell", c: "identity_career" },
+			{ n: "hiring loop", c: "identity_career" },
+
 			{ n: "Northwind", c: "business_product" },
 			{ n: "Enterprise tier", c: "business_product", of: "Northwind" },
+			{ n: "uptime SLA", c: "business_product", of: "Enterprise tier" },
+			{ n: "Q4 renewal", c: "business_product", of: "Northwind" },
+		],
+		links: [
+			["Platform team", "checkout service"], ["Platform team", "Postgres"], ["Platform team", "on-call rotation"],
+			["incident 412", "read replicas"], ["read amplification", "primary node"],
+			["postmortem", "read replicas"], ["postmortem", "Priya Raghavan"],
+			["checkout service", "Postgres"], ["payment retries", "replication lag"],
+			["staleness bound", "replication lag"], ["cart service", "checkout service"],
+			["inventory service", "order events"], ["stock reservations", "primary node"],
+			["webhook fanout", "logical decoding"], ["incident 388", "PgBouncer"],
+			["connection pool", "PgBouncer"], ["Priya Raghavan", "on-call rotation"],
+			["Priya Raghavan", "migration plan"], ["Marcus Bell", "hiring loop"],
+			["Northwind", "checkout service"], ["uptime SLA", "incident 412"],
+			["Q4 renewal", "uptime SLA"], ["migration plan", "read replicas"],
+			["rollback runbook", "escalation policy"], ["query planner", "read amplification"],
+			["capacity review", "read replicas"], ["load test", "staleness bound"],
+			["SLO dashboard", "uptime SLA"], ["error budget", "incident 412"],
+			["chaos drill", "rollback runbook"], ["SLO dashboard", "replication lag"],
 		],
 		opening: [
 			{ r: "user", c: "We're deciding whether checkout should keep talking to the primary database." },
@@ -3598,8 +3699,9 @@ const PG_SCENARIOS = [
 		turns: [
 			{
 				p: "We're moving checkout reads to replicas next sprint.",
-				a: "That matches what the incident 412 postmortem recommended. The open risk it named was payment retries reading stale rows — worth deciding the staleness bound before the sprint rather than during it.",
+				a: "That matches what the incident 412 postmortem recommended. The open risk it named was payment retries reading stale rows — worth fixing the staleness bound before the sprint rather than during it, since Northwind's uptime SLA hangs off the same path.",
 				add: [{ n: "replica cutover", c: "software_product", of: "checkout service" }],
+				links: [["replica cutover", "read replicas"], ["replica cutover", "migration plan"], ["replica cutover", "staleness bound"]],
 				facts: [
 					{ f: "The checkout service will move read traffic to Postgres read replicas next sprint.", from: "now" },
 					{ f: "Incident 412 was caused by read amplification on the Postgres primary.", from: "-48d" },
@@ -3607,13 +3709,14 @@ const PG_SCENARIOS = [
 				],
 				ents: [
 					{ n: "replica cutover", l: "Decision", s: "Committed for next sprint; implements the recommendation the incident 412 postmortem made 46 days earlier." },
-					{ n: "checkout service", l: "Artifact", s: "The service whose read path caused incident 412; owner of the payment-retry logic sensitive to stale reads." },
+					{ n: "checkout service", l: "Artifact", s: "The service whose read path caused incident 412; owns payment-retry logic sensitive to replication lag." },
 				],
 			},
 			{
 				p: "Priya is taking over the on-call rotation from me.",
-				a: "Recorded. That puts the person who wrote the replica recommendation on call during the sprint that implements it — probably the outcome you want, but it does concentrate the context in one person.",
+				a: "Recorded. That puts the person who wrote the replica recommendation on call during the sprint that implements it — probably what you want, though it does concentrate the context in one person while Marcus is still in the hiring loop.",
 				add: [{ n: "rotation handover", c: "identity_career", of: "on-call rotation" }],
+				links: [["rotation handover", "Priya Raghavan"], ["rotation handover", "escalation policy"]],
 				facts: [
 					{ f: "Priya Raghavan is taking over the on-call rotation.", from: "now" },
 					{ f: "Priya Raghavan is a staff engineer on the Platform team.", from: "-300d" },
@@ -3625,8 +3728,9 @@ const PG_SCENARIOS = [
 			},
 			{
 				p: "Northwind is our largest customer on the checkout path.",
-				a: "Then the staleness bound isn't only a correctness question. Northwind sits on the same path as the cutover and the rotation handover, which makes it the natural blast-radius test for the sprint.",
+				a: "Then the staleness bound isn't only a correctness question. Northwind sits on the same path as the cutover and the rotation handover, its Enterprise tier carries the uptime SLA that incident 412 already dented, and the Q4 renewal is behind it.",
 				add: [{ n: "largest account", c: "business_product", of: "Northwind" }],
+				links: [["largest account", "checkout service"], ["largest account", "Q4 renewal"], ["largest account", "uptime SLA"]],
 				facts: [
 					{ f: "Northwind is the largest customer on the checkout path.", from: "now" },
 					{ f: "The checkout service handles payment retries.", from: "-300d" },
@@ -3644,17 +3748,51 @@ const PG_SCENARIOS = [
 		seed: [
 			{ n: "Devi Raman", c: "health_fitness", hub: true },
 			{ n: "knee injury", c: "health_fitness" },
+			{ n: "MRI scan", c: "health_fitness", of: "knee injury" },
+			{ n: "patellar tendon", c: "health_fitness", of: "knee injury" },
 			{ n: "physiotherapist", c: "health_fitness" },
 			{ n: "rehab plan", c: "health_fitness", of: "physiotherapist" },
+			{ n: "strength work", c: "health_fitness", of: "rehab plan" },
+			{ n: "load management", c: "health_fitness", of: "rehab plan" },
+			{ n: "sleep tracking", c: "health_fitness" },
+			{ n: "resting heart rate", c: "health_fitness", of: "sleep tracking" },
+
 			{ n: "morning runs", c: "fitness_habits" },
 			{ n: "long run Sunday", c: "fitness_habits", of: "morning runs" },
 			{ n: "tempo sessions", c: "fitness_habits" },
+			{ n: "interval track", c: "fitness_habits", of: "tempo sessions" },
+			{ n: "easy pace", c: "fitness_habits", of: "morning runs" },
+			{ n: "weekly mileage", c: "fitness_habits" },
+			{ n: "rest day", c: "fitness_habits", of: "weekly mileage" },
+			{ n: "running shoes", c: "fitness_habits" },
+
 			{ n: "marathon", c: "active_goals" },
 			{ n: "race pace", c: "active_goals", of: "marathon" },
+			{ n: "sub-4 target", c: "active_goals", of: "marathon" },
+			{ n: "half marathon", c: "active_goals" },
+			{ n: "taper weeks", c: "active_goals", of: "marathon" },
+
 			{ n: "swimming", c: "preferences_research" },
 			{ n: "pool sessions", c: "preferences_research", of: "swimming" },
+			{ n: "cycling", c: "preferences_research" },
+
 			{ n: "Cubbon Park", c: "life_family" },
 			{ n: "weekend routine", c: "life_family", of: "Cubbon Park" },
+			{ n: "running club", c: "life_family" },
+			{ n: "Anil", c: "life_family", of: "running club" },
+		],
+		links: [
+			["Devi Raman", "marathon"], ["Devi Raman", "morning runs"], ["Devi Raman", "physiotherapist"],
+			["knee injury", "tempo sessions"], ["knee injury", "weekly mileage"],
+			["rehab plan", "swimming"], ["rehab plan", "tempo sessions"],
+			["load management", "weekly mileage"], ["patellar tendon", "strength work"],
+			["long run Sunday", "Cubbon Park"], ["morning runs", "Cubbon Park"],
+			["interval track", "race pace"], ["tempo sessions", "sub-4 target"],
+			["half marathon", "race pace"], ["taper weeks", "weekly mileage"],
+			["running club", "long run Sunday"], ["Anil", "half marathon"],
+			["cycling", "load management"], ["running shoes", "patellar tendon"],
+			["sleep tracking", "load management"], ["resting heart rate", "easy pace"],
+			["MRI scan", "physiotherapist"],
 		],
 		opening: [
 			{ r: "user", c: "I want to get back to marathon training." },
@@ -3663,8 +3801,9 @@ const PG_SCENARIOS = [
 		turns: [
 			{
 				p: "My knee is cleared — I'm back to running Sundays.",
-				a: "Then the Sunday long run comes back and swimming becomes optional rather than prescribed. Worth keeping one swim while the tempo sessions ramp, since that's the load your knee reacted to last time.",
+				a: "Then the Sunday long run comes back and swimming becomes optional rather than prescribed. Worth keeping one swim while tempo sessions ramp, since that's the load your patellar tendon reacted to last time — and the running club meets on the same morning.",
 				add: [{ n: "cleared to run", c: "health_fitness", of: "knee injury" }],
+				links: [["cleared to run", "long run Sunday"], ["cleared to run", "tempo sessions"], ["cleared to run", "rehab plan"]],
 				facts: [
 					{ f: "Devi Raman is cleared to run and has resumed Sunday long runs.", from: "now" },
 					{ f: "Devi Raman was restricted from running by a knee injury.", from: "-151d", to: "now" },
@@ -3677,8 +3816,9 @@ const PG_SCENARIOS = [
 			},
 			{
 				p: "I prefer running early, before 7am at Cubbon Park.",
-				a: "That fits the Sunday long run and the tempo sessions both. Cubbon Park before 7am also keeps you off the road sections your physiotherapist flagged.",
+				a: "That fits the Sunday long run and the tempo sessions both. Cubbon Park before 7am also keeps you off the road surfaces your physiotherapist flagged during load management.",
 				add: [{ n: "before 7am", c: "fitness_habits", of: "morning runs" }],
+				links: [["before 7am", "Cubbon Park"], ["before 7am", "long run Sunday"], ["before 7am", "running club"]],
 				facts: [
 					{ f: "Devi Raman prefers to run before 7am.", from: "now" },
 					{ f: "Devi Raman runs at Cubbon Park.", from: "now" },
@@ -3690,14 +3830,15 @@ const PG_SCENARIOS = [
 			},
 			{
 				p: "The marathon is in Chennai this December.",
-				a: "That gives the ramp a fixed end. Working back from December, the tempo sessions have room to rebuild gradually rather than compressing into the weeks right after your clearance.",
+				a: "That gives the ramp a fixed end. Working back from December, taper weeks land in November and the tempo sessions have room to rebuild gradually rather than compressing into the weeks right after your clearance.",
 				add: [{ n: "Chennai, December", c: "active_goals", of: "marathon" }],
+				links: [["Chennai, December", "taper weeks"], ["Chennai, December", "sub-4 target"], ["Chennai, December", "weekly mileage"]],
 				facts: [
 					{ f: "Devi Raman's marathon is in Chennai in December.", from: "now" },
 					{ f: "Devi Raman does long runs on Sunday.", from: "now" },
 				],
 				ents: [
-					{ n: "marathon", l: "Event", s: "Target race, now dated to December in Chennai, anchoring the training ramp." },
+					{ n: "marathon", l: "Event", s: "Target race, now dated to December in Chennai, anchoring the training ramp and taper." },
 					{ n: "tempo sessions", l: "Topic", s: "Training component suspended during rehab, now rebuilding toward the December race." },
 				],
 			},
@@ -3710,26 +3851,61 @@ const PG_SCENARIOS = [
 			{ n: "Kyoto trip", c: "life_family", hub: true },
 			{ n: "Noor", c: "life_family" },
 			{ n: "early mornings", c: "life_family", of: "Noor" },
+			{ n: "anniversary", c: "life_family" },
+			{ n: "postcards home", c: "life_family" },
+
 			{ n: "Fushimi Inari", c: "general_memory" },
+			{ n: "torii gates", c: "general_memory", of: "Fushimi Inari" },
 			{ n: "ryokan", c: "general_memory" },
+			{ n: "tatami room", c: "general_memory", of: "ryokan" },
+			{ n: "onsen", c: "general_memory", of: "ryokan" },
 			{ n: "Arashiyama", c: "general_memory" },
+			{ n: "bamboo grove", c: "general_memory", of: "Arashiyama" },
+			{ n: "Gion", c: "general_memory" },
+			{ n: "Philosopher's Path", c: "general_memory" },
+			{ n: "Nishiki market", c: "general_memory" },
+			{ n: "Kiyomizu-dera", c: "general_memory" },
+
 			{ n: "vegetarian", c: "preferences_research" },
 			{ n: "shojin ryori", c: "preferences_research", of: "vegetarian" },
 			{ n: "temple kitchens", c: "preferences_research", of: "shojin ryori" },
+			{ n: "matcha tasting", c: "preferences_research" },
+			{ n: "no crowds", c: "preferences_research" },
+			{ n: "walking pace", c: "preferences_research", of: "no crowds" },
+
 			{ n: "November", c: "active_goals" },
 			{ n: "four nights", c: "active_goals", of: "November" },
+			{ n: "autumn leaves", c: "active_goals", of: "November" },
+			{ n: "flight booking", c: "active_goals" },
+
 			{ n: "JR Pass", c: "projects_systems" },
 			{ n: "Osaka day trip", c: "projects_systems", of: "JR Pass" },
+			{ n: "Nara detour", c: "projects_systems", of: "JR Pass" },
+			{ n: "luggage forwarding", c: "projects_systems" },
+		],
+		links: [
+			["Kyoto trip", "November"], ["Kyoto trip", "ryokan"], ["Kyoto trip", "vegetarian"],
+			["Noor", "vegetarian"], ["early mornings", "Fushimi Inari"], ["early mornings", "no crowds"],
+			["Fushimi Inari", "torii gates"], ["ryokan", "Gion"], ["onsen", "walking pace"],
+			["Arashiyama", "early mornings"], ["bamboo grove", "no crowds"],
+			["Philosopher's Path", "autumn leaves"], ["Nishiki market", "vegetarian"],
+			["matcha tasting", "Gion"], ["shojin ryori", "temple kitchens"],
+			["four nights", "ryokan"], ["autumn leaves", "Arashiyama"],
+			["flight booking", "November"], ["JR Pass", "Osaka day trip"],
+			["Nara detour", "walking pace"], ["luggage forwarding", "four nights"],
+			["anniversary", "November"], ["postcards home", "Nishiki market"],
+			["Kiyomizu-dera", "early mornings"], ["Kiyomizu-dera", "Gion"],
 		],
 		opening: [
 			{ r: "user", c: "Help me plan the Kyoto trip properly." },
-			{ r: "assistant", c: "You've given me most of it already: November, travelling with Noor, vegetarian, and you both prefer early mornings. The open pieces are where you stay and whether the JR Pass is worth it." },
+			{ r: "assistant", c: "You've given me most of it already: November, travelling with Noor, vegetarian, and you both prefer early mornings and no crowds. The open pieces are where you stay and whether the JR Pass is worth it." },
 		],
 		turns: [
 			{
 				p: "We booked the ryokan in Higashiyama for four nights.",
-				a: "Good — Higashiyama puts you walking distance from the early-morning Fushimi Inari climb you wanted, which was the main reason the location mattered. Four nights also leaves room for the Osaka day trip without moving hotels.",
+				a: "Good — Higashiyama puts you walking distance from the early-morning Fushimi Inari climb, which was the main reason location mattered. Four nights also leaves room for the Osaka day trip without moving hotels, and Gion is on the same side for the matcha tasting.",
 				add: [{ n: "Higashiyama, 4 nights", c: "general_memory", of: "ryokan" }],
+				links: [["Higashiyama, 4 nights", "Fushimi Inari"], ["Higashiyama, 4 nights", "four nights"], ["Higashiyama, 4 nights", "Gion"]],
 				facts: [
 					{ f: "Noor and the traveller booked a ryokan in Higashiyama for four nights.", from: "now" },
 					{ f: "The Kyoto trip takes place in November.", from: "-22d" },
@@ -3742,8 +3918,9 @@ const PG_SCENARIOS = [
 			},
 			{
 				p: "Noor is vegetarian, so shojin ryori only for dinners.",
-				a: "Recorded as a constraint rather than a preference, then. That narrows Higashiyama's dinner options usefully — the temple kitchens near the ryokan are the obvious fit.",
+				a: "Recorded as a constraint rather than a preference, then. That narrows Higashiyama's dinner options usefully — the temple kitchens near the ryokan are the obvious fit, and Nishiki market covers lunches.",
 				add: [{ n: "dinner constraint", c: "preferences_research", of: "shojin ryori" }],
+				links: [["dinner constraint", "Noor"], ["dinner constraint", "temple kitchens"], ["dinner constraint", "Nishiki market"]],
 				facts: [
 					{ f: "Noor is vegetarian.", from: "now" },
 					{ f: "Dinners on the Kyoto trip will be shojin ryori.", from: "now" },
@@ -3755,14 +3932,15 @@ const PG_SCENARIOS = [
 			},
 			{
 				p: "Skip the JR Pass — we're staying in Kyoto.",
-				a: "Then the Osaka day trip either drops or gets paid per-leg. Given four nights in Higashiyama and early starts, staying local is the coherent version of this trip.",
+				a: "Then the Osaka day trip and the Nara detour either drop or get paid per-leg. Given four nights in Higashiyama, early starts and a preference for no crowds, staying local is the coherent version of this trip.",
 				add: [{ n: "no rail pass", c: "projects_systems", of: "JR Pass" }],
+				links: [["no rail pass", "Osaka day trip"], ["no rail pass", "Nara detour"], ["no rail pass", "walking pace"]],
 				facts: [
 					{ f: "The travellers will not purchase a JR Pass.", from: "now" },
 					{ f: "The travellers considered an Osaka day trip using the JR Pass.", from: "-14d", to: "now" },
 				],
 				ents: [
-					{ n: "JR Pass", l: "Artifact", s: "Rail pass considered and declined; its main justification was the Osaka day trip." },
+					{ n: "JR Pass", l: "Artifact", s: "Rail pass considered and declined; its main justification was the Osaka day trip and the Nara detour." },
 					{ n: "Osaka day trip", l: "Event", s: "Contingent on the JR Pass; now unfunded and effectively dropped." },
 				],
 			},
@@ -3775,53 +3953,102 @@ const PG_SCENARIOS = [
 			{ n: "Northwind Retail", c: "business_product", hub: true },
 			{ n: "Enterprise plan", c: "business_product" },
 			{ n: "renewal Q1", c: "business_product", of: "Enterprise plan" },
+			{ n: "seat count", c: "business_product", of: "Enterprise plan" },
+			{ n: "support SLA", c: "business_product", of: "Enterprise plan" },
+			{ n: "account review", c: "business_product" },
+			{ n: "churn risk", c: "business_product", of: "account review" },
+
 			{ n: "Dana Whitfield", c: "career_applications" },
 			{ n: "IT director", c: "career_applications", of: "Dana Whitfield" },
 			{ n: "notify first", c: "career_applications", of: "Dana Whitfield" },
+			{ n: "Raj Patel", c: "career_applications" },
+			{ n: "security review", c: "career_applications", of: "Raj Patel" },
+			{ n: "procurement", c: "career_applications" },
+
 			{ n: "SSO rollout", c: "software_product" },
 			{ n: "Okta", c: "software_product", of: "SSO rollout" },
+			{ n: "SAML assertions", c: "software_product", of: "Okta" },
 			{ n: "identity migration", c: "software_product", of: "SSO rollout" },
+			{ n: "SCIM provisioning", c: "software_product", of: "identity migration" },
+			{ n: "legacy logins", c: "software_product", of: "identity migration" },
+
 			{ n: "webhook failures", c: "projects_systems" },
 			{ n: "retry backlog", c: "projects_systems", of: "webhook failures" },
+			{ n: "signature mismatch", c: "projects_systems", of: "webhook failures" },
+			{ n: "dead letter queue", c: "projects_systems", of: "retry backlog" },
+			{ n: "delivery latency", c: "projects_systems", of: "webhook failures" },
+			{ n: "endpoint rotation", c: "projects_systems" },
+			{ n: "webhook logs", c: "projects_systems" },
+			{ n: "payload schema", c: "projects_systems", of: "signature mismatch" },
+			{ n: "retry policy", c: "projects_systems", of: "retry backlog" },
+			{ n: "batch replay", c: "projects_systems", of: "dead letter queue" },
+			{ n: "alert rule", c: "projects_systems", of: "webhook logs" },
+
+			{ n: "Q1 business review", c: "active_goals" },
+			{ n: "remediation plan", c: "active_goals", of: "Q1 business review" },
+			{ n: "status page", c: "active_goals" },
+
 			{ n: "ticket 8841", c: "general_memory" },
 			{ n: "support history", c: "general_memory", of: "ticket 8841" },
+			{ n: "ticket 8602", c: "general_memory" },
+			{ n: "ticket 9114", c: "general_memory" },
+			{ n: "call recording", c: "general_memory", of: "ticket 9114" },
+		],
+		links: [
+			["Northwind Retail", "SSO rollout"], ["Northwind Retail", "webhook failures"], ["Northwind Retail", "Dana Whitfield"],
+			["Dana Whitfield", "SSO rollout"], ["notify first", "SSO rollout"], ["notify first", "ticket 8841"],
+			["Raj Patel", "Okta"], ["security review", "SAML assertions"], ["procurement", "renewal Q1"],
+			["ticket 8841", "webhook failures"], ["ticket 8602", "retry backlog"], ["ticket 9114", "delivery latency"],
+			["support history", "churn risk"], ["retry backlog", "dead letter queue"],
+			["signature mismatch", "endpoint rotation"], ["endpoint rotation", "identity migration"],
+			["legacy logins", "seat count"], ["SCIM provisioning", "seat count"],
+			["support SLA", "delivery latency"], ["churn risk", "renewal Q1"],
+			["account review", "Dana Whitfield"], ["call recording", "Dana Whitfield"],
+			["webhook logs", "delivery latency"], ["payload schema", "SAML assertions"],
+			["retry policy", "support SLA"], ["batch replay", "ticket 8602"],
+			["alert rule", "status page"], ["Q1 business review", "renewal Q1"],
+			["remediation plan", "webhook failures"], ["status page", "support SLA"],
+			["Okta", "identity migration"],
 		],
 		opening: [
 			{ r: "user", c: "Northwind is on the line again about webhooks." },
-			{ r: "assistant", c: "Third time. Ticket 8841 covered the retry backlog, and Dana Whitfield — their IT director — asked then to be told before any change touching the SSO rollout. Their renewal is Q1." },
+			{ r: "assistant", c: "Third time — 8602, 8841, 9114. Ticket 8841 covered the retry backlog, and Dana Whitfield, their IT director, asked then to be told before any change touching the SSO rollout. Their renewal is Q1 and the account review already flags churn risk." },
 		],
 		turns: [
 			{
 				p: "Dana says the webhook failures started after the Okta cutover.",
-				a: "That connects two threads that were separate until now. Ticket 8841 treated the retry backlog as a queue problem; if it begins at the Okta cutover, the cause sits in the SSO rollout instead.",
-				add: [{ n: "Okta cutover", c: "software_product", of: "webhook failures" }],
+				a: "That connects two threads that were separate until now. Ticket 8841 treated the retry backlog as a queue problem; if it begins at the Okta cutover, the cause sits in the identity migration instead — and endpoint rotation happened in the same window.",
+				add: [{ n: "Okta cutover", c: "software_product", of: "Okta" }],
+				links: [["Okta cutover", "webhook failures"], ["Okta cutover", "endpoint rotation"], ["Okta cutover", "identity migration"]],
 				facts: [
 					{ f: "Northwind Retail's webhook failures began after the Okta cutover.", from: "now" },
 					{ f: "Ticket 8841 attributed webhook failures to a retry backlog.", from: "-27d", to: "now" },
 					{ f: "Dana Whitfield is Northwind Retail's IT director.", from: "-119d" },
 				],
 				ents: [
-					{ n: "webhook failures", l: "Topic", s: "Recurring Northwind issue; cause reattributed from the retry backlog to the Okta cutover." },
+					{ n: "webhook failures", l: "Topic", s: "Recurring Northwind issue across three tickets; cause reattributed from the retry backlog to the Okta cutover." },
 					{ n: "Okta", l: "Topic", s: "Identity provider in the SSO rollout; its cutover now correlates with the webhook failures." },
 				],
 			},
 			{
 				p: "They want a named engineer before the Q1 renewal.",
-				a: "Worth treating as a renewal condition rather than a preference. It arrives while an unresolved cause sits under three tickets, which is usually what a request like this is really about.",
+				a: "Worth treating as a renewal condition rather than a preference. It arrives while an unresolved cause sits under three tickets and the account review already flags churn risk — which is usually what a request like this is really about.",
 				add: [{ n: "named engineer", c: "business_product", of: "renewal Q1" }],
+				links: [["named engineer", "churn risk"], ["named engineer", "support SLA"], ["named engineer", "Dana Whitfield"]],
 				facts: [
 					{ f: "Northwind Retail requires a named engineer before the Q1 renewal.", from: "now" },
 					{ f: "Northwind Retail is on the Enterprise plan.", from: "-365d" },
 				],
 				ents: [
-					{ n: "renewal Q1", l: "Event", s: "Northwind's Enterprise renewal, now carrying a named-engineer condition." },
+					{ n: "renewal Q1", l: "Event", s: "Northwind's Enterprise renewal, now carrying a named-engineer condition and an open churn risk." },
 					{ n: "Dana Whitfield", l: "Person", s: "Northwind's IT director and the standing contact for anything touching the SSO rollout." },
 				],
 			},
 			{
 				p: "Escalate 8841 and tell Dana before we touch SSO.",
-				a: "Both are consistent with what Dana asked for on the first ticket. The notification is a standing instruction on this account, not a one-off for this escalation.",
+				a: "Both are consistent with what Dana asked for on the first ticket. The notification is a standing instruction on this account, not a one-off for this escalation — and it now covers the identity migration work the cutover implicates.",
 				add: [{ n: "escalated", c: "general_memory", of: "ticket 8841" }],
+				links: [["escalated", "webhook failures"], ["escalated", "support SLA"], ["escalated", "notify first"]],
 				facts: [
 					{ f: "Ticket 8841 is escalated.", from: "now" },
 					{ f: "Dana Whitfield must be notified before changes touching the SSO rollout.", from: "-27d" },
@@ -3929,53 +4156,92 @@ function pgRng(seed) {
 }
 
 const PG_LAYOUT = new Map();
-const PG_VIEW_W = 1000, PG_VIEW_H = 680;
+const PG_VIEW_W = 1240, PG_VIEW_H = 860;
 
 /**
- * Lay out every node the scenario will EVER show, grouped by cluster, and
- * cache it. Positions never move when a memory lands: the new node arrives
- * into space that was always reserved for it, so the arrival reads as growth
- * rather than a re-shuffle. Clusters sit on an ellipse; members ring their
- * cluster's anchor and are relaxed apart without leaving its territory.
+ * Lay out every node the scenario will EVER show and cache it. Positions never
+ * move when a memory lands: the new node arrives into space that was always
+ * reserved for it, so the arrival reads as growth rather than a re-shuffle.
+ *
+ * Clusters are unevenly sized on purpose, so their centres cannot sit on a
+ * tidy circle — a twelve-node cluster needs three times the room of a
+ * three-node one. Centres are seeded on an ellipse and then repelled by their
+ * own radii until they stop colliding; members fill concentric rings inside.
  */
 function pgLayoutFor(sc) {
 	if (PG_LAYOUT.has(sc.id)) return PG_LAYOUT.get(sc.id);
 	const all = [...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])];
 	const order = [...new Set(all.map((n) => n.c))];
 	const rnd = pgRng(sc.id);
-	const cx = PG_VIEW_W / 2, cy = PG_VIEW_H / 2 + 4;
-	const centres = order.map((_, i) => {
-		const a = -Math.PI / 2 + (i / order.length) * Math.PI * 2;
-		return { x: cx + Math.cos(a) * 296, y: cy + Math.sin(a) * 192 };
-	});
-	const pos = new Map();
-	order.forEach((cid, ci) => {
-		const centre = centres[ci];
+	const cx = PG_VIEW_W / 2, cy = PG_VIEW_H / 2;
+	const groups = order.map((cid, i) => {
 		const members = all.filter((n) => n.c === cid);
-		members.forEach((n, i) => {
-			if (!i) { pos.set(n.n, { x: centre.x, y: centre.y, c: cid, home: centre }); return; }
-			const a = ((i - 1) / Math.max(members.length - 1, 1)) * Math.PI * 2 + rnd() * .6;
-			const r = 48 + rnd() * 22;
-			pos.set(n.n, {
-				x: centre.x + Math.cos(a) * r, y: centre.y + Math.sin(a) * r * .88,
-				c: cid, home: centre,
-			});
-		});
+		const a = -Math.PI / 2 + (i / order.length) * Math.PI * 2;
+		return {
+			cid, members,
+			// Area scales with membership, so radius scales with its square root.
+			r: 40 + Math.sqrt(members.length) * 27,
+			x: cx + Math.cos(a) * 330, y: cy + Math.sin(a) * 232,
+		};
 	});
-	// Push overlapping members apart, then pull each back inside its cluster —
-	// a node that drifted into a neighbouring hull would be read as belonging
-	// to it. Deterministic, so the layout is identical on every visit.
+	// Separate the clusters themselves before placing anything inside them.
+	for (let iter = 0; iter < 220; iter++) {
+		let moved = 0;
+		for (let a = 0; a < groups.length; a++) {
+			for (let b = a + 1; b < groups.length; b++) {
+				const A = groups[a], B = groups[b];
+				let dx = B.x - A.x, dy = B.y - A.y;
+				let d = Math.hypot(dx, dy);
+				const want = A.r + B.r + 34;
+				if (d >= want) continue;
+				if (d < 0.01) { dx = 1; dy = a % 2 ? 1 : -1; d = 1.4; }
+				const push = ((want - d) / 2) * .5;
+				A.x -= (dx / d) * push; A.y -= (dy / d) * push;
+				B.x += (dx / d) * push; B.y += (dy / d) * push;
+				moved++;
+			}
+		}
+		for (const g of groups) {
+			g.x = Math.max(g.r + 16, Math.min(PG_VIEW_W - g.r - 16, g.x));
+			g.y = Math.max(g.r + 30, Math.min(PG_VIEW_H - g.r - 30, g.y));
+		}
+		if (!moved) break;
+	}
+	const pos = new Map();
+	for (const g of groups) {
+		// Concentric rings: anchor at the middle, then 6, then 12, then 18.
+		let index = 0, ring = 0;
+		while (index < g.members.length) {
+			const capacity = ring === 0 ? 1 : ring * 6;
+			const take = Math.min(capacity, g.members.length - index);
+			const radius = ring === 0 ? 0 : (g.r - 26) * (ring / Math.max(1, Math.ceil((g.members.length - 1) / 6)));
+			for (let k = 0; k < take; k++) {
+				const n = g.members[index + k];
+				const a = (k / take) * Math.PI * 2 + ring * .5 + (rnd() - .5) * .3;
+				const jitter = 1 + (rnd() - .5) * .16;
+				pos.set(n.n, {
+					x: g.x + Math.cos(a) * radius * jitter,
+					y: g.y + Math.sin(a) * radius * jitter * .92,
+					c: g.cid, home: g, ring,
+				});
+			}
+			index += take;
+			ring++;
+		}
+	}
+	// Finally de-overlap members, holding each inside its own hull: a node that
+	// drifts into a neighbouring cluster reads as belonging to it.
 	const points = [...pos.values()];
-	for (let iter = 0; iter < 90; iter++) {
+	for (let iter = 0; iter < 120; iter++) {
 		let moved = 0;
 		for (let a = 0; a < points.length; a++) {
 			for (let b = a + 1; b < points.length; b++) {
 				const A = points[a], B = points[b];
 				let dx = B.x - A.x, dy = B.y - A.y;
 				let d = Math.hypot(dx, dy);
-				if (d >= 52) continue;
+				if (d >= 34) continue;
 				if (d < 0.01) { dx = (a % 2 ? 1 : -1) * .7; dy = .7; d = 1; }
-				const push = ((52 - d) / 2) * .55;
+				const push = ((34 - d) / 2) * .5;
 				A.x -= (dx / d) * push; A.y -= (dy / d) * push;
 				B.x += (dx / d) * push; B.y += (dy / d) * push;
 				moved++;
@@ -3984,9 +4250,8 @@ function pgLayoutFor(sc) {
 		for (const p of points) {
 			const dx = p.x - p.home.x, dy = p.y - p.home.y;
 			const dist = Math.hypot(dx, dy);
-			if (dist > 84) { p.x = p.home.x + (dx / dist) * 84; p.y = p.home.y + (dy / dist) * 84; }
-			p.x = Math.max(70, Math.min(PG_VIEW_W - 70, p.x));
-			p.y = Math.max(58, Math.min(PG_VIEW_H - 74, p.y));
+			const cap = p.home.r - 22;
+			if (dist > cap) { p.x = p.home.x + (dx / dist) * cap; p.y = p.home.y + (dy / dist) * cap; }
 		}
 		if (!moved) break;
 	}
@@ -4083,59 +4348,81 @@ function renderPgGraph(animate = false) {
 	const byName = new Map(nodes.map((n) => [n.n, n]));
 	const hulls = pgHulls(nodes);
 	const q = PG.gsearch.trim().toLowerCase();
-	const dim = (n) => (q && !n.n.toLowerCase().includes(q))
-		|| (PG.gfilter !== "all" && n.c !== PG.gfilter);
+	const hit = (n) => q && n.n.toLowerCase().includes(q);
+	const dim = (n) => (q && !hit(n)) || (PG.gfilter !== "all" && n.c !== PG.gfilter);
 	const anchors = new Map();
 	for (const n of nodes) if (!anchors.has(n.c)) anchors.set(n.c, n);
+
+	// Two kinds of edge. Containment comes from `of` and is drawn solid; the
+	// scenario's `links` are the cross-cutting relations — the deadline that
+	// governs a chapter, the incident that indicted a database — and are drawn
+	// lighter so structure stays readable underneath them.
 	const edges = [];
-	for (const n of nodes) {
-		const parent = byName.get(n.of) ?? anchors.get(n.c);
-		if (parent && parent !== n) edges.push({ a: parent, b: n, isNew: n.isNew });
+	const seen = new Set();
+	const push = (a, b, kind, isNew) => {
+		if (!a || !b || a === b) return;
+		const key = a.n < b.n ? `${a.n}|${b.n}` : `${b.n}|${a.n}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		edges.push({ a, b, kind, isNew });
+	};
+	for (const n of nodes) push(byName.get(n.of) ?? anchors.get(n.c), n, "own", n.isNew);
+	const scenarioLinks = PG.mode === "preview"
+		? [...(pgScenario().links ?? []),
+			...pgScenario().turns.slice(0, PG.turn).flatMap((t) => t.links ?? [])]
+		: [];
+	for (const [from, to] of scenarioLinks) {
+		const a = byName.get(from), b = byName.get(to);
+		push(a, b, "rel", Boolean(a?.isNew || b?.isNew));
 	}
-	// Inter-cluster ties: each cluster anchor links back to the hub, which is
-	// what gives the field its shape instead of five disconnected islands.
 	const hub = nodes.find((n) => n.hub);
-	if (hub) {
-		for (const anchor of anchors.values()) {
-			if (anchor !== hub && anchor.c !== hub.c) edges.push({ a: hub, b: anchor, long: true });
-		}
-	}
+	if (hub) for (const anchor of anchors.values()) push(hub, anchor, "span", false);
+
+	// Labelling everything at this density is a wall of text. Name the hub, each
+	// cluster's anchor and whatever just landed; the rest answer on hover, on
+	// search, and when a cluster is focused.
+	const labelled = (n) => n.hub || n.isNew || anchors.get(n.c) === n
+		|| hit(n) || (PG.gfilter !== "all" && n.c === PG.gfilter);
+	const width = { own: 1.25, rel: 1, span: 1 };
+	const alpha = { own: .5, rel: .34, span: .22 };
 	host.innerHTML = `
 		<svg viewBox="0 0 ${PG_VIEW_W} ${PG_VIEW_H}" preserveAspectRatio="xMidYMid meet" role="img"
-			aria-label="Memory graph: ${hulls.length} clusters, ${nodes.length} nodes"
-			onpointerdown="pgDragStart(event)" onpointermove="pgDragMove(event)"
-			onpointerup="pgDragEnd(event)" onpointercancel="pgDragEnd(event)">
+			aria-label="Memory graph: ${hulls.length} clusters, ${nodes.length} nodes, ${edges.length} relations"
+			onpointerdown="pgPointerDown(event)" onpointermove="pgPointerMove(event)"
+			onpointerup="pgPointerUp(event)" onpointercancel="pgPointerUp(event)"
+			onwheel="pgWheel(event)" ondblclick="pgResetView()">
 			<g class="pg-world" id="pgWorld" style="transform-origin:${PG_VIEW_W / 2}px ${PG_VIEW_H / 2}px">
 				${hulls.map((h) => {
 					const on = PG.gfilter === "all" || PG.gfilter === h.id;
-					return `<g class="pgn-hull${h.isNew ? " is-latest" : ""}" style="--c:${h.color};opacity:${on ? 1 : .22}">
+					return `<g class="pgn-hull${h.isNew ? " is-latest" : ""}" style="--c:${h.color};opacity:${on ? 1 : .2}">
 						<path class="pgn-hull-fill" d="${pgHullPath(h)}"></path>
 						<path class="pgn-hull-core" d="${pgHullPath(h, .72)}"></path>
 						<path class="pgn-hull-edge" d="${pgHullPath(h)}"></path>
 					</g>`;
 				}).join("")}
-				${edges.map((e) => `<line class="pgn-edge${e.isNew ? " is-new" : ""}${e.long ? " is-long" : ""}"
+				${edges.map((e) => `<line class="pgn-edge is-${e.kind}${e.isNew ? " is-new" : ""}"
 					x1="${e.a.x.toFixed(1)}" y1="${e.a.y.toFixed(1)}" x2="${e.b.x.toFixed(1)}" y2="${e.b.y.toFixed(1)}"
-					style="--c:${pgCluster(e.b.c).color};opacity:${dim(e.b) ? .1 : (e.long ? .28 : .5)}"></line>`).join("")}
+					style="--c:${pgCluster(e.b.c).color};stroke-width:${width[e.kind]};opacity:${
+						dim(e.a) && dim(e.b) ? .06 : alpha[e.kind]}"></line>`).join("")}
 				${hulls.map((h) => {
 					const on = PG.gfilter === "all" || PG.gfilter === h.id;
 					const text = `${h.label} (${h.count})`;
 					const w = text.length * 6.3 + 20;
-					const x = h.x - w / 2, y = h.y - h.ry - 21;
 					return `<g class="pgn-pill" style="--c:${h.color};opacity:${on ? 1 : .25}">
-						<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="21" rx="10.5"></rect>
-						<text x="${h.x.toFixed(1)}" y="${(y + 14.5).toFixed(1)}">${esc(text)}</text>
+						<rect x="${(h.x - w / 2).toFixed(1)}" y="${(h.y - h.ry - 21).toFixed(1)}" width="${w.toFixed(1)}" height="21" rx="10.5"></rect>
+						<text x="${h.x.toFixed(1)}" y="${(h.y - h.ry - 6.5).toFixed(1)}">${esc(text)}</text>
 					</g>`;
 				}).join("")}
 				${nodes.map((n) => {
-					const r = n.hub ? 15 : 9;
+					const r = n.hub ? 13 : (anchors.get(n.c) === n ? 9 : 7);
 					return `<g class="pgn-g${n.hub ? " is-hub" : ""}${n.isNew ? " is-new is-latest" : ""}"
-						style="--c:${pgCluster(n.c).color};opacity:${dim(n) ? .18 : 1}" tabindex="0"
+						style="--c:${pgCluster(n.c).color};opacity:${dim(n) ? .16 : 1}" tabindex="0"
 						aria-label="${esc(n.n)}, in ${esc(pgCluster(n.c).label)}">
 						<title>${esc(n.n)} — ${esc(pgCluster(n.c).label)}</title>
 						${n.isNew ? `<circle class="pgn-halo" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}"></circle>` : ""}
 						<circle class="pgn-dot" cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r}"></circle>
-						<text class="pgn-label" x="${n.x.toFixed(1)}" y="${(n.y + r + 13).toFixed(1)}">${esc(n.n.length > 24 ? `${n.n.slice(0, 23)}…` : n.n)}</text>
+						${labelled(n) ? `<text class="pgn-label" x="${n.x.toFixed(1)}" y="${(n.y + r + 12).toFixed(1)}">${
+							esc(n.n.length > 24 ? `${n.n.slice(0, 23)}…` : n.n)}</text>` : ""}
 					</g>`;
 				}).join("")}
 			</g>
@@ -4167,33 +4454,107 @@ function pgApplyView() {
 	if (world) world.style.setProperty("--vt", `translate(${PG.view.x}px, ${PG.view.y}px) scale(${PG.view.k})`);
 }
 
-function pgZoom(factor) {
-	PG.view.k = Math.max(.45, Math.min(2.6, PG.view.k * factor));
+const PG_ZOOM_MIN = 0.5, PG_ZOOM_MAX = 6;
+
+/**
+ * Client pixels to viewBox units. preserveAspectRatio letterboxes the viewBox
+ * inside the element, so the visible drawing is offset — without undoing that
+ * offset, zooming to the cursor drifts further off the further you are from
+ * the centre.
+ */
+function pgToUser(svg, clientX, clientY) {
+	const rect = svg.getBoundingClientRect();
+	const scale = Math.min(rect.width / PG_VIEW_W, rect.height / PG_VIEW_H) || 1;
+	return {
+		x: (clientX - rect.left - (rect.width - PG_VIEW_W * scale) / 2) / scale,
+		y: (clientY - rect.top - (rect.height - PG_VIEW_H * scale) / 2) / scale,
+		scale,
+	};
+}
+
+/**
+ * Zoom about a fixed point. The world is drawn as translate(v) scale(k) around
+ * the viewBox centre C, so a point u sits at C + (u - C)k + v. Holding u still
+ * across a scale change means v' = v + (u - C)(k - k').
+ */
+function pgZoomAt(nextK, user) {
+	const k = PG.view.k;
+	const clamped = Math.max(PG_ZOOM_MIN, Math.min(PG_ZOOM_MAX, nextK));
+	if (clamped === k) return;
+	const cx = PG_VIEW_W / 2, cy = PG_VIEW_H / 2;
+	PG.view.x += (user.x - cx) * (k - clamped);
+	PG.view.y += (user.y - cy) * (k - clamped);
+	PG.view.k = clamped;
 	pgApplyView();
+}
+
+function pgZoom(factor) {
+	pgZoomAt(PG.view.k * factor, { x: PG_VIEW_W / 2, y: PG_VIEW_H / 2 });
 }
 
 function pgResetView() { PG.view = { x: 0, y: 0, k: 1 }; pgApplyView(); }
 
-function pgDragStart(event) {
-	if (event.button) return;
-	PG.drag = { x: event.clientX, y: event.clientY, ox: PG.view.x, oy: PG.view.y };
-	event.currentTarget.setPointerCapture?.(event.pointerId);
+function pgWheel(event) {
+	event.preventDefault();
+	// Trackpads report fractional deltas and mice report ~100 per notch; the
+	// exponential keeps both feeling like the same gesture.
+	const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.002));
+	pgZoomAt(PG.view.k * factor, pgToUser(event.currentTarget, event.clientX, event.clientY));
 }
 
-function pgDragMove(event) {
+/* One pointer pans, two pinch. Pointer events cover mouse, pen and touch, so
+   there is no separate touch path to keep in step. */
+/* Capture is a nicety — it keeps a drag alive past the element edge — but it
+   throws for a pointer the element does not own. Never let it run before the
+   state it guards, and never let it abort the handler: a throw here used to
+   leave the graph stuck mid-drag after the button came back up. */
+function pgCapture(svg, id, release = false) {
+	try { release ? svg.releasePointerCapture?.(id) : svg.setPointerCapture?.(id); } catch {}
+}
+
+function pgPointerDown(event) {
+	const svg = event.currentTarget;
+	PG.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	if (PG.pointers.size === 2) {
+		const [a, b] = [...PG.pointers.values()];
+		PG.pinch = {
+			dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+			k: PG.view.k,
+			user: pgToUser(svg, (a.x + b.x) / 2, (a.y + b.y) / 2),
+		};
+		PG.drag = null;
+	} else if (PG.pointers.size === 1 && !event.button) {
+		PG.drag = { x: event.clientX, y: event.clientY, ox: PG.view.x, oy: PG.view.y };
+	}
+	pgCapture(svg, event.pointerId);
+}
+
+function pgPointerMove(event) {
+	if (!PG.pointers.has(event.pointerId)) return;
+	PG.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	const svg = event.currentTarget;
+	if (PG.pinch && PG.pointers.size >= 2) {
+		const [a, b] = [...PG.pointers.values()];
+		const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+		pgZoomAt(PG.pinch.k * (dist / PG.pinch.dist), PG.pinch.user);
+		return;
+	}
 	if (!PG.drag) return;
-	// Screen pixels are not user units once the SVG is scaled to fit: convert
-	// through the rendered width so a drag tracks the cursor at any zoom.
-	const rect = event.currentTarget.getBoundingClientRect();
-	const scale = PG_VIEW_W / (rect.width || PG_VIEW_W);
-	PG.view.x = PG.drag.ox + (event.clientX - PG.drag.x) * scale;
-	PG.view.y = PG.drag.oy + (event.clientY - PG.drag.y) * scale;
+	// Screen pixels are not viewBox units once the SVG is scaled to fit, and the
+	// world is drawn at k on top of that: divide by both or the graph outruns
+	// the cursor when zoomed in.
+	const { scale } = pgToUser(svg, event.clientX, event.clientY);
+	const per = 1 / (scale * PG.view.k);
+	PG.view.x = PG.drag.ox + (event.clientX - PG.drag.x) * per;
+	PG.view.y = PG.drag.oy + (event.clientY - PG.drag.y) * per;
 	pgApplyView();
 }
 
-function pgDragEnd(event) {
-	PG.drag = null;
-	event.currentTarget.releasePointerCapture?.(event.pointerId);
+function pgPointerUp(event) {
+	PG.pointers.delete(event.pointerId);
+	if (PG.pointers.size < 2) PG.pinch = null;
+	if (!PG.pointers.size) PG.drag = null;
+	pgCapture(event.currentTarget, event.pointerId, true);
 }
 
 /* ---------- header menus ---------- */

@@ -302,6 +302,73 @@ describe("the playground screen", () => {
 		expect(script).toContain("onclick=\"pgSendScripted(");
 	});
 
+	/**
+	 * The scenarios carry ~150 hand-written relations naming nodes by string. A
+	 * typo in one silently drops an edge and nothing else complains, so the data
+	 * is parsed and checked rather than pattern-matched.
+	 */
+	it("wires every relation to a node that exists", async () => {
+		const { script } = await page();
+		const start = script.indexOf("const PG_SCENARIOS = [");
+		const literal = script.slice(script.indexOf("[", start), script.indexOf("\n];", start) + 2);
+		const scenarios = new Function(`return ${literal}`)();
+		expect(scenarios).toHaveLength(5);
+		for (const sc of scenarios) {
+			const names = new Set([...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])].map((n) => n.n));
+			expect(names.size, `${sc.id} has duplicate node names`)
+				.toBe([...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])].length);
+			const links = [...(sc.links ?? []), ...sc.turns.flatMap((t) => t.links ?? [])];
+			for (const [from, to] of links) {
+				expect(names, `${sc.id}: link from unknown node "${from}"`).toContain(from);
+				expect(names, `${sc.id}: link to unknown node "${to}"`).toContain(to);
+				expect(from, `${sc.id}: link points at itself`).not.toBe(to);
+			}
+			// Containment parents must exist too, or the node silently reparents
+			// onto its cluster anchor and the tree it belonged to disappears.
+			for (const n of [...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])]) {
+				if (n.of) expect(names, `${sc.id}: "${n.n}" has unknown parent "${n.of}"`).toContain(n.of);
+				expect(typeof n.c, `${sc.id}: "${n.n}" has no cluster`).toBe("string");
+			}
+			expect(sc.seed.filter((n) => n.hub)).toHaveLength(1);
+			expect(links.length, `${sc.id} is too sparse to read as a graph`).toBeGreaterThanOrEqual(20);
+		}
+	});
+
+	it("builds clusters of uneven density, the way a real memory is", async () => {
+		const { script } = await page();
+		const start = script.indexOf("const PG_SCENARIOS = [");
+		const literal = script.slice(script.indexOf("[", start), script.indexOf("\n];", start) + 2);
+		for (const sc of new Function(`return ${literal}`)()) {
+			const nodes = [...sc.seed, ...sc.turns.flatMap((t) => t.add ?? [])];
+			expect(nodes.length, `${sc.id} node count`).toBeGreaterThanOrEqual(30);
+			const sizes = [...nodes.reduce((m, n) => m.set(n.c, (m.get(n.c) ?? 0) + 1), new Map()).values()];
+			expect(sizes.length, `${sc.id} cluster count`).toBeGreaterThanOrEqual(5);
+			// A graph of equal-sized clusters looks generated. A real memory has a
+			// subject that fills a cluster and a corner that holds three things.
+			expect(Math.max(...sizes), `${sc.id} needs one dense cluster`).toBeGreaterThanOrEqual(10);
+			expect(Math.min(...sizes), `${sc.id} needs one sparse cluster`).toBeLessThanOrEqual(5);
+			expect(Math.max(...sizes) / Math.min(...sizes), `${sc.id} density spread`).toBeGreaterThanOrEqual(2.5);
+		}
+	});
+
+	it("can be zoomed by wheel and by pinch, anchored where the gesture is", async () => {
+		const { script } = await page();
+		expect(script).toContain("function pgZoomAt(");
+		expect(script).toContain("function pgWheel(");
+		expect(script).toContain("const PG_ZOOM_MIN = 0.5, PG_ZOOM_MAX = 6;");
+		// Two pointers pinch, one pans.
+		expect(script).toContain("if (PG.pointers.size === 2) {");
+		expect(script).toContain("PG.pinch.k * (dist / PG.pinch.dist)");
+		// preserveAspectRatio letterboxes the viewBox; zoom-to-cursor has to undo
+		// that offset or it drifts away from the pointer.
+		expect(script).toContain("function pgToUser(");
+		expect(script).toContain("(rect.width - PG_VIEW_W * scale) / 2");
+		// Capture throws for a pointer the element does not own, and must never
+		// abort the handler that clears drag state.
+		expect(script).toContain("function pgCapture(");
+		expect(script).toMatch(/try \{ release \? svg\.releasePointerCapture[\s\S]{0,80}catch \{\}/);
+	});
+
 	it("shows the capture status and the context that produced the reply", async () => {
 		const { script } = await page();
 		expect(script).toContain("${PG.threads.length} of ${PG.limits.maxThreads ?? 5} used");
