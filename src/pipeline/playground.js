@@ -275,7 +275,10 @@ function parsePreviewLines(raw) {
 		if (!value) continue;
 		if (/^REPLY:/i.test(text)) reply.push(value);
 		else if (/^FACT:/i.test(text) && facts.length < 3) facts.push(value.slice(0, 200));
-		else if (/^ENTITY:/i.test(text) && entities.length < 3) {
+		// The model frequently drops the prefix and emits the bare `name | kind`
+		// shape instead. Accepting both is the difference between reading what it
+		// produced and throwing it away for a formatting slip.
+		else if ((/^ENTITY:/i.test(text) || /^[^|]{1,40}\|[^|]{1,24}$/.test(text)) && entities.length < 3) {
 			const [name, kind] = value.split("|").map((part) => part.trim());
 			if (name) entities.push({ name: name.slice(0, 40), kind: (kind || "entity").slice(0, 24), summary: "" });
 		}
@@ -286,7 +289,8 @@ function parsePreviewLines(raw) {
 	// inventing them from prose would be making memory up.
 	const spoken = reply.join(" ").trim()
 		|| String(raw ?? "").split(/\r?\n/).map((l) => l.trim())
-			.filter((l) => l && !/^(FACT|ENTITY):/i.test(l)).join(" ").trim();
+			.filter((l) => l && !/^(FACT|ENTITY):/i.test(l) && !/^[^|]{1,40}\|[^|]{1,24}$/.test(l))
+			.join(" ").trim();
 	return { reply: spoken.replace(/^REPLY:\s*/i, "").slice(0, 400), facts, entities };
 }
 
