@@ -291,7 +291,13 @@ function parsePreviewLines(raw) {
 		|| String(raw ?? "").split(/\r?\n/).map((l) => l.trim())
 			.filter((l) => l && !/^(FACT|ENTITY):/i.test(l) && !/^[^|]{1,40}\|[^|]{1,24}$/.test(l))
 			.join(" ").trim();
-	return { reply: spoken.replace(/^REPLY:\s*/i, "").slice(0, 400), facts, entities };
+	const cleaned = spoken.replace(/^REPLY:\s*/i, "").trim();
+	// A small model sometimes restates its own instructions instead of answering.
+	// Showing that back is worse than showing nothing, so it is treated as no
+	// reply at all rather than dressed up as one.
+	const echoed = /you read one sentence|worth remembering long term|in this exact format|third-person statement/i
+		.test(cleaned);
+	return { reply: echoed ? "" : cleaned.slice(0, 400), facts, entities };
 }
 
 export async function playgroundPreviewExtract(env, text, { rules = null } = {}) {
