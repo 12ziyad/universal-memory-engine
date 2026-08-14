@@ -478,15 +478,19 @@ client = MultiServerMCPClient({
 })
 tools = await client.get_tools()  # hand these to your LangGraph agent`)}
 <h2 id="crewai">CrewAI</h2>
-${codeBlock(`pip install crewai-tools
+<p>The MCP support lives in an extra — install <code>crewai-tools[mcp]</code>, not plain <code>crewai-tools</code>, or <code>MCPServerAdapter</code> will not be exported.</p>
+${codeBlock(`pip install "crewai-tools[mcp]"
 
-from crewai_tools import MCPServerHTTP
+from crewai_tools import MCPServerAdapter
 
-itsuki = MCPServerHTTP(
-    url="${ORIGIN}/mcp",
-    headers={"Authorization": "Bearer YOUR_MCP_KEY"},
-    streamable=True,
-)`)}
+server_params = {
+    "url": "${ORIGIN}/mcp",
+    "transport": "streamable-http",
+    "headers": {"Authorization": "Bearer YOUR_MCP_KEY"},
+}
+
+with MCPServerAdapter(server_params) as tools:
+    agent = Agent(tools=tools, role="...", goal="...")`)}
 <h2 id="autogen">AutoGen</h2>
 ${codeBlock(`pip install autogen-ext
 
@@ -549,8 +553,9 @@ tools = McpToolSpec(client=client)`)}
 <li><b>Tools don't appear</b> — confirm the URL is exactly <code>${ORIGIN}/mcp</code> (header route) and the header reads <code>Authorization: Bearer &lt;key&gt;</code>.</li>
 <li><b>401</b> — the key is revoked or pasted with whitespace. Create a fresh MCP link.</li>
 <li><b>Saves report queued, recall is empty</b> — extraction is asynchronous; allow a few seconds.</li>
-<li><b>LlamaIndex: <code>ValueError: not enough values to unpack</code></b> — current <code>llama-index-tools-mcp</code> releases lag the <code>mcp 2.x</code> API (an upstream clash that hits every MCP server, not just ${PRODUCT.name}). Install the pair we verified end to end: <code>pip install "llama-index-tools-mcp==0.4.0" "mcp&lt;2"</code>.</li>
+<li><b>Import errors mentioning <code>mcp.shared</code>, <code>RequestContext</code>, or "not enough values to unpack"</b> — several framework adapters still target the <code>mcp 1.x</code> Python API and break against <code>mcp 2.x</code>. This is an upstream clash that affects every MCP server, not just ${PRODUCT.name}. AutoGen and Agno both need <code>pip install "mcp&lt;2"</code>; LlamaIndex additionally needs <code>pip install "llama-index-tools-mcp==0.4.0"</code>. These are the exact versions each route above was verified against.</li>
 </ul>
+<div class="note">Every route on this page was executed end to end against <code>${ORIGIN}</code> — tools listed and called with a real key — not transcribed from a vendor's README.</div>
 ` };
 
 PAGES["/integrations/typescript"] = { title: "TypeScript frameworks", html: `
@@ -569,7 +574,7 @@ const mcp = new MCPClient({
     },
   },
 });
-const tools = await mcp.getTools();`)}
+const tools = await mcp.listTools();`)}
 <h2 id="vercel-ai">Vercel AI SDK</h2>
 ${codeBlock(`npm install @ai-sdk/mcp
 

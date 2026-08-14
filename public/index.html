@@ -4215,14 +4215,17 @@ client = MultiServerMCPClient({
     }
 })
 tools = await client.get_tools()  # save_memory, recall_memory, list_memories, ...`,
-		crewaiConnect: `from crewai_tools import MCPServerHTTP
+		crewaiConnect: `# pip install "crewai-tools[mcp]"
+from crewai_tools import MCPServerAdapter
 
-itsuki = MCPServerHTTP(
-    url="${origin}/mcp",
-    headers={"Authorization": "Bearer ${mcpToken}"},
-    streamable=True,
-)
-# hand itsuki's tools to your Agent(tools=...)`,
+server_params = {
+    "url": "${origin}/mcp",
+    "transport": "streamable-http",
+    "headers": {"Authorization": "Bearer ${mcpToken}"},
+}
+
+with MCPServerAdapter(server_params) as tools:
+    agent = Agent(tools=tools, role="...", goal="...")`,
 		autogenConnect: `from autogen_ext.tools.mcp import StreamableHttpServerParams, mcp_server_tools
 
 params = StreamableHttpServerParams(
@@ -4274,7 +4277,7 @@ const mcp = new MCPClient({
     },
   },
 });
-const tools = await mcp.getTools();`,
+const tools = await mcp.listTools();`,
 		vercelAiConnect: `import { createMCPClient } from "@ai-sdk/mcp";
 
 const mcpClient = await createMCPClient({
