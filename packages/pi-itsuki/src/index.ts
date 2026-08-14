@@ -114,6 +114,21 @@ export default function itsukiExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		state = await build(ctx);
 		if (!state.ready) return;
+		// Blocks injected by earlier processes are still in this session's
+		// history. Reseed their fingerprints so a late echo of one of those
+		// lines is suppressed exactly like a same-process echo.
+		for (const raw of ctx.sessionManager.getBranch() as unknown[]) {
+			const entry = raw as { type?: string; message?: { role?: string; customType?: string; content?: unknown } };
+			if (entry?.type !== "message" || entry.message?.role !== "custom") continue;
+			if (entry.message.customType !== "itsuki-recall") continue;
+			const content = entry.message.content;
+			const text = typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content.map((b) => (b && typeof b === "object" && (b as { type?: string }).type === "text" ? String((b as { text?: unknown }).text ?? "") : "")).join("\n")
+					: "";
+			if (text) state.coordinator.seedEchoContext(text);
+		}
 		// Anything left from a previous run (crash, offline, rate limit) goes
 		// out before this session writes anything new.
 		await state.coordinator.drain();

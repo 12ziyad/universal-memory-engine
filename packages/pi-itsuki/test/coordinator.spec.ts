@@ -114,6 +114,17 @@ describe("recall", () => {
 		expect(String((requests[0]!.body as { query: string }).query).length).toBeLessThanOrEqual(2_000);
 	});
 
+	it("truncates the query on code-point boundaries, never splitting a surrogate pair", async () => {
+		const { coordinator, requests } = build([{ status: 200, body: { count: 0, context: "" } }]);
+		// 2,500 astral characters: a UTF-16 slice at 2,000 units would cut one in half.
+		await coordinator.recall("👍".repeat(2_500));
+		const sent = String((requests[0]!.body as { query: string }).query);
+		expect(Array.from(sent).length).toBe(2_000);
+		// Well-formed: encoding round-trips without a replacement character.
+		expect(sent.includes("�")).toBe(false);
+		expect(Buffer.from(sent, "utf8").toString("utf8")).toBe(sent);
+	});
+
 	it("carries the sub-tenant and never widens it", async () => {
 		const { coordinator, requests } = build([{ status: 200, body: { count: 0, context: "" } }], { userId: "alice" });
 		await coordinator.recall("q");

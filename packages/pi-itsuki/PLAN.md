@@ -116,6 +116,21 @@ Legend: **PASS** evidenced here · **PENDING** requires an action outside this p
 
 Two non-blocking observations recorded above: the shared scrubber comma limitation (D-5, faithful to server, fix belongs upstream and to both lanes at once) and the `.tgz` install behaviour (D-6, documentation handled).
 
+## Independent audit (Fable, 2026-08-15)
+
+Read-only verification first: branch/diff scope confirmed exact (31 files, only the four permitted paths); host contracts re-verified (pi still 0.84.2, Node ≥22.19.0, `pi-itsuki` still 404 on the registry); all deterministic suites re-run serially and green. The D-1 transport divergence was **accepted**: `itsuki@0.2.1` genuinely does not exist, 0.2.0 demonstrably lacks packet-status, base-URL validation and redirect hardening, and the replacement transport is corpus-pinned, parity-tested against the published n8n behaviour, and adds no dependency surface.
+
+Adversarial review findings (all fixed in the follow-up commit, each with a regression test proven to fail without its fix):
+
+| # | Severity | Finding | Repair |
+|---|---|---|---|
+| A | nonblocking Medium | `coordinator.recall` truncated the query with UTF-16 `.slice(0, 2000)` — could split a surrogate pair (lone surrogate on the wire) and miscounted the contract's 2,000 code points | `truncateToCodePoints(trimmed, 2000)`; astral-plane regression test |
+| B | nonblocking Medium | Echo fingerprints lived only in process memory. After `/resume`, a model echo of a line injected by the PREVIOUS process was captured as new — the structural block-strip held, line-level suppression did not | `session_start` reseeds fingerprints from the branch's own `itsuki-recall` messages via `coordinator.seedEchoContext`; resume-echo regression test (verified red without the fix) |
+| C | Low (open, documented) | A crash in the window between `stage()` resolving and the watermark append can yield an overlapping subset+superset span under two keys at the next settle. Milliseconds wide; the reverse ordering converts the same window into data LOSS, which is worse. Same accepted property as the Claude outbox. | None safe; documented here |
+| D | Low (open, by design) | `validateBaseUrl` permits HTTPS to any host (only plain HTTP is loopback-restricted) — an operator can point the adapter at an internal HTTPS host. Identical policy to the published n8n node; config is local and operator-owned | None; parity with shipped behaviour |
+
+Post-fix state: typecheck 0, package suite **150** tests green, packaging gates re-run green (no secrets, no DELETE, zero deps, 0 vulnerabilities).
+
 ## What is deliberately NOT claimed
 
 - Not published, not advertised, not installable by name yet.

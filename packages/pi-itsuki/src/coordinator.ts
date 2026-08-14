@@ -17,7 +17,7 @@
 import { planBatches } from "./batching.js";
 import { type ErrorClass, ItsukiError } from "./errors.js";
 import { type CaptureMessage, type CaptureScope, captureIdentity } from "./identity.js";
-import { echoFingerprints, formatRecallBlock, suppressEchoLines } from "./inject.js";
+import { echoFingerprints, formatRecallBlock, suppressEchoLines, truncateToCodePoints } from "./inject.js";
 import { scrubText } from "./scrub.js";
 import { SPOOL_LIMITS, SPOOL_SCHEMA, type Spool, type SpoolEnvelope } from "./spool.js";
 import type { ItsukiTransport } from "./transport.js";
@@ -104,6 +104,22 @@ export class Coordinator {
 		this.echoKey = key;
 	}
 
+	/**
+	 * Re-arm echo suppression from context injected by a PREVIOUS process.
+	 *
+	 * The fingerprint set is in-memory, but injected blocks live on in the
+	 * session history across /resume. Without reseeding, a model echo of an
+	 * earlier process's recalled line would be captured as if it were new
+	 * (audit finding B). session_start scans the branch for our own injected
+	 * messages and feeds their text back through here.
+	 */
+	seedEchoContext(contextText: string): void {
+		if (!this.echoKey) return;
+		for (const fingerprint of echoFingerprints(String(contextText ?? ""), this.echoKey)) {
+			this.injected.add(fingerprint);
+		}
+	}
+
 	private breakerOpen(): boolean {
 		return this.now() < this.openUntil;
 	}
@@ -155,7 +171,9 @@ export class Coordinator {
 
 		const started = this.now();
 		try {
-			const response = await this.transport.recall(trimmed.slice(0, 2_000), {
+			// Code points, not UTF-16 units: a .slice here could split a surrogate
+			// pair and send a lone surrogate to the server (audit finding A).
+			const response = await this.transport.recall(truncateToCodePoints(trimmed, 2_000), {
 				limit: this.recallConfig.maxItems,
 				userId: this.scope.userId,
 				timeoutMs: this.recallConfig.timeoutMs,
