@@ -1,0 +1,105 @@
+# Publish n8n-nodes-itsuki to npm, with provenance.
+#
+# Provenance requires two things: a supported CI (this workflow, on a
+# GitHub-hosted runner) and `id-token: write`, which lets npm mint an OIDC
+# token and sign an attestation linking the published tarball to this exact
+# commit and workflow file. That is independent of how we AUTHENTICATE.
+#
+# Authentication has two modes, and this workflow supports both without edits:
+#
+#   1. Trusted publishing (tokenless, preferred). Configurable on npmjs.com
+#      only after a package exists, so it cannot cover a first publication.
+#      Once configured, delete the NPM_TOKEN secret — the env below resolves
+#      to empty and npm falls back to OIDC.
+#   2. A granular access token in the NPM_TOKEN repository secret. Required
+#      for the FIRST publish of a new package name.
+#
+# Either way the published artifact carries provenance.
+name: Publish n8n node
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every gate and pack the tarball, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/n8n-nodes-itsuki
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm to a trusted-publishing-capable version
+        run: npm install -g npm@latest
+
+      - name: Report toolchain
+        run: |
+          echo "node $(node --version)"
+          echo "npm  $(npm --version)"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (official n8n community-node rules)
+        run: npm run lint
+
+      - name: Unit and contract tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify the packed contents
+        run: |
+          npm pack --silent
+          echo "--- tarball contents ---"
+          tar -tzf n8n-nodes-itsuki-*.tgz | sort
+          echo "--- refuse to ship secrets ---"
+          if tar -xzOf n8n-nodes-itsuki-*.tgz | grep -qE 'itsuki_live_[A-Za-z0-9]{10}'; then
+            echo "FAIL: a credential-shaped string is present in the tarball"
+            exit 1
+          fi
+          echo "OK: no credential-shaped strings"
+          echo "--- refuse to ship a postinstall hook ---"
+          if node -e "process.exit(require('./package.json').scripts.postinstall ? 1 : 0)"; then
+            echo "OK: no postinstall script"
+          else
+            echo "FAIL: package declares a postinstall script"
+            exit 1
+          fi
+
+      - name: Publish to npm with provenance
+        if: ${{ inputs.dry_run == false }}
+        run: npm publish --provenance --access public
+        env:
+          # Empty when trusted publishing is configured; npm then uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run only
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "dry_run was true — every gate passed and the tarball was built."
+          echo "Re-run with dry_run=false to publish."
