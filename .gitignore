@@ -181,3 +181,6 @@ __pycache__/
 # verify_owner_restore.py reads the file from disk next to itself; it is
 # never committed.
 evals/**/owner_account_snapshot.json
+
+# Session handoff notes (local working docs, not product artifacts)
+CLAUDE_ENTERPRISE_COMPLETION_HANDOFF.md
