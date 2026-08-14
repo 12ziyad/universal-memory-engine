@@ -93,9 +93,12 @@ jobs:
         run: |
           npm pack --silent
           echo "--- tarball contents ---"
-          tar -tzf openclaw-itsuki-*.tgz | sort
+          # Capture the listing once: grep -q on a live tar pipe SIGPIPEs tar
+          # under the runner's default pipefail and fails the step spuriously.
+          tar -tzf openclaw-itsuki-*.tgz | sort > tarball-contents.txt
+          cat tarball-contents.txt
           echo "--- the manifest must ship, or OpenClaw cannot load the plugin ---"
-          tar -tzf openclaw-itsuki-*.tgz | grep -q 'package/openclaw.plugin.json'
+          grep -q 'package/openclaw.plugin.json' tarball-contents.txt
           echo "OK: manifest present"
           echo "--- refuse to ship secrets ---"
           if tar -xzOf openclaw-itsuki-*.tgz | grep -qE '(itsuki|uml)_live_[A-Za-z0-9_-]{10}'; then
