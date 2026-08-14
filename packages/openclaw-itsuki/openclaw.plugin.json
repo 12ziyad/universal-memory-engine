@@ -1,0 +1,61 @@
+{
+	"id": "itsuki",
+	"name": "Itsuki Memory",
+	"description": "Long-term memory that joins the agent turn: bounded recall before the model, exactly-once capture after a settled turn. Runs alongside OpenClaw's built-in memory rather than replacing it.",
+	"contracts": {
+		"tools": ["itsuki_recall", "itsuki_save"]
+	},
+	"activation": {
+		"onStartup": true
+	},
+	"uiHints": {
+		"apiKey": {
+			"label": "Itsuki API key",
+			"placeholder": "itsuki_live_...",
+			"sensitive": true
+		}
+	},
+	"configSchema": {
+		"type": "object",
+		"additionalProperties": false,
+		"properties": {
+			"apiKey": {
+				"type": "string",
+				"description": "Itsuki project key (itsuki_live_...). Prefer the ITSUKI_API_KEY environment variable; this field exists for operators who manage secrets through OpenClaw config."
+			},
+			"baseUrl": {
+				"type": "string",
+				"description": "Itsuki origin. HTTPS is required except for explicit loopback development.",
+				"default": "https://itsuki.app"
+			},
+			"userId": {
+				"type": "string",
+				"description": "Optional sub-tenant. Narrows this plugin to one end user's memory space under your key; it can never widen scope."
+			},
+			"tenancy": {
+				"type": "string",
+				"enum": ["owner", "per-sender"],
+				"default": "owner",
+				"description": "owner: every channel writes to the key's own memory space. per-sender: each channel-scoped sender gets an isolated sub-tenant derived from channel+sender, so one person's memory is never read by another. per-sender means the operator is storing per-person memory — tell your users."
+			},
+			"recall": {
+				"type": "object",
+				"additionalProperties": false,
+				"properties": {
+					"enabled": { "type": "boolean", "default": true },
+					"maxItems": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+					"maxChars": { "type": "integer", "minimum": 200, "maximum": 8000, "default": 4000 },
+					"timeoutMs": { "type": "integer", "minimum": 500, "maximum": 15000, "default": 3000 }
+				}
+			},
+			"capture": {
+				"type": "object",
+				"additionalProperties": false,
+				"properties": {
+					"enabled": { "type": "boolean", "default": true },
+					"timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 60000, "default": 10000 }
+				}
+			}
+		}
+	}
+}
