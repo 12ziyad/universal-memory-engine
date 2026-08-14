@@ -358,10 +358,24 @@ describe("Agents door and the variant chooser", () => {
 			"langchain", "crewai", "autogen", "agno", "openai-agents", "google-adk", "llamaindex",
 		]);
 		expect(Object.keys(doors.integrations.clients.typescript.variants)).toEqual(["mastra", "vercel-ai"]);
-		expect(Object.keys(doors.integrations.clients.n8n.variants)).toEqual(["http", "mcp"]);
+		expect(Object.keys(doors.integrations.clients.n8n.variants)).toEqual(["native", "http", "mcp"]);
 		// Unverified frameworks must not ship — the no-dead-commands rule.
 		expect(script).not.toContain("camel");
 		expect(script).not.toContain("chatdev");
+	});
+
+	it("the native n8n node names the published package and stays honest about Cloud", () => {
+		const snippets = build(["installSnippets"], "installSnippets")("itsuki_live_n8n");
+		// The package is published; this is the one place a bare install name is
+		// allowed, and it must match the registry exactly.
+		expect(snippets.n8nNativeInstall).toBe("n8n-nodes-itsuki");
+		expect(snippets.n8nNativeCredential).toContain("itsuki_live_n8n");
+		const native = buildMethods().integrations.clients.n8n.variants.native;
+		const install = native.steps.find((s) => /community node/i.test(s.title));
+		expect(install.body).toMatch(/self-hosted/i);
+		// Never claim n8n Cloud support the verification programme has not granted.
+		expect(script).not.toMatch(/n8n Cloud (compatible|verified|supported)/i);
+		expect(script).not.toContain("officially verified by n8n");
 	});
 
 	it("the LlamaIndex route rides the path token, never a header it cannot send", () => {

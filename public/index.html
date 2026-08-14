@@ -4298,6 +4298,14 @@ Body (JSON):
 { "content": "{{ $json.textToRemember }}" }
 
 Recall is the same node against ${origin}/v1/recall with { "query": "..." }.`,
+		n8nNativeInstall: `n8n-nodes-itsuki`,
+		n8nNativeCredential: `Credential: Itsuki API
+API Key: ${mcpToken}
+Base URL: ${origin}
+
+Then add an "Itsuki" node and pick an operation:
+Save Memory · Save Conversation · Recall Memory · List Memories ·
+Get Memory · Delete Memory · Delete All Memories · Who Am I · Wait for Packet`,
 		n8nMcpClient: `Node: MCP Client Tool  (attach to an AI Agent node)
 Endpoint: ${origin}/mcp
 Server Transport: HTTP Streamable
@@ -4532,8 +4540,14 @@ function installMethods() {
 					label: "n8n",
 					icon: ICON.hexN,
 					docsHref: "/docs/#/integrations/n8n",
-					hint: "HTTP Request works in any workflow. MCP Client needs an AI Agent node.",
+					hint: "Native node on self-hosted n8n. HTTP Request works anywhere, including n8n Cloud.",
 					variants: {
+						native: { label: "Native node", steps: [
+							{ title: "Install the community node", body: "Settings → Community Nodes → Install. Self-hosted n8n only — n8n Cloud carries just n8n-verified nodes.", codeLabel: "package name", code: () => installSnippets().n8nNativeInstall },
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Add the credential", body: "Create an Itsuki API credential, then hit Test — it checks the connection without touching your memories.", codeLabel: "credential", code: (key) => installSnippets(key).n8nNativeCredential },
+							{ title: "Build the workflow", body: "Save Memory waits for extraction by default, so the next node sees settled state. Delete All previews unless you tick Confirm Destruction." },
+						] },
 						http: { label: "HTTP Request", steps: [
 							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
 							{ title: "Add an HTTP Request node", body: "Works in every workflow — forms, schedules, webhooks — with no AI involved.", codeLabel: "node config", code: (key) => installSnippets(key).n8nHttpRequest },

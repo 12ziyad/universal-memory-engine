@@ -109,7 +109,19 @@ describe("page contracts", () => {
 		expect(script).toContain('BasicMCPClient("${ORIGIN}/mcp/YOUR_MCP_KEY")');
 	});
 
-	it("the n8n page documents both routes, Dify stays review-free, Convex is SDK-only", () => {
+	it("the n8n page documents the native node without overclaiming Cloud support", () => {
+		const n8n = script.split('PAGES["/integrations/n8n"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(n8n).toContain("n8n-nodes-itsuki");
+		expect(n8n).toMatch(/self-hosted/i);
+		expect(n8n).toContain("N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE");
+		// Delete All must be described as preview-first wherever it appears.
+		expect(n8n).toMatch(/previews by default/i);
+		// No Update operation exists; the page must not imply one.
+		expect(n8n).toContain("There is no Update operation");
+		expect(script).not.toContain("officially verified by n8n");
+	});
+
+	it("the n8n page documents both built-in routes, Dify stays review-free, Convex is SDK-only", () => {
 		expect(script).toContain("HTTP Request node");
 		expect(script).toContain("MCP Client Tool");
 		expect(script).toContain('PAGES["/integrations/dify"]');

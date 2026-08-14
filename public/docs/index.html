@@ -599,8 +599,24 @@ const tools = await mcpClient.tools(); // pass to generateText / streamText`)}
 
 PAGES["/integrations/n8n"] = { title: "n8n", html: `
 <h1>n8n</h1>
-<p class="lede">Two routes: the <b>HTTP Request node</b> works in every workflow with no AI involved; the <b>MCP Client Tool</b> gives an AI Agent node the memory tools. Both are built into n8n — nothing to install, and both work on n8n Cloud and self-hosted.</p>
-<h2 id="http">Route A — HTTP Request node (any workflow)</h2>
+<p class="lede">Three routes. The <b>native Itsuki node</b> is a real installable package with typed operations and a credential — self-hosted n8n only. The <b>HTTP Request node</b> and <b>MCP Client Tool</b> are built into n8n, need no install, and work on n8n Cloud too.</p>
+<h2 id="native">Route A — native Itsuki node (self-hosted)</h2>
+<p>Published on npm as <code>n8n-nodes-itsuki</code>, built and signed from this repository's GitHub Actions workflow with npm provenance. Install it in n8n under <b>Settings → Community Nodes → Install</b>; only instance owners can install community nodes, and n8n Cloud carries only nodes n8n has verified, so Cloud users should use Route B or C below.</p>
+${codeBlock(`n8n-nodes-itsuki`)}
+<p>Then create an <b>Itsuki API</b> credential (API key from <b>API Keys</b> in the dashboard, base URL <code>${ORIGIN}</code>) and press <b>Test</b> — it verifies the connection against an endpoint that returns counts only, never memory content. The key travels as a header and is never written into workflow exports.</p>
+<p>The node exposes nine operations:</p>
+<ul>
+<li><b>Save Memory</b> and <b>Save Conversation</b> — store a durable fact, or a batch of chat messages for extraction. Both <b>wait for completion by default</b>, so the next node sees settled state; if the wait times out the output says the save was accepted and is still processing, which is not a failure.</li>
+<li><b>Recall Memory</b> — prompt-ready context plus structured items. Zero results is a result, not an error.</li>
+<li><b>List Memories</b> — one page, or Return All with a hard item cap and pagination-loop detection.</li>
+<li><b>Get Memory</b> · <b>Delete Memory</b> — by prefixed ID. A missing ID is reported as an error, never as a silent success.</li>
+<li><b>Delete All Memories</b> — <b>previews by default</b>; it reports what would be removed and changes nothing until you tick Confirm Destruction.</li>
+<li><b>Who Am I</b> — identity, project scope, connection health and plan usage.</li>
+<li><b>Wait for Packet</b> — poll a save receipt to a terminal state on its own.</li>
+</ul>
+<p>The node is usable as an AI Agent tool. On self-hosted n8n that additionally requires <code>N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true</code>. Recall and the save operations are the sensible tools to expose; destructive operations are deliberately unattractive as tools, since Delete All previews unless a human enables confirmation.</p>
+<p>There is no Update operation. ${PRODUCT.name} has no safe versioned-correction contract yet, and this node does not pretend otherwise — correct a memory by deleting it and saving the corrected fact.</p>
+<h2 id="http">Route B — HTTP Request node (any workflow, incl. Cloud)</h2>
 <p>The deterministic route: "form submitted → save to memory", "nightly digest → recall". Create an <b>MCP link</b> in <b>API Keys</b> (it doubles as a REST Bearer credential).</p>
 ${codeBlock(`Node: HTTP Request
 Method: POST
@@ -609,7 +625,7 @@ Authentication: Generic Credential Type -> Header Auth
   Name: authorization    Value: Bearer YOUR_MCP_KEY
 Body (JSON): { "content": "{{ $json.textToRemember }}" }`)}
 <p>Recall is the same node against <code>${ORIGIN}/v1/recall</code> with <code>{ "query": "..." }</code> — the response's <code>context</code> field is prompt-ready. Saves return a <b>receipt</b>; extraction finishes asynchronously.</p>
-<h2 id="mcp">Route B — MCP Client Tool (AI Agent workflows)</h2>
+<h2 id="mcp">Route C — MCP Client Tool (AI Agent workflows, incl. Cloud)</h2>
 ${codeBlock(`Node: MCP Client Tool  (attach to an AI Agent node)
 Endpoint: ${ORIGIN}/mcp
 Server Transport: HTTP Streamable
