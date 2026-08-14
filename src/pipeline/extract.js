@@ -47,7 +47,7 @@ import {
 	updateMemoryJob,
 } from "../lib/db.js";
 import { messagesContainMemoryOptOut } from "./opt_out.js";
-import { resolveAdmissionRules } from "./admission.js";
+import { resolveQueuedAdmissionRules } from "./admission.js";
 import { detectUpdateMode } from "./corrections.js";
 import { rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
@@ -294,6 +294,22 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		return {
 			outcome: "cancelled_by_delete",
 			error: String(current.error ?? "cancelled_by_delete"),
+			receipt,
+			recovered: true,
+		};
+	}
+	if (current.status === "cancelled_by_retention") {
+		const receipt = emptyReceipt(
+			"cancelled_by_retention",
+			"the accepted save is older than this project's retention boundary; the save was cancelled",
+			recoveredMeta,
+		);
+		receipt.durable = false;
+		receipt.created_at = Number(current.created_at ?? Date.now());
+		receipt.recovered_from_extraction_run = true;
+		return {
+			outcome: "cancelled_by_retention",
+			error: String(current.error ?? "cancelled_by_retention"),
 			receipt,
 			recovered: true,
 		};
@@ -622,7 +638,10 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}, 
 			}, { markInterrupted: row.status === "committing", error });
 		}
 		try {
-			const totals = await flushAiMeter(env, userId, meter);
+			const totals = await flushAiMeter(env, userId, meter, {
+				accountUserId: overrides.meta?.account_user_id ?? overrides.meta?.accountUserId ?? null,
+				managedProjectId: overrides.meta?.managed_project_id ?? overrides.meta?.managedProjectId ?? null,
+			});
 			if (result?.receipt) {
 				result.receipt.ai_calls = totals.calls;
 				result.receipt.ai_input_tokens = totals.input_tokens;
@@ -715,6 +734,27 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			receipt.durable = false;
 			return { outcome: "cancelled_by_delete", error: "cancelled_by_delete", receipt };
 		}
+		const managedProjectId = meta.managed_project_id ?? meta.managedProjectId ?? null;
+		if (managedProjectId) {
+			const retentionFence = await env.DB.prepare(
+				`SELECT cutoff_at FROM retention_fences
+				  WHERE project_id = ? AND class = 'semantic_memory' AND cutoff_at >= ? LIMIT 1`,
+			).bind(managedProjectId, acceptedAt).first();
+			if (retentionFence) {
+				await updateExtractionRun(env, userId, extractionRunId, {
+					status: "cancelled_by_retention",
+					error: "cancelled_by_retention: this accepted save is older than the project's retention boundary",
+					expectStatus: "running",
+				});
+				const receipt = emptyReceipt(
+					"cancelled_by_retention",
+					"this accepted save is older than the project's retention boundary; the save was cancelled",
+					{ ...meta, latency_ms: elapsed() },
+				);
+				receipt.durable = false;
+				return { outcome: "cancelled_by_retention", error: "cancelled_by_retention", receipt };
+			}
+		}
 	}
 
 	// D — packet (three separated parts).
@@ -734,7 +774,13 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// and the gates get the same object for enforcement. A caller may hand in a
 	// pre-merged set (the Playground layers thread settings over the account's,
 	// and an SDK caller's per-request rules arrive the same way).
-	const rules = await resolveAdmissionRules(env, userId, overrides.rules);
+	const rules = await resolveQueuedAdmissionRules(
+		env,
+		userId,
+		overrides.rules,
+		overrides.rulePolicy,
+		meta,
+	);
 	// Which rules were actually in force for this save. Without this, a rule
 	// that never loaded and a rule that matched nothing look identical on the
 	// receipt — which is exactly how unenforced excludes stayed invisible.
@@ -773,6 +819,9 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			rules,
 			projectId: projectScope.projectId,
 			projectName: projectScope.projectName,
+			managedProjectId: meta.managed_project_id ?? meta.managedProjectId ?? null,
+			accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+			memoryOwnerUserId: meta.owner_user_id ?? meta.ownerUserId ?? userId,
 			sourcePacketId: meta.source_packet_id ?? null,
 			extractionRunId,
 			acceptedAt,
@@ -1065,7 +1114,13 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		return extractionRunResult(env, userId, row, chunk, meta);
 	}
 	try {
-		result = await writeApproved(env, config, userId, plan, { extractionRunId, acceptedAt });
+		result = await writeApproved(env, config, userId, plan, {
+			extractionRunId,
+			acceptedAt,
+			managedProjectId: meta.managed_project_id ?? meta.managedProjectId ?? null,
+			accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+			memoryOwnerUserId: meta.owner_user_id ?? meta.ownerUserId ?? userId,
+		});
 	} catch (err) {
 		const message = String(err?.message ?? err);
 		// The commit fence rolled the batch back: a confirmed erasure superseded
@@ -1075,19 +1130,29 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		// error text carries "fence_guard"; the expression form is kept for the
 		// rollout window where the unnamed 0030 table may still be live.
 		if (/fence_guard|violation IS NULL/i.test(message)) {
-			console.warn(`extraction cancelled_by_delete at commit user=${userId}`);
+			const managedProjectId = meta.managed_project_id ?? meta.managedProjectId ?? null;
+			const retentionFence = managedProjectId && acceptedAt != null
+				? await env.DB.prepare(
+					`SELECT cutoff_at FROM retention_fences
+					  WHERE project_id = ? AND class = 'semantic_memory' AND cutoff_at >= ? LIMIT 1`,
+				).bind(managedProjectId, acceptedAt).first()
+				: null;
+			const outcome = retentionFence ? "cancelled_by_retention" : "cancelled_by_delete";
+			console.warn(`extraction ${outcome} at commit user=${userId}`);
 			await updateExtractionRun(env, userId, extractionRunId, {
-				status: "cancelled_by_delete",
-				error: "cancelled_by_delete: a confirmed delete erased this scope while the save was committing",
+				status: outcome,
+				error: `${outcome}: a confirmed deletion boundary superseded this save while it was committing`,
 				expectStatus: "committing",
 			});
 			const receipt = emptyReceipt(
-				"cancelled_by_delete",
-				"a confirmed delete erased this scope while the save was processing; the save was cancelled",
+				outcome,
+				retentionFence
+					? "this accepted save is older than the project's retention boundary; the save was cancelled"
+					: "a confirmed delete erased this scope while the save was processing; the save was cancelled",
 				{ ...meta, latency_ms: elapsed() },
 			);
 			receipt.durable = false;
-			return { outcome: "cancelled_by_delete", error: "cancelled_by_delete", receipt };
+			return { outcome, error: outcome, receipt };
 		}
 		console.error(`extraction db_write_failed user=${userId}:`, message);
 		await updateExtractionRun(env, userId, extractionRunId, {
@@ -1123,6 +1188,8 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			idempotencyKey: `pass2:${extractionRunId}`,
 			sourcePacketId: meta.source_packet_id ?? null,
 			extractionRunId,
+			accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+			managedProjectId: meta.managed_project_id ?? meta.managedProjectId ?? null,
 			payload: {
 				affectedNodeIds: result.affectedNodeIds,
 				project_id: projectScope.projectId,
@@ -1130,7 +1197,11 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			},
 		});
 		if (jobId) await updateExtractionRun(env, userId, extractionRunId, { jobId });
-		const pass2 = await runPass2(env, config, userId, result.affectedNodeIds, { jobId });
+		const pass2 = await runPass2(env, config, userId, result.affectedNodeIds, {
+			jobId,
+			accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+			managedProjectId: meta.managed_project_id ?? meta.managedProjectId ?? null,
+		});
 		await updateMemoryJob(env, userId, jobId, {
 			status: pass2?.ran ? "completed" : "skipped",
 			payload: {

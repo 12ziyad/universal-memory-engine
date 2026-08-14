@@ -98,6 +98,7 @@ function metadataForRows(rows) {
 		eventTimePrecision: first.event_time_precision ?? null,
 		eventTimeRelation: first.event_time_relation ?? null,
 		rawTemporalPhrase: clean(first.raw_temporal_phrase, 160) || null,
+		projectCategoryId: first.project_category_id ?? null,
 	};
 }
 
@@ -130,10 +131,14 @@ export function buildAtomicProjection(candidateRows = []) {
 
 	for (const rowsForEntity of nodeGroups.values()) {
 		const best = [...rowsForEntity].sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))[0];
+		const bestCategory = [...rowsForEntity]
+			.filter((row) => row.project_category_id)
+			.sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))[0];
 		const object = {
 			kind: "node",
 			label: clean(best.entity, 120),
 			category: clean(best.entity_type, 64) || "other",
+			project_category_id: bestCategory?.project_category_id ?? null,
 			confidence: Math.max(...rowsForEntity.map((row) => Number(row.confidence ?? 0))),
 		};
 		objects.push(object);
@@ -148,6 +153,7 @@ export function buildAtomicProjection(candidateRows = []) {
 		const base = {
 			on: clean(best.entity, 120),
 			text: clean(best.assertion, 800),
+			project_category_id: best.project_category_id ?? null,
 			confidence: Number(best.confidence ?? 0),
 		};
 		const object = best.atom_type === "event"

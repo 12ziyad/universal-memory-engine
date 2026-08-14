@@ -369,8 +369,8 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
 <tr><td><code>GET /v1/usage?range=30d</code></td><td>Activity rollups: saves/recalls per day, by source, totals. Ranges 1d/7d/30d/all.</td></tr>
 <tr><td><code>GET /v1/receipts?limit=50</code></td><td>Latest save/recall receipts.</td></tr>
-<tr><td><code>GET /v1/export</code></td><td>Complete JSON export of your memory. Your data is never locked in.</td></tr>
-<tr><td><code>GET/PUT /v1/rules</code></td><td>Read or update capture rules (what to remember / never remember).</td></tr>
+<tr><td><code>GET /v1/export</code></td><td>Complete JSON export of the memory space resolved by the current credential and request. It does not aggregate sibling SDK sub-tenant spaces in the project.</td></tr>
+<tr><td><code>GET/PUT /v1/rules</code></td><td>Read or update the project's memory-extraction inclusion and exclusion policy.</td></tr>
 </table>
 <h2>Conversation-ingest boundaries</h2>
 <table>
@@ -548,7 +548,7 @@ ${codeBlock(`{ "summary": "Saved: 1 memory (Kotlin), 1 detail. Skipped: 1 (quest
   "receipt_id": "receipt_1a2b…",
   "receipt": { "outcome": "wrote", "saved": { "nodes": 1, "slices": 1 }, "skipped": 1 } }`)}
 <h2>Rules</h2>
-<p>In <b>Settings → What to remember</b> (or <code>PUT /v1/rules</code>):</p>
+<p>In <b>Settings → Memory extraction</b> (or the compatibility <code>PUT /v1/rules</code> endpoint):</p>
 <ul>
 <li><b>Custom instructions</b> — plain language: <i>"Always save exam progress. Never save jokes."</i></li>
 <li><b>Includes / excludes</b> — topic lists; excludes always win.</li>
@@ -658,13 +658,13 @@ ${codeBlock(`GET /v1/jobs?cancelled=true    # only work your own erasure cancell
 GET /v1/jobs?cancelled=false   # only work that actually failed`)}
 
 <h2>Which route to use</h2>
-<p>There are two ways to erase, and they are for different callers:</p>
+<p>There are two compatibility surfaces for erasing one resolved memory space. Neither one is project-wide:</p>
 <table>
 <tr><th>Route</th><th>Who</th><th>Behaviour</th></tr>
-<tr><td><code>DELETE /v1/memories</code></td><td>API keys and sessions</td><td>Preview-first, addresses any memory space you own including a single sub-tenant, and carries the erasure barrier described above. <b>This is the route to build on.</b></td></tr>
-<tr><td><code>POST /v1/actions/delete-all</code></td><td>Signed-in sessions only</td><td>The dashboard's danger-zone button. It deliberately refuses API keys with <code>token_not_allowed</code>.</td></tr>
+<tr><td><code>DELETE /v1/memories</code></td><td>API keys and sessions</td><td>Preview-first, addresses the one memory space resolved for the request (including a specifically addressed sub-tenant), and carries the erasure barrier described above. <b>This is the route to build on.</b></td></tr>
+<tr><td><code>POST /v1/actions/delete-all</code></td><td>Signed-in sessions only</td><td>Legacy compatibility route for the session's one resolved memory space. It refuses API keys with <code>token_not_allowed</code> and is intentionally not exposed in Settings.</td></tr>
 </table>
-<p>The split is intentional rather than an oversight. A confirmed unscoped <code>DELETE /v1/memories</code> already gives a key holder everything <code>delete-all</code> does, with a preview step first and the barrier semantics above — so opening the second route to keys would add a less careful path to the same outcome and no new capability.</p>
+<p>A project may contain a primary space plus registered SDK sub-tenant spaces. These routes never claim to iterate all of them. True project-wide deletion is not self-serve until the convergent lifecycle workflow can verify every project space, index, queue, artifact, and retry path together.</p>
 
 <h2>What is kept</h2>
 <p>Erasure removes your memory. It retains the bookkeeping that proves the deletion happened — deletion records, job and receipt history, and the timestamps above. That audit trail carries no memory content, and it is what lets a later preview honestly answer "nothing left".</p>
@@ -737,7 +737,7 @@ PAGES["/privacy"] = { title: "Privacy & limits", html: `
 <p class="lede">The short version we hold ourselves to: no selling data, no ads, no third-party trackers, no training on your memory.</p>
 <h2>Privacy</h2>
 <ul>
-<li>Your memory belongs to you. Export everything anytime (<code>GET /v1/export</code>); delete everything anytime (Settings → danger zone, or a confirmed unscoped <code>DELETE /v1/memories</code>). A confirmed erasure takes effect immediately and also <b>cancels saves you had already submitted</b>, so nothing you erased can reappear afterwards — see <a href="/concepts/delete">Delete &amp; erasure</a>. What is retained is the bookkeeping proving the deletion happened; it carries no memory content.</li>
+<li>Your memory belongs to you. <code>GET /v1/export</code> exports the memory space resolved for that request, and a confirmed unscoped <code>DELETE /v1/memories</code> erases that same resolved space with an erasure barrier. Settings has no delete-all button, and true project-wide export or deletion must not be inferred from these scoped operations. Project-wide deletion is not self-serve until convergent lifecycle cleanup covers every primary and SDK sub-tenant path — see <a href="/concepts/delete">Delete &amp; erasure</a>.</li>
 <li>Site analytics are aggregate-only: no cookies, no visitor IDs, bot-filtered counts.</li>
 <li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed. The <a href="/operate/observability">operator endpoints</a> available to <i>you</i> return counts, states and timings only — never content.</li>
 <li>The identifier you pass as <code>userId</code> for a sub-tenant is stored as part of that write's provenance, so your own account can list its tenants. Use an opaque, stable id of your own rather than an end user's email address.</li>

@@ -17,6 +17,9 @@ import { runRecallCommand } from "../src/pipeline/commands.js";
  */
 
 const USER = "user_bf2";
+// Production and the shared test environment intentionally run V3 on. Tests
+// that assert the historical narrow-only contract must opt out explicitly.
+const LEGACY_ENV = { ...env, ITSUKI_MEMORY_V3: "off", ITSUKI_MEMORY_V3_USERS: "" };
 const V3_ENV = { ...env, ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: USER };
 
 async function seedGraph(userId, count) {
@@ -119,7 +122,7 @@ describe("BF-2 end to end: the number of returned items follows the request", ()
 		const userId = `${USER}_narrow`;
 		await seedGraph(userId, 12);
 		for (const limit of [1, 2, 5]) {
-			const result = await recallOnce(userId, "Falcon project", { limit });
+			const result = await recallOnce(userId, "Falcon project", { limit }, LEGACY_ENV);
 			expect(result.items.length, `limit=${limit}`).toBeLessThanOrEqual(limit);
 			expect(result.limit_applied).toBe(limit);
 			expect(result.limit_mode).toBe("narrow");
@@ -129,7 +132,7 @@ describe("BF-2 end to end: the number of returned items follows the request", ()
 	it("is capped at the legacy maximum for a legacy caller who asks for more", async () => {
 		const userId = `${USER}_cap`;
 		await seedGraph(userId, 30);
-		const result = await recallOnce(userId, "Falcon project", { limit: 100 });
+		const result = await recallOnce(userId, "Falcon project", { limit: 100 }, LEGACY_ENV);
 		expect(result.items.length).toBeLessThanOrEqual(8);
 		expect(result.limit_requested).toBe(100);
 		expect(result.limit_applied).toBe(8);
@@ -137,7 +140,7 @@ describe("BF-2 end to end: the number of returned items follows the request", ()
 
 	it("returns more than the legacy maximum for a V3 caller", async () => {
 		await seedGraph(USER, 30);
-		const legacy = await recallOnce(USER, "Falcon project", {});
+		const legacy = await recallOnce(USER, "Falcon project", {}, LEGACY_ENV);
 		const deep = await recallOnce(USER, "Falcon project", { limit: 20 }, V3_ENV);
 		expect(legacy.items.length).toBeLessThanOrEqual(8);
 		expect(deep.limit_mode).toBe("depth");

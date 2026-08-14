@@ -1,4 +1,10 @@
 import { newId } from "./lib/ids.js";
+import {
+	auditedMutationResult,
+	auditInvariantStatement,
+	commitAuditedBatch,
+	commitAuditedNoop,
+} from "./lib/audit.js";
 
 export const SESSION_COOKIE = "uml_session";
 // New tokens mint with the Itsuki prefix; tokens minted before the rebrand
@@ -10,6 +16,17 @@ const ENCODER = new TextEncoder();
 const PASSWORD_ITERATIONS = 100000;
 const PASSWORD_ALG = "pbkdf2_sha256";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+export const MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT = 50;
+export const MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT = 200;
+
+export class ConnectionTokenError extends Error {
+	constructor(code, message, status = 400) {
+		super(message);
+		this.name = "ConnectionTokenError";
+		this.code = code;
+		this.status = status;
+	}
+}
 
 function now() {
 	return Date.now();
@@ -380,21 +397,54 @@ async function recordLoginEvent(env, request, userId, outcome, email = null) {
  * Change (or, for Google-only accounts, set) the password while logged in.
  * The active session proves identity; existing passwords must be re-entered.
  */
-export async function changePassword(env, request, body) {
+export async function changePassword(env, request, body, options = {}) {
+	const auditIntent = options?.auditIntent ?? null;
 	const auth = await getSessionUser(env, request);
-	if (!auth) return { error: "unauthorized", status: 401 };
+	if (!auth) {
+		const result = { error: "unauthorized", status: 401 };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
+	}
 	const newPassword = String(body?.newPassword ?? "");
-	if (newPassword.length < 8) return { error: "New password must be at least 8 characters", status: 400 };
+	if (newPassword.length < 8) {
+		const result = { error: "New password must be at least 8 characters", status: 400 };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
+	}
 	const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.userId).first();
-	if (!row) return { error: "unauthorized", status: 401 };
+	if (!row) {
+		const result = { error: "unauthorized", status: 401 };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
+	}
 	if (row.password_hash && !(await verifyPassword(String(body?.currentPassword ?? ""), row.password_hash))) {
-		return { error: "Current password is incorrect", status: 400 };
+		const result = { error: "Current password is incorrect", status: 400 };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
 	}
 	const password = await hashPassword(newPassword);
-	await env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?")
-		.bind(password.passwordHash, password.passwordSalt, now(), row.id).run();
+	const updatedAt = Math.max(now(), Number(row.updated_at ?? 0) + 1);
+	const statement = env.DB.prepare(
+		"UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ? AND password_hash IS ? AND updated_at IS ?",
+	).bind(password.passwordHash, password.passwordSalt, updatedAt, row.id, row.password_hash ?? null, row.updated_at ?? null);
+	if (auditIntent) {
+		await commitAuditedBatch(env, auditIntent, [statement], {
+			preconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 FROM users WHERE id = ? AND status = 'active' AND password_hash IS ? AND updated_at IS ?",
+				[row.id, row.password_hash ?? null, row.updated_at ?? null],
+			)],
+			postconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 FROM users WHERE id = ? AND password_hash = ? AND updated_at = ?",
+				[row.id, password.passwordHash, updatedAt],
+			)],
+		});
+	} else {
+		const updated = await statement.run();
+		if (Number(updated?.meta?.changes ?? 0) !== 1) {
+			return { error: "Account changed. Reload and try again.", status: 409 };
+		}
+	}
 	await recordLoginEvent(env, request, row.id, row.password_hash ? "password_changed" : "password_set");
-	return { ok: true, status: 200 };
+	const result = { ok: true, status: 200 };
+	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
 
 export async function logout(env, request) {
@@ -408,11 +458,24 @@ export async function logout(env, request) {
 	return { ok: true, cookie: clearSessionCookie(request) };
 }
 
-export async function logoutAll(env, userId) {
-	await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-		.bind(now(), userId)
-		.run();
-	return { ok: true };
+export async function logoutAll(env, userId, { auditIntent = null } = {}) {
+	const revokedAt = now();
+	const statement = env.DB.prepare(
+		"UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+	).bind(revokedAt, userId);
+	if (auditIntent) {
+		await commitAuditedBatch(env, auditIntent, [statement], {
+			postconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND revoked_at IS NULL)",
+				[userId],
+			)],
+		});
+	} else {
+		await statement.run();
+	}
+	const result = { ok: true, revoked_at: revokedAt };
+	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
 
 export function publicToken(row) {
@@ -429,31 +492,52 @@ export function publicToken(row) {
 		revoked_at: row.revoked_at ?? null,
 		scopes: JSON.parse(row.scopes_json || "[]"),
 		status: row.status || "active",
+		owner: row.owner_user_id ? {
+			user_id: String(row.owner_user_id).slice(0, 100),
+			name: String(row.owner_name ?? "").trim().slice(0, 120) || null,
+			email: String(row.owner_email ?? "").trim().toLocaleLowerCase("en-US").slice(0, 254) || null,
+		} : null,
 	};
 }
 
 export async function listConnectionTokens(env, userId, options = {}) {
 	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
-	const columns = "id, project_id, label, type, token_prefix, token_tail, scopes_json, created_at, last_used_at, revoked_at, status";
+	const requestedLimit = Number(options.limit ?? MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT);
+	const limit = Math.max(1, Math.min(MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT, Number.isFinite(requestedLimit)
+		? Math.floor(requestedLimit)
+		: MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT));
+	const columns = `t.id, t.project_id, t.label, t.type, t.token_prefix, t.token_tail,
+		t.scopes_json, t.created_at, t.last_used_at, t.revoked_at, t.status,
+		t.user_id AS owner_user_id, u.name AS owner_name, u.email AS owner_email`;
 	const statement = !scoped
-		? env.DB.prepare(`SELECT ${columns} FROM connection_tokens WHERE user_id = ? ORDER BY created_at DESC`)
-			.bind(userId)
+		? env.DB.prepare(
+			`SELECT ${columns} FROM connection_tokens t
+			 LEFT JOIN users u ON u.id = t.user_id
+			 WHERE t.user_id = ? ORDER BY t.created_at DESC LIMIT ?`,
+		)
+			.bind(userId, limit)
 		: options.isDefault
 			? env.DB.prepare(
-				`SELECT ${columns} FROM connection_tokens
-				 WHERE user_id = ? AND (project_id = ? OR project_id IS NULL)
-				 ORDER BY created_at DESC`,
-			).bind(userId, options.projectId)
+				`SELECT ${columns} FROM connection_tokens t
+				 LEFT JOIN users u ON u.id = t.user_id
+				 WHERE t.project_id = ? OR (t.project_id IS NULL AND t.user_id = ?)
+				 ORDER BY t.created_at DESC LIMIT ?`,
+			).bind(options.projectId, userId, limit)
 			: env.DB.prepare(
-				`SELECT ${columns} FROM connection_tokens
-				 WHERE user_id = ? AND project_id = ?
-				 ORDER BY created_at DESC`,
-			).bind(userId, options.projectId);
+			`SELECT ${columns} FROM connection_tokens t
+			 LEFT JOIN users u ON u.id = t.user_id
+			 WHERE t.project_id = ?
+			 ORDER BY t.created_at DESC LIMIT ?`,
+		).bind(options.projectId, limit);
 	const { results } = await statement.all();
 	return (results ?? []).map(publicToken);
 }
 
 export async function createConnectionToken(env, userId, body = {}, options = {}) {
+	const projectScoped = Object.prototype.hasOwnProperty.call(options, "projectId");
+	if (projectScoped && !options.projectId) throw new ConnectionTokenError("project_required", "Choose a project before creating a key.", 400);
+	const auditIntent = options.auditIntent ?? null;
+	const includeHistoricalDefault = options.isDefault === true;
 	const type = ["mcp", "api"].includes(body.type) ? body.type : "api";
 	const label = String(body.label ?? "").trim().slice(0, 80) || (type === "mcp" ? "MCP client" : "API client");
 	const token = `${CONNECTION_TOKEN_PREFIX}${base64Url(randomBytes(32))}`;
@@ -473,10 +557,15 @@ export async function createConnectionToken(env, userId, body = {}, options = {}
 		created_at: createdAt,
 		status: "active",
 	};
-	await env.DB.prepare(
+	const statement = projectScoped ? env.DB.prepare(
 		`INSERT INTO connection_tokens
 			(id, user_id, project_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status, rules_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		  WHERE (SELECT COUNT(*) FROM connection_tokens
+		          WHERE (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?))
+		            AND status = 'active' AND revoked_at IS NULL) < ?
+		    AND (SELECT COUNT(*) FROM connection_tokens
+		          WHERE project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)) < ?`,
 	)
 		.bind(
 			row.id,
@@ -491,12 +580,97 @@ export async function createConnectionToken(env, userId, body = {}, options = {}
 			row.scopes_json,
 			row.status,
 			row.rules_json,
+			row.project_id,
+			includeHistoricalDefault ? 1 : 0,
+			userId,
+			MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT,
+			row.project_id,
+			includeHistoricalDefault ? 1 : 0,
+			userId,
+			MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT,
 		)
-		.run();
-	return { token, tokenRecord: publicToken(row) };
+		: env.DB.prepare(
+			`INSERT INTO connection_tokens
+			 (id, user_id, project_id, label, token_hash, token_prefix, token_tail, type, created_at, scopes_json, status, rules_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind(
+			row.id, userId, null, row.label, tokenHash, row.token_prefix, row.token_tail,
+			row.type, row.created_at, row.scopes_json, row.status, row.rules_json,
+		);
+	let result;
+	try {
+		if (auditIntent && projectScoped) {
+			[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+				preconditions: [auditInvariantStatement(
+					env,
+					`SELECT 1 WHERE
+					 (SELECT COUNT(*) FROM connection_tokens
+					   WHERE (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?))
+					     AND status = 'active' AND revoked_at IS NULL) < ?
+					 AND (SELECT COUNT(*) FROM connection_tokens
+					   WHERE project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)) < ?`,
+					[row.project_id, includeHistoricalDefault ? 1 : 0, userId,
+						MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT,
+						row.project_id, includeHistoricalDefault ? 1 : 0, userId,
+						MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT],
+				)],
+				postconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 FROM connection_tokens WHERE id = ? AND project_id = ? AND status = 'active' AND revoked_at IS NULL",
+					[row.id, row.project_id],
+				)],
+				commitDetails: { targetId: row.id },
+			});
+		} else result = await statement.run();
+	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			const count = await env.DB.prepare(
+				`SELECT COUNT(*) AS total,
+				        SUM(CASE WHEN status = 'active' AND revoked_at IS NULL THEN 1 ELSE 0 END) AS active
+				   FROM connection_tokens
+				  WHERE project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)`,
+			).bind(row.project_id, includeHistoricalDefault ? 1 : 0, userId).first();
+			if (Number(count?.total ?? 0) >= MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT) {
+				throw new ConnectionTokenError(
+					"credential_history_limit_reached",
+					`A project can retain at most ${MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT} key records. Delete a revoked key before creating another.`,
+					409,
+				);
+			}
+			if (Number(count?.active ?? 0) >= MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT) {
+				throw new ConnectionTokenError(
+					"credential_limit_reached",
+					`A project can have at most ${MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT} active keys. Delete one before creating another.`,
+					409,
+				);
+			}
+		}
+		throw error;
+	}
+	if (Number(result?.meta?.changes ?? 0) !== 1) {
+		const total = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM connection_tokens
+			  WHERE project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)`,
+		).bind(row.project_id, includeHistoricalDefault ? 1 : 0, userId).first();
+		if (Number(total?.n ?? 0) >= MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT) {
+			throw new ConnectionTokenError(
+				"credential_history_limit_reached",
+				`A project can retain at most ${MAX_CONNECTION_TOKEN_HISTORY_PER_PROJECT} key records. Delete a revoked key before creating another.`,
+				409,
+			);
+		}
+		throw new ConnectionTokenError(
+			"credential_limit_reached",
+			`A project can have at most ${MAX_ACTIVE_CONNECTION_TOKENS_PER_PROJECT} active keys. Delete one before creating another.`,
+			409,
+		);
+	}
+	const created = { token, tokenRecord: publicToken(row) };
+	return auditIntent ? auditedMutationResult(created, auditIntent) : created;
 }
 
 export async function revokeConnectionToken(env, userId, tokenId, options = {}) {
+	const auditIntent = options.auditIntent ?? null;
 	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
 	const statement = !scoped
 		? env.DB.prepare(
@@ -504,13 +678,34 @@ export async function revokeConnectionToken(env, userId, tokenId, options = {}) 
 		).bind(now(), tokenId, userId)
 		: options.isDefault
 			? env.DB.prepare(
-				"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND (project_id = ? OR project_id IS NULL) AND revoked_at IS NULL",
-			).bind(now(), tokenId, userId, options.projectId)
+				`UPDATE connection_tokens SET revoked_at = ?, status = 'revoked'
+				  WHERE id = ? AND (project_id = ? OR (project_id IS NULL AND user_id = ?)) AND revoked_at IS NULL`,
+			).bind(now(), tokenId, options.projectId, userId)
 			: env.DB.prepare(
-				"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND user_id = ? AND project_id = ? AND revoked_at IS NULL",
-			).bind(now(), tokenId, userId, options.projectId);
-	const result = await statement.run();
-	return { revoked: (result.meta?.changes ?? 0) > 0 };
+			"UPDATE connection_tokens SET revoked_at = ?, status = 'revoked' WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
+		).bind(now(), tokenId, options.projectId);
+	const visible = scoped ? await env.DB.prepare(
+		`SELECT status, revoked_at FROM connection_tokens
+		  WHERE id = ? AND (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)) LIMIT 1`,
+	).bind(tokenId, options.projectId, options.isDefault ? 1 : 0, userId).first() : null;
+	if (scoped && (!visible || visible.revoked_at !== null || visible.status !== "active")) {
+		const unchanged = { revoked: false };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
+	}
+	let result;
+	if (auditIntent) {
+		[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+			postconditions: [auditInvariantStatement(
+				env,
+				`SELECT 1 FROM connection_tokens
+				  WHERE id = ? AND (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?))
+				    AND status = 'revoked' AND revoked_at IS NOT NULL`,
+				[tokenId, options.projectId, options.isDefault ? 1 : 0, userId],
+			)],
+		});
+	} else result = await statement.run();
+	const revoked = { revoked: Number(result.meta?.changes ?? 0) > 0 };
+	return auditIntent ? auditedMutationResult(revoked, auditIntent) : revoked;
 }
 
 /**
@@ -520,19 +715,41 @@ export async function revokeConnectionToken(env, userId, tokenId, options = {}) 
  * matches on the hash, and there is nothing left to match.
  */
 export async function deleteConnectionToken(env, userId, tokenId, options = {}) {
+	const auditIntent = options.auditIntent ?? null;
 	const scoped = Object.prototype.hasOwnProperty.call(options, "projectId");
 	const statement = !scoped
 		? env.DB.prepare("DELETE FROM connection_tokens WHERE id = ? AND user_id = ?")
 			.bind(tokenId, userId)
 		: options.isDefault
 			? env.DB.prepare(
-				"DELETE FROM connection_tokens WHERE id = ? AND user_id = ? AND (project_id = ? OR project_id IS NULL)",
-			).bind(tokenId, userId, options.projectId)
+				"DELETE FROM connection_tokens WHERE id = ? AND (project_id = ? OR (project_id IS NULL AND user_id = ?))",
+			).bind(tokenId, options.projectId, userId)
 			: env.DB.prepare(
-				"DELETE FROM connection_tokens WHERE id = ? AND user_id = ? AND project_id = ?",
-			).bind(tokenId, userId, options.projectId);
-	const result = await statement.run();
-	return { deleted: (result.meta?.changes ?? 0) > 0 };
+			"DELETE FROM connection_tokens WHERE id = ? AND project_id = ?",
+		).bind(tokenId, options.projectId);
+	const visible = scoped ? await env.DB.prepare(
+		`SELECT 1 FROM connection_tokens
+		  WHERE id = ? AND (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?)) LIMIT 1`,
+	).bind(tokenId, options.projectId, options.isDefault ? 1 : 0, userId).first() : null;
+	if (scoped && !visible) {
+		const unchanged = { deleted: false };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
+	}
+	let result;
+	if (auditIntent) {
+		[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+			postconditions: [auditInvariantStatement(
+				env,
+				`SELECT 1 WHERE NOT EXISTS (
+				 SELECT 1 FROM connection_tokens
+				  WHERE id = ? AND (project_id = ? OR (? = 1 AND project_id IS NULL AND user_id = ?))
+				)`,
+				[tokenId, options.projectId, options.isDefault ? 1 : 0, userId],
+			)],
+		});
+	} else result = await statement.run();
+	const deleted = { deleted: Number(result.meta?.changes ?? 0) > 0 };
+	return auditIntent ? auditedMutationResult(deleted, auditIntent) : deleted;
 }
 
 export async function resolveConnectionToken(env, token, { allowedTypes = ["api", "mcp"] } = {}) {

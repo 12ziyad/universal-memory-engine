@@ -90,7 +90,7 @@ function expectOptOutReceipt(receipt) {
 }
 
 describe("memory opt-out / do-not-remember", () => {
-	it("/v1/ingest with do-not-remember grief creates no_write receipt and no graph node", async () => {
+	it("/v1/ingest with do-not-remember grief returns a transient no_write receipt and stores nothing", async () => {
 		const userId = "opt-ingest-grief";
 		const res = await ingest(userId, "Do not remember this: my grandmother passed away on July 7.", griefMemory);
 		expect(res.status).toBe(200);
@@ -102,7 +102,7 @@ describe("memory opt-out / do-not-remember", () => {
 		expect(await table("source_packets", userId)).toHaveLength(0);
 		expect(await table("memory_jobs", userId)).toHaveLength(0);
 		expect(await table("memory_profiles", userId)).toHaveLength(0);
-		expect((await receipts(userId))[0].outcome).toBe("no_write");
+		expect(await receipts(userId)).toHaveLength(0);
 	});
 
 	it("/v1/save with do-not-remember grief creates no_write receipt and no graph node", async () => {

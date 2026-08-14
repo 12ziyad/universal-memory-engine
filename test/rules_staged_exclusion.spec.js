@@ -167,11 +167,16 @@ describe("account rules govern sub-tenant staging (Bearer door, defect SRV-04)",
 		const { key, ownerId } = await bearerAccount("srv04");
 		const bearer = { "content-type": "application/json", authorization: `Bearer ${key}` };
 		const tenant = `tenant-${crypto.randomUUID()}`;
+		const initialRules = await call("/v1/rules", { headers: bearer });
 
 		const put = await call("/v1/rules", {
 			method: "PUT",
 			headers: bearer,
-			body: JSON.stringify({ userId: tenant, rules: { excludes: ["salary"] } }),
+			body: JSON.stringify({
+				userId: tenant,
+				expected_version: initialRules.body.rules_version,
+				rules: { excludes: ["salary"] },
+			}),
 		});
 		expect(put.status).toBe(200);
 		expect(put.body?.rules?.excludes).toContain("salary");

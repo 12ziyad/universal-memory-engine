@@ -26,10 +26,9 @@ import {
 } from "../src/lib/memory_v3.js";
 
 /**
- * The V3 write/read architecture ships behind a flag that is OFF in production
- * and can only be turned on for explicitly named accounts. This suite is the
- * rollback mechanism's proof: if any of it fails, V3 can reach a user who was
- * never selected for it.
+ * The V3 write/read architecture retains explicit off, allowlist, and on
+ * controls. Production is now on, while the empty/unrecognised configuration
+ * still fails closed so rollback remains deterministic.
  */
 
 const base = { ...env };
@@ -40,9 +39,8 @@ describe("V3 feature flag: default state", () => {
 		expect(memoryV3Enabled({}, "user_a")).toBe(false);
 	});
 
-	it("is OFF for the real deployed environment (production default)", () => {
-		// The deployed worker must not carry an enabling value by accident.
-		expect(memoryV3Enabled(base, "user_a")).toBe(false);
+	it("matches the production-aligned test environment", () => {
+		expect(memoryV3Enabled(base, "user_a")).toBe(true);
 	});
 
 	it("fails closed on an unrecognised value rather than guessing", () => {
@@ -415,14 +413,14 @@ describe("V3 feature flag: surfaced on the HTTP doors", () => {
 		expect(response.status).toBe(200);
 		expect(body.memory_v3).toEqual({
 			schema: "itsuki.memory-v3-flag/v1",
-			mode: "off",
+			mode: "on",
 			allowlistCount: 0,
 			extractionB1: { mode: "off", allowlistCount: 0 },
-			atomicCapture: { mode: "off", allowlistCount: 0 },
-			atomicProjection: { mode: "off", allowlistCount: 0 },
+			atomicCapture: { mode: "on", allowlistCount: 0 },
+			atomicProjection: { mode: "on", allowlistCount: 0 },
 			atomicCoalescing: { mode: "off", allowlistCount: 0 },
-			hybridRetrieval: { mode: "off", allowlistCount: 0 },
-			sourceExpansion: { mode: "off", allowlistCount: 0 },
+			hybridRetrieval: { mode: "on", allowlistCount: 0 },
+			sourceExpansion: { mode: "on", allowlistCount: 0 },
 			episodeFallback: { mode: "off", allowlistCount: 0 },
 			adaptiveContext: { mode: "off", allowlistCount: 0 },
 		});

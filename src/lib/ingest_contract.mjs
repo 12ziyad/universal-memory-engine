@@ -310,9 +310,30 @@ export function validateIngestBody(body, { requestBytes } = {}) {
 		}
 
 		const messageIds = new Set();
+		// Messages without caller ids are assigned a stable id from conversation,
+		// role, and normalized text after this door. Two identical implicit
+		// identities in one packet would therefore collide only after the source
+		// packet/job had been accepted. Reject that ambiguity here so the request
+		// remains an atomic, non-accepting 422 instead of a late 503 with held work.
+		const implicitMessageIdentities = new Set();
 		for (let index = 0; index < messages.length; index += 1) {
 			const message = messages[index];
-			if (typeof message === "string") continue; // legacy shorthand: a user message
+			if (typeof message === "string") {
+				const content = message.trim();
+				if (content) {
+					const identity = JSON.stringify(["user", content]);
+					if (implicitMessageIdentities.has(identity)) {
+						return invalidMessage(
+							index,
+							`messages[${index}]`,
+							`messages[${index}] duplicates an earlier message without an explicit id.`,
+							{ actual: "duplicate_generated_id" },
+						);
+					}
+					implicitMessageIdentities.add(identity);
+				}
+				continue; // legacy shorthand: a user message
+			}
 			if (!message || typeof message !== "object" || Array.isArray(message)) {
 				return invalidMessage(
 					index,
@@ -369,6 +390,20 @@ export function validateIngestBody(body, { requestBytes } = {}) {
 					);
 				}
 				messageIds.add(message.id);
+			} else {
+				const content = message.content.trim();
+				if (content) {
+					const identity = JSON.stringify([String(message.role ?? "user").toLowerCase(), content]);
+					if (implicitMessageIdentities.has(identity)) {
+						return invalidMessage(
+							index,
+							`messages[${index}]`,
+							`messages[${index}] duplicates an earlier message without an explicit id.`,
+							{ actual: "duplicate_generated_id" },
+						);
+					}
+					implicitMessageIdentities.add(identity);
+				}
 			}
 		}
 

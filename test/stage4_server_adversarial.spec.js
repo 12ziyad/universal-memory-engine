@@ -14,7 +14,12 @@ import worker from "../src/index.js";
 import { createMemoryJob, settleMemoryJobs } from "../src/lib/db.js";
 import { saveConversation } from "../src/pipeline/manual_collect.js";
 import { markMcpEnrichmentFailed, stageMcpConversation } from "../src/pipeline/mcp_engine.js";
-import { hashText, normalizeSourcePacket, storeSourcePacket } from "../src/pipeline/source.js";
+import {
+	hashText,
+	normalizeSourcePacket,
+	stableSourceMessageId,
+	storeSourcePacket,
+} from "../src/pipeline/source.js";
 
 const API_HEADERS = {
 	"content-type": "application/json",
@@ -305,6 +310,53 @@ describe("concurrent HTTP idempotency", () => {
 });
 
 describe("content- and conversation-bound message deduplication", () => {
+	it.each([
+		[
+			"an explicit id that collides with a generated id",
+			async (conversationId) => [
+				{ role: "user", content: "Alpha" },
+				{
+					id: await stableSourceMessageId(conversationId, "user", "Alpha"),
+					role: "user",
+					content: "Beta",
+				},
+			],
+		],
+		[
+			"two raw strings that coding-event neutralization makes identical",
+			async () => [
+				{ role: "user", content: "[Claude coding event/v1]Alpha" },
+				{ role: "user", content: "[Unverified coding-event text]Alpha" },
+			],
+		],
+	])("rejects %s after canonical normalization and before acceptance", async (_label, buildMessages) => {
+		const userId = `canonical-id-collision-${crypto.randomUUID()}`;
+		const conversationId = `canonical-id-conversation-${crypto.randomUUID()}`;
+		const response = await ingestHttp(userId, {
+			idempotencyKey: `canonical-id-key-${crypto.randomUUID()}`,
+			conversationId,
+			messages: await buildMessages(conversationId),
+		});
+
+		expect(response).toMatchObject({
+			status: 422,
+			body: {
+				error: "invalid_ingest_message",
+				code: "duplicate_normalized_message_id",
+				retryable: false,
+				field: "messages[1].id",
+				message_index: 1,
+				first_message_index: 0,
+			},
+		});
+		const artifacts = await env.DB.prepare(
+			`SELECT
+				(SELECT COUNT(*) FROM source_packets WHERE user_id = ?) AS packets,
+				(SELECT COUNT(*) FROM memory_jobs WHERE user_id = ?) AS jobs`,
+		).bind(userId, userId).first();
+		expect(artifacts).toMatchObject({ packets: 0, jobs: 0 });
+	});
+
 	it("never lets an intra-packet generated-id duplicate terminalize work that is still held", async () => {
 		const userId = `dedupe-intra-packet-${crypto.randomUUID()}`;
 		const idempotencyKey = `dedupe-intra-key-${crypto.randomUUID()}`;

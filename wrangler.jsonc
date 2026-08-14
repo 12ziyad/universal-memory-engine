@@ -33,7 +33,8 @@
 	},
 	"upload_source_maps": true,
 	"compatibility_flags": [
-		"nodejs_compat"
+		"nodejs_compat",
+		"global_fetch_strictly_public"
 	],
 	"d1_databases": [
 		{
@@ -66,6 +67,15 @@
 		// silences the "may incur usage charges in local dev" warning).
 		"remote": true
 	},
+	// Transactional invitations only. The binding is restricted to Itsuki's
+	// dedicated sending identity so application code cannot become an open
+	// relay. Local tests omit this binding and use a deterministic fake.
+	"send_email": [
+		{
+			"name": "EMAIL",
+			"allowed_sender_addresses": ["invites@notify.itsuki.app"]
+		}
+	],
 	"vectorize": [
 		{
 			"binding": "VECTORIZE",
@@ -106,6 +116,9 @@
 		// anyone who signs up. Per user, per UTC day.
 		"PLAYGROUND_DAILY_MESSAGES": "30",
 		"PLAYGROUND_MAX_THREADS": "5",
+		"PUBLIC_ORIGIN": "https://itsuki.app",
+		"INVITE_EMAIL_FROM": "invites@notify.itsuki.app",
+		"RULES_PREVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
 		// OAuth client id is public by design; the secret lives in a Worker secret.
 		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com",
 		// Memory V3 public beta. The owner explicitly authorized the validated V3

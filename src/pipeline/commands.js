@@ -100,7 +100,10 @@ async function storeStatusReceipt(env, userId, sourcePacket, outcome, reason, so
 	// verdict instead of manufacturing accepted/accumulating duplicates.
 	if (sourcePacket?.id) receipt.id = `receipt_door_${sourcePacket.id}`;
 	const summary = formatReceipt(receipt);
-	const id = await storeReceipt(env, userId, source, receipt, summary, { strict: true });
+	const id = await storeReceipt(env, userId, source, receipt, summary, {
+		strict: true,
+		managedAccess: meta.managedAccess ?? "write",
+	});
 	let durableReceipt = receipt;
 	let durableSummary = summary;
 	if (id) {
@@ -240,7 +243,10 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 	// Legacy digest-page lane — deprecated alias. Reachable through its test
 	// hook and through scope:"summary" (a page-producing feature by
 	// definition; the engine path has no flat-page concept to map it onto).
-	if (input.digestResponse !== undefined || input.scope === "summary") {
+	const managedProjectId = input.memoryScope?.managedProjectId
+		?? input.memoryScope?.managed_project_id
+		?? null;
+	if ((input.digestResponse !== undefined || input.scope === "summary") && !managedProjectId) {
 		console.log("manual_collect (deprecated): legacy digest-page lane used");
 		const res = await saveConversation(env, ctx, userId, input.messages ?? [], {
 			scope: input.scope,
@@ -257,6 +263,9 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 		return finalizeSaveResponse(saveResponse("conversation_collect", "save_conversation", res, env, userId, null, {
 			received: (input.messages ?? []).length,
 		}));
+	}
+	if (managedProjectId && (input.digestResponse !== undefined || input.scope === "summary")) {
+		console.log("manual_collect (deprecated): managed project routed through guarded conversation engine");
 	}
 
 	// Fix round 1, Part 4: add_conversation IS the engine —
@@ -311,6 +320,20 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 			retry_after_s: res.retryAfterS ?? 30,
 			queue_depth: res.queueDepth ?? null,
 			summary: "Your memory queue is full — give it a moment to catch up, then retry.",
+		};
+	}
+	if (res.invalidIngestMessage) {
+		return {
+			ok: false,
+			invalidIngestMessage: true,
+			error: res.error ?? "invalid_ingest_message",
+			code: res.code ?? "duplicate_normalized_message_id",
+			http_status: res.httpStatus ?? 422,
+			retryable: false,
+			field: res.field ?? null,
+			message_index: res.messageIndex ?? null,
+			first_message_index: res.firstMessageIndex ?? null,
+			summary: res.summary ?? "The message batch contains duplicate canonical message ids.",
 		};
 	}
 	if (res.idempotencyConflict) {
@@ -573,12 +596,29 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		topic: input.topic,
 		scope: input.memoryScope,
 	});
-	const sourcePacket = await storeSourcePacket(env, normalized.packet, {
+	// The query is retrieval input, not memory content. Keep it transient for
+	// recall while persisting only its cryptographic identity and content-free
+	// routing metadata. This prevents a question containing forbidden/private
+	// text from becoming a second durable copy in source provenance.
+	const contentFreeQueryPacket = {
+		...normalized.packet,
+		content_preview: null,
+		message_count: 0,
+		raw_meta_json: JSON.stringify({
+			query_content_free: true,
+			session_id_explicit: Boolean(normalized.packet.session_id_explicit),
+			account_user_id: normalized.packet.account_user_id ?? null,
+			managed_project_id: normalized.packet.managed_project_id ?? null,
+		}),
+		messages: [],
+	};
+	const sourcePacket = await storeSourcePacket(env, contentFreeQueryPacket, {
 		// A confirmed erasure keeps content-free source-packet fences so accepted
 		// writes cannot replay. Read queries are different: repeating the same
 		// query is a new post-erasure operation and may safely replace only its own
 		// erased query/recall row.
 		allowErasedReadReplacement: true,
+		managedAccess: "read",
 	});
 	if (sourcePacket?.idempotency_conflict) {
 		return {
@@ -614,7 +654,14 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 				rerank: limitMode === "depth" && input.rerank === true,
 				rerankKeep: input.rerankKeep,
 			});
-			return { result: value, aiTotals: await flushAiMeter(env, userId, meter) };
+			return {
+				result: value,
+				aiTotals: await flushAiMeter(env, userId, meter, {
+					accountUserId: sourceMeta(sourcePacket).account_user_id,
+					managedProjectId: sourceMeta(sourcePacket).managed_project_id,
+					managedAccess: "read",
+				}),
+			};
 		});
 	} catch (error) {
 		if (error instanceof RecallScopeError || error?.name === "RecallScopeError") {
@@ -674,6 +721,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 		latency_ms: latencyMs,
 		matched: Number(result.count ?? 0),
 		ai: aiTotals,
+		managedAccess: "read",
 	});
 	const baseSummary = result.count ? "Found relevant memory." : "No relevant memory found.";
 	const summary = processingNote ? `${baseSummary} ${processingNote}` : baseSummary;

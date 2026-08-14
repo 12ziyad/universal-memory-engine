@@ -31,6 +31,7 @@
 
 import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import {
 	activeJobDepth,
@@ -41,7 +42,7 @@ import {
 } from "../lib/db.js";
 import { reportServerError } from "../lib/report.js";
 import { resolveAdmissionRules } from "./admission.js";
-import { rulesAllowText } from "./rules.js";
+import { narrowManagedMemoryRules, rulesAllowText } from "./rules.js";
 import { runExtraction } from "./extract.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
@@ -336,6 +337,7 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 	jobId,
 	receiptId: existingReceiptId = null,
 }) {
+	const source = sourceMeta(sourcePacket);
 	const receiptId = existingReceiptId ?? `receipt_mcp_stage_${jobId}`;
 	const receipt = emptyReceipt("staged", "captured — extracting facts and relationships in the background", {
 		source: SOURCE,
@@ -353,7 +355,7 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 	receipt.id = receiptId;
 	const summary = `Staged ✓ "${title}" — ${stagedFacts} message(s) captured. Facts and relationships are being extracted now (~1 min); this save is final only when its page shows enriched.`;
 	const saved = receipt.saved ?? {};
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO receipts
 			(id, user_id, source, outcome, summary, saved_total, saved_nodes, saved_slices,
 			 saved_events, saved_edges, saved_candidates, updated_nodes, skipped, received,
@@ -384,7 +386,18 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 		receipt.idempotency_key ?? null,
 		receipt.scope_json ?? null,
 		receipt.source_mode ?? SOURCE_MODE,
-	).run();
+	);
+	if (source.managed_project_id) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: source.account_user_id,
+				projectId: source.managed_project_id,
+			}),
+			statement,
+		]);
+	} else {
+		await statement.run();
+	}
 	const stored = await env.DB.prepare(
 		"SELECT detail, summary FROM receipts WHERE id = ? AND user_id = ? LIMIT 1",
 	).bind(receiptId, userId).first();
@@ -396,7 +409,7 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 
 async function insertProvisionalPage(env, userId, { pageId, title, userLines, derivedLines, sourcePacket, receiptId, now }) {
 	const meta = sourceMeta(sourcePacket);
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO memory_pages
 			(id, user_id, node_kind, source_mode, title, canonical_title, short_summary, full_markdown,
 			 source_conversation_id, source_packet_id, input_hash, idempotency_key, scope_json, receipt_id,
@@ -422,7 +435,18 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 		now,
 		meta.project_id ?? null,
 		meta.project_name ?? null,
-	).run();
+	);
+	if (meta.managed_project_id) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: meta.account_user_id,
+				projectId: meta.managed_project_id,
+			}),
+			statement,
+		]);
+	} else {
+		await statement.run();
+	}
 	const stored = await env.DB.prepare(
 		"SELECT id, user_id, source_packet_id, input_hash FROM memory_pages WHERE id = ? LIMIT 1",
 	).bind(pageId).first();
@@ -438,6 +462,8 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 }
 
 async function stageMcpMemoryTextOnce(env, userId, {
+	accountUserId = null,
+	managedProjectId = null,
 	jobId,
 	sourcePacketId,
 	messages,
@@ -452,7 +478,7 @@ async function stageMcpMemoryTextOnce(env, userId, {
 	if (!rows.length) return { staged: 0 };
 	const now = Date.now();
 	try {
-		await env.DB.batch(rows.map((message, index) => env.DB.prepare(
+		const statements = rows.map((message, index) => env.DB.prepare(
 			`INSERT INTO staged_memories
 				(id, user_id, job_id, source_packet_id, lane, message_id, text, created_at,
 				 settled_at, project_id, project_name)
@@ -469,9 +495,15 @@ async function stageMcpMemoryTextOnce(env, userId, {
 			now,
 			projectId,
 			projectName,
-		)));
+		));
+		if (managedProjectId) statements.unshift(managedMutationGuardStatement(env, {
+			accountUserId,
+			projectId: managedProjectId,
+		}));
+		await env.DB.batch(statements);
 		return { staged: rows.length };
 	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) throw error;
 		console.warn("MCP staged text failed:", error?.message ?? error);
 		return { staged: 0, error: String(error?.message ?? error) };
 	}
@@ -613,11 +645,28 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		});
 		return commandResult({ fired: false, processing: false, summary, receipt, receiptId });
 	}
+	const rules = await resolveAdmissionRules(env, userId, input.rules);
+	const admittedMessages = scrubbed.messages.filter((message) => rulesAllowText(rules, message?.content));
+	const receivedBeforeRules = userMessagesOf(scrubbed.messages).length;
+	const admittedUserMessages = userMessagesOf(admittedMessages).length;
+	if (receivedBeforeRules > 0 && admittedUserMessages === 0) {
+		const receipt = emptyReceipt("excluded_by_rule", "project memory policy excluded this content", {
+			source: SOURCE, source_mode: SOURCE_MODE, ...requestedProject, received: receivedBeforeRules,
+		});
+		receipt.skipped = receivedBeforeRules;
+		return commandResult({
+			fired: false,
+			processing: false,
+			summary: "Saved: 0. Reason: excluded by the project's memory policy.",
+			receipt,
+			receiptId: null,
+		});
+	}
 
 	const normalized = await normalizeSourcePacket(userId, {
 		type: "message_batch",
 		sourceMode: SOURCE_MODE,
-		messages: scrubbed.messages,
+		messages: admittedMessages,
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,
@@ -640,7 +689,10 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		});
 		receipt.skipped = received;
 		const summary = `Saved: 0. This conversation is too large for one save (limit ${config.mcp.maxStagedMessages} messages / ${Math.round(config.mcp.maxStagedChars / 1000)}k characters) — send the part that matters.`;
-		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
+		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary, {
+			accountUserId: requestedScope.accountUserId ?? requestedScope.account_user_id ?? null,
+			managedProjectId: requestedScope.managedProjectId ?? requestedScope.managed_project_id ?? null,
+		});
 		return commandResult({
 			ok: false,
 			error: "too_large",
@@ -722,7 +774,10 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			source: SOURCE, source_mode: SOURCE_MODE, ...requestedProject, received,
 		});
 		const summary = "Your memory queue is full — give it a moment to catch up, then retry this save.";
-		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary);
+		const receiptId = await storeReceipt(env, userId, SOURCE, receipt, summary, {
+			accountUserId: requestedScope.accountUserId ?? requestedScope.account_user_id ?? null,
+			managedProjectId: requestedScope.managedProjectId ?? requestedScope.managed_project_id ?? null,
+		});
 		return commandResult({
 			ok: false, error: "queue_full", httpStatus: 429,
 			fired: false, processing: false, summary, receipt, receiptId,
@@ -755,7 +810,6 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	// The MCP door only ever serves the key owner's root identity (handleMcp),
 	// so a self-load here IS the account's rules — the admission boundary makes
 	// that explicit.
-	const rules = await resolveAdmissionRules(env, userId);
 	const capture = captureRequested(normalized.messages) && rules.captureDefault !== "graph_only";
 	const userLines = durable.map((m) => m.content).filter((line) => rulesAllowText(rules, line));
 	const derivedLines = capture
@@ -773,6 +827,8 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	let jobClaim = existing
 		? { claimed: false, id: existing.job.id, job: existing.job }
 		: await claimMemoryJob(env, userId, {
+			accountUserId: sourceMeta(sourcePacket).account_user_id,
+			managedProjectId: sourceMeta(sourcePacket).managed_project_id,
 			id: proposedJobId,
 			type: JOB_TYPE,
 			status: "staged",
@@ -851,6 +907,8 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	// receipt returns — not just the first one via the page's short_summary
 	// (the gap the 0.3 trace measured on this exact lane).
 	await stageMcpMemoryTextOnce(env, userId, {
+		accountUserId: sourceMeta(sourcePacket).account_user_id,
+		managedProjectId: sourceMeta(sourcePacket).managed_project_id,
 		jobId,
 		sourcePacketId: sourcePacket?.id ?? null,
 		messages: durable.map((m) => ({ id: m.id, role: "user", content: m.content })),
@@ -877,6 +935,11 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		sourceMeta: { ...sourceMeta(sourcePacket), topic_filter: normalized.packet.topic ?? null },
 		lastTs,
 		repairGeneration: Number(ownerPayload.repair_generation ?? 0),
+		managedPolicy: input.managedPolicy === true,
+		credentialRules: input.managedPolicy === true ? (input.credentialRules ?? null) : null,
+		projectCategories: input.managedPolicy === true && Array.isArray(input.projectCategories)
+			? input.projectCategories
+			: [],
 		testOverrides: Object.keys(jobTestOverrides).length ? jobTestOverrides : null,
 	};
 	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
@@ -1030,7 +1093,11 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 	const config = getConfig(env);
 	const project = projectPayload(job.sourceMeta);
 	try {
-		const rules = await resolveAdmissionRules(env, userId);
+		const accountRules = await resolveAdmissionRules(env, userId);
+		const rules = job.managedPolicy
+			? narrowManagedMemoryRules(accountRules, job.credentialRules)
+			: accountRules;
+		if (job.managedPolicy) rules.projectCategories = Array.isArray(job.projectCategories) ? job.projectCategories : [];
 		const overrides = {
 			manual: true,
 			source: SOURCE,

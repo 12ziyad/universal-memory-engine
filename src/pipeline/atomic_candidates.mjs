@@ -9,7 +9,13 @@
  */
 
 import { runAi } from "../lib/ai_meter.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import {
+	projectMemorySpaceRegistrationStatement,
+	retentionFenceGuardStatement,
+	retentionProjectForMemoryOwner,
+} from "../lib/retention.js";
 import {
 	ATOMIC_CAPTURE_SCHEMA,
 	ATOMIC_CARDINALITIES,
@@ -49,6 +55,7 @@ export const ATOMIC_CAPTURE_JSON_SCHEMA = Object.freeze({
 					source_message_id: { type: "string" },
 					evidence_quote: { type: "string" },
 					raw_temporal_phrase: { type: "string" },
+					project_category: { type: "string" },
 					cardinality: { type: "string", enum: [...ATOMIC_CARDINALITIES] },
 					confidence: { type: "number", minimum: 0, maximum: 1 },
 				},
@@ -202,6 +209,9 @@ async function failRun(env, userId, runId, errorCode, counts = {}, expectedAttem
 
 async function claimRun(env, {
 	userId,
+	accountUserId,
+	memoryOwnerUserId,
+	managedProjectId,
 	projectId,
 	projectName,
 	sourcePacketId,
@@ -211,7 +221,7 @@ async function claimRun(env, {
 }) {
 	const id = await captureRunId(userId, sourcePacketId, chunkKey);
 	const now = Date.now();
-	const inserted = await env.DB.prepare(
+	const insertStatement = env.DB.prepare(
 		`INSERT INTO semantic_atom_capture_runs
 		 (id, user_id, project_id, project_name, source_packet_id, extraction_run_id,
 		  chunk_key, status, model, schema_version, accepted_at, attempts, created_at, updated_at)
@@ -235,7 +245,44 @@ async function claimRun(env, {
 		now,
 		userId,
 		acceptedAt,
-	).run();
+	);
+	let inserted;
+	try {
+		const statements = [];
+		if (managedProjectId && memoryOwnerUserId) {
+			statements.push(
+				managedMutationGuardStatement(env, {
+					accountUserId: accountUserId ?? null,
+					projectId: managedProjectId,
+				}),
+				retentionFenceGuardStatement(env, {
+					projectId: managedProjectId,
+					retentionClass: "semantic_memory",
+					acceptedAt,
+				}),
+				projectMemorySpaceRegistrationStatement(env, {
+					projectId: managedProjectId,
+					memoryOwnerUserId,
+					memoryUserId: userId,
+					seenAt: acceptedAt,
+				}),
+			);
+		}
+		statements.push(insertStatement);
+		const results = await env.DB.batch(statements);
+		inserted = results[results.length - 1];
+	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			if (managedProjectId) {
+				const active = await env.DB.prepare(
+					"SELECT 1 AS ok FROM managed_projects WHERE id = ? AND status = 'active' LIMIT 1",
+				).bind(managedProjectId).first();
+				if (!active) return { claimed: false, row: null, cancelledByDelete: true };
+			}
+			return { claimed: false, row: null, cancelledByRetention: true };
+		}
+		throw error;
+	}
 	let row = await env.DB.prepare(
 		`SELECT * FROM semantic_atom_capture_runs
 		 WHERE user_id = ? AND source_packet_id = ? AND chunk_key = ? LIMIT 1`,
@@ -400,6 +447,9 @@ async function proposeAtomic(env, packet, rules, override, context) {
 
 async function persistChunk(env, {
 	userId,
+	accountUserId,
+	memoryOwnerUserId,
+	managedProjectId,
 	projectId,
 	sourcePacketId,
 	extractionRunId,
@@ -414,12 +464,31 @@ async function persistChunk(env, {
 	const now = Date.now();
 	const statements = [];
 	const candidateInsertIndexes = [];
+	if (managedProjectId) statements.push(managedMutationGuardStatement(env, {
+		accountUserId: accountUserId ?? null,
+		projectId: managedProjectId,
+	}));
 	statements.push(env.DB.prepare(
 		`INSERT INTO fence_guard (violation)
 		 SELECT 1 WHERE EXISTS (
 			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?
 		 )`,
 	).bind(userId, acceptedAt));
+	if (managedProjectId && memoryOwnerUserId) {
+		statements.push(
+			retentionFenceGuardStatement(env, {
+				projectId: managedProjectId,
+				retentionClass: "semantic_memory",
+				acceptedAt,
+			}),
+			projectMemorySpaceRegistrationStatement(env, {
+				projectId: managedProjectId,
+				memoryOwnerUserId,
+				memoryUserId: userId,
+				seenAt: acceptedAt,
+			}),
+		);
+	}
 
 	for (const atom of atoms) {
 		// Provenance is a commit precondition, not a later integrity check. If
@@ -457,12 +526,13 @@ async function persistChunk(env, {
 			  raw_temporal_phrase, cardinality, confidence,
 			  source_time, source_time_offset_minutes, source_time_precision, observed_at,
 			  event_time, event_time_end, event_time_precision, event_time_relation,
-			  event_time_source, event_time_anchor, temporal_schema,
-			  extraction_model, schema_version, status, created_at)
+				event_time_source, event_time_anchor, temporal_schema,
+				extraction_model, schema_version, status, created_at, project_category_id)
 			 SELECT ?, e.user_id, e.memory_user_id, e.owner_user_id, e.external_user_id,
 				e.project_id, e.project_name, ?, ?, e.id, ?, ?, ?, ?, ?, ?, ?, ?,
 				?, ?, ?, ?, ?, ?, ?, ?, ?, e.source_time, e.source_time_offset_minutes,
-				e.source_time_precision, e.observed_at, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?
+				e.source_time_precision, e.observed_at, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?,
+				(SELECT id FROM project_categories WHERE id = ? AND project_id = ? AND status = 'active')
 			 FROM source_episodes e
 			 WHERE e.user_id = ? AND e.source_packet_id = ? AND e.message_id = ? AND e.project_id IS ?
 			   AND EXISTS (
@@ -501,6 +571,8 @@ async function persistChunk(env, {
 			ATOMIC_CAPTURE_MODEL,
 			ATOMIC_CAPTURE_SCHEMA,
 			now,
+			atom.projectCategoryId ?? null,
+			managedProjectId ?? null,
 			userId,
 			sourcePacketId,
 			atom.sourceMessageId,
@@ -586,7 +658,15 @@ async function persistChunk(env, {
 			const barrier = await env.DB.prepare(
 				"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at > ? LIMIT 1",
 			).bind(userId, acceptedAt).first();
-			const code = barrier ? "cancelled_by_delete" : "source_episode_unavailable";
+			const retentionFence = !barrier && managedProjectId
+				? await env.DB.prepare(
+					`SELECT cutoff_at FROM retention_fences
+					  WHERE project_id = ? AND class = 'semantic_memory' AND cutoff_at >= ? LIMIT 1`,
+				).bind(managedProjectId, acceptedAt).first()
+				: null;
+			const code = barrier
+				? "cancelled_by_delete"
+				: retentionFence ? "cancelled_by_retention" : "source_episode_unavailable";
 			const terminalStatus = barrier ? "cancelled_by_delete" : "failed";
 			const terminal = await env.DB.prepare(
 				`UPDATE semantic_atom_capture_runs
@@ -665,6 +745,10 @@ async function captureChunk(env, options, plannedChunk) {
 		...options,
 		chunkKey: plannedChunk.key,
 	});
+	if (claim.cancelledByRetention) return {
+		...cancelledBeforeClaimResult(),
+		outcome: "cancelled_by_retention",
+	};
 	if (claim.cancelledByDelete) return cancelledBeforeClaimResult();
 	if (!claim.claimed) {
 		if (claim.row.status === "running") {
@@ -742,6 +826,8 @@ export async function captureAtomicCandidates(env, options = {}) {
 		};
 	}
 	const project = normalizeProjectScope({ projectId: options.projectId, projectName: options.projectName });
+	const managedProjectId = options.managedProjectId
+		?? await retentionProjectForMemoryOwner(env, options.memoryOwnerUserId);
 	const chunks = await planExtractionChunks(options.messages ?? [], {
 		...(options.chunkConfig ?? {}),
 		sourcePacketId,
@@ -773,6 +859,7 @@ export async function captureAtomicCandidates(env, options = {}) {
 	for (const chunk of chunks) {
 		results.push(await captureChunk(env, {
 			...options,
+			managedProjectId,
 			userId,
 			sourcePacketId,
 			acceptedAt,

@@ -124,8 +124,11 @@ describe("dashboard script", () => {
 	});
 
 	it("has one normal dashboard nav with required tabs and hidden dev credentials", () => {
+		expect(html).toContain(".tab[hidden] { display: none; }");
 		for (const view of ["overview", "memory", "graph", "install", "playground", "keys", "receipts", "settings"]) {
-			expect(html.match(new RegExp(`data-view="${view}"`, "g")) || []).toHaveLength(1);
+			// Count actual navigation buttons, not capability selectors that name
+			// the same view in JavaScript.
+			expect(html.match(new RegExp(`<button[^>]+data-view="${view}"`, "g")) || []).toHaveLength(1);
 		}
 		// Candidates and Rules stopped being top-level tabs; they live inside
 		// Memories and Settings, but old deep links must still resolve.
@@ -161,7 +164,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("function viewInstall(");
 		expect(script).toContain("function viewKeys(");
 		expect(script).toContain("function installSnippets(");
-		expect(script).toContain("Full secrets are shown only once");
+		expect(script).toContain("won't be shown again");
 		expect(script).toContain('authorization: Bearer');
 		// Get started is a numbered stepper: three method cards, per-client tabs,
 		// and one instruction + one copyable thing per step.
@@ -184,7 +187,7 @@ describe("dashboard script", () => {
 		]) {
 			expect(script).toContain(marker);
 		}
-		for (const section of ["Account", "Security", "Connections", "Memory Controls", "Data &amp; Privacy", "Support", "Legal / Terms", "Danger Zone"]) {
+		for (const section of ["Account", "Security", "Connections", "Memory Controls", "Data &amp; Privacy", "Support", "Legal / Terms", "Delete project memory"]) {
 			expect(script).toContain(section);
 		}
 	});
@@ -215,7 +218,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("Connected tools are third-party services.");
 		expect(script).toContain("You are responsible for keeping tokens, API keys, and private MCP URLs safe.");
 		expect(script).toContain("You can revoke tokens from Connect.");
-		expect(script).toContain("Reset memory currently deletes saved memory rows");
+		expect(script).toContain("Project-wide memory deletion is not currently exposed");
 		expect(script).toContain("Avoid sensitive, regulated, or high-risk data");
 		expect(script).toContain("Do not use Itsuki for abuse, unsafe automation");
 		expect(script).toContain("function openPolicyModal(");
@@ -263,19 +266,32 @@ describe("dashboard script", () => {
 		expect(script).not.toContain(">Create MCP link</button>");
 	});
 
-	it("includes a settings danger zone with exact confirmation gating", () => {
+	it("does not expose the incomplete scoped reset as project-wide deletion", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(html).toContain('data-view="settings"');
-		expect(script).toContain("function viewReset(");
 		expect(script).toContain("function viewSettings(");
-		expect(script).toContain("function resetSelectedUserMemory(");
-		expect(script).toContain("function showResetMemoryConfirm(");
-		expect(script).toContain("function cancelResetMemory(");
-		expect(script).toContain("resetConfirmOpen");
-		expect(script).toContain("/v1/actions/delete-all");
-		expect(script).toContain("DELETE ALL");
-		expect(script).toContain("showResetMemoryConfirm()");
-		expect(script).toContain('button.disabled = (input?.value || "") !== "DELETE ALL"');
-		expect(script).toContain('if (confirmText !== "DELETE ALL") return resetConfirmChanged();');
+		expect(script).toContain("The existing scoped compatibility reset is intentionally not exposed here");
+		expect(script).toContain("Project-wide deletion arrives with the verified lifecycle workflow");
+		expect(script).not.toContain("function viewReset(");
+		expect(script).not.toContain("function resetSelectedUserMemory(");
+		expect(script).not.toContain("function showResetMemoryConfirm(");
+		expect(script).not.toContain("/v1/actions/delete-all");
+		expect(script).not.toContain("DELETE ALL");
+	});
+
+	it("describes export and erasure at their real resolved-space boundary", () => {
+		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
+		expect(html).toContain("Export a resolved memory space as JSON");
+		expect(script).toContain("does not aggregate sibling SDK subtenant spaces");
+		expect(script).toContain("does not combine sibling SDK subtenant spaces");
+		expect(script).toContain("function exportEntityLabel(row)");
+		expect(script).toContain('"Resolved memory space"');
+		expect(script).toContain("Settings does not expose project-wide deletion");
+		expect(script).not.toContain("delete all of it, at any time, from Settings");
+		expect(script).not.toContain("Deletion is self-serve and immediate for memory");
+		expect(docsHtml).toContain("the one memory space resolved for the request");
+		expect(docsHtml).toContain("is intentionally not exposed in Settings");
+		expect(docsHtml).toContain("True project-wide deletion is not self-serve");
+		expect(docsHtml).not.toContain("Settings → danger zone");
 	});
 });

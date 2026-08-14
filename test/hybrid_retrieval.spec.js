@@ -77,7 +77,15 @@ describe("E7 assertion-level hybrid retrieval", () => {
 		const nodeId = `${userId}:node`;
 		await seedNode(userId, nodeId, "Stable decision");
 		await seedSlice(userId, `${nodeId}:slice`, nodeId, "Use bounded deterministic fusion.");
-		const parent = { ...env, ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: userId };
+		const parent = {
+			...env,
+			ITSUKI_MEMORY_V3: "allowlist",
+			ITSUKI_MEMORY_V3_USERS: userId,
+			// Override the production-aligned test default: this assertion proves
+			// that an omitted nested rollout remains byte-identical to explicit off.
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: undefined,
+			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: undefined,
+		};
 		const explicitOff = { ...parent, ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "off", ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: userId };
 		const before = await recall(parent, getConfig(env), userId, "What was the stable fusion decision?", options);
 		const after = await recall(explicitOff, getConfig(env), userId, "What was the stable fusion decision?", options);

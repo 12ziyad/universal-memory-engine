@@ -338,7 +338,14 @@ describe("BF-1 is gated: V3 off means refused by name, never accepted-then-ignor
 				headers: { "content-type": "application/json", "x-api-key": env.API_KEY },
 				body: JSON.stringify(body),
 			}),
-			{ ...env, ...overrides },
+			{
+				...env,
+				// Production/test defaults intentionally mirror V3-on. This describe
+				// block is specifically the explicit feature-off compatibility contract.
+				ITSUKI_MEMORY_V3: "off",
+				ITSUKI_MEMORY_V3_USERS: "",
+				...overrides,
+			},
 			ctx,
 		);
 		await waitOnExecutionContext(ctx);

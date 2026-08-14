@@ -22,6 +22,7 @@ import {
 	ERASED_SOURCE_CONTENT_HASH,
 	hashText,
 	normalizeSourcePacket,
+	SourceMessageIdentityError,
 	sourceContextIdentity,
 	sourceMeta,
 	sourcePacketWithAdmissionRules,
@@ -332,18 +333,36 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			};
 		}
 	}
-	const normalized = await normalizeSourcePacket(userId, {
-		type: opts.sourceType ?? "message_batch",
-		sourceMode: opts.sourceMode ?? overrides.source ?? "ingest",
-		messages,
-		conversationId: opts.conversationId,
-		threadId: opts.threadId,
-		sourceId: opts.sourceId,
-		idempotencyKey: opts.idempotencyKey,
-		delivery,
-		sourceTime: opts.sourceTime,
-		scope: memoryScope,
-	});
+	let normalized;
+	try {
+		normalized = await normalizeSourcePacket(userId, {
+			type: opts.sourceType ?? "message_batch",
+			sourceMode: opts.sourceMode ?? overrides.source ?? "ingest",
+			messages,
+			conversationId: opts.conversationId,
+			threadId: opts.threadId,
+			sourceId: opts.sourceId,
+			idempotencyKey: opts.idempotencyKey,
+			delivery,
+			sourceTime: opts.sourceTime,
+			scope: memoryScope,
+		});
+	} catch (error) {
+		if (error instanceof SourceMessageIdentityError || error?.name === "SourceMessageIdentityError") {
+			return {
+				invalidIngestMessage: true,
+				error: "invalid_ingest_message",
+				code: error.code ?? "duplicate_normalized_message_id",
+				httpStatus: 422,
+				retryable: false,
+				field: error.field ?? null,
+				messageIndex: error.messageIndex ?? null,
+				firstMessageIndex: error.firstMessageIndex ?? null,
+				summary: error.message,
+			};
+		}
+		throw error;
+	}
 	if (sourceEpisodesRequired) {
 		normalized.packet = sourcePacketWithAdmissionRules(normalized.packet, normalized.messages, admissionRules);
 	}
@@ -389,7 +408,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		// An erasure is a permanent user decision, not an extraction failure that
 		// an exact replay may repair. Re-queuing it would permit source or semantic
 		// evidence to reappear behind the deletion barrier.
-		if (String(replay.job.error ?? "").startsWith("cancelled_by_delete")) {
+		if (/^(cancelled_by_delete|cancelled_by_retention):/.test(String(replay.job.error ?? ""))) {
 			return {
 				sourceEpisodeErased: true,
 				jobId: replay.job.id,
@@ -493,7 +512,6 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	const { contextKey } = await sourceContextIdentity(userId, { sourcePacket });
 	const extractionOverrides = {
 		...pipelineOverrides,
-		...(sourceEpisodesRequired ? { rules: admissionRules } : {}),
 		meta: {
 			...(pipelineOverrides.meta ?? {}),
 			...sourceMeta(sourcePacket),
@@ -503,6 +521,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// 1.1 job row before the 200 — refusing to accept work without a durable
 	// record is the whole point, so a failed insert fails the request.
 	const jobClaim = await claimIngestMemoryJob(env, userId, {
+		accountUserId: memoryScope.accountUserId ?? memoryScope.account_user_id ?? null,
+		managedProjectId: memoryScope.managedProjectId ?? memoryScope.managed_project_id ?? null,
 		type: "extract",
 		status: sourceEpisodesRequired ? "awaiting_source" : "queued",
 		idempotencyKey: sourcePacket?.idempotency_key ?? normalized.packet.idempotency_key,
@@ -573,20 +593,44 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 			messages: normalized.messages,
 			projectId,
 			projectName,
+			managedProjectId: sourcePacket?.managed_project_id
+				?? normalized.packet.managed_project_id
+				?? memoryScope.managedProjectId
+				?? memoryScope.managed_project_id
+				?? null,
+			accountUserId: memoryScope.accountUserId ?? memoryScope.account_user_id ?? null,
 			rules: admissionRules,
 			acceptedAt: sourcePacket?.received_at ?? sourcePacket?.created_at ?? null,
 			required: true,
 		});
 		if (!episodeResult.ok) {
+			const terminalCancellation = {
+				blocked_by_erasure: "cancelled_by_delete",
+				blocked_by_retention: "cancelled_by_retention",
+			}[episodeResult.outcome] ?? null;
+			if (terminalCancellation && jobId) {
+				await env.DB.prepare(
+					`UPDATE memory_jobs
+					    SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
+					  WHERE id = ? AND user_id = ? AND status = 'awaiting_source'`,
+				).bind(
+					`${terminalCancellation}: source preservation was fenced before acceptance`,
+					Date.now(),
+					Date.now(),
+					jobId,
+					userId,
+				).run();
+				jobStatus = "failed";
+			}
 			return {
 				episodePersistenceFailed: true,
 				episodeOutcome: episodeResult.outcome,
-				retryable: episodeResult.outcome !== "blocked_by_erasure",
+				retryable: !["blocked_by_erasure", "blocked_by_retention"].includes(episodeResult.outcome),
 				jobId,
 				jobStatus,
 				sourcePacketId: sourcePacket?.id ?? null,
-				summary: episodeResult.outcome === "blocked_by_erasure"
-					? "This write predates a confirmed erasure and cannot restore deleted source evidence."
+				summary: ["blocked_by_erasure", "blocked_by_retention"].includes(episodeResult.outcome)
+					? "This write predates a confirmed deletion boundary and cannot restore deleted source evidence."
 					: "Permitted source evidence could not be durably preserved, so this write was not accepted. Retry safely.",
 			};
 		}
@@ -603,7 +647,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 				summary: "Source evidence is durable but its extraction job could not be activated, so this write was not accepted. Retry safely.",
 			};
 		}
-		if (jobStatus === "failed" && String(sourceActivation.error ?? "").startsWith("cancelled_by_delete")) {
+		if (jobStatus === "failed" && /^(cancelled_by_delete|cancelled_by_retention):/.test(String(sourceActivation.error ?? ""))) {
 			return {
 				sourceEpisodeErased: true,
 				jobId,
@@ -622,6 +666,8 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	// so a self-load here would silently return defaults.
 	if (jobClaim.claimed || sourceActivation.activated || repairGeneration > 0) {
 		await stageMemoryText(env, userId, {
+			accountUserId: memoryScope.accountUserId ?? memoryScope.account_user_id ?? null,
+			managedProjectId: memoryScope.managedProjectId ?? memoryScope.managed_project_id ?? null,
 			jobId,
 			sourcePacketId: sourcePacket?.id ?? null,
 			lane: opts.sourceMode ?? pipelineOverrides.source ?? "ingest",

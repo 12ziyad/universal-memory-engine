@@ -1,4 +1,3 @@
-import { storeReceipt } from "../lib/db.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 
 const OPT_OUT_PATTERNS = [
@@ -94,7 +93,8 @@ export async function storeOptOutReceipt(env, userId, source = "ingest", meta = 
 	receipt.opt_out_phrase = meta.opt_out_phrase ?? null;
 	receipt.skippedReasons = { user_opt_out: meta.skipped ?? 1 };
 	const summary = formatReceipt(receipt);
-	const receiptId = await storeReceipt(env, userId, source, receipt, summary);
-	if (receiptId) receipt.id = receiptId;
-	return { receipt, receiptId, summary };
+	// An opt-out is a response, not an audit artifact. Persisting even a
+	// content-free receipt can race account erasure and, historically, copied the
+	// matched phrase into D1. Keep the verdict transient across every door.
+	return { receipt, receiptId: null, summary };
 }

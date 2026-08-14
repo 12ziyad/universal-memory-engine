@@ -15,6 +15,7 @@ import worker from "../src";
 import {
 	getMemoryRules,
 	mergeRuleOverride,
+	narrowManagedMemoryRules,
 	normalizeMemoryRules,
 	rulesAllowText,
 	rulesRejection,
@@ -96,6 +97,45 @@ describe("override layering is replacement, not union", () => {
 		for (const override of [null, undefined, "not an object", 42]) {
 			expect(mergeRuleOverride(base, override)).toBe(base);
 		}
+	});
+});
+
+describe("managed-project policy composition only narrows", () => {
+	it("keeps every parent deny and ANDs each include layer", () => {
+		const account = normalizeMemoryRules({
+			includes: ["work"],
+			excludes: ["salary"],
+			customInstructions: "Never save anything about my landlord.",
+			captureDefault: "graph_only",
+			autoCollect: false,
+			retentionDays: 30,
+		});
+		const credential = narrowManagedMemoryRules(account, {
+			includes: ["project"],
+			excludes: ["health"],
+			captureDefault: "auto",
+			autoCollect: true,
+			retentionDays: 90,
+		});
+		const request = narrowManagedMemoryRules(credential, {
+			includes: ["falcon"],
+			excludes: ["address"],
+		});
+
+		expect(request.excludes).toEqual(expect.arrayContaining(["salary", "landlord", "health", "address"]));
+		expect(request.captureDefault).toBe("graph_only");
+		expect(request.autoCollect).toBe(false);
+		expect(request.retentionDays).toBe(30);
+		expect(rulesAllowText(request, "The work project falcon deadline moved")).toBe(true);
+		expect(rulesRejection(request, "The work project deadline moved")).toBe("outside_include_rules");
+		expect(rulesRejection(request, "The work project falcon salary review")).toBe("excluded_by_rule");
+	});
+
+	it("does not change the unmanaged replacement contract", () => {
+		const account = normalizeMemoryRules({ excludes: ["salary"] });
+		const unmanaged = mergeRuleOverride(account, { excludes: ["health"] });
+		expect(unmanaged.excludes).toEqual(["health"]);
+		expect(rulesAllowText(unmanaged, "salary review")).toBe(true);
 	});
 });
 

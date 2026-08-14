@@ -3,7 +3,7 @@
 	"name": "uml-test",
 	"main": "src/index.js",
 	"compatibility_date": "2026-06-23",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -28,6 +28,25 @@
 	],
 	"vars": {
 		"USE_VECTORS": "false",
-		"ENABLE_PASS2": "true"
+		"ENABLE_PASS2": "true",
+		"RULES_PREVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+		"ITSUKI_MEMORY_V3": "on",
+		"ITSUKI_MEMORY_V3_USERS": "",
+		"ITSUKI_MEMORY_V3_EXTRACTION_B1": "off",
+		"ITSUKI_MEMORY_V3_EXTRACTION_B1_USERS": "",
+		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE": "on",
+		"ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS": "",
+		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION": "on",
+		"ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS": "",
+		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING": "off",
+		"ITSUKI_MEMORY_V3_ATOMIC_COALESCING_USERS": "",
+		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL": "on",
+		"ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS": "",
+		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION": "on",
+		"ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS": "",
+		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK": "off",
+		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS": "",
+		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT": "off",
+		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS": ""
 	}
 }

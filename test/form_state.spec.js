@@ -151,7 +151,7 @@ describe("the dashboard save forms", () => {
 });
 
 describe("the rules form", () => {
-	function harness({ apiImpl } = {}) {
+	function harness({ apiImpl, version = "rules-v1" } = {}) {
 		const fields = {
 			"#rule-instructions": { value: "Always save exam progress." },
 			"#rule-includes": { value: "exams, health" },
@@ -163,17 +163,25 @@ describe("the rules form", () => {
 		};
 		const status = { textContent: "", classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } } };
 		const button = { disabled: false, textContent: "Save rules" };
+		const review = { hidden: true };
 		const calls = [];
-		const $ = (sel) => (sel === "#rules-status" ? status : sel === "#rules-save" ? button : fields[sel] ?? null);
-		const api = apiImpl ?? (async (path, init) => { calls.push(JSON.parse(init.body)); return { rules: { customInstructions: "", includes: [], excludes: [], customCategories: [] } }; });
+		const $ = (sel) => (sel === "#rules-status" ? status : sel === "#rules-save" ? button : sel === "#rules-review" ? review : fields[sel] ?? null);
+		const api = apiImpl ?? (async (path, init) => { calls.push(JSON.parse(init.body)); return { rules: { customInstructions: "", includes: [], excludes: [], customCategories: [] }, rules_version: "rules-v2" }; });
+		const RULES_FORM = {
+			version, projectId: "proj_a", projectEpoch: 1,
+			busy: false, mutationId: 0, mutation: null, conflict: null,
+		};
 		const built = build(["saveRulesForm", "rulesStatusClear"], {
-			$, api, calls,
+			$, api, calls, RULES_FORM, S: { projectId: "proj_a", projectEpoch: 1 },
+			requireProjectCapability: () => true,
+			setRulesVersionToken: (value) => typeof value === "string" && value.trim() ? value : null,
+			rulesReloadEditor: () => {},
 			parseTermList: (v) => String(v).split(",").map((t) => t.trim()).filter(Boolean),
 			parseCategoryLines: (v) => String(v).split("\n").filter(Boolean).map((l) => ({ name: l.split(":")[0].trim() })),
 			scopedPayload: (p) => p,
 			renderRulesSummary: () => {},
 		});
-		return { ...built, fields, status, button, calls };
+		return { ...built, fields, status, button, review, calls, RULES_FORM };
 	}
 
 	it("reads every field before disabling the form", async () => {
@@ -182,6 +190,7 @@ describe("the rules form", () => {
 		expect(h.calls[0].rules.customInstructions).toBe("Always save exam progress.");
 		expect(h.calls[0].rules.includes).toEqual(["exams", "health"]);
 		expect(h.calls[0].rules.excludes).toEqual(["politics"]);
+		expect(h.calls[0].expected_version).toBe("rules-v1");
 		expect(h.status.textContent).toBe("Saved ✓");
 		expect(h.button.disabled).toBe(false); // re-enabled, not stuck on "Saving…"
 	});
@@ -193,6 +202,31 @@ describe("the rules form", () => {
 		expect(h.status.classList.contains("rules-status-error")).toBe(true);
 		expect(h.fields["#rule-instructions"].value).toBe("Always save exam progress.");
 		expect(h.button.disabled).toBe(false);
+	});
+
+	it("never sends a direct rules write without a loaded version", async () => {
+		const h = harness({ version: null });
+		await h.saveRulesForm();
+		expect(h.calls).toHaveLength(0);
+		expect(h.status.textContent).toContain("version is unavailable");
+		expect(h.status.classList.contains("rules-status-error")).toBe(true);
+		expect(h.review.hidden).toBe(false);
+		expect(h.fields["#rule-instructions"].value).toBe("Always save exam progress.");
+	});
+
+	it("keeps the direct-form text visible when another tab wins", async () => {
+		const conflict = new Error("These settings changed in another tab.");
+		Object.assign(conflict, {
+			status: 409, code: "settings_conflict",
+			body: { error: "settings_conflict", rules: { includes: ["remote"] }, rules_version: "rules-v2" },
+		});
+		const h = harness({ apiImpl: async () => { throw conflict; } });
+		await h.saveRulesForm();
+		expect(h.fields["#rule-instructions"].value).toBe("Always save exam progress.");
+		expect(h.RULES_FORM.version).toBe("rules-v1");
+		expect(h.RULES_FORM.conflict).toMatchObject({ rules_version: "rules-v2" });
+		expect(h.status.textContent).toContain("Another tab saved different rules");
+		expect(h.review.hidden).toBe(false);
 	});
 
 	it("editing after a failure retires the stale message", async () => {

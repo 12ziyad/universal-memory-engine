@@ -4,10 +4,32 @@
  */
 
 import { newId } from "./ids.js";
+import { managedMutationGuardStatement } from "./managed_projects.js";
 import { hasProjectScopeOption, normalizeProjectScope } from "./project_scope.js";
 import { normalizeLabel } from "./text.js";
 
 export const MEMORY_JOB_ACTIVE_LIMIT = 200;
+
+function durableLifecycleScope(value = {}, options = {}) {
+	let scope = {};
+	try {
+		const rawScope = value?.scope_json ?? value?.scopeJson;
+		scope = typeof rawScope === "string"
+			? JSON.parse(rawScope || "{}") ?? {}
+			: rawScope && typeof rawScope === "object" ? rawScope : {};
+	} catch {}
+	return {
+		accountUserId: options.accountUserId ?? options.account_user_id
+			?? value?.accountUserId ?? value?.account_user_id
+			?? scope.account_user_id ?? scope.accountUserId ?? null,
+		managedProjectId: options.managedProjectId ?? options.managed_project_id
+			?? value?.managedProjectId ?? value?.managed_project_id
+			?? scope.managed_project_id ?? scope.managedProjectId ?? null,
+		managedAccess: options.managedAccess ?? options.managed_access
+			?? value?.managedAccess ?? value?.managed_access
+			?? "write",
+	};
+}
 
 function activeWhere(alias = "") {
 	const p = alias ? `${alias}.` : "";
@@ -164,7 +186,7 @@ export async function addSuppression(env, userId, {
 export async function createExtractionRun(env, userId, data = {}) {
 	const now = Date.now();
 	const id = data.id ?? newId("run");
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO extraction_runs
 			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
@@ -197,8 +219,17 @@ export async function createExtractionRun(env, userId, data = {}) {
 			data.idempotency_key ?? data.idempotencyKey ?? null,
 			data.scope_json ?? data.scopeJson ?? null,
 			data.job_id ?? data.jobId ?? null,
-		)
-		.run();
+		);
+	const lifecycle = durableLifecycleScope(data, data);
+	if (lifecycle.managedProjectId) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: lifecycle.accountUserId,
+				projectId: lifecycle.managedProjectId,
+			}),
+			statement,
+		]);
+	} else await statement.run();
 	return id;
 }
 
@@ -219,7 +250,7 @@ export async function claimExtractionRun(env, userId, data = {}) {
 		idempotencyKey: data.idempotency_key ?? data.idempotencyKey ?? null,
 		scopeJson: data.scope_json ?? data.scopeJson ?? null,
 	};
-	const inserted = await env.DB.prepare(
+	const insertStatement = env.DB.prepare(
 		`INSERT INTO extraction_runs
 			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
@@ -242,8 +273,19 @@ export async function claimExtractionRun(env, userId, data = {}) {
 			owner.sourcePacketId,
 			owner.idempotencyKey,
 			owner.scopeJson,
-		)
-		.first();
+		);
+	const lifecycle = durableLifecycleScope(data, data);
+	let inserted;
+	if (lifecycle.managedProjectId) {
+		const results = await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: lifecycle.accountUserId,
+				projectId: lifecycle.managedProjectId,
+			}),
+			insertStatement,
+		]);
+		inserted = results?.[1]?.results?.[0] ?? null;
+	} else inserted = await insertStatement.first();
 	const row = await env.DB.prepare(
 		`SELECT * FROM extraction_runs WHERE id = ? LIMIT 1`,
 	).bind(id).first();
@@ -322,12 +364,13 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
  * Persist a save receipt (Priority 5). Best-effort: a receipt failure must never
  * break a save, so this swallows errors. `summary` is the human one-liner.
  */
-export async function storeReceipt(env, userId, source, receipt, summary, { strict = false } = {}) {
+export async function storeReceipt(env, userId, source, receipt, summary, options = {}) {
+	const { strict = false } = options;
 	const s = receipt?.saved ?? {};
 	const id = receipt?.id ?? newId("receipt");
 	const detail = receipt && typeof receipt === "object" ? { ...receipt, id } : receipt;
 	try {
-		await env.DB.prepare(
+		const insertStatement = env.DB.prepare(
 			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total,
 				saved_nodes, saved_slices, saved_events, saved_edges, saved_candidates,
 				updated_nodes, skipped, received, digested, detail, created_at, extraction_run_id,
@@ -335,8 +378,7 @@ export async function storeReceipt(env, userId, source, receipt, summary, { stri
 				ai_calls, ai_input_tokens, ai_output_tokens, ai_neurons)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(id) DO NOTHING`,
-		)
-			.bind(
+		).bind(
 				id,
 				userId,
 				source ?? receipt?.source ?? "ingest",
@@ -367,8 +409,31 @@ export async function storeReceipt(env, userId, source, receipt, summary, { stri
 				Number.isFinite(receipt?.ai_input_tokens) ? receipt.ai_input_tokens : null,
 				Number.isFinite(receipt?.ai_output_tokens) ? receipt.ai_output_tokens : null,
 				Number.isFinite(receipt?.ai_neurons) ? receipt.ai_neurons : null,
-			)
-			.run();
+			);
+		const lifecycle = durableLifecycleScope(receipt, options);
+		const stateStatements = [insertStatement];
+		if (receipt?.extraction_run_id) {
+			stateStatements.push(env.DB.prepare(
+				"UPDATE extraction_runs SET receipt_id = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+			).bind(id, Date.now(), receipt.extraction_run_id, userId));
+		}
+		// Historical bearer/API tenants are not accounts and deliberately have no
+		// users row. A managed project id is the unambiguous signal that this
+		// receipt belongs to the enterprise account/project lifecycle.
+		if (lifecycle.managedProjectId) {
+			await env.DB.batch([
+				managedMutationGuardStatement(env, {
+					accountUserId: lifecycle.accountUserId,
+					projectId: lifecycle.managedProjectId,
+					access: lifecycle.managedAccess,
+				}),
+				...stateStatements,
+			]);
+		} else if (stateStatements.length > 1) {
+			await env.DB.batch(stateStatements);
+		} else {
+			await insertStatement.run();
+		}
 		// Deterministic receipt ids make concurrent/replayed door responses one
 		// immutable verdict. A conflicting primary key owned by another user is
 		// never treated as success.
@@ -390,9 +455,6 @@ export async function storeReceipt(env, userId, source, receipt, summary, { stri
 			throw new Error("receipt id is not durably owned by this user");
 		}
 		if (receipt && typeof receipt === "object") receipt.id = id;
-		if (receipt?.extraction_run_id) {
-			await updateExtractionRun(env, userId, receipt.extraction_run_id, { receiptId: id });
-		}
 		return id;
 	} catch (err) {
 		if (strict) throw err;
@@ -410,15 +472,14 @@ export async function createMemoryJob(env, userId, data = {}) {
 	const extractionRunId = data.extraction_run_id ?? data.extractionRunId ?? null;
 	const payloadJson = JSON.stringify(data.payload ?? data.payload_json ?? {});
 	try {
-		const inserted = await env.DB.prepare(
+		const insertStatement = env.DB.prepare(
 			`INSERT INTO memory_jobs
 				(id, user_id, type, status, idempotency_key, source_packet_id, extraction_run_id,
 				 receipt_id, attempts, payload_json, error, run_after, created_at, updated_at, completed_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, idempotency_key) DO NOTHING
 			 RETURNING id`,
-		)
-			.bind(
+		).bind(
 				id,
 				userId,
 				type,
@@ -434,8 +495,21 @@ export async function createMemoryJob(env, userId, data = {}) {
 				now,
 				now,
 				data.completed_at ?? data.completedAt ?? null,
-			)
-			.first();
+			);
+		const lifecycle = durableLifecycleScope(data, data);
+		let inserted;
+		if (lifecycle.managedProjectId) {
+			const results = await env.DB.batch([
+				managedMutationGuardStatement(env, {
+					accountUserId: lifecycle.accountUserId,
+					projectId: lifecycle.managedProjectId,
+				}),
+				insertStatement,
+			]);
+			inserted = results?.[1]?.results?.[0] ?? null;
+		} else {
+			inserted = await insertStatement.first();
+		}
 		if (inserted?.id) return inserted.id;
 		if (!idempotencyKey) return null;
 		const existing = await env.DB.prepare(
@@ -470,7 +544,7 @@ export async function claimMemoryJob(env, userId, data = {}) {
 	const idempotencyKey = data.idempotency_key ?? data.idempotencyKey ?? null;
 	if (!idempotencyKey) throw new Error("a memory job claim requires an idempotency key");
 	const type = data.type ?? "extract";
-	const row = await env.DB.prepare(
+	const insertStatement = env.DB.prepare(
 		`INSERT INTO memory_jobs
 			(id, user_id, type, status, idempotency_key, source_packet_id, extraction_run_id,
 			 receipt_id, attempts, payload_json, error, run_after, created_at, updated_at, completed_at)
@@ -500,8 +574,20 @@ export async function claimMemoryJob(env, userId, data = {}) {
 			data.completed_at ?? data.completedAt ?? null,
 			userId,
 			MEMORY_JOB_ACTIVE_LIMIT,
-		)
-		.first();
+		);
+	let row;
+	if (data.managedProjectId) {
+		const results = await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: data.accountUserId ?? null,
+				projectId: data.managedProjectId,
+			}),
+			insertStatement,
+		]);
+		row = results?.[1]?.results?.[0] ?? null;
+	} else {
+		row = await insertStatement.first();
+	}
 	if (row?.id) return { claimed: true, id: row.id };
 	const existing = await env.DB.prepare(
 		"SELECT id, status, type, receipt_id, source_packet_id FROM memory_jobs WHERE user_id = ? AND idempotency_key = ? LIMIT 1",

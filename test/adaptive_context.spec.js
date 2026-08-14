@@ -194,6 +194,11 @@ describe("E10 recall integration", () => {
 			ITSUKI_MEMORY_V3_USERS: userId,
 			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "allowlist",
 			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: userId,
+			// Isolate E10 from the production-aligned source-expansion rollout.
+			// Otherwise its wall-clock telemetry legitimately differs between the
+			// two recall calls and cannot be a byte-equality assertion.
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "off",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS: "",
 		};
 		const explicitOff = {
 			...base,

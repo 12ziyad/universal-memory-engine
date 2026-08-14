@@ -126,7 +126,7 @@ async function extract(f, extra = {}) {
 
 describe("E6 deterministic atomic projection", () => {
 	it("maps candidates to governed node/assertion proposals and preserves exact provenance out of band", () => {
-		const decision = row("atom-decision");
+		const decision = row("atom-decision", { project_category_id: "cat_customer_success" });
 		const dayEvent = row("atom-day", {
 			atom_type: "event",
 			attribute: "moved",
@@ -150,6 +150,12 @@ describe("E6 deterministic atomic projection", () => {
 		expect(projected.schema).toBe(ATOMIC_PROJECTION_SCHEMA);
 		expect(projected.objects.filter((object) => object.kind === "node")).toHaveLength(1);
 		expect(projected.objects.filter((object) => object.kind === "slice")).toHaveLength(1);
+		expect(projected.objects.find((object) => object.kind === "slice")).toMatchObject({
+			project_category_id: "cat_customer_success",
+		});
+		expect(projected.objects.find((object) => object.kind === "node")).toMatchObject({
+			project_category_id: "cat_customer_success",
+		});
 		const events = projected.objects.filter((object) => object.kind === "event");
 		expect(events).toHaveLength(2);
 		expect(events.find((event) => projected.metadata.get(event).candidateIds.includes("atom-day"))).toMatchObject({

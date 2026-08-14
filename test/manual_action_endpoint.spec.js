@@ -51,6 +51,16 @@ async function manualRowsFor(userId) {
 }
 
 describe("POST /v1/mcp/choose", () => {
+	it("rejects non-object JSON without turning malformed input into a server error", async () => {
+		const response = await request("/v1/mcp/choose", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: "null",
+		});
+		expect(response.status).toBe(400);
+		expect(await response.json()).toMatchObject({ error: "invalid_body" });
+	});
+
 	it("requires an authenticated host", async () => {
 		const response = await jsonRequest("/v1/mcp/choose", {
 			request: "Remember that I prefer dark mode.",

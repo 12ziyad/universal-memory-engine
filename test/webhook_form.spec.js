@@ -47,6 +47,7 @@ function harness({ apiImpl } = {}) {
 
 	const WH = {
 		rows: [], loading: false, creating: false, error: "", openLog: null, deliveries: [],
+		listError: "", secret: null, mutationId: 0, mutation: null,
 		events: WH_EVENTS,
 		form: { name: "", url: "", events: [...WH_EVENTS], metadataOnly: false },
 	};
@@ -78,12 +79,17 @@ function harness({ apiImpl } = {}) {
 		return { webhook: { id: "wh_1", name: "x", url: "https://example.com", events: WH_EVENTS, metadata_only: false }, secret: "whsec_abc" };
 	});
 
-	const source = ["whFormReset", "whField", "whToggleEvent", "whUrlComplaint", "createWebhookNow", "loadWebhooks"]
+	const source = [
+		"whFormReset", "whField", "whToggleEvent", "webhookSecretVisible", "webhookOwnsMutation",
+		"whUrlComplaint", "createWebhookNow", "loadWebhooks",
+	]
 		.map(fnSource).join("\n");
 	const built = new Function(
-		"WH", "WH_EVENTS", "$", "document", "api", "renderView", "renderWebhooksTable", "showWebhookSecret", "S",
+		"WH", "WH_EVENTS", "$", "document", "api", "renderView", "renderWebhooksTable", "showWebhookSecret", "S", "requireProjectCapability",
 		`${source}\nreturn { createWebhookNow, whUrlComplaint, whField, whToggleEvent, whFormReset, loadWebhooks };`,
-	)(WH, WH_EVENTS, $, documentStub, api, renderView, () => {}, () => {}, { view: "webhooks" });
+	)(WH, WH_EVENTS, $, documentStub, api, renderView, () => {}, () => {}, {
+		view: "webhooks", projectId: "proj_webhook", projectEpoch: 0,
+	}, () => true);
 
 	/** Simulate typing: sets the input AND fires the oninput binding. */
 	const type = (id, value) => {
@@ -239,7 +245,8 @@ describe("the server side of the same submit", () => {
 		expect(res.status).toBe(201);
 		const body = await res.json();
 		expect(body.webhook.name).toBe("CRM sync");
-		expect(body.webhook.url).toBe("https://webhook.site/6f1c2a9e-0b77-4c31-9a4e-2f9f1c0d5b3a");
+		expect(body.webhook.display_url).toBe("https://webhook.site/\u2026");
+		expect(body.webhook).not.toHaveProperty("url");
 		expect(body.webhook.events).toHaveLength(4);
 		expect(body.secret.startsWith("whsec_")).toBe(true);
 	});
@@ -264,6 +271,6 @@ describe("the server side of the same submit", () => {
 		const res = await worker.fetch(req, env, ctx);
 		await waitOnExecutionContext(ctx);
 		expect(res.status).toBe(400);
-		expect((await res.json()).message).toContain("valid URL");
+		expect((await res.json()).message).toContain("between 1 and 2048 characters");
 	});
 });

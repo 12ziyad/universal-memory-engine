@@ -10,6 +10,11 @@
  */
 
 import { newId } from "../lib/ids.js";
+import {
+	auditedMutationResult,
+	auditInvariantStatement,
+	commitAuditedBatch,
+} from "../lib/audit.js";
 
 export const EXPORT_TABLES = [
 	"nodes", "slices", "events", "edges", "memory_pages", "candidates", "receipts", "memory_rules",
@@ -49,14 +54,27 @@ export async function getExport(env, userId, id) {
 	return env.DB.prepare("SELECT * FROM memory_exports WHERE id = ? AND user_id = ?").bind(id, userId).first();
 }
 
-export async function createExport(env, userId, { entity = "All memories" } = {}) {
+export async function createExport(env, userId, { entity = "All memories", auditIntent = null } = {}) {
 	const id = newId("export");
 	const now = Date.now();
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO memory_exports (id, user_id, status, format, entity, created_at)
 		 VALUES (?, ?, 'queued', 'json', ?, ?)`,
-	).bind(id, userId, String(entity).slice(0, 80), now).run();
-	return { id, status: "queued", format: "json", entity, created_at: now };
+	).bind(id, userId, String(entity).slice(0, 80), now);
+	if (auditIntent) {
+		await commitAuditedBatch(env, auditIntent, [statement], {
+			postconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 FROM memory_exports WHERE id = ? AND user_id = ? AND status = 'queued'",
+				[id, userId],
+			)],
+			commitDetails: { targetType: "export", targetId: id },
+		});
+	} else {
+		await statement.run();
+	}
+	const result = { id, status: "queued", format: "json", entity, created_at: now };
+	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
 
 /**

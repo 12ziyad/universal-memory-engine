@@ -143,8 +143,9 @@ describe("undated events anchor on when the content was written", () => {
 
 	it("leaves a legacy account on the ingest clock exactly as before", async () => {
 		const userId = nextUser("legacy");
+		const legacyEnv = { ...env, ITSUKI_MEMORY_V3: "off", ITSUKI_MEMORY_V3_USERS: "" };
 		await runExtraction(
-			env,
+			legacyEnv,
 			userId,
 			chunk("I moved into the flat on Wexford Street yesterday"),
 			[],

@@ -1,5 +1,6 @@
 import { newId } from "../lib/ids.js";
 import { normalizeDeliveryMetadata } from "../lib/ingest_contract.mjs";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeSourceTime, parseSourceTime, persistedSourceTime } from "../lib/source_time.mjs";
 import { rulesAllowText } from "./rules.js";
@@ -17,6 +18,19 @@ const SNIPPET_LIMIT = 900;
 const SCOPED_IDEMPOTENCY_PREFIX = "itsuki-scope:v1:";
 const EXTRACTION_CONTEXT_SCHEMA = "itsuki.extract-context/v1";
 export const ERASED_SOURCE_CONTENT_HASH = "itsuki-erased-source/v1";
+
+export class SourceMessageIdentityError extends Error {
+	constructor(messageIndex, firstMessageIndex) {
+		super(`messages[${messageIndex}] resolves to the same canonical id as messages[${firstMessageIndex}].`);
+		this.name = "SourceMessageIdentityError";
+		this.code = "duplicate_normalized_message_id";
+		this.status = 422;
+		this.field = `messages[${messageIndex}].id`;
+		this.messageIndex = messageIndex;
+		this.firstMessageIndex = firstMessageIndex;
+		this.retryable = false;
+	}
+}
 
 function cleanText(value, fallback = "") {
 	const text = String(value ?? fallback).replace(/\s+/g, " ").trim();
@@ -344,6 +358,19 @@ async function normalizeMessageBatch(messages = [], opts = {}) {
 			},
 		};
 	});
+	// IDs are authoritative only after every server normalization step. The
+	// wire validator cannot see collisions between caller ids and generated ids,
+	// or between two different strings that reserved-prefix neutralization makes
+	// identical. Reject the final canonical batch before a source packet or job
+	// can be persisted.
+	const firstIndexById = new Map();
+	for (let index = 0; index < out.length; index += 1) {
+		const id = out[index].id;
+		if (firstIndexById.has(id)) {
+			throw new SourceMessageIdentityError(index, firstIndexById.get(id));
+		}
+		firstIndexById.set(id, index);
+	}
 	return { messages: out, droppedSourceEvents };
 }
 
@@ -558,6 +585,7 @@ export function sourcePacketSourceTime(sourcePacket) {
 export async function storeSourcePacket(env, packet, {
 	immutableIdempotency = true,
 	allowErasedReadReplacement = false,
+	managedAccess = "write",
 } = {}) {
 	if (!env?.DB || !packet) return null;
 	const now = Date.now();
@@ -566,6 +594,7 @@ export async function storeSourcePacket(env, packet, {
 		const mutableUpdate = `DO UPDATE SET
 				memory_user_id = excluded.memory_user_id,
 				owner_user_id = excluded.owner_user_id,
+				managed_project_id = excluded.managed_project_id,
 				external_user_id = excluded.external_user_id,
 				scope_user_id = excluded.scope_user_id,
 				workspace_id = excluded.workspace_id,
@@ -606,19 +635,20 @@ export async function storeSourcePacket(env, packet, {
 				? `${mutableUpdate}
 				 WHERE source_packets.content_hash = excluded.content_hash${erasedReadReplacement}`
 				: `DO UPDATE SET
+				managed_project_id = COALESCE(source_packets.managed_project_id, excluded.managed_project_id),
 				seen_count = COALESCE(source_packets.seen_count, 0) + 1,
 				updated_at = excluded.updated_at
 			 WHERE source_packets.content_hash = excluded.content_hash`
 			: mutableUpdate;
-		const row = await env.DB.prepare(
+		const statement = env.DB.prepare(
 			`INSERT INTO source_packets
-				(id, user_id, memory_user_id, owner_user_id, external_user_id, scope_user_id,
+				(id, user_id, memory_user_id, owner_user_id, managed_project_id, external_user_id, scope_user_id,
 				 workspace_id, app_id, agent_id, session_id, source_scope, project_id, project_name,
 				 source_type, source_mode, source_id, source_role, conversation_id, thread_id, topic,
 				 idempotency_key, content_hash, content_preview, message_count, raw_meta_json,
 				 source_time, source_time_offset_minutes, source_time_precision,
 				 seen_count, received_at, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, idempotency_key) ${conflictUpdate}
 			 RETURNING *`,
 		)
@@ -627,6 +657,7 @@ export async function storeSourcePacket(env, packet, {
 				packet.user_id,
 				packet.memory_user_id,
 				packet.owner_user_id,
+				packet.managed_project_id ?? null,
 				packet.external_user_id,
 				packet.scope_user_id,
 				packet.workspace_id,
@@ -655,8 +686,21 @@ export async function storeSourcePacket(env, packet, {
 				packet.received_at ?? now,
 				now,
 				now,
-			)
-			.first();
+			);
+		let row;
+		if (packet.managed_project_id) {
+			const results = await env.DB.batch([
+				managedMutationGuardStatement(env, {
+					accountUserId: packet.account_user_id ?? null,
+					projectId: packet.managed_project_id,
+					access: managedAccess,
+				}),
+				statement,
+			]);
+			row = results?.[1]?.results?.[0] ?? null;
+		} else {
+			row = await statement.first();
+		}
 		if (!row && immutableIdempotency) {
 			const existing = await env.DB.prepare(
 				"SELECT * FROM source_packets WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
@@ -755,7 +799,7 @@ export function sourceMeta(sourcePacket) {
 			memory_user_id: sourcePacket.memory_user_id,
 			owner_user_id: sourcePacket.owner_user_id,
 			account_user_id: rawMeta.account_user_id ?? sourcePacket.owner_user_id,
-			managed_project_id: rawMeta.managed_project_id ?? null,
+			managed_project_id: sourcePacket.managed_project_id ?? rawMeta.managed_project_id ?? null,
 			external_user_id: sourcePacket.external_user_id,
 			workspace_id: sourcePacket.workspace_id,
 			app_id: sourcePacket.app_id,
@@ -773,7 +817,10 @@ export function sourceMeta(sourcePacket) {
 			delivery,
 		}),
 		account_user_id: rawMeta.account_user_id ?? sourcePacket.owner_user_id ?? null,
-		managed_project_id: rawMeta.managed_project_id ?? null,
+		// Rules are owned by the immutable memory owner, which is distinct from
+		// the authenticated actor for a shared managed project.
+		owner_user_id: sourcePacket.owner_user_id ?? null,
+		managed_project_id: sourcePacket.managed_project_id ?? rawMeta.managed_project_id ?? null,
 		project_id: sourcePacket.project_id ?? null,
 		project_name: sourcePacket.project_name ?? null,
 		delivery,

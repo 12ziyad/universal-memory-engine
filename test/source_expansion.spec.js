@@ -138,6 +138,10 @@ describe("E9A exact source expansion", () => {
 			ITSUKI_MEMORY_V3_USERS: userId,
 			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL: "allowlist",
 			ITSUKI_MEMORY_V3_HYBRID_RETRIEVAL_USERS: userId,
+			// The shared test environment mirrors production and enables E9A.
+			// This baseline explicitly isolates E7, which is what the test names.
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION: "off",
+			ITSUKI_MEMORY_V3_SOURCE_EXPANSION_USERS: "",
 		};
 		const explicitOff = {
 			...e7,

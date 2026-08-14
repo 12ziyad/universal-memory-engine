@@ -56,6 +56,15 @@ function manualCollectReplay(sourcePacket, stored = {}) {
 export async function saveConversation(env, ctx, userId, rawMessages, opts = {}) {
 	const config = getConfig(env);
 	const memoryScope = canonicalMemoryScope(opts.memoryScope);
+	if (memoryScope.managedProjectId ?? memoryScope.managed_project_id) {
+		const error = new Error(
+			"The deprecated digest-page collector is unavailable for managed projects; use the guarded conversation engine.",
+		);
+		error.name = "ManagedManualCollectDisabledError";
+		error.code = "managed_manual_collect_disabled";
+		error.status = 409;
+		throw error;
+	}
 	const projectScope = normalizeProjectScope(memoryScope);
 	// The digest model reads these messages directly — scrub before it can.
 	const messages = scrubMessages(rawMessages).messages;

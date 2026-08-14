@@ -163,6 +163,25 @@ describe("atomic capture normalization and exact provenance", () => {
 		expect(result.outcomes.temporalAbsent).toBe(1);
 	});
 
+	it("maps only an offered project category slug or id to stable metadata", async () => {
+		const rules = {
+			customInstructions: "",
+			includes: [],
+			excludes: [],
+			projectCategories: [{
+				id: "cat_customer_success",
+				slug: "customer_success",
+				description: "Customer adoption and renewal work",
+			}],
+		};
+		const offered = await normalize([proposal({ project_category: "customer_success" })], { rules });
+		expect(offered.atoms[0].projectCategoryId).toBe("cat_customer_success");
+		const byId = await normalize([proposal({ project_category: "cat_customer_success" })], { rules });
+		expect(byId.atoms[0].projectCategoryId).toBe("cat_customer_success");
+		const invented = await normalize([proposal({ project_category: "executive_secrets" })], { rules });
+		expect(invented.atoms[0].projectCategoryId).toBeNull();
+	});
+
 	it("rejects unknown source ids and inexact quotes", async () => {
 		const result = await normalize([
 			proposal({ source_message_id: "assistant" }),

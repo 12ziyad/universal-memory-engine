@@ -2,6 +2,12 @@ import { getConfig } from "../config.js";
 import { addSuppression, storeReceipt } from "../lib/db.js";
 import { newId } from "../lib/ids.js";
 import { managedProjectMemoryOwnerId } from "../lib/managed_projects.js";
+import {
+	auditedMutationResult,
+	auditInvariantStatement,
+	commitAuditedBatch,
+	commitAuditedNoop,
+} from "../lib/audit.js";
 import { normalizeLabel } from "../lib/text.js";
 import { deleteNodeVectors } from "../lib/vectorize.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
@@ -538,15 +544,105 @@ export async function archiveObject(env, userId, { kind, id }) {
  * Full account teardown for the admin console and account-deletion requests:
  * all memory rows (via deleteAllMemories), then auth rows, then the user row.
  */
-export async function deleteAccountCompletely(env, userId) {
+export async function deleteAccountCompletely(env, userId, options = {}) {
+	const auditIntent = options?.auditIntent ?? null;
+	const user = await env.DB.prepare("SELECT id, email_normalized FROM users WHERE id = ? LIMIT 1")
+		.bind(userId).first();
+	if (!user) {
+		const unchanged = { deleted: false, already_deleted: true, memory_spaces: 0 };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
+	}
+
+	// Ownership is governance, not an implementation detail we may silently
+	// discard. A shared organization must be transferred explicitly before its
+	// owner can erase the account. This check runs before any memory mutation.
+	const { results: ownedOrganizations } = await env.DB.prepare(
+		"SELECT id FROM organizations WHERE owner_user_id = ? AND status = 'active'",
+	).bind(userId).all();
+	for (const org of ownedOrganizations ?? []) {
+		const collaborators = await env.DB.prepare(
+		"SELECT COUNT(*) AS n FROM organization_members WHERE org_id = ? AND user_id != ?",
+		).bind(org.id, userId).first();
+		if (Number(collaborators?.n ?? 0) > 0) {
+			const error = new Error("Transfer or remove the other organization members before deleting this account.");
+			error.name = "AccountDeletionError";
+			error.code = "organization_transfer_required";
+			error.status = 409;
+			throw error;
+		}
+	}
+
+	// Quiesce before discovering a single memory space. A request that already
+	// crossed managed authorization has registered its exact (possibly hashed)
+	// space; later requests now fail because the account/projects are inactive.
+	// If any later erasure step fails, the account remains disabled, credentials
+	// revoked, and retryable rather than returning to a writable partial state.
+	const quiescedAt = Date.now();
+	const quiesceStatements = [
+		env.DB.prepare(
+			`INSERT INTO account_erasure_tombstones (user_id, erased_at) VALUES (?, ?)
+			 ON CONFLICT(user_id) DO UPDATE SET erased_at = MIN(account_erasure_tombstones.erased_at, excluded.erased_at)`,
+		).bind(userId, quiescedAt),
+		env.DB.prepare(
+			"UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ?",
+		).bind(quiescedAt, userId),
+		env.DB.prepare(
+			"UPDATE sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?",
+		).bind(quiescedAt, userId),
+		env.DB.prepare(
+			`UPDATE connection_tokens
+			 SET status = 'revoked', revoked_at = COALESCE(revoked_at, ?)
+			 WHERE user_id = ? AND (status != 'revoked' OR revoked_at IS NULL)`,
+		).bind(quiescedAt, userId),
+		env.DB.prepare(
+			`UPDATE managed_projects
+			 SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ?
+			 WHERE owner_user_id = ? AND status = 'active'
+			   AND (organization_id IS NULL OR organization_id IN (
+			     SELECT id FROM organizations WHERE owner_user_id = ? AND status = 'active'
+			   ))`,
+		).bind(quiescedAt, quiescedAt, userId, userId),
+	];
+	if (auditIntent) {
+		await commitAuditedBatch(env, auditIntent, quiesceStatements, {
+			postconditions: [
+				auditInvariantStatement(
+					env,
+					"SELECT 1 FROM account_erasure_tombstones WHERE user_id = ? AND erased_at <= ?",
+					[userId, quiescedAt],
+				),
+				auditInvariantStatement(
+					env,
+					"SELECT 1 FROM users WHERE id = ? AND status = 'disabled'",
+					[userId],
+				),
+			],
+		});
+	} else await env.DB.batch(quiesceStatements);
+	const ownedOrgIds = (ownedOrganizations ?? []).map((row) => row.id);
+	const { results: ownedProjects } = await env.DB.prepare(
+		`SELECT p.id FROM managed_projects p
+		  WHERE p.owner_user_id = ?
+		    AND (
+		      p.organization_id IS NULL
+		      OR p.organization_id IN (
+		        SELECT o.id FROM organizations o WHERE o.owner_user_id = ? AND o.status = 'active'
+		      )
+		    )`,
+	).bind(userId, userId).all();
+	const ownedProjectIds = (ownedProjects ?? []).map((row) => row.id);
 	// A managed project is implemented as a separate proven memory identity,
 	// with optional end-user sub-tenants below it. Account erasure must discover
 	// and erase every one of those identities before removing the control plane.
 	const roots = new Set([userId]);
 	try {
 		const { results: projects } = await env.DB.prepare(
-			"SELECT id, is_default, memory_owner_user_id FROM managed_projects WHERE owner_user_id = ?",
-		).bind(userId).all();
+			`SELECT id, is_default, memory_owner_user_id FROM managed_projects
+			  WHERE owner_user_id = ?
+			    AND (organization_id IS NULL OR organization_id IN (
+			      SELECT id FROM organizations WHERE owner_user_id = ? AND status = 'active'
+			    ))`,
+		).bind(userId, userId).all();
 		for (const project of projects ?? []) {
 			roots.add(project.memory_owner_user_id ?? await managedProjectMemoryOwnerId(userId, project));
 		}
@@ -556,6 +652,18 @@ export async function deleteAccountCompletely(env, userId) {
 	}
 
 	const memoryIds = new Set(roots);
+	// The registry is the authoritative finite inventory for managed writes.
+	// A tenant may have no source packet/episode yet (for example a commit that
+	// registered the scope immediately before an erasure), so provenance tables
+	// alone are insufficient and would let that tenant survive when the registry
+	// is later removed. This read is deliberately fail-closed.
+	if (ownedProjectIds.length) {
+		const { results: registeredSpaces } = await env.DB.prepare(
+			`SELECT DISTINCT memory_user_id AS id FROM project_memory_spaces
+			  WHERE project_id IN (${ownedProjectIds.map(() => "?").join(",")})`,
+		).bind(...ownedProjectIds).all();
+		for (const row of registeredSpaces ?? []) if (row.id) memoryIds.add(row.id);
+	}
 	for (const root of roots) {
 		const [packets, episodes, atoms] = await env.DB.batch([
 			env.DB.prepare(
@@ -575,14 +683,59 @@ export async function deleteAccountCompletely(env, userId) {
 		}
 	}
 
+	// USER_MEMORY owns private held messages, queued MCP/extraction jobs, replay
+	// markers, and an alarm outside D1. Quiescence is already durable, so reset
+	// every discovered root/sub-tenant now and fail closed if even one reset is
+	// unavailable or fails. The permanent account tombstone makes retries safe;
+	// the user/control-plane rows remain until all DO state is proven empty.
+	if (!env.USER_MEMORY) {
+		throw new Error("account teardown requires the USER_MEMORY binding");
+	}
+	for (const memoryId of memoryIds) {
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(memoryId));
+		if (!stub || typeof stub.resetAll !== "function") {
+			throw new Error("account teardown could not reset a memory coordinator");
+		}
+		await stub.resetAll();
+	}
+
 	const memoryResults = [];
 	for (const memoryId of memoryIds) {
-		memoryResults.push({ user_id: memoryId, ...(await deleteAllMemories(env, memoryId, "DELETE ALL")) });
+		memoryResults.push({
+			user_id: memoryId,
+			...(await bulkDeleteBySource(env, memoryId, {
+				dryRun: false,
+				confirm: true,
+				by: "account_delete",
+				barrierFloor: quiescedAt + 1,
+			})),
+		});
 	}
 
 	// Project-owned configuration and secondary copies are not part of a normal
 	// "delete memories" reset, but they are part of complete account erasure.
 	const projectTables = [
+		"memory_pages",
+		"nodes",
+		"slices",
+		"events",
+		"edges",
+		"candidates",
+		"memory_profiles",
+		"memory_suppressions",
+		"manual_node_identities",
+		"checkpoints",
+		"node_topic_communities",
+		"topic_communities",
+		"manual_search_profiles",
+		"manual_fact_identities",
+		"manual_page_identities",
+		"manual_page_versions",
+		"semantic_atom_projections",
+		"source_episodes",
+		"semantic_atom_candidates",
+		"semantic_atom_capture_runs",
+		"staged_memories",
 		"webhook_deliveries",
 		"webhooks",
 		"playground_messages",
@@ -590,7 +743,9 @@ export async function deleteAccountCompletely(env, userId) {
 		"memory_exports",
 		"memory_rules",
 		"ai_calls",
-		"deletion_barriers",
+		"receipts",
+		"extraction_runs",
+		"memory_jobs",
 		"manual_page_write_epochs",
 	];
 	for (const memoryId of memoryIds) {
@@ -599,25 +754,156 @@ export async function deleteAccountCompletely(env, userId) {
 		}
 	}
 
-	for (const table of ["sessions", "connection_tokens", "login_events", "error_reports"]) {
-		try {
-			await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId).run();
-		} catch (error) {
-			console.warn(`account teardown: ${table} delete failed:`, error?.message ?? error);
-		}
+	// Identity/security erasure is mandatory. These statements deliberately
+	// share one D1 batch so a storage failure cannot leave a half-erased set and
+	// then let the account row disappear. Failed-login rows may not yet have a
+	// user id, so the normalized address is an equally authoritative erasure key.
+	await env.DB.batch([
+		// Shared-project content survives a departing member, but the surviving
+		// provenance must no longer contain that account's stable identifier.
+		env.DB.prepare(
+			`UPDATE source_packets
+			    SET external_user_id = CASE WHEN external_user_id = ? THEN NULL ELSE external_user_id END,
+			        raw_meta_json = CASE
+			          WHEN json_valid(raw_meta_json) AND json_extract(raw_meta_json, '$.account_user_id') = ?
+			          THEN json_remove(raw_meta_json, '$.account_user_id') ELSE raw_meta_json END
+			  WHERE external_user_id = ? OR (
+			    json_valid(raw_meta_json) AND json_extract(raw_meta_json, '$.account_user_id') = ?
+			  )`,
+		).bind(userId, userId, userId, userId),
+		env.DB.prepare(
+			"UPDATE source_episodes SET external_user_id = NULL WHERE external_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE semantic_atom_candidates SET external_user_id = NULL WHERE external_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			`UPDATE receipts SET scope_json = json_remove(scope_json, '$.account_user_id')
+			  WHERE json_valid(scope_json) AND json_extract(scope_json, '$.account_user_id') = ?`,
+		).bind(userId),
+		env.DB.prepare(
+			`UPDATE extraction_runs SET scope_json = json_remove(scope_json, '$.account_user_id')
+			  WHERE json_valid(scope_json) AND json_extract(scope_json, '$.account_user_id') = ?`,
+		).bind(userId),
+		env.DB.prepare("DELETE FROM playground_messages WHERE account_user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM playground_threads WHERE account_user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM connection_tokens WHERE user_id = ?").bind(userId),
+		env.DB.prepare(
+			"DELETE FROM login_events WHERE user_id = ? OR email_normalized = ?",
+		).bind(userId, user.email_normalized),
+		...[...memoryIds].map((memoryId) => env.DB.prepare(
+			"DELETE FROM error_reports WHERE user_id = ?",
+		).bind(memoryId)),
+	]);
+
+	// Remove this account from organizations it does not own, including every
+	// email-bearing invitation addressed to it. Delete its outbox copy first:
+	// that row can still contain the recipient email and an encrypted live token
+	// while an invitation is pending/retrying. Old project keys were already
+	// removed above; the explicit revocation is belt-and-braces for partial rows.
+	await env.DB.batch([
+		// Foreign-tenant resources survive account erasure, but their provenance
+		// must not keep a stable identifier for the deleted person. Nullable actor
+		// columns are anonymized; the invitation creator is NOT NULL by schema, so
+		// it receives one fixed non-user tombstone rather than a reversible value.
+		env.DB.prepare(
+			"UPDATE project_categories SET created_by_user_id = NULL WHERE created_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE project_categories SET updated_by_user_id = NULL WHERE updated_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE organization_members SET invited_by_user_id = NULL WHERE invited_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE project_members SET invited_by_user_id = NULL WHERE invited_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE retention_policies SET updated_by_user_id = NULL WHERE updated_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE retention_runs SET actor_user_id = NULL WHERE actor_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE organization_invitations SET invited_by_user_id = 'deleted_user' WHERE invited_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare(
+			"UPDATE organization_invitations SET accepted_by_user_id = NULL WHERE accepted_by_user_id = ?",
+		).bind(userId),
+		env.DB.prepare("DELETE FROM project_members WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM organization_members WHERE user_id = ?").bind(userId),
+		env.DB.prepare(
+			`DELETE FROM invitation_email_outbox
+			  WHERE invitation_id IN (
+				SELECT id FROM organization_invitations
+				 WHERE email_normalized = ?
+			  )`,
+		).bind(user.email_normalized),
+		env.DB.prepare("DELETE FROM organization_invitations WHERE email_normalized = ?")
+			.bind(user.email_normalized),
+		env.DB.prepare(
+			`UPDATE audit_event_completions
+			    SET target_id = NULL
+			  WHERE target_type IN ('member', 'user') AND target_id = ?`,
+		).bind(userId),
+		// Correlation dedupe belongs to the actor generation. Clear both values
+		// while anonymising so two erased users who legitimately supplied the same
+		// request id cannot collide under the COALESCE(..., 'system') unique index.
+		env.DB.prepare(
+			"UPDATE audit_events SET actor_user_id = NULL, request_id = NULL, dedupe_key = NULL WHERE actor_user_id = ?",
+		).bind(userId),
+		env.DB.prepare("UPDATE audit_events SET target_id = NULL WHERE target_type IN ('member', 'user') AND target_id = ?")
+			.bind(userId),
+	]);
+
+	// Solo-owned organizations can be removed without orphaning anyone. Delete
+	// child control-plane rows before the organization/project rows. No loop
+	// constructs dynamic SQL from untrusted values; every id remains bound.
+	for (const orgId of ownedOrgIds) {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM invitation_email_outbox WHERE org_id = ?").bind(orgId),
+			env.DB.prepare("DELETE FROM organization_invitations WHERE org_id = ?").bind(orgId),
+			env.DB.prepare("DELETE FROM project_members WHERE org_id = ?").bind(orgId),
+			env.DB.prepare("DELETE FROM organization_members WHERE org_id = ?").bind(orgId),
+			env.DB.prepare(
+				"DELETE FROM audit_event_completions WHERE event_id IN (SELECT id FROM audit_events WHERE org_id = ?)",
+			).bind(orgId),
+			env.DB.prepare("DELETE FROM audit_events WHERE org_id = ?").bind(orgId),
+		]);
 	}
-	await env.DB.prepare("DELETE FROM managed_projects WHERE owner_user_id = ?").bind(userId).run();
-	await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId).run();
-	return { deleted: true, memory: memoryResults[0], memory_spaces: memoryResults.length };
+	for (const projectId of ownedProjectIds) {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM project_categories WHERE project_id = ?").bind(projectId),
+			env.DB.prepare("DELETE FROM project_memory_spaces WHERE project_id = ?").bind(projectId),
+			env.DB.prepare("DELETE FROM retention_fences WHERE project_id = ?").bind(projectId),
+			env.DB.prepare("DELETE FROM retention_runs WHERE project_id = ?").bind(projectId),
+			env.DB.prepare("DELETE FROM retention_policies WHERE project_id = ?").bind(projectId),
+		]);
+	}
+	await env.DB.prepare(
+		`DELETE FROM managed_projects WHERE owner_user_id = ?
+		  AND (organization_id IS NULL OR organization_id IN (${ownedOrgIds.length ? ownedOrgIds.map(() => "?").join(",") : "NULL"}))`,
+	).bind(userId, ...ownedOrgIds).run();
+	for (const orgId of ownedOrgIds) {
+		await env.DB.prepare("DELETE FROM organizations WHERE id = ? AND owner_user_id = ?")
+			.bind(orgId, userId).run();
+	}
+	const deleteUser = env.DB.prepare("DELETE FROM users WHERE id = ? AND status = 'disabled'").bind(userId);
+	const deleted = await deleteUser.run();
+	if (Number(deleted?.meta?.changes ?? 0) !== 1) throw new Error("account deletion lost its final state transition");
+	const result = { deleted: true, memory: memoryResults[0], memory_spaces: memoryResults.length };
+	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
 
-export async function deleteAllMemories(env, userId, confirm) {
+export async function deleteAllMemories(env, userId, confirm, { auditIntent = null } = {}) {
 	if (confirm !== "DELETE ALL") {
-		return {
+		const unchanged = {
 			deleted: false,
 			reason: "confirmation text required",
 			confirmationRequired: "DELETE ALL",
 		};
+		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
 	}
 	const [nodeResult, pageResult] = await env.DB.batch([
 		env.DB.prepare("SELECT id, label FROM nodes WHERE user_id = ?").bind(userId),
@@ -665,11 +951,26 @@ export async function deleteAllMemories(env, userId, confirm) {
 		const row = await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`).bind(userId).first();
 		counts[table] = row?.count ?? 0;
 	}
-	await env.DB.batch([
+	const deletionStatements = [
 		advanceManualPageWriteEpoch(env, userId, Date.now()),
 		...[...tables, ...internalManualTables]
 			.map((table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)),
-	]);
+	];
+	if (auditIntent) {
+		await commitAuditedBatch(env, auditIntent, deletionStatements, {
+			postconditions: [auditInvariantStatement(
+				env,
+				`SELECT 1 WHERE NOT EXISTS (
+				   SELECT 1 FROM nodes WHERE user_id = ?
+				   UNION ALL SELECT 1 FROM memory_pages WHERE user_id = ?
+				   UNION ALL SELECT 1 FROM source_packets WHERE user_id = ?
+				   UNION ALL SELECT 1 FROM source_episodes WHERE user_id = ?
+				   UNION ALL SELECT 1 FROM semantic_atom_candidates WHERE user_id = ?
+				 )`,
+				[userId, userId, userId, userId, userId],
+			)],
+		});
+	} else await env.DB.batch(deletionStatements);
 	const vectorIds = [
 		...(nodes ?? []).map((n) => n.id),
 		...(pages ?? []).map((p) => `page:${p.id}`),
@@ -679,6 +980,9 @@ export async function deleteAllMemories(env, userId, confirm) {
 			await env.VECTORIZE.deleteByIds(vectorIds);
 		} catch (error) {
 			console.warn("memory reset vector cleanup failed:", error?.message ?? error);
+			if (auditIntent) throw Object.assign(new Error("Memory reset needs retry after vector cleanup failed."), {
+				code: "memory_reset_vector_failed",
+			});
 		}
 	}
 	let durableObjectReset = false;
@@ -692,8 +996,16 @@ export async function deleteAllMemories(env, userId, confirm) {
 		}
 	} catch (err) {
 		console.warn("durable object reset failed:", err?.message ?? err);
+		if (auditIntent) throw Object.assign(new Error("Memory reset needs retry after coordinator cleanup failed."), {
+			code: "memory_reset_coordinator_failed",
+		});
 	}
-	return {
+	if (auditIntent && !durableObjectReset) {
+		throw Object.assign(new Error("Memory reset needs retry because its coordinator was unavailable."), {
+			code: "memory_reset_coordinator_unavailable",
+		});
+	}
+	const result = {
 		deleted: true,
 		reset: true,
 		nodes: counts.nodes,
@@ -701,6 +1013,7 @@ export async function deleteAllMemories(env, userId, confirm) {
 		counts,
 		durableObjectReset,
 	};
+	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
 
 export async function clearFailedReceipts(env, userId) {
@@ -955,6 +1268,7 @@ export async function bulkDeleteBySource(env, userId, {
 	dryRun = true,
 	confirm = false,
 	by = null,
+	barrierFloor = null,
 } = {}) {
 	const beforeMs = Number(before);
 	const afterMs = Number(after);
@@ -1075,7 +1389,10 @@ export async function bulkDeleteBySource(env, userId, {
 		};
 	}
 
-	const now = Date.now();
+	const requestedBarrierFloor = Number(barrierFloor);
+	const now = Number.isFinite(requestedBarrierFloor) && requestedBarrierFloor > 0
+		? Math.max(Date.now(), requestedBarrierFloor)
+		: Date.now();
 	const config = getConfig(env);
 
 	let cancelledRuns = 0;

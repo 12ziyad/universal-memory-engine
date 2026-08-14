@@ -12,6 +12,7 @@ import { createMcpHandler } from "agents/mcp";
 import { CATEGORIES, getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
 import { runAi } from "./lib/ai_meter.js";
+import { previewMemoryRules } from "./lib/rules_preview.js";
 import { getUserReceipts } from "./lib/db.js";
 import {
 	INGEST_DELIVERY_SCHEMA,
@@ -26,17 +27,22 @@ import { memoryV3Enabled, memoryV3Status } from "./lib/memory_v3.js";
 import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
 	createManagedProject,
+	getManagedProjectForUser,
 	listManagedProjects,
 	ManagedProjectError,
 	managedProjectMemoryOwnerId,
+	registerProjectMemorySpace,
 	resolveManagedProject,
 	updateManagedProject,
 } from "./lib/managed_projects.js";
 import {
 	can,
+	capabilityGuardStatement,
 	capabilitiesFor,
+	createOrganization,
 	ensureDefaultOrganization,
 	getOrganization,
+	listOrganizations,
 	listOrganizationMembers,
 	listProjectMembers,
 	OrgError,
@@ -45,6 +51,7 @@ import {
 	resolveMembership,
 	setOrganizationRole,
 	setProjectRole,
+	updateProjectRole,
 	updateOrganization,
 } from "./lib/organizations.js";
 import {
@@ -52,16 +59,53 @@ import {
 	createInvitation,
 	describeInvitation,
 	listInvitations,
+	resendInvitation,
 	revokeInvitation,
 } from "./lib/invitations.js";
-import { auditDiff, emailDomain, listAuditEvents, writeAudit } from "./lib/audit.js";
+import { processInvitationEmailOutbox } from "./lib/invitation_email.js";
 import {
+	AuditReplayError,
+	AuditUnavailableError,
+	auditedMutationResult,
+	auditInvariantStatement,
+	auditRequestId,
+	auditDiff,
+	commitAuditedAccess,
+	decodeAuditCursor,
+	deriveRequestId,
+	commitAuditedBatch,
+	drainAuditCompletions,
+	emailDomain,
+	exportAuditCsv,
+	listAuditEvents,
+	reconcileStaleAuditIntents,
+	runAuditedMutation,
+	systemRequestId,
+	withAuditRequestId,
+	withResponseRequestId,
+} from "./lib/audit.js";
+import {
+	activeCategoryRules,
+	activeCategoryRulesReadOnly,
+	CATEGORY_COLOR_TOKENS,
 	createProjectCategory,
 	deleteProjectCategory,
 	listProjectCategories,
+	projectCategoryMetadata,
+	reassignProjectCategory,
 	setProjectCategoryStatus,
 	updateProjectCategory,
 } from "./lib/project_categories.js";
+import {
+	RetentionError,
+	activateRetentionPolicy,
+	listRetentionPolicies,
+	listRetentionRuns,
+	previewRetentionChange,
+	processQueuedRetentionRuns,
+	processRetentionRun,
+	scheduleRetentionRuns,
+} from "./lib/retention.js";
 import {
 	archiveObject,
 	bulkDeleteBySource,
@@ -87,9 +131,25 @@ import {
 	runRecallCommand,
 } from "./pipeline/commands.js";
 import { resolveAdmissionRules } from "./pipeline/admission.js";
-import { getMemoryRules, mergeRuleOverride, rulesRejection, saveMemoryRules } from "./pipeline/rules.js";
+import {
+	getMemoryRules,
+	getMemoryRulesState,
+	MemoryRulesConflictError,
+	mergeRuleOverride,
+	narrowManagedMemoryRules,
+	rulesRejection,
+	saveMemoryRulesIfCurrent,
+} from "./pipeline/rules.js";
 import { credentialShapeHint, validateBody } from "./lib/params.js";
-import { createWebhook, deleteWebhook, emitWebhookEvent, listDeliveries, listWebhooks, webhookDataFromReceipt } from "./pipeline/webhooks.js";
+import {
+	createWebhook,
+	deleteWebhook,
+	emitWebhookEvent,
+	listDeliveries,
+	listWebhooks,
+	queueAuditedWebhookTest,
+	webhookDataFromReceipt,
+} from "./pipeline/webhooks.js";
 import { listJobs, packetStatus, queueCounters } from "./pipeline/jobs_api.js";
 import { operatorOverview } from "./pipeline/ops.js";
 import {
@@ -149,6 +209,22 @@ async function allowRate(binding, key) {
 	}
 }
 
+/**
+ * A rate-limit bucket must describe the authenticated actor and project, never
+ * the caller-selected external memory subject. Otherwise an SDK can rotate
+ * userId on every request and buy a fresh quota bucket each time.
+ */
+function managedActorRateKey(prefix, context) {
+	const auth = context.auth ?? {};
+	const actor = auth.type === "token"
+		? `token:${auth.token?.id ?? "unknown"}`
+		: auth.type === "session"
+			? `session:${auth.userId}`
+			: "legacy:configured";
+	const projectId = context.managedProject?.id ?? "unmanaged";
+	return `${prefix}:${actor}:project:${projectId}`;
+}
+
 function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
 }
@@ -182,9 +258,35 @@ async function doorOverrides(env, auth, body = {}) {
 	const keyRules = isToken ? auth.auth.token?.rules : null;
 	const bodyRules = body.rules && typeof body.rules === "object" ? body.rules : null;
 	const scoped = ownerUserId !== auth.userId;
-	if (keyRules || bodyRules || scoped) {
+	if (auth.managedProject) {
+		// Organization-managed projects are governed by a parent policy. API-key
+		// and per-request rules may make that policy narrower, but can never erase
+		// an account/project deny or broaden an include allow-list.
+		const account = await getMemoryRules(env, ownerUserId, { failClosed: true });
+		out.rules = narrowManagedMemoryRules(
+			narrowManagedMemoryRules(account, keyRules),
+			bodyRules,
+		);
+		out.rules.projectCategories = await activeCategoryRules(env, {
+			projectId: auth.managedProject.id,
+			memoryOwnerUserId: ownerUserId,
+			legacy: account.customCategories ?? [],
+		});
+		out.rulePolicy = {
+			schema: "itsuki.admission-policy/v1",
+			mode: "managed_narrow",
+			layers: [keyRules, bodyRules].filter(Boolean),
+			refresh_project_categories: true,
+		};
+	} else if (keyRules || bodyRules || scoped) {
 		const account = await getMemoryRules(env, ownerUserId);
 		out.rules = mergeRuleOverride(mergeRuleOverride(account, keyRules), bodyRules);
+		out.rulePolicy = {
+			schema: "itsuki.admission-policy/v1",
+			mode: "legacy_replace",
+			layers: [keyRules, bodyRules].filter(Boolean),
+			refresh_project_categories: false,
+		};
 	}
 	return out;
 }
@@ -271,6 +373,19 @@ async function readBody(request, path, { maxBytes = INGEST_LIMITS.maxRequestByte
 		return { response: json({ error: checked.error, message: checked.message }, 400) };
 	}
 	return { body: checked.body, requestBytes: totalBytes };
+}
+
+async function readSmallJsonObject(request, path, maxBytes = 16 * 1024) {
+	const bounded = await readBoundedBytes(request, path, { maxBytes });
+	if (bounded.response) return bounded;
+	try {
+		const text = new TextDecoder("utf-8", { fatal: true }).decode(bounded.bytes);
+		const body = text ? JSON.parse(text) : {};
+		if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("object required");
+		return { body };
+	} catch {
+		return { response: json({ error: "invalid_json", message: "The request body must be one JSON object." }, 400) };
+	}
 }
 
 /**
@@ -386,12 +501,40 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 		}
 		try {
 			const managedProject = await resolveManagedProject(env, request, auth);
+			// Bearer tokens retain their declared scope contract, then intersect it
+			// with the creator's current project role. Browser sessions use the same
+			// fresh role check. The legacy API keeps its historical owner-selected
+			// boundary because it has no managed-project membership identity.
+			const requiredCapability = options.requiredCapability
+				?? (options.requiredScope === MEMORY_READ_SCOPE
+					? "project.memory.read"
+					: options.requiredScope === MEMORY_WRITE_SCOPE
+						? "project.memory.write"
+						: null);
+			let membership = null;
+			if (["session", "token"].includes(auth.type) && requiredCapability) {
+				membership = await resolveMembership(env, {
+					userId: auth.userId,
+					project: managedProject?.project ?? null,
+				});
+				if (!can(requiredCapability, membership)) {
+					return { response: forbidden(requiredCapability) };
+				}
+			}
 			const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput, managedProject);
+			if (managedProject && options.registerSpace !== false) {
+				await registerProjectMemorySpace(env, {
+					projectId: managedProject.project.id,
+					memoryOwnerUserId: managedProject.memoryOwnerUserId,
+					memoryUserId: scoped.userId,
+				});
+			}
 			const project = normalizeProjectScope(scoped.memoryScope);
 			return {
 				auth,
 				userId: scoped.userId,
 				managedProject: managedProject?.project ?? null,
+				membership,
 				memoryScope: {
 					...scoped.memoryScope,
 					projectId: project.projectId,
@@ -422,6 +565,29 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 	// KIND of secret entirely.
 	const hint = credentialShapeHint(bearerToken(request) ?? request.headers.get("x-api-key"));
 	return { response: json({ error: "unauthorized", ...(hint ? { message: hint } : {}) }, 401) };
+}
+
+/**
+ * Authenticate and authorize a JSON mutation before buffering its body.
+ * Session and bearer callers receive the same fresh project-role check as the
+ * final scoped resolution. The legacy operator key is verified first, then its
+ * required target user is read from the bounded body. No registry row is
+ * created for a malformed/oversized request.
+ */
+async function preauthorizeMemoryBody(request, env, options = {}) {
+	const principal = await resolveMemoryUser(request, env, null, {
+		...options,
+		allowLegacy: false,
+	});
+	if (principal) {
+		return requireMemoryUser(request, env, null, {
+			...options,
+			allowLegacy: false,
+			registerSpace: false,
+		});
+	}
+	if (await isAuthorized(request, env)) return { legacy: true };
+	return requireMemoryUser(request, env, null, { ...options, registerSpace: false });
 }
 
 function requireControlUser(request, env, explicitUserId, options = {}) {
@@ -494,12 +660,16 @@ function authPayload(auth) {
 }
 
 function managedProjectFailure(error) {
+	const auditResponse = auditFailure(error);
+	if (auditResponse) return auditResponse;
 	if (error instanceof ManagedProjectError || error?.name === "ManagedProjectError") {
-		return json({
+		const payload = {
 			error: error.code ?? "invalid_project",
 			code: error.code ?? "invalid_project",
 			message: String(error.message ?? "The project request is invalid."),
-		}, Number(error.status ?? 400));
+		};
+		if (error.currentProject) payload.project = error.currentProject;
+		return json(payload, Number(error.status ?? 400));
 	}
 	throw error;
 }
@@ -546,11 +716,141 @@ function requireCapability(context, capability) {
 }
 
 function orgFailure(error) {
+	const auditResponse = auditFailure(error);
+	if (auditResponse) return auditResponse;
 	if (error instanceof OrgError) {
-		return json({ error: error.code, message: error.message }, Number(error.status ?? 400));
+		const payload = { error: error.code, code: error.code, message: error.message };
+		if (error.currentOrganization) payload.organization = error.currentOrganization;
+		if (error.currentCategory) payload.category = error.currentCategory;
+		return json(payload, Number(error.status ?? 400));
 	}
 	console.error("organization route failed:", error?.message ?? error);
 	return json({ error: "organization_unavailable", message: "That could not be completed. Try again." }, 500);
+}
+
+function auditFailure(error) {
+	if (!(error instanceof AuditReplayError) && !(error instanceof AuditUnavailableError)
+		&& !["AuditReplayError", "AuditUnavailableError"].includes(error?.name)) return null;
+	return json({
+		error: error.code ?? "audit_unavailable",
+		code: error.code ?? "audit_unavailable",
+		message: String(error.message ?? "The security audit trail is unavailable. No changes were made."),
+		...(error.eventId ? { audit_event_id: error.eventId, outcome: error.outcome } : {}),
+	}, Number(error.status ?? 503));
+}
+
+function auditQuery(url, { exportMode = false } = {}) {
+	const action = url.searchParams.get("action");
+	if (action && !/^[a-z0-9_.:-]{1,60}$/.test(action)) {
+		return { response: json({ error: "invalid_audit_action", message: "Audit action is not valid." }, 400) };
+	}
+	const cursor = url.searchParams.get("cursor") ?? url.searchParams.get("before");
+	if (cursor && !decodeAuditCursor(cursor)) {
+		return { response: json({ error: "invalid_audit_cursor", message: "Audit cursor is not valid." }, 400) };
+	}
+	const parseTime = (name) => {
+		const raw = url.searchParams.get(name);
+		if (raw === null || raw === "") return null;
+		if (!/^\d{1,16}$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error(name);
+		return Number(raw);
+	};
+	let from;
+	let to;
+	try { from = parseTime("from"); to = parseTime("to"); } catch {
+		return { response: json({ error: "invalid_audit_time", message: "Audit from/to must be epoch milliseconds." }, 400) };
+	}
+	if (from !== null && to !== null && from > to) {
+		return { response: json({ error: "invalid_audit_range", message: "Audit from must not be after to." }, 400) };
+	}
+	const rawLimit = url.searchParams.get("limit");
+	let limit = exportMode ? 5_000 : 50;
+	if (rawLimit !== null) {
+		if (!/^\d+$/.test(rawLimit)) return { response: json({ error: "invalid_audit_limit", message: "Audit limit must be a positive integer." }, 400) };
+		limit = Number(rawLimit);
+		const max = exportMode ? 20_000 : 200;
+		if (!Number.isSafeInteger(limit) || limit < 1 || limit > max) {
+			return { response: json({ error: "invalid_audit_limit", message: `Audit limit must be between 1 and ${max}.` }, 400) };
+		}
+	}
+	return { action: action || null, cursor, from, to, limit };
+}
+
+function retentionFailure(error) {
+	if (error instanceof RetentionError || error?.name === "RetentionError") {
+		return json({
+			error: error.code ?? "invalid_retention_request",
+			code: error.code ?? "invalid_retention_request",
+			message: String(error.message ?? "The retention request is invalid."),
+			...(error.current ? { current: error.current } : {}),
+		}, Number(error.status ?? 400));
+	}
+	throw error;
+}
+
+function rulesPrecondition(request, body) {
+	const bodyVersion = body?.expected_version;
+	const headerValue = request.headers.get("if-match");
+	const headerVersion = headerValue === null
+		? null
+		: headerValue.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
+	if ((bodyVersion === undefined || bodyVersion === null || bodyVersion === "") && !headerVersion) {
+		return {
+			response: json({
+				error: "precondition_required",
+				message: "Reload these settings before saving so a newer policy is not overwritten.",
+			}, 428),
+		};
+	}
+	if (headerVersion && bodyVersion !== undefined && bodyVersion !== null && String(bodyVersion) !== headerVersion) {
+		return {
+			response: json({
+				error: "invalid_precondition",
+				message: "If-Match and expected_version must identify the same rules version.",
+			}, 400),
+		};
+	}
+	return { expectedVersion: headerVersion || String(bodyVersion) };
+}
+
+function rulesAuditMetadata(saved) {
+	const shape = (rules) => ({
+		includes_count: rules.includes.length,
+		excludes_count: rules.excludes.length,
+		categories_count: rules.customCategories.length,
+		instructions_present: Boolean(rules.customInstructions),
+		capture_default: rules.captureDefault,
+		capture_density: rules.captureDensity,
+		auto_collect: rules.autoCollect,
+	});
+	return auditDiff(shape(saved.previousRules), shape(saved.rules));
+}
+
+function savedRulesMetadata(saved, actor = null) {
+	return {
+		version: saved.version,
+		updated_at: saved.updatedAt ?? null,
+		updated_by: actor?.id
+			? { id: actor.id, name: actor.name ?? null, email: actor.email ?? null }
+			: null,
+	};
+}
+
+function rulesFailure(error) {
+	if (error instanceof MemoryRulesConflictError) {
+		return json({
+			error: "settings_conflict",
+			message: "These settings changed elsewhere. Reload the current values before saving again.",
+			rules: error.currentRules,
+			rules_version: error.currentVersion,
+		}, 409);
+	}
+	if (error?.code === "memory_rules_unavailable") {
+		return json({
+			error: "memory_rules_unavailable",
+			message: "The current policy could not be verified, so no changes were saved. Try again.",
+		}, 503);
+	}
+	return orgFailure(error);
 }
 
 /**
@@ -559,18 +859,80 @@ function orgFailure(error) {
  * feature still has no organization row.
  */
 async function sessionOrganization(env, context) {
-	const explicit = context.project?.organization_id;
-	if (explicit) {
-		const org = await getOrganization(env, explicit);
+	const effective = context.membership?.orgId ?? context.project?.organization_id ?? null;
+	if (effective) {
+		const org = await getOrganization(env, effective);
 		if (org) return org;
+		throw new OrgError("org_not_found", "That project's organization is not available.", 404);
 	}
-	return ensureDefaultOrganization(env, context.auth.userId);
+	// A NULL organization id is the backwards-compatible representation of the
+	// PROJECT OWNER's default organization. A collaborator's own default must
+	// never become the target merely because they made the request.
+	return ensureDefaultOrganization(env, context.project?.owner_user_id ?? context.auth.userId);
+}
+
+function waitUntilFrom(ctx) {
+	return typeof ctx?.waitUntil === "function" ? (promise) => ctx.waitUntil(promise) : null;
+}
+
+/** One request-scoped, commit-time authorization + audit contract. */
+async function contextAuditDetails(request, env, ctx, context, capability, {
+	orgId = context.membership?.orgId ?? context.project?.organization_id ?? null,
+	projectId = context.project?.id ?? null,
+	action,
+	targetType = null,
+	targetId = null,
+	metadata = null,
+	idempotencyKey = null,
+} = {}) {
+	if (!orgId && context.project?.owner_user_id) {
+		orgId = (await ensureDefaultOrganization(env, context.project.owner_user_id)).id;
+	}
+	return {
+		orgId,
+		projectId,
+		actorUserId: context.auth?.userId ?? null,
+		actorType: context.auth?.type ?? "user",
+		action,
+		targetType,
+		targetId,
+		metadata,
+		requestId: auditRequestId(request),
+		idempotencyKey,
+		waitUntil: waitUntilFrom(ctx),
+		authorizationGuards: capability ? [capabilityGuardStatement(env, {
+			actorUserId: context.auth?.userId,
+			orgId,
+			projectId,
+			capability,
+		})] : [],
+	};
+}
+
+async function runContextAuditedMutation(request, env, ctx, context, capability, details, mutate, finish = null) {
+	return runAuditedMutation(
+		env,
+		await contextAuditDetails(request, env, ctx, context, capability, details),
+		mutate,
+		finish,
+	);
+}
+
+function managedMemoryAuditContext(auth) {
+	return {
+		auth: { userId: auth.auth?.userId, type: auth.auth?.type ?? "user" },
+		project: auth.managedProject,
+		membership: auth.membership,
+	};
 }
 
 function tokenProjectOptions(context) {
 	return {
 		projectId: context.project.id,
-		isDefault: context.project.is_default,
+		// NULL-project keys predate managed projects and belong only to their
+		// creator's own default project. A collaborator looking at somebody
+		// else's default must never see or mutate those historical credentials.
+		isDefault: context.project.is_default && context.project.owner_user_id === context.auth.userId,
 	};
 }
 
@@ -614,7 +976,9 @@ const routes = {
 	"POST /auth/signup": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
 		try {
-			const body = await request.json().catch(() => ({}));
+			const parsed = await readSmallJsonObject(request, "/auth/signup", 8 * 1024);
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
 			const result = await signup(env, request, body);
 			if (result.error) return json({ error: result.error }, result.status);
 			return json(
@@ -623,6 +987,8 @@ const routes = {
 				{ "set-cookie": result.session.cookie },
 			);
 		} catch (error) {
+			const auditResponse = auditFailure(error);
+			if (auditResponse) return withResponseRequestId(auditResponse, auditRequestId(request));
 			return authFailureResponse("signup", error);
 		}
 	},
@@ -630,7 +996,9 @@ const routes = {
 	"POST /auth/login": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
 		try {
-			const body = await request.json().catch(() => ({}));
+			const parsed = await readSmallJsonObject(request, "/auth/login", 8 * 1024);
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
 			const result = await login(env, request, body);
 			if (result.error) return json({ error: result.error }, result.status);
 			return json(
@@ -648,10 +1016,20 @@ const routes = {
 		return json({ ok: true }, 200, { "set-cookie": result.cookie });
 	},
 
-	"POST /auth/logout-all": async (request, env) => {
+	"POST /auth/logout-all": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401, { "set-cookie": clearSessionCookie(request) });
-		await logoutAll(env, auth.userId);
+		await runAuditedMutation(env, {
+			actorUserId: auth.userId,
+			actorType: "user",
+			action: "account.sessions.revoked_all",
+			targetType: "account",
+			targetId: auth.userId,
+			requestId: auditRequestId(request),
+			waitUntil: waitUntilFrom(ctx),
+		}, (intent) => logoutAll(env, auth.userId, { auditIntent: intent }), () => ({
+			metadata: { status: { from: "active", to: "revoked" } },
+		}));
 		return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(request) });
 	},
 
@@ -665,13 +1043,95 @@ const routes = {
 		}
 	},
 
-	"POST /auth/projects": async (request, env) => {
+	"GET /auth/organizations": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		const body = await request.json().catch(() => ({}));
 		try {
-			return json({ project: await createManagedProject(env, auth.userId, body) }, 201);
+			return json({ organizations: await listOrganizations(env, auth.userId) });
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"POST /auth/organizations": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `org-create:actor:${auth.userId}`))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, `org-create:ip:${clientIp(request)}`))) return tooMany();
+		const parsed = await readSmallJsonObject(request, "/auth/organizations");
+		if (parsed.response) return parsed.response;
+		try {
+			const created = await runAuditedMutation(
+				env,
+				{
+					actorUserId: auth.userId,
+					action: "org.created",
+					targetType: "organization",
+					requestId: auditRequestId(request),
+					waitUntil: waitUntilFrom(ctx),
+					guardOrgId: null,
+					guardProjectId: null,
+					metadata: {
+						status: { from: null, to: "active" },
+						project_count: { from: 0, to: 1 },
+					},
+				},
+				(intent) => createOrganization(env, auth.userId, parsed.body, { auditIntent: intent }),
+				(result) => ({
+					orgId: result.organization.id,
+					projectId: result.project.id,
+					targetId: result.organization.id,
+				}),
+			);
+			const project = await getManagedProjectForUser(env, auth.userId, created.project.id);
+			return json({ ok: true, organization: created.organization, project }, 201);
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"POST /auth/projects": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env, "project.create");
+		if (context.response) return context.response;
+		try {
+			const org = await sessionOrganization(env, context);
+			const parsed = await readSmallJsonObject(request, "/auth/projects");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			if (!body || typeof body !== "object" || Array.isArray(body)) {
+				throw new ManagedProjectError("invalid_project", "Project details must be a JSON object.");
+			}
+			const unknown = Object.keys(body).filter((key) => !["name", "description", "organization_id"].includes(key));
+			if (unknown.length) {
+				throw new ManagedProjectError(
+					"unknown_project_field",
+					`Unknown project field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`,
+				);
+			}
+			if (body.organization_id !== undefined && body.organization_id !== org.id) {
+				return forbidden("project.create");
+			}
+			const project = await runContextAuditedMutation(
+				request, env, ctx, context, "project.create",
+				{
+					orgId: org.id,
+					projectId: null,
+					action: "project.created",
+					targetType: "project",
+					metadata: { status: { from: null, to: "active" } },
+				},
+				(intent) => createManagedProject(
+					env,
+					org.owner_user_id,
+					{ name: body.name, description: body.description },
+					{ organizationId: org.id, auditIntent: intent },
+				),
+				(created) => ({
+					orgId: org.id,
+					projectId: created.id,
+					targetId: created.id,
+					metadata: { status: { from: null, to: "active" } },
+				}),
+			);
+			return json({ project }, 201);
 		} catch (error) {
+			if (error instanceof OrgError) return orgFailure(error);
 			return managedProjectFailure(error);
 		}
 	},
@@ -686,7 +1146,14 @@ const routes = {
 		if (context.response) return context.response;
 		try {
 			const org = await sessionOrganization(env, context);
-			const rules = await getMemoryRules(env, context.memoryOwnerUserId);
+			const rulesState = await getMemoryRulesState(env, context.memoryOwnerUserId);
+			const rules = rulesState.rules;
+			const latestRulesAudit = await env.DB.prepare(
+				`SELECT a.actor_user_id, a.created_at, u.name AS actor_name, u.email AS actor_email
+				   FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+				  WHERE a.project_id = ? AND a.action = 'project.rules.updated' AND a.outcome = 'ok'
+				  ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
+			).bind(context.project.id).first();
 			return json({
 				ok: true,
 				project: context.project,
@@ -697,15 +1164,26 @@ const routes = {
 					capabilities: context.membership.capabilities,
 				},
 				rules,
-				// The saved-at timestamp doubles as the concurrency token: a stale
-				// tab sends what it loaded and gets a conflict instead of silently
-				// overwriting whatever landed in between.
-				rules_version: rules.updated_at ?? null,
+				// Always present, including before the first rules row exists. The
+				// opaque token is backed by an atomic D1 compare-and-set on write.
+				rules_version: rulesState.version,
+				rules_metadata: {
+					version: rulesState.version,
+					updated_at: rulesState.row?.updated_at ?? null,
+					updated_by: latestRulesAudit?.actor_user_id
+						? {
+							id: latestRulesAudit.actor_user_id,
+							name: latestRulesAudit.actor_name ?? null,
+							email: latestRulesAudit.actor_email ?? null,
+						}
+						: null,
+				},
 				categories: await listProjectCategories(env, {
 					projectId: context.project.id,
 					memoryOwnerUserId: context.memoryOwnerUserId,
 					legacy: rules.customCategories ?? [],
 				}),
+				category_color_tokens: CATEGORY_COLOR_TOKENS,
 				builtin_categories: CATEGORIES,
 				members: can("project.members.view", context.membership)
 					? await listProjectMembers(env, context.project.id)
@@ -720,34 +1198,49 @@ const routes = {
 		} catch (error) { return orgFailure(error); }
 	},
 
-	"PATCH /v1/settings/organization": async (request, env) => {
+	"PATCH /v1/settings/organization": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env, "org.edit");
 		if (context.response) return context.response;
 		try {
 			const org = await sessionOrganization(env, context);
-			const body = await request.json().catch(() => ({}));
-			const next = await updateOrganization(env, org.id, body);
-			await writeAudit(env, {
-				orgId: org.id, actorUserId: context.auth.userId, action: "org.updated",
-				targetType: "organization", targetId: org.id, metadata: auditDiff(org, next),
-			});
-			return json({ ok: true, organization: next });
+			const parsed = await readSmallJsonObject(request, "/v1/settings/organization");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const mutation = await runContextAuditedMutation(
+				request, env, ctx, context, "org.edit",
+				{ orgId: org.id, projectId: null, action: "org.updated", targetType: "organization", targetId: org.id },
+				(intent) => updateOrganization(env, org.id, body, request.headers.get("if-match"), { auditIntent: intent }),
+				(result) => ({
+					outcome: result.changed ? "ok" : "noop",
+					reason: result.changed ? null : "no_change",
+					metadata: auditDiff(result.previousOrganization, result.organization),
+				}),
+			);
+			return json({ ok: true, changed: mutation.changed, organization: mutation.organization });
 		} catch (error) { return orgFailure(error); }
 	},
 
-	"PATCH /v1/settings/project": async (request, env) => {
+	"PATCH /v1/settings/project": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env, "project.edit");
 		if (context.response) return context.response;
 		try {
 			const before = context.project;
-			const body = await request.json().catch(() => ({}));
-			const next = await updateManagedProject(env, before.owner_user_id, before.id, body);
-			await writeAudit(env, {
-				orgId: context.membership.orgId, projectId: before.id, actorUserId: context.auth.userId,
-				action: "project.updated", targetType: "project", targetId: before.id,
-				metadata: auditDiff(before, next),
-			});
-			return json({ ok: true, project: next });
+			const parsed = await readSmallJsonObject(request, "/v1/settings/project");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const mutation = await runContextAuditedMutation(
+				request, env, ctx, context, "project.edit",
+				{ action: "project.updated", targetType: "project", targetId: before.id },
+				(intent) => updateManagedProject(
+					env, before.owner_user_id, before.id, body, request.headers.get("if-match"), { auditIntent: intent },
+				),
+				(saved) => ({
+					outcome: saved.changed ? "ok" : "noop",
+					reason: saved.changed ? null : "no_change",
+					metadata: auditDiff(saved.previousProject, saved.project),
+				}),
+			);
+			return json({ ok: true, changed: mutation.changed, project: mutation.project });
 		} catch (error) { return managedProjectFailure(error); }
 	},
 
@@ -757,46 +1250,40 @@ const routes = {
 	 * silently last-write-win, because the thing being overwritten is what the
 	 * user believes is protecting their memory.
 	 */
-	"PUT /v1/settings/rules": async (request, env) => {
+	"PUT /v1/settings/rules": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env, "project.rules.edit");
 		if (context.response) return context.response;
 		try {
-			const body = await request.json().catch(() => ({}));
-			const current = await getMemoryRules(env, context.memoryOwnerUserId);
-			const expected = body.expected_version;
-			if (expected !== undefined && expected !== null && Number(expected) !== Number(current.updated_at ?? 0)) {
-				return json({
-					error: "settings_conflict",
-					message: "These settings changed in another tab. Reload to see the current values before saving.",
-					rules: current,
-					rules_version: current.updated_at ?? null,
-				}, 409);
-			}
-			const next = await saveMemoryRules(env, context.memoryOwnerUserId, body.rules ?? body);
-			await writeAudit(env, {
-				orgId: context.membership.orgId, projectId: context.project.id, actorUserId: context.auth.userId,
-				action: "project.rules.updated", targetType: "rules", targetId: context.project.id,
-				// Counts, never the terms themselves: an audit log must not become
-				// a readable copy of what somebody asked us never to store.
-				metadata: auditDiff(
-					{
-						includes_count: current.includes.length, excludes_count: current.excludes.length,
-						categories_count: current.customCategories.length,
-						instructions_present: Boolean(current.customInstructions),
-						capture_default: current.captureDefault, capture_density: current.captureDensity,
-						auto_collect: current.autoCollect,
-					},
-					{
-						includes_count: next.includes.length, excludes_count: next.excludes.length,
-						categories_count: next.customCategories.length,
-						instructions_present: Boolean(next.customInstructions),
-						capture_default: next.captureDefault, capture_density: next.captureDensity,
-						auto_collect: next.autoCollect,
-					},
+			const parsed = await readSmallJsonObject(request, "/v1/settings/rules");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const precondition = rulesPrecondition(request, body);
+			if (precondition.response) return precondition.response;
+			const saved = await runContextAuditedMutation(
+				request, env, ctx, context, "project.rules.edit",
+				{ action: "project.rules.updated", targetType: "rules", targetId: context.project.id },
+				(intent) => saveMemoryRulesIfCurrent(
+					env,
+					context.memoryOwnerUserId,
+					body.rules ?? body,
+					precondition.expectedVersion,
+					{ auditIntent: intent },
 				),
+				(result) => ({
+					outcome: result.changed ? "ok" : "noop",
+					reason: result.changed ? null : "no_change",
+					metadata: rulesAuditMetadata(result),
+				}),
+			);
+			const next = saved.rules;
+			return json({
+				ok: true,
+				rules: next,
+				rules_version: saved.version,
+				rules_metadata: savedRulesMetadata(saved, context.auth.user),
+				changed: saved.changed,
 			});
-			return json({ ok: true, rules: next, rules_version: next.updated_at ?? Date.now() });
-		} catch (error) { return orgFailure(error); }
+		} catch (error) { return rulesFailure(error); }
 	},
 
 	/**
@@ -805,21 +1292,34 @@ const routes = {
 	 * truthful "kept / not kept" instead of a promise.
 	 */
 	"POST /v1/settings/rules/preview": async (request, env) => {
-		const context = await requireSessionProject(request, env, "project.view");
+		const context = await requireSessionProject(request, env, "project.rules.edit");
 		if (context.response) return context.response;
-		const body = await request.json().catch(() => ({}));
-		const samples = Array.isArray(body.samples) ? body.samples.slice(0, 10) : [];
-		const rules = body.rules && typeof body.rules === "object"
-			? mergeRuleOverride(await getMemoryRules(env, context.memoryOwnerUserId), body.rules)
-			: await getMemoryRules(env, context.memoryOwnerUserId);
-		return json({
-			ok: true,
-			results: samples.map((raw) => {
-				const text = String(raw ?? "").slice(0, 400);
-				const reason = rulesRejection(rules, text);
-				return { text, kept: !reason, reason: reason ?? null };
-			}),
+		if (!(await allowRate(
+			env.SAVE_LIMITER,
+			`rules-preview:${context.auth.userId}:project:${context.project.id}`,
+		))) return tooMany();
+		const parsed = await readSmallJsonObject(request, "/v1/settings/rules/preview");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => !["samples", "rules"].includes(key));
+		if (unknown.length) return json({ error: "unknown_preview_field", message: `Unknown preview field: ${unknown[0]}.` }, 400);
+		const storedRules = await getMemoryRules(env, context.memoryOwnerUserId);
+		let rules = storedRules;
+		if (body.rules !== undefined) {
+			if (!body.rules || typeof body.rules !== "object" || Array.isArray(body.rules)) {
+				return json({ error: "invalid_preview_rules", message: "Preview rules must be a JSON object." }, 400);
+			}
+			const ruleUnknown = Object.keys(body.rules).filter((key) => ![
+				"customInstructions", "includes", "excludes", "captureDefault", "captureDensity", "autoCollect",
+			].includes(key));
+			if (ruleUnknown.length) return json({ error: "unknown_preview_rule", message: `Unknown preview rule: ${ruleUnknown[0]}.` }, 400);
+			rules = mergeRuleOverride(storedRules, body.rules);
+		}
+		const projectCategories = await activeCategoryRulesReadOnly(env, {
+			projectId: context.project.id,
+			legacy: rules.customCategories ?? [],
 		});
+		return json(await previewMemoryRules(env, { samples: body.samples, rules, projectCategories }));
 	},
 
 	"GET /v1/settings/categories": async (request, env) => {
@@ -829,6 +1329,7 @@ const routes = {
 		return json({
 			ok: true,
 			builtin: CATEGORIES,
+			color_tokens: CATEGORY_COLOR_TOKENS,
 			categories: await listProjectCategories(env, {
 				projectId: context.project.id,
 				memoryOwnerUserId: context.memoryOwnerUserId,
@@ -837,24 +1338,36 @@ const routes = {
 		});
 	},
 
-	"POST /v1/settings/categories": async (request, env) => {
+	"POST /v1/settings/categories": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env, "project.categories.edit");
 		if (context.response) return context.response;
 		try {
-			const body = await request.json().catch(() => ({}));
+			const parsed = await readSmallJsonObject(request, "/v1/settings/categories");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => !["name", "description", "color_token"].includes(key));
+			if (unknown.length) throw new OrgError("unknown_category_field", `Unknown category field: ${unknown[0]}.`);
 			const rules = await getMemoryRules(env, context.memoryOwnerUserId);
-			const result = await createProjectCategory(env, {
-				projectId: context.project.id,
-				memoryOwnerUserId: context.memoryOwnerUserId,
-				legacy: rules.customCategories ?? [],
-				name: body.name, description: body.description, actorUserId: context.auth.userId,
-			});
-			await writeAudit(env, {
-				orgId: context.membership.orgId, projectId: context.project.id, actorUserId: context.auth.userId,
-				action: "project.category.created", targetType: "category", targetId: result.slug,
-				metadata: { slug: { from: null, to: result.slug } },
-			});
-			return json({ ok: true }, 201);
+			const result = await runContextAuditedMutation(
+				request, env, ctx, context, "project.categories.edit",
+				{ action: "project.category.created", targetType: "category" },
+				(intent) => createProjectCategory(env, {
+					projectId: context.project.id,
+					memoryOwnerUserId: context.memoryOwnerUserId,
+					legacy: rules.customCategories ?? [],
+					name: body.name, description: body.description, colorToken: body.color_token,
+					actorUserId: context.auth.userId,
+					auditIntent: intent,
+				}),
+				(created) => ({
+					targetId: created.category.id,
+					metadata: {
+						slug: { from: null, to: created.category.slug },
+						color_token: { from: null, to: created.category.color_token },
+					},
+				}),
+			);
+			return json({ ok: true, category: result.category }, 201);
 		} catch (error) { return orgFailure(error); }
 	},
 
@@ -862,73 +1375,333 @@ const routes = {
 		const context = await requireSessionProject(request, env, "project.audit.view");
 		if (context.response) return context.response;
 		const url = new URL(request.url);
+		const query = auditQuery(url);
+		if (query.response) return query.response;
 		return json({
 			ok: true,
 			...await listAuditEvents(env, {
 				projectId: context.project.id,
-				action: url.searchParams.get("action"),
-				limit: Number(url.searchParams.get("limit")) || 50,
-				before: url.searchParams.get("before"),
+				action: query.action,
+				limit: query.limit,
+				cursor: query.cursor,
+				from: query.from,
+				to: query.to,
 			}),
 		});
 	},
 
+	"GET /v1/settings/audit/export": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env, "project.audit.export");
+		if (context.response) return context.response;
+		const url = new URL(request.url);
+		const query = auditQuery(url, { exportMode: true });
+		if (query.response) return query.response;
+		const result = await runContextAuditedMutation(
+			request, env, ctx, context, "project.audit.export",
+			{ action: "project.audit.exported", targetType: "audit", targetId: context.project.id },
+			async (intent) => {
+				const exported = await exportAuditCsv(env, {
+					projectId: context.project.id,
+					action: query.action,
+					from: query.from,
+					to: query.to,
+					maxEvents: query.limit,
+				});
+				return commitAuditedAccess(env, intent, exported);
+			},
+			(exported) => ({ metadata: { events_count: exported.count, format: "csv" } }),
+		);
+		return new Response(result.csv, {
+			headers: {
+				"content-type": "text/csv; charset=utf-8",
+				"content-disposition": `attachment; filename="itsuki-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
+				"x-itsuki-export-count": String(result.count),
+				"x-itsuki-export-truncated": String(result.truncated),
+				"cache-control": "private, no-store",
+			},
+		});
+	},
+
+	"GET /v1/settings/retention": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.retention.view");
+		if (context.response) return context.response;
+		try {
+			const url = new URL(request.url);
+			const input = {
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+			};
+			return json({
+				ok: true,
+				policies: await listRetentionPolicies(env, input),
+				runs: await listRetentionRuns(env, {
+					...input,
+					limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined,
+				}),
+			});
+		} catch (error) { return retentionFailure(error); }
+	},
+
+	"POST /v1/settings/retention/preview": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.retention.view");
+		if (context.response) return context.response;
+		const parsed = await readSmallJsonObject(request, "/v1/settings/retention/preview");
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => !["class", "days", "expected_version"].includes(key));
+			if (unknown.length) {
+				throw new RetentionError("unknown_retention_field", `Unknown retention field: ${unknown[0]}.`);
+			}
+			const preview = await previewRetentionChange(env, {
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+				retentionClass: body.class,
+				days: body.days,
+				expectedVersion: body.expected_version,
+			});
+			return json({ ok: true, preview });
+		} catch (error) { return retentionFailure(error); }
+	},
+
+	"PUT /v1/settings/retention": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env, "project.retention.manage");
+		if (context.response) return context.response;
+		const parsed = await readSmallJsonObject(request, "/v1/settings/retention");
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => ![
+				"class", "days", "expected_version", "preview_cutoff_at",
+				"preview_inventory_hash", "confirmation",
+			].includes(key));
+			if (unknown.length) {
+				throw new RetentionError("unknown_retention_field", `Unknown retention field: ${unknown[0]}.`);
+			}
+			const result = await activateRetentionPolicy(env, {
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+				actorUserId: context.auth.userId,
+				retentionClass: body.class,
+				days: body.days,
+				expectedVersion: body.expected_version,
+				previewCutoffAt: body.preview_cutoff_at,
+				previewInventoryHash: body.preview_inventory_hash,
+				confirmation: body.confirmation,
+				requestId: auditRequestId(request),
+				waitUntil: waitUntilFrom(ctx),
+				authorizationGuards: [capabilityGuardStatement(env, {
+					actorUserId: context.auth.userId,
+					orgId: context.membership.orgId,
+					projectId: context.project.id,
+					capability: "project.retention.manage",
+				})],
+			});
+			return json({ ok: true, ...result });
+		} catch (error) { return retentionFailure(error); }
+	},
+
+	"POST /v1/settings/retention/process": async (request, env) => {
+		const context = await requireSessionProject(request, env, "project.retention.manage");
+		if (context.response) return context.response;
+		if (!(await allowRate(env.SAVE_LIMITER, `retention:${context.auth.userId}:${context.project.id}`))) return tooMany();
+		const parsed = await readSmallJsonObject(request, "/v1/settings/retention/process");
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => key !== "run_id");
+			if (unknown.length) {
+				throw new RetentionError("unknown_retention_field", `Unknown retention field: ${unknown[0]}.`);
+			}
+			const run = await processRetentionRun(env, {
+				runId: body.run_id,
+				projectId: context.project.id,
+				memoryOwnerUserId: context.memoryOwnerUserId,
+				batchSize: 40,
+			});
+			return json({ ok: true, run });
+		} catch (error) { return retentionFailure(error); }
+	},
+
 	/**
-	 * Invite. There is no mail server, so this returns a link ONCE and says so
-	 * plainly — a "we emailed them" that never sent would be worse than asking
-	 * someone to paste a link.
+	 * Invite. The copy-once link is always returned. When transactional email is
+	 * configured the encrypted outbox reports its real delivery state; the API
+	 * never claims a send merely because an invitation was created.
 	 */
-	"POST /v1/settings/invitations": async (request, env) => {
+	"POST /v1/settings/invitations": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env, "org.members.manage");
 		if (context.response) return context.response;
-		if (!(await allowRate(env.AUTH_LIMITER, `invite:${context.auth.userId}`))) return tooMany();
 		try {
 			const org = await sessionOrganization(env, context);
-			const body = await request.json().catch(() => ({}));
-			const created = await createInvitation(env, {
-				orgId: org.id,
-				projectId: body.project_role ? context.project.id : null,
-				email: body.email,
-				orgRole: body.org_role ?? "member",
-				projectRole: body.project_role ?? null,
-				invitedByUserId: context.auth.userId,
-				origin: new URL(request.url).origin,
-			});
-			await writeAudit(env, {
-				orgId: org.id, projectId: context.project.id, actorUserId: context.auth.userId,
-				action: "org.invitation.created", targetType: "invitation", targetId: created.invitation.id,
-				metadata: {
-					email_domain: { from: null, to: emailDomain(body.email) },
-					org_role: { from: null, to: created.invitation.org_role },
-					project_role: { from: null, to: created.invitation.project_role },
+			const inviteRateKeys = [
+				`invite:actor:${context.auth.userId}`,
+				`invite:org:${org.id}`,
+				`invite:ip:${clientIp(request)}`,
+			];
+			for (const key of inviteRateKeys) {
+				if (!(await allowRate(env.AUTH_LIMITER, key))) return tooMany();
+			}
+			const parsed = await readSmallJsonObject(request, "/v1/settings/invitations");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => ![
+				"email", "org_role", "project_role", "access_starts_at", "access_expires_at",
+			].includes(key));
+			if (unknown.length) throw new OrgError("unknown_invitation_field", `Unknown invitation field: ${unknown[0]}.`);
+			const invitationResult = await runContextAuditedMutation(
+				request, env, ctx, context, "org.members.manage",
+				{
+					orgId: org.id,
+					projectId: body.project_role ? context.project.id : null,
+					action: "org.invitation.created",
+					targetType: "invitation",
+					metadata: {
+						email_domain: { from: null, to: emailDomain(body.email) },
+						org_role: { from: null, to: body.org_role ?? "member" },
+						project_role: { from: null, to: body.project_role ?? null },
+						access_starts_at: { from: null, to: body.access_starts_at ?? null },
+						access_expires_at: { from: null, to: body.access_expires_at ?? null },
+					},
 				},
-			});
+				(intent) => createInvitation(env, {
+					orgId: org.id,
+					projectId: body.project_role ? context.project.id : null,
+					email: body.email,
+					orgRole: body.org_role ?? "member",
+					projectRole: body.project_role ?? null,
+					invitedByUserId: context.auth.userId,
+					origin: new URL(request.url).origin,
+					accessStartsAt: body.access_starts_at ?? null,
+					accessExpiresAt: body.access_expires_at ?? null,
+					auditIntent: intent,
+				}),
+				(result) => ({
+					targetId: result.invitation.id,
+					metadata: {
+						email_domain: { from: null, to: emailDomain(body.email) },
+						org_role: { from: null, to: result.invitation.org_role },
+						project_role: { from: null, to: result.invitation.project_role },
+						active_count: {
+							from: Number(result.expired_invitation_count ?? 0) + Number(result.replaced_invitation_ids?.length ?? 0),
+							to: 1,
+						},
+					},
+				}),
+			);
+			const {
+				replaced_invitation_ids: _replacedInvitationIds = [],
+				expired_invitation_count: _expiredInvitationCount = 0,
+				...created
+			} = invitationResult;
+			// Superseded/expired rows are part of the same atomic create transition.
+			// Their bounded counts are folded into the committed create event rather
+			// than pretending separate best-effort audit events were durable.
+			// Delivery is an aid, never the invitation authority. Dispatch after the
+			// hash-only invitation and encrypted outbox are durable; any provider
+			// failure is retried by cron and never changes this successful response.
+			ctx?.waitUntil?.(processInvitationEmailOutbox(env, { limit: 5 }).catch((error) => {
+				console.warn("invitation email dispatch failed:", error?.message ?? error);
+			}));
 			return json({ ok: true, ...created }, 201);
 		} catch (error) { return orgFailure(error); }
 	},
 
-	"POST /v1/settings/invitations/accept": async (request, env) => {
+	"POST /v1/settings/invitations/accept": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		if (!(await allowRate(env.AUTH_LIMITER, `accept:${clientIp(request)}`))) return tooMany();
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/settings/invitations/accept", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => key !== "token");
+		if (unknown.length) return json({ error: "unknown_invitation_field", message: `Unknown invitation field: ${unknown[0]}.` }, 400);
+		if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 512) {
+			return json({ error: "invalid_invitation", message: "That invitation link is not valid." }, 400);
+		}
 		const user = await env.DB.prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
 			.bind(auth.userId).first();
 		if (!user) return json({ error: "unauthorized" }, 401);
-		const result = await acceptInvitation(env, body.token, user);
-		await writeAudit(env, {
-			orgId: result.org_id ?? null, actorUserId: auth.userId,
-			action: "org.invitation.accepted", targetType: "invitation",
-			outcome: result.ok ? "ok" : "denied", reason: result.ok ? null : result.reason,
-		});
-		return json(result, result.ok ? 200 : 409);
+		try {
+			const inviteScope = await env.DB.prepare(
+				`SELECT id, org_id, project_id FROM organization_invitations
+				  WHERE token_hash = ? LIMIT 1`,
+			).bind(await sha256Hex(body.token)).first();
+			if (!inviteScope) return json({ ok: false, reason: "invalid", message: "That invitation link is not valid." }, 409);
+			const result = await runAuditedMutation(
+				env,
+				{
+					orgId: inviteScope.org_id,
+					projectId: inviteScope.project_id ?? null,
+					actorUserId: auth.userId,
+					action: "org.invitation.accepted",
+					targetType: "invitation",
+					targetId: inviteScope.id,
+					requestId: auditRequestId(request),
+					waitUntil: waitUntilFrom(ctx),
+				},
+				(intent) => acceptInvitation(env, body.token, user, { auditIntent: intent }),
+				(mutation) => ({
+					outcome: mutation.ok ? "ok" : "denied",
+					reason: mutation.ok ? null : mutation.reason,
+				}),
+			);
+			return json(result, result.ok ? 200 : 409);
+		} catch (error) { return orgFailure(error); }
 	},
 
 	"POST /v1/settings/invitations/describe": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		const body = await request.json().catch(() => ({}));
-		return json(await describeInvitation(env, body.token));
+		const parsed = await readSmallJsonObject(request, "/v1/settings/invitations/describe", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => key !== "token");
+		if (unknown.length) return json({ error: "unknown_invitation_field", message: `Unknown invitation field: ${unknown[0]}.` }, 400);
+		if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 512) {
+			return json({ error: "invalid_invitation", message: "That invitation link is not valid." }, 400);
+		}
+		const user = await env.DB.prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
+			.bind(auth.userId).first();
+		return json(await describeInvitation(env, body.token, user));
+	},
+
+	"POST /v1/settings/members": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env, "project.members.manage");
+		if (context.response) return context.response;
+		try {
+			const org = await sessionOrganization(env, context);
+			const parsed = await readSmallJsonObject(request, "/v1/settings/members");
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => ![
+				"user_id", "role", "access_starts_at", "access_expires_at",
+			].includes(key));
+			if (unknown.length) throw new OrgError("unknown_member_field", `Unknown member field: ${unknown[0]}.`);
+			const targetUserId = String(body.user_id ?? "");
+			const mutation = await runContextAuditedMutation(
+				request, env, ctx, context, "project.members.manage",
+				{ action: "project.member.added", targetType: "member", targetId: targetUserId },
+				(intent) => setProjectRole(
+					env,
+					context.project.id,
+					org.id,
+					targetUserId,
+					body.role ?? "viewer",
+					context.auth.userId,
+					body,
+					{ auditIntent: intent },
+				),
+				(result) => ({
+					metadata: {
+						project_role: { from: null, to: result.member.role },
+						access_starts_at: { from: null, to: result.member.access_starts_at },
+						access_expires_at: { from: null, to: result.member.access_expires_at },
+					},
+				}),
+			);
+			if (!mutation.created) throw new OrgError("already_project_member", "That person already has a project role.", 409);
+			return json({ ok: true, member: mutation.member }, 201);
+		} catch (error) { return orgFailure(error); }
 	},
 
 	"GET /auth/tokens": async (request, env) => {
@@ -940,11 +1713,23 @@ const routes = {
 		});
 	},
 
-	"POST /auth/tokens": async (request, env) => {
-		const context = await requireSessionProject(request, env);
+	"POST /auth/tokens": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env, "project.keys.manage");
 		if (context.response) return context.response;
-		const body = await request.json().catch(() => ({}));
-		const result = await createConnectionToken(env, context.auth.userId, body, tokenProjectOptions(context));
+		const parsed = await readSmallJsonObject(request, "/auth/tokens");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const result = await runContextAuditedMutation(
+			request, env, ctx, context, "project.keys.manage",
+			{ action: "project.credential.created", targetType: "credential" },
+			(intent) => createConnectionToken(env, context.auth.userId, body, {
+				...tokenProjectOptions(context), auditIntent: intent,
+			}),
+			(created) => ({
+				targetId: created.tokenRecord?.id ?? null,
+				metadata: { status: { from: null, to: "active" } },
+			}),
+		);
 		return json(result, 201);
 	},
 
@@ -1050,6 +1835,17 @@ const routes = {
 				{ ...contractHeaders, "retry-after": String(result.retry_after_s ?? 30) },
 			);
 		}
+		if (result.invalidIngestMessage) {
+			return json({
+				error: result.error,
+				code: result.code,
+				message: result.summary,
+				retryable: false,
+				field: result.field,
+				message_index: result.message_index,
+				first_message_index: result.first_message_index,
+			}, result.http_status ?? 422, contractHeaders);
+		}
 		if (result.idempotencyConflict) {
 			return json({
 				error: "idempotency_conflict",
@@ -1099,11 +1895,19 @@ const routes = {
 	},
 
 	"POST /v1/mcp/choose": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readBody(request, "/v1/mcp/choose", { maxBytes: 16 * 1024 });
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		if (!body || typeof body !== "object" || Array.isArray(body)) {
+			return json({ error: "invalid_body", message: "The request body must be a JSON object." }, 400);
+		}
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			scopeInput: body.memoryScope ?? body.sourceScope,
+			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.chooser.use",
 		});
 		if (auth.response) return auth.response;
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth)))) return tooMany();
 
 		// AutoChoose is a read-only host adapter. It selects and validates an
 		// action, but the selected MCP tool remains responsible for its own
@@ -1121,6 +1925,16 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		const userId = auth.userId;
+		const categoryMetadata = auth.managedProject
+			? await projectCategoryMetadata(env, auth.managedProject.id)
+			: new Map();
+		const withProjectCategory = (item) => {
+			const category = item?.project_category_id ? categoryMetadata.get(item.project_category_id) ?? null : null;
+			return {
+				...item,
+				project_category: category,
+			};
+		};
 
 		// The whole brain for one user: nodes with ALL their slices (current + old,
 		// each carrying is_current) and their events newest-first, plus edges and
@@ -1163,24 +1977,24 @@ const routes = {
 			eventsByNode.get(event.node_id).push(event);
 		}
 
-		const nodes = nodesResult.results.map((node) => withCluster({
+		const nodes = nodesResult.results.map((node) => withProjectCategory(withCluster({
 			...node,
 			slices: slicesByNode.get(node.id) ?? [],
 			events: eventsByNode.get(node.id) ?? [],
-		}));
-		const pages = pagesResult.results.map((page) => withCluster({
+		})));
+		const pages = pagesResult.results.map((page) => withProjectCategory(withCluster({
 			...page,
 			title: page.title,
 			category: page.topic_filter ?? "interest",
 			summary: page.short_summary,
-		}));
-		const candidates = candidatesResult.results.map((candidate) => withCluster({
+		})));
+		const candidates = candidatesResult.results.map((candidate) => withProjectCategory(withCluster({
 			...candidate,
 			label: candidate.label_guess ?? candidate.label,
 			category: candidate.role_guess ?? candidate.cluster_guess ?? candidate.cluster_hint ?? "interest",
 			cluster: candidate.cluster_guess ?? candidate.cluster_hint,
 			summary: null,
-		}));
+		})));
 		const layout = buildGraphLayout(nodes, pages, candidates);
 		const projectMap = new Map();
 		const addProjectRows = (kind, rows) => {
@@ -1345,7 +2159,9 @@ const routes = {
 		// First-party visit counting: aggregate counters only — no cookies, no
 		// IPs, no identifiers stored. Public by design; lightly rate limited.
 		if (!(await allowRate(env.AUTH_LIMITER, `beacon:${clientIp(request)}`))) return json({ ok: true });
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/beacon", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const kind = ["landing", "app", "legal"].includes(body.kind) ? body.kind : "other";
 		const day = new Date().toISOString().slice(0, 10);
 
@@ -1423,7 +2239,9 @@ const routes = {
 		// Funnel step counters (aggregate only): signup_view, signup_done,
 		// first_memory. Same privacy shape as the beacon.
 		if (!(await allowRate(env.AUTH_LIMITER, `funnel:${clientIp(request)}`))) return json({ ok: true });
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/funnel", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const step = ["signup_view", "signup_done", "first_memory"].includes(body.step) ? body.step : null;
 		if (!step) return json({ ok: true });
 		const day = new Date().toISOString().slice(0, 10);
@@ -1441,7 +2259,9 @@ const routes = {
 	"POST /v1/error-report": async (request, env) => {
 		// Automatic client-side error reporting. Public, rate limited, minimal.
 		if (!(await allowRate(env.AUTH_LIMITER, `errrep:${clientIp(request)}`))) return json({ ok: true });
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/error-report", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await getSessionUser(env, request).catch(() => null);
 		try {
 			await env.DB.prepare(
@@ -1459,10 +2279,34 @@ const routes = {
 		return json({ ok: true });
 	},
 
-	"POST /auth/password": async (request, env) => {
-		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
-		const body = await request.json().catch(() => ({}));
-		const result = await changePassword(env, request, body);
+	"POST /auth/password": async (request, env, ctx) => {
+		// This is a visible security mutation, so authenticate before buffering an
+		// attacker-controlled body. Keep both actor and network buckets: an account
+		// cannot rotate IPs for unlimited guesses, and one address cannot spray many
+		// signed-in accounts without sharing the limiter.
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `password:actor:${auth.userId}`))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, `password:ip:${clientIp(request)}`))) return tooMany();
+		const parsed = await readSmallJsonObject(request, "/auth/password", 8 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		if (Object.keys(body).some((key) => !["currentPassword", "newPassword"].includes(key))
+			|| (body.currentPassword !== undefined && typeof body.currentPassword !== "string")
+			|| typeof body.newPassword !== "string") {
+			return json({ error: "invalid_password_request", message: "Only currentPassword and newPassword string fields are accepted." }, 400);
+		}
+		const result = await runAuditedMutation(env, {
+			actorUserId: auth.userId,
+			action: "account.password.changed",
+			targetType: "user",
+			targetId: auth.userId,
+			requestId: auditRequestId(request),
+			waitUntil: waitUntilFrom(ctx),
+		}, (intent) => changePassword(env, request, body, { auditIntent: intent }), (changed) => ({
+			outcome: changed.error ? "denied" : "ok",
+			reason: changed.error ? "password_change_rejected" : null,
+		}));
 		if (result.error) return json({ error: result.error }, result.status);
 		return json({ ok: true });
 	},
@@ -1501,11 +2345,13 @@ const routes = {
 		return json({ ok: true, users: results ?? [] });
 	},
 
-	"POST /v1/admin/users/action": async (request, env) => {
+	"POST /v1/admin/users/action": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/admin/users/action");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const targetId = String(body.userId ?? "").trim();
 		const action = String(body.action ?? "").trim();
 		if (!targetId) return json({ error: "userId is required" }, 400);
@@ -1516,51 +2362,137 @@ const routes = {
 			return json({ error: "You cannot do that to your own admin account." }, 400);
 		}
 		const now = Date.now();
-		switch (action) {
-			case "disable":
-				await env.DB.batch([
-					env.DB.prepare("UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ?").bind(now, target.id),
-					env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id),
-				]);
-				return json({ ok: true, action, status: "disabled" });
-			case "enable":
-				await env.DB.prepare("UPDATE users SET status = 'active', updated_at = ? WHERE id = ?").bind(now, target.id).run();
-				return json({ ok: true, action, status: "active" });
-			case "revoke_sessions":
-				await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id).run();
-				return json({ ok: true, action });
-			case "promote":
-				await env.DB.prepare("UPDATE users SET role = 'admin', updated_at = ? WHERE id = ?").bind(now, target.id).run();
-				return json({ ok: true, action, role: "admin" });
-			case "demote":
-				await env.DB.prepare("UPDATE users SET role = 'user', updated_at = ? WHERE id = ?").bind(now, target.id).run();
-				return json({ ok: true, action, role: "user" });
-			case "delete": {
-				const result = await deleteAccountCompletely(env, target.id);
-				return json({ ok: true, action, deleted: result.deleted });
+		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete"].includes(action)) {
+			return json({ error: "unknown action" }, 400);
+		}
+		const auditDetails = {
+			actorUserId: auth.userId,
+			action: `admin.user.${action}`,
+			targetType: "user",
+			targetId: target.id,
+			requestId: auditRequestId(request),
+			waitUntil: waitUntilFrom(ctx),
+			authorizationGuards: [auditInvariantStatement(
+				env,
+				`SELECT 1 FROM users
+				  WHERE id = ? AND role = 'admin' AND status = 'active'
+				    AND NOT EXISTS (SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?)`,
+				[auth.userId, auth.userId],
+			)],
+		};
+		const auditedAdminBatch = async (intent, statements, postconditions, result) => {
+			try {
+				await commitAuditedBatch(env, intent, statements, {
+					preconditions: [auditInvariantStatement(
+						env,
+						"SELECT 1 FROM users WHERE id = ? AND role = ? AND status = ?",
+						[target.id, target.role, target.status],
+					)],
+					postconditions,
+				});
+				return auditedMutationResult(result, intent);
+			} catch (error) {
+				if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+					const conflict = new Error("The administrator or target account changed. Reload and try again.");
+					conflict.code = "admin_state_conflict";
+					conflict.status = 409;
+					throw conflict;
+				}
+				throw error;
 			}
-			default:
-				return json({ error: "unknown action" }, 400);
+		};
+		switch (action) {
+			case "disable": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+					env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND status = 'disabled'", [target.id])],
+				{ ok: true }), () => ({ metadata: { status: { from: target.status, to: "disabled" } } }));
+				return json({ ok: true, action, status: "disabled" });
+			}
+			case "enable": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET status = 'active', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND status = 'active'", [target.id])],
+				{ ok: true }), () => ({ metadata: { status: { from: target.status, to: "active" } } }));
+				return json({ ok: true, action, status: "active" });
+			}
+			case "revoke_sessions": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id),
+				], [auditInvariantStatement(env,
+					"SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE user_id = ? AND revoked_at IS NULL)", [target.id])],
+				{ ok: true }));
+				return json({ ok: true, action });
+			}
+			case "promote": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET role = 'admin', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND role = 'admin'", [target.id])],
+				{ ok: true }), () => ({ metadata: { role: { from: target.role, to: "admin" } } }));
+				return json({ ok: true, action, role: "admin" });
+			}
+			case "demote": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET role = 'user', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND role = 'user'", [target.id])],
+				{ ok: true }), () => ({ metadata: { role: { from: target.role, to: "user" } } }));
+				return json({ ok: true, action, role: "user" });
+			}
+			case "delete": {
+				try {
+					const result = await runAuditedMutation(
+						env, auditDetails,
+						(intent) => deleteAccountCompletely(env, target.id, { auditIntent: intent }),
+						(deleted) => ({ metadata: { status: { from: target.status, to: deleted.deleted ? "deleted" : target.status } } }),
+					);
+					return json({ ok: true, action, deleted: result.deleted, already_deleted: result.already_deleted ?? false });
+				} catch (error) {
+					if (error?.code === "organization_transfer_required") {
+						return json({ error: error.code, code: error.code, message: error.message }, error.status ?? 409);
+					}
+					throw error;
+				}
+			}
 		}
 	},
 
-	"GET /v1/export": async (request, env) => {
+	"GET /v1/export": async (request, env, ctx) => {
 		// Data portability: everything the user owns, one JSON download.
 		const requestedUserId = new URL(request.url).searchParams.get("userId");
 		const auth = await requireMemoryUser(request, env, requestedUserId, {
 			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.export",
 		});
 		if (auth.response) return auth.response;
-		const userId = auth.userId;
-		const tables = EXPORT_TABLES;
-		const results = await env.DB.batch(tables.map((table) => prepareExportRows(env, userId, table)));
-		const payload = {
-			format: "uml-export",
-			version: 1,
-			exported_at: new Date().toISOString(),
-			user_id: userId,
+		const buildPayload = async () => {
+			const tables = EXPORT_TABLES;
+			const results = await env.DB.batch(tables.map((table) => prepareExportRows(env, auth.userId, table)));
+			const payload = {
+				format: "uml-export",
+				version: 1,
+				exported_at: new Date().toISOString(),
+				user_id: auth.userId,
+			};
+			tables.forEach((table, index) => { payload[table] = results[index].results ?? []; });
+			return payload;
 		};
-		tables.forEach((table, index) => { payload[table] = results[index].results ?? []; });
+		const payload = auth.managedProject
+			? (await runContextAuditedMutation(
+				request, env, ctx, managedMemoryAuditContext(auth), "project.export",
+				{
+					action: "project.export.downloaded",
+					targetType: "export",
+					targetId: auth.managedProject.id,
+				},
+				async (intent) => commitAuditedAccess(env, intent, { payload: await buildPayload() }),
+				() => ({ metadata: { format: "json" } }),
+			)).payload
+			: await buildPayload();
 		return new Response(JSON.stringify(payload, null, 2), {
 			headers: {
 				"content-type": "application/json; charset=utf-8",
@@ -1804,30 +2736,99 @@ const routes = {
 		});
 		if (auth.response) return auth.response;
 		const ownerUserId = configurationOwnerUserId(auth);
-		return json({ ok: true, rules: await getMemoryRules(env, ownerUserId) });
+		const state = await getMemoryRulesState(env, ownerUserId);
+		return json({ ok: true, rules: state.rules, rules_version: state.version });
 	},
 
-	"PUT /v1/rules": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
+	"PUT /v1/rules": async (request, env, ctx) => {
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			requiredScope: MEMORY_WRITE_SCOPE,
+			requiredCapability: "project.rules.edit",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/rules");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			requiredScope: MEMORY_WRITE_SCOPE,
+			requiredCapability: "project.rules.edit",
 		});
 		if (auth.response) return auth.response;
 		const ownerUserId = configurationOwnerUserId(auth);
-		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
-		return json({ ok: true, rules });
+		const precondition = rulesPrecondition(request, body);
+		if (precondition.response) return precondition.response;
+		try {
+			const context = auth.managedProject ? {
+				auth: auth.auth,
+				project: auth.managedProject,
+				membership: auth.membership,
+			} : null;
+			const saved = context ? await runContextAuditedMutation(
+				request, env, ctx, context, "project.rules.edit",
+				{ action: "project.rules.updated", targetType: "rules", targetId: auth.managedProject.id },
+				(intent) => saveMemoryRulesIfCurrent(
+					env, ownerUserId, body.rules ?? body, precondition.expectedVersion, { auditIntent: intent },
+				),
+				(result) => ({
+					outcome: result.changed ? "ok" : "noop",
+					reason: result.changed ? null : "no_change",
+					metadata: rulesAuditMetadata(result),
+				}),
+			) : await saveMemoryRulesIfCurrent(env, ownerUserId, body.rules ?? body, precondition.expectedVersion);
+			return json({
+				ok: true,
+				rules: saved.rules,
+				rules_version: saved.version,
+				rules_metadata: savedRulesMetadata(saved, auth.auth?.user),
+				changed: saved.changed,
+			});
+		} catch (error) { return rulesFailure(error); }
 	},
 
-	"POST /v1/rules": async (request, env) => {
+	"POST /v1/rules": async (request, env, ctx) => {
 		// Alias for clients that cannot send PUT.
-		const body = await request.json().catch(() => ({}));
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			requiredScope: MEMORY_WRITE_SCOPE,
+			requiredCapability: "project.rules.edit",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/rules");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			requiredScope: MEMORY_WRITE_SCOPE,
+			requiredCapability: "project.rules.edit",
 		});
 		if (auth.response) return auth.response;
 		const ownerUserId = configurationOwnerUserId(auth);
-		const rules = await saveMemoryRules(env, ownerUserId, body.rules ?? body);
-		return json({ ok: true, rules });
+		const precondition = rulesPrecondition(request, body);
+		if (precondition.response) return precondition.response;
+		try {
+			const context = auth.managedProject ? {
+				auth: auth.auth,
+				project: auth.managedProject,
+				membership: auth.membership,
+			} : null;
+			const saved = context ? await runContextAuditedMutation(
+				request, env, ctx, context, "project.rules.edit",
+				{ action: "project.rules.updated", targetType: "rules", targetId: auth.managedProject.id },
+				(intent) => saveMemoryRulesIfCurrent(
+					env, ownerUserId, body.rules ?? body, precondition.expectedVersion, { auditIntent: intent },
+				),
+				(result) => ({
+					outcome: result.changed ? "ok" : "noop",
+					reason: result.changed ? null : "no_change",
+					metadata: rulesAuditMetadata(result),
+				}),
+			) : await saveMemoryRulesIfCurrent(env, ownerUserId, body.rules ?? body, precondition.expectedVersion);
+			return json({
+				ok: true,
+				rules: saved.rules,
+				rules_version: saved.version,
+				rules_metadata: savedRulesMetadata(saved, auth.auth?.user),
+				changed: saved.changed,
+			});
+		} catch (error) { return rulesFailure(error); }
 	},
 
 	"POST /v1/turn": async (request, env, ctx) => {
@@ -1916,7 +2917,7 @@ const routes = {
 	// Session auth ONLY. An API key or MCP token must not be able to spend a
 	// free model call: those doors reach memory, not the chat model.
 	"GET /v1/playground": async (request, env) => {
-		const context = await requireSessionProject(request, env);
+		const context = await requireSessionProject(request, env, "project.playground.read");
 		if (context.response) return context.response;
 		const userId = context.memoryOwnerUserId;
 		const url = new URL(request.url);
@@ -1947,14 +2948,22 @@ const routes = {
 	},
 
 	"POST /v1/playground/chat": async (request, env, ctx) => {
-		const context = await requireSessionProject(request, env);
+		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
 		const userId = context.memoryOwnerUserId;
 		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`))) return tooMany();
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/playground/chat");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		return json(await playgroundTurn(env, ctx, userId, {
 			message: body.message,
 			threadId: body.threadId,
+			accountUserId: context.auth.userId,
+			// The selected managed project is the authority for custom filing
+			// categories. playgroundTurn resolves the active set only after its
+			// fail-closed rules load, so this door cannot reuse a stale/browser-
+			// supplied category or borrow one from another project.
+			managedProjectId: context.project.id,
 			overrides: testOnlyOverrides(env, body._test),
 		}));
 	},
@@ -1968,28 +2977,52 @@ const routes = {
 	 * read-only while still answering honestly.
 	 */
 	"POST /v1/playground/preview": async (request, env) => {
-		const context = await requireSessionProject(request, env, "project.view");
+		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
 		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`))) return tooMany();
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/playground/preview");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const rules = await getMemoryRules(env, context.memoryOwnerUserId);
 		return json(await playgroundPreviewExtract(env, body.message, { rules }));
 	},
 
 	"POST /v1/playground/thread": async (request, env) => {
-		const context = await requireSessionProject(request, env);
+		// Authorize before consuming the body: a malformed or oversized request
+		// must not become an authentication oracle or make an unauthorized caller
+		// spend parsing resources. Deletion is a second, stricter decision made on
+		// this already-resolved fresh membership context.
+		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
+		const parsed = await readBody(request, "/v1/playground/thread", { maxBytes: 16 * 1024 });
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		if (!body || typeof body !== "object" || Array.isArray(body)) {
+			return json({ error: "invalid_body", message: "The request body must be a JSON object." }, 400);
+		}
+		if (Object.prototype.hasOwnProperty.call(body, "delete") && typeof body.delete !== "boolean") {
+			return json({ error: "invalid_delete", message: '"delete" must be true or false.' }, 400);
+		}
+		const deleting = body.delete === true;
+		if (deleting) {
+			const denied = requireCapability(context, "project.playground.delete");
+			if (denied) return denied;
+		}
 		const userId = context.memoryOwnerUserId;
-		const body = await request.json().catch(() => ({}));
-		if (body.delete) return json(await deleteThread(env, userId, body.threadId));
-		return json(await createThread(env, userId, body.title || "New chat"));
+		if (deleting) return json(await deleteThread(env, userId, body.threadId));
+		return json(await createThread(env, userId, body.title || "New chat", {
+			accountUserId: context.auth.userId,
+			managedProjectId: context.project.id,
+		}));
 	},
 
 	"PUT /v1/playground/settings": async (request, env) => {
-		const context = await requireSessionProject(request, env);
+		const context = await requireSessionProject(request, env, "project.playground.policy.edit");
 		if (context.response) return context.response;
 		const userId = context.memoryOwnerUserId;
-		const body = await request.json().catch(() => ({}));
+		const parsed = await readSmallJsonObject(request, "/v1/playground/settings");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
 		const thread = await getThread(env, userId, body.threadId);
 		if (!thread) return json({ ok: false, message: "Open a chat first, then apply settings to it." }, 404);
 		const settings = normalizeThreadSettings(body.settings ?? body);
@@ -2002,18 +3035,44 @@ const routes = {
 	"GET /v1/exports": async (request, env) => {
 		const auth = await requireMemoryUser(request, env, new URL(request.url).searchParams.get("userId"), {
 			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.export",
 		});
 		if (auth.response) return auth.response;
 		return json({ ok: true, exports: await listExports(env, auth.userId) });
 	},
 
 	"POST /v1/exports": async (request, env, ctx) => {
-		const body = await request.json().catch(() => ({}));
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.export",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/exports");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => !["userId", "entity"].includes(key));
+		if (unknown.length) return json({ error: "unknown_export_field", message: `Unknown export field: ${unknown[0]}.` }, 400);
 		const auth = await requireMemoryUser(request, env, body.userId, {
 			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.export",
 		});
 		if (auth.response) return auth.response;
-		const job = await createExport(env, auth.userId, { entity: body.entity });
+		const auditContext = {
+			auth: { userId: auth.auth?.userId, type: auth.auth?.type ?? "user" },
+			project: auth.managedProject,
+			membership: auth.membership,
+		};
+		const job = auth.managedProject
+			? await runContextAuditedMutation(
+				request, env, ctx, auditContext, "project.export",
+				{ action: "project.export.created", targetType: "export" },
+				(intent) => createExport(env, auth.userId, { entity: body.entity, auditIntent: intent }),
+				(created) => ({
+					targetId: created.id,
+					metadata: { status: { from: null, to: created.status ?? "pending" }, format: created.format ?? "json" },
+				}),
+			)
+			: await createExport(env, auth.userId, { entity: body.entity });
 		// The work happens in the user's Durable Object so a large graph cannot
 		// hold this response open. The page polls for the finished row.
 		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(auth.userId));
@@ -2024,13 +3083,36 @@ const routes = {
 		return json({ ok: true, export: job }, 201);
 	},
 
-	"GET /v1/exports/download": async (request, env) => {
+	"GET /v1/exports/download": async (request, env, ctx) => {
 		const url = new URL(request.url);
 		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
 			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.export",
 		});
 		if (auth.response) return auth.response;
-		const row = await getExport(env, auth.userId, url.searchParams.get("id"));
+		const requestedExportId = url.searchParams.get("id");
+		const row = auth.managedProject
+			? (await runContextAuditedMutation(
+				request, env, ctx, managedMemoryAuditContext(auth), "project.export",
+				{
+					action: "project.export.downloaded",
+					targetType: "export",
+					targetId: requestedExportId,
+				},
+				async (intent) => commitAuditedAccess(env, intent, {
+					row: await getExport(env, auth.userId, requestedExportId),
+				}),
+				(result) => ({
+					outcome: result.row?.status === "complete" && result.row?.data ? "ok" : "noop",
+					reason: result.row?.status === "complete" && result.row?.data
+						? null
+						: result.row ? "export_not_ready" : "export_not_found",
+					metadata: result.row
+						? { status: result.row.status, format: result.row.format ?? "json" }
+						: { format: "json" },
+				}),
+			)).row
+			: await getExport(env, auth.userId, requestedExportId);
 		if (!row) return json({ error: "not_found", message: "That export is gone. Create a new one." }, 404);
 		if (row.status !== "complete" || !row.data) {
 			return json({ error: "not_ready", message: "This export is still being built. Refresh in a moment." }, 409);
@@ -2141,15 +3223,33 @@ const routes = {
 	},
 
 	"POST /v1/actions/delete-last-extraction": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/delete-last-extraction");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		return json(await deleteLastExtraction(env, auth.userId));
 	},
 
 	"POST /v1/actions/delete-object": async (request, env, ctx) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/delete-object");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
 		const result = await deleteObject(env, auth.userId, body);
@@ -2162,51 +3262,125 @@ const routes = {
 	},
 
 	"POST /v1/actions/archive-object": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/archive-object");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		if (!body.kind || !body.id) return json({ error: "kind and id are required" }, 400);
 		return json(await archiveObject(env, auth.userId, body));
 	},
 
 	"POST /v1/actions/delete-all": async (request, env, ctx) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/delete-all");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => !["userId", "confirm"].includes(key));
+		if (unknown.length) return json({ error: "unknown_delete_field", message: `Unknown delete field: ${unknown[0]}.` }, 400);
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
-		const result = await deleteAllMemories(env, auth.userId, body.confirm);
+		const result = auth.managedProject
+			? await runContextAuditedMutation(
+				request, env, ctx, managedMemoryAuditContext(auth), "project.memory.delete",
+				{
+					action: "project.memory.space_reset",
+					targetType: "memory_space",
+					targetId: auth.userId,
+				},
+				(intent) => deleteAllMemories(env, auth.userId, body.confirm, { auditIntent: intent }),
+				(deleted) => ({
+					outcome: deleted.deleted ? "ok" : "noop",
+					reason: deleted.deleted ? null : "confirmation_required",
+					metadata: deleted.deleted ? {
+						status: { from: "active", to: "reset" },
+						deleted_count: Object.values(deleted.counts ?? {}).reduce((sum, count) => sum + Number(count || 0), 0),
+					} : null,
+				}),
+			)
+			: await deleteAllMemories(env, auth.userId, body.confirm);
 		if (result.deleted) {
 			ctx.waitUntil(emitWebhookEvent(env, (p) => ctx.waitUntil(p), auth.userId, "memory.deleted", {
 				source: "delete_all",
 				counts: { deleted_all: true },
 			}));
 		}
-		return json(result, result.deleted ? 200 : 400);
+		return json({ ...result, scope: "memory_space" }, result.deleted ? 200 : 400);
 	},
 
 	"POST /v1/actions/clean-junk": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/clean-junk");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		return json(await cleanJunkMemories(env, auth.userId, { confirm: body.confirm }));
 	},
 
 	"POST /v1/actions/clear-failed-receipts": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/clear-failed-receipts");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		return json(await clearFailedReceipts(env, auth.userId));
 	},
 
 	"POST /v1/actions/organize-clusters": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.write",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/organize-clusters");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.write",
+		});
 		if (auth.response) return auth.response;
 		return json(await organizeUserClusters(env, auth.userId));
 	},
 
 	"POST /v1/actions/repair-graph": async (request, env) => {
-		const body = await request.json().catch(() => ({}));
-		const auth = await requireControlUser(request, env, body.userId);
+		const preliminary = await preauthorizeMemoryBody(request, env, {
+			allowTokenAuth: false,
+			requiredCapability: "project.memory.delete",
+		});
+		if (preliminary.response) return preliminary.response;
+		const parsed = await readSmallJsonObject(request, "/v1/actions/repair-graph");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const auth = await requireControlUser(request, env, body.userId, {
+			requiredCapability: "project.memory.delete",
+		});
 		if (auth.response) return auth.response;
 		return json(await repairGraph(env, auth.userId, body));
 	},
@@ -2375,18 +3549,37 @@ export default {
 		const { retryPendingWebhookDeliveries } = await import("./pipeline/webhooks.js");
 		ctx.waitUntil(runReconciliationSweep(env));
 		ctx.waitUntil(retryPendingWebhookDeliveries(env, (promise) => ctx.waitUntil(promise)));
+		ctx.waitUntil(processInvitationEmailOutbox(env, { limit: 25 }));
+		ctx.waitUntil((async () => {
+			await drainAuditCompletions(env, { limit: 100 });
+			await reconcileStaleAuditIntents(env, {
+				now: Number(controller?.scheduledTime) || Date.now(),
+				limit: 250,
+			});
+		})());
+		ctx.waitUntil((async () => {
+			const scheduledAt = Number(controller?.scheduledTime);
+			const now = Number.isFinite(scheduledAt) && scheduledAt > 0 ? scheduledAt : Date.now();
+			const requestId = systemRequestId("retention-schedule", String(now));
+			await scheduleRetentionRuns(env, { now, limit: 50, requestId });
+			await processQueuedRetentionRuns(env, { now, maxRuns: 5, batchSize: 40, requestId });
+		})());
 	},
 
 	async fetch(request, env, ctx) {
+		const requestId = deriveRequestId(request);
+		const correlatedRequest = withAuditRequestId(request, requestId);
 		// Users must never see a raw exception or an infrastructure error page:
 		// every unhandled failure is reported for the admin and answered with one
 		// calm, generic message.
 		try {
-			return await handleRequest(request, env, ctx);
+			return withResponseRequestId(await handleRequest(correlatedRequest, env, ctx), requestId);
 		} catch (error) {
+			const auditResponse = auditFailure(error);
+			if (auditResponse) return withResponseRequestId(auditResponse, requestId);
 			const scope = (() => { try { return new URL(request.url).pathname; } catch { return "unknown"; } })();
 			ctx.waitUntil(reportServerError(env, scope, error));
-			return json({ error: "something_went_wrong", message: FRIENDLY_FAILURE }, 500);
+			return withResponseRequestId(json({ error: "something_went_wrong", message: FRIENDLY_FAILURE }, 500), requestId);
 		}
 	},
 };
@@ -2396,8 +3589,9 @@ export default {
 // sent, and resolveMemoryUser skips sessions cross-origin). /auth, /mcp,
 // admin, and control routes stay same-origin.
 const CORS_HEADERS = {
-	"access-control-allow-methods": "GET,POST,PUT,OPTIONS",
-	"access-control-allow-headers": "authorization, content-type, x-uml-token, x-itsuki-project",
+	"access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+	"access-control-allow-headers": "authorization, content-type, if-match, x-request-id, x-uml-token, x-itsuki-project",
+	"access-control-expose-headers": "x-request-id, x-itsuki-export-count, x-itsuki-export-truncated",
 	"access-control-max-age": "86400",
 };
 
@@ -2465,39 +3659,95 @@ async function handleRequestInner(request, env, ctx, url) {
 			if (!auth) return json({ error: "unauthorized" }, 401);
 			const id = decodeURIComponent(url.pathname.slice("/auth/projects/".length));
 			if (!id || id.includes("/")) return json({ error: "not found" }, 404);
-			const body = await request.json().catch(() => ({}));
 			try {
-				return json({ project: await updateManagedProject(env, auth.userId, id, body) });
+				const project = await getManagedProjectForUser(env, auth.userId, id);
+				if (!project) {
+					return managedProjectFailure(new ManagedProjectError(
+						"project_not_found", "That project does not exist.", 404,
+					));
+				}
+				const membership = await resolveMembership(env, { userId: auth.userId, project });
+				if (!can("project.edit", membership)) return forbidden("project.edit");
+				const parsed = await readSmallJsonObject(request, "/auth/projects/:id");
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const orgId = membership.orgId ?? (await ensureDefaultOrganization(env, project.owner_user_id)).id;
+				const mutation = await runAuditedMutation(
+					env,
+					{
+						orgId,
+						projectId: id,
+						actorUserId: auth.userId,
+						action: "project.updated",
+						targetType: "project",
+						targetId: id,
+						requestId: auditRequestId(request),
+						waitUntil: waitUntilFrom(ctx),
+						authorizationGuards: [capabilityGuardStatement(env, {
+							actorUserId: auth.userId, orgId, projectId: id, capability: "project.edit",
+						})],
+					},
+					(intent) => updateManagedProject(
+						env, project.owner_user_id, id, body, request.headers.get("if-match"), { auditIntent: intent },
+					),
+					(result) => ({
+						outcome: result.changed ? "ok" : "noop",
+						reason: result.changed ? null : "no_change",
+						metadata: auditDiff(result.previousProject, result.project),
+					}),
+				);
+				return json({ project: mutation.project, changed: mutation.changed });
 			} catch (error) {
 				return managedProjectFailure(error);
 			}
 		}
 
 		if (request.method === "POST" && url.pathname.startsWith("/auth/tokens/") && url.pathname.endsWith("/revoke")) {
-			const context = await requireSessionProject(request, env);
+			const context = await requireSessionProject(request, env, "project.keys.manage");
 			if (context.response) return context.response;
 			const id = url.pathname.slice("/auth/tokens/".length).replace(/\/revoke$/, "");
-			return json(await revokeConnectionToken(
-				env,
-				context.auth.userId,
-				id,
-				tokenProjectOptions(context),
-			));
+			const result = await runContextAuditedMutation(
+				request, env, ctx, context, "project.keys.manage",
+				{ action: "project.credential.revoked", targetType: "credential", targetId: id },
+				(intent) => revokeConnectionToken(
+					env,
+					context.auth.userId,
+					id,
+					{ ...tokenProjectOptions(context), auditIntent: intent },
+				),
+				(mutation) => ({
+					outcome: mutation.revoked ? "ok" : "noop",
+					reason: mutation.revoked ? null : "already_revoked_or_missing",
+					metadata: mutation.revoked ? { status: { from: "active", to: "revoked" } } : null,
+				}),
+			);
+			return json(result);
 		}
 
 		// The app offers one action per key now: delete. Revoke stays reachable
 		// above for anything already scripted against it.
 		if (request.method === "DELETE" && url.pathname.startsWith("/auth/tokens/")) {
-			const context = await requireSessionProject(request, env);
+			const context = await requireSessionProject(request, env, "project.keys.manage");
 			if (context.response) return context.response;
 			const id = url.pathname.slice("/auth/tokens/".length);
 			if (!id) return json({ error: "not found" }, 404);
-			return json(await deleteConnectionToken(
-				env,
-				context.auth.userId,
-				decodeURIComponent(id),
-				tokenProjectOptions(context),
-			));
+			const tokenId = decodeURIComponent(id);
+			const result = await runContextAuditedMutation(
+				request, env, ctx, context, "project.keys.manage",
+				{ action: "project.credential.deleted", targetType: "credential", targetId: tokenId },
+				(intent) => deleteConnectionToken(
+					env,
+					context.auth.userId,
+					tokenId,
+					{ ...tokenProjectOptions(context), auditIntent: intent },
+				),
+				(mutation) => ({
+					outcome: mutation.deleted ? "ok" : "noop",
+					reason: mutation.deleted ? null : "already_deleted_or_missing",
+					metadata: mutation.deleted ? { status: { from: "active", to: null } } : null,
+				}),
+			);
+			return json(result);
 		}
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
@@ -2529,7 +3779,7 @@ async function handleRequestInner(request, env, ctx, url) {
 		}
 
 		if (url.pathname.startsWith("/v1/settings/")) {
-			const settingsResponse = await handleSettingsMemberRoutes(request, env, url);
+			const settingsResponse = await handleSettingsMemberRoutes(request, env, ctx, url);
 			if (settingsResponse) return settingsResponse;
 		}
 
@@ -2571,8 +3821,41 @@ function unauthorizedMcp(message) {
 async function serveProjectBoundMcp(request, env, ctx, url, auth) {
 	try {
 		const managed = await resolveManagedProject(env, request, auth);
+		const membership = await resolveMembership(env, {
+			userId: auth.userId,
+			project: managed.project,
+		});
+		const tokenScopes = auth.token?.scopes ?? [];
+		if (!tokenAllowsScope(tokenScopes, MEMORY_READ_SCOPE)) {
+			return json({ error: "forbidden", code: "insufficient_scope", required_scope: MEMORY_READ_SCOPE }, 403);
+		}
+		if (!can("project.memory.read", membership)) {
+			return forbidden("project.memory.read");
+		}
+		// Normalize wildcards and intersect the credential's declared scopes with
+		// the role that exists now. A downgrade therefore takes effect on the next
+		// MCP request without revoking the key: recall remains available to a
+		// viewer, while save tools receive the existing insufficient_scope result.
+		const effectiveScopes = [MEMORY_READ_SCOPE];
+		if (
+			can("project.memory.write", membership)
+			&& tokenAllowsScope(tokenScopes, MEMORY_WRITE_SCOPE)
+		) {
+			effectiveScopes.push(MEMORY_WRITE_SCOPE);
+		}
+		const accountRules = await getMemoryRules(env, managed.memoryOwnerUserId, { failClosed: true });
+		const effectiveRules = narrowManagedMemoryRules(accountRules, auth.token?.rules);
+		effectiveRules.projectCategories = await activeCategoryRules(env, {
+			projectId: managed.project.id,
+			memoryOwnerUserId: managed.memoryOwnerUserId,
+			legacy: accountRules.customCategories ?? [],
+		});
 		return serveMcp(request, env, ctx, url, managed.memoryOwnerUserId, {
-			scopes: auth.token?.scopes ?? [],
+			scopes: effectiveScopes,
+			rules: effectiveRules,
+			credentialRules: auth.token?.rules ?? null,
+			projectCategories: effectiveRules.projectCategories,
+			managedPolicy: true,
 			memoryScope: {
 				authType: auth.type,
 				memoryUserId: managed.memoryOwnerUserId,
@@ -2682,7 +3965,7 @@ async function handleMcp(request, env, ctx, url) {
  * missing permission check would be an actual breach, so both name their
  * capability explicitly rather than relying on having got here at all.
  */
-async function handleSettingsMemberRoutes(request, env, url) {
+async function handleSettingsMemberRoutes(request, env, ctx, url) {
 	const rest = url.pathname.slice("/v1/settings/".length);
 	const [group, rawId, sub] = rest.split("/").map((part) => (part ? decodeURIComponent(part) : part));
 	if (!["members", "org-members", "invitations", "categories"].includes(group) || !rawId) return null;
@@ -2690,31 +3973,56 @@ async function handleSettingsMemberRoutes(request, env, url) {
 
 	const context = await requireSessionProject(request, env);
 	if (context.response) return context.response;
-	const body = request.method === "PATCH" || request.method === "POST"
-		? await request.json().catch(() => ({}))
-		: {};
+	const readMutationBody = () => readSmallJsonObject(request, url.pathname);
 
 	try {
 		const org = await sessionOrganization(env, context);
-		const audit = (action, extra = {}) => writeAudit(env, {
-			orgId: org.id, projectId: context.project.id, actorUserId: context.auth.userId,
-			action, ...extra,
-		});
 
 		if (group === "members") {
 			const denied = requireCapability(context, "project.members.manage");
 			if (denied) return denied;
 			if (request.method === "PATCH") {
-				await setProjectRole(env, context.project.id, org.id, rawId, body.role, context.auth.userId);
-				await audit("project.member.role_changed", {
-					targetType: "member", targetId: rawId, metadata: { project_role: { from: null, to: body.role } },
-				});
-				return json({ ok: true });
+				const parsed = await readMutationBody();
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const unknown = Object.keys(body).filter((key) => ![
+					"role", "access_starts_at", "access_expires_at",
+				].includes(key));
+				if (unknown.length) throw new OrgError("unknown_member_field", `Unknown member field: ${unknown[0]}.`);
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.members.manage",
+					{ action: "project.member.role_changed", targetType: "member", targetId: rawId },
+					(intent) => updateProjectRole(
+						env, context.project.id, org.id, rawId, body.role, request.headers.get("if-match"), body,
+						context.auth.userId, { auditIntent: intent },
+					),
+					(result) => ({
+						outcome: result.changed ? "ok" : "noop",
+						reason: result.changed ? null : "no_change",
+						metadata: auditDiff(
+							{ project_role: result.previous_role },
+							{ project_role: result.member.role },
+						),
+					}),
+				);
+				return json({ ok: true, changed: mutation.changed, member: mutation.member });
 			}
 			if (request.method === "DELETE") {
-				await removeProjectMember(env, context.project.id, rawId);
-				await audit("project.member.removed", { targetType: "member", targetId: rawId });
-				return json({ ok: true });
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.members.manage",
+					{ action: "project.member.removed", targetType: "member", targetId: rawId },
+					(intent) => removeProjectMember(
+						env, context.project.id, rawId, request.headers.get("if-match"), { auditIntent: intent },
+					),
+					(result) => ({
+						outcome: result.removed ? "ok" : "noop",
+						reason: result.removed ? null : "already_removed",
+						metadata: result.removed
+							? auditDiff({ project_role: result.previous_role }, { project_role: null })
+							: null,
+					}),
+				);
+				return json({ ok: true, removed: mutation.removed, already_removed: mutation.already_removed });
 			}
 		}
 
@@ -2722,25 +4030,90 @@ async function handleSettingsMemberRoutes(request, env, url) {
 			const denied = requireCapability(context, "org.members.manage");
 			if (denied) return denied;
 			if (request.method === "PATCH") {
-				await setOrganizationRole(env, org.id, rawId, body.role);
-				await audit("org.member.role_changed", {
-					targetType: "member", targetId: rawId, metadata: { org_role: { from: null, to: body.role } },
-				});
-				return json({ ok: true });
+				const parsed = await readMutationBody();
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const unknown = Object.keys(body).filter((key) => ![
+					"role", "access_starts_at", "access_expires_at",
+				].includes(key));
+				if (unknown.length) throw new OrgError("unknown_member_field", `Unknown member field: ${unknown[0]}.`);
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "org.members.manage",
+					{ orgId: org.id, projectId: null, action: "org.member.role_changed", targetType: "member", targetId: rawId },
+					(intent) => setOrganizationRole(
+						env, org.id, rawId, body.role, request.headers.get("if-match"), body,
+						context.auth.userId, { auditIntent: intent },
+					),
+					(result) => ({
+						outcome: result.changed ? "ok" : "noop",
+						reason: result.changed ? null : "no_change",
+						metadata: auditDiff(
+							{ org_role: result.previous_role },
+							{ org_role: result.member.role },
+						),
+					}),
+				);
+				return json({ ok: true, changed: mutation.changed, member: mutation.member });
 			}
 			if (request.method === "DELETE") {
-				await removeOrganizationMember(env, org.id, rawId);
-				await audit("org.member.removed", { targetType: "member", targetId: rawId });
-				return json({ ok: true });
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "org.members.manage",
+					{ orgId: org.id, projectId: null, action: "org.member.removed", targetType: "member", targetId: rawId },
+					(intent) => removeOrganizationMember(
+						env, org.id, rawId, request.headers.get("if-match"), { auditIntent: intent },
+					),
+					(result) => ({
+						outcome: result.removed ? "ok" : "noop",
+						reason: result.removed ? null : "already_removed",
+						metadata: result.removed
+							? auditDiff({ org_role: result.previous_role }, { org_role: null })
+							: null,
+					}),
+				);
+				return json({ ok: true, removed: mutation.removed, already_removed: mutation.already_removed });
 			}
 		}
 
 		if (group === "invitations") {
 			const denied = requireCapability(context, "org.members.manage");
 			if (denied) return denied;
+			if (request.method === "POST" && sub === "resend") {
+				const inviteRateKeys = [
+					`invite:actor:${context.auth.userId}`,
+					`invite:org:${org.id}`,
+					`invite:ip:${clientIp(request)}`,
+				];
+				for (const key of inviteRateKeys) {
+					if (!(await allowRate(env.AUTH_LIMITER, key))) return tooMany();
+				}
+				const result = await runContextAuditedMutation(
+					request, env, ctx, context, "org.members.manage",
+					{ orgId: org.id, action: "org.invitation.resent", targetType: "invitation", targetId: rawId },
+					(intent) => resendInvitation(env, {
+						orgId: org.id,
+						invitationId: rawId,
+						invitedByUserId: context.auth.userId,
+						origin: new URL(request.url).origin,
+						auditIntent: intent,
+					}),
+					(created) => ({
+						targetId: created.invitation.id,
+						metadata: { status: { from: "pending", to: "pending" } },
+					}),
+				);
+				const { replaced_invitation_ids: _replaced, expired_invitation_count: _expired, ...created } = result;
+				ctx?.waitUntil?.(processInvitationEmailOutbox(env, { limit: 5 }).catch((error) => {
+					console.warn("invitation resend email dispatch failed:", error?.message ?? error);
+				}));
+				return json({ ok: true, ...created }, 201);
+			}
 			if (request.method === "DELETE") {
-				await revokeInvitation(env, org.id, rawId);
-				await audit("org.invitation.revoked", { targetType: "invitation", targetId: rawId });
+				await runContextAuditedMutation(
+					request, env, ctx, context, "org.members.manage",
+					{ orgId: org.id, action: "org.invitation.revoked", targetType: "invitation", targetId: rawId },
+					(intent) => revokeInvitation(env, org.id, rawId, { auditIntent: intent }),
+					() => ({ metadata: { status: { from: "pending", to: "revoked" } } }),
+				);
 				return json({ ok: true });
 			}
 		}
@@ -2749,23 +4122,102 @@ async function handleSettingsMemberRoutes(request, env, url) {
 			const denied = requireCapability(context, "project.categories.edit");
 			if (denied) return denied;
 			if (request.method === "PATCH" && sub === "status") {
-				await setProjectCategoryStatus(env, { projectId: context.project.id, categoryId: rawId, status: body.status });
-				await audit("project.category.status_changed", {
-					targetType: "category", targetId: rawId, metadata: { status: { from: null, to: body.status } },
-				});
-				return json({ ok: true });
+				const parsed = await readMutationBody();
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const unknown = Object.keys(body).filter((key) => key !== "status");
+				if (unknown.length) throw new OrgError("unknown_category_field", `Unknown category field: ${unknown[0]}.`);
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.categories.edit",
+					{ action: "project.category.status_changed", targetType: "category", targetId: rawId },
+					(intent) => setProjectCategoryStatus(env, {
+						projectId: context.project.id,
+						categoryId: rawId,
+						status: body.status,
+						expectedRevision: request.headers.get("if-match"),
+						actorUserId: context.auth.userId,
+						auditIntent: intent,
+					}),
+					(result) => ({
+						outcome: result.changed ? "ok" : "noop",
+						reason: result.changed ? null : "no_change",
+						metadata: result.changed
+							? { status: { from: result.previousCategory.status, to: result.category.status } }
+							: null,
+					}),
+				);
+				return json({ ok: true, changed: mutation.changed, category: mutation.category });
+			}
+			if (request.method === "POST" && sub === "reassign") {
+				const parsed = await readMutationBody();
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const unknown = Object.keys(body).filter((key) => key !== "target_category_id");
+				if (unknown.length) throw new OrgError("unknown_category_field", `Unknown category field: ${unknown[0]}.`);
+				const targetCategoryId = body.target_category_id === undefined || body.target_category_id === null
+					? null
+					: String(body.target_category_id);
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.categories.edit",
+					{ action: "project.category.reassigned", targetType: "category", targetId: rawId },
+					(intent) => reassignProjectCategory(env, {
+						projectId: context.project.id,
+						categoryId: rawId,
+						targetCategoryId,
+						expectedRevision: request.headers.get("if-match"),
+						actorUserId: context.auth.userId,
+						auditIntent: intent,
+					}),
+					(result) => ({ metadata: {
+						replacement_category_id: { from: rawId, to: targetCategoryId },
+						assignment_count: {
+							from: result.reassigned.nodes + result.reassigned.pages
+								+ result.reassigned.candidates + result.reassigned.atoms,
+							to: 0,
+						},
+					} }),
+				);
+				return json({ ok: true, ...mutation });
 			}
 			if (request.method === "PATCH") {
-				await updateProjectCategory(env, {
-					projectId: context.project.id, categoryId: rawId, name: body.name, description: body.description,
-				});
-				await audit("project.category.updated", { targetType: "category", targetId: rawId });
-				return json({ ok: true });
+				const parsed = await readMutationBody();
+				if (parsed.response) return parsed.response;
+				const body = parsed.body;
+				const unknown = Object.keys(body).filter((key) => !["name", "description", "color_token"].includes(key));
+				if (unknown.length) throw new OrgError("unknown_category_field", `Unknown category field: ${unknown[0]}.`);
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.categories.edit",
+					{ action: "project.category.updated", targetType: "category", targetId: rawId },
+					(intent) => updateProjectCategory(env, {
+						projectId: context.project.id,
+						categoryId: rawId,
+						name: body.name,
+						description: body.description,
+						colorToken: body.color_token,
+						expectedRevision: request.headers.get("if-match"),
+						actorUserId: context.auth.userId,
+						auditIntent: intent,
+					}),
+					(result) => ({
+						outcome: result.changed ? "ok" : "noop",
+						reason: result.changed ? null : "no_change",
+						metadata: auditDiff(result.previousCategory, result.category),
+					}),
+				);
+				return json({ ok: true, changed: mutation.changed, category: mutation.category });
 			}
 			if (request.method === "DELETE") {
-				await deleteProjectCategory(env, { projectId: context.project.id, categoryId: rawId });
-				await audit("project.category.deleted", { targetType: "category", targetId: rawId });
-				return json({ ok: true });
+				const mutation = await runContextAuditedMutation(
+					request, env, ctx, context, "project.categories.edit",
+					{ action: "project.category.deleted", targetType: "category", targetId: rawId },
+					(intent) => deleteProjectCategory(env, {
+						projectId: context.project.id,
+						categoryId: rawId,
+						expectedRevision: request.headers.get("if-match"),
+						auditIntent: intent,
+					}),
+				);
+				return json({ ok: true, deleted: mutation.deleted });
 			}
 		}
 		return null;
@@ -2780,7 +4232,10 @@ async function handleSettingsMemberRoutes(request, env, url) {
  * silently point a user's memory events somewhere new).
  */
 async function handleWebhookRoutes(request, env, ctx, url) {
-	const context = await requireSessionProject(request, env);
+	const capability = request.method === "GET"
+		? "project.integrations.view"
+		: "project.integrations.manage";
+	const context = await requireSessionProject(request, env, capability);
 	if (context.response) return context.response;
 	const userId = context.memoryOwnerUserId;
 
@@ -2788,8 +4243,27 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 		return json({ webhooks: await listWebhooks(env, userId) });
 	}
 	if (request.method === "POST" && url.pathname === "/v1/webhooks") {
-		const body = await request.json().catch(() => ({}));
-		const result = await createWebhook(env, userId, body);
+		const parsed = await readSmallJsonObject(request, "/v1/webhooks");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const unknown = Object.keys(body).filter((key) => ![
+			"name", "url", "events", "metadataOnly", "metadata_only",
+		].includes(key));
+		if (unknown.length) return json({ error: "unknown_webhook_field", message: `Unknown webhook field: ${unknown[0]}.` }, 400);
+		const result = await runContextAuditedMutation(
+			request, env, ctx, context, "project.integrations.manage",
+			{ action: "project.webhook.created", targetType: "webhook" },
+			(intent) => createWebhook(env, userId, body, { auditIntent: intent }),
+			(created) => ({
+				outcome: created.error ? "noop" : "ok",
+				reason: created.error ? "invalid_or_limited" : null,
+				targetId: created.webhook?.id ?? null,
+				metadata: created.webhook ? {
+					status: { from: null, to: "active" },
+					metadata_only: { from: null, to: created.webhook.metadata_only },
+				} : null,
+			}),
+		);
 		if (result.error) return json({ error: "invalid_webhook", message: result.error }, 400);
 		return json(result, 201);
 	}
@@ -2799,21 +4273,47 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 	if (!id) return json({ error: "not found" }, 404);
 
 	if (request.method === "DELETE" && !sub) {
-		return json(await deleteWebhook(env, userId, decodeURIComponent(id)));
+		const webhookId = decodeURIComponent(id);
+		const result = await runContextAuditedMutation(
+			request, env, ctx, context, "project.integrations.manage",
+			{ action: "project.webhook.deleted", targetType: "webhook", targetId: webhookId },
+			(intent) => deleteWebhook(env, userId, webhookId, { auditIntent: intent }),
+			(mutation) => ({
+				outcome: mutation.deleted ? "ok" : "noop",
+				reason: mutation.deleted ? null : "already_deleted_or_missing",
+				metadata: mutation.deleted ? { status: { from: "active", to: null } } : null,
+			}),
+		);
+		return json(result);
 	}
 	if (request.method === "GET" && sub === "deliveries") {
 		return json({ deliveries: await listDeliveries(env, userId, decodeURIComponent(id)) });
 	}
 	if (request.method === "POST" && sub === "test") {
-		// A synthetic event so a receiver can be verified before anything real
-		// flows. Uses the exact signing and delivery path.
-		await emitWebhookEvent(env, (p) => ctx.waitUntil(p), userId, "memory.added", {
-			source: "webhook_test",
-			receipt_id: null,
-			counts: { nodes: 1, updated_nodes: 0, slices: 1, events: 0, edges: 0 },
-			new_node_labels: ["Webhook test"],
-		});
-		return json({ ok: true, sent: true });
+		const webhookId = decodeURIComponent(id);
+		const mutation = await runContextAuditedMutation(
+			request, env, ctx, context, "project.integrations.manage",
+			{ action: "project.webhook.tested", targetType: "webhook", targetId: webhookId },
+			(intent) => queueAuditedWebhookTest(
+				env,
+				(promise) => ctx.waitUntil(promise),
+				userId,
+				webhookId,
+				{
+					source: "webhook_test",
+					receipt_id: null,
+					counts: { nodes: 1, updated_nodes: 0, slices: 1, events: 0, edges: 0 },
+					new_node_labels: ["Webhook test"],
+				},
+				intent,
+			),
+			(result) => ({
+				outcome: result.queued ? "ok" : "noop",
+				reason: result.queued ? null : "webhook_not_found",
+			}),
+		);
+		if (mutation.notFound) return json({ error: "not_found" }, 404);
+		return json({ ok: true, sent: true, delivery_id: mutation.deliveryId });
 	}
 	return json({ error: "not found" }, 404);
 }
@@ -2827,6 +4327,7 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 async function handleMemoryDeleteRoutes(request, env, url) {
 	const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
 		requiredScope: MEMORY_WRITE_SCOPE,
+		requiredCapability: "project.memory.delete",
 	});
 	if (auth.response) return auth.response;
 	if (!(await allowRate(env.SAVE_LIMITER, `del:${auth.userId}`))) return tooMany();
@@ -2877,7 +4378,9 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 
 async function handleCandidateRoutes(request, env, url, ctx) {
 	if (request.method === "GET" && url.pathname === "/v1/candidates") {
-		const auth = await requireControlUser(request, env, url.searchParams.get("userId"));
+		const auth = await requireControlUser(request, env, url.searchParams.get("userId"), {
+			requiredCapability: "project.memory.read",
+		});
 		if (auth.response) return auth.response;
 		const status = url.searchParams.get("status") || "pending";
 		const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 250);
@@ -2887,9 +4390,17 @@ async function handleCandidateRoutes(request, env, url, ctx) {
 	if (request.method !== "POST") return json({ error: "not found" }, 404);
 	const match = url.pathname.match(/^\/v1\/candidates\/([^/]+)\/(promote|reject|merge)$/);
 	if (!match) return json({ error: "not found" }, 404);
-	const body = await request.json().catch(() => ({}));
+	const preliminary = await preauthorizeMemoryBody(request, env, {
+		allowTokenAuth: false,
+		requiredCapability: "project.memory.write",
+	});
+	if (preliminary.response) return preliminary.response;
+	const parsed = await readSmallJsonObject(request, url.pathname);
+	if (parsed.response) return parsed.response;
+	const body = parsed.body;
 	const auth = await requireControlUser(request, env, body.userId, {
 		scopeInput: body.memoryScope ?? body.sourceScope,
+		requiredCapability: "project.memory.write",
 	});
 	if (auth.response) return auth.response;
 

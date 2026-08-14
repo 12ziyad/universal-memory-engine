@@ -107,12 +107,21 @@ describe("memory rules module", () => {
 describe("/v1/rules routes", () => {
 	it("saves and returns rules through the API", async () => {
 		const id = userId("api");
+		const initial = await httpFetch(`/v1/rules?userId=${id}`, { headers: { "x-api-key": env.API_KEY } });
+		const initialBody = await initial.json();
+		expect(initialBody.rules_version).toMatch(/^rules_v1_[a-f0-9]{48}$/);
 		const put = await httpFetch("/v1/rules", {
-			...authedJson({ userId: id, rules: { excludes: ["politics"], customInstructions: "Never save politics." } }),
+			...authedJson({
+				userId: id,
+				expected_version: initialBody.rules_version,
+				rules: { excludes: ["politics"], customInstructions: "Never save politics." },
+			}),
 			method: "PUT",
 		});
 		expect(put.status).toBe(200);
-		expect((await put.json()).rules.excludes).toEqual(["politics"]);
+		const saved = await put.json();
+		expect(saved.rules.excludes).toEqual(["politics"]);
+		expect(saved.rules_version).not.toBe(initialBody.rules_version);
 
 		const get = await httpFetch(`/v1/rules?userId=${id}`, { headers: { "x-api-key": env.API_KEY } });
 		expect(get.status).toBe(200);

@@ -641,6 +641,21 @@ export async function applyGates(
 	// Per-user memory rules (includes/excludes) — deterministic enforcement for
 	// every auto-lane save, whatever the model proposed.
 	const rules = await resolveAdmissionRules(env, userId, opts.rules);
+	// Project categories are a server-authoritative optional filing label,
+	// separate from the built-in semantic `category`. A model may return the
+	// stable id or offered slug; anything else becomes NULL rather than being
+	// coerced to built-in `other` and pretending the custom assignment worked.
+	const projectCategories = Array.isArray(rules.projectCategories) ? rules.projectCategories : [];
+	const projectCategoryByKey = new Map();
+	for (const category of projectCategories) {
+		if (category?.id) projectCategoryByKey.set(String(category.id), category.id);
+		if (category?.slug) projectCategoryByKey.set(catKey(category.slug), category.id);
+	}
+	const projectCategoryIdFor = (obj) => {
+		const raw = obj?.project_category_id ?? obj?.project_category;
+		if (typeof raw !== "string" || !raw.trim()) return null;
+		return projectCategoryByKey.get(raw.trim()) ?? projectCategoryByKey.get(catKey(raw)) ?? null;
+	};
 	// Per-user density preference (Settings → exhaustive) lowers the floor too;
 	// a per-request setting always wins when present.
 	if (!manual && (settings?.captureDensity ?? null) === null && rules.captureDensity === "dense") {
@@ -746,7 +761,7 @@ export async function applyGates(
 	const isSuppressed = (kind, label) => suppressionByKindKey.has(`${kind}:${canonicalKey(label)}`);
 
 	/** Create a brand-new node and make it resolvable for the rest of this batch. */
-	function createNode(label, category, role = null, state = null, auto = false) {
+	function createNode(label, category, role = null, state = null, auto = false, projectCategoryId = null) {
 		const id = newId("node");
 		const canonicalCategory = canonicalizeCategory(category) ?? "other";
 		plan.newNodes.push({
@@ -767,6 +782,7 @@ export async function applyGates(
 			cluster: clusterForMemory({ label, category: canonicalCategory }),
 			project_id: projectScope.projectId,
 			project_name: projectScope.projectName,
+			project_category_id: projectCategoryId,
 		});
 		resolved.set(normalizeLabel(label), id);
 		const created = {
@@ -801,12 +817,12 @@ export async function applyGates(
 	 * model emitted an event/slice but forgot the node (anti-orphan). Refuses to
 	 * synthesize a node from a pronoun/filler or a status phrase.
 	 */
-	function resolveOrCreateRef(ref, hintCategory) {
+	function resolveOrCreateRef(ref, hintCategory, projectCategoryId = null) {
 		const r = resolveRef(ref);
 		if (r) return r;
 		if (!ref || isJunkLabel(ref) || looksLikeStatus(ref)) return null;
 		if (isSuppressed("node", ref)) return null;
-		const id = createNode(ref, hintCategory ?? "other", null, null, true);
+		const id = createNode(ref, hintCategory ?? "other", null, null, true, projectCategoryId);
 		return { id };
 	}
 
@@ -824,7 +840,7 @@ export async function applyGates(
 			reject(obj, "suppressed_blocked");
 			return true;
 		}
-		const node = resolveOrCreateRef(durable.label, durable.category);
+		const node = resolveOrCreateRef(durable.label, durable.category, projectCategoryIdFor(obj));
 		if (!node) {
 			reject(obj, "durable_signal_no_node");
 			return true;
@@ -941,6 +957,7 @@ export async function applyGates(
 			created_at: now,
 			project_id: projectScope.projectId,
 			project_name: projectScope.projectName,
+			project_category_id: meta.projectCategoryId ?? null,
 		});
 	}
 
@@ -1070,6 +1087,7 @@ export async function applyGates(
 					roleGuess: category,
 					reason: manual ? "manual_low_confidence_rejected" : "low_confidence_downgraded",
 					evidence: messageEvidenceFor(obj),
+					projectCategoryId: projectCategoryIdFor(obj),
 				});
 				reject(obj, manual ? "low_confidence" : "low_confidence_downgraded");
 				continue;
@@ -1094,12 +1112,13 @@ export async function applyGates(
 						roleGuess: category,
 						reason: "node_without_detail",
 						evidence: messageEvidenceFor(obj),
+						projectCategoryId: projectCategoryIdFor(obj),
 					});
 				}
 				reject(obj, "node_without_detail");
 				continue;
 			}
-			createNode(obj.label, category, obj.role, obj.state);
+			createNode(obj.label, category, obj.role, obj.state, false, projectCategoryIdFor(obj));
 			continue;
 		}
 
@@ -1365,6 +1384,7 @@ export async function applyGates(
 				reason: obj.reason ?? "model_candidate",
 				evidence: messageEvidenceFor(obj),
 				possibleExistingNodeId: obj.matches_existing ?? obj.possible_existing_node_id ?? null,
+				projectCategoryId: projectCategoryIdFor(obj),
 			});
 			continue;
 		}

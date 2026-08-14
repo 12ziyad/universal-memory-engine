@@ -13,6 +13,7 @@
  */
 
 import { newId } from "../lib/ids.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { resolveAdmissionRules } from "./admission.js";
 import { rulesAllowText } from "./rules.js";
@@ -28,6 +29,8 @@ const MAX_ROWS_PER_WRITE = 40;
  * recallable through the staging bridge until the job settles.
  */
 export async function stageMemoryText(env, userId, {
+	accountUserId = null,
+	managedProjectId = null,
 	jobId,
 	sourcePacketId,
 	lane,
@@ -56,7 +59,7 @@ export async function stageMemoryText(env, userId, {
 	const now = Date.now();
 	const project = normalizeProjectScope({ projectId, projectName });
 	try {
-		await env.DB.batch(rows.map((row) => env.DB.prepare(
+		const statements = rows.map((row) => env.DB.prepare(
 			`INSERT INTO staged_memories
 				(id, user_id, job_id, source_packet_id, lane, message_id, text, created_at, settled_at,
 				 project_id, project_name)
@@ -72,9 +75,15 @@ export async function stageMemoryText(env, userId, {
 			now,
 			project.projectId,
 			project.projectName,
-		)));
+		));
+		if (managedProjectId) statements.unshift(managedMutationGuardStatement(env, {
+			accountUserId,
+			projectId: managedProjectId,
+		}));
+		await env.DB.batch(statements);
 		return { staged: rows.length, ruleFiltered };
 	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) throw error;
 		console.warn("stage text failed:", error?.message ?? error);
 		return { staged: 0, ruleFiltered, error: String(error?.message ?? error) };
 	}

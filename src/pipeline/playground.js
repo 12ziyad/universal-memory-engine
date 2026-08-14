@@ -16,11 +16,13 @@
 
 import { getConfig } from "../config.js";
 import { newId } from "../lib/ids.js";
+import { activeCategoryRules } from "../lib/project_categories.js";
 import { responseText } from "./llm.js";
 import { runObserveMessagesCommand, runRecallCommand } from "./commands.js";
 import { getMemoryRules, rulesRejection } from "./rules.js";
-import { threadRefusal, threadRulesFrom } from "./playground_settings.js";
+import { normalizeThreadSettings, threadRefusal, threadRulesFrom } from "./playground_settings.js";
 import { runAi } from "../lib/ai_meter.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_TURNS = 12;
@@ -146,7 +148,7 @@ function parseJson(value, fallback) {
 }
 
 /** Create a thread, or report the cap without creating one. */
-export async function createThread(env, userId, title = "New chat") {
+export async function createThread(env, userId, title = "New chat", lifecycle = {}) {
 	const { maxThreads } = playgroundLimits(env);
 	const threads = await listThreads(env, userId);
 	if (threads.length >= maxThreads) {
@@ -159,9 +161,23 @@ export async function createThread(env, userId, title = "New chat") {
 	}
 	const now = Date.now();
 	const id = newId("pgthread");
-	await env.DB.prepare(
-		"INSERT INTO playground_threads (id, user_id, title, settings_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-	).bind(id, userId, String(title).slice(0, 80), null, now, now).run();
+	const statement = env.DB.prepare(
+		`INSERT INTO playground_threads
+		 (id, user_id, account_user_id, managed_project_id, title, settings_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	).bind(
+		id, userId, lifecycle.accountUserId ?? null, lifecycle.managedProjectId ?? null,
+		String(title).slice(0, 80), null, now, now,
+	);
+	if (lifecycle.managedProjectId) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: lifecycle.accountUserId ?? null,
+				projectId: lifecycle.managedProjectId,
+			}),
+			statement,
+		]);
+	} else await statement.run();
 	return { ok: true, thread: { id, title, created_at: now, updated_at: now, message_count: 0 } };
 }
 
@@ -174,12 +190,26 @@ export async function deleteThread(env, userId, threadId) {
 	return { ok: true, deleted: threadId };
 }
 
-async function storeMessage(env, userId, threadId, role, content, extraction = null) {
+async function storeMessage(env, userId, threadId, role, content, extraction = null, lifecycle = {}) {
 	const id = newId("pgmsg");
 	const now = Date.now();
-	await env.DB.prepare(
-		"INSERT INTO playground_messages (id, thread_id, user_id, role, content, extraction_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-	).bind(id, threadId, userId, role, content, extraction ? JSON.stringify(extraction) : null, now).run();
+	const statement = env.DB.prepare(
+		`INSERT INTO playground_messages
+		 (id, thread_id, user_id, account_user_id, managed_project_id, role, content, extraction_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	).bind(
+		id, threadId, userId, lifecycle.accountUserId ?? null, lifecycle.managedProjectId ?? null,
+		role, content, extraction ? JSON.stringify(extraction) : null, now,
+	);
+	if (lifecycle.managedProjectId) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: lifecycle.accountUserId ?? null,
+				projectId: lifecycle.managedProjectId,
+			}),
+			statement,
+		]);
+	} else await statement.run();
 	return { id, role, content, created_at: now, extraction };
 }
 
@@ -349,6 +379,17 @@ async function chatReply(env, messages) {
 }
 
 export async function playgroundTurn(env, ctx, userId, input = {}) {
+	const lifecycle = {
+		accountUserId: input.accountUserId ?? input.account_user_id ?? null,
+		managedProjectId: input.managedProjectId ?? input.managed_project_id ?? null,
+	};
+	const memoryScope = lifecycle.managedProjectId ? {
+		memoryUserId: userId,
+		ownerUserId: userId,
+		accountUserId: lifecycle.accountUserId,
+		managedProjectId: lifecycle.managedProjectId,
+		externalUserId: lifecycle.accountUserId ?? userId,
+	} : undefined;
 	const limits = playgroundLimits(env);
 	const message = String(input.message ?? "").trim().slice(0, MAX_MESSAGE_CHARS);
 	if (!message) return { ok: false, reason: "empty", message: "Type something to send." };
@@ -365,18 +406,23 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 
 	let thread = await getThread(env, userId, input.threadId);
 	if (!thread) {
-		const created = await createThread(env, userId, message.slice(0, 60));
+		const created = await createThread(env, userId, message.slice(0, 60), lifecycle);
 		if (!created.ok) return { ok: true, capped: "threads", message: created.message };
 		thread = { ...created.thread, settings_json: null };
 	}
 
 	const history = await getThreadMessages(env, userId, thread.id);
-	const userMessage = await storeMessage(env, userId, thread.id, "user", message);
+	const userMessage = await storeMessage(env, userId, thread.id, "user", message, null, lifecycle);
+	// Direct-test seam only (functions cannot cross the JSON HTTP boundary): it
+	// deterministically models erasure after the user message but before recall,
+	// chat and the late assistant write finish.
+	if (typeof input._testAfterUserMessage === "function") await input._testAfterUserMessage();
 
 	// Recall through the shared command, exactly as a connected client does.
 	const recall = await runRecallCommand(env, userId, message, {
 		conversationId: `playground:${thread.id}`,
 		threadId: thread.id,
+		memoryScope,
 	});
 	const reply = await chatReply(env, buildChatMessages(history, message, String(recall.context ?? "").trim()));
 
@@ -391,14 +437,26 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 	// reply still goes out — losing the conversation helps nobody — but nothing
 	// is captured, and the receipt says so rather than staying silent.
 	let accountRules = null;
+	let projectCategories = [];
 	let rulesUnavailable = false;
 	try {
 		accountRules = await getMemoryRules(env, userId, { failClosed: true });
+		if (input.managedProjectId) {
+			projectCategories = await activeCategoryRules(env, {
+				projectId: input.managedProjectId,
+				memoryOwnerUserId: userId,
+				legacy: accountRules.customCategories ?? [],
+			});
+		}
 	} catch (error) {
-		console.warn("playground rules unavailable:", error?.message ?? error);
+		// Category policy is part of the effective capture policy. If either
+		// store is unreadable, the reply may still succeed but capture must not
+		// guess or silently fall back to uncategorized writes.
+		console.warn("playground rules/categories unavailable:", error?.message ?? error);
 		rulesUnavailable = true;
 	}
 	const threadSettings = parseJson(thread.settings_json, null);
+	const normalizedThreadSettings = normalizeThreadSettings(threadSettings ?? {});
 	// The chat's own policy is enforced HERE, at the Playground's own boundary,
 	// and the account's rules are enforced AGAIN by the pipeline behind it. That
 	// ordering is what keeps this a sandbox: a per-chat panel can only ever
@@ -409,6 +467,7 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 	const rules = rulesUnavailable
 		? null
 		: threadRulesFrom(accountRules, threadSettings) ?? accountRules;
+	if (rules) rules.projectCategories = projectCategories;
 	const capture = refusal ? null : await runObserveMessagesCommand(env, ctx, userId, [
 		{ id: userMessage.id, role: "user", content: message, ts: userMessage.created_at },
 	], {
@@ -416,12 +475,28 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		waitBudgetMs: Number(env.PLAYGROUND_WAIT_MS ?? getConfig(env).saveWaitBudgetMs),
 		conversationId: `playground:${thread.id}`,
 		threadId: thread.id,
+		memoryScope,
 		source: "ingest",
 		sourceMode: "playground",
 		// `_test` injects a canned extraction proposal for deterministic specs,
 		// exactly as /v1/save and /v1/ingest do. Production never sends it, and
 		// it only replaces the model's proposal — every gate still runs.
-		overrides: { ...(input.overrides ?? {}), ...(rules ? { rules } : {}) },
+		overrides: {
+			...(input.overrides ?? {}),
+			...(rules ? {
+				rules,
+				rulePolicy: {
+					schema: "itsuki.admission-policy/v1",
+					mode: "managed_narrow",
+					layers: [{
+						includes: normalizedThreadSettings.includeTopics,
+						excludes: normalizedThreadSettings.excludeTopics,
+						customCategories: normalizedThreadSettings.customCategories,
+					}],
+					refresh_project_categories: Boolean(lifecycle.managedProjectId),
+				},
+			} : {}),
+		},
 	});
 
 	const items = capture?.receipt ? await extractionItems(env, userId, capture.receipt) : [];
@@ -443,7 +518,7 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 	await env.DB.prepare(
 		"UPDATE playground_messages SET extraction_json = ? WHERE id = ? AND user_id = ?",
 	).bind(JSON.stringify(extraction), userMessage.id, userId).run();
-	const assistantMessage = await storeMessage(env, userId, thread.id, "assistant", reply);
+	const assistantMessage = await storeMessage(env, userId, thread.id, "assistant", reply, null, lifecycle);
 	await env.DB.prepare("UPDATE playground_threads SET updated_at = ? WHERE id = ? AND user_id = ?")
 		.bind(Date.now(), thread.id, userId).run();
 

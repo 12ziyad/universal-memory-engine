@@ -1,1 +1,4 @@
 API_KEY=replace-with-a-local-dev-key
+# At least 32 random characters. Encrypts invitation-email outbox payloads;
+# never reuse the API key and never commit the real value.
+INVITATION_EMAIL_KEY=replace-with-a-separate-random-32-byte-secret

@@ -144,6 +144,27 @@ describe("authoritative ingest contract", () => {
 		});
 	});
 
+	it("rejects duplicate implicit identities before any durable ingest work", () => {
+		for (const messages of [
+			["same shorthand", "same shorthand"],
+			[
+				{ role: "USER", content: "  same object  " },
+				{ role: "user", content: "same object" },
+			],
+		]) {
+			expect(validateIngestBody({ messages })).toMatchObject({
+				status: 422,
+				error: "invalid_ingest_message",
+				field: "messages[1]",
+				actual: "duplicate_generated_id",
+			});
+		}
+		expect(validateIngestBody({ messages: [
+			{ role: "user", content: "same", id: "first" },
+			{ role: "user", content: "same", id: "second" },
+		] })).toBeNull();
+	});
+
 	it("counts astral Unicode as code points while counting serialized HTTP bytes as UTF-8", () => {
 		const content = "🪁".repeat(4_000);
 		expect(content.length).toBe(8_000);

@@ -12,6 +12,7 @@ import { getCurrentSlices, getNodeEvents } from "../lib/db.js";
 import { clusterForMemory } from "./clusters.js";
 import { responseText } from "./llm.js";
 import { runAi } from "../lib/ai_meter.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 
 // Planner-written bookkeeping events ("updated: was X → now Y"). They belong in
 // the node's timeline, never in its summary.
@@ -109,7 +110,7 @@ function topByUpdated(items, limit) {
 		.slice(0, limit);
 }
 
-async function refreshProfile(env, userId, sourceJobId = null) {
+async function refreshProfile(env, userId, sourceJobId = null, lifecycle = {}) {
 	const [nodesRes, pagesRes] = await env.DB.batch([
 		env.DB.prepare(
 			`SELECT id, label, category, state, summary, cluster, updated_at, last_seen_at, heat_score
@@ -192,7 +193,7 @@ async function refreshProfile(env, userId, sourceJobId = null) {
 		summary: item.summary,
 	}));
 
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO memory_profiles
 			(user_id, profile_json, cluster_hints_json, family_summaries_json, source_job_id, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -211,9 +212,22 @@ async function refreshProfile(env, userId, sourceJobId = null) {
 			sourceJobId,
 			now,
 			now,
-		)
-		.run();
+		);
+	if (lifecycle.managedProjectId) {
+		await env.DB.batch([
+			managedMutationGuardStatement(env, {
+				accountUserId: lifecycle.accountUserId ?? null,
+				projectId: lifecycle.managedProjectId,
+			}),
+			statement,
+		]);
+	} else await statement.run();
 	return { profile, clusterHints: clusterHints.length, familySummaries: familySummaries.length };
+}
+
+/** Rebuild the project-memory rollup after an explicit deletion workflow. */
+export async function refreshMemoryProfile(env, userId, sourceJobId = null, lifecycle = {}) {
+	return refreshProfile(env, userId, sourceJobId, lifecycle);
 }
 
 export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) {
@@ -244,11 +258,18 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 					...slices.map((s) => s.id),
 					...withoutAuditEvents(events).map((e) => e.id),
 				].slice(0, 40));
-				await env.DB.prepare(
+				const statement = env.DB.prepare(
 					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-				)
-					.bind(summary, cluster, sources, Date.now(), nodeId, userId)
-					.run();
+				).bind(summary, cluster, sources, Date.now(), nodeId, userId);
+				if (opts.managedProjectId) {
+					await env.DB.batch([
+						managedMutationGuardStatement(env, {
+							accountUserId: opts.accountUserId ?? null,
+							projectId: opts.managedProjectId,
+						}),
+						statement,
+					]);
+				} else await statement.run();
 				refreshed++;
 				if (node.cluster !== cluster) clustered++;
 			}
@@ -260,9 +281,17 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 				const sorted = [...slices].sort((a, b) => a.created_at - b.created_at);
 				const demote = sorted.slice(0, slices.length - config.sliceRollupThreshold);
 				for (const s of demote) {
-					await env.DB.prepare("UPDATE slices SET is_current = 0 WHERE id = ? AND user_id = ?")
-						.bind(s.id, userId)
-						.run();
+					const statement = env.DB.prepare("UPDATE slices SET is_current = 0 WHERE id = ? AND user_id = ?")
+						.bind(s.id, userId);
+					if (opts.managedProjectId) {
+						await env.DB.batch([
+							managedMutationGuardStatement(env, {
+								accountUserId: opts.accountUserId ?? null,
+								projectId: opts.managedProjectId,
+							}),
+							statement,
+						]);
+					} else await statement.run();
 					rolledUp++;
 				}
 			}
@@ -271,7 +300,7 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 			console.warn(`pass2 node ${nodeId} failed:`, err?.message ?? err);
 		}
 	}
-	const profile = await refreshProfile(env, userId, opts.jobId ?? null);
+	const profile = await refreshProfile(env, userId, opts.jobId ?? null, opts);
 	return {
 		ran: true,
 		refreshed,

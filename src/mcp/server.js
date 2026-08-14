@@ -230,7 +230,11 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				sourceId,
 				idempotencyKey,
 				memoryScope: projectBoundMemoryScope(authz, memoryScope),
-				overrides: { profile: "mcp", lightPath: true },
+				overrides: {
+					profile: "mcp",
+					lightPath: true,
+					...(authz.rules ? { rules: authz.rules } : {}),
+				},
 			});
 			return mcpResult(res);
 		},
@@ -275,6 +279,12 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				sourceId,
 				idempotencyKey,
 				memoryScope: projectBoundMemoryScope(authz, memoryScope),
+				...(authz.rules ? { rules: authz.rules } : {}),
+				...(authz.managedPolicy ? {
+					managedPolicy: true,
+					credentialRules: authz.credentialRules ?? null,
+					projectCategories: authz.projectCategories ?? [],
+				} : {}),
 			});
 			return mcpResult(res);
 		},

@@ -90,7 +90,10 @@ describe("the key rule", () => {
 	it("warns before the tab closes while a one-time key is in memory", () => {
 		expect(script).toContain("function installKeyGuard() {");
 		expect(script).toContain('window.addEventListener("beforeunload"');
-		expect(script).toContain("if (!S.oneTimeToken) return;");
+		// A one-time secret and an unsaved Settings draft are both browser-memory
+		// state that must not disappear on an accidental close.
+		expect(script).toContain("if (!S.oneTimeToken && !setHasUnsavedWork() && !setMutationBusy()");
+		expect(script).toContain("&& !PROJECT_CREATE.open && !ORG_CREATE.open) return;");
 		expect(script).toContain("installKeyGuard();");
 	});
 });

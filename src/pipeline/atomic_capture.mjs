@@ -68,6 +68,7 @@ Each atom must have exactly these fields:
 - source_message_id: one id from new_slice
 - evidence_quote: an exact, non-empty substring copied from that source message
 - raw_temporal_phrase: optional; only an exact temporal phrase copied from that same message
+- project_category: optional; one offered project filing slug, only when it clearly fits
 - cardinality: single|multi|unknown
 - confidence: number from 0 to 1
 
@@ -265,6 +266,20 @@ function invalidFieldReason(proposal) {
 	return null;
 }
 
+function projectCategoryIdFor(rules, proposal) {
+	const raw = typeof proposal?.project_category === "string"
+		? proposal.project_category.trim().toLocaleLowerCase("en-US")
+		: "";
+	if (!raw) return null;
+	for (const category of rules?.projectCategories ?? []) {
+		if (raw === String(category.id).toLocaleLowerCase("en-US")
+			|| raw === String(category.slug).toLocaleLowerCase("en-US")) {
+			return category.id;
+		}
+	}
+	return null;
+}
+
 /**
  * Validate and canonicalize model proposals. This is the trust boundary: the
  * model proposes strings; code binds every accepted atom to an exact, scrubbed
@@ -395,6 +410,7 @@ export async function normalizeAtomicCapture(parsed, options = {}) {
 			temporal: normalizeAtomicTemporal(rawTemporalPhrase, message),
 			cardinality: proposal.cardinality,
 			confidence: proposal.confidence,
+			projectCategoryId: projectCategoryIdFor(normalizedRules, proposal),
 		};
 		const existing = acceptedById.get(id);
 		if (existing) {

@@ -9,14 +9,14 @@
  */
 
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src";
 import { chatModel, playgroundLimits } from "../src/pipeline/playground.js";
 
-async function request(path, init = {}) {
+async function request(path, init = {}, runtimeEnv = env) {
 	const req = new Request(`http://example.com${path}`, init);
 	const ctx = createExecutionContext();
-	const res = await worker.fetch(req, env, ctx);
+	const res = await worker.fetch(req, runtimeEnv, ctx);
 	await waitOnExecutionContext(ctx);
 	return res;
 }
@@ -146,6 +146,142 @@ describe("a turn", () => {
 		expect(texts).toContain("Learning Kotlin for Android work");
 		expect(body.extraction.saved_total).toBeGreaterThan(0);
 		expect(body.extraction.receipt_id).toBeTruthy();
+	});
+
+	it("uses the selected project's active category and exposes it as a separate graph accent", async () => {
+		const me = await account("pg-project-category");
+		const created = await request("/v1/settings/categories", post({
+			name: "Customer success",
+			description: "Customer adoption and renewal work",
+			color_token: "teal",
+		}, me.cookie));
+		expect(created.status).toBe(201);
+		const category = (await created.json()).category;
+		const preview = await request("/v1/settings/rules/preview", post({
+			samples: ["Acme renewal is planned for October."],
+		}, me.cookie));
+		expect(preview.status).toBe(200);
+		expect(await preview.json()).toMatchObject({
+			active_category_count: 1,
+			results: [{
+				kept: true,
+				project_category: null,
+				project_category_reason: "preview_unavailable",
+			}],
+		});
+
+		const proposal = {
+			llmResponse: {
+				objects: [
+					{
+						kind: "node",
+						label: "Acme renewal",
+						category: "project",
+						project_category: category.slug,
+						confidence: 0.98,
+					},
+					{
+						kind: "slice",
+						on: "Acme renewal",
+						text: "Acme renewal is planned for October",
+						kind_detail: "plan",
+						confidence: 0.97,
+					},
+				],
+			},
+		};
+		const turn = await request("/v1/playground/chat", post({
+			message: "Acme renewal is planned for October.",
+			_test: proposal,
+		}, me.cookie));
+		expect(turn.status).toBe(200);
+		expect((await turn.json()).extraction.saved_total).toBeGreaterThan(0);
+
+		const stored = await env.DB.prepare(
+			"SELECT project_category_id FROM nodes WHERE user_id = ? AND label = ?",
+		).bind(me.user.id, "Acme renewal").first();
+		expect(stored?.project_category_id).toBe(category.id);
+
+		const archive = await request(`/v1/settings/categories/${encodeURIComponent(category.id)}/status`, {
+			method: "PATCH",
+			headers: {
+				cookie: me.cookie,
+				"content-type": "application/json",
+				"if-match": category.revision,
+			},
+			body: JSON.stringify({ status: "archived" }),
+		});
+		expect(archive.status).toBe(409);
+		expect(await archive.json()).toMatchObject({
+			error: "category_in_use",
+			category: { id: category.id, usage: { total: 1 } },
+		});
+
+		const graph = await request("/v1/graph", { headers: { cookie: me.cookie } });
+		expect(graph.status).toBe(200);
+		const graphBody = await graph.json();
+		const node = graphBody.nodes.find((item) => item.label === "Acme renewal");
+		expect(node.project_category_id).toBe(category.id);
+		expect(node.project_category).toEqual(expect.objectContaining({
+			id: category.id,
+			slug: category.slug,
+			name: "Customer success",
+			color_token: "teal",
+		}));
+		// Cluster identity remains its own visual/data channel.
+		expect(node.cluster).toBeTruthy();
+	});
+
+	it("previews an unsaved draft without persisting or sending excluded samples to category AI", async () => {
+		const me = await account("pg-rules-draft-preview");
+		const created = await request("/v1/settings/categories", post({
+			name: "Customer success",
+			description: "Customer adoption and renewal work",
+			color_token: "teal",
+		}, me.cookie));
+		expect(created.status).toBe(201);
+		const category = (await created.json()).category;
+		const tables = ["source_packets", "memory_jobs", "receipts", "extraction_runs", "ai_calls", "nodes", "slices", "events", "edges"];
+		const counts = async () => Object.fromEntries(await Promise.all(tables.map(async (table) => [
+			table,
+			Number((await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n),
+		])));
+		const before = await counts();
+		const calls = [];
+		const runtimeEnv = {
+			...env,
+			AI: { run: async (_model, input) => {
+				calls.push(input);
+				return { response: JSON.stringify({ assignments: [{ index: 1, category_slug: category.slug }] }) };
+			} },
+		};
+		const preview = await request("/v1/settings/rules/preview", post({
+			samples: ["My salary is private", "Acme renewal is planned for October"],
+			rules: { excludes: ["salary"], includes: [], customInstructions: "" },
+		}, me.cookie), runtimeEnv);
+		expect(preview.status).toBe(200);
+		expect(await preview.json()).toMatchObject({
+			category_preview: "evaluated",
+			results: [
+				{ kept: false, project_category_reason: "not_evaluated_blocked" },
+				{ kept: true, project_category: { id: category.id }, project_category_reason: "model_proposed" },
+			],
+		});
+		expect(calls).toHaveLength(1);
+		const providerPayload = JSON.parse(calls[0].messages[1].content);
+		expect(providerPayload.samples).toEqual([{ index: 1, text: "Acme renewal is planned for October" }]);
+		expect(JSON.stringify(providerPayload)).not.toContain("salary");
+		expect(await counts()).toEqual(before);
+
+		const denied = await request("/v1/settings/rules/preview", post({
+			samples: ["This must never reach AI"],
+		}, me.cookie), {
+			...runtimeEnv,
+			SAVE_LIMITER: { limit: async () => ({ success: false }) },
+		});
+		expect(denied.status).toBe(429);
+		expect(calls).toHaveLength(1);
+		expect(await counts()).toEqual(before);
 	});
 
 	it("leaves a receipt like every other door", async () => {

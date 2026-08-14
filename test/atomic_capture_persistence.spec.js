@@ -36,13 +36,17 @@ function flagged(userId, projectId = "project-a") {
 		ITSUKI_MEMORY_V3_USERS: userId,
 		ITSUKI_MEMORY_V3_ATOMIC_CAPTURE: "allowlist",
 		ITSUKI_MEMORY_V3_ATOMIC_CAPTURE_USERS: userId,
+		// This suite isolates append-only capture. Projection has its own tests;
+		// production/test defaults now enable it, so the control must be explicit.
+		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION: "off",
+		ITSUKI_MEMORY_V3_ATOMIC_PROJECTION_USERS: "",
 		USE_VECTORS: "false",
 		ENABLE_PASS2: "false",
 		_projectId: projectId,
 	};
 }
 
-async function fixture(label, { projectId = "project-a", content = "Northwind uses sqlc; no ORM." } = {}) {
+async function fixture(label, { projectId = `project-${crypto.randomUUID()}`, content = "Northwind uses sqlc; no ORM." } = {}) {
 	const userId = `atomic-${label}-${crypto.randomUUID()}`;
 	const sourcePacketId = `packet-${crypto.randomUUID()}`;
 	const message = {
@@ -67,6 +71,7 @@ async function fixture(label, { projectId = "project-a", content = "Northwind us
 }
 
 async function extract(f, atomicLlmResponse, extra = {}) {
+	const { meta: extraMeta = {}, ...rest } = extra;
 	return runExtraction(f.testEnv, f.userId, [f.message], [], {
 		llmResponse: EMPTY_GRAPH,
 		atomicLlmResponse,
@@ -75,8 +80,9 @@ async function extract(f, atomicLlmResponse, extra = {}) {
 			accepted_at: f.message.ts,
 			project_id: f.projectId,
 			project_name: "Project A",
+			...extraMeta,
 		},
-		...extra,
+		...rest,
 	});
 }
 
@@ -119,6 +125,69 @@ describe("E4 atomic candidate persistence", () => {
 			"SELECT COUNT(*) AS n FROM nodes WHERE user_id = ?",
 		).bind(f.userId).first();
 		expect(Number(graph.n)).toBe(0);
+	});
+
+	it("persists only the stable id of an active governed project category", async () => {
+		const f = await fixture("project-category");
+		const category = {
+			id: `cat_${crypto.randomUUID()}`,
+			slug: "customer_success",
+			description: "Customer adoption and renewal work",
+		};
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO managed_projects
+				 (id, owner_user_id, memory_owner_user_id, name, name_normalized, is_default, status, created_at, updated_at)
+				 VALUES (?, ?, ?, 'Atomic category project', 'atomic category project', 0, 'active', ?, ?)`,
+			).bind(f.projectId, f.userId, f.userId, Date.now(), Date.now()),
+			env.DB.prepare(
+				`INSERT INTO project_categories
+				 (id, project_id, memory_owner_user_id, slug, name, status, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, 'Customer success', 'active', ?, ?)`,
+			).bind(category.id, f.projectId, f.userId, category.slug, Date.now(), Date.now()),
+		]);
+		const result = await extract(f, { atoms: [atom("m1", {
+			project_category: category.slug,
+		})] }, {
+			rules: { ...RULES, projectCategories: [category] },
+			meta: { managed_project_id: f.projectId, owner_user_id: f.userId },
+		});
+		expect(result.receipt.atomic_capture_stored).toBe(1);
+		const row = await env.DB.prepare(
+			"SELECT project_category_id FROM semantic_atom_candidates WHERE user_id = ?",
+		).bind(f.userId).first();
+		expect(row).toEqual({ project_category_id: category.id });
+	});
+
+	it("stores Uncategorized when a governed category is archived after inference but before the V3 commit", async () => {
+		const f = await fixture("project-category-race");
+		const category = { id: `cat_${crypto.randomUUID()}`, slug: "release_risk" };
+		const at = Date.now();
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO managed_projects
+				 (id, owner_user_id, memory_owner_user_id, name, name_normalized, is_default, status, created_at, updated_at)
+				 VALUES (?, ?, ?, 'Atomic category race', 'atomic category race', 0, 'active', ?, ?)`,
+			).bind(f.projectId, f.userId, f.userId, at, at),
+			env.DB.prepare(
+				`INSERT INTO project_categories
+				 (id, project_id, memory_owner_user_id, slug, name, status, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, 'Release risk', 'active', ?, ?)`,
+			).bind(category.id, f.projectId, f.userId, category.slug, at, at),
+		]);
+		const result = await extract(f, async () => {
+			await env.DB.prepare(
+				"UPDATE project_categories SET status = 'archived', updated_at = ? WHERE id = ? AND project_id = ?",
+			).bind(at + 1, category.id, f.projectId).run();
+			return { atoms: [atom("m1", { project_category: category.slug })] };
+		}, {
+			rules: { ...RULES, projectCategories: [category] },
+			meta: { managed_project_id: f.projectId, owner_user_id: f.userId },
+		});
+		expect(result.receipt.atomic_capture_stored).toBe(1);
+		expect(await env.DB.prepare(
+			"SELECT project_category_id FROM semantic_atom_candidates WHERE user_id = ?",
+		).bind(f.userId).first()).toEqual({ project_category_id: null });
 	});
 
 	it("persists deterministic temporal fields with exact episode provenance", async () => {
@@ -372,6 +441,43 @@ describe("E4 atomic candidate persistence", () => {
 			"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?",
 		).bind(f.userId).first();
 		expect(Number(runs.n)).toBe(0);
+	});
+
+	it("does not call the model or register a tenant after its managed project is quiesced", async () => {
+		const f = await fixture("project-quiesced");
+		const at = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO managed_projects
+			 (id, owner_user_id, memory_owner_user_id, name, name_normalized, is_default, status,
+			  created_at, updated_at, archived_at)
+			 VALUES (?, ?, ?, 'Quiesced atomic', 'quiesced atomic', 0, 'archived', ?, ?, ?)`,
+		).bind(f.projectId, f.userId, f.userId, at, at, at).run();
+		let modelCalls = 0;
+		const result = await captureAtomicCandidates(f.testEnv, {
+			userId: f.userId,
+			memoryOwnerUserId: f.userId,
+			managedProjectId: f.projectId,
+			messages: [f.message],
+			recent: [],
+			rules: RULES,
+			projectId: f.projectId,
+			projectName: "Quiesced atomic",
+			sourcePacketId: f.sourcePacketId,
+			extractionRunId: `run-${crypto.randomUUID()}`,
+			acceptedAt: f.message.ts,
+			override: () => {
+				modelCalls += 1;
+				return { atoms: [atom()] };
+			},
+		});
+		expect(result).toMatchObject({ outcome: "cancelled_by_delete", complete: false, stored: 0 });
+		expect(modelCalls).toBe(0);
+		expect(Number((await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?",
+		).bind(f.userId).first()).n)).toBe(0);
+		expect(Number((await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM project_memory_spaces WHERE project_id = ?",
+		).bind(f.projectId).first()).n)).toBe(0);
 	});
 
 	it("records malformed output as a terminal typed failure without raw output", async () => {

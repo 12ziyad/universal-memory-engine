@@ -223,7 +223,7 @@ describe("the exports screen", () => {
 
 	it("tells a first-time visitor what an export is for", async () => {
 		const { script } = await page();
-		expect(script).toContain("An export is a full JSON copy of your memory");
+		expect(script).toContain("An export is a JSON copy of the currently resolved memory space");
 		expect(script).toContain("No exports yet.");
 	});
 });

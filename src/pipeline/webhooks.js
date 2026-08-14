@@ -13,6 +13,12 @@
  */
 
 import { newId } from "../lib/ids.js";
+import {
+	auditedMutationResult,
+	auditInvariantStatement,
+	commitAuditedBatch,
+	commitAuditedNoop,
+} from "../lib/audit.js";
 
 export const WEBHOOK_EVENTS = [
 	"memory.added",
@@ -37,6 +43,58 @@ async function deterministicDeliveryId(eventId, webhookId) {
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
 	const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 	return `whd_${hex}`;
+}
+
+// Legacy API-key memory spaces predate account/project governance. The final
+// arm keeps only identifiers that are neither accounts nor known managed roots;
+// known inactive roots therefore cannot fall through the compatibility path.
+function activeWebhookLifecycleSql(hookAlias = "w") {
+	return `(
+		EXISTS (
+		 SELECT 1 FROM users u
+		  WHERE u.id = ${hookAlias}.user_id AND u.status = 'active'
+		    AND NOT EXISTS (SELECT 1 FROM account_erasure_tombstones t WHERE t.user_id = u.id)
+		)
+		OR EXISTS (
+		 SELECT 1 FROM managed_projects p
+		 JOIN users owner ON owner.id = p.owner_user_id AND owner.status = 'active'
+		  WHERE p.memory_owner_user_id = ${hookAlias}.user_id AND p.status = 'active'
+		    AND NOT EXISTS (SELECT 1 FROM account_erasure_tombstones t WHERE t.user_id = owner.id)
+		    AND (
+		      COALESCE(p.organization_id, (
+		        SELECT od.id FROM organizations od
+		         WHERE od.owner_user_id = p.owner_user_id AND od.is_default = 1 AND od.status = 'active' LIMIT 1
+		      )) IS NULL
+		      OR EXISTS (
+		        SELECT 1 FROM organizations o
+		         WHERE o.id = COALESCE(p.organization_id, (
+		           SELECT od.id FROM organizations od
+		            WHERE od.owner_user_id = p.owner_user_id AND od.is_default = 1 AND od.status = 'active' LIMIT 1
+		         )) AND o.status = 'active'
+		      )
+		    )
+		)
+		OR (
+		  NOT EXISTS (SELECT 1 FROM users u WHERE u.id = ${hookAlias}.user_id)
+		  AND NOT EXISTS (
+		    SELECT 1 FROM managed_projects p
+		     WHERE p.memory_owner_user_id = ${hookAlias}.user_id
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM account_erasure_tombstones t
+		     WHERE t.user_id = ${hookAlias}.user_id
+		  )
+		)
+	)`;
+}
+
+async function webhookStillDeliverable(env, webhookId, userId) {
+	return env.DB.prepare(
+		`SELECT 1 FROM webhooks w
+		  WHERE w.id = ? AND w.user_id = ? AND w.status = 'active'
+		    AND ${activeWebhookLifecycleSql("w")}
+		  LIMIT 1`,
+	).bind(webhookId, userId).first();
 }
 
 function isPrivateIpv4(host) {
@@ -64,9 +122,11 @@ function isPrivateIpv6(host) {
  * receiver; production never sets it.
  */
 export function webhookUrlProblem(rawUrl, env = {}) {
+	const raw = String(rawUrl ?? "");
+	if (!raw || raw.length > 2048) return "Webhook URLs must be between 1 and 2048 characters.";
 	let url;
 	try {
-		url = new URL(String(rawUrl ?? ""));
+		url = new URL(raw);
 	} catch {
 		return "That doesn't look like a valid URL.";
 	}
@@ -74,8 +134,12 @@ export function webhookUrlProblem(rawUrl, env = {}) {
 		return "Webhook URLs must be http(s).";
 	}
 	if (url.username || url.password) return "Webhook URLs must not embed credentials.";
+	if (url.hash) return "Webhook URLs must not contain fragments.";
 	const host = url.hostname;
 	const allowPrivate = String(env.WEBHOOK_ALLOW_PRIVATE ?? "") === "true";
+	if (url.protocol !== "https:" && !allowPrivate) {
+		return "Webhook URLs must use HTTPS.";
+	}
 	if (!allowPrivate) {
 		if (PRIVATE_HOST_RE.test(host) || isPrivateIpv4(host) || isPrivateIpv6(host)) {
 			return "Private and internal addresses can't receive webhooks.";
@@ -87,6 +151,25 @@ export function webhookUrlProblem(rawUrl, env = {}) {
 		return "Webhooks can't point back at Itsuki.";
 	}
 	return null;
+}
+
+function displayWebhookUrl(rawUrl) {
+	try {
+		const url = new URL(String(rawUrl ?? ""));
+		const hasPrivateSuffix = url.pathname !== "/" || Boolean(url.search);
+		return `${url.protocol}//${url.host}${hasPrivateSuffix ? "/\u2026" : "/"}`;
+	} catch {
+		return null;
+	}
+}
+
+function publicDeliveryError(value) {
+	const text = String(value ?? "");
+	if (!text) return null;
+	if (/^endpoint answered \d{3}$/.test(text)) return text;
+	if (/^(Webhook URLs|Webhooks can't|Private and internal|That doesn't look)/.test(text)) return text.slice(0, 200);
+	if (text === "delivery_timeout") return text;
+	return "delivery_failed";
 }
 
 async function hmacHex(secret, message) {
@@ -115,7 +198,7 @@ function publicWebhook(row) {
 	return {
 		id: row.id,
 		name: row.name,
-		url: row.url,
+		display_url: displayWebhookUrl(row.url),
 		events: JSON.parse(row.events_json || "[]"),
 		metadata_only: Number(row.metadata_only ?? 0) === 1,
 		status: row.status,
@@ -131,14 +214,20 @@ export async function listWebhooks(env, userId) {
 	return (results ?? []).map(publicWebhook);
 }
 
-export async function createWebhook(env, userId, body = {}) {
+export async function createWebhook(env, userId, body = {}, options = {}) {
+	const auditIntent = options?.auditIntent ?? null;
 	const problem = webhookUrlProblem(body.url, env);
-	if (problem) return { error: problem };
+	if (problem) {
+		const invalid = { error: problem };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, invalid) : invalid;
+	}
+	const canonicalUrl = new URL(String(body.url)).toString();
 	const existing = await env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM webhooks WHERE user_id = ? AND status = 'active'",
 	).bind(userId).first();
 	if (Number(existing?.n ?? 0) >= MAX_WEBHOOKS_PER_USER) {
-		return { error: `You can have up to ${MAX_WEBHOOKS_PER_USER} webhooks — delete one first.` };
+		const limited = { error: `You can have up to ${MAX_WEBHOOKS_PER_USER} webhooks — delete one first.` };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, limited) : limited;
 	}
 	const secretBytes = new Uint8Array(32);
 	crypto.getRandomValues(secretBytes);
@@ -147,7 +236,7 @@ export async function createWebhook(env, userId, body = {}) {
 		id: newId("wh"),
 		user_id: userId,
 		name: String(body.name ?? "").trim().slice(0, 80) || "Webhook",
-		url: String(body.url),
+		url: canonicalUrl,
 		secret,
 		events_json: JSON.stringify(normalizeEvents(body.events)),
 		metadata_only: body.metadataOnly === true || body.metadata_only === true ? 1 : 0,
@@ -155,19 +244,77 @@ export async function createWebhook(env, userId, body = {}) {
 		created_at: Date.now(),
 		updated_at: Date.now(),
 	};
-	await env.DB.prepare(
+	const statement = env.DB.prepare(
 		`INSERT INTO webhooks (id, user_id, name, url, secret, events_json, metadata_only, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	).bind(row.id, row.user_id, row.name, row.url, row.secret, row.events_json, row.metadata_only, row.status, row.created_at, row.updated_at).run();
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		  WHERE (SELECT COUNT(*) FROM webhooks WHERE user_id = ? AND status = 'active') < ?`,
+	).bind(
+		row.id, row.user_id, row.name, row.url, row.secret, row.events_json, row.metadata_only,
+		row.status, row.created_at, row.updated_at, userId, MAX_WEBHOOKS_PER_USER,
+	);
+	let result;
+	if (auditIntent) {
+		try {
+			[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+				preconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 WHERE (SELECT COUNT(*) FROM webhooks WHERE user_id = ? AND status = 'active') < ?",
+					[userId, MAX_WEBHOOKS_PER_USER],
+				)],
+				postconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 FROM webhooks WHERE id = ? AND user_id = ? AND status = 'active'",
+					[row.id, userId],
+				)],
+				commitDetails: { targetId: row.id },
+			});
+		} catch (error) {
+			if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+				const count = await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM webhooks WHERE user_id = ? AND status = 'active'",
+				).bind(userId).first();
+				if (Number(count?.n ?? 0) >= MAX_WEBHOOKS_PER_USER) {
+					return commitAuditedNoop(env, auditIntent, {
+						error: `You can have up to ${MAX_WEBHOOKS_PER_USER} webhooks — delete one first.`,
+					});
+				}
+			}
+			throw error;
+		}
+	} else result = await statement.run();
+	if (Number(result?.meta?.changes ?? 0) !== 1) {
+		const limited = { error: `You can have up to ${MAX_WEBHOOKS_PER_USER} webhooks — delete one first.` };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, limited) : limited;
+	}
 	// The secret appears exactly once: in this response.
-	return { webhook: publicWebhook(row), secret };
+	const created = { webhook: publicWebhook(row), secret };
+	return auditIntent ? auditedMutationResult(created, auditIntent) : created;
 }
 
-export async function deleteWebhook(env, userId, id) {
-	const result = await env.DB.prepare(
+export async function deleteWebhook(env, userId, id, options = {}) {
+	const auditIntent = options?.auditIntent ?? null;
+	const visible = await env.DB.prepare(
+		"SELECT 1 FROM webhooks WHERE id = ? AND user_id = ? LIMIT 1",
+	).bind(id, userId).first();
+	if (!visible) {
+		const unchanged = { deleted: false };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
+	}
+	const statement = env.DB.prepare(
 		"DELETE FROM webhooks WHERE id = ? AND user_id = ?",
-	).bind(id, userId).run();
-	return { deleted: (result.meta?.changes ?? 0) > 0 };
+	).bind(id, userId);
+	let result;
+	if (auditIntent) {
+		[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+			postconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM webhooks WHERE id = ? AND user_id = ?)",
+				[id, userId],
+			)],
+		});
+	} else result = await statement.run();
+	const deleted = { deleted: Number(result.meta?.changes ?? 0) > 0 };
+	return auditIntent ? auditedMutationResult(deleted, auditIntent) : deleted;
 }
 
 export async function listDeliveries(env, userId, webhookId, limit = 50) {
@@ -176,7 +323,7 @@ export async function listDeliveries(env, userId, webhookId, limit = 50) {
 		 FROM webhook_deliveries WHERE user_id = ? AND webhook_id = ?
 		 ORDER BY created_at DESC LIMIT ?`,
 	).bind(userId, webhookId, Math.min(limit, 200)).all();
-	return results ?? [];
+	return (results ?? []).map((row) => ({ ...row, error: publicDeliveryError(row.error) }));
 }
 
 /**
@@ -218,11 +365,19 @@ async function deliver(env, hook, deliveryId, body, { fetchImpl = fetch } = {}) 
 			lastError = problem;
 			break;
 		}
+		if (!await webhookStillDeliverable(env, hook.id, hook.user_id)) {
+			lastError = "webhook_inactive";
+			break;
+		}
 		try {
 			const controller = new AbortController();
 			const timer = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
 			const res = await fetchImpl(hook.url, {
 				method: "POST",
+				// Worker-created fetches follow redirects by default and forward our
+				// signature headers to the new host. A webhook endpoint must be the
+				// exact registered origin, so redirects are terminal delivery errors.
+				redirect: "manual",
 				signal: controller.signal,
 				headers: {
 					"content-type": "application/json",
@@ -241,9 +396,13 @@ async function deliver(env, hook, deliveryId, body, { fetchImpl = fetch } = {}) 
 				).bind(attempt, res.status, Date.now(), Date.now(), deliveryId).run();
 				return;
 			}
+			if (res.status >= 300 && res.status < 400) {
+				lastError = `endpoint redirected with ${res.status}`;
+				break;
+			}
 			lastError = `endpoint answered ${res.status}`;
 		} catch (err) {
-			lastError = String(err?.message ?? err).slice(0, 200);
+			lastError = err?.name === "AbortError" ? "delivery_timeout" : "delivery_failed";
 		}
 		await env.DB.prepare(
 			"UPDATE webhook_deliveries SET attempts = ?, response_code = ?, error = ?, updated_at = ? WHERE id = ?",
@@ -279,6 +438,7 @@ export async function emitWebhookEvent(env, waitUntil, userId, event, data, opts
 			"SELECT * FROM webhooks WHERE user_id = ? AND status = 'active'",
 		).bind(userId).all();
 		const hooks = (results ?? []).filter((hook) => {
+			if (opts.webhookId && hook.id !== opts.webhookId) return false;
 			try { return JSON.parse(hook.events_json || "[]").includes(event); } catch { return false; }
 		});
 		for (const hook of hooks) {
@@ -291,9 +451,14 @@ export async function emitWebhookEvent(env, waitUntil, userId, event, data, opts
 			const inserted = await env.DB.prepare(
 				`INSERT INTO webhook_deliveries
 				 (id, user_id, webhook_id, event, status, attempts, payload_json, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+				 SELECT ?, ?, ?, ?, 'pending', 0, ?, ?, ?
+				  WHERE EXISTS (
+				    SELECT 1 FROM webhooks w
+				     WHERE w.id = ? AND w.user_id = ? AND w.status = 'active'
+				       AND ${activeWebhookLifecycleSql("w")}
+				  )
 				 ON CONFLICT(id) DO NOTHING`,
-			).bind(deliveryId, userId, hook.id, event, body, now, now).run();
+			).bind(deliveryId, userId, hook.id, event, body, now, now, hook.id, userId).run();
 			if (Number(inserted.meta?.changes ?? 0) > 0) {
 				await dispatchPendingDelivery(env, hook, deliveryId, body, waitUntil, opts);
 			}
@@ -303,6 +468,69 @@ export async function emitWebhookEvent(env, waitUntil, userId, event, data, opts
 		// Webhooks must never break the save that triggered them.
 		console.warn("webhook emit failed:", err?.message ?? err);
 	}
+}
+
+/**
+ * Queue one synthetic test delivery as the authoritative governed mutation.
+ * The outbox INSERT, fresh lifecycle/capability guards carried by auditIntent,
+ * and committed audit marker share one D1 batch. Only after that commit may a
+ * waitUntil task claim the row and connect to the remote endpoint.
+ */
+export async function queueAuditedWebhookTest(env, waitUntil, userId, webhookId, data, auditIntent, opts = {}) {
+	const hook = await env.DB.prepare(
+		"SELECT * FROM webhooks WHERE id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+	).bind(webhookId, userId).first();
+	if (!hook) return commitAuditedNoop(env, auditIntent, { ok: false, notFound: true, queued: false });
+	let supportsEvent = false;
+	try { supportsEvent = JSON.parse(hook.events_json || "[]").includes("memory.added"); } catch { /* fail closed */ }
+	if (!supportsEvent) return commitAuditedNoop(env, auditIntent, { ok: false, notFound: true, queued: false });
+
+	const payload = payloadFor(hook, "memory.added", data);
+	const body = JSON.stringify(payload);
+	const deliveryId = newId("whd");
+	const now = Date.now();
+	const statement = env.DB.prepare(
+		`INSERT INTO webhook_deliveries
+		 (id, user_id, webhook_id, event, status, attempts, payload_json, created_at, updated_at)
+		 SELECT ?, ?, ?, 'memory.added', 'pending', 0, ?, ?, ?
+		  WHERE EXISTS (
+		    SELECT 1 FROM webhooks w
+		     WHERE w.id = ? AND w.user_id = ? AND w.status = 'active'
+		       AND ${activeWebhookLifecycleSql("w")}
+		  )`,
+	).bind(deliveryId, userId, webhookId, body, now, now, webhookId, userId);
+	let inserted;
+	try {
+		[inserted] = await commitAuditedBatch(env, auditIntent, [statement], {
+			preconditions: [auditInvariantStatement(
+				env,
+				`SELECT 1 FROM webhooks w WHERE w.id = ? AND w.user_id = ? AND w.status = 'active'
+				   AND ${activeWebhookLifecycleSql("w")}`,
+				[webhookId, userId],
+			)],
+			postconditions: [auditInvariantStatement(
+				env,
+				"SELECT 1 FROM webhook_deliveries WHERE id = ? AND user_id = ? AND webhook_id = ? AND status = 'pending'",
+				[deliveryId, userId, webhookId],
+			)],
+		});
+	} catch (error) {
+		if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			const changed = new Error("Webhook access changed before the test could be queued.");
+			changed.code = "webhook_authorization_changed";
+			changed.status = 403;
+			throw changed;
+		}
+		throw error;
+	}
+	if (Number(inserted?.meta?.changes ?? 0) !== 1) throw new Error("webhook test delivery was not queued");
+	const result = auditedMutationResult({ ok: true, queued: true, deliveryId }, auditIntent);
+	const task = dispatchPendingDelivery(env, hook, deliveryId, body, waitUntil, opts).catch((error) => {
+		console.warn("webhook test delivery crashed:", error?.message ?? error);
+	});
+	if (typeof waitUntil === "function") waitUntil(task);
+	else await task;
+	return result;
 }
 
 /** Recover an outbox row if an isolate died after its durable insert/claim. */

@@ -9,14 +9,27 @@
 
 import { embed } from "../lib/embeddings.js";
 import { newId } from "../lib/ids.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import {
+	projectMemorySpaceRegistrationStatement,
+	retentionFenceGuardStatement,
+	retentionProjectForMemoryOwner,
+} from "../lib/retention.js";
 import { upsertNodeVector } from "../lib/vectorize.js";
 
 export async function writeApproved(env, config, userId, plan = {}, options = {}) {
 	const stmts = [];
+	const retentionProjectId = options.managedProjectId
+		?? await retentionProjectForMemoryOwner(env, options.memoryOwnerUserId);
+	const categoryProjectId = options.managedProjectId ?? null;
 	const commitEffects = [];
 	const fallbackEffects = [];
 	let extractionCommitIndex = null;
+	if (retentionProjectId) stmts.push(managedMutationGuardStatement(env, {
+		accountUserId: options.accountUserId ?? null,
+		projectId: retentionProjectId,
+	}));
 
 	// SRV-08 commit fence. `fence_guard` is unsatisfiable by construction
 	// (NOT NULL + CHECK (violation IS NULL)), so an INSERT that actually
@@ -50,6 +63,21 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			`INSERT INTO fence_guard (violation)
 			 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
 		).bind(userId, acceptedAt));
+		if (retentionProjectId && options.memoryOwnerUserId) {
+			stmts.push(
+				retentionFenceGuardStatement(env, {
+					projectId: retentionProjectId,
+					retentionClass: "semantic_memory",
+					acceptedAt,
+				}),
+				projectMemorySpaceRegistrationStatement(env, {
+					projectId: retentionProjectId,
+					memoryOwnerUserId: options.memoryOwnerUserId,
+					memoryUserId: userId,
+					seenAt: acceptedAt,
+				}),
+			);
+		}
 	}
 	const newNodes = plan.newNodes ?? [];
 	const nodeStateUpdates = plan.nodeStateUpdates ?? [];
@@ -296,7 +324,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	for (const n of newNodes) {
 		const guarded = Boolean(n.identity_key);
 		const correction = correctionGuard(n);
-		const values = [
+		const baseValues = [
 			n.id,
 			n.user_id,
 			n.label,
@@ -319,7 +347,18 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			projectScope.projectId,
 			projectScope.projectName,
 		];
-		const placeholders = values.map(() => "?").join(", ");
+		// A project category is governed metadata, not model authority. Resolve
+		// it inside the committing statement so an archive that wins after
+		// extraction but before this batch turns the late value into NULL.
+		const values = [
+			...baseValues,
+			n.project_category_id ?? null,
+			categoryProjectId,
+		];
+		const placeholders = [
+			...baseValues.map(() => "?"),
+			"(SELECT id FROM project_categories WHERE id = ? AND project_id = ? AND status = 'active')",
+		].join(", ");
 		if (guarded) values.push(userId, n.identity_key, n.id, ...correction.bindings);
 		// Track both guarded MCP nodes and ordinary API/AutoMode nodes. Otherwise a
 		// later tracked effect makes `committed` non-null and the embedding loop can
@@ -330,7 +369,8 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 				`INSERT INTO nodes
 					(id, user_id, label, category, role, state, summary, created_at, updated_at,
 					 canonical_label, aliases_json, mention_count, session_count, last_seen_at,
-					 heat_score, confidence, health_state, importance_class, cluster, project_id, project_name)
+					 heat_score, confidence, health_state, importance_class, cluster, project_id, project_name,
+					 project_category_id)
 				 ${guarded
 					? `SELECT ${placeholders}
 					   WHERE EXISTS (
@@ -846,8 +886,9 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 					 label_guess, canonical_key, role_guess, cluster_guess, confidence, status,
 					 first_seen_at, last_seen_at, session_count, mention_count, evidence_json,
 					 possible_parent_id, possible_existing_node_id, expires_at, reason,
-					 project_id, project_name)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 project_id, project_name, project_category_id)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+				  (SELECT id FROM project_categories WHERE id = ? AND project_id = ? AND status = 'active'))`,
 			).bind(
 				c.id,
 				c.user_id,
@@ -873,6 +914,8 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 				c.reason ?? null,
 				projectScope.projectId,
 				projectScope.projectName,
+				c.project_category_id ?? null,
+				categoryProjectId,
 			),
 		);
 	}
@@ -1075,7 +1118,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			insertGuardBindings.push(...provisionalNode.bindings);
 		}
 		const guarded = insertGuards.length > 0;
-		const pageValues = [
+		const pageBaseValues = [
 			page.id,
 			userId,
 			page.node_id ?? null,
@@ -1111,7 +1154,15 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			projectScope.projectId,
 			projectScope.projectName,
 		];
-		const placeholders = pageValues.map(() => "?").join(", ");
+		const pageValues = [
+			...pageBaseValues,
+			page.project_category_id ?? null,
+			categoryProjectId,
+		];
+		const placeholders = [
+			...pageBaseValues.map(() => "?"),
+			"(SELECT id FROM project_categories WHERE id = ? AND project_id = ? AND status = 'active')",
+		].join(", ");
 		const values = guarded ? [...pageValues, ...insertGuardBindings] : pageValues;
 		trackNext({ kind: "pages", id: page.id });
 		stmts.push(
@@ -1123,7 +1174,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 					 source_conversation_id, source_packet_id, input_hash, idempotency_key, extraction_run_id,
 					 receipt_id,
 					 created_at, updated_at, last_seen_at, heat_score, confidence, health_state, importance_class,
-					 cluster, role_type, project_id, project_name)
+					 cluster, role_type, project_id, project_name, project_category_id)
 					 ${guarded
 					? `SELECT ${placeholders}
 					   WHERE ${insertGuards.join(" AND ")}`

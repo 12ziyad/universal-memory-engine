@@ -3,10 +3,10 @@ import { describe, it, expect } from "vitest";
 import worker from "../src";
 import html from "../public/index.html?raw";
 
-async function request(path, init = {}) {
+async function request(path, init = {}, runtimeEnv = env) {
 	const req = new Request(`http://example.com${path}`, init);
 	const ctx = createExecutionContext();
-	const res = await worker.fetch(req, env, ctx);
+	const res = await worker.fetch(req, runtimeEnv, ctx);
 	await waitOnExecutionContext(ctx);
 	return res;
 }
@@ -143,6 +143,77 @@ describe("email/password auth", () => {
 
 		const after = await request("/auth/me", { headers: { cookie } });
 		expect(await after.json()).toEqual({ authenticated: false, user: null });
+	});
+
+	it("fails logout-all closed when its audit intent is unavailable, then revokes every session once", async () => {
+		const account = await signupAccount("logout-all-audit");
+		const login = await jsonRequest("/auth/login", { email: account.email, password: "correct-horse" });
+		const secondCookie = cookieFrom(login);
+		const requestId = crypto.randomUUID();
+		const failedDb = new Proxy(env.DB, {
+			get(target, property) {
+				if (property === "prepare") return (sql) => {
+					if (/^\s*INSERT\s+INTO\s+audit_events/i.test(String(sql))) throw new Error("audit unavailable");
+					return target.prepare(sql);
+				};
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const init = { method: "POST", headers: { cookie: account.cookie, "x-request-id": requestId } };
+		const unavailable = await request("/auth/logout-all", init, { ...env, DB: failedDb });
+		expect(unavailable.status).toBe(503);
+		expect(await unavailable.json()).toMatchObject({ error: "audit_unavailable" });
+		expect((await request("/auth/me", { headers: { cookie: secondCookie } })).status).toBe(200);
+
+		const succeeded = await request("/auth/logout-all", init);
+		expect(succeeded.status).toBe(200);
+		expect(await (await request("/auth/me", { headers: { cookie: secondCookie } })).json())
+			.toEqual({ authenticated: false, user: null });
+		const events = await env.DB.prepare(
+			`SELECT action, outcome, request_id FROM audit_events
+			  WHERE actor_user_id = ? AND action = 'account.sessions.revoked_all'`,
+		).bind(account.user.id).all();
+		expect(events.results).toEqual([expect.objectContaining({ outcome: "ok", request_id: requestId })]);
+	});
+
+	it("authenticates before buffering password changes and bounds the request", async () => {
+		const account = await signupAccount("password-boundary");
+		const before = await env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+			.bind(account.user.id).first();
+		const oversizedBody = JSON.stringify({
+			currentPassword: "correct-horse",
+			newPassword: "next-correct-horse",
+			padding: "x".repeat(9 * 1024),
+		});
+
+		const anonymous = await request("/auth/password", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: oversizedBody,
+		});
+		expect(anonymous.status).toBe(401);
+		expect(await anonymous.json()).toEqual({ error: "unauthorized" });
+
+		const oversized = await request("/auth/password", {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie: account.cookie },
+			body: oversizedBody,
+		});
+		expect(oversized.status).toBe(413);
+		expect(await oversized.json()).toMatchObject({ error: "request_too_large" });
+
+		const unknown = await jsonRequest("/auth/password", {
+			currentPassword: "correct-horse",
+			newPassword: "next-correct-horse",
+			unexpected: true,
+		}, account.cookie);
+		expect(unknown.status).toBe(400);
+		expect(await unknown.json()).toMatchObject({ error: "invalid_password_request" });
+
+		const after = await env.DB.prepare("SELECT password_hash FROM users WHERE id = ?")
+			.bind(account.user.id).first();
+		expect(after.password_hash).toBe(before.password_hash);
 	});
 });
 

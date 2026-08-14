@@ -184,11 +184,16 @@ describe("account rules govern every tenant under the key", () => {
 	it("GET, PUT, and POST target the key owner even with a tenant selector", async () => {
 		const { key, ownerId, cookie } = await bearerKey("rule-routes");
 		const headers = { "content-type": "application/json", authorization: `Bearer ${key}` };
+		const initial = await call("/v1/rules?userId=tenant-initial", { headers });
 
 		const put = await call("/v1/rules", {
 			method: "PUT",
 			headers,
-			body: JSON.stringify({ userId: "tenant-put", rules: { excludes: ["salary"] } }),
+			body: JSON.stringify({
+				userId: "tenant-put",
+				expected_version: initial.body.rules_version,
+				rules: { excludes: ["salary"] },
+			}),
 		});
 		expect(put.status).toBe(200);
 		expect(put.body.rules.excludes).toEqual(["salary"]);
@@ -200,7 +205,11 @@ describe("account rules govern every tenant under the key", () => {
 		const post = await call("/v1/rules", {
 			method: "POST",
 			headers,
-			body: JSON.stringify({ userId: "tenant-post", rules: { excludes: ["classified"] } }),
+			body: JSON.stringify({
+				userId: "tenant-post",
+				expected_version: put.body.rules_version,
+				rules: { excludes: ["classified"] },
+			}),
 		});
 		expect(post.status).toBe(200);
 		expect(post.body.rules.excludes).toEqual(["classified"]);
@@ -238,10 +247,14 @@ describe("account rules govern every tenant under the key", () => {
 		// integrator's excludes applied to their own memory and to none of
 		// their end users', the only place it matters.
 		const { key, cookie } = await bearerKey("rulescope");
+		const initial = await call("/v1/rules", { headers: { cookie } });
 		await call("/v1/rules", {
 			method: "PUT",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify({ rules: { excludes: ["salary"] } }),
+			body: JSON.stringify({
+				expected_version: initial.body.rules_version,
+				rules: { excludes: ["salary"] },
+			}),
 		});
 
 		const res = await call("/v1/save", {

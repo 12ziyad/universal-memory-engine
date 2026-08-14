@@ -444,6 +444,76 @@ export class UserMemory extends DurableObject {
 	// still the source of truth across eviction, deployment, and crashes.
 	#handoffsInFlight = new Map();
 
+	#managedLifecycleScope(value) {
+		const meta = value?.sourceMeta
+			?? value?.overrides?.meta
+			?? value?.meta
+			?? value
+			?? {};
+		const accountUserId = String(meta.account_user_id ?? meta.accountUserId ?? "").trim() || null;
+		const managedProjectId = String(meta.managed_project_id ?? meta.managedProjectId ?? "").trim() || null;
+		return { accountUserId, managedProjectId };
+	}
+
+	async #assertManagedLifecycleActive(scope) {
+		const accountUserId = String(scope?.accountUserId ?? "").trim() || null;
+		const managedProjectId = String(scope?.managedProjectId ?? "").trim() || null;
+		if (!accountUserId && !managedProjectId) return;
+
+		const row = await this.env.DB.prepare(
+			`SELECT
+			   EXISTS(SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?) AS account_erased,
+			   (SELECT status FROM users WHERE id = ? LIMIT 1) AS account_status,
+			   p.id AS project_id,
+			   p.status AS project_status,
+			   p.organization_id,
+			   o.status AS organization_status
+			 FROM (SELECT 1) seed
+			 LEFT JOIN managed_projects p ON p.id = ?
+			 LEFT JOIN organizations o ON o.id = p.organization_id`,
+		).bind(accountUserId, accountUserId, managedProjectId).first();
+
+		if (
+			accountUserId
+			&& (
+				Number(row?.account_erased ?? 0) === 1
+				|| (row?.account_status != null && row.account_status !== "active")
+				|| (managedProjectId && row?.account_status !== "active")
+			)
+		) {
+			throw codedError("ACCOUNT_ERASED", "account is no longer writable");
+		}
+		if (
+			managedProjectId
+			&& (
+				row?.project_id !== managedProjectId
+				|| row?.project_status !== "active"
+				|| (row?.organization_id && row?.organization_status !== "active")
+			)
+		) {
+			throw codedError("MANAGED_PROJECT_INACTIVE", "managed project is no longer writable");
+		}
+	}
+
+	async #clearLocalState() {
+		await this.ctx.storage.deleteAll();
+		// Durable Object storage deletion does not remove an alarm. Clear it
+		// explicitly so wiped private work cannot wake after account teardown.
+		await this.ctx.storage.deleteAlarm();
+	}
+
+	async #assertManagedLifecycleOrReset(scope) {
+		try {
+			await this.#assertManagedLifecycleActive(scope);
+		} catch (error) {
+			// A local acceptance without a proven active D1 owner is unsafe. It is
+			// replayable from the D1 accept ledger, so fail closed and remove every
+			// held/queued copy rather than leave a resurrection lane.
+			await this.#clearLocalState();
+			throw error;
+		}
+	}
+
 	async #handoffMarkerKey(handoffId) {
 		return `${HANDOFF_MARKER_PREFIX}${await sha256Hex(handoffId)}`;
 	}
@@ -947,6 +1017,8 @@ export class UserMemory extends DurableObject {
 			throw codedError("HANDOFF_HASH_INVALID", "handoff request hash is invalid");
 		}
 		validateQueueableMessages(messages);
+		const lifecycleScope = this.#managedLifecycleScope(opts);
+		await this.#assertManagedLifecycleOrReset(lifecycleScope);
 		const acceptanceId = String(opts.jobId ?? handoffId);
 		const contextKey = await requestedContextIdentity(userId, opts, acceptanceId);
 
@@ -964,7 +1036,11 @@ export class UserMemory extends DurableObject {
 		const promise = this.#acceptMessagesOnce(userId, messages, normalizedOpts, markerKey);
 		this.#handoffsInFlight.set(markerKey, { requestHash, promise });
 		try {
-			return await promise;
+			const result = await promise;
+			// D1 quiescence may win after the pre-check but after this DO's local
+			// transaction. Re-check before acknowledgement and erase a fenced copy.
+			await this.#assertManagedLifecycleOrReset(lifecycleScope);
+			return result;
 		} finally {
 			const current = this.#handoffsInFlight.get(markerKey);
 			if (current?.promise === promise) this.#handoffsInFlight.delete(markerKey);
@@ -1333,6 +1409,8 @@ export class UserMemory extends DurableObject {
 	 */
 	async addMessages(userId, messages, opts = {}) {
 		validateQueueableMessages(messages);
+		const lifecycleScope = this.#managedLifecycleScope(opts);
+		await this.#assertManagedLifecycleOrReset(lifecycleScope);
 		const rawAcceptanceRef = String(
 			opts.acceptanceId
 			?? opts.jobId
@@ -1341,7 +1419,7 @@ export class UserMemory extends DurableObject {
 		);
 		const acceptanceRef = `accept:v1:${await sha256Hex(rawAcceptanceRef)}`;
 		const requestedContextKey = await requestedContextIdentity(userId, opts, rawAcceptanceRef);
-		return this.ctx.blockConcurrencyWhile(async () => {
+		const accepted = await this.ctx.blockConcurrencyWhile(async () => {
 			const requestedScopeKey = cleanScopeKey(opts.scopeKey);
 			const persistedOverrides = opts.overrides !== undefined
 				? persistableOverrides(opts.overrides ?? {})
@@ -1612,6 +1690,8 @@ export class UserMemory extends DurableObject {
 
 			return result;
 		});
+		await this.#assertManagedLifecycleOrReset(lifecycleScope);
+		return accepted;
 	}
 
 	async #mcpHandoffMarkerKey(handoffId) {
@@ -1644,6 +1724,8 @@ export class UserMemory extends DurableObject {
 		const markerKey = await this.#mcpHandoffMarkerKey(handoffId);
 		const persistedJob = persistableOverrides(job);
 		if (!persistedJob?.jobId) throw codedError("MCP_HANDOFF_JOB_INVALID", "MCP handoff job is not persistable");
+		const lifecycleScope = this.#managedLifecycleScope(job);
+		await this.#assertManagedLifecycleOrReset(lifecycleScope);
 		const now = Date.now();
 		const result = await this.ctx.storage.transaction(async (txn) => {
 			const existing = await txn.get(markerKey);
@@ -1707,6 +1789,15 @@ export class UserMemory extends DurableObject {
 			});
 			return { queued: true, terminal: false, duplicate: Boolean(existing), queueKey };
 		});
+		if (
+			String(this.env.DO_WAKE_ALARMS ?? "true") === "false"
+			&& typeof options._testAfterLocalEnqueue === "function"
+		) {
+			await options._testAfterLocalEnqueue();
+		}
+		// Close the D1-quiesce-after-local-commit race. The account tombstone is
+		// permanent, so an erased account can never make this check pass again.
+		await this.#assertManagedLifecycleOrReset(lifecycleScope);
 
 		// This fault models an isolate dying after the durable local commit but
 		// before either the alarm hint or the caller's successful response.
@@ -1829,6 +1920,19 @@ export class UserMemory extends DurableObject {
 				if (!next) break;
 				attempted.add(next.key);
 				await this.#refreshLease(token);
+				const lifecycleScope = this.#managedLifecycleScope(
+					next.entry.kind === "mcp" ? next.entry.job : next.entry,
+				);
+				try {
+					await this.#assertManagedLifecycleActive(lifecycleScope);
+				} catch (error) {
+					if (error?.code === "ACCOUNT_ERASED" || error?.code === "MANAGED_PROJECT_INACTIVE") {
+						await this.#clearLocalState();
+						results.push({ kind: next.entry.kind, outcome: "lifecycle_fenced" });
+						break;
+					}
+					throw error;
+				}
 				const result = next.entry.kind === "mcp"
 					? await this.#processMcpEntry(userId, next.key, next.entry)
 					: await this.#processExtractEntry(userId, next.key, next.entry, opts.inlineOverrides);
@@ -2645,15 +2749,16 @@ export class UserMemory extends DurableObject {
 		// and visible (job `failed` with the cancellation named), never retried
 		// — the barrier would cancel every retry, so retrying only burns model
 		// budget to rediscover the same answer.
-		if (result.outcome === "cancelled_by_delete") {
-			const error = String(result.error ?? "cancelled_by_delete: a confirmed delete erased this scope after this save was accepted").slice(0, 400);
+		if (["cancelled_by_delete", "cancelled_by_retention"].includes(result.outcome)) {
+			const cancellation = result.outcome;
+			const error = String(result.error ?? `${cancellation}: a confirmed deletion boundary superseded this accepted save`).slice(0, 400);
 			const pending = await this.#persistExtractSettlement(userId, key, entry, result, {
 				action: "failed",
 				processedIds,
 				processedIdentities,
 				lastId,
 				lastIdentity,
-				error: error.startsWith("cancelled_by_delete") ? error : `cancelled_by_delete: ${error}`,
+				error: error.startsWith(cancellation) ? error : `${cancellation}: ${error}`,
 			});
 			return this.#processPendingExtract(userId, key, pending, overrides);
 		}
@@ -2881,10 +2986,9 @@ export class UserMemory extends DurableObject {
 	/** Clear held ingest state after an explicit DELETE ALL reset. */
 	async resetAll() {
 		await this.ctx.blockConcurrencyWhile(async () => {
-			await this.ctx.storage.deleteAll();
+			await this.#clearLocalState();
 			// deleteAll clears values, not alarms — an orphaned alarm would wake
 			// a wiped instance (and in tests, fire into storage teardown).
-			await this.ctx.storage.deleteAlarm();
 		});
 		return { reset: true };
 	}

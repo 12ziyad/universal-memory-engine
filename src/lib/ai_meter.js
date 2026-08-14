@@ -21,6 +21,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { newId } from "./ids.js";
+import { managedMutationGuardStatement } from "./managed_projects.js";
 import { guardModelInput } from "./model_input.js";
 
 const meterStore = new AsyncLocalStorage();
@@ -162,12 +163,12 @@ export function meterTotals(meter) {
  * Write the meter out. Best-effort and never throws — a failed insert costs us
  * a measurement, and that must never cost the user their memory.
  */
-export async function flushAiMeter(env, userId, meter) {
+export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 	const calls = meter?.calls ?? [];
 	if (!env?.DB || !calls.length) return meterTotals(meter);
 	const now = Date.now();
 	try {
-		await env.DB.batch(calls.map((call) => env.DB.prepare(
+		const statements = calls.map((call) => env.DB.prepare(
 			`INSERT INTO ai_calls (id, user_id, scope, scope_id, model, task, input_tokens,
 				output_tokens, total_tokens, neurons, duration_ms, ok, raw_usage_json, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -188,7 +189,19 @@ export async function flushAiMeter(env, userId, meter) {
 				? JSON.stringify({ provider: call.raw_usage, itsuki_input_boundary: call.input_boundary })
 				: call.raw_usage ? JSON.stringify(call.raw_usage) : null,
 			now,
-		)));
+		));
+		const accountUserId = lifecycle.accountUserId ?? lifecycle.account_user_id ?? null;
+		const managedProjectId = lifecycle.managedProjectId ?? lifecycle.managed_project_id ?? null;
+		const managedAccess = lifecycle.managedAccess ?? lifecycle.managed_access ?? "write";
+		// Legacy API tenants are arbitrary memory ids rather than user accounts;
+		// only managed-project work participates in account-erasure fencing.
+		await env.DB.batch(managedProjectId
+			? [managedMutationGuardStatement(env, {
+				accountUserId,
+				projectId: managedProjectId,
+				access: managedAccess,
+			}), ...statements]
+			: statements);
 	} catch (error) {
 		console.warn("ai meter flush failed:", error?.message ?? error);
 	}

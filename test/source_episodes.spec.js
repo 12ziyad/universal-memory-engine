@@ -24,6 +24,7 @@ import { saveMemoryRules } from "../src/pipeline/rules.js";
  */
 
 const V3 = (userId) => ({ ...env, ITSUKI_MEMORY_V3: "allowlist", ITSUKI_MEMORY_V3_USERS: userId });
+const V3_OFF = { ...env, ITSUKI_MEMORY_V3: "off", ITSUKI_MEMORY_V3_USERS: "" };
 
 let counter = 0;
 const nextUser = (tag) => `ep_${tag}_${Date.now().toString(36)}_${counter++}`;
@@ -437,9 +438,11 @@ describe("episodes are erased, not tombstoned", () => {
 		expect(await first.json()).toMatchObject({ ok: true, mode: "recall" });
 
 		const packetBefore = await env.DB.prepare(
-			"SELECT id, content_hash, content_preview FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
+			"SELECT id, content_hash, content_preview, raw_meta_json FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
 		).bind(userId).first();
-		expect(packetBefore?.content_preview).toContain(query);
+		expect(packetBefore?.content_preview).toBeNull();
+		expect(JSON.parse(packetBefore?.raw_meta_json ?? "{}")).toMatchObject({ query_content_free: true });
+		expect(JSON.stringify(packetBefore)).not.toContain(query);
 
 		const erased = await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
 		expect(erased.ok).toBe(true);
@@ -457,11 +460,13 @@ describe("episodes are erased, not tombstoned", () => {
 		expect(await repeated.json()).toMatchObject({ ok: true, mode: "recall" });
 
 		const fresh = await env.DB.prepare(
-			"SELECT id, content_hash, content_preview FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
+			"SELECT id, content_hash, content_preview, raw_meta_json FROM source_packets WHERE user_id = ? AND source_type = 'query' AND source_mode = 'recall'",
 		).bind(userId).first();
 		expect(fresh?.id).toBe(packetBefore.id);
 		expect(fresh?.content_hash).toBe(packetBefore.content_hash);
-		expect(fresh?.content_preview).toContain(query);
+		expect(fresh?.content_preview).toBeNull();
+		expect(JSON.parse(fresh?.raw_meta_json ?? "{}")).toMatchObject({ query_content_free: true });
+		expect(JSON.stringify(fresh)).not.toContain(query);
 	}, 30_000);
 
 	it("refuses an acceptance-shaped exact replay after a terminal V3 write was erased", async () => {
@@ -673,7 +678,7 @@ describe("episodes are written only for accounts selected for V3", () => {
 
 	it("writes nothing for a legacy account", async () => {
 		const userId = nextUser("legacy");
-		expect((await ingest(userId, env)).status).toBeLessThan(400);
+		expect((await ingest(userId, V3_OFF)).status).toBeLessThan(400);
 		expect(await countSourceEpisodes(env, userId)).toBe(0);
 	});
 

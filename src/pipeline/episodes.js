@@ -30,7 +30,13 @@
  */
 
 import { newId } from "../lib/ids.js";
+import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
+import {
+	projectMemorySpaceRegistrationStatement,
+	retentionFenceGuardStatement,
+	retentionProjectForMemoryOwner,
+} from "../lib/retention.js";
 import { resolveAdmissionRules } from "./admission.js";
 import { rulesAllowText } from "./rules.js";
 import { hashText } from "./source.js";
@@ -65,6 +71,8 @@ export async function writeSourceEpisodes(env, userId, {
 	messages = [],
 	projectId = null,
 	projectName = null,
+	managedProjectId = null,
+	accountUserId = null,
 	rules,
 	acceptedAt = null,
 	required = false,
@@ -124,6 +132,8 @@ export async function writeSourceEpisodes(env, userId, {
 	const acceptanceTime = Number.isFinite(packetAcceptedAt) && packetAcceptedAt > 0
 		? packetAcceptedAt
 		: now;
+	const retentionProjectId = managedProjectId
+		?? await retentionProjectForMemoryOwner(env, ownerUserId ?? userId);
 	const project = normalizeProjectScope({ projectId, projectName });
 	try {
 		const prepared = await Promise.all(rows.map(async (row) => {
@@ -169,7 +179,28 @@ export async function writeSourceEpisodes(env, userId, {
 			);
 			return { statement, messageId: row.id, textHash };
 		}));
-		await env.DB.batch(prepared.map((row) => row.statement));
+		const statements = [];
+		if (retentionProjectId) {
+			statements.push(
+				managedMutationGuardStatement(env, {
+					accountUserId,
+					projectId: retentionProjectId,
+				}),
+				retentionFenceGuardStatement(env, {
+					projectId: retentionProjectId,
+					retentionClass: "source_episodes",
+					acceptedAt: acceptanceTime,
+				}),
+				projectMemorySpaceRegistrationStatement(env, {
+					projectId: retentionProjectId,
+					memoryOwnerUserId: ownerUserId ?? userId,
+					memoryUserId: memoryUserId ?? userId,
+					seenAt: acceptanceTime,
+				}),
+			);
+		}
+		statements.push(...prepared.map((row) => row.statement));
+		await env.DB.batch(statements);
 
 		// A batch that executed without throwing can still have inserted zero rows:
 		// the erasure barrier deliberately turns a pre-delete retry into a no-op,
@@ -205,6 +236,22 @@ export async function writeSourceEpisodes(env, userId, {
 				ruleFiltered,
 			};
 		}
+		if (retentionProjectId) {
+			const retentionFence = await env.DB.prepare(
+				`SELECT cutoff_at FROM retention_fences
+				  WHERE project_id = ? AND class = 'source_episodes' AND cutoff_at >= ? LIMIT 1`,
+			).bind(retentionProjectId, acceptanceTime).first();
+			if (retentionFence) {
+				return {
+					ok: false,
+					outcome: "blocked_by_retention",
+					written: 0,
+					expected: prepared.length,
+					eligible: eligible.length,
+					ruleFiltered,
+				};
+			}
+		}
 		const complete = prepared.every((row) => durable.get(row.messageId) === row.textHash);
 		if (!complete) {
 			return {
@@ -225,6 +272,22 @@ export async function writeSourceEpisodes(env, userId, {
 			ruleFiltered,
 		};
 	} catch (error) {
+		if (retentionProjectId) {
+			const retentionFence = await env.DB.prepare(
+				`SELECT cutoff_at FROM retention_fences
+				  WHERE project_id = ? AND class = 'source_episodes' AND cutoff_at >= ? LIMIT 1`,
+			).bind(retentionProjectId, acceptanceTime).first();
+			if (retentionFence) {
+				return {
+					ok: false,
+					outcome: "blocked_by_retention",
+					written: 0,
+					expected: rows.length,
+					eligible: eligible.length,
+					ruleFiltered,
+				};
+			}
+		}
 		console.warn("episode write failed:", error?.message ?? error);
 		return {
 			ok: false,

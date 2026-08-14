@@ -9,9 +9,12 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, it, expect } from "vitest";
 import worker from "../src";
 import {
-	createWebhook, emitWebhookEvent, listDeliveries, retryPendingWebhookDeliveries,
+	createWebhook, emitWebhookEvent, listDeliveries, listWebhooks, queueAuditedWebhookTest, retryPendingWebhookDeliveries,
 	signWebhookBody, webhookUrlProblem,
 } from "../src/pipeline/webhooks.js";
+import { runAuditedMutation } from "../src/lib/audit.js";
+import { capabilityGuardStatement, ensureDefaultOrganization, setProjectRole } from "../src/lib/organizations.js";
+import { newId } from "../src/lib/ids.js";
 
 async function sessionFor(prefix) {
 	const req = new Request("http://example.com/auth/signup", {
@@ -60,6 +63,49 @@ describe("SSRF wall", () => {
 			expect(webhookUrlProblem(url, env), url).toBeTruthy();
 		}
 		expect(webhookUrlProblem("https://hooks.example.com/itsuki", env)).toBeNull();
+		expect(webhookUrlProblem(`https://hooks.example.com/${"x".repeat(2050)}`, env)).toContain("2048");
+		expect(webhookUrlProblem("https://hooks.example.com/path#private-fragment", env)).toContain("fragments");
+	});
+
+	it("keeps secret-bearing target paths and queries delivery-only", async () => {
+		const { cookie, userId } = await sessionFor("wh-url-privacy");
+		const canary = `private-${crypto.randomUUID()}`;
+		const rawUrl = `https://hooks.example.com/a/${canary}?key=${canary}`;
+		const req = new Request("http://example.com/v1/webhooks", {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ name: "masked target", url: rawUrl, events: ["memory.added"] }),
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(req, env, ctx);
+		await waitOnExecutionContext(ctx);
+		expect(response.status).toBe(201);
+		const created = await response.json();
+		expect(created.webhook).toMatchObject({ display_url: "https://hooks.example.com/\u2026" });
+		expect(created.webhook).not.toHaveProperty("url");
+		expect(JSON.stringify(created)).not.toContain(canary);
+
+		const listed = await listWebhooks(env, userId);
+		expect(listed[0]).toMatchObject({ id: created.webhook.id, display_url: "https://hooks.example.com/\u2026" });
+		expect(JSON.stringify(listed)).not.toContain(canary);
+
+		const tasks = [];
+		const deliveredTo = [];
+		await emitWebhookEvent(env, (promise) => tasks.push(promise), userId, "memory.added", { counts: {} }, {
+			fetchImpl: async (url) => { deliveredTo.push(url); return new Response("ok"); },
+		});
+		await Promise.all(tasks);
+		expect(deliveredTo).toEqual([rawUrl]);
+
+		await env.DB.prepare("UPDATE webhook_deliveries SET error = ? WHERE webhook_id = ?")
+			.bind(`connection failed at ${rawUrl}`, created.webhook.id).run();
+		const deliveries = await listDeliveries(env, userId, created.webhook.id);
+		expect(deliveries[0].error).toBe("delivery_failed");
+		expect(JSON.stringify(deliveries)).not.toContain(canary);
+		const audit = await env.DB.prepare(
+			"SELECT metadata_json FROM audit_events WHERE action = 'project.webhook.created' AND target_id = ?",
+		).bind(created.webhook.id).first();
+		expect(JSON.stringify(audit)).not.toContain(canary);
 	});
 
 	it("refuses them at the API too, with a friendly message", async () => {
@@ -67,7 +113,7 @@ describe("SSRF wall", () => {
 		const req = new Request("http://example.com/v1/webhooks", {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify({ name: "probe", url: "http://127.0.0.1:8787/x", events: ["memory.added"] }),
+			body: JSON.stringify({ name: "probe", url: "https://127.0.0.1:8787/x", events: ["memory.added"] }),
 		});
 		const ctx = createExecutionContext();
 		const res = await worker.fetch(req, env, ctx);
@@ -82,7 +128,7 @@ describe("SSRF wall", () => {
 		// Simulate a row edited outside the API.
 		await env.DB.prepare(
 			`INSERT INTO webhooks (id, user_id, name, url, secret, events_json, metadata_only, status, created_at, updated_at)
-			 VALUES ('wh-evil', ?, 'evil', 'http://127.0.0.1:9999/x', 'whsec_test', '["memory.added"]', 0, 'active', 1, 1)`,
+			 VALUES ('wh-evil', ?, 'evil', 'https://127.0.0.1:9999/x', 'whsec_test', '["memory.added"]', 0, 'active', 1, 1)`,
 		).bind(userId).run();
 		let fetched = 0;
 		await emitWebhookEvent(env, (p) => p, userId, "memory.added", { counts: {} }, {
@@ -132,6 +178,26 @@ describe("signing and payloads", () => {
 		expect(log[0].response_code).toBe(200);
 	});
 
+	it("never follows redirects or forwards a signing secret to another origin", async () => {
+		const { userId } = await sessionFor("wh-redirect");
+		const { webhook } = await createWebhook(env, userId, {
+			name: "no redirects", url: "https://hooks.example.com/redirect", events: ["memory.added"],
+		});
+		const seen = [];
+		await emitWebhookEvent(env, (p) => p, userId, "memory.added", { counts: { nodes: 1 } }, {
+			fetchImpl: async (url, init) => {
+				seen.push({ url, init });
+				return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/latest/meta-data" } });
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(seen).toHaveLength(1); // redirects are terminal, never retried or followed
+		expect(seen.every(({ url, init }) => url === "https://hooks.example.com/redirect" && init.redirect === "manual")).toBe(true);
+		expect(seen.some(({ url }) => url.includes("127.0.0.1"))).toBe(false);
+		const log = await listDeliveries(env, userId, webhook.id);
+		expect(log[0]).toMatchObject({ status: "failed", response_code: 302 });
+	});
+
 	it("metadata-only mode never ships content", async () => {
 		const { userId } = await sessionFor("wh-meta");
 		const { webhook } = await createWebhook(env, userId, {
@@ -178,6 +244,72 @@ describe("signing and payloads", () => {
 });
 
 describe("durable outbox", () => {
+	it("does not queue or fetch a webhook test when the member loses write access after authorization", async () => {
+		const owner = await sessionFor("wh-test-owner");
+		const collaborator = await sessionFor("wh-test-member");
+		// Signup is intentionally lightweight. Exercise the supported discovery
+		// door so the owner's legacy default organization/project is bootstrapped
+		// before this test inspects its immutable storage boundary.
+		const projectContext = createExecutionContext();
+		const projectResponse = await worker.fetch(new Request("http://example.com/auth/projects", {
+			headers: { cookie: owner.cookie },
+		}), env, projectContext);
+		await waitOnExecutionContext(projectContext);
+		expect(projectResponse.status).toBe(200);
+		const project = await env.DB.prepare(
+			"SELECT * FROM managed_projects WHERE owner_user_id = ? AND is_default = 1 LIMIT 1",
+		).bind(owner.userId).first();
+		expect(project).toBeTruthy();
+		const org = await ensureDefaultOrganization(env, owner.userId);
+		const at = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO organization_members
+			 (id, org_id, user_id, role, invited_by_user_id, created_at, updated_at)
+			 VALUES (?, ?, ?, 'member', ?, ?, ?)`,
+		).bind(newId("orgm"), org.id, collaborator.userId, owner.userId, at, at).run();
+		await setProjectRole(env, project.id, org.id, collaborator.userId, "member", owner.userId);
+		const { webhook } = await createWebhook(env, project.memory_owner_user_id, {
+			name: "race fence", url: "https://hooks.example.com/race", events: ["memory.added"],
+		});
+		let fetches = 0;
+		await expect(runAuditedMutation(env, {
+			orgId: org.id,
+			projectId: project.id,
+			actorUserId: collaborator.userId,
+			action: "project.webhook.tested",
+			targetType: "webhook",
+			targetId: webhook.id,
+			requestId: crypto.randomUUID(),
+			authorizationGuards: [capabilityGuardStatement(env, {
+				actorUserId: collaborator.userId,
+				orgId: org.id,
+				projectId: project.id,
+				capability: "project.integrations.manage",
+			})],
+		}, async (intent) => {
+			// Deterministic pause after route authorization + intent reservation.
+			await env.DB.prepare(
+				"UPDATE project_members SET role = 'viewer', updated_at = ? WHERE project_id = ? AND user_id = ?",
+			).bind(at + 1, project.id, collaborator.userId).run();
+			return queueAuditedWebhookTest(
+				env,
+				null,
+				project.memory_owner_user_id,
+				webhook.id,
+				{ source: "webhook_test", counts: { nodes: 1 } },
+				intent,
+				{ fetchImpl: async () => { fetches += 1; return new Response("ok"); } },
+			);
+		})).rejects.toMatchObject({ code: "webhook_authorization_changed", status: 403 });
+		expect(fetches).toBe(0);
+		expect(await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM webhook_deliveries WHERE webhook_id = ?",
+		).bind(webhook.id).first()).toEqual({ n: 0 });
+		expect(await env.DB.prepare(
+			"SELECT outcome FROM audit_events WHERE action = 'project.webhook.tested' AND target_id = ?",
+		).bind(webhook.id).first()).toEqual({ outcome: "denied" });
+	});
+
 	it("deduplicates concurrent emission of one logical event", async () => {
 		const { userId } = await sessionFor("wh-once");
 		const { webhook } = await createWebhook(env, userId, {
@@ -266,6 +398,6 @@ describe("a dead endpoint", () => {
 		const log = await listDeliveries(env, userId, webhook.id);
 		expect(log[0].status).toBe("failed");
 		expect(log[0].attempts).toBe(3);
-		expect(log[0].error).toContain("ECONNREFUSED");
+		expect(log[0].error).toBe("delivery_failed");
 	}, 45000);
 });

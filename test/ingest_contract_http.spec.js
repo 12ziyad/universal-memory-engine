@@ -313,7 +313,7 @@ describe("POST /v1/ingest contract", () => {
 		expect(counts).toMatchObject({ packets: 1, jobs: 1 });
 	});
 
-	it("retains normalized delivery evidence on an opt-out receipt", async () => {
+	it("returns normalized opt-out delivery evidence transiently without persisting the refused text", async () => {
 		const userId = `delivery-opt-out-${crypto.randomUUID()}`;
 		const delivery = orderedDelivery({ captureEvidence: captureEvidence() });
 		const response = await call(bodyFor(
@@ -332,7 +332,11 @@ describe("POST /v1/ingest contract", () => {
 		const stored = await env.DB.prepare(
 			"SELECT detail FROM receipts WHERE id = ? AND user_id = ?",
 		).bind(response.body.receipt_id, userId).first();
-		expect(JSON.parse(stored.detail).delivery).toEqual(delivery);
+		expect(stored).toBeNull();
+		expect(response.body.receipt_id).toBeNull();
+		expect(await env.DB.prepare(
+			"SELECT id FROM source_packets WHERE user_id = ?",
+		).bind(userId).first()).toBeNull();
 	});
 
 	it("preserves the full successful extraction receipt while retry state stays compact", async () => {
