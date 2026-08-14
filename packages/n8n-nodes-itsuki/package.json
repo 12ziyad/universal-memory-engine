@@ -1,0 +1,61 @@
+{
+	"name": "n8n-nodes-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for n8n workflows and AI Agents: save durable facts, recall them in any later run, and hand memory to an AI Agent as a tool.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"n8n-community-node-package",
+		"memory",
+		"ai",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/n8n-nodes-itsuki"
+	},
+	"engines": {
+		"node": ">=20.15"
+	},
+	"main": "index.js",
+	"scripts": {
+		"build": "tsc && node scripts/copy-assets.mjs",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint nodes credentials --ext .ts",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"index.js"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/ItsukiApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Itsuki/Itsuki.node.js"
+		]
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.0",
+		"@typescript-eslint/eslint-plugin": "^8.32.0",
+		"@typescript-eslint/parser": "^8.32.0",
+		"eslint": "^8.57.0",
+		"eslint-plugin-n8n-nodes-base": "^1.16.3",
+		"n8n-workflow": "^2.16.0",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}

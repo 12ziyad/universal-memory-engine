@@ -1,0 +1,16 @@
+{
+	"name": "Itsuki: save then recall",
+	"nodes": [
+		{ "id": "trig1", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+		{ "id": "save1", "name": "Save Memory", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [220, 0],
+			"parameters": { "operation": "saveMemory", "content": "The deploy mascot is a teal axolotl.", "waitForCompletion": true, "waitOptions": { "timeoutSeconds": 45, "intervalSeconds": 2 }, "additionalFields": { "userId": "example_user", "idempotencyKey": "example-save-1" } } },
+		{ "id": "rec1", "name": "Recall Memory", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [440, 0],
+			"parameters": { "operation": "recall", "query": "what is the deploy mascot?", "limit": 5, "additionalFields": { "userId": "example_user" } } }
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Save Memory", "type": "main", "index": 0 }]] },
+		"Save Memory": { "main": [[{ "node": "Recall Memory", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" },
+	"pinData": {}
+}

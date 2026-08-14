@@ -1,0 +1,19 @@
+{
+	"name": "Itsuki: preview, delete one, verify",
+	"nodes": [
+		{ "id": "t", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+		{ "id": "p", "name": "Delete All Preview", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [220, 0],
+			"parameters": { "operation": "deleteAll", "confirmDestruction": false, "additionalFields": { "userId": "example_user" } } },
+		{ "id": "d", "name": "Delete One", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [440, 0],
+			"parameters": { "operation": "delete", "memoryId": "node_replace-with-a-real-id", "additionalFields": { "userId": "example_user" } } },
+		{ "id": "l", "name": "List After", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [660, 0],
+			"parameters": { "operation": "list", "returnAll": false, "pageSize": 50, "additionalFields": { "userId": "example_user" } } }
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Delete All Preview", "type": "main", "index": 0 }]] },
+		"Delete All Preview": { "main": [[{ "node": "Delete One", "type": "main", "index": 0 }]] },
+		"Delete One": { "main": [[{ "node": "List After", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" },
+	"pinData": {}
+}

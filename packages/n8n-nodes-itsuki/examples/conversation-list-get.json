@@ -1,0 +1,22 @@
+{
+	"name": "Itsuki: conversation, list, get",
+	"nodes": [
+		{ "id": "t", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+		{ "id": "c", "name": "Save Conversation", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [220, 0],
+			"parameters": { "operation": "saveConversation", "messages": { "message": [
+				{ "role": "user", "content": "Our staging database is called sandcastle." },
+				{ "role": "assistant", "content": "Noted — staging DB is sandcastle." }
+			] }, "waitForCompletion": true, "waitOptions": { "timeoutSeconds": 60, "intervalSeconds": 2 }, "additionalFields": { "userId": "example_user", "conversationId": "example-conv", "idempotencyKey": "example-conv-1" } } },
+		{ "id": "l", "name": "List Memories", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [440, 0],
+			"parameters": { "operation": "list", "returnAll": true, "pageSize": 50, "maxItems": 100, "additionalFields": { "userId": "example_user" } } },
+		{ "id": "g", "name": "Get Memory", "type": "n8n-nodes-itsuki.itsuki", "typeVersion": 1, "position": [660, 0],
+			"parameters": { "operation": "get", "memoryId": "={{ $json.items[0].id }}", "additionalFields": { "userId": "example_user" } } }
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Save Conversation", "type": "main", "index": 0 }]] },
+		"Save Conversation": { "main": [[{ "node": "List Memories", "type": "main", "index": 0 }]] },
+		"List Memories": { "main": [[{ "node": "Get Memory", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" },
+	"pinData": {}
+}
