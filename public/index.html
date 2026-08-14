@@ -439,6 +439,9 @@
 	   between-groups gap (12 + 20). */
 	.client-tabs + .steps { margin-top: 20px; }
 	.variant-tabs + .steps { margin-top: 20px; }
+	/* When a client offers two install routes, the variant row belongs to its
+	   client row — pull it up so the pair reads as one chooser. */
+	.client-tabs:has(+ .variant-tabs) { margin-bottom: 12px; }
 	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; }
 	.client-tabs .term-tab svg, .client-tabs .term-tab .brand-icon { width: 18px; height: 18px; flex: 0 0 auto; }
 	.brand-icon { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
@@ -1728,7 +1731,7 @@
 				<div class="term-pane" data-pane="claude-code">
 					<div class="term-step"><b>1</b><span>Create your MCP link in the Connect tab, then run:</span></div>
 					<div class="term-code"><code data-connect="claude-code"></code><button class="copy-btn" data-copy-key="claude-code">Copy</button></div>
-					<div class="term-note">Claude Code gets three tools: <i>save_memory</i>, <i>save_conversation</i>, <i>recall_memory</i>.</div>
+					<div class="term-note">Claude Code gets all eight memory tools — <i>save_memory</i>, <i>save_conversation</i>, <i>recall_memory</i>, plus browse, inspect, guarded delete, and <i>whoami</i>.</div>
 				</div>
 				<div class="term-pane" data-pane="cursor">
 					<div class="term-step"><b>1</b><span>Add Itsuki to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
@@ -4112,6 +4115,92 @@ const result = await memory.turn([
   { role: "user", content: "We picked Postgres for the new service." },
 ]);
 console.log(result.recall.context);`,
+		// Coding agents that speak MCP natively. The path-token URL carries the
+		// credential, so none of these need a headers block — which also sidesteps
+		// hosts whose config files cannot interpolate environment variables.
+		opencode: `{
+  "mcp": {
+    "${PRODUCT.name.toLowerCase()}": {
+      "type": "remote",
+      "url": "${origin}/mcp/${mcpToken}",
+      "enabled": true
+    }
+  }
+}`,
+		antigravity: `{
+  "mcpServers": {
+    "${PRODUCT.name.toLowerCase()}": { "serverUrl": "${origin}/mcp/${mcpToken}" }
+  }
+}`,
+		openclawMcpAdd: `openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${origin}/mcp/${mcpToken} --transport streamable-http`,
+		// The agent-driven install: paste once, OpenClaw wires itself up, imports
+		// its own workspace memory through the bounded ingest door, and proves the
+		// round trip with whoami + recall. Every write returns a receipt.
+		openclawPrompt: `Set up the ${PRODUCT.name} memory connection and import existing memories.
+
+Install & Configure
+
+1. Run: openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${origin}/mcp/${mcpToken} --transport streamable-http
+2. Reload OpenClaw so the MCP server list refreshes.
+3. Call the ${PRODUCT.name.toLowerCase()} whoami tool — confirm it reports "Connected to ${PRODUCT.name} memory". If it does not, stop and report the error.
+
+Import Existing Memories
+
+4. Read these files from ~/.openclaw/workspace/ if they exist:
+- SOUL.md, IDENTITY.md, USER.md, MEMORY.md
+- Skip: AGENTS.md, BOOTSTRAP.md, HEARTBEAT.md, TOOLS.md
+
+5. Read all files from ~/.openclaw/workspace/memory/ matching YYYY-MM-DD.md, most recent 30 days only.
+
+6. Fetch ${origin}/v1/ingest/limits and respect it: at most 30 messages per request and 4,000 characters per message. Split any file over 2,000 words by heading (#), one section per message. Send each batch:
+curl -X POST ${origin}/v1/ingest -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"messages":[{"role":"user","content":"<one section>"}],"idempotencyKey":"<unique-per-batch>","flush":true}'
+Skip anything that looks like a secret, API key, or password.
+
+7. Verify: call the ${PRODUCT.name.toLowerCase()} recall_memory tool with the query "preferences" and confirm imported content comes back.
+
+8. Report: which files were found, how many batches were accepted (each returns a receipt id), and the recall result. Never print the key or the connection URL in your report.`,
+		openclawImport: `# limits first — the door refuses oversized batches by name
+curl -s ${origin}/v1/ingest/limits
+
+# one bounded batch (repeat per section, new idempotencyKey each time)
+curl -X POST ${origin}/v1/ingest \\
+  -H "authorization: Bearer ${mcpToken}" \\
+  -H "content-type: application/json" \\
+  -d '{
+    "messages": [{"role": "user", "content": "One section of workspace notes."}],
+    "idempotencyKey": "import-0001",
+    "flush": true
+  }'`,
+		// Hermes reads MCP servers from its YAML config; the path-token URL means
+		// no headers block is needed. `hermes mcp add` is its interactive verb.
+		hermesConfig: `# ~/.hermes/config.yaml
+mcp_servers:
+  ${PRODUCT.name.toLowerCase()}:
+    url: "${origin}/mcp/${mcpToken}"`,
+		hermesMcpAdd: `hermes mcp add ${PRODUCT.name.toLowerCase()}`,
+		// Pi has no MCP support (verified) — its honest day-one route is REST
+		// through the shell tool it already has. The native npm extension is the
+		// planned upgrade; until it exists no install verb for it appears here.
+		piPrompt: `Set up the ${PRODUCT.name} memory connection and verify it end to end.
+
+1. Verify: run
+curl -s ${origin}/v1/status -H "authorization: Bearer ${mcpToken}"
+Confirm it returns JSON counts. If it does not, stop and report the exact error without printing the key.
+
+2. Save a first memory: run
+curl -s -X POST ${origin}/v1/save -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"content": "Connected Pi to ${PRODUCT.name} memory."}'
+Confirm the response contains a receipt id.
+
+3. Recall it: run
+curl -s -X POST ${origin}/v1/recall -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"query": "Pi connection"}'
+Confirm the saved fact comes back in the context field.
+
+4. Report what worked and what failed. Never print the key in your report.`,
+		restInstructions: `You have a personal ${PRODUCT.name} memory service reachable over REST. At the start of each session, recall relevant context:
+curl -s -X POST ${origin}/v1/recall -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"query": "<the current task or topic>"}'
+Use the returned context field. When I state a durable fact, preference, decision, or plan, save it in my own words:
+curl -s -X POST ${origin}/v1/save -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"content": "<the fact>"}'
+Never claim something was saved unless the response contained a receipt. Never print the key.`,
 	};
 }
 
@@ -4127,6 +4216,9 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 	hexN: `<path d="M12 2.6 20 7v10l-8 4.4L4 17V7z"/><path d="M9.5 15.5v-7l5 7v-7"/>`,
 	pointer: `<path d="M5.5 3.2 19 11l-6.4 1.4L10 19.3z"/>`,
 	terminal: `<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m7.5 10 2.5 2.5-2.5 2.5M13 15h4"/>`,
+	bot: `<rect x="4.5" y="7.5" width="15" height="12" rx="3"/><path d="M12 4.5v3M8.5 4.5h7"/><path d="M9 12.5v2M15 12.5v2"/>`,
+	pi: `<path d="M4.5 7.5h15"/><path d="M8.5 7.5V19M15.5 7.5V19"/>`,
+	orbit: `<circle cx="12" cy="12" r="3"/><path d="M20.5 12c0 2.2-3.8 4-8.5 4s-8.5-1.8-8.5-4 3.8-4 8.5-4 8.5 1.8 8.5 4Z"/>`,
 	chevron: `<path d="m4.5 7 4.5 5-4.5 5"/><path d="M12 17h7.5"/>`,
 	copy: `<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15.5V5.5a2.5 2.5 0 0 1 2.5-2.5H17"/>`,
 	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
@@ -4206,19 +4298,6 @@ function installMethods() {
 							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
-				cursor: {
-					label: "Cursor",
-					icon: ICON.pointer,
-					steps: [
-						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add it to Cursor", body: "One click. Cursor asks you to confirm.",
-							action: (key) => key
-								? `<a class="install-btn" href="${esc(cursorInstallLink(key))}">Add to Cursor</a>`
-								: mcpKey },
-						{ title: "Or paste the config", body: "Works in any other MCP editor.",
-							codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor },
-					],
-				},
 			},
 		},
 		sdk: {
@@ -4281,6 +4360,116 @@ function installMethods() {
 						{ title: "Connect Itsuki", body: "Node 22 or 24 LTS is required. Load the API key from Codex's private environment file.", action: apiKey, codeLabel: ".env", code: () => installSnippets().codexCredential },
 						{ title: "Trust lifecycle hooks", body: "Review Itsuki's SessionStart and SessionEnd commands before enabling them.", codeLabel: "codex", code: () => installSnippets().codexTrust },
 						{ title: "Test connection", body: "Verify the plugin and MCP server, then start a new Codex session.", codeLabel: "terminal", code: () => installSnippets().codexVerify },
+					],
+				},
+				cursor: {
+					label: "Cursor",
+					icon: ICON.pointer,
+					docsHref: "/docs/#/install/cursor",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add it to Cursor", body: "One click. Cursor asks you to confirm.",
+							action: (key) => key
+								? `<a class="install-btn" href="${esc(cursorInstallLink(key))}">Add to Cursor</a>`
+								: mcpKey },
+						{ title: "Or paste the config", body: "Works in any other MCP editor.",
+							codeLabel: "mcp.json", code: (key) => installSnippets(key).cursor },
+						{ title: "Test connection", body: `Start a new Cursor session and ask it to check.`,
+							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+					],
+				},
+				opencode: {
+					label: "OpenCode",
+					icon: ICON.terminal,
+					docsHref: "/docs/#/install/opencode",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add the remote MCP server", body: "Project opencode.json, or global at ~/.config/opencode/opencode.json. The URL is the credential — treat the file as a secret.",
+							codeLabel: "opencode.json", code: (key) => installSnippets(key).opencode },
+						{ title: "Test connection", body: "Restart OpenCode, then ask it to check.",
+							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+						{ title: "Ask for proactive tool use", body: "Add to your OpenCode rules or agent instructions so recall and save happen without prompting.",
+							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
+					],
+				},
+				antigravity: {
+					label: "Antigravity",
+					icon: ICON.orbit,
+					docsHref: "/docs/#/install/antigravity",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add the MCP server", body: "Agent panel → MCP servers → Manage → open the raw config.",
+							codeLabel: "mcp_config.json", code: (key) => installSnippets(key).antigravity,
+							note: "This file does not interpolate environment variables, so the pasted URL carries the credential. Treat the file as a secret." },
+						{ title: "Test connection", body: "Restart the Antigravity session, then ask it to check.",
+							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+					],
+				},
+			},
+		},
+		// Agent harnesses: always-on agents that own their own memory files.
+		// Both routes below use only the shipped MCP and REST doors — the CLI
+		// variant arrives with the native package, never before it exists.
+		agents: {
+			label: "Agents",
+			blurb: "Agent harnesses",
+			icon: ICON.bot,
+			clients: {
+				openclaw: {
+					label: "OpenClaw",
+					icon: ICON.spark,
+					docsHref: "/docs/#/install/openclaw",
+					hint: "Both routes use OpenClaw's built-in MCP support. A native package with one-line install is planned.",
+					variants: {
+						prompt: {
+							label: "Prompt install",
+							steps: [
+								{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+								{ title: "Paste this prompt", body: "OpenClaw adds the memory server itself, imports your workspace files through the bounded ingest door, and verifies the round trip.",
+									codeLabel: "prompt", code: (key) => installSnippets(key).openclawPrompt },
+								{ title: "Review the report", body: "The agent reports what was imported and what was skipped. Every accepted batch has a receipt under Requests." },
+							],
+						},
+						manual: {
+							label: "Manual config",
+							steps: [
+								{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+								{ title: "Add the MCP server", body: "One command in your terminal, then reload OpenClaw.",
+									codeLabel: "terminal", code: (key) => installSnippets(key).openclawMcpAdd },
+								{ title: "Import workspace files", body: "Optional: batch existing notes through the bounded ingest door.",
+									codeLabel: "curl", code: (key) => installSnippets(key).openclawImport },
+								{ title: "Ask for proactive tool use", body: "Add to OpenClaw's standing instructions so recall and save happen without prompting.",
+									codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
+							],
+						},
+					},
+				},
+				hermes: {
+					label: "Hermes Agent",
+					icon: ICON.hex,
+					docsHref: "/docs/#/install/hermes",
+					hint: "Uses Hermes's built-in MCP support, alongside its own memory files. A native memory provider is planned.",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add the MCP server", body: "In Hermes's config file — or run the interactive command below and paste the URL when asked.",
+							codeLabel: "config.yaml", code: (key) => installSnippets(key).hermesConfig },
+						{ title: "Or add it interactively", body: "Hermes walks you through it.",
+							codeLabel: "terminal", code: (key) => installSnippets(key).hermesMcpAdd },
+						{ title: "Test connection", body: "Restart Hermes, then ask it to check.",
+							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+					],
+				},
+				pi: {
+					label: "Pi Agent",
+					icon: ICON.pi,
+					docsHref: "/docs/#/install/pi",
+					hint: "Pi has no MCP support, so this route works through its shell tool and the REST door. A native Pi extension is planned.",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Paste this prompt", body: "Pi verifies the connection, saves a first memory, and proves recall — end to end.",
+							codeLabel: "prompt", code: (key) => installSnippets(key).piPrompt },
+						{ title: "Make it automatic", body: "Add to Pi's standing instructions (global or project) so recall and save happen every session.",
+							codeLabel: "custom instructions", code: (key) => installSnippets(key).restInstructions },
 					],
 				},
 			},
@@ -4405,7 +4594,7 @@ function viewInstall(v) {
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		${state.method === "plugin" ? `
+		${["plugin", "agents"].includes(state.method) ? `
 			<div class="plugin-stage">
 				<div class="plugin-stage-head">
 					<div class="plugin-stage-title">${client.icon ?? ""}<span>${esc(client.label)}</span></div>
@@ -8319,8 +8508,8 @@ function connectSnippets() {
 	const base = location.origin;
 	return {
 		"mcp-url": `${base}/mcp/YOUR_PRIVATE_TOKEN`,
-		"claude-code": `claude mcp add --transport http uml ${base}/mcp/YOUR_PRIVATE_TOKEN`,
-		cursor: `{ "mcpServers": { "uml": { "url": "${base}/mcp/YOUR_PRIVATE_TOKEN" } } }`,
+		"claude-code": `claude mcp add --transport http itsuki ${base}/mcp/YOUR_PRIVATE_TOKEN`,
+		cursor: `{ "mcpServers": { "itsuki": { "url": "${base}/mcp/YOUR_PRIVATE_TOKEN" } } }`,
 		api: `curl -X POST ${base}/v1/turn \\
   -H "authorization: Bearer YOUR_API_TOKEN" \\
   -H "content-type: application/json" \\
@@ -12751,7 +12940,7 @@ function viewSetup(v) {
 			<ol class="steps">
 				<li>If your workspace or custom assistant supports connectors, MCP, tools, or API actions, add Itsuki there.</li>
 				<li>Paste the URL above only for legacy dev testing.</li>
-				<li>Enable the <code>save_memory</code>, <code>save_conversation</code>, and <code>recall_memory</code> tools.</li>
+				<li>Enable the memory tools — <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, and the management tools alongside them.</li>
 			</ol>
 		</div>
 		<div class="box"><h3>Connect Claude / MCP clients</h3>

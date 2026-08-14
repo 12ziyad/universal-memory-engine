@@ -147,6 +147,13 @@ const NAV = [
 		["/install/claude-code", "Claude Code (MCP)"],
 		["/install/plugin", "Claude Code plugin"],
 		["/install/cursor", "Cursor & other editors"],
+		["/install/opencode", "OpenCode"],
+		["/install/antigravity", "Antigravity"],
+	]},
+	{ sec: "Agent harnesses", items: [
+		["/install/openclaw", "OpenClaw"],
+		["/install/hermes", "Hermes Agent"],
+		["/install/pi", "Pi Agent"],
 	]},
 	{ sec: "Build with the API", items: [
 		["/api/rest", "REST API reference"],
@@ -323,10 +330,127 @@ ${codeBlock(`{
     "${PRODUCT.name.toLowerCase()}": { "url": "${ORIGIN}/mcp/YOUR_MCP_KEY" }
   }
 }`)}
+<h2>Verify</h2>
+<p>Start a new session and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>. A healthy connection answers with the memory space, scopes, and live counts.</p>
 <h2>Other MCP clients</h2>
 <p>Where a client supports Streamable HTTP MCP, point its documented remote-server configuration at the same generated URL. Client-specific lifecycle hooks and transcript capture require separate tested adapters and are not implied by this MCP connection.</p>
 <p>If your client prefers a fixed URL with header auth, that works too: point it at <code>${ORIGIN}/mcp</code> with no path token and send <code>Authorization: Bearer</code> plus an API key. Same server, same tools.</p>
 <div class="note">Treat the MCP URL like a password: it IS your key. One key per tool means you can revoke one tool without touching the rest. And it must be an <b>MCP link</b>, created as such in API Keys — an API key in the URL is refused (API keys belong in the <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code>).</div>
+<div class="note">Some clients' MCP configs cannot send custom headers (LlamaIndex's <code>BasicMCPClient</code>, for example, documents only OAuth). The path-token URL works there unchanged — the credential travels in the URL, no header required.</div>
+` };
+
+PAGES["/install/opencode"] = { title: "OpenCode", html: `
+<h1>OpenCode</h1>
+<p class="lede">Persistent memory for OpenCode through its remote MCP support — one config block, no plugin required.</p>
+<h2>1. Create your link</h2>
+<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
+<h2>2. Add the remote server</h2>
+<p>Project-level <code>opencode.json</code>, or global at <code>~/.config/opencode/opencode.json</code>:</p>
+${codeBlock(`{
+  "mcp": {
+    "${PRODUCT.name.toLowerCase()}": {
+      "type": "remote",
+      "url": "${ORIGIN}/mcp/YOUR_MCP_KEY",
+      "enabled": true
+    }
+  }
+}`)}
+<h2>3. Verify</h2>
+<p>Restart OpenCode and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>. You should see the connected memory space, scopes, and live counts.</p>
+<h2>What you get</h2>
+<p>All eight memory tools in every OpenCode session: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. Ask naturally — "remember that we deploy from main", "what do you know about this project" — and the agent picks the tool.</p>
+<p>For recall and save without prompting, add the proactive-use instructions from the dashboard's Get started page to your OpenCode rules.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>No tools appearing</b> — restart OpenCode after editing the config, and check the JSON parses.</li>
+<li><b>401 unauthorized</b> — the link is revoked or was an API key. Create an MCP link in API Keys; API keys go in an <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code> instead.</li>
+<li><b>Wrong or missing memories</b> — say <i>use the whoami tool</i> and check which memory space and project the connection reports.</li>
+</ul>
+<div class="note">The URL carries your credential — treat <code>opencode.json</code> as a secret, and keep it out of version control unless the key is meant to be shared with that repository's collaborators. A native OpenCode plugin with lifecycle hooks is planned; this MCP route stays supported either way.</div>
+` };
+
+PAGES["/install/antigravity"] = { title: "Antigravity", html: `
+<h1>Antigravity</h1>
+<p class="lede">Persistent memory for Google Antigravity through its MCP support — one config block in the agent panel.</p>
+<h2>1. Create your link</h2>
+<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
+<h2>2. Add the MCP server</h2>
+<p>In the agent panel: <b>MCP servers → Manage → open the raw config</b>, then add:</p>
+${codeBlock(`{
+  "mcpServers": {
+    "${PRODUCT.name.toLowerCase()}": { "serverUrl": "${ORIGIN}/mcp/YOUR_MCP_KEY" }
+  }
+}`)}
+<h2>3. Verify</h2>
+<p>Restart the Antigravity session and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>.</p>
+<h2>What you get</h2>
+<p>All eight memory tools: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>No tools appearing</b> — restart the session after saving the config.</li>
+<li><b>401 unauthorized</b> — the pasted URL must be an MCP link created in API Keys, not an API key.</li>
+</ul>
+<div class="note">Antigravity's config file does not interpolate environment variables, so the URL you paste carries the credential in plain text. Treat the file as a secret. This is also why the path-token URL is the recommended route here — there is no header for a variable to fail to reach.</div>
+` };
+
+PAGES["/install/openclaw"] = { title: "OpenClaw", html: `
+<h1>OpenClaw</h1>
+<p class="lede">Persistent memory for OpenClaw agents — a paste-once prompt install, or one manual command. Both use OpenClaw's built-in MCP support.</p>
+<h2>Route A — prompt install (recommended)</h2>
+<p>Create an <b>MCP link</b> in API Keys, open the dashboard's <b>Get started → Agents → OpenClaw</b> tab, and copy the installation prompt. Paste it into OpenClaw. The agent adds the memory server to its own configuration, imports your workspace files (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>USER.md</code>, <code>MEMORY.md</code>, and the last 30 days of <code>memory/YYYY-MM-DD.md</code>) through the bounded ingest door, and verifies the round trip with <code>whoami</code> and <code>recall_memory</code>. Every accepted batch returns a receipt you can inspect under <b>Requests</b>.</p>
+<h2>Route B — manual config</h2>
+${codeBlock(`openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${ORIGIN}/mcp/YOUR_MCP_KEY --transport streamable-http`)}
+<p>Reload OpenClaw, then confirm the connection by asking it to call the <code>whoami</code> tool. To import existing workspace notes, batch them through <code>POST ${ORIGIN}/v1/ingest</code> — check <code>GET ${ORIGIN}/v1/ingest/limits</code> first (at most 30 messages per request, 4,000 characters per message).</p>
+<h2>What you get</h2>
+<p>All eight memory tools in every OpenClaw session: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. Memory persists across sessions and across machines — the workspace files stay yours; ${PRODUCT.name} adds structured recall on top.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Tools missing after install</b> — reload OpenClaw so its MCP server list refreshes, then re-ask for <code>whoami</code>.</li>
+<li><b>401 unauthorized</b> — the link is revoked or was an API key; MCP links are created as such in API Keys.</li>
+<li><b>Import batches rejected</b> — the ingest door refuses oversized batches by name; re-split against <code>GET /v1/ingest/limits</code>.</li>
+</ul>
+<div class="note">A native OpenClaw package — a one-line marketplace install, the exclusive memory slot, and lifecycle hooks — is planned. Until it ships, both routes above use only OpenClaw's built-in MCP support and ${PRODUCT.name}'s public doors, so nothing here stops working when the package arrives.</div>
+` };
+
+PAGES["/install/hermes"] = { title: "Hermes Agent", html: `
+<h1>Hermes Agent</h1>
+<p class="lede">Persistent memory for Hermes through its built-in MCP support — one YAML block or one interactive command.</p>
+<h2>1. Create your link</h2>
+<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
+<h2>2. Add the MCP server</h2>
+<p>In <code>~/.hermes/config.yaml</code>:</p>
+${codeBlock(`mcp_servers:
+  ${PRODUCT.name.toLowerCase()}:
+    url: "${ORIGIN}/mcp/YOUR_MCP_KEY"`)}
+<p>Or interactively — Hermes prompts for the URL:</p>
+${codeBlock(`hermes mcp add ${PRODUCT.name.toLowerCase()}`)}
+<h2>3. Verify</h2>
+<p>Restart Hermes and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>.</p>
+<h2>How this sits beside Hermes's own memory</h2>
+<p>Hermes keeps its built-in <code>MEMORY.md</code> and <code>USER.md</code> files; external memory runs alongside them, never replacing them. Through this MCP connection Hermes gets all eight ${PRODUCT.name} tools — <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, <code>whoami</code> — so memory persists across sessions, machines, and every other connected tool.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Tools missing</b> — restart Hermes after editing <code>config.yaml</code>, and check the YAML indentation.</li>
+<li><b>401 unauthorized</b> — the link is revoked or was an API key; create an MCP link in API Keys. Hermes also supports header auth: url <code>${ORIGIN}/mcp</code> with a <code>headers:</code> mapping carrying <code>Authorization: Bearer</code> and an API key.</li>
+</ul>
+<div class="note">A native ${PRODUCT.name} memory provider for Hermes's external-provider ecosystem is planned — prefetch before each response, background sync after it. The MCP route above stays supported either way.</div>
+` };
+
+PAGES["/install/pi"] = { title: "Pi Agent", html: `
+<h1>Pi Agent</h1>
+<p class="lede">Memory for Pi through the REST door — Pi has no MCP support, so this route uses the shell tool Pi already has.</p>
+<h2>1. Create your link</h2>
+<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — it doubles as a REST Bearer credential for the memory endpoints.</p>
+<h2>2. Paste the setup prompt</h2>
+<p>Copy the installation prompt from the dashboard's <b>Get started → Agents → Pi Agent</b> tab and paste it into Pi. The agent verifies the connection (<code>GET /v1/status</code>), saves a first memory (<code>POST /v1/save</code>), and proves recall (<code>POST /v1/recall</code>) — end to end, reporting receipts.</p>
+<h2>3. Make it automatic</h2>
+<p>Add the standing instructions from the same tab to Pi's global or project instructions: recall at session start, save when you state something durable. Every save returns a receipt; the instructions tell Pi never to claim a save without one.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Verification fails at step 1</b> — the link is revoked, or the shell has no network access. Run the curl by hand to see the exact error.</li>
+<li><b>Saves succeed but recall is empty</b> — extraction is asynchronous; allow a few seconds, then recall again.</li>
+</ul>
+<div class="note">A native Pi extension (<code>pi.registerTool</code> memory tools, slash commands, auto-capture) is planned and will replace the curl route with first-class tools. Until it is published, no install command for it appears here — the REST route above is what actually works today.</div>
 ` };
 
 PAGES["/api/rest"] = { title: "REST API reference", html: `
@@ -367,6 +491,8 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>GET /v1/ingest/limits</code></td><td>Authoritative machine-readable limits, character unit, request encoding, and ordered-delivery schema.</td></tr>
 <tr><td><code>GET /v1/graph</code></td><td>The full laid-out memory graph (nodes, details, events, edges, clusters).</td></tr>
 <tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
+<tr><td><code>GET /v1/memories</code></td><td>Read-only inventory, newest first: <code>kind</code> (all | node | page), <code>limit</code> (1–200), keyset <code>cursor</code>, <code>q</code> substring filter.</td></tr>
+<tr><td><code>GET /v1/memories/&lt;id&gt;</code></td><td>One object by id — a memory with its history and events, a page with its markdown.</td></tr>
 <tr><td><code>GET /v1/usage?range=30d</code></td><td>Activity rollups: saves/recalls per day, by source, totals. Ranges 1d/7d/30d/all.</td></tr>
 <tr><td><code>GET /v1/receipts?limit=50</code></td><td>Latest save/recall receipts.</td></tr>
 <tr><td><code>GET /v1/export</code></td><td>Complete JSON export of the memory space resolved by the current credential and request. It does not aggregate sibling SDK sub-tenant spaces in the project.</td></tr>
@@ -431,13 +557,25 @@ ${codeBlock(`authorization: Bearer ${PRODUCT.tokenPrefix}XXXXXXXX`)}
 PAGES["/api/mcp"] = { title: "MCP tools", html: `
 <h1>MCP tools</h1>
 <p class="lede">Server: <code>itsuki-memory</code> · Transport: Streamable HTTP · URL: <code>${ORIGIN}/mcp/&lt;key&gt;</code></p>
-<h2>The three tools</h2>
+<h2>Write &amp; recall</h2>
 <h3>save_memory</h3>
 <p>Saves exactly one explicitly submitted durable fact. Input: <code>content</code> (required, the user's words), optional <code>recentContext</code> for resolving references like "it". Returns a final receipt — <i>Saved: 1 memory (Kotlin)…</i> — only after the write completes.</p>
 <h3>save_conversation</h3>
 <p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Attribution rules require user adoption or supported request/outcome evidence; unsupported assistant prose is not treated as a user fact.</p>
 <h3>recall_memory</h3>
 <p>Input: <code>query</code>, optional <code>memoryScope</code> project metadata, and optional <code>recallScope</code> (<code>global</code> | <code>project_only</code> | <code>project_then_global</code>). The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
+<h2>Management</h2>
+<p>The half a client needs to inspect and clean up its own memory without opening the dashboard. All of it is read-only except the two delete tools, which are guarded.</p>
+<h3>list_memories</h3>
+<p>Browse stored memories newest-first. Input: optional <code>kind</code> (<code>all</code> | <code>node</code> | <code>page</code>), <code>limit</code> (1–200), <code>cursor</code> for the next page, and <code>q</code> substring filter. Returns ids that <code>get_memory</code> and <code>delete_memory</code> accept. For meaning-based lookup use <code>recall_memory</code>.</p>
+<h3>get_memory</h3>
+<p>Fetch one object by id (<code>node_…</code>, <code>page_…</code>, <code>slice_…</code>, or a candidate id) with its current text, bounded history, and dated events.</p>
+<h3>delete_memory</h3>
+<p>Permanently delete one object by id. Same effect as <code>DELETE /v1/memories/:id</code>, including the deletion tombstone. In managed projects this needs the distinct delete permission, not just write.</p>
+<h3>delete_all_memories</h3>
+<p>Safe by default: without <code>confirm: true</code> it only previews what would be deleted (counts and sample labels). Only an explicit <code>confirm: true</code> destroys, matching the REST bulk-delete contract.</p>
+<h3>whoami</h3>
+<p>Reports the connection's identity and health: memory space, scopes, bound project, whether deletion is allowed, and live counts. The verify step of every install guide is "ask for <code>whoami</code>".</p>
 <h2>Design guarantees</h2>
 <ul>
 <li>Itsuki's write responses distinguish locally queued work, server acceptance, and a backend receipt; asynchronous enrichment has separate packet status.</li>

@@ -39,3 +39,9 @@ If the application uses Durable Objects or Workflows, refer to the relevant best
 
 - Durable Objects: https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/
 - Workflows: https://developers.cloudflare.com/workflows/build/rules-of-workflows/
+
+## Project conventions
+
+- The Get started doors in `public/index.html` (`installMethods()` / `installSnippets()`) and the docs Connect-a-tool nav in `public/docs/index.html` describe the same integrations and are contract-tested together (`test/get_started.spec.js`, `test/docs_connect_tool.spec.js`) — edit both sides or the suite goes red. Neither surface may show an install verb for a package that has not shipped; the "no dead commands" tests enforce this by name.
+
+## Imported Claude Cowork project instructions

@@ -316,3 +316,130 @@ describe("the visual redesign", () => {
 		expect(labels.length).toBe(codeSteps.length);
 	});
 });
+
+/** Execute the real installMethods() with inert stand-ins for page globals. */
+function buildMethods() {
+	const source = ["installMethods", "installSnippets", "cursorInstallLink"].map(fnSource).join("\n");
+	const placeholder = script.match(/const MCP_KEY_PLACEHOLDER = "([^"]+)";/)?.[1];
+	const iconProxy = new Proxy({}, { get: () => "<svg/>" });
+	return new Function(
+		"location", "PRODUCT", "MCP_KEY_PLACEHOLDER", "ICON", "BRAND",
+		"esc", "projectCan", "projectCapabilityActionCopy",
+		`${source}\nreturn installMethods;`,
+	)(
+		{ origin: FIXTURE_ORIGIN },
+		{ name: "Itsuki", tokenPrefix: "itsuki_live_" },
+		placeholder,
+		iconProxy,
+		iconProxy,
+		(value) => String(value),
+		() => true,
+		() => "",
+	)();
+}
+
+describe("Agents door and the variant chooser", () => {
+	it("declares the agents door at the same two-tab level as the others", () => {
+		expect(script).toMatch(/\n\t\tagents: \{/);
+	});
+
+	it("keeps App Connect to Claude and ChatGPT, and grows the plugin door", () => {
+		const doors = buildMethods();
+		expect(Object.keys(doors.appConnect.clients)).toEqual(["claude", "chatgpt"]);
+		expect(Object.keys(doors.plugin.clients)).toEqual(["claude-code", "codex", "cursor", "opencode", "antigravity"]);
+		expect(Object.keys(doors.agents.clients)).toEqual(["openclaw", "hermes", "pi"]);
+	});
+
+	it("OpenClaw is the first client with two install routes", () => {
+		const doors = buildMethods();
+		expect(Object.keys(doors.agents.clients.openclaw.variants)).toEqual(["prompt", "manual"]);
+		for (const variant of Object.values(doors.agents.clients.openclaw.variants)) {
+			expect(Array.isArray(variant.steps)).toBe(true);
+			expect(variant.steps.length).toBeGreaterThan(1);
+		}
+	});
+
+	it("the once-dormant variant renderer path is live and wired", () => {
+		const view = fnSource("viewInstall");
+		expect(view).toContain("const variants = client.variants ?? null;");
+		expect(view).toContain("variant-tabs");
+		expect(view).toContain("variants[state.variant]");
+		expect(script).toContain("function setInstallVariant(");
+	});
+
+	it("every framed-stage client carries a docs link", () => {
+		// The stage template interpolates client.docsHref unguarded, so a client
+		// without one would render a dead 'View docs' link.
+		const doors = buildMethods();
+		for (const doorId of ["plugin", "agents"]) {
+			for (const [id, client] of Object.entries(doors[doorId].clients)) {
+				expect(typeof client.docsHref, `${doorId}.${id}`).toBe("string");
+			}
+		}
+		expect(fnSource("viewInstall")).toContain('["plugin", "agents"].includes(state.method)');
+	});
+
+	it("gives the new doors and clients their inline glyphs", () => {
+		for (const icon of ["ICON.bot", "ICON.spark", "ICON.terminal", "ICON.orbit"]) {
+			expect(script).toContain(`icon: ${icon}`);
+		}
+		for (const glyph of ["\tbot: `", "\tpi: `", "\torbit: `"]) {
+			expect(script).toContain(glyph);
+		}
+	});
+});
+
+describe("coding agents via MCP", () => {
+	it("emits valid OpenCode and Antigravity config with the key inside", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const withKey = installSnippets("itsuki_live_k1");
+		expect(JSON.parse(withKey.opencode).mcp.itsuki).toMatchObject({
+			type: "remote",
+			url: `${FIXTURE_ORIGIN}/mcp/itsuki_live_k1`,
+			enabled: true,
+		});
+		expect(JSON.parse(withKey.antigravity).mcpServers.itsuki.serverUrl)
+			.toBe(`${FIXTURE_ORIGIN}/mcp/itsuki_live_k1`);
+	});
+});
+
+describe("no dead commands", () => {
+	it("never shows an install verb for a package that does not exist yet", () => {
+		expect(script).not.toContain("openclaw plugins install");
+		expect(script).not.toContain("hermes memory setup");
+		expect(script).not.toContain("pi install npm:");
+	});
+
+	it("builds the OpenClaw routes only from shipped doors", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const withKey = installSnippets("itsuki_live_k2");
+		expect(withKey.openclawMcpAdd)
+			.toBe(`openclaw mcp add itsuki --url ${FIXTURE_ORIGIN}/mcp/itsuki_live_k2 --transport streamable-http`);
+		for (const needed of ["/v1/ingest", "~/.openclaw/workspace", "SOUL.md", "30 days", "recall_memory", "whoami"]) {
+			expect(withKey.openclawPrompt).toContain(needed);
+		}
+		expect(withKey.openclawPrompt).toContain("Never print the key");
+		expect(withKey.openclawImport).toContain("/v1/ingest/limits");
+	});
+
+	it("gives Hermes its verified YAML block and interactive verb", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const withKey = installSnippets("itsuki_live_k3");
+		expect(withKey.hermesConfig).toContain("~/.hermes/config.yaml");
+		expect(withKey.hermesConfig).toContain("mcp_servers:");
+		expect(withKey.hermesConfig).toContain(`${FIXTURE_ORIGIN}/mcp/itsuki_live_k3`);
+		expect(withKey.hermesMcpAdd).toBe("hermes mcp add itsuki");
+	});
+
+	it("gives Pi only what actually works: the REST door through its shell", () => {
+		// Pi has no MCP support (verified) — its flow must never pretend otherwise.
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const withKey = installSnippets("itsuki_live_k4");
+		for (const needed of ["/v1/status", "/v1/save", "/v1/recall", "receipt"]) {
+			expect(withKey.piPrompt).toContain(needed);
+		}
+		expect(withKey.piPrompt).not.toContain("/mcp/");
+		expect(withKey.restInstructions).toContain("/v1/recall");
+		expect(withKey.restInstructions).toContain("Never claim something was saved unless the response contained a receipt.");
+	});
+});

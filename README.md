@@ -22,7 +22,7 @@ Itsuki provides four interfaces to one account- and scope-aware backend:
 
 | Door | Who uses it |
 | --- | --- |
-| **App Connect** | claude.ai, ChatGPT, Cursor — paste one MCP link |
+| **App Connect** | claude.ai and ChatGPT — paste one MCP link. Coding agents (Claude Code, Codex, Cursor, OpenCode, Antigravity) and agent harnesses (OpenClaw, Hermes, Pi) each have a Get-started tab |
 | **REST API** | `/v1/*` with a Bearer key |
 | **SDKs** | `itsuki` for Node and Python |
 | **The app itself** | dashboard, graph, and a Playground that captures as you talk |
@@ -101,12 +101,13 @@ receipts + recall context
 
 Signed in at `/app`:
 
-**Setup** — Get started (App Connect · SDK · Plugin), Playground, API Keys.
+**Setup** — Get started (App Connect · SDK · Plugin · Agents), Playground, API Keys.
 **Activity** — Dashboard, Memories, Graph, Requests, Memory exports, History.
 
-- **Get started** walks you through connecting Claude, ChatGPT, or Cursor. Before you create a
-  link, no code block is copyable — the copy button *is* the create-link button, so you can
-  never copy a URL that cannot work.
+- **Get started** walks you through connecting Claude, ChatGPT, coding editors (Claude Code,
+  Codex, Cursor, OpenCode, Antigravity), or agent harnesses (OpenClaw with prompt/manual
+  routes, Hermes, Pi). Before you create a link, no code block is copyable — the copy button
+  *is* the create-link button, so you can never copy a URL that cannot work.
 - **Playground** submits conversations through the same extraction pipeline and displays the
   resulting receipts and memory panel. Rules and gates may save, update, or skip a proposal.
   Per-thread settings feed the account rules system.

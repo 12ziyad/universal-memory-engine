@@ -341,14 +341,19 @@ describe("/mcp Streamable HTTP handler", () => {
 		});
 	});
 
-	it("lists exactly the three manual memory-door tools", async () => {
+	it("lists exactly the eight memory-door tools", async () => {
 		const res = await mcp(token, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(res.status).toBe(200);
 		const body = await mcpJson(res);
 		expect(body.result.tools.map((tool) => tool.name).sort()).toEqual([
+			"delete_all_memories",
+			"delete_memory",
+			"get_memory",
+			"list_memories",
 			"recall_memory",
 			"save_conversation",
 			"save_memory",
+			"whoami",
 		]);
 	});
 
@@ -386,7 +391,16 @@ describe("/mcp Streamable HTTP handler", () => {
 	it("publishes only public scope fields and rejects forged tenant identity before persistence", async () => {
 		const listed = await mcp(token, { jsonrpc: "2.0", id: 204, method: "tools/list", params: {} });
 		const listBody = await mcpJson(listed);
-		for (const tool of listBody.result.tools) {
+		// Every tool that accepts caller attribution must publish the strict
+		// public schema; the id-addressed management tools take no scope at all.
+		const scopedTools = listBody.result.tools.filter((tool) => tool.inputSchema.properties.memoryScope);
+		expect(scopedTools.map((tool) => tool.name).sort()).toEqual([
+			"list_memories",
+			"recall_memory",
+			"save_conversation",
+			"save_memory",
+		]);
+		for (const tool of scopedTools) {
 			const schema = tool.inputSchema.properties.memoryScope;
 			expect(schema.additionalProperties).toBe(false);
 			expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining([
@@ -659,5 +673,144 @@ describe("/mcp Streamable HTTP handler", () => {
 		expect(body.result.content[0].text).not.toContain("receipt_id");
 		expect(body.result.content[0].text).not.toContain('"nodes"');
 		expect(body.result.content[0].text).not.toContain("structured_result");
+	});
+});
+
+describe("MCP management tools", () => {
+	const call = async (userId, name, args = {}) => {
+		const res = await mcp(encodeMcpToken(userId, env.API_KEY), {
+			jsonrpc: "2.0",
+			id: Math.floor(Math.random() * 100000),
+			method: "tools/call",
+			params: { name, arguments: args },
+		});
+		expect(res.status).toBe(200);
+		return mcpJson(res);
+	};
+
+	const seedNode = async (userId, id, label, summary = null) => {
+		const now = Date.now();
+		await env.DB.prepare(
+			"INSERT INTO nodes (id, user_id, label, category, state, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		).bind(id, userId, label, "skill", "active", summary, now, now).run();
+	};
+
+	it("whoami reports identity, scopes, and live counts", async () => {
+		const userId = `mcp-inv-who-${crypto.randomUUID()}`;
+		await seedNode(userId, "node_who1", "Fencing");
+		const body = await call(userId, "whoami");
+		const result = body.result.structuredContent;
+		expect(result).toMatchObject({
+			ok: true,
+			command_mode: "whoami",
+			source: "whoami",
+			user_id: userId,
+			can_delete: true,
+			server: { name: "itsuki-memory" },
+		});
+		expect(result.counts.nodes).toBe(1);
+		expect(result.counts.memories).toBe(1);
+		expect(body.result.content[0].text).toContain("Connected to Itsuki memory");
+		expect(body.result.content[0].text).toContain("1 memories");
+	});
+
+	it("list_memories browses newest-first and the text block carries the items", async () => {
+		const userId = `mcp-inv-list-${crypto.randomUUID()}`;
+		await seedNode(userId, "node_list1", "Boxing", "Started boxing in June");
+		await seedNode(userId, "node_list2", "Cooking");
+		const body = await call(userId, "list_memories", {});
+		const result = body.result.structuredContent;
+		expect(result).toMatchObject({ ok: true, command_mode: "list", source: "list_memories", count: 2, next_cursor: null });
+		expect(result.items.map((item) => item.kind)).toEqual(["node", "node"]);
+		expect(body.result.content[0].text).toContain("node_list1");
+		expect(body.result.content[0].text).toContain("Boxing");
+	});
+
+	it("list_memories paginates with an opaque cursor", async () => {
+		const userId = `mcp-inv-page-${crypto.randomUUID()}`;
+		for (let i = 0; i < 3; i++) await seedNode(userId, `node_page${i}`, `Fact ${i}`);
+		const first = (await call(userId, "list_memories", { limit: 2 })).result.structuredContent;
+		expect(first.count).toBe(2);
+		expect(first.next_cursor).toBeTruthy();
+		const second = (await call(userId, "list_memories", { limit: 2, cursor: first.next_cursor })).result.structuredContent;
+		expect(second.count).toBe(1);
+		expect(second.next_cursor).toBeNull();
+		const seen = new Set([...first.items, ...second.items].map((item) => item.id));
+		expect(seen.size).toBe(3);
+	});
+
+	it("get_memory returns the object with its current slice text", async () => {
+		const userId = `mcp-inv-get-${crypto.randomUUID()}`;
+		await seedNode(userId, "node_get1", "Guitar", "Learning guitar");
+		await env.DB.prepare(
+			"INSERT INTO slices (id, user_id, node_id, text, kind, is_current, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		).bind("slice_get1", userId, "node_get1", "practices fingerstyle daily", "progress", 1, Date.now()).run();
+		const body = await call(userId, "get_memory", { id: "node_get1" });
+		const result = body.result.structuredContent;
+		expect(result).toMatchObject({ ok: true, kind: "node", memory: { id: "node_get1", label: "Guitar" } });
+		expect(result.memory.slices).toHaveLength(1);
+		expect(body.result.content[0].text).toContain("practices fingerstyle daily");
+	});
+
+	it("get_memory distinguishes a bad id shape from a missing row", async () => {
+		const userId = `mcp-inv-miss-${crypto.randomUUID()}`;
+		const bad = await call(userId, "get_memory", { id: "banana_7" });
+		expect(bad.result.isError).toBe(true);
+		expect(bad.result.structuredContent).toMatchObject({ ok: false, error: "unrecognized_id" });
+		const missing = await call(userId, "get_memory", { id: "node_never_existed" });
+		expect(missing.result.isError).toBe(true);
+		expect(missing.result.structuredContent).toMatchObject({ ok: false, error: "not_found" });
+	});
+
+	it("delete_memory removes one object and it stops being listed", async () => {
+		const userId = `mcp-inv-del-${crypto.randomUUID()}`;
+		await seedNode(userId, "node_del1", "Old preference");
+		const del = await call(userId, "delete_memory", { id: "node_del1" });
+		expect(del.result.structuredContent).toMatchObject({ ok: true, command_mode: "delete", id: "node_del1", kind: "node" });
+		expect(del.result.content[0].text).toContain("Deleted node_del1");
+		const after = (await call(userId, "list_memories", {})).result.structuredContent;
+		expect(after.count).toBe(0);
+		const gone = await call(userId, "get_memory", { id: "node_del1" });
+		expect(gone.result.structuredContent).toMatchObject({ ok: false, error: "not_found" });
+	});
+
+	it("delete_all_memories previews by default and destroys nothing", async () => {
+		const userId = `mcp-inv-wipe-${crypto.randomUUID()}`;
+		await seedNode(userId, "node_wipe1", "Keep me");
+		const preview = await call(userId, "delete_all_memories", {});
+		const result = preview.result.structuredContent;
+		expect(result).toMatchObject({ ok: true, command_mode: "delete_all", confirmed: false, dry_run: true });
+		expect(preview.result.content[0].text).toContain("Dry run only");
+		expect(preview.result.content[0].text).toContain("confirm=true");
+		const still = (await call(userId, "list_memories", {})).result.structuredContent;
+		expect(still.count).toBe(1);
+	});
+
+	it("management reads honor read scope; deletes demand write scope", async () => {
+		const account = await signupAccount("mcp-inv-scope");
+		const created = await jsonRequest(
+			"/auth/tokens",
+			{ type: "mcp", label: "Read Only", scopes: ["memory:read"] },
+			account.cookie,
+		);
+		expect(created.status).toBe(201);
+		const { token: readToken } = await created.json();
+
+		const listRes = await mcp(readToken, {
+			jsonrpc: "2.0", id: 301, method: "tools/call",
+			params: { name: "list_memories", arguments: {} },
+		});
+		expect((await mcpJson(listRes)).result.structuredContent).toMatchObject({ ok: true, command_mode: "list" });
+
+		const delRes = await mcp(readToken, {
+			jsonrpc: "2.0", id: 302, method: "tools/call",
+			params: { name: "delete_memory", arguments: { id: "node_whatever" } },
+		});
+		expect((await mcpJson(delRes)).result.structuredContent).toMatchObject({
+			ok: false,
+			error: "forbidden",
+			code: "insufficient_scope",
+			required_scope: "memory:write",
+		});
 	});
 });

@@ -1,10 +1,18 @@
 /**
  * The MCP server — the door supported MCP clients and custom agents connect through.
  *
- * Three manual tools:
- *   - save_memory       → isolated manual direct engine
- *   - save_conversation → isolated manual conversation engine
- *   - recall_memory     → existing recall engine
+ * Write/recall tools (the engine lanes):
+ *   - save_memory         → isolated manual direct engine
+ *   - save_conversation   → isolated manual conversation engine
+ *   - recall_memory       → existing recall engine
+ *
+ * Management tools (read-only inventory + guarded deletion — the half every
+ * client needs to inspect and clean up its own memory without a dashboard):
+ *   - list_memories       → lib/memory_inventory listMemories
+ *   - get_memory          → lib/memory_inventory getMemory
+ *   - delete_memory       → pipeline/cleanup deleteObject (+ tombstone)
+ *   - delete_all_memories → pipeline/cleanup bulkDeleteBySource (dry-run first)
+ *   - whoami              → identity, scopes, project binding, live counts
  *
  * Preferred identity is a connection token in `Authorization: Bearer` at
  * `/mcp`. Generated `/mcp/<token>` links remain for headerless clients and
@@ -18,6 +26,8 @@ import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/
 import { normalizeProjectScope, ProjectScopeError } from "../lib/project_scope.js";
 import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js";
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
+import { getMemory, listMemories, memoryCounts, parseInventoryListOptions } from "../lib/memory_inventory.js";
+import { bulkDeleteBySource, deleteObject, storeDeletionTombstone } from "../pipeline/cleanup.js";
 import { tokens } from "../lib/text.js";
 
 /**
@@ -193,9 +203,9 @@ function projectBoundMemoryScope(authz, publicScope) {
  */
 export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	const server = new McpServer(
-		{ name: "itsuki-memory", version: "0.6.0" },
+		{ name: "itsuki-memory", version: "0.7.0" },
 		{
-			instructions: "Itsuki gives this user persistent memory across conversations. Call recall_memory at the start of a conversation to load what is already known. Call save_memory the moment the user states one durable fact, and save_conversation when a discussion has produced lasting decisions, plans, or facts — send the relevant turns verbatim, oldest first; do not pre-summarize. Saves are staged instantly and finish processing in the background: report exactly what the receipt says, and never claim something was saved without a receipt. Assistant claims are context unless the user explicitly adopts one.",
+			instructions: "Itsuki gives this user persistent memory across conversations. Call recall_memory at the start of a conversation to load what is already known. Call save_memory the moment the user states one durable fact, and save_conversation when a discussion has produced lasting decisions, plans, or facts — send the relevant turns verbatim, oldest first; do not pre-summarize. Saves are staged instantly and finish processing in the background: report exactly what the receipt says, and never claim something was saved without a receipt. Assistant claims are context unless the user explicitly adopts one. Use list_memories/get_memory to browse what is stored, whoami to check identity and connection health, and delete_memory/delete_all_memories only when the user explicitly asks to remove something — delete_all_memories previews first and destroys nothing without confirm=true.",
 		},
 	);
 
@@ -321,6 +331,238 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				memoryScope: projectBoundMemoryScope(authz, memoryScope),
 			});
 			return mcpResult(res);
+		},
+	);
+
+	// ——— Management tools ———————————————————————————————————————————————
+	// Read-only inventory plus guarded deletion. These wrap the same REST
+	// surface (GET/DELETE /v1/memories) — nothing here enters the extraction
+	// pipeline. Text blocks carry the payload itself, mirroring recall: most
+	// clients surface only `content` to the model.
+
+	const managementResult = (payload, text) => ({
+		structuredContent: payload,
+		content: [{ type: "text", text }],
+	});
+
+	// Managed projects grant deletion as its own capability
+	// (project.memory.delete). serveProjectBoundMcp resolves it per request;
+	// only an explicit false blocks, so owner-lane doors keep full power.
+	const deleteForbidden = (mode, source) => (authz.allowDelete === false
+		? mcpResult({
+			ok: false,
+			command_mode: mode,
+			mode,
+			source,
+			fired: false,
+			processing: false,
+			summary: "Forbidden: your project role does not allow deleting memories.",
+			error: "forbidden",
+			code: "insufficient_capability",
+			required_capability: "project.memory.delete",
+			source_packet_id: null,
+			receipt_id: null,
+			receipt: null,
+			counts: { savedTotal: 0 },
+		})
+		: null);
+
+	const describeItem = (item) => {
+		const label = item.label ?? item.title ?? "(untitled)";
+		const summary = item.summary ? ` — ${String(item.summary).slice(0, 160)}` : "";
+		return `${item.id} [${item.kind}${item.category ? `/${item.category}` : ""}] ${label}${summary}`;
+	};
+
+	server.tool(
+		"list_memories",
+		"Browse this user's stored memories, newest first. Use for \"what do you remember\", audits, and cleanup — for meaning-based lookup use recall_memory instead. Returns ids that get_memory and delete_memory accept.",
+		{
+			kind: z.enum(["all", "node", "page"]).optional().describe("all (default): atomic facts and memory pages; node: facts only; page: pages only."),
+			limit: z.number().optional().describe("Items per page, 1-200. Default 50."),
+			cursor: z.string().optional().describe("Opaque cursor from a previous call's next_cursor."),
+			q: z.string().optional().describe("Optional substring filter on labels and summaries. Not semantic search."),
+			memoryScope: publicMemoryScopeSchema,
+		},
+		async ({ kind, limit, cursor, q, memoryScope }) => {
+			const forbidden = ensureScope(authz, "list", "list_memories", MEMORY_READ_SCOPE);
+			if (forbidden) return forbidden;
+			const invalidScope = invalidProjectScope(memoryScope, "list", "list_memories");
+			if (invalidScope) return invalidScope;
+			const options = parseInventoryListOptions({
+				kind,
+				limit,
+				cursor,
+				q,
+				projectId: normalizeProjectScope(memoryScope)?.projectId ?? null,
+			});
+			if (options.error) {
+				return mcpResult({
+					ok: false,
+					command_mode: "list",
+					source: "list_memories",
+					error: options.error,
+					summary: options.message,
+				});
+			}
+			const page = await listMemories(env, userId, options);
+			const payload = { ok: true, command_mode: "list", source: "list_memories", ...page };
+			const lines = page.items.map((item, i) => `${i + 1}. ${describeItem(item)}`);
+			const text = page.count === 0
+				? "No stored memories match."
+				: `${page.count} memor${page.count === 1 ? "y" : "ies"}${page.next_cursor ? " (more available — pass cursor to continue)" : ""}:\n\n${lines.join("\n")}`;
+			return managementResult(payload, text);
+		},
+	);
+
+	server.tool(
+		"get_memory",
+		"Fetch one stored memory by id (node_, page_, slice_, or candidate id), including its current text, history slices, and dated events.",
+		{
+			id: z.string().trim().min(1).describe("The memory id, e.g. node_abc123 — as returned by list_memories, receipts, or recall."),
+		},
+		async ({ id }) => {
+			const forbidden = ensureScope(authz, "get", "get_memory", MEMORY_READ_SCOPE);
+			if (forbidden) return forbidden;
+			const found = await getMemory(env, userId, id);
+			if (found?.error === "unrecognized_id") {
+				return mcpResult({
+					ok: false,
+					command_mode: "get",
+					source: "get_memory",
+					error: "unrecognized_id",
+					summary: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id.",
+				});
+			}
+			if (!found) {
+				return mcpResult({
+					ok: false,
+					command_mode: "get",
+					source: "get_memory",
+					error: "not_found",
+					summary: `No live memory with id ${id}.`,
+				});
+			}
+			const memory = found.memory;
+			const payload = { ok: true, command_mode: "get", source: "get_memory", kind: found.kind, memory };
+			const parts = [describeItem(memory)];
+			const currentSlice = (memory.slices ?? []).find((slice) => slice.is_current);
+			if (currentSlice?.text) parts.push(`Current: ${currentSlice.text}`);
+			if (memory.full_markdown) parts.push(String(memory.full_markdown).slice(0, 2_000));
+			if (memory.events?.length) parts.push(`${memory.events.length} dated event(s); newest: ${memory.events[0].text ?? memory.events[0].action}`);
+			return managementResult(payload, parts.join("\n\n"));
+		},
+	);
+
+	server.tool(
+		"delete_memory",
+		"Permanently delete ONE stored memory by id. Only call when the user explicitly asks to forget or remove something specific — confirm which memory first via list_memories or get_memory.",
+		{
+			id: z.string().trim().min(1).describe("The exact id to delete (node_, page_, slice_, or candidate id)."),
+		},
+		async ({ id }) => {
+			const forbidden = ensureScope(authz, "delete", "delete_memory", MEMORY_WRITE_SCOPE);
+			if (forbidden) return forbidden;
+			const notAllowed = deleteForbidden("delete", "delete_memory");
+			if (notAllowed) return notAllowed;
+			const kind = id.startsWith("node_") ? "node"
+				: id.startsWith("page_") ? "page"
+					: id.startsWith("slice_") ? "slice"
+						: id.startsWith("cand") ? "candidate"
+							: null;
+			if (!kind) {
+				return mcpResult({
+					ok: false,
+					command_mode: "delete",
+					source: "delete_memory",
+					error: "unrecognized_id",
+					summary: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id.",
+				});
+			}
+			const table = kind === "page" ? "memory_pages"
+				: kind === "node" ? "nodes"
+					: kind === "slice" ? "slices"
+						: "candidates";
+			const exists = await env.DB.prepare(
+				`SELECT id, project_id, project_name FROM ${table} WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+			).bind(id, userId).first();
+			if (!exists) {
+				return mcpResult({
+					ok: false,
+					command_mode: "delete",
+					source: "delete_memory",
+					error: "not_found",
+					summary: `No live memory with id ${id}.`,
+				});
+			}
+			const result = await deleteObject(env, userId, { kind, id, suppress: true });
+			await storeDeletionTombstone(env, userId, {
+				kind,
+				ids: [id],
+				by: "mcp:delete_memory",
+				source: "delete_memory",
+				projectScopes: [{ project_id: exists.project_id ?? null, project_name: exists.project_name ?? null }],
+			});
+			const payload = { ok: true, command_mode: "delete", source: "delete_memory", id, kind, ...result };
+			return managementResult(payload, `Deleted ${id}. This memory will no longer be recalled.`);
+		},
+	);
+
+	server.tool(
+		"delete_all_memories",
+		"Erase this user's stored memories. SAFE BY DEFAULT: without confirm=true it only previews what would be deleted. Never pass confirm=true unless the user has explicitly confirmed full erasure in this conversation.",
+		{
+			confirm: z.boolean().optional().describe("false/absent: dry-run preview only. true: irreversible erasure."),
+			source: z.string().optional().describe("Optional: restrict to memories created by one source/tool instead of everything."),
+		},
+		async ({ confirm, source }) => {
+			const forbidden = ensureScope(authz, "delete_all", "delete_all_memories", MEMORY_WRITE_SCOPE);
+			if (forbidden) return forbidden;
+			const notAllowed = deleteForbidden("delete_all", "delete_all_memories");
+			if (notAllowed) return notAllowed;
+			const confirmed = confirm === true;
+			const result = await bulkDeleteBySource(env, userId, {
+				source: source || null,
+				dryRun: !confirmed,
+				confirm: confirmed,
+				by: "mcp:delete_all_memories",
+			});
+			const payload = { ok: result.ok !== false, command_mode: "delete_all", source: "delete_all_memories", confirmed, ...result };
+			const counts = result.would_delete ?? result.deleted ?? {};
+			const total = ["nodes", "pages", "slices", "events", "candidates"]
+				.reduce((sum, key) => sum + Number(counts[key] ?? 0), 0);
+			const text = result.dry_run
+				? `Dry run only — nothing deleted. ${total} object(s) would be removed${result.note ? ` (${result.note})` : ""}. Ask the user to confirm, then call again with confirm=true.`
+				: `Erasure complete: ${total} object(s) removed.`;
+			return managementResult(payload, text);
+		},
+	);
+
+	server.tool(
+		"whoami",
+		"Report this connection's identity and health: which memory space it writes to, its scopes, any bound project, and live memory counts. Call when the user asks \"is memory working\", or to diagnose setup.",
+		{},
+		async () => {
+			const forbidden = ensureScope(authz, "whoami", "whoami", MEMORY_READ_SCOPE);
+			if (forbidden) return forbidden;
+			const counts = await memoryCounts(env, userId);
+			const scope = authz.memoryScope ?? null;
+			const payload = {
+				ok: true,
+				command_mode: "whoami",
+				source: "whoami",
+				server: { name: "itsuki-memory", version: "0.7.0" },
+				user_id: userId,
+				scopes: authz.scopes ?? [MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE],
+				can_delete: authz.allowDelete !== false,
+				project: scope?.managedProjectId
+					? { id: scope.managedProjectId, name: scope.managedProjectName ?? null }
+					: null,
+				counts,
+			};
+			const projectLine = payload.project ? `Project: ${payload.project.name ?? payload.project.id}. ` : "";
+			const text = `Connected to Itsuki memory (server 0.7.0). ${projectLine}Scopes: ${payload.scopes.join(", ")}. `
+				+ `Stored: ${counts.memories} memories (${counts.nodes} facts, ${counts.pages} pages), ${counts.events} events, ${counts.candidates} pending candidates.`;
+			return managementResult(payload, text);
 		},
 	);
 

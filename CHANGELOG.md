@@ -130,6 +130,29 @@ the live service after the erasure work, with no client change required. The
 No public version number — the deployment is the identity. What changed for
 callers, newest first:
 
+### Memory management surface + six agent integrations
+
+- **The MCP server grew from three tools to eight.** Alongside `save_memory`,
+  `save_conversation`, and `recall_memory`, every MCP client now gets the
+  management half: `list_memories` (browse newest-first, keyset cursor),
+  `get_memory` (one object with its history and events), `delete_memory`,
+  `delete_all_memories` (previews by default; only an explicit
+  `confirm: true` destroys), and `whoami` (identity, scopes, project binding,
+  live counts — the verify step of every install guide). In managed projects
+  the delete tools require the project's distinct delete permission, not just
+  write, matching the REST contract.
+- **`GET /v1/memories` and `GET /v1/memories/:id` are new** — the read-only
+  inventory behind those tools, for API keys that could write and delete but
+  never see what they had.
+- **Get started grew an Agents door** (OpenClaw with prompt-install and
+  manual-config routes, Hermes Agent, Pi Agent) **and three editor tabs**
+  (Cursor moved beside Claude Code and Codex; OpenCode and Antigravity added).
+  Every flow shown works today against the shipped MCP and REST doors; no tab
+  shows an install command for a package that does not exist yet.
+- **Docs gained six Connect-a-tool pages** (Cursor updated; OpenCode,
+  Antigravity, OpenClaw, Hermes, Pi new) and the MCP reference now documents
+  all eight tools.
+
 ### Operator visibility
 
 - **`GET /v1/ops/overview`** is new: one account-scoped call that rolls up your

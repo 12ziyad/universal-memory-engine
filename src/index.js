@@ -119,6 +119,7 @@ import {
 	storeDeletionTombstone,
 } from "./pipeline/cleanup.js";
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
+import { getMemory, listMemories, parseInventoryListOptions } from "./lib/memory_inventory.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
 import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
@@ -3760,6 +3761,13 @@ async function handleRequestInner(request, env, ctx, url) {
 			return handleMemoryDeleteRoutes(request, env, url, ctx);
 		}
 
+		// Read-only inventory: the management half of the memory surface. API
+		// keys could write and destroy but never see what they had — every MCP
+		// client and plugin doctor needs list/get without a dashboard session.
+		if (request.method === "GET" && (url.pathname === "/v1/memories" || url.pathname.startsWith("/v1/memories/"))) {
+			return handleMemoryReadRoutes(request, env, url);
+		}
+
 		// Packet status (Part 2.1): the public handle every receipt carries.
 		{
 			const match = url.pathname.match(/^\/v1\/packets\/([^/]+)\/status$/);
@@ -3843,6 +3851,12 @@ async function serveProjectBoundMcp(request, env, ctx, url, auth) {
 		) {
 			effectiveScopes.push(MEMORY_WRITE_SCOPE);
 		}
+		// Deletion is a distinct capability on the REST surface
+		// (project.memory.delete), so the MCP delete tools must not ride along on
+		// write scope alone — a member who can write but not delete would gain
+		// through this door what the API refuses them.
+		const allowDelete = can("project.memory.delete", membership)
+			&& tokenAllowsScope(tokenScopes, MEMORY_WRITE_SCOPE);
 		const accountRules = await getMemoryRules(env, managed.memoryOwnerUserId, { failClosed: true });
 		const effectiveRules = narrowManagedMemoryRules(accountRules, auth.token?.rules);
 		effectiveRules.projectCategories = await activeCategoryRules(env, {
@@ -3852,6 +3866,7 @@ async function serveProjectBoundMcp(request, env, ctx, url, auth) {
 		});
 		return serveMcp(request, env, ctx, url, managed.memoryOwnerUserId, {
 			scopes: effectiveScopes,
+			allowDelete,
 			rules: effectiveRules,
 			credentialRules: auth.token?.rules ?? null,
 			projectCategories: effectiveRules.projectCategories,
@@ -4316,6 +4331,39 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 		return json({ ok: true, sent: true, delivery_id: mutation.deliveryId });
 	}
 	return json({ error: "not found" }, 404);
+}
+
+/**
+ * GET /v1/memories and GET /v1/memories/:id — the read-only inventory.
+ * List is nodes + pages newest-first with a keyset cursor; get-one uses the
+ * same id-prefix dispatch as delete so any id a receipt or delete names can
+ * be looked up. Pure SELECTs from lib/memory_inventory.js.
+ */
+async function handleMemoryReadRoutes(request, env, url) {
+	const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+		requiredScope: MEMORY_READ_SCOPE,
+	});
+	if (auth.response) return auth.response;
+
+	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));
+	if (id) {
+		const found = await getMemory(env, auth.userId, id);
+		if (found?.error === "unrecognized_id") {
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id." }, 400);
+		}
+		if (!found) return json({ error: "not_found" }, 404);
+		return json({ ok: true, kind: found.kind, memory: found.memory });
+	}
+
+	const options = parseInventoryListOptions({
+		kind: url.searchParams.get("kind"),
+		limit: url.searchParams.get("limit"),
+		cursor: url.searchParams.get("cursor"),
+		projectId: url.searchParams.get("projectId"),
+		q: url.searchParams.get("q"),
+	});
+	if (options.error) return json({ error: options.error, message: options.message }, 400);
+	return json({ ok: true, ...(await listMemories(env, auth.userId, options)) });
 }
 
 /**
