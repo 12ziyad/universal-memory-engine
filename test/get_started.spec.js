@@ -99,9 +99,10 @@ describe("the key rule", () => {
 });
 
 describe("one config, one state, one renderer", () => {
-	it("declares three doors and renders from state alone", () => {
+	it("declares five doors and renders from state alone", () => {
 		expect(script).toContain("appConnect: {");
 		expect(script).toMatch(/\n\t\tsdk: \{/);
+		expect(script).toMatch(/\n\t\tintegrations: \{/);
 		expect(script).toMatch(/\n\t\tplugin: \{/);
 		expect(script).toContain("const doors = installMethods();");
 		expect(script).toContain("const state = {");
@@ -350,6 +351,31 @@ describe("Agents door and the variant chooser", () => {
 		expect(Object.keys(doors.agents.clients)).toEqual(["openclaw", "hermes", "pi"]);
 	});
 
+	it("the Integrations door carries frameworks and tools, grouped by ecosystem", () => {
+		const doors = buildMethods();
+		expect(Object.keys(doors.integrations.clients)).toEqual(["python", "typescript", "n8n", "dify", "convex"]);
+		expect(Object.keys(doors.integrations.clients.python.variants)).toEqual([
+			"langchain", "crewai", "autogen", "agno", "openai-agents", "google-adk", "llamaindex",
+		]);
+		expect(Object.keys(doors.integrations.clients.typescript.variants)).toEqual(["mastra", "vercel-ai"]);
+		expect(Object.keys(doors.integrations.clients.n8n.variants)).toEqual(["http", "mcp"]);
+		// Unverified frameworks must not ship — the no-dead-commands rule.
+		expect(script).not.toContain("camel");
+		expect(script).not.toContain("chatdev");
+	});
+
+	it("the LlamaIndex route rides the path token, never a header it cannot send", () => {
+		const snippets = build(["installSnippets"], "installSnippets")("itsuki_live_llama");
+		expect(snippets.llamaindexConnect).toContain("/mcp/itsuki_live_llama");
+		expect(snippets.llamaindexConnect).not.toContain("Authorization");
+		// The n8n HTTP route is the deterministic-workflow path: REST, not MCP.
+		expect(snippets.n8nHttpRequest).toContain("/v1/save");
+		expect(snippets.n8nMcpClient).toContain("/mcp");
+		// Convex is SDK-only and keyless in its snippets: always copyable.
+		expect(snippets.convexHelper).toContain("ITSUKI_API_KEY");
+		expect(snippets.convexHelper).not.toContain("YOUR_MCP_KEY");
+	});
+
 	it("OpenClaw is the first client with two install routes", () => {
 		const doors = buildMethods();
 		expect(Object.keys(doors.agents.clients.openclaw.variants)).toEqual(["prompt", "manual"]);
@@ -371,19 +397,19 @@ describe("Agents door and the variant chooser", () => {
 		// The stage template interpolates client.docsHref unguarded, so a client
 		// without one would render a dead 'View docs' link.
 		const doors = buildMethods();
-		for (const doorId of ["plugin", "agents"]) {
+		for (const doorId of ["plugin", "agents", "integrations"]) {
 			for (const [id, client] of Object.entries(doors[doorId].clients)) {
 				expect(typeof client.docsHref, `${doorId}.${id}`).toBe("string");
 			}
 		}
-		expect(fnSource("viewInstall")).toContain('["plugin", "agents"].includes(state.method)');
+		expect(fnSource("viewInstall")).toContain('["plugin", "agents", "integrations"].includes(state.method)');
 	});
 
 	it("gives the new doors and clients their inline glyphs", () => {
-		for (const icon of ["ICON.bot", "ICON.spark", "ICON.terminal", "ICON.orbit"]) {
+		for (const icon of ["ICON.bot", "ICON.spark", "ICON.terminal", "ICON.orbit", "ICON.blocks", "ICON.hexN", "ICON.layers", "ICON.database"]) {
 			expect(script).toContain(`icon: ${icon}`);
 		}
-		for (const glyph of ["\tbot: `", "\tpi: `", "\torbit: `"]) {
+		for (const glyph of ["\tbot: `", "\tpi: `", "\torbit: `", "\tblocks: `", "\tlayers: `", "\tdatabase: `"]) {
 			expect(script).toContain(glyph);
 		}
 	});

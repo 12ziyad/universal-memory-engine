@@ -31,9 +31,20 @@ describe("navigation", () => {
 		expect(script).toContain('["/install/pi", "Pi Agent"]');
 	});
 
+	it("lists the Frameworks & tools section", () => {
+		expect(script).toContain('{ sec: "Frameworks & tools", items: [');
+		expect(script).toContain('["/integrations/python", "Python frameworks"]');
+		expect(script).toContain('["/integrations/typescript", "TypeScript frameworks"]');
+		expect(script).toContain('["/integrations/n8n", "n8n"]');
+		expect(script).toContain('["/integrations/dify", "Dify"]');
+		expect(script).toContain('["/integrations/convex", "Convex"]');
+	});
+
 	it("every dashboard docsHref under /docs resolves to a defined page", () => {
 		const appScript = app.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		const hrefs = [...appScript.matchAll(/docsHref: "\/docs\/#(\/[a-z/-]+)"/g)].map((m) => m[1]);
+		// Digits belong in the class: /integrations/n8n would otherwise truncate
+		// at the 8 and assert PAGES["/integrations/n"], failing forever.
+		const hrefs = [...appScript.matchAll(/docsHref: "\/docs\/#(\/[a-z0-9/-]+)"/g)].map((m) => m[1]);
 		expect(hrefs.length).toBeGreaterThan(0);
 		for (const href of hrefs) {
 			expect(script, href).toContain(`PAGES["${href}"]`);
@@ -85,6 +96,28 @@ describe("page contracts", () => {
 	it("the REST reference lists the read-only inventory routes", () => {
 		expect(script).toContain("GET /v1/memories</code>");
 		expect(script).toContain("GET /v1/memories/&lt;id&gt;");
+	});
+
+	it("the Python page carries every verified framework and the path-token line", () => {
+		for (const anchor of ["langchain", "crewai", "autogen", "agno", "openai-agents", "google-adk", "llamaindex"]) {
+			expect(script).toContain(`<h2 id="${anchor}">`);
+		}
+		expect(script).toContain("MultiServerMCPClient");
+		// The competitive line: LlamaIndex cannot send custom headers, the
+		// path-token door works anyway — and BasicMCPClient carries no header.
+		expect(script).toContain("no custom headers");
+		expect(script).toContain('BasicMCPClient("${ORIGIN}/mcp/YOUR_MCP_KEY")');
+	});
+
+	it("the n8n page documents both routes, Dify stays review-free, Convex is SDK-only", () => {
+		expect(script).toContain("HTTP Request node");
+		expect(script).toContain("MCP Client Tool");
+		expect(script).toContain('PAGES["/integrations/dify"]');
+		const dify = script.split('PAGES["/integrations/dify"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(dify).toContain("no plugin, no marketplace, no review");
+		const convex = script.split('PAGES["/integrations/convex"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(convex).toContain("npm install itsuki convex");
+		expect(convex).toContain("ITSUKI_API_KEY");
 	});
 });
 

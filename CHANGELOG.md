@@ -9,6 +9,39 @@ the documentation at <https://itsuki.app/docs/> is the contract.
 
 ---
 
+## Hosted service — 2026-08-14
+
+### Added
+
+- **Every door is rate limited, and the numbers are published.** The MCP tools
+  (saves, deletes, inventory reads) and the REST inventory routes now share the
+  same per-credential buckets as the rest of the API; a new unauthenticated
+  `GET /v1/limits` publishes every bucket, what it applies to, and how a
+  refusal looks. REST 429s carry `retry-after`, `ratelimit-limit`, and a
+  `bucket` field; MCP refusals are readable tool results, so the connection
+  never drops. Bulk import moved to its own roomier bucket (300/min), so
+  workspace imports no longer throttle against ordinary saves.
+- **A monthly AI plan, enforced and visible.** Each account gets a calendar-month
+  budget of AI-processed writes (launch plan: 1000), counted exactly in D1
+  against the authenticated account — rotating `userId` neither resets a bucket
+  nor a budget. Over-budget saves refuse with `ai_quota_exhausted` and the reset
+  date; `/v1/turn` keeps answering recall and reports the capped capture
+  instead. Usage and remaining quota surface in `GET /v1/usage`, the dashboard's
+  new AI-plan card, and Settings → General.
+- **An account-wide inference circuit breaker.** A daily neuron ceiling halts
+  extraction before a runaway day becomes a surprise bill, with copy that never
+  blames the user for an account-wide event.
+- **The Integrations door.** Get started grew its fifth door: Python frameworks
+  (LangChain/LangGraph, CrewAI, AutoGen, Agno, OpenAI Agents SDK, Google ADK,
+  LlamaIndex via the path-token route), TypeScript (Mastra, Vercel AI SDK), n8n
+  (HTTP Request and MCP Client routes), Dify (native MCP, no plugin), and
+  Convex (the `itsuki` SDK inside a Convex backend) — with five matching docs
+  pages. LangChain and LlamaIndex were verified end to end against production;
+  frameworks whose shapes could not be verified (Camel AI, ChatDev) do not
+  appear at all.
+
+---
+
 ## Claude Code plugin — 0.7.0 (prepared, not yet published)
 
 The first release since the plugin was hardened against a full acceptance

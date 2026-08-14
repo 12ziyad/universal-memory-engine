@@ -21,6 +21,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { newId } from "./ids.js";
+import { utcDayKey } from "./ai_budget.js";
 import { managedMutationGuardStatement } from "./managed_projects.js";
 import { guardModelInput } from "./model_input.js";
 
@@ -168,10 +169,14 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 	if (!env?.DB || !calls.length) return meterTotals(meter);
 	const now = Date.now();
 	try {
+		const accountUserId = lifecycle.accountUserId ?? lifecycle.account_user_id ?? null;
+		const managedProjectId = lifecycle.managedProjectId ?? lifecycle.managed_project_id ?? null;
+		const managedAccess = lifecycle.managedAccess ?? lifecycle.managed_access ?? "write";
 		const statements = calls.map((call) => env.DB.prepare(
 			`INSERT INTO ai_calls (id, user_id, scope, scope_id, model, task, input_tokens,
-				output_tokens, total_tokens, neurons, duration_ms, ok, raw_usage_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				output_tokens, total_tokens, neurons, duration_ms, ok, raw_usage_json, created_at,
+				account_user_id, managed_project_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		).bind(
 			newId("aicall"),
 			userId ?? null,
@@ -189,10 +194,38 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 				? JSON.stringify({ provider: call.raw_usage, itsuki_input_boundary: call.input_boundary })
 				: call.raw_usage ? JSON.stringify(call.raw_usage) : null,
 			now,
+			// The ACCOUNT, not the rotatable memory subject: the monthly quota
+			// counts this column, so a caller rotating body.userId cannot reset
+			// their own budget. Legacy operator-door rows stay null.
+			accountUserId,
+			managedProjectId,
 		));
-		const accountUserId = lifecycle.accountUserId ?? lifecycle.account_user_id ?? null;
-		const managedProjectId = lifecycle.managedProjectId ?? lifecycle.managed_project_id ?? null;
-		const managedAccess = lifecycle.managedAccess ?? lifecycle.managed_access ?? "write";
+		// One upsert per flush keeps the circuit breaker's read a single-row
+		// primary-key lookup. Only binding-reported neurons land here; the
+		// derived estimate for unreported calls is computed at read time from
+		// the token sums, labelled as derived.
+		const finite = (key) => calls.map((c) => c[key]).filter((v) => Number.isFinite(v));
+		const sumOf = (key) => finite(key).reduce((a, b) => a + b, 0);
+		const measured = finite("neurons");
+		statements.push(env.DB.prepare(
+			`INSERT INTO ai_daily_totals (day, calls, input_tokens, output_tokens, measured_neurons, measured_neuron_calls, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(day) DO UPDATE SET
+				calls = calls + excluded.calls,
+				input_tokens = input_tokens + excluded.input_tokens,
+				output_tokens = output_tokens + excluded.output_tokens,
+				measured_neurons = measured_neurons + excluded.measured_neurons,
+				measured_neuron_calls = measured_neuron_calls + excluded.measured_neuron_calls,
+				updated_at = excluded.updated_at`,
+		).bind(
+			utcDayKey(now),
+			calls.length,
+			sumOf("input_tokens"),
+			sumOf("output_tokens"),
+			measured.reduce((a, b) => a + b, 0),
+			measured.length,
+			now,
+		));
 		// Legacy API tenants are arbitrary memory ids rather than user accounts;
 		// only managed-project work participates in account-erasure fencing.
 		await env.DB.batch(managedProjectId

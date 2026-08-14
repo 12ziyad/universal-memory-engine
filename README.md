@@ -101,13 +101,15 @@ receipts + recall context
 
 Signed in at `/app`:
 
-**Setup** — Get started (App Connect · SDK · Plugin · Agents), Playground, API Keys.
+**Setup** — Get started (App Connect · SDK · Integrations · Plugin · Agents), Playground, API Keys.
 **Activity** — Dashboard, Memories, Graph, Requests, Memory exports, History.
 
 - **Get started** walks you through connecting Claude, ChatGPT, coding editors (Claude Code,
-  Codex, Cursor, OpenCode, Antigravity), or agent harnesses (OpenClaw with prompt/manual
-  routes, Hermes, Pi). Before you create a link, no code block is copyable — the copy button
-  *is* the create-link button, so you can never copy a URL that cannot work.
+  Codex, Cursor, OpenCode, Antigravity), agent harnesses (OpenClaw with prompt/manual
+  routes, Hermes, Pi), or frameworks and tools (LangChain, LangGraph, CrewAI, AutoGen, Agno,
+  OpenAI Agents SDK, Google ADK, LlamaIndex, Mastra, Vercel AI SDK, n8n, Dify, Convex).
+  Before you create a link, no code block is copyable — the copy button *is* the create-link
+  button, so you can never copy a URL that cannot work.
 - **Playground** submits conversations through the same extraction pipeline and displays the
   resulting receipts and memory panel. Rules and gates may save, update, or skip a proposal.
   Per-thread settings feed the account rules system.

@@ -23,6 +23,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
+import { allowRate, managedActorRateKey } from "../lib/rate.js";
+import { checkAiBudget } from "../lib/ai_budget.js";
 import { normalizeProjectScope, ProjectScopeError } from "../lib/project_scope.js";
 import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js";
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
@@ -227,6 +229,10 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ content, recentContext, conversationId, threadId, sourceId, idempotencyKey, memoryScope }) => {
 			const forbidden = ensureScope(authz, "direct_save", "save_memory", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
+			const limited = await rateLimited("mcp-save", env.SAVE_LIMITER, "direct_save", "save_memory");
+			if (limited) return limited;
+			const capped = await aiCapped("direct_save", "save_memory");
+			if (capped) return capped;
 			const invalidScope = invalidProjectScope(memoryScope, "direct_save", "save_memory");
 			if (invalidScope) return invalidScope;
 			// The same Engine v2 lane every other door uses — with the MCP lens
@@ -274,6 +280,10 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ messages, conversationId, threadId, sourceId, idempotencyKey, scope, n, topic, contentScope, memoryScope }) => {
 			const forbidden = ensureScope(authz, "conversation_collect", "save_conversation", MEMORY_WRITE_SCOPE);
 			if (forbidden) return forbidden;
+			const limited = await rateLimited("mcp-save", env.SAVE_LIMITER, "conversation_collect", "save_conversation");
+			if (limited) return limited;
+			const capped = await aiCapped("conversation_collect", "save_conversation");
+			if (capped) return capped;
 			const invalidScope = invalidProjectScope(memoryScope, "conversation_collect", "save_conversation");
 			if (invalidScope) return invalidScope;
 			// Receipt-first: stage deterministically (no model calls), answer in
@@ -367,6 +377,82 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		})
 		: null);
 
+	// Rate refusals are tool RESULTS, not transport 429s: an HTTP error tears
+	// down the MCP connection and the model never sees why. ok:false maps to
+	// isError with the summary as readable text — the same shape queue_full
+	// already uses on this door. The key comes from the authenticated
+	// credential + bound project (never the caller-supplied memoryScope), so
+	// rotating userId does not buy a fresh bucket. The legacy operator door
+	// passes no rateContext and deliberately shares one "legacy:configured"
+	// bucket — one master key IS one actor.
+	const rateLimited = async (bucket, binding, mode, source) => {
+		if (await allowRate(binding, managedActorRateKey(bucket, authz.rateContext ?? {}))) return null;
+		return mcpResult({
+			ok: false,
+			command_mode: mode,
+			mode,
+			source,
+			fired: false,
+			processing: false,
+			error: "rate_limited",
+			code: "rate_limited",
+			http_status: 429,
+			retry_after_s: 60,
+			summary: "You're sending requests very quickly — wait a few seconds and try again.",
+			source_packet_id: null,
+			receipt_id: null,
+			receipt: null,
+			counts: { savedTotal: 0 },
+		});
+	};
+
+	// The monthly AI-write quota, in the same soft shape as rateLimited: the
+	// refusal must be a readable sentence the model can relay, and it must be
+	// impossible to mistake for a successful save. Identity is the ACCOUNT
+	// behind the credential — the same column the meter attributes — so a
+	// rotated memoryScope cannot reset the budget. Fail CLOSED on an unreadable
+	// quota, matching the REST doors.
+	const aiCapped = async (mode, source) => {
+		let refusal;
+		try {
+			refusal = await checkAiBudget(env, {
+				accountUserId: authz.rateContext?.accountUserId
+					?? authz.memoryScope?.accountUserId
+					?? authz.rateContext?.auth?.userId
+					?? null,
+				userId,
+			});
+		} catch (error) {
+			console.warn(JSON.stringify({ event: "ai_quota_unavailable", door: "mcp", error: String(error?.message ?? error) }));
+			refusal = {
+				error: "ai_quota_unavailable",
+				retryAfterSeconds: 60,
+				message: "Itsuki could not verify the AI quota just now — nothing was saved. Try again shortly.",
+			};
+		}
+		if (!refusal) return null;
+		return mcpResult({
+			ok: false,
+			command_mode: mode,
+			mode,
+			source,
+			fired: false,
+			processing: false,
+			error: refusal.error,
+			code: refusal.error,
+			http_status: 429,
+			retry_after_s: refusal.retryAfterSeconds ?? 60,
+			...(refusal.reason === "monthly"
+				? { usage: { used: refusal.used, limit: refusal.limit, unit: "ai_writes", resets_at: refusal.resetsAt } }
+				: {}),
+			summary: refusal.message,
+			source_packet_id: null,
+			receipt_id: null,
+			receipt: null,
+			counts: { savedTotal: 0 },
+		});
+	};
+
 	const describeItem = (item) => {
 		const label = item.label ?? item.title ?? "(untitled)";
 		const summary = item.summary ? ` — ${String(item.summary).slice(0, 160)}` : "";
@@ -386,6 +472,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ kind, limit, cursor, q, memoryScope }) => {
 			const forbidden = ensureScope(authz, "list", "list_memories", MEMORY_READ_SCOPE);
 			if (forbidden) return forbidden;
+			const limited = await rateLimited("mcp-read", env.READ_LIMITER, "list", "list_memories");
+			if (limited) return limited;
 			const invalidScope = invalidProjectScope(memoryScope, "list", "list_memories");
 			if (invalidScope) return invalidScope;
 			const options = parseInventoryListOptions({
@@ -423,6 +511,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async ({ id }) => {
 			const forbidden = ensureScope(authz, "get", "get_memory", MEMORY_READ_SCOPE);
 			if (forbidden) return forbidden;
+			const limited = await rateLimited("mcp-read", env.READ_LIMITER, "get", "get_memory");
+			if (limited) return limited;
 			const found = await getMemory(env, userId, id);
 			if (found?.error === "unrecognized_id") {
 				return mcpResult({
@@ -464,6 +554,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			if (forbidden) return forbidden;
 			const notAllowed = deleteForbidden("delete", "delete_memory");
 			if (notAllowed) return notAllowed;
+			const limited = await rateLimited("mcp-del", env.DELETE_LIMITER, "delete", "delete_memory");
+			if (limited) return limited;
 			const kind = id.startsWith("node_") ? "node"
 				: id.startsWith("page_") ? "page"
 					: id.startsWith("slice_") ? "slice"
@@ -519,6 +611,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			if (forbidden) return forbidden;
 			const notAllowed = deleteForbidden("delete_all", "delete_all_memories");
 			if (notAllowed) return notAllowed;
+			const limited = await rateLimited("mcp-del", env.DELETE_LIMITER, "delete_all", "delete_all_memories");
+			if (limited) return limited;
 			const confirmed = confirm === true;
 			const result = await bulkDeleteBySource(env, userId, {
 				source: source || null,
@@ -544,6 +638,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		async () => {
 			const forbidden = ensureScope(authz, "whoami", "whoami", MEMORY_READ_SCOPE);
 			if (forbidden) return forbidden;
+			const limited = await rateLimited("mcp-read", env.READ_LIMITER, "whoami", "whoami");
+			if (limited) return limited;
 			const counts = await memoryCounts(env, userId);
 			const scope = authz.memoryScope ?? null;
 			const payload = {

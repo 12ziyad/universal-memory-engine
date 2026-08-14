@@ -77,6 +77,10 @@ describe("General settings compare-and-set", () => {
 		const current = await settings(account.cookie);
 		expect(current.project.revision).toMatch(/^prv1\.[0-9a-f]{64}$/);
 		expect(current.organization.revision).toMatch(/^orv1\.[0-9a-f]{64}$/);
+		// The General usage row reads {used, limit, unit} — served for real now,
+		// so the dashboard's "No project quota is configured" branch is dead.
+		expect(current.project_usage).toMatchObject({ used: 0, unit: "AI saves this month" });
+		expect(current.project_usage.limit).toBeGreaterThan(0);
 
 		for (const [path, body] of [
 			["/v1/settings/project", { name: "Blind project overwrite" }],

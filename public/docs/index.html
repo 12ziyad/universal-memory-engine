@@ -155,6 +155,13 @@ const NAV = [
 		["/install/hermes", "Hermes Agent"],
 		["/install/pi", "Pi Agent"],
 	]},
+	{ sec: "Frameworks & tools", items: [
+		["/integrations/python", "Python frameworks"],
+		["/integrations/typescript", "TypeScript frameworks"],
+		["/integrations/n8n", "n8n"],
+		["/integrations/dify", "Dify"],
+		["/integrations/convex", "Convex"],
+	]},
 	{ sec: "Build with the API", items: [
 		["/api/rest", "REST API reference"],
 		["/api/auth", "Authentication & keys"],
@@ -451,6 +458,217 @@ PAGES["/install/pi"] = { title: "Pi Agent", html: `
 <li><b>Saves succeed but recall is empty</b> — extraction is asynchronous; allow a few seconds, then recall again.</li>
 </ul>
 <div class="note">A native Pi extension (<code>pi.registerTool</code> memory tools, slash commands, auto-capture) is planned and will replace the curl route with first-class tools. Until it is published, no install command for it appears here — the REST route above is what actually works today.</div>
+` };
+
+PAGES["/integrations/python"] = { title: "Python frameworks", html: `
+<h1>Python frameworks</h1>
+<p class="lede">One MCP endpoint, every framework's own client. Each shape below is taken from that framework's current documentation — connect once and your agent gets save, recall, list, get, delete, and whoami as tools.</p>
+<p>Every route needs an <b>MCP link</b> from <b>API Keys</b> (shown once). The URL or header carrying it is a credential — treat the file that holds it as a secret.</p>
+<h2 id="langchain">LangChain &amp; LangGraph</h2>
+${codeBlock(`pip install langchain-mcp-adapters
+
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+client = MultiServerMCPClient({
+    "itsuki": {
+        "transport": "http",
+        "url": "${ORIGIN}/mcp",
+        "headers": {"Authorization": "Bearer YOUR_MCP_KEY"},
+    }
+})
+tools = await client.get_tools()  # hand these to your LangGraph agent`)}
+<h2 id="crewai">CrewAI</h2>
+${codeBlock(`pip install crewai-tools
+
+from crewai_tools import MCPServerHTTP
+
+itsuki = MCPServerHTTP(
+    url="${ORIGIN}/mcp",
+    headers={"Authorization": "Bearer YOUR_MCP_KEY"},
+    streamable=True,
+)`)}
+<h2 id="autogen">AutoGen</h2>
+${codeBlock(`pip install autogen-ext
+
+from autogen_ext.tools.mcp import StreamableHttpServerParams, mcp_server_tools
+
+params = StreamableHttpServerParams(
+    url="${ORIGIN}/mcp",
+    headers={"Authorization": "Bearer YOUR_MCP_KEY"},
+)
+tools = await mcp_server_tools(params)`)}
+<h2 id="agno">Agno</h2>
+${codeBlock(`pip install agno
+
+from agno.tools.mcp import MCPTools, StreamableHTTPClientParams
+
+params = StreamableHTTPClientParams(
+    url="${ORIGIN}/mcp",
+    headers={"Authorization": "Bearer YOUR_MCP_KEY"},
+)
+async with MCPTools(transport="streamable-http", server_params=params) as mcp:
+    agent = Agent(tools=[mcp])`)}
+<h2 id="openai-agents">OpenAI Agents SDK</h2>
+${codeBlock(`pip install openai-agents
+
+from agents.mcp import MCPServerStreamableHttp
+
+async with MCPServerStreamableHttp(
+    name="itsuki",
+    params={
+        "url": "${ORIGIN}/mcp",
+        "headers": {"Authorization": "Bearer YOUR_MCP_KEY"},
+    },
+    cache_tools_list=True,
+) as server:
+    agent = Agent(name="Assistant", mcp_servers=[server])`)}
+<h2 id="google-adk">Google ADK</h2>
+${codeBlock(`pip install google-adk
+
+from google.adk.tools.mcp_tool import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
+
+toolset = McpToolset(
+    connection_params=StreamableHTTPConnectionParams(
+        url="${ORIGIN}/mcp",
+        headers={"Authorization": "Bearer YOUR_MCP_KEY"},
+    )
+)`)}
+<h2 id="llamaindex">LlamaIndex</h2>
+<p>LlamaIndex's MCP client documents OAuth but <b>no custom headers</b> — a header-only memory service cannot connect there at all. ${PRODUCT.name}'s path-token door carries the credential in the URL itself, so <code>BasicMCPClient</code> works as-is:</p>
+${codeBlock(`pip install llama-index-tools-mcp
+
+from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
+
+client = BasicMCPClient("${ORIGIN}/mcp/YOUR_MCP_KEY")
+tools = McpToolSpec(client=client)`)}
+<h2>Verify any of them</h2>
+<p>Run the agent and ask it to <i>"save that I prefer concise answers, then recall what you know about me"</i>. A working connection reports a receipt for the save and returns the fact on recall. The <code>whoami</code> tool reports identity and health at any time.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Tools don't appear</b> — confirm the URL is exactly <code>${ORIGIN}/mcp</code> (header route) and the header reads <code>Authorization: Bearer &lt;key&gt;</code>.</li>
+<li><b>401</b> — the key is revoked or pasted with whitespace. Create a fresh MCP link.</li>
+<li><b>Saves report queued, recall is empty</b> — extraction is asynchronous; allow a few seconds.</li>
+<li><b>LlamaIndex: <code>ValueError: not enough values to unpack</code></b> — current <code>llama-index-tools-mcp</code> releases lag the <code>mcp 2.x</code> API (an upstream clash that hits every MCP server, not just ${PRODUCT.name}). Install the pair we verified end to end: <code>pip install "llama-index-tools-mcp==0.4.0" "mcp&lt;2"</code>.</li>
+</ul>
+` };
+
+PAGES["/integrations/typescript"] = { title: "TypeScript frameworks", html: `
+<h1>TypeScript frameworks</h1>
+<p class="lede">The same MCP endpoint, TypeScript clients. Create an <b>MCP link</b> in <b>API Keys</b> first — it is shown once.</p>
+<h2 id="mastra">Mastra</h2>
+${codeBlock(`npm install @mastra/mcp
+
+import { MCPClient } from "@mastra/mcp";
+
+const mcp = new MCPClient({
+  servers: {
+    itsuki: {
+      url: new URL("${ORIGIN}/mcp"),
+      requestInit: { headers: { Authorization: "Bearer YOUR_MCP_KEY" } },
+    },
+  },
+});
+const tools = await mcp.getTools();`)}
+<h2 id="vercel-ai">Vercel AI SDK</h2>
+${codeBlock(`npm install @ai-sdk/mcp
+
+import { createMCPClient } from "@ai-sdk/mcp";
+
+const mcpClient = await createMCPClient({
+  transport: {
+    type: "http",
+    url: "${ORIGIN}/mcp",
+    headers: { Authorization: "Bearer YOUR_MCP_KEY" },
+  },
+});
+const tools = await mcpClient.tools(); // pass to generateText / streamText`)}
+<h2>Verify</h2>
+<p>Ask the agent to save a fact and recall it back; the save must report a receipt. Building your own loop instead? The <a href="#/sdk/js">JavaScript SDK</a> talks to the same memory without MCP.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Connection refused in the browser</b> — connect from your server side; the credential must not ship to clients.</li>
+<li><b>401</b> — revoked or malformed key; mint a fresh MCP link.</li>
+</ul>
+` };
+
+PAGES["/integrations/n8n"] = { title: "n8n", html: `
+<h1>n8n</h1>
+<p class="lede">Two routes: the <b>HTTP Request node</b> works in every workflow with no AI involved; the <b>MCP Client Tool</b> gives an AI Agent node the memory tools. Both are built into n8n — nothing to install, and both work on n8n Cloud and self-hosted.</p>
+<h2 id="http">Route A — HTTP Request node (any workflow)</h2>
+<p>The deterministic route: "form submitted → save to memory", "nightly digest → recall". Create an <b>MCP link</b> in <b>API Keys</b> (it doubles as a REST Bearer credential).</p>
+${codeBlock(`Node: HTTP Request
+Method: POST
+URL: ${ORIGIN}/v1/save
+Authentication: Generic Credential Type -> Header Auth
+  Name: authorization    Value: Bearer YOUR_MCP_KEY
+Body (JSON): { "content": "{{ $json.textToRemember }}" }`)}
+<p>Recall is the same node against <code>${ORIGIN}/v1/recall</code> with <code>{ "query": "..." }</code> — the response's <code>context</code> field is prompt-ready. Saves return a <b>receipt</b>; extraction finishes asynchronously.</p>
+<h2 id="mcp">Route B — MCP Client Tool (AI Agent workflows)</h2>
+${codeBlock(`Node: MCP Client Tool  (attach to an AI Agent node)
+Endpoint: ${ORIGIN}/mcp
+Server Transport: HTTP Streamable
+Authentication: Bearer -> YOUR_MCP_KEY`)}
+<p>The agent then decides when to call <code>save_memory</code> / <code>recall_memory</code> / <code>list_memories</code> itself.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>429 with retry-after</b> — the workflow is bursting past a rate bucket; add a Wait node honouring the header. Bulk imports belong on <code>POST /v1/ingest</code> (300/min).</li>
+<li><b>Credential test fails</b> — the header name must be exactly <code>authorization</code> and the value must start with <code>Bearer </code>.</li>
+</ul>
+` };
+
+PAGES["/integrations/dify"] = { title: "Dify", html: `
+<h1>Dify</h1>
+<p class="lede">Dify consumes remote MCP servers natively — no plugin, no marketplace, no review. Two minutes in the Tools screen.</p>
+<h2>Connect</h2>
+<p>Create an <b>MCP link</b> in <b>API Keys</b>, then in Dify:</p>
+${codeBlock(`Dify -> Tools -> MCP -> Add server (HTTP transport)
+Server URL: ${ORIGIN}/mcp
+Headers: authorization = Bearer YOUR_MCP_KEY`)}
+<p>Dify connects and imports the tools (save, recall, list, get, delete, whoami). Enable them for your app under its Agent settings; only HTTP-transport MCP servers are supported, which is exactly what ${PRODUCT.name} serves.</p>
+<h2>Verify</h2>
+<p>Chat with the app: <i>"remember that I prefer morning meetings, then recall what you know about me"</i>. The save must report a receipt.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Authorization errors on connect</b> — Dify's Dynamic Client Registration expects OAuth by default; use the custom-header route above instead.</li>
+<li><b>Tools imported but never called</b> — enable them for the specific app, and give the agent instructions to recall at conversation start.</li>
+</ul>
+` };
+
+PAGES["/integrations/convex"] = { title: "Convex", html: `
+<h1>Convex</h1>
+<p class="lede">Not an MCP integration — the published <code>itsuki</code> npm SDK running inside your Convex backend. Memory becomes two Convex actions any client or function can call.</p>
+<h2>1. Install</h2>
+${codeBlock(`npm install itsuki convex`)}
+<h2>2. Create an API key</h2>
+<p>In <b>API Keys</b>, create an <b>API key</b> and set it in your Convex deployment environment as <code>ITSUKI_API_KEY</code>. Server-side only — never in client code.</p>
+<h2>3. Write the memory actions</h2>
+${codeBlock(`// convex/memory.ts
+import { MemoryClient } from "itsuki";
+import { action } from "./_generated/server";
+import { v } from "convex/values";
+
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY! });
+
+export const remember = action({
+  args: { content: v.string(), userId: v.string() },
+  handler: async (_ctx, args) => memory.add(args.content, { userId: args.userId }),
+});
+
+export const recall = action({
+  args: { query: v.string(), userId: v.string() },
+  handler: async (_ctx, args) => memory.search(args.query, { userId: args.userId }),
+});`)}
+<p><code>userId</code> scopes each end user to an isolated memory space under your one key — the same sub-tenant model as the <a href="#/sdk/js">JavaScript SDK</a>, because it IS the JavaScript SDK.</p>
+<h2>Verify</h2>
+${codeBlock(`npx convex run memory:remember '{ "content": "Prefers dark mode", "userId": "user_1" }'
+npx convex run memory:recall '{ "query": "preferences", "userId": "user_1" }'`)}
+<p>The first call returns a receipt; the second returns the fact in <code>context</code> after extraction settles.</p>
+<h2>Troubleshooting</h2>
+<ul>
+<li><b>Missing API key</b> — set <code>ITSUKI_API_KEY</code> with <code>npx convex env set</code>, then redeploy.</li>
+<li><b>Recall empty right after save</b> — extraction is asynchronous; allow a few seconds.</li>
+</ul>
 ` };
 
 PAGES["/api/rest"] = { title: "REST API reference", html: `

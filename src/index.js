@@ -193,38 +193,9 @@ import {
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
-
-/**
- * Workers rate limiting. No-ops when the binding is absent (tests, local dev
- * without unsafe bindings), fails open on errors — protection, not a gate.
- */
-async function allowRate(binding, key) {
-	if (!binding?.limit) return true;
-	try {
-		const { success } = await binding.limit({ key: String(key ?? "anon") });
-		return success !== false;
-	} catch (error) {
-		// Fail open — rate limiting is protection, not a gate — but never silently.
-		console.warn("rate limiter unavailable:", error?.message ?? error);
-		return true;
-	}
-}
-
-/**
- * A rate-limit bucket must describe the authenticated actor and project, never
- * the caller-selected external memory subject. Otherwise an SDK can rotate
- * userId on every request and buy a fresh quota bucket each time.
- */
-function managedActorRateKey(prefix, context) {
-	const auth = context.auth ?? {};
-	const actor = auth.type === "token"
-		? `token:${auth.token?.id ?? "unknown"}`
-		: auth.type === "session"
-			? `session:${auth.userId}`
-			: "legacy:configured";
-	const projectId = context.managedProject?.id ?? "unmanaged";
-	return `${prefix}:${actor}:project:${projectId}`;
-}
+import { allowRate, managedActorRateKey, RATE_BUCKETS } from "./lib/rate.js";
+import { LIMITS_SCHEMA, RATE_LIMITS_DOC } from "./lib/limits_contract.mjs";
+import { aiBudget, aiLimitsDocument, checkAiBudget, countWritesThisMonth, derivedNeurons, startOfNextUtcMonth } from "./lib/ai_budget.js";
 
 function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
@@ -292,8 +263,83 @@ async function doorOverrides(env, auth, body = {}) {
 	return out;
 }
 
-function tooMany() {
-	return json({ error: "too_many_requests", message: "Slow down a little — try again in a minute." }, 429);
+/**
+ * 429 for rate limiting. The headers matter: our own SDKs read `retry-after`
+ * to pace their backoff (sdk/js retryAfterMilliseconds), and every 503 on this
+ * worker already sends it — a bare 429 left the client guessing.
+ *
+ * `ratelimit-remaining`/`reset` are deliberately absent: the Workers rate
+ * limiting binding reports only success/failure, and Cloudflare documents it as
+ * "eventually consistent … not an accurate accounting system". Publishing a
+ * remaining count we cannot compute would be a lie. Accurate remaining figures
+ * come from the AI budget, which is counted in D1 and reported by /v1/limits.
+ */
+/**
+ * Identity for the AI budget: the authenticated ACCOUNT, never the
+ * caller-rotatable memory subject. userId rides along only as the legacy
+ * fallback for operator-door rows that carry no account attribution.
+ */
+function aiBudgetIdentity(auth) {
+	return {
+		accountUserId: auth.memoryScope?.accountUserId ?? auth.auth?.userId ?? null,
+		userId: auth.userId,
+	};
+}
+
+/**
+ * The AI-write admission decision for REST doors. null = allowed. A refused
+ * REST write is HTTP 429 — every SDK treats 200+ok:true as success, so a
+ * soft-200 refusal here would let callers believe the memory was stored (the
+ * one claim this product forbids). /v1/turn does NOT use this: it degrades to
+ * recall-only instead, because refusing the whole request over a WRITE quota
+ * would break the caller's chat loop for no saving.
+ */
+async function refuseWriteOverAiBudget(env, auth) {
+	let refusal;
+	try {
+		refusal = await checkAiBudget(env, aiBudgetIdentity(auth));
+	} catch (error) {
+		// Fail CLOSED: an unreadable quota means unbounded spend of unknown size.
+		console.warn(JSON.stringify({ event: "ai_quota_unavailable", error: String(error?.message ?? error) }));
+		return json({
+			error: "ai_quota_unavailable",
+			message: "Itsuki could not verify the AI quota just now — nothing was saved. Try again shortly.",
+			retry_after_s: 60,
+		}, 503, { "retry-after": "60" });
+	}
+	if (!refusal) return null;
+	const budget = aiBudget(env);
+	return json({
+		error: refusal.error,
+		...(refusal.capped ? { capped: refusal.capped } : {}),
+		message: refusal.message,
+		retry_after_s: refusal.retryAfterSeconds,
+		...(refusal.reason === "monthly"
+			? { usage: { used: refusal.used, limit: refusal.limit, unit: "ai_writes", resets_at: refusal.resetsAt } }
+			: {}),
+	}, 429, {
+		"retry-after": String(refusal.retryAfterSeconds),
+		"ratelimit-limit": String(budget.monthlyWrites),
+	});
+}
+
+function tooManyFor(bucket) {
+	// One name, both surfaces: the header limit and the /v1/limits document
+	// read the same RATE_BUCKETS row, so the published number cannot drift
+	// from the enforced one.
+	return tooMany({ limit: RATE_BUCKETS[bucket].limit, bucket });
+}
+
+function tooMany({ retryAfterSeconds = 60, limit = null, bucket = null } = {}) {
+	return json({
+		error: "too_many_requests",
+		message: "Slow down a little — try again in a minute.",
+		retry_after_s: retryAfterSeconds,
+		...(bucket ? { bucket } : {}),
+	}, 429, {
+		"retry-after": String(retryAfterSeconds),
+		...(limit ? { "ratelimit-limit": String(limit) } : {}),
+	});
 }
 
 export { UserMemory } from "./durable/user-memory.js";
@@ -967,6 +1013,22 @@ const routes = {
 		request_encoding: "utf-8-json",
 		delivery_schema: INGEST_DELIVERY_SCHEMA,
 	}),
+	// The whole limits surface in one unauthenticated fetch: rate buckets,
+	// ingest bounds, and the AI plan. Frozen configuration only — a caller's
+	// CONSUMED quota needs auth and lives on GET /v1/usage. The account-wide
+	// AI ceiling is deliberately not published.
+	"GET /v1/limits": (request, env) => json({
+		ok: true,
+		schema: LIMITS_SCHEMA,
+		rate: RATE_LIMITS_DOC,
+		ingest: {
+			limits: INGEST_LIMITS,
+			character_unit: "unicode_code_points",
+			request_encoding: "utf-8-json",
+			delivery_schema: INGEST_DELIVERY_SCHEMA,
+		},
+		ai: aiLimitsDocument(env),
+	}),
 
 	"GET /auth/me": async (request, env) => {
 		const auth = await getSessionUser(env, request);
@@ -975,7 +1037,7 @@ const routes = {
 	},
 
 	"POST /auth/signup": async (request, env) => {
-		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		try {
 			const parsed = await readSmallJsonObject(request, "/auth/signup", 8 * 1024);
 			if (parsed.response) return parsed.response;
@@ -995,7 +1057,7 @@ const routes = {
 	},
 
 	"POST /auth/login": async (request, env) => {
-		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		try {
 			const parsed = await readSmallJsonObject(request, "/auth/login", 8 * 1024);
 			if (parsed.response) return parsed.response;
@@ -1055,8 +1117,8 @@ const routes = {
 	"POST /auth/organizations": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.AUTH_LIMITER, `org-create:actor:${auth.userId}`))) return tooMany();
-		if (!(await allowRate(env.AUTH_LIMITER, `org-create:ip:${clientIp(request)}`))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, `org-create:actor:${auth.userId}`))) return tooManyFor("auth");
+		if (!(await allowRate(env.AUTH_LIMITER, `org-create:ip:${clientIp(request)}`))) return tooManyFor("auth");
 		const parsed = await readSmallJsonObject(request, "/auth/organizations");
 		if (parsed.response) return parsed.response;
 		try {
@@ -1195,6 +1257,15 @@ const routes = {
 				invitations: can("org.members.manage", context.membership)
 					? await listInvitations(env, org.id)
 					: [],
+				// Lights up the Settings → General usage row, which shipped ahead
+				// of the quota and has read "No project quota is configured" ever
+				// since. Best-effort: settings must answer without it.
+				project_usage: await (async () => {
+					try {
+						const used = await countWritesThisMonth(env, { accountUserId: context.auth.userId });
+						return { used, limit: aiBudget(env).monthlyWrites, unit: "AI saves this month" };
+					} catch { return null; }
+				})(),
 			});
 		} catch (error) { return orgFailure(error); }
 	},
@@ -1298,7 +1369,7 @@ const routes = {
 		if (!(await allowRate(
 			env.SAVE_LIMITER,
 			`rules-preview:${context.auth.userId}:project:${context.project.id}`,
-		))) return tooMany();
+		))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/rules/preview");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -1505,7 +1576,7 @@ const routes = {
 	"POST /v1/settings/retention/process": async (request, env) => {
 		const context = await requireSessionProject(request, env, "project.retention.manage");
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `retention:${context.auth.userId}:${context.project.id}`))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, `retention:${context.auth.userId}:${context.project.id}`))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/retention/process");
 		if (parsed.response) return parsed.response;
 		try {
@@ -1540,7 +1611,7 @@ const routes = {
 				`invite:ip:${clientIp(request)}`,
 			];
 			for (const key of inviteRateKeys) {
-				if (!(await allowRate(env.AUTH_LIMITER, key))) return tooMany();
+				if (!(await allowRate(env.AUTH_LIMITER, key))) return tooManyFor("auth");
 			}
 			const parsed = await readSmallJsonObject(request, "/v1/settings/invitations");
 			if (parsed.response) return parsed.response;
@@ -1610,7 +1681,7 @@ const routes = {
 	"POST /v1/settings/invitations/accept": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.AUTH_LIMITER, `accept:${clientIp(request)}`))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, `accept:${clientIp(request)}`))) return tooManyFor("auth");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/invitations/accept", 4 * 1024);
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -1735,7 +1806,7 @@ const routes = {
 	},
 
 	"GET /auth/google/start": async (request, env) => {
-		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		const result = googleAuthStart(env, request);
 		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
 		if (result.cookie) headers.append("set-cookie", result.cookie);
@@ -1743,7 +1814,7 @@ const routes = {
 	},
 
 	"GET /auth/google/callback": async (request, env) => {
-		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		const result = await googleAuthCallback(env, request);
 		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
 		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
@@ -1800,7 +1871,12 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		// Bulk import is legitimate burst traffic (workspace files, backfills):
+		// it gets the roomy IMPORT bucket, keyed to the credential+project so a
+		// rotated body.userId cannot buy a fresh bucket.
+		if (!(await allowRate(env.IMPORT_LIMITER, managedActorRateKey("ingest", auth)))) return tooManyFor("import");
+		const capped = await refuseWriteOverAiBudget(env, auth);
+		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { messages, flush } = body;
@@ -1908,7 +1984,7 @@ const routes = {
 			requiredCapability: "project.chooser.use",
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth)))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth)))) return tooManyFor("save");
 
 		// AutoChoose is a read-only host adapter. It selects and validates an
 		// action, but the selected MCP tool remains responsible for its own
@@ -2092,7 +2168,9 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth)))) return tooManyFor("save");
+		const capped = await refuseWriteOverAiBudget(env, auth);
+		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
@@ -2287,8 +2365,8 @@ const routes = {
 		// signed-in accounts without sharing the limiter.
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.AUTH_LIMITER, `password:actor:${auth.userId}`))) return tooMany();
-		if (!(await allowRate(env.AUTH_LIMITER, `password:ip:${clientIp(request)}`))) return tooMany();
+		if (!(await allowRate(env.AUTH_LIMITER, `password:actor:${auth.userId}`))) return tooManyFor("auth");
+		if (!(await allowRate(env.AUTH_LIMITER, `password:ip:${clientIp(request)}`))) return tooManyFor("auth");
 		const parsed = await readSmallJsonObject(request, "/auth/password", 8 * 1024);
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -2844,7 +2922,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, auth.userId))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("turn", auth)))) return tooManyFor("save");
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -2884,7 +2962,35 @@ const routes = {
 		if (recall?.ok === false) return json(recall, recall.http_status ?? 400);
 
 		let collect = { enabled: false };
+		// The AI-write quota degrades this door instead of refusing it: recall
+		// is a read and costs nothing extra, so the caller's chat loop keeps
+		// working — only capture reports capped. No http_status on purpose:
+		// the response stays 200 with recall intact.
+		let turnBudgetRefusal = null;
 		if (rules.autoCollect && messages.length) {
+			try {
+				turnBudgetRefusal = await checkAiBudget(env, aiBudgetIdentity(auth));
+			} catch (error) {
+				console.warn(JSON.stringify({ event: "ai_quota_unavailable", door: "turn", error: String(error?.message ?? error) }));
+				turnBudgetRefusal = {
+					reason: "unavailable",
+					error: "ai_quota_unavailable",
+					message: "Itsuki could not verify the AI quota just now, so nothing was captured. Nothing was lost — retry in a moment.",
+				};
+			}
+		}
+		if (turnBudgetRefusal) {
+			collect = {
+				enabled: true,
+				ok: false,
+				capped: turnBudgetRefusal.capped ?? turnBudgetRefusal.reason,
+				error: turnBudgetRefusal.error,
+				summary: turnBudgetRefusal.message,
+				...(turnBudgetRefusal.reason === "monthly"
+					? { usage: { used: turnBudgetRefusal.used, limit: turnBudgetRefusal.limit, unit: "ai_writes", resets_at: turnBudgetRefusal.resetsAt } }
+					: {}),
+			};
+		} else if (rules.autoCollect && messages.length) {
 			const test = testOnlyOverrides(env, body._test);
 			const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 				conversationId: body.conversationId,
@@ -2905,7 +3011,10 @@ const routes = {
 			});
 			collect = { enabled: true, ...result };
 		}
-		const ok = collect.ok !== false;
+		// A quota-capped capture is a completed turn: recall answered, and
+		// collect says exactly why nothing was captured. 200, like the
+		// Playground's daily cap — not an error the caller's loop must handle.
+		const ok = collect.ok !== false || Boolean(collect.capped);
 		return json({
 			ok,
 			recall,
@@ -2952,7 +3061,7 @@ const routes = {
 		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
 		const userId = context.memoryOwnerUserId;
-		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/playground/chat");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -2980,7 +3089,7 @@ const routes = {
 	"POST /v1/playground/preview": async (request, env) => {
 		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`))) return tooMany();
+		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/playground/preview");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -3488,6 +3597,55 @@ const routes = {
 		}
 		days.sort((a, b) => a.day.localeCompare(b.day));
 		const t = totals.results?.[0] ?? {};
+
+		// The AI half: what inference this account consumed in the range, and
+		// where the monthly plan stands. Attributed to the ACCOUNT (the same
+		// column the quota enforces), so a sub-tenant userId cannot present a
+		// different bill. Neurons are measured + a labelled derived estimate
+		// for calls the binding didn't price — never blended silently.
+		const identity = aiBudgetIdentity(auth);
+		const budget = aiBudget(env);
+		let aiUsage = null;
+		let quota = null;
+		try {
+			const accountColumn = identity.accountUserId
+				? "account_user_id = ?1"
+				: "user_id = ?1 AND account_user_id IS NULL";
+			const ai = await env.DB.prepare(
+				`SELECT COUNT(*) AS calls,
+					SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+					SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+					SUM(CASE WHEN neurons IS NOT NULL THEN neurons ELSE 0 END) AS measured_neurons,
+					SUM(CASE WHEN neurons IS NULL THEN COALESCE(input_tokens, 0) ELSE 0 END) AS unmeasured_in,
+					SUM(CASE WHEN neurons IS NULL THEN COALESCE(output_tokens, 0) ELSE 0 END) AS unmeasured_out
+				 FROM ai_calls WHERE ${accountColumn} AND created_at BETWEEN ?2 AND ?3`,
+			).bind(identity.accountUserId ?? identity.userId, fromMs, toMs).first();
+			const measured = Number(ai?.measured_neurons ?? 0);
+			const derived = derivedNeurons(ai?.unmeasured_in, ai?.unmeasured_out);
+			aiUsage = {
+				calls: Number(ai?.calls ?? 0),
+				input_tokens: Number(ai?.input_tokens ?? 0),
+				output_tokens: Number(ai?.output_tokens ?? 0),
+				neurons_measured: Math.round(measured * 1000) / 1000,
+				neurons_derived: Math.round(derived * 1000) / 1000,
+				neurons_total: Math.round((measured + derived) * 1000) / 1000,
+				neurons_source: "measured+derived",
+			};
+			const used = await countWritesThisMonth(env, identity);
+			quota = {
+				unit: "ai_writes",
+				used,
+				limit: budget.monthlyWrites,
+				remaining: Math.max(0, budget.monthlyWrites - used),
+				period: "calendar_month_utc",
+				resets_at: new Date(startOfNextUtcMonth()).toISOString(),
+				capped: used >= budget.monthlyWrites,
+			};
+		} catch (error) {
+			// Usage must answer even if the AI accounting is unreadable — the
+			// activity half of this response does not depend on it.
+			console.warn(JSON.stringify({ event: "usage_ai_unavailable", error: String(error?.message ?? error) }));
+		}
 		return json({
 			ok: true,
 			range: {
@@ -3504,6 +3662,8 @@ const routes = {
 			by_day: days,
 			by_source: bySource.results ?? [],
 			last_activity_at: lastActivity.results?.[0]?.at ?? null,
+			ai: aiUsage,
+			quota,
 		});
 	},
 
@@ -3867,6 +4027,10 @@ async function serveProjectBoundMcp(request, env, ctx, url, auth) {
 		return serveMcp(request, env, ctx, url, managed.memoryOwnerUserId, {
 			scopes: effectiveScopes,
 			allowDelete,
+			// Rate-limit + AI-budget identity for the MCP tools: the credential,
+			// its bound project, and the ACCOUNT — never the caller-selected
+			// memory subject. Same anti-rotation discipline as the REST doors.
+			rateContext: { auth, managedProject: managed.project, accountUserId: managed.accountUserId },
 			rules: effectiveRules,
 			credentialRules: auth.token?.rules ?? null,
 			projectCategories: effectiveRules.projectCategories,
@@ -3968,6 +4132,9 @@ async function handleMcp(request, env, ctx, url) {
 		);
 	}
 
+	// Legacy operator door: no rateContext on purpose. This branch requires the
+	// single operator master key, so every caller here IS one actor — they share
+	// the "legacy:configured" bucket rather than minting per-user buckets.
 	return serveMcp(request, env, ctx, url, id.userId);
 }
 
@@ -4099,7 +4266,7 @@ async function handleSettingsMemberRoutes(request, env, ctx, url) {
 					`invite:ip:${clientIp(request)}`,
 				];
 				for (const key of inviteRateKeys) {
-					if (!(await allowRate(env.AUTH_LIMITER, key))) return tooMany();
+					if (!(await allowRate(env.AUTH_LIMITER, key))) return tooManyFor("auth");
 				}
 				const result = await runContextAuditedMutation(
 					request, env, ctx, context, "org.members.manage",
@@ -4344,6 +4511,9 @@ async function handleMemoryReadRoutes(request, env, url) {
 		requiredScope: MEMORY_READ_SCOPE,
 	});
 	if (auth.response) return auth.response;
+	// After auth on purpose: an unauthenticated caller must not be able to
+	// consume another actor's read bucket.
+	if (!(await allowRate(env.READ_LIMITER, managedActorRateKey("read", auth)))) return tooManyFor("read");
 
 	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));
 	if (id) {
@@ -4378,7 +4548,9 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 		requiredCapability: "project.memory.delete",
 	});
 	if (auth.response) return auth.response;
-	if (!(await allowRate(env.SAVE_LIMITER, `del:${auth.userId}`))) return tooMany();
+	// Destructive work gets the tighter DELETE bucket: a loop that deletes is
+	// worse than a loop that saves.
+	if (!(await allowRate(env.DELETE_LIMITER, managedActorRateKey("del", auth)))) return tooManyFor("delete");
 	const by = auth.auth?.type === "token" ? `token:${auth.auth.token?.id ?? "unknown"}` : auth.auth?.type ?? "session";
 
 	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));

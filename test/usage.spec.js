@@ -61,6 +61,18 @@ describe("GET /v1/usage", () => {
 		expect(body.last_activity_at).toBeGreaterThan(0);
 	});
 
+	it("carries the AI usage and quota blocks (additive to the activity shape)", async () => {
+		const res = await request(`/v1/usage?userId=${userId}`, { headers });
+		const body = await res.json();
+		expect(body.ai).toMatchObject({ neurons_source: "measured+derived" });
+		expect(typeof body.ai.calls).toBe("number");
+		expect(typeof body.ai.neurons_total).toBe("number");
+		expect(body.quota).toMatchObject({ unit: "ai_writes", period: "calendar_month_utc", capped: false });
+		expect(body.quota.limit).toBeGreaterThan(0);
+		expect(body.quota.remaining).toBe(body.quota.limit - body.quota.used);
+		expect(body.quota.resets_at).toMatch(/^\d{4}-\d{2}-01T00:00:00/);
+	});
+
 	it("range=all widens the window", async () => {
 		const res = await request(`/v1/usage?userId=${userId}&range=all`, { headers });
 		const body = await res.json();

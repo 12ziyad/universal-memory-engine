@@ -3603,6 +3603,7 @@ function viewOverview(v) {
 			<div class="action-box"><h3>Saves</h3><div class="stat-big">${usage ? t.saves : "…"}</div><div class="help">Writes in this range, by you or your connected tools.</div></div>
 			<div class="action-box"><h3>Recalls</h3><div class="stat-big">${usage ? t.recalls : "…"}</div><div class="help">Times a tool looked something up.</div></div>
 			<div class="action-box"><h3>Requests</h3><div class="stat-big">${usage ? t.requests : "…"}</div><div class="help">Saves + recalls in this range · ${S.tokens.length} active key${S.tokens.length === 1 ? "" : "s"}.</div></div>
+			<div class="action-box"><h3>AI plan</h3><div class="stat-big">${usage?.quota ? `${usage.quota.used}<span style="color:var(--faint);font-size:.55em"> / ${usage.quota.limit}</span>` : "…"}</div><div class="help">${usage?.quota ? (usage.quota.capped ? `Monthly AI saves used up — resets ${usage.quota.resets_at.slice(0, 10)}.` : `AI saves this month · resets ${usage.quota.resets_at.slice(0, 10)}.`) : "Loading…"}</div></div>
 		</div>
 		<div class="box" style="max-width:1080px">
 			<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -4201,6 +4202,125 @@ curl -s -X POST ${origin}/v1/recall -H "authorization: Bearer ${mcpToken}" -H "c
 Use the returned context field. When I state a durable fact, preference, decision, or plan, save it in my own words:
 curl -s -X POST ${origin}/v1/save -H "authorization: Bearer ${mcpToken}" -H "content-type: application/json" -d '{"content": "<the fact>"}'
 Never claim something was saved unless the response contained a receipt. Never print the key.`,
+		// ---- Frameworks: one MCP endpoint, each framework's own client shape.
+		// Every shape below is taken from that framework's current documentation;
+		// a framework whose shape could not be verified is not listed at all.
+		langchainConnect: `from langchain_mcp_adapters.client import MultiServerMCPClient
+
+client = MultiServerMCPClient({
+    "itsuki": {
+        "transport": "http",
+        "url": "${origin}/mcp",
+        "headers": {"Authorization": "Bearer ${mcpToken}"},
+    }
+})
+tools = await client.get_tools()  # save_memory, recall_memory, list_memories, ...`,
+		crewaiConnect: `from crewai_tools import MCPServerHTTP
+
+itsuki = MCPServerHTTP(
+    url="${origin}/mcp",
+    headers={"Authorization": "Bearer ${mcpToken}"},
+    streamable=True,
+)
+# hand itsuki's tools to your Agent(tools=...)`,
+		autogenConnect: `from autogen_ext.tools.mcp import StreamableHttpServerParams, mcp_server_tools
+
+params = StreamableHttpServerParams(
+    url="${origin}/mcp",
+    headers={"Authorization": "Bearer ${mcpToken}"},
+)
+tools = await mcp_server_tools(params)`,
+		agnoConnect: `from agno.tools.mcp import MCPTools, StreamableHTTPClientParams
+
+params = StreamableHTTPClientParams(
+    url="${origin}/mcp",
+    headers={"Authorization": "Bearer ${mcpToken}"},
+)
+async with MCPTools(transport="streamable-http", server_params=params) as mcp:
+    agent = Agent(tools=[mcp])`,
+		openaiAgentsConnect: `from agents.mcp import MCPServerStreamableHttp
+
+async with MCPServerStreamableHttp(
+    name="itsuki",
+    params={
+        "url": "${origin}/mcp",
+        "headers": {"Authorization": "Bearer ${mcpToken}"},
+    },
+    cache_tools_list=True,
+) as server:
+    agent = Agent(name="Assistant", mcp_servers=[server])`,
+		googleAdkConnect: `from google.adk.tools.mcp_tool import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
+
+toolset = McpToolset(
+    connection_params=StreamableHTTPConnectionParams(
+        url="${origin}/mcp",
+        headers={"Authorization": "Bearer ${mcpToken}"},
+    )
+)`,
+		llamaindexConnect: `from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
+
+# LlamaIndex's MCP client documents OAuth but no custom headers — so use
+# ${PRODUCT.name}'s path-token door: the credential travels in the URL itself.
+client = BasicMCPClient("${origin}/mcp/${mcpToken}")
+tools = McpToolSpec(client=client)`,
+		mastraConnect: `import { MCPClient } from "@mastra/mcp";
+
+const mcp = new MCPClient({
+  servers: {
+    itsuki: {
+      url: new URL("${origin}/mcp"),
+      requestInit: { headers: { Authorization: "Bearer ${mcpToken}" } },
+    },
+  },
+});
+const tools = await mcp.getTools();`,
+		vercelAiConnect: `import { createMCPClient } from "@ai-sdk/mcp";
+
+const mcpClient = await createMCPClient({
+  transport: {
+    type: "http",
+    url: "${origin}/mcp",
+    headers: { Authorization: "Bearer ${mcpToken}" },
+  },
+});
+const tools = await mcpClient.tools();`,
+		// ---- Dev tools ----
+		n8nHttpRequest: `Node: HTTP Request  (works in ANY workflow — no AI Agent node needed)
+Method: POST
+URL: ${origin}/v1/save
+Authentication: Generic Credential Type -> Header Auth
+  Name: authorization    Value: Bearer ${mcpToken}
+Body (JSON):
+{ "content": "{{ $json.textToRemember }}" }
+
+Recall is the same node against ${origin}/v1/recall with { "query": "..." }.`,
+		n8nMcpClient: `Node: MCP Client Tool  (attach to an AI Agent node)
+Endpoint: ${origin}/mcp
+Server Transport: HTTP Streamable
+Authentication: Bearer -> ${mcpToken}
+The agent then calls save_memory / recall_memory / list_memories itself.`,
+		difyConnect: `Dify -> Tools -> MCP -> Add server (HTTP transport)
+Server URL: ${origin}/mcp
+Headers: authorization = Bearer ${mcpToken}
+Dify imports the tools; enable them for your app under Agent settings.`,
+		convexInstall: `npm install itsuki convex`,
+		convexHelper: `// convex/memory.ts — ${PRODUCT.name} inside your Convex backend
+import { MemoryClient } from "itsuki";
+import { action } from "./_generated/server";
+import { v } from "convex/values";
+
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY! });
+
+export const remember = action({
+  args: { content: v.string(), userId: v.string() },
+  handler: async (_ctx, args) => memory.add(args.content, { userId: args.userId }),
+});
+
+export const recall = action({
+  args: { query: v.string(), userId: v.string() },
+  handler: async (_ctx, args) => memory.search(args.query, { userId: args.userId }),
+});`,
 	};
 }
 
@@ -4219,6 +4339,9 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 	bot: `<rect x="4.5" y="7.5" width="15" height="12" rx="3"/><path d="M12 4.5v3M8.5 4.5h7"/><path d="M9 12.5v2M15 12.5v2"/>`,
 	pi: `<path d="M4.5 7.5h15"/><path d="M8.5 7.5V19M15.5 7.5V19"/>`,
 	orbit: `<circle cx="12" cy="12" r="3"/><path d="M20.5 12c0 2.2-3.8 4-8.5 4s-8.5-1.8-8.5-4 3.8-4 8.5-4 8.5 1.8 8.5 4Z"/>`,
+	blocks: `<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="8.5" y="13.5" width="7" height="7" rx="1.5"/>`,
+	layers: `<path d="M12 3.5 20.5 8 12 12.5 3.5 8 12 3.5Z"/><path d="m4.5 12.5 7.5 4 7.5-4"/><path d="m4.5 16.5 7.5 4 7.5-4"/>`,
+	database: `<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8v-13"/><path d="M4.5 12c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8"/>`,
 	chevron: `<path d="m4.5 7 4.5 5-4.5 5"/><path d="M12 17h7.5"/>`,
 	copy: `<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15.5V5.5a2.5 2.5 0 0 1 2.5-2.5H17"/>`,
 	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
@@ -4332,6 +4455,114 @@ function installMethods() {
 						{ title: "Create an API key", body: "Use it only as a Bearer credential from your server.", action: apiKey },
 						{ title: "Add memory", body: "Send a conversation and bind it to one isolated end user.", codeLabel: "curl", code: () => installSnippets().curlAdd },
 						{ title: "Retrieve memory", body: "Search the same end-user memory and read the context field.", codeLabel: "curl", code: () => installSnippets().curlSearch },
+					],
+				},
+			},
+		},
+		integrations: {
+			label: "Integrations",
+			blurb: "Frameworks and tools",
+			icon: ICON.blocks,
+			clients: {
+				python: {
+					label: "Python",
+					icon: BRAND.python,
+					docsHref: "/docs/#/integrations/python",
+					hint: "Every framework below talks to the same MCP endpoint — pick yours.",
+					variants: {
+						langchain: { label: "LangChain", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the tools", body: "pip install langchain-mcp-adapters. Works for LangGraph agents too.", codeLabel: "python", code: (key) => installSnippets(key).langchainConnect },
+							{ title: "Test it", body: "Run your agent and ask it to remember something, then recall it.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						crewai: { label: "CrewAI", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the tools", body: "pip install crewai-tools. Streamable HTTP with a Bearer header.", codeLabel: "python", code: (key) => installSnippets(key).crewaiConnect },
+							{ title: "Test it", body: "Run a crew and ask an agent to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						autogen: { label: "AutoGen", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the tools", body: "pip install autogen-ext. The adapter wraps every memory tool.", codeLabel: "python", code: (key) => installSnippets(key).autogenConnect },
+							{ title: "Test it", body: "Run your team and ask an agent to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						agno: { label: "Agno", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the tools", body: "pip install agno. Streamable HTTP transport.", codeLabel: "python", code: (key) => installSnippets(key).agnoConnect },
+							{ title: "Test it", body: "Ask the agent to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						"openai-agents": { label: "OpenAI Agents", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the server", body: "pip install openai-agents. MCP servers attach per agent.", codeLabel: "python", code: (key) => installSnippets(key).openaiAgentsConnect },
+							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						"google-adk": { label: "Google ADK", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the toolset", body: "pip install google-adk. The toolset carries every memory tool.", codeLabel: "python", code: (key) => installSnippets(key).googleAdkConnect },
+							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						llamaindex: { label: "LlamaIndex", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the client", body: "pip install llama-index-tools-mcp. LlamaIndex sends no custom headers, so the path-token URL carries the credential — treat the config as a secret.", codeLabel: "python", code: (key) => installSnippets(key).llamaindexConnect },
+							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+					},
+				},
+				typescript: {
+					label: "TypeScript",
+					icon: BRAND.typescript,
+					docsHref: "/docs/#/integrations/typescript",
+					hint: "Same MCP endpoint, TypeScript clients.",
+					variants: {
+						mastra: { label: "Mastra", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the client", body: "npm install @mastra/mcp. Tools flow into your agent config.", codeLabel: "typescript", code: (key) => installSnippets(key).mastraConnect },
+							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+						"vercel-ai": { label: "Vercel AI SDK", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Connect the client", body: "npm install @ai-sdk/mcp. Pass the tools to generateText or streamText.", codeLabel: "typescript", code: (key) => installSnippets(key).vercelAiConnect },
+							{ title: "Test it", body: "Run the app and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+					},
+				},
+				n8n: {
+					label: "n8n",
+					icon: ICON.hexN,
+					docsHref: "/docs/#/integrations/n8n",
+					hint: "HTTP Request works in any workflow. MCP Client needs an AI Agent node.",
+					variants: {
+						http: { label: "HTTP Request", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Add an HTTP Request node", body: "Works in every workflow — forms, schedules, webhooks — with no AI involved.", codeLabel: "node config", code: (key) => installSnippets(key).n8nHttpRequest },
+							{ title: "Run the workflow", body: "Execute once and confirm the response carries a receipt id." },
+						] },
+						mcp: { label: "MCP Client", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Add the MCP Client Tool", body: "Attach it to an AI Agent node; the agent picks the memory tools itself.", codeLabel: "node config", code: (key) => installSnippets(key).n8nMcpClient },
+							{ title: "Test it", body: "Chat with the agent workflow.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+						] },
+					},
+				},
+				dify: {
+					label: "Dify",
+					icon: ICON.layers,
+					docsHref: "/docs/#/integrations/dify",
+					hint: "Dify's native MCP client — no plugin, no marketplace review.",
+					steps: [
+						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+						{ title: "Add the MCP server", body: "Tools → MCP → Add server. Dify imports the tools on connect.", codeLabel: "dify config", code: (key) => installSnippets(key).difyConnect },
+						{ title: "Test it", body: "Enable the tools for an app, then chat.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
+					],
+				},
+				convex: {
+					label: "Convex",
+					icon: ICON.database,
+					docsHref: "/docs/#/integrations/convex",
+					hint: `Not MCP — the ${PRODUCT.name} SDK inside your Convex backend.`,
+					steps: [
+						{ title: "Install the packages", body: "The published SDK plus Convex.", codeLabel: "terminal", code: () => installSnippets().convexInstall },
+						{ title: "Create an API key", body: "Set it as ITSUKI_API_KEY in your Convex deployment env.", action: apiKey },
+						{ title: "Write the memory actions", body: "Save and recall become callable from any Convex function or client.", codeLabel: "convex/memory.ts", code: () => installSnippets().convexHelper },
 					],
 				},
 			},
@@ -4480,6 +4711,9 @@ function installMethods() {
 function setInstallMethod(method) {
 	S.installMethod = method;
 	S.installClient = null;
+	// A stale variant key from another door's client must not survive the
+	// switch — with several variant-bearing clients, key collisions are real.
+	S.installVariant = null;
 	renderView();
 }
 
@@ -4594,7 +4828,7 @@ function viewInstall(v) {
 					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
 			</div>` : ""}
 		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		${["plugin", "agents"].includes(state.method) ? `
+		${["plugin", "agents", "integrations"].includes(state.method) ? `
 			<div class="plugin-stage">
 				<div class="plugin-stage-head">
 					<div class="plugin-stage-title">${client.icon ?? ""}<span>${esc(client.label)}</span></div>

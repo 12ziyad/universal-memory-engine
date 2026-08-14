@@ -178,6 +178,47 @@ describe("persistence", () => {
 		expect(JSON.parse(row.raw_usage_json).neurons).toBe(1.25);
 	});
 
+	it("persists account attribution and feeds the daily rollup", async () => {
+		const userId = `meter-attr-${crypto.randomUUID()}`;
+		const account = `acct-${crypto.randomUUID()}`;
+		const before = await env.DB.prepare(
+			"SELECT calls, input_tokens, measured_neurons, measured_neuron_calls FROM ai_daily_totals WHERE day = date('now')",
+		).first();
+
+		const meter = await withAiMeter("save", async (m) => {
+			tagAiMeter("run_attr");
+			await runAi(fakeAi({ usage: { prompt_tokens: 10, completion_tokens: 5, neurons: 2 } }),
+				"@cf/qwen/qwen3-30b-a3b-fp8", {}, undefined, { task: "extract" });
+			// A second call with NO reported neurons: counts in calls/tokens,
+			// never in measured_neurons.
+			await runAi(fakeAi({ usage: { prompt_tokens: 4, completion_tokens: 2 } }),
+				"@cf/baai/bge-base-en-v1.5", {}, undefined, { task: "embed" });
+			return m;
+		});
+		await flushAiMeter(env, userId, meter, { accountUserId: account });
+		await flushAiMeter(env, userId, meter, { accountUserId: account }); // same-day accumulation
+
+		const row = await env.DB.prepare(
+			"SELECT account_user_id, managed_project_id FROM ai_calls WHERE user_id = ? LIMIT 1",
+		).bind(userId).first();
+		expect(row.account_user_id).toBe(account);
+		expect(row.managed_project_id).toBeNull();
+
+		const after = await env.DB.prepare(
+			"SELECT calls, input_tokens, measured_neurons, measured_neuron_calls FROM ai_daily_totals WHERE day = date('now')",
+		).first();
+		// The rollup must accumulate exactly what the meter recorded, twice.
+		// (Per-call field mapping is pinned by the row test above.)
+		const totals = meterTotals(meter);
+		const measuredCalls = meter.calls.filter((c) => Number.isFinite(c.neurons)).length;
+		expect(meter.calls.length).toBe(2);
+		expect(measuredCalls).toBe(1); // the embed call reported no neurons
+		expect(after.calls - (before?.calls ?? 0)).toBe(meter.calls.length * 2);
+		expect(after.input_tokens - (before?.input_tokens ?? 0)).toBe((totals.input_tokens ?? 0) * 2);
+		expect(after.measured_neurons - (before?.measured_neurons ?? 0)).toBeCloseTo((totals.neurons ?? 0) * 2);
+		expect(after.measured_neuron_calls - (before?.measured_neuron_calls ?? 0)).toBe(measuredCalls * 2);
+	});
+
 	it("survives a flush against a missing table without throwing", async () => {
 		const meter = { scope: "save", calls: [{ model: "m", input_tokens: 1 }] };
 		const brokenEnv = { DB: { batch: async () => { throw new Error("no such table"); }, prepare: () => ({ bind: () => ({}) }) } };
