@@ -4179,9 +4179,18 @@ mcp_servers:
   ${PRODUCT.name.toLowerCase()}:
     url: "${origin}/mcp/${mcpToken}"`,
 		hermesMcpAdd: `hermes mcp add ${PRODUCT.name.toLowerCase()}`,
-		// Pi has no MCP support (verified) — its honest day-one route is REST
-		// through the shell tool it already has. The native npm extension is the
-		// planned upgrade; until it exists no install verb for it appears here.
+		// The native Pi extension — published as pi-itsuki on npm with provenance.
+		// Recall runs before each turn's first model call, capture after the turn
+		// settles; the extension reads ITSUKI_API_KEY from the environment only.
+		piNativeInstall: `pi install npm:pi-itsuki`,
+		piNativeEnv: `# bash/zsh — add to your shell profile, then restart pi
+export ITSUKI_API_KEY=${mcpToken}
+
+# PowerShell
+$env:ITSUKI_API_KEY = "${mcpToken}"`,
+		piNativeVerify: `/itsuki status`,
+		// Pi has no MCP support (verified) — the REST route through the shell
+		// tool remains as the fallback for setups that cannot install packages.
 		piPrompt: `Set up the ${PRODUCT.name} memory connection and verify it end to end.
 
 1. Verify: run
@@ -4711,14 +4720,30 @@ function installMethods() {
 					label: "Pi Agent",
 					icon: ICON.pi,
 					docsHref: "/docs/#/install/pi",
-					hint: "Pi has no MCP support, so this route works through its shell tool and the REST door. A native Pi extension is planned.",
-					steps: [
-						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Paste this prompt", body: "Pi verifies the connection, saves a first memory, and proves recall — end to end.",
-							codeLabel: "prompt", code: (key) => installSnippets(key).piPrompt },
-						{ title: "Make it automatic", body: "Add to Pi's standing instructions (global or project) so recall and save happen every session.",
-							codeLabel: "custom instructions", code: (key) => installSnippets(key).restInstructions },
-					],
+					hint: "The native extension joins Pi's own lifecycle: recall before each turn, capture after it settles. The REST route remains for setups that cannot install packages.",
+					variants: {
+						native: {
+							label: "Native extension",
+							steps: [
+								{ title: "Install the extension", body: "One command in your terminal. Needs Node 22.19+, Pi's own floor. Zero runtime dependencies, published with npm provenance.",
+									codeLabel: "terminal", code: () => installSnippets().piNativeInstall },
+								{ title: "Create your link and set the key", body: "Shown once. The key lives in your environment only — the extension refuses keys placed in config files.",
+									action: (key) => key ? linkReady : mcpKey, codeLabel: "terminal", code: (key) => installSnippets(key).piNativeEnv },
+								{ title: "Verify", body: "Memory now recalls before every turn and saves after each settled turn. The doctor shows receipts, spool depth, and breaker state — never the key.",
+									codeLabel: "in pi", code: () => installSnippets().piNativeVerify },
+							],
+						},
+						rest: {
+							label: "REST fallback",
+							steps: [
+								{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+								{ title: "Paste this prompt", body: "Pi verifies the connection, saves a first memory, and proves recall — end to end.",
+									codeLabel: "prompt", code: (key) => installSnippets(key).piPrompt },
+								{ title: "Make it automatic", body: "Add to Pi's standing instructions (global or project) so recall and save happen every session.",
+									codeLabel: "custom instructions", code: (key) => installSnippets(key).restInstructions },
+							],
+						},
+					},
 				},
 			},
 		},

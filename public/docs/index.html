@@ -445,19 +445,25 @@ ${codeBlock(`hermes mcp add ${PRODUCT.name.toLowerCase()}`)}
 
 PAGES["/install/pi"] = { title: "Pi Agent", html: `
 <h1>Pi Agent</h1>
-<p class="lede">Memory for Pi through the REST door — Pi has no MCP support, so this route uses the shell tool Pi already has.</p>
-<h2>1. Create your link</h2>
-<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — it doubles as a REST Bearer credential for the memory endpoints.</p>
-<h2>2. Paste the setup prompt</h2>
-<p>Copy the installation prompt from the dashboard's <b>Get started → Agents → Pi Agent</b> tab and paste it into Pi. The agent verifies the connection (<code>GET /v1/status</code>), saves a first memory (<code>POST /v1/save</code>), and proves recall (<code>POST /v1/recall</code>) — end to end, reporting receipts.</p>
-<h2>3. Make it automatic</h2>
-<p>Add the standing instructions from the same tab to Pi's global or project instructions: recall at session start, save when you state something durable. Every save returns a receipt; the instructions tell Pi never to claim a save without one.</p>
+<p class="lede">The <b>native extension</b> joins Pi's own lifecycle: relevant memory is recalled before each turn's first model call, and what you decide is captured after the turn settles — the agent never has to choose to look, or remember to write down. The <b>REST route</b> remains as a fallback.</p>
+<h2>Route A — native extension (recommended)</h2>
+<p>Published on npm as <code>pi-itsuki</code>, built and signed from this repository's GitHub Actions workflow with npm provenance. Zero runtime dependencies. Needs Node 22.19+, Pi's own floor.</p>
+${codeBlock(`pi install npm:pi-itsuki`)}
+<p>Create an <b>MCP link</b> under <b>API Keys</b> (shown once), set it as <code>ITSUKI_API_KEY</code> in your environment, and restart pi. The key is read from the environment only — the extension refuses keys placed in config files, and it travels only as an <code>Authorization</code> header.</p>
+${codeBlock(`export ITSUKI_API_KEY=YOUR_MCP_KEY`)}
+<p>Then, inside pi:</p>
+${codeBlock(`/itsuki status`)}
+<p><code>/itsuki doctor</code> shows the connection, spool depth, last receipt, and circuit-breaker state — never the key. <code>/itsuki recall &lt;query&gt;</code> does a one-off lookup, and the model itself gets <code>itsuki_recall</code> and <code>itsuki_save</code> tools. There is deliberately no delete tool: nothing in the extension can destroy memory.</p>
+<p>Capture is exactly-once: each settled turn is staged to a durable local spool under a content-derived idempotency key before any network call, so retries, crashes, <code>/resume</code> and <code>/fork</code> cannot double-write — and if Itsuki is unreachable, the turn waits on disk and is delivered later. Recalled memory is injected behind an explicit stored-context-not-instructions label. Every message is scrubbed for credentials locally before it leaves your machine.</p>
+<p>Deliberately absent, because the backend has no honest contract for them: update/edit of a stored memory, multimodal memory, and automatic consolidation.</p>
+<h2>Route B — REST fallback</h2>
+<p>Pi has no MCP support, so the fallback uses the shell tool Pi already has. Copy the installation prompt from the dashboard's <b>Get started → Agents → Pi Agent → REST fallback</b> tab and paste it into Pi. The agent verifies the connection (<code>GET /v1/status</code>), saves a first memory (<code>POST /v1/save</code>), and proves recall (<code>POST /v1/recall</code>) — reporting receipts. Then add the standing instructions from the same tab so recall and save happen every session.</p>
 <h2>Troubleshooting</h2>
 <ul>
-<li><b>Verification fails at step 1</b> — the link is revoked, or the shell has no network access. Run the curl by hand to see the exact error.</li>
+<li><b><code>/itsuki status</code> says the key is not configured</b> — <code>ITSUKI_API_KEY</code> is not visible to the pi process. Set it in the profile of the shell that launches pi, then restart pi.</li>
+<li><b>Saves say "queued" rather than "saved"</b> — Itsuki is unreachable or rate-limited; the span is spooled and delivers automatically. <code>/itsuki doctor</code> names the reason.</li>
 <li><b>Saves succeed but recall is empty</b> — extraction is asynchronous; allow a few seconds, then recall again.</li>
 </ul>
-<div class="note">A native Pi extension (<code>pi.registerTool</code> memory tools, slash commands, auto-capture) is planned and will replace the curl route with first-class tools. Until it is published, no install command for it appears here — the REST route above is what actually works today.</div>
 ` };
 
 PAGES["/integrations/python"] = { title: "Python frameworks", html: `

@@ -447,7 +447,8 @@ describe("no dead commands", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
 		expect(script).not.toContain("openclaw plugins install");
 		expect(script).not.toContain("hermes memory setup");
-		expect(script).not.toContain("pi install npm:");
+		// pi-itsuki is published (npm, provenance), so its verb is now allowed —
+		// and pinned to the exact registry name in the Pi-door test below.
 	});
 
 	it("builds the OpenClaw routes only from shipped doors", () => {
@@ -471,8 +472,25 @@ describe("no dead commands", () => {
 		expect(withKey.hermesMcpAdd).toBe("hermes mcp add itsuki");
 	});
 
-	it("gives Pi only what actually works: the REST door through its shell", () => {
-		// Pi has no MCP support (verified) — its flow must never pretend otherwise.
+	it("gives Pi the published native extension first, and the honest REST fallback beside it", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const withKey = installSnippets("itsuki_live_k4");
+		// The package is published; this is the one place the install verb is
+		// allowed, and it must match the registry name exactly.
+		expect(withKey.piNativeInstall).toBe("pi install npm:pi-itsuki");
+		expect(withKey.piNativeEnv).toContain("ITSUKI_API_KEY=itsuki_live_k4");
+		expect(withKey.piNativeVerify).toBe("/itsuki status");
+		const doors = buildMethods();
+		expect(Object.keys(doors.agents.clients.pi.variants)).toEqual(["native", "rest"]);
+		// The extension reads the key from the environment only; the step says so.
+		const native = doors.agents.clients.pi.variants.native;
+		expect(native.steps.some((s) => /environment only/i.test(s.body))).toBe(true);
+		// Pi still has no MCP support — the native route must not pretend otherwise.
+		expect(withKey.piNativeInstall).not.toContain("mcp");
+	});
+
+	it("keeps the Pi REST fallback honest and complete", () => {
+		// Pi has no MCP support (verified) — the fallback must never pretend otherwise.
 		const installSnippets = build(["installSnippets"], "installSnippets");
 		const withKey = installSnippets("itsuki_live_k4");
 		for (const needed of ["/v1/status", "/v1/save", "/v1/recall", "receipt"]) {

@@ -9,6 +9,41 @@ the documentation at <https://itsuki.app/docs/> is the contract.
 
 ---
 
+## Pi extension — pi-itsuki 0.1.0 — 2026-08-15
+
+First release of the native Pi integration, published to npm with SLSA
+provenance from this repository's GitHub Actions workflow.
+
+### Added
+
+- **Memory joins Pi's own lifecycle.** Recall runs in `before_agent_start`, so
+  relevant context is in the prompt before the first model call of every turn;
+  capture runs in `agent_settled`, the only event Pi documents as "will not
+  continue running automatically". No tool-choosing, no curl.
+- **Exactly-once capture.** Each settled turn is staged to a crash-safe local
+  spool under a content-derived idempotency key before any network call.
+  Retries, crashes, `/resume` and `/fork` produce the same key; the server
+  collapses them. Offline turns wait on disk and deliver on recovery.
+- **Honest state everywhere.** Saves report "queued" until a receipt exists;
+  `/itsuki status` and `/itsuki doctor` show spool depth, drop counts, last
+  receipt, and breaker state — never the key. Recalled memory is injected
+  behind an explicit stored-context-not-instructions label, and injected lines
+  are never re-captured (including across `/resume`).
+- **No destructive surface.** The extension contains no delete call of any
+  kind; the tools are `itsuki_recall` and `itsuki_save` only.
+- Local credential scrubbing byte-identical to the server's canonical lane,
+  pinned by the shared security corpus plus a differential parity suite; a new
+  language-neutral lifecycle corpus (`test/fixtures/agent_lifecycle_corpus.json`)
+  pins identity, injection, error taxonomy, batching, and URL-safety vectors
+  for this and every future native agent adapter.
+- Zero runtime dependencies; Node ≥ 22.19.0 (Pi's own floor); Windows and
+  Linux CI legs both green before publication.
+
+The dashboard's Pi tab now leads with the native route; the REST-through-shell
+route remains as the documented fallback.
+
+---
+
 ## Hosted service — 2026-08-14
 
 ### Added

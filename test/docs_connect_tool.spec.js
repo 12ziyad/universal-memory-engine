@@ -137,6 +137,17 @@ describe("no dead commands in docs", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
 		expect(script).not.toContain("openclaw plugins install");
 		expect(script).not.toContain("hermes memory setup");
-		expect(script).not.toContain("pi install npm:");
+	});
+
+	it("shows the published Pi extension under its exact registry name", () => {
+		// pi-itsuki shipped (npm, provenance), so the verb is allowed — but only
+		// the real one, on the Pi page, alongside the surviving REST fallback.
+		const piPage = script.split('PAGES["/install/pi"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(piPage).toContain("pi install npm:pi-itsuki");
+		expect(piPage).toContain("ITSUKI_API_KEY");
+		expect(piPage).toContain("/itsuki status");
+		expect(piPage).toMatch(/REST fallback/);
+		// Honesty survives the upgrade: no update/multimodal/consolidation claims.
+		expect(piPage).toMatch(/Deliberately absent/i);
 	});
 });
