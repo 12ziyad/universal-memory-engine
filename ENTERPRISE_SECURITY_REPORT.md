@@ -1,6 +1,6 @@
 # Itsuki Stage 3 Enterprise Security Report
 
-Status: **independent security review GO** with no remaining Stage 3 release blockers. Production bookmark, migration, deployment, and canary verification remain pending operational gates.
+Status: **PASS / independent security review GO**. No Stage 3 release blocker remains; production migration, deployment, adversarial canary, and cleanup are verified.
 
 ## Security properties implemented
 
@@ -49,4 +49,17 @@ Verified before production mutation on 2026-08-14:
 - Production read-only preflight: **4 active projects**, **0 effective-organization/name collision groups**, **0 non-null organization owner mismatches**, and only `0040_enterprise_settings.sql` pending.
 - Desktop and 390 px browser QA: **green**, with no console warnings.
 
-Pending: fresh production D1 recovery bookmark, migration apply and post-apply invariant proof, exact end commit/Worker deployment IDs, production security/RBAC/audit/retention/email canaries, canary cleanup, and final production artifact identity.
+## Production security verification
+
+- Recovery bookmark: `00000e44-00000000-000050c7-ca8add7d10c7bc4cc753b035b947993c`.
+- Migration 0040 applied once and passed post-apply proof: `applied_0040=1`, 6 enterprise tables, 2 name-scope triggers, 0 old owner-wide indexes, and 0 collision groups.
+- Source commit `9b2d2d81452b73abaa3fd33256b37a8778857bc5` (HEAD = `origin/master` at deployment) deployed as deployment `08e0c041-6d56-4e90-a630-9ff25280c7a7`, version `9ed4826b-2149-40da-885e-a416208b06e5`.
+- Custom-domain and `workers.dev` health returned HTTP 200 with `x-request-id`; production health remained HTTP 200 after cleanup.
+- A viewer received HTTP 200 for graph read and HTTP 403 for category editing, export, audit viewing, and key management.
+- Invitation acceptance succeeded once and exact replay returned HTTP 409. Audit recorded category, rules, and invitation actions with the exact request ID and without the invitation token.
+- A real save was accepted and produced two graph objects. After governed owner/viewer erasure, old sessions failed and a late save returned HTTP 401.
+- Final canary identity/content rows and all three FTS marker searches were zero. The accepted residual is content-free anti-resurrection state: tombstones, barriers, and one scrubbed source replay fence with sentinel hash `itsuki-erased-source/v1`, no preview/content, empty metadata, and null source, role, topic, project-name, external-user, and source-time fields. Opaque routing and idempotency fields remain only to enforce the replay fence.
+- Synthetic admin cleanup was a preflight-proven fail-safe sequence of exact remote D1 statements, not a single transaction. Tombstone/barrier protection preceded disable/revoke, anonymization, and identity deletion.
+- No Vectorize record had materialized for the two checked object IDs, so production vector deletion was not observed or claimed; deterministic tests cover the deletion path.
+
+Open Critical: **0**. Open High: **0**. Open release-blocking Medium: **0**. The evidence set is hash-locked separately from the deployed source, and the delivery message records its documentation commit.

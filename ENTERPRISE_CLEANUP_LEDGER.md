@@ -1,6 +1,6 @@
 # Itsuki Stage 3 Cleanup and Erasure Ledger
 
-Status: implementation and predeployment release gates complete. Production migration, deploy, and cleanup canaries remain pending.
+Status: **PASS**. Stage 3 production erasure/no-resurrection canaries completed and cleanup was verified.
 
 Scope: Stage 3 account erasure and retention cleanup only. Stage 2 chat-plus-memory deletion and Stage 4 project/organization lifecycle deletion are excluded and not claimed.
 
@@ -40,4 +40,18 @@ Verified before production mutation on 2026-08-14:
 - Migration `0040_enterprise_settings.sql` SHA-256: `0034ba291d0754454d5b2111075322a707c7ac87540463211708687a1d1b4790`.
 - Desktop and 390 px browser QA: **green**, with no console warnings.
 
-Still pending by design: production D1 recovery bookmark, migration application, post-apply production schema/invariant verification, exact Worker deployment identity, production cleanup/erasure canaries (including Durable Object and Vectorize convergence), and canary cleanup evidence.
+## Production cleanup proof
+
+The completed canary used redacted account hashes admin `037d0a5d7d2c292e`, owner `ec0f8ece18473689`, and viewer `61c18bd0e4c15b32`; organization `1c3ed12dc78e566d`; project `148eb11c13806671`; category `18fababc87e6ba24`; memory root `6ea60e6c710bcb9d`; and marker `31cd16f4287af05d`.
+
+- Viewer and owner product erasure endpoints each returned HTTP 200 with `deleted: true`, using the governed/transactional boundaries implemented by the product.
+- Old sessions no longer resolved, and a late save returned HTTP 401.
+- Synthetic admin cleanup was a narrow, preflight-proven, fail-safe sequence of exact remote D1 statements—not one `DB.batch` transaction. It persisted tombstone/barrier protection first, then disabled/revoked, anonymized, and deleted identity last.
+- The operator preflight proved zero unexpected non-minimal rows before the final scrub/delete sequence.
+- Final production user count returned to the **14-user baseline** with **0 canary users**.
+
+Exact canary counts were zero for users, sessions, connection tokens, login records, organizations, projects, organization/project members, invitations, invitation email outbox, categories, project memory-space registry, every retention table, nodes, pages, receipts, jobs, staged text, source episodes, semantic atoms, webhooks, webhook deliveries, exports, audit identity references, and all three FTS marker searches.
+
+The completed pass intentionally retained **3 account tombstones**, **4 deletion barriers**, and **1 content-free source replay fence**. That fence uses sentinel hash `itsuki-erased-source/v1`, a null preview, `message_count=0`, raw metadata `{}`, and null source, role, topic, project-name, external-user, and source-time fields. Opaque routing and idempotency fields remain only to enforce the replay fence. Including a prior harness-only aborted pass that was also safely erased, recent anti-resurrection totals are **6 tombstones** and **8 barriers**.
+
+Two node/page identifiers were checked before cleanup, but no Vectorize records had materialized because Vectorize is best-effort. Production vector deletion was therefore not observed and is not claimed by this canary; deterministic test coverage proves the deletion path. Production health returned HTTP 200 after cleanup.

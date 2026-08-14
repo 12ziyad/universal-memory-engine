@@ -1,6 +1,6 @@
 # Itsuki Stage 3 Enterprise Migration Ledger
 
-Status: migration `0040_enterprise_settings.sql` is frozen and verified for deployment. No production migration has been applied as part of this document yet.
+Status: **PASS**. Migration `0040_enterprise_settings.sql` is frozen, applied once in production, and post-apply verified.
 
 Scope: Stage 3 schema only. This ledger does not claim completion of Stage 2 Playground policy work or Stage 4 project/organization lifecycle work.
 
@@ -43,9 +43,10 @@ Production application is conditional on a read-only preflight proving zero dupl
 | Clean database replay 0001 to 0040 | VERIFIED; 40/40 passed with schema/trigger proof |
 | Production pre-migration head | `0039`; only `0040_enterprise_settings.sql` pending |
 | Production data preflight | 4 active projects; 0 collision groups; 0 non-null organization owner mismatches |
-| Cloudflare D1 recovery bookmark | PENDING DEPLOY PREFLIGHT |
-| Migration apply result | NOT YET APPLIED |
-| Post-apply schema/invariant check | NOT YET RUN |
-| Rollback mechanism | D1 Time Travel bookmark + previous Worker version |
+| Cloudflare D1 recovery bookmark | `00000e44-00000000-000050c7-ca8add7d10c7bc4cc753b035b947993c` |
+| Migration apply result | PASS; 48 remote commands in 794.78 ms; `applied_0040=1` |
+| Post-apply schema/invariant check | PASS; 6 enterprise tables, 2 name-scope triggers, 0 old owner-wide indexes, 0 collision groups |
+| Deployed source | `9b2d2d81452b73abaa3fd33256b37a8778857bc5` |
+| Rollback mechanism | D1 Time Travel bookmark above + previous Worker deployment `2bce6453-df3b-4ceb-b80a-e78d3670e317` / version `a292d696-d3d9-4f97-9000-6720f47aebee` |
 
-Production application remains migration-first: capture a fresh D1 recovery bookmark, apply the exact verified `0040`, run the post-apply schema/invariant checks, then deploy the exact tested Worker commit. Old code safely ignores the additive objects during that bounded interval.
+The production sequence completed in the required order: capture the recovery bookmark, apply the exact verified `0040`, prove the post-apply schema and name-scope invariants, then deploy the exact tested source commit. No collision or owner-mismatch remediation was required, and the old owner-wide uniqueness index is absent.

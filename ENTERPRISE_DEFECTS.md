@@ -22,7 +22,7 @@ This ledger records Stage 3 release findings. Stage 2 and Stage 4 requirements a
 
 None known. The independent final security review returned **GO** with no remaining reachable Stage 3 Critical, High, or release-blocking Medium findings.
 
-The release is nevertheless not yet deployed: the production recovery bookmark, migration application, exact Worker deployment identity, production canaries, and canary cleanup remain explicit operational gates.
+The exact reviewed source commit is deployed. Production reattack covered organization/project creation, category color, rule concurrency, retention preview, invitation accept/replay, viewer authorization, audit correlation/privacy, real capture/graph materialization, erasure, late-write denial, and cleanup; every checked Stage 3 outcome passed.
 
 ## Verified predeployment gate
 
@@ -32,6 +32,18 @@ The release is nevertheless not yet deployed: the production recovery bookmark, 
 - Clean `0001` through `0040` replay: **40/40 passed**, including schema and trigger proof.
 - Desktop and 390 px browser QA: **green**, with no console warnings.
 - Production read-only preflight: **4 active projects**, **0 effective-organization/name collision groups**, **0 non-null organization owner mismatches**, and only `0040_enterprise_settings.sql` pending.
+
+## Production closure
+
+- Source commit `9b2d2d81452b73abaa3fd33256b37a8778857bc5` deployed as deployment `08e0c041-6d56-4e90-a630-9ff25280c7a7`, version `9ed4826b-2149-40da-885e-a416208b06e5`.
+- Migration 0040 applied once after recovery bookmark `00000e44-00000000-000050c7-ca8add7d10c7bc4cc753b035b947993c`; post-apply schema/name-scope invariants passed.
+- Viewer negative authorization returned the expected four HTTP 403 responses; invitation replay returned HTTP 409; late post-erasure save returned HTTP 401.
+- Audit request correlation matched exactly and did not retain the invitation token.
+- Final canary identity/content rows and all three FTS marker searches were zero. Intended anti-resurrection tombstones/barriers plus one content-free replay fence remained.
+- No Vectorize records had materialized for the checked object IDs, so production vector deletion was not observed; deterministic tests remain the evidence for that deletion path.
+- Production health returned HTTP 200 after cleanup.
+
+Open Critical: **0**. Open High: **0**. Open release-blocking Medium: **0**.
 
 ## Accepted Stage 3 limits
 
