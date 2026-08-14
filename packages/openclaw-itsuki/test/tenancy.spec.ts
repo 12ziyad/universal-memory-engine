@@ -21,14 +21,14 @@ describe("owner mode (the default)", () => {
 	it("defaults to owner scope and ignores sender identity entirely", () => {
 		expect(ownerConfig.tenancy).toBe("owner");
 		const scope = resolveScope(ownerConfig, { channel: "discord", senderId: "user-1", sessionKey: "s1" });
-		expect(scope.userId).toBeUndefined();
-		expect(scope.conversationId).toBe("s1");
-		expect(scope.source).toBe("openclaw");
+		expect(scope?.userId).toBeUndefined();
+		expect(scope?.conversationId).toBe("s1");
+		expect(scope?.source).toBe("openclaw");
 	});
 
 	it("uses a configured sub-tenant when the operator set one", () => {
 		const config = resolveConfig({ userId: "team-a" });
-		expect(resolveScope(config, { channel: "discord", senderId: "user-1" }).userId).toBe("team-a");
+		expect(resolveScope(config, { channel: "discord", senderId: "user-1" })?.userId).toBe("team-a");
 	});
 
 	it("cannot be switched to per-sender by anything in the run context", () => {
@@ -39,7 +39,7 @@ describe("owner mode (the default)", () => {
 			// deliberately hostile extras
 			...({ tenancy: "per-sender", userId: "victim", pluginConfig: { tenancy: "per-sender" } } as object),
 		});
-		expect(scope.userId).toBeUndefined();
+		expect(scope?.userId).toBeUndefined();
 	});
 });
 
@@ -69,13 +69,21 @@ describe("per-sender mode", () => {
 		expect(senderTenant("discord", "alice")).not.toBe(senderTenant("discord", "bob"));
 	});
 
-	it("falls back to owner scope when identity is missing, never inventing a tenant", () => {
-		// System-originated runs (heartbeat, cron, exec-event) have no sender.
+	it("REFUSES a scope when identity is missing — no silent owner fallback", () => {
+		// Audit F1: falling back to owner scope on a channel without sender ids
+		// would let every stranger share (and recall) the owner's memory. A
+		// missing identity yields NO scope, and the caller skips memory.
 		expect(senderTenant("discord", undefined)).toBeNull();
 		expect(senderTenant(undefined, "user-1")).toBeNull();
 		expect(senderTenant("", "")).toBeNull();
-		const scope = resolveScope(perSender, { sessionKey: "s1" });
-		expect(scope.userId).toBeUndefined();
+		expect(resolveScope(perSender, { sessionKey: "s1" })).toBeNull();
+	});
+
+	it("refuses even when the operator also configured a static userId", () => {
+		// A configured sub-tenant is the OWNER's space in per-sender mode;
+		// routing an unidentified stranger into it is still mixing.
+		const both = resolveConfig({ tenancy: "per-sender", userId: "team-a" });
+		expect(resolveScope(both, { sessionKey: "s1" })).toBeNull();
 	});
 
 	it("ignores non-string identity rather than coercing it", () => {
@@ -86,9 +94,9 @@ describe("per-sender mode", () => {
 	it("produces a different memory space per sender in a real scope", () => {
 		const alice = resolveScope(perSender, { channel: "discord", senderId: "alice", sessionKey: "s1" });
 		const bob = resolveScope(perSender, { channel: "discord", senderId: "bob", sessionKey: "s2" });
-		expect(alice.userId).toBeTruthy();
-		expect(bob.userId).toBeTruthy();
-		expect(alice.userId).not.toBe(bob.userId);
+		expect(alice?.userId).toBeTruthy();
+		expect(bob?.userId).toBeTruthy();
+		expect(alice?.userId).not.toBe(bob?.userId);
 	});
 });
 
@@ -97,13 +105,13 @@ describe("scope can never widen", () => {
 		const config = resolveConfig({ userId: "narrow" });
 		// Even a hostile run context cannot clear it in owner mode.
 		const scope = resolveScope(config, { channel: "discord", senderId: "x", ...({ userId: null } as object) });
-		expect(scope.userId).toBe("narrow");
+		expect(scope?.userId).toBe("narrow");
 	});
 
 	it("treats conversationId as attribution only, never as tenancy", () => {
 		const a = resolveScope(ownerConfig, { sessionKey: "session-a" });
 		const b = resolveScope(ownerConfig, { sessionKey: "session-b" });
-		expect(a.userId).toBe(b.userId);
-		expect(a.conversationId).not.toBe(b.conversationId);
+		expect(a?.userId).toBe(b?.userId);
+		expect(a?.conversationId).not.toBe(b?.conversationId);
 	});
 });

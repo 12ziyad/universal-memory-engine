@@ -22,7 +22,7 @@ export const SESSION_STATE_SCHEMA = "itsuki.openclaw-session/v1";
 
 export const SESSION_LIMITS = Object.freeze({
 	maxFingerprints: 512,
-	maxSessions: 256,
+	maxSessions: 1_024,
 	maxAgeMs: 30 * 24 * 60 * 60 * 1000,
 });
 
@@ -62,8 +62,8 @@ export class SessionStore {
 	}
 
 	async init(): Promise<void> {
-		await mkdir(this.dir, { recursive: true });
-		await mkdir(this.tmpDir, { recursive: true });
+		await mkdir(this.dir, { recursive: true, mode: 0o700 });
+		await mkdir(this.tmpDir, { recursive: true, mode: 0o700 });
 	}
 
 	private async atomicWrite(destination: string, contents: string): Promise<void> {
@@ -71,7 +71,7 @@ export class SessionStore {
 			this.tmpDir,
 			`${createHash("sha256").update(destination + Math.random() + Date.now()).digest("hex").slice(0, 24)}.tmp`,
 		);
-		await writeFile(tmp, contents, "utf8");
+		await writeFile(tmp, contents, { encoding: "utf8", mode: 0o600 });
 		await rename(tmp, destination).catch(async (error: NodeJS.ErrnoException) => {
 			// Windows refuses rename onto an existing file; replace deliberately.
 			if (error?.code === "EEXIST" || error?.code === "EPERM" || error?.code === "EACCES") {

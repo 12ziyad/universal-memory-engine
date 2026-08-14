@@ -30,6 +30,12 @@ openclaw plugins enable itsuki
 
 That gate is OpenClaw's, and it is the right default — a plugin that reads every conversation should be something you turned on deliberately. `openclaw plugins inspect itsuki --runtime --json` reports the block in `diagnostics` until you do.
 
+OpenClaw also warns when `plugins.allow` is empty. Pinning it is good hygiene:
+
+```json
+{ "plugins": { "allow": ["itsuki"] } }
+```
+
 Create a key at [itsuki.app](https://itsuki.app) under **API Keys**, then give it to the Gateway:
 
 ```
@@ -50,7 +56,7 @@ openclaw plugins inspect itsuki --runtime --json
 |---|---|
 | `gateway_start` | Restores and validates the durable spool. No blocking network dependency. |
 | `agent_turn_prepare` | Recalls memory for the user's prompt and injects it via `prependContext`. Bounded and **fail-open**: if Itsuki is slow or down, the turn proceeds with no memory rather than not at all. Skipped for cron and heartbeat runs. |
-| `agent_end` | Captures the user/assistant text of a genuinely settled turn (`success: true`, no error). |
+| `agent_end` | Captures the user/assistant text of a genuinely settled turn (`success: true`, no error). Cron, heartbeat and other system-originated runs are **never** captured — automation output is not conversation. |
 | `before_compaction` | Flushes the outstanding span before compaction rewrites context. |
 | `session_end` | Drains on true termination; a `compaction` end is ignored so nothing is captured twice. |
 | `subagent_spawned` | Attribution only — never widens authority. |
@@ -74,7 +80,7 @@ Under `plugins.entries.itsuki.config`:
 
 `owner` (default) writes everything to the key's own memory space.
 
-`per-sender` gives each channel-scoped sender an isolated sub-tenant, derived as a one-way hash of **channel + sender id** — so a Discord user and a Feishu user with the same underlying id can never collide, and a raw platform id never becomes a key inside Itsuki. When a run has no sender (heartbeat, cron), it falls back to owner scope rather than inventing a tenant.
+`per-sender` gives each channel-scoped sender an isolated sub-tenant, derived as a one-way hash of **channel + sender id** — so a Discord user and a Feishu user with the same underlying id can never collide, and a raw platform id never becomes a key inside Itsuki. When a user turn has no derivable sender (a channel that supplies no sender ids), memory is **skipped for that turn** — recall and capture both — rather than silently routed into the owner's space. Skipping is the only behaviour that cannot mix tenants.
 
 **Turn `per-sender` on deliberately.** It means you are storing per-person memory for the people who talk to your agent. Tell them.
 
@@ -99,6 +105,8 @@ Injected context is wrapped in `<itsuki-recalled-context-v1>` markers behind an 
 ## What it captures
 
 User and assistant **text** from settled turns. Not thinking blocks, not tool calls, not tool results, not system messages. Every message is scrubbed for credentials locally before it leaves your machine, and anything Itsuki injected is stripped so recalled text is never re-saved as if it were new — including after a restart.
+
+One consequence worth knowing on day one: the first settled turn after installation captures the **visible session transcript up to that point** (that is where the watermark starts). For a fresh session that is nothing; for a long-running session it is a one-time backfill of that conversation, bounded by the published ingest limits.
 
 ## Deliberately absent
 

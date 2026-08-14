@@ -70,8 +70,8 @@ export class Spool {
 	}
 
 	async init(): Promise<void> {
-		await mkdir(this.dir, { recursive: true });
-		await mkdir(this.tmpDir, { recursive: true });
+		await mkdir(this.dir, { recursive: true, mode: 0o700 });
+		await mkdir(this.tmpDir, { recursive: true, mode: 0o700 });
 	}
 
 	private async readMeta(): Promise<{ dropped: number }> {
@@ -91,7 +91,7 @@ export class Spool {
 	/** Write to a unique temp file, then rename — never a partial file in place. */
 	private async atomicWrite(destination: string, contents: string): Promise<void> {
 		const tmp = join(this.tmpDir, `${createHash("sha256").update(destination + Math.random() + Date.now()).digest("hex").slice(0, 24)}.tmp`);
-		await writeFile(tmp, contents, "utf8");
+		await writeFile(tmp, contents, { encoding: "utf8", mode: 0o600 });
 		await rename(tmp, destination).catch(async (error: NodeJS.ErrnoException) => {
 			// Windows refuses rename onto an existing file; replace deliberately.
 			if (error?.code === "EEXIST" || error?.code === "EPERM" || error?.code === "EACCES") {

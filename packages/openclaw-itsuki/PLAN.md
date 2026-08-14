@@ -127,6 +127,39 @@ Legend: **PASS** evidenced · **PENDING** requires an action outside this phase.
 | 24 | Publication | **NOT DONE — out of scope** | Nothing published to npm or ClawHub |
 | 25 | Site / docs surfaces | **NOT DONE — out of scope** | Untouched; the no-dead-commands test still forbids an `openclaw plugins install` verb, correctly — the package is not live |
 
+**Open findings after build: superseded by the audit below.**
+
+## Independent audit (Fable, 2026-08-15) — enterprise completion round
+
+Read-only verification first: branch/HEAD/diff confirmed (29 files, only permitted paths); Phase-1 baselines re-run serially and green (repo 140/1,759; openclaw 135→151 after fixes; pi 150; n8n 40); every contract in the table above re-spot-checked against the shipped `openclaw@2026.7.1-2` artifact (registry latest unchanged, retrieved 2026-08-15).
+
+Adversarial findings, each fixed with regression tests **proven to fail on the pre-fix code** (7 tests red against `ce605eb`'s `src/index.ts`, all green after):
+
+| # | Severity | Finding | Repair |
+|---|---|---|---|
+| F1a | High (per-sender installs) | System-originated runs (cron/heartbeat) were CAPTURED. Automation noise entered memory — and in per-sender mode a system run has no sender, so its content landed in the owner's space | `captureSettled` now requires `isUserTurn`; cron + heartbeat regression tests |
+| F1b | High (per-sender installs) | A user turn with no derivable sender fell back to OWNER scope: on channels without sender ids, every stranger would share and recall the owner's memory | `resolveScope` returns `null` in per-sender mode without identity; recall, capture and both tools skip with an honest message; 5 regression tests |
+| F2 | Medium | `conversationAccessGranted` read `pluginConfig.hooks`, but the real key is `plugins.entries.<id>.hooks` — a SIBLING of `config`. Every correctly-configured gateway would get a false "blocked" warning | Reads `api.config.plugins.entries.itsuki.hooks` with a forward-compat pluginConfig fallback; real-layout + fallback + malformed-shape tests |
+| F3 | nonblocking Medium | `maxSessions: 256` could evict active long-tail sessions on a busy multi-channel gateway → lost watermark → full-history recapture (duplicates under a superset key) | Bound raised to 1,024 (mtime-ordered eviction keeps active sessions); scale suite proves prune keeps recent state |
+| F4 | Low | Spool/session files created with default permissions | `0o700` dirs / `0o600` files (POSIX; no-op on Windows) |
+| F5 | Low | `ensure()` comment claimed config changes land without restart — untrue | Comment corrected |
+| F6 | docs | Missing: `plugins.allow` pin, first-capture backfill semantics, system-run and per-sender skip semantics | README updated |
+
+Scale requirements (order: "at least 1,000 organizations/users") — `test/scale.spec.ts`: 1,000 distinct collision-free sender tenants across 10 channels; 1,000 disjoint capture identities for identical content; 1,100 session states written and pruned to the bound with recent state surviving; 10,000-entry hostile transcript normalized in bounded time; 500-message span split into ≤30-message batches losslessly.
+
+Post-fix real-host re-proof (fixed artifact, openclaw 2026.7.1-2, Node 24.15.0):
+- turn: `recall ok` → model → `capture ok`, no false access warning, no allow-list warning (pinned);
+- **genuine subagent spawn** (stub model emitted a real `sessions_spawn` tool call): `subagent_spawned` fired logging only the hashed session key; the child ran its own recall+capture; parent and child captured under **distinct conversationIds** (`agent:main:audit-sub-1` vs `agent:main:subagent:<uuid>`) with distinct keys — gate 14-adjacent subagent evidence is now LIVE, not just unit-level;
+- restart exactly-once re-proven.
+
+Post-fix state: typecheck 0; package suite **151 tests / 8 files**; packaging gates green (zero deps, no secrets, no DELETE, no slot claim, audit 0).
+
+Accepted nonblocking limitations (documented, deliberate):
+1. Subagent child sessions capture their `[Subagent Context]` scaffold as the child's user turn. Same owner scope, no tenant risk; filtering host scaffolding is a candidate refinement.
+2. No CLI `doctor` command in 0.1.0. `api.registerCli` exists (commander-based), but a malformed registration would break the `openclaw` binary for every user — too much blast radius for an unproven surface at release. Status lives in `plugins inspect --runtime --json` + gateway logs.
+3. Two concurrent turns in ONE session may lose a fingerprint-set union (read-modify-write race on session state). Bounded impact: marginally weaker echo suppression for that session; gateways serialize turns per session in practice.
+4. `before_compaction` without a `messages` payload (the field is optional in the host type) skips the pre-compaction flush; the digest-based rewrite detection then prevents duplication at the next `agent_end`, at the cost of possibly not persisting a mid-compaction tail.
+
 **Open findings: 0 Critical, 0 High, 0 release-blocking Medium.**
 
 ## What is deliberately NOT claimed

@@ -66,14 +66,30 @@ function sessionKeyOf(ctx: AgentCtxLike): string {
  *
  * OpenClaw gates conversation-reading hooks (`agent_end` and friends) for
  * non-bundled plugins behind `plugins.entries.<id>.hooks.allowConversationAccess`.
- * The host enforces this itself — the check here exists only so the plugin can
+ * That key is a SIBLING of `entries.<id>.config`, so it is NOT inside
+ * `api.pluginConfig` — it has to be read from the full `api.config`. (Audit
+ * finding: the first implementation read `pluginConfig.hooks` and would have
+ * warned falsely in every correctly-configured gateway.)
+ *
+ * The host enforces the gate itself — this check exists only so the plugin can
  * TELL the operator why nothing is happening, instead of sitting silently
- * inert. Read defensively: the shape is host-owned and may move.
+ * inert. Read defensively: the shape is host-owned and may move, and a wrong
+ * read here must degrade to a spurious warning, never a crash.
  */
-export function conversationAccessGranted(pluginConfig: unknown): boolean {
+export function conversationAccessGranted(hostConfig: unknown, pluginConfig?: unknown): boolean {
+	const entry = (hostConfig as {
+		plugins?: { entries?: Record<string, { hooks?: { allowConversationAccess?: unknown } }> };
+	} | undefined)?.plugins?.entries?.[PLUGIN_ID];
+	if (entry?.hooks && typeof entry.hooks === "object" && entry.hooks.allowConversationAccess === true) {
+		return true;
+	}
+	// Forward-compat fallback: accept the flag inside pluginConfig too, in case
+	// a future host surfaces it there.
 	const hooks = (pluginConfig as { hooks?: unknown } | undefined)?.hooks;
-	if (!hooks || typeof hooks !== "object") return false;
-	return (hooks as { allowConversationAccess?: unknown }).allowConversationAccess === true;
+	if (hooks && typeof hooks === "object") {
+		return (hooks as { allowConversationAccess?: unknown }).allowConversationAccess === true;
+	}
+	return false;
 }
 
 /** A system-originated run has no user asking anything. */
@@ -122,27 +138,34 @@ export function buildRuntime(
 }
 
 /**
- * Resolve the memory scope for one run.
+ * Resolve the memory scope for one run, or REFUSE with null.
  *
  * Tenancy can only ever NARROW: the credential decides the project, and this
  * picks an optional sub-tenant inside it. In `per-sender` mode the sub-tenant
  * is a one-way hash of channel + sender, so two channels cannot collide and a
- * platform user id never becomes a durable key inside Itsuki. When identity is
- * missing (system runs), it falls back to owner scope rather than inventing a
- * tenant — a forged or absent sender can never select somebody else's memory.
+ * platform user id never becomes a durable key inside Itsuki.
+ *
+ * In `per-sender` mode a turn WITHOUT derivable sender identity gets NO scope
+ * at all — memory is skipped for that turn. The first implementation fell back
+ * to owner scope, which the audit rejected: on a channel that does not supply
+ * sender ids, every stranger would have silently shared (and recalled!) the
+ * owner's memory space. Skipping is the only answer that cannot mix tenants.
  */
-export function resolveScope(config: ItsukiConfig, ctx: AgentCtxLike): CaptureScope {
+export function resolveScope(config: ItsukiConfig, ctx: AgentCtxLike): CaptureScope | null {
 	const conversationId = ctx.sessionKey ?? ctx.sessionId;
 	if (config.tenancy !== "per-sender") {
 		return { userId: config.userId, conversationId, source: SOURCE };
 	}
 	const tenant = senderTenant(ctx.channel, ctx.senderId);
-	return { userId: tenant ?? config.userId, conversationId, source: SOURCE };
+	if (!tenant) return null;
+	return { userId: tenant, conversationId, source: SOURCE };
 }
 
 /** The subset of OpenClaw's plugin API this adapter uses. */
 export interface ItsukiPluginApi {
 	pluginConfig?: Record<string, unknown>;
+	/** The full resolved OpenClaw config (host-owned shape). */
+	config?: unknown;
 	logger?: { info?: (m: string) => void; warn?: (m: string) => void; error?: (m: string) => void };
 	on: (hook: string, handler: (event: unknown, ctx: unknown) => Promise<unknown> | unknown, opts?: { priority?: number; timeoutMs?: number }) => void;
 	registerTool?: (tool: unknown) => void;
@@ -153,8 +176,10 @@ export function register(api: ItsukiPluginApi): void {
 	let runtime: Runtime | null = null;
 
 	function ensure(ctx: AgentCtxLike | undefined): Runtime {
-		// Each hook receives its own resolved pluginConfig; prefer it so an
-		// operator config change lands without a Gateway restart.
+		// Built once per plugin lifetime, from the first hook's resolved config
+		// (falling back to the registration-time api.pluginConfig). A config
+		// change lands when the host reloads the plugin (gateway restart) —
+		// this function deliberately does NOT hot-swap credentials mid-flight.
 		const configured = ctx?.pluginConfig ?? api.pluginConfig;
 		if (!runtime) runtime = buildRuntime(configured, process.env, log);
 		return runtime;
@@ -175,7 +200,7 @@ export function register(api: ItsukiPluginApi): void {
 		// OpenClaw blocks conversation-reading hooks for non-bundled plugins
 		// until the operator opts in. Without it this plugin loads and captures
 		// NOTHING, so say so loudly rather than looking healthy while inert.
-		if (!conversationAccessGranted(api.pluginConfig)) {
+		if (!conversationAccessGranted(api.config, api.pluginConfig)) {
 			api.logger?.warn?.(
 				"itsuki: capture and recall are blocked — set plugins.entries.itsuki.hooks.allowConversationAccess=true to let this plugin read conversations, then restart the Gateway.",
 			);
@@ -204,9 +229,12 @@ export function register(api: ItsukiPluginApi): void {
 		const prompt = typeof event.prompt === "string" ? event.prompt : "";
 		if (!prompt.trim()) return;
 
+		const scope = resolveScope(active.config, ctx);
+		// Per-sender mode with no derivable sender: no scope, no memory. Never
+		// fall back to the owner's space for an unidentified stranger.
+		if (!scope) return;
 		const sessionKey = sessionKeyOf(ctx);
 		const echoKey = echoSessionKey(sessionKey);
-		const scope = resolveScope(active.config, ctx);
 		const outcome = await active.coordinator.recall(prompt, scope, { echoKey });
 		if (!outcome.block) return;
 
@@ -228,6 +256,13 @@ export function register(api: ItsukiPluginApi): void {
 
 	async function captureSettled(active: Runtime, ctx: AgentCtxLike, event: { messages?: unknown; success?: unknown; error?: unknown }): Promise<void> {
 		if (!active.ready || !active.config.capture.enabled) return;
+		// A cron tick or heartbeat is not a conversation. Capturing automation
+		// output would pollute memory with machine noise — and in per-sender
+		// mode a system run has no sender, so there is nobody to attribute it
+		// to. (Audit finding: the first implementation captured these.)
+		if (!isUserTurn(ctx)) return;
+		const scope = resolveScope(active.config, ctx);
+		if (!scope) return;
 		const messages = Array.isArray(event?.messages) ? event.messages : [];
 		if (messages.length === 0) return;
 
@@ -243,7 +278,6 @@ export function register(api: ItsukiPluginApi): void {
 			return;
 		}
 
-		const scope = resolveScope(active.config, ctx);
 		const staged = await active.coordinator.stage(span.messages, scope);
 		// The watermark advances the moment the span is durably owned — before
 		// any network call — so a crash mid-delivery cannot re-capture it inside
@@ -308,8 +342,12 @@ export function register(api: ItsukiPluginApi): void {
 			if (!active.ready) {
 				return { content: [{ type: "text", text: `Itsuki is not connected: ${active.problem}` }] };
 			}
+			const scope = resolveScope(active.config, ctx);
+			if (!scope) {
+				return { content: [{ type: "text", text: "Memory is per-sender here and this run has no sender identity, so recall is unavailable." }] };
+			}
 			const sessionKey = sessionKeyOf(ctx);
-			const outcome = await active.coordinator.recall(String(params?.query ?? ""), resolveScope(active.config, ctx), {
+			const outcome = await active.coordinator.recall(String(params?.query ?? ""), scope, {
 				echoKey: echoSessionKey(sessionKey),
 			});
 			if (!outcome.block) {
@@ -344,7 +382,11 @@ export function register(api: ItsukiPluginApi): void {
 			const text = String(params?.content ?? "").trim();
 			if (!text) return { content: [{ type: "text", text: "Nothing to save: content was empty." }] };
 
-			const staged = await active.coordinator.stage([{ role: "user", content: text }], resolveScope(active.config, ctx));
+			const scope = resolveScope(active.config, ctx);
+			if (!scope) {
+				return { content: [{ type: "text", text: "Memory is per-sender here and this run has no sender identity, so nothing was saved." }] };
+			}
+			const staged = await active.coordinator.stage([{ role: "user", content: text }], scope);
 			if (staged.status !== "staged") {
 				return { content: [{ type: "text", text: `Itsuki did not accept that (${staged.status}).` }] };
 			}

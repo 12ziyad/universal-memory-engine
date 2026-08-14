@@ -47,7 +47,11 @@ afterEach(async () => {
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
-function fakeHost(replies: Array<Reply | Error>, pluginConfig: Record<string, unknown> = {}) {
+function fakeHost(
+	replies: Array<Reply | Error>,
+	pluginConfig: Record<string, unknown> = {},
+	hostConfig?: Record<string, unknown>,
+) {
 	const handlers = new Map<string, Array<{ handler: Handler; priority: number }>>();
 	const tools: Array<{ name: string; execute: (...a: unknown[]) => Promise<unknown> }> = [];
 	const requests: Array<{ url: string; body: unknown }> = [];
@@ -67,6 +71,9 @@ function fakeHost(replies: Array<Reply | Error>, pluginConfig: Record<string, un
 
 	const api = {
 		pluginConfig,
+		// The full OpenClaw config, where entries.<id>.hooks actually lives —
+		// a SIBLING of entries.<id>.config, never inside pluginConfig.
+		config: hostConfig ?? { plugins: { entries: { itsuki: { config: pluginConfig } } } },
 		logger: { info: (m: string) => logs.push(m), warn: (m: string) => logs.push(`WARN ${m}`) },
 		on(hook: string, handler: Handler, opts?: { priority?: number }) {
 			handlers.set(hook, [...(handlers.get(hook) ?? []), { handler, priority: opts?.priority ?? 0 }]);
@@ -536,7 +543,28 @@ describe("OpenClaw's conversation-access gate", () => {
 		expect(warned).toMatch(/blocked/i);
 	});
 
-	it("stays quiet once access is granted", async () => {
+	it("stays quiet when access is granted in the REAL location: entries.<id>.hooks", async () => {
+		// The flag is a SIBLING of entries.<id>.config, so it is NOT visible in
+		// api.pluginConfig. The first implementation read pluginConfig.hooks and
+		// warned falsely in every correctly-configured gateway — this test is
+		// the regression proof for that audit finding.
+		const host = fakeHost([OK_SAVE], {}, {
+			plugins: {
+				entries: {
+					itsuki: {
+						enabled: true,
+						hooks: { allowConversationAccess: true },
+						config: {},
+					},
+				},
+			},
+		});
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		expect(host.logs.filter((l) => l.startsWith("WARN")).join("\n")).not.toMatch(/allowConversationAccess/);
+	});
+
+	it("also accepts the forward-compat pluginConfig location", async () => {
 		const host = fakeHost([OK_SAVE], { hooks: { allowConversationAccess: true } });
 		register(host.api as never);
 		await host.emit("gateway_start", { port: 1 });
@@ -544,10 +572,92 @@ describe("OpenClaw's conversation-access gate", () => {
 	});
 
 	it("reads the flag defensively and never crashes on a strange shape", async () => {
-		for (const shape of [undefined, null, {}, { hooks: null }, { hooks: "yes" }, { hooks: { allowConversationAccess: "true" } }]) {
-			const host = fakeHost([OK_SAVE], shape as Record<string, unknown>);
+		const shapes: Array<[Record<string, unknown>, Record<string, unknown> | undefined]> = [
+			[{}, undefined],
+			[{ hooks: null } as Record<string, unknown>, undefined],
+			[{ hooks: "yes" } as Record<string, unknown>, undefined],
+			[{ hooks: { allowConversationAccess: "true" } }, undefined],
+			[{}, {}],
+			[{}, { plugins: null } as unknown as Record<string, unknown>],
+			[{}, { plugins: { entries: { itsuki: { hooks: "granted" } } } } as unknown as Record<string, unknown>],
+		];
+		for (const [pluginConfig, hostConfig] of shapes) {
+			const host = fakeHost([OK_SAVE], pluginConfig, hostConfig);
 			register(host.api as never);
 			await expect(host.emit("gateway_start", { port: 1 })).resolves.toBeUndefined();
 		}
+	});
+});
+
+describe("system-originated runs are not conversations", () => {
+	it("does NOT capture a cron-driven run", async () => {
+		// A scheduled tick's transcript is automation noise, not something a
+		// person said — and in per-sender mode it has no one to belong to.
+		const host = fakeHost([OK_SAVE]);
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		await host.emit(
+			"agent_end",
+			turn([{ role: "user", content: "cron says hello" }, { role: "assistant", content: "done" }]),
+			userCtx({ jobId: "cron-9", trigger: "cron" }),
+		);
+		expect(host.requests.filter((r) => r.url.endsWith("/v1/save")).length).toBe(0);
+	});
+
+	it("does NOT capture a heartbeat run", async () => {
+		const host = fakeHost([OK_SAVE]);
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		await host.emit(
+			"agent_end",
+			turn([{ role: "user", content: "heartbeat prompt" }, { role: "assistant", content: "ok" }]),
+			userCtx({ trigger: "heartbeat" }),
+		);
+		expect(host.requests.filter((r) => r.url.endsWith("/v1/save")).length).toBe(0);
+	});
+});
+
+describe("per-sender tenancy at the hook boundary", () => {
+	const perSenderConfig = { tenancy: "per-sender" };
+
+	it("captures under the hashed sender tenant, never the raw platform id", async () => {
+		const host = fakeHost([OK_SAVE], perSenderConfig);
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		await host.emit("agent_end", turn([{ role: "user", content: "per-sender turn" }]), userCtx());
+		const save = host.requests.find((r) => r.url.endsWith("/v1/save"));
+		expect(save).toBeTruthy();
+		const userId = (save!.body as { userId?: string }).userId;
+		expect(userId).toMatch(/^oc_[a-f0-9]{32}$/);
+		expect(userId).not.toContain("alice");
+	});
+
+	it("SKIPS memory entirely when a user turn has no derivable sender", async () => {
+		// The first implementation fell back to owner scope here — meaning on a
+		// channel without sender ids, every stranger would share and RECALL the
+		// owner's memory. Skipping is the only non-mixing answer. (Audit F1.)
+		const host = fakeHost([OK_SAVE], perSenderConfig);
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		await host.emit(
+			"agent_turn_prepare",
+			{ prompt: "who am I?", messages: [], queuedInjections: [] },
+			userCtx({ senderId: undefined }),
+		);
+		await host.emit("agent_end", turn([{ role: "user", content: "anonymous words" }]), userCtx({ senderId: undefined }));
+		expect(host.requests.filter((r) => r.url.endsWith("/v1/recall")).length).toBe(0);
+		expect(host.requests.filter((r) => r.url.endsWith("/v1/save")).length).toBe(0);
+	});
+
+	it("tools refuse honestly instead of writing to the wrong tenant", async () => {
+		const host = fakeHost([OK_SAVE], perSenderConfig);
+		register(host.api as never);
+		await host.emit("gateway_start", { port: 1 });
+		const save = host.tools.find((t) => t.name === "itsuki_save")!;
+		const result = (await save.execute("c1", { content: "orphan fact" }, { sessionKey: "s", trigger: "message" })) as {
+			content: Array<{ text: string }>;
+		};
+		expect(result.content[0]!.text).toMatch(/no sender identity/);
+		expect(host.requests.filter((r) => r.url.endsWith("/v1/save")).length).toBe(0);
 	});
 });
