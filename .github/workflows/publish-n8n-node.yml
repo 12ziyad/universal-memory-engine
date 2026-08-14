@@ -42,15 +42,18 @@ jobs:
         with:
           persist-credentials: false
 
-      # Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0.
+      # Trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0. Both are
+      # pinned rather than floating: npm@latest moved to 12.x, which demands a
+      # newer Node than the one this job used to install, and a release
+      # pipeline should not break because an upstream tag advanced.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22.20.0'
+          node-version: '24.15.0'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Upgrade npm to a trusted-publishing-capable version
-        run: npm install -g npm@latest
+      - name: Pin npm to a trusted-publishing-capable major
+        run: npm install -g npm@11
 
       - name: Report toolchain
         run: |
