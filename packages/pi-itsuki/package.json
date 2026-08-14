@@ -1,0 +1,56 @@
+{
+	"name": "pi-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for the Pi coding agent: bounded recall before every turn, exactly-once capture after each settled turn.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"pi-package",
+		"memory",
+		"ai",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/pi-itsuki"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"type": "module",
+	"pi": {
+		"extensions": [
+			"./dist/index.js"
+		]
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "^0.84.2",
+		"@types/node": "^22.15.0",
+		"typebox": "^1.3.7",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	}
+}
