@@ -1,0 +1,65 @@
+{
+	"name": "openclaw-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for OpenClaw: bounded recall before every agent turn, exactly-once capture after each settled turn. Runs alongside OpenClaw's built-in memory.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"openclaw",
+		"openclaw-plugin",
+		"memory",
+		"ai",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/openclaw-itsuki"
+	},
+	"engines": {
+		"node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"openclaw": {
+		"extensions": [
+			"./dist/index.js"
+		],
+		"compat": {
+			"pluginApi": ">=2026.7.1-2",
+			"minGatewayVersion": "2026.7.1-2"
+		},
+		"build": {
+			"openclawVersion": "2026.7.1-2",
+			"pluginSdkVersion": "2026.7.1-2"
+		}
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"openclaw.plugin.json",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"peerDependencies": {
+		"openclaw": ">=2026.7.1-2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.0",
+		"openclaw": "2026.7.1-2",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	}
+}
