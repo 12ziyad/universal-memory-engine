@@ -208,6 +208,7 @@ async function finalizeSaveResponse({ mode, source, res, env, userId, sourcePack
 export async function runDirectSaveCommand(env, ctx, userId, input = {}) {
 	const res = await saveMemory(env, ctx, userId, input.content, {
 		recentContext: input.recentContext,
+		clientSource: input.clientSource,
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,
@@ -252,6 +253,7 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 			scope: input.scope,
 			n: input.n,
 			topic: input.topic,
+			clientSource: input.clientSource,
 			conversationId: input.conversationId,
 			threadId: input.threadId,
 			sourceId: input.sourceId,
@@ -275,6 +277,7 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 	const result = await runObserveMessagesCommand(env, ctx, userId, messages, {
 		flush: true,
 		waitBudgetMs: Number(input.waitBudgetMs ?? getConfig(env).saveWaitBudgetMs),
+		clientSource: input.clientSource,
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,
@@ -298,6 +301,7 @@ export async function runObserveMessagesCommand(env, ctx, userId, messages, inpu
 		// bounded time for the real receipt. Default 0 keeps every other caller
 		// on the fire-and-forget path exactly as before.
 		waitBudgetMs: Number(input.waitBudgetMs ?? 0),
+		clientSource: input.clientSource,
 		conversationId: input.conversationId,
 		threadId: input.threadId,
 		sourceId: input.sourceId,

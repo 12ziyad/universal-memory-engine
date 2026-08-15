@@ -84,6 +84,7 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 	const normalized = await normalizeSourcePacket(userId, {
 		type: "message_batch",
 		sourceMode: "manual_collect",
+		clientSource: opts.clientSource,
 		messages,
 		conversationId: opts.conversationId,
 		threadId: opts.threadId,

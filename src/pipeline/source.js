@@ -46,6 +46,21 @@ function record(value) {
 	return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+/**
+ * SRV-01: the caller's own source label ("ai-sdk", "llama-index", …), the
+ * identity that `DELETE /v1/memories?source=X` filters on. One rule for every
+ * door and every stamp site: a short trimmed identifier, no control
+ * characters, ≤64 chars. Anything else is null — never a truncated or
+ * mutated variant, which would create rows a caller can name but not delete.
+ */
+export function cleanClientSource(value) {
+	if (value == null) return null;
+	if (typeof value !== "string") return null;
+	const text = value.trim();
+	if (!text || text.length > 64 || /[\u0000-\u001f\u007f]/.test(text)) return null;
+	return text;
+}
+
 function own(value, key) {
 	return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -400,6 +415,13 @@ export async function normalizeSourcePacket(userId, input = {}) {
 	const threadId = cleanKey(input.threadId ?? input.thread_id ?? scope.thread_id, null);
 	const sessionId = explicitSession ?? scope.session_id ?? conversationId ?? threadId ?? userId;
 	const sourceRole = cleanKey(input.sourceRole ?? input.role, null);
+	// SRV-01: the caller's own source label, distinct from the engine's
+	// sourceMode lane. Carried in raw_meta_json (and from there onto every
+	// derived scope_json) so source-scoped deletion can find these rows. It is
+	// deliberately NOT part of the content hash: the same words in the same
+	// scope are the same memory regardless of which client wrote them, and
+	// every already-issued idempotency key must stay valid.
+	const clientSource = cleanClientSource(input.clientSource ?? input.client_source);
 	const topic = cleanKey(input.topic ?? scope.topic, null);
 	const delivery = normalizeDeliveryMetadata(input.delivery);
 	// BF-1: the packet's authoritative write time. Doors validate before we get
@@ -480,6 +502,7 @@ export async function normalizeSourcePacket(userId, input = {}) {
 		session_id_explicit: Boolean(explicitSession),
 		account_user_id: scope.account_user_id,
 		managed_project_id: scope.managed_project_id,
+		...(clientSource ? { client_source: clientSource } : {}),
 		...(packetSourceTime ? { source_time: packetSourceTime } : {}),
 		messages: messages.map((m) => ({
 			id: m.id,
@@ -814,6 +837,9 @@ export function sourceMeta(sourcePacket) {
 			project_name: sourcePacket.project_name,
 			source_type: sourcePacket.source_type,
 			source_mode: sourcePacket.source_mode,
+			// SRV-01: conditional so packets without a caller label keep their
+			// scope_json byte-for-byte as before this deploy.
+			...(cleanClientSource(rawMeta.client_source) ? { client_source: cleanClientSource(rawMeta.client_source) } : {}),
 			delivery,
 		}),
 		account_user_id: rawMeta.account_user_id ?? sourcePacket.owner_user_id ?? null,

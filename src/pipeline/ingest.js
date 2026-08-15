@@ -338,6 +338,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 		normalized = await normalizeSourcePacket(userId, {
 			type: opts.sourceType ?? "message_batch",
 			sourceMode: opts.sourceMode ?? overrides.source ?? "ingest",
+			clientSource: opts.clientSource,
 			messages,
 			conversationId: opts.conversationId,
 			threadId: opts.threadId,

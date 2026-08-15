@@ -234,6 +234,7 @@ export async function saveMemory(env, ctx, userId, content, opts = {}) {
 		waitBudgetMs: opts.waitBudgetMs ?? config.saveWaitBudgetMs,
 		sourceType: "message",
 		sourceMode: "manual_direct",
+		clientSource: opts.clientSource,
 		conversationId: opts.conversationId,
 		threadId: opts.threadId,
 		sourceId: opts.sourceId,

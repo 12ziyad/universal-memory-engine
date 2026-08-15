@@ -119,6 +119,7 @@ import {
 	storeDeletionTombstone,
 } from "./pipeline/cleanup.js";
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
+import { cleanClientSource } from "./pipeline/source.js";
 import { getMemory, listMemories, parseInventoryListOptions } from "./lib/memory_inventory.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
 import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
@@ -207,6 +208,26 @@ function configurationOwnerUserId(auth) {
 	// project's root so configuration is shared by that project's sub-tenants.
 	if (auth.auth?.type === "legacy") return auth.userId;
 	return auth.memoryScope?.ownerUserId ?? auth.auth?.userId ?? auth.userId;
+}
+
+/**
+ * SRV-01: `source` on a write is the caller's own label — the identity that
+ * `DELETE /v1/memories?source=X` later filters on. A value the deletion
+ * filter could never match must be refused at the door, not silently
+ * dropped: dropping it is exactly how rows became undeletable by name.
+ */
+function clientSourceFromBody(body = {}) {
+	if (body.source == null) return { clientSource: null };
+	const clientSource = cleanClientSource(body.source);
+	if (!clientSource) {
+		return {
+			response: json({
+				error: "source must be a 1-64 character string with no control characters",
+				field: "source",
+			}, 400),
+		};
+	}
+	return { clientSource };
 }
 
 /**
@@ -1881,6 +1902,8 @@ const routes = {
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { messages, flush } = body;
 		if (!Array.isArray(messages)) return json({ error: "messages[] is required" }, 400);
+		const sourceLabel = clientSourceFromBody(body);
+		if (sourceLabel.response) return sourceLabel.response;
 
 		// Route through the shared command facade. Extraction runs in the
 		// background, so fired async requests return an accepted/processing receipt.
@@ -1888,6 +1911,7 @@ const routes = {
 		const test = testOnlyOverrides(env, body._test);
 		const result = await runObserveMessagesCommand(env, ctx, auth.userId, messages, {
 			flush: Boolean(flush),
+			clientSource: sourceLabel.clientSource,
 			conversationId: body.conversationId,
 			threadId: body.threadId,
 			sourceId: body.sourceId,
@@ -2174,6 +2198,8 @@ const routes = {
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const { mode, content, messages, scope, n, topic, conversationId, recentContext } = body;
+		const sourceLabel = clientSourceFromBody(body);
+		if (sourceLabel.response) return sourceLabel.response;
 
 		const t = testOnlyOverrides(env, body._test);
 		const overrides = await doorOverrides(env, auth, body);
@@ -2191,6 +2217,7 @@ const routes = {
 				scope,
 				n,
 				topic,
+				clientSource: sourceLabel.clientSource,
 				conversationId,
 				threadId: body.threadId,
 				sourceId: body.sourceId,
@@ -2222,6 +2249,7 @@ const routes = {
 			res = await runDirectSaveCommand(env, ctx, auth.userId, {
 				content,
 				recentContext,
+				clientSource: sourceLabel.clientSource,
 				conversationId,
 				threadId: body.threadId,
 				sourceId: body.sourceId,
@@ -4585,8 +4613,17 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 	// Bulk by source/time. dry_run defaults TRUE; only confirm=true destroys.
 	const dryRunParam = url.searchParams.get("dry_run");
 	const confirm = url.searchParams.get("confirm") === "true";
+	// SRV-01: the same identifier rule the write doors stamp with. A filter
+	// value no stamp could ever equal must 400, not silently delete nothing.
+	const rawSource = url.searchParams.get("source");
+	if (rawSource != null && rawSource !== "" && !cleanClientSource(rawSource)) {
+		return json({
+			error: "source must be a 1-64 character string with no control characters",
+			field: "source",
+		}, 400);
+	}
 	const result = await bulkDeleteBySource(env, auth.userId, {
-		source: url.searchParams.get("source") || null,
+		source: cleanClientSource(rawSource),
 		before: url.searchParams.get("before") || null,
 		after: url.searchParams.get("after") || null,
 		dryRun: dryRunParam === null ? !confirm : dryRunParam !== "false",

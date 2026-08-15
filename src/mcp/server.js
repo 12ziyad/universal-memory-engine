@@ -30,6 +30,7 @@ import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js"
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
 import { getMemory, listMemories, memoryCounts, parseInventoryListOptions } from "../lib/memory_inventory.js";
 import { bulkDeleteBySource, deleteObject, storeDeletionTombstone } from "../pipeline/cleanup.js";
+import { cleanClientSource } from "../pipeline/source.js";
 import { tokens } from "../lib/text.js";
 
 /**
@@ -614,8 +615,16 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			const limited = await rateLimited("mcp-del", env.DELETE_LIMITER, "delete_all", "delete_all_memories");
 			if (limited) return limited;
 			const confirmed = confirm === true;
+			// SRV-01 parity with the REST door: a source filter no write stamp
+			// could ever equal must be refused loudly, not silently match nothing.
+			if (source != null && source !== "" && !cleanClientSource(source)) {
+				return managementResult(
+					{ ok: false, command_mode: "delete_all", source: "delete_all_memories", error: "invalid_source" },
+					"That source filter is not a valid label (1-64 characters, no control characters). Nothing was deleted.",
+				);
+			}
 			const result = await bulkDeleteBySource(env, userId, {
-				source: source || null,
+				source: cleanClientSource(source),
 				dryRun: !confirmed,
 				confirm: confirmed,
 				by: "mcp:delete_all_memories",

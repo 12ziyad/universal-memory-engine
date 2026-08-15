@@ -1280,8 +1280,15 @@ export async function bulkDeleteBySource(env, userId, {
 	const clauses = ["user_id = ?"];
 	const binds = [userId];
 	if (source) {
-		clauses.push("(source_mode = ? OR tool_name = ?)");
-		binds.push(source, source);
+		// SRV-01: a run is in scope when the caller's filter names its engine
+		// lane, its tool, OR the caller's own source label — the client_source
+		// stamped through save/ingest into the run's scope. Without the third
+		// arm, conversation-capture rows written with source:"X" were invisible
+		// to `?source=X` and scoped deletion silently no-oped on them.
+		clauses.push(
+			"(source_mode = ? OR tool_name = ? OR (json_valid(scope_json) AND json_extract(scope_json, '$.client_source') = ?))",
+		);
+		binds.push(source, source, source);
 	}
 	if (Number.isFinite(beforeMs) && beforeMs > 0) {
 		clauses.push("created_at < ?");
