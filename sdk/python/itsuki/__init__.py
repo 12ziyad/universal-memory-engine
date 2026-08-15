@@ -918,6 +918,39 @@ class _ClientCore:
     def _plan_export_all(self, *, user_id: Optional[str]) -> _Plan:
         return self._request_plan("GET", "/v1/export", user_id=user_id)
 
+    def _plan_list_memories(
+        self,
+        *,
+        kind: Optional[str],
+        limit: Optional[int],
+        cursor: Optional[str],
+        q: Optional[str],
+        user_id: Optional[str],
+    ) -> _Plan:
+        if kind is not None and kind not in ("all", "node", "page"):
+            raise _argument_error("kind must be all, node, or page")
+        validated_limit = (
+            None
+            if limit is None
+            else _validate_number(limit, "limit", minimum=1, integer=True)
+        )
+        if validated_limit is not None and validated_limit > 200:
+            raise _argument_error("limit must be no greater than 200")
+        return self._request_plan(
+            "GET",
+            "/v1/memories",
+            params={"kind": kind, "limit": validated_limit, "cursor": cursor, "q": q},
+            user_id=user_id,
+        )
+
+    def _plan_get_memory(self, memory_id: str, *, user_id: Optional[str]) -> _Plan:
+        memory_id = _validate_identifier(memory_id, "memory_id")
+        return self._request_plan(
+            "GET",
+            f"/v1/memories/{quote(memory_id, safe='')}",
+            user_id=user_id,
+        )
+
     # ------------------------------------------------------ delete plans
     def _plan_delete(self, memory_id: str, *, user_id: Optional[str]) -> _Plan:
         memory_id = _validate_identifier(memory_id, "memory_id")
@@ -1324,6 +1357,35 @@ class MemoryClient(_ClientCore):
     def export_all(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
         return cast(Dict[str, Any], self._drive(self._plan_export_all(user_id=user_id)))
 
+    def list_memories(
+        self,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        q: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Browse stored memories, newest first. Cursor-paginated.
+
+        This is inventory, not search: for meaning-based lookup use
+        :meth:`search`. ``q`` filters labels and summaries by substring.
+        """
+        return cast(Dict[str, Any], self._drive(
+            self._plan_list_memories(kind=kind, limit=limit, cursor=cursor, q=q, user_id=user_id)
+        ))
+
+    def get_memory(
+        self,
+        memory_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Fetch one stored memory by id, with its slices and dated events."""
+        return cast(Dict[str, Any], self._drive(
+            self._plan_get_memory(memory_id, user_id=user_id)
+        ))
+
     def delete(
         self,
         memory_id: str,
@@ -1576,6 +1638,31 @@ class AsyncMemoryClient(_ClientCore):
 
     async def export_all(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
         return cast(Dict[str, Any], await self._adrive(self._plan_export_all(user_id=user_id)))
+
+    async def list_memories(
+        self,
+        *,
+        kind: Optional[str] = None,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        q: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Browse stored memories, newest first. Cursor-paginated."""
+        return cast(Dict[str, Any], await self._adrive(
+            self._plan_list_memories(kind=kind, limit=limit, cursor=cursor, q=q, user_id=user_id)
+        ))
+
+    async def get_memory(
+        self,
+        memory_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Fetch one stored memory by id, with its slices and dated events."""
+        return cast(Dict[str, Any], await self._adrive(
+            self._plan_get_memory(memory_id, user_id=user_id)
+        ))
 
     async def delete(
         self,

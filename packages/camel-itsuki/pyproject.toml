@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "camel-itsuki"
+version = "0.1.0"
+description = "Itsuki memory storage and recall for CAMEL agents."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["itsuki>=0.3,<0.4", "camel-ai>=0.2.90,<0.3"]
+keywords = ["camel", "camel-ai", "memory", "ai", "agent", "llm", "itsuki"]
+
+[project.urls]
+Repository = "https://github.com/12ziyad/universal-memory-engine"
+Documentation = "https://itsuki.app/docs/"
+Issues = "https://github.com/12ziyad/universal-memory-engine/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["camel_itsuki"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/camel_itsuki", "/LICENSE", "/README.md", "/pyproject.toml"]

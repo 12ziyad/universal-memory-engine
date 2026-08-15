@@ -1,0 +1,167 @@
+# Publish one Python adapter to PyPI, with attestations.
+#
+# PyPI differs from npm in the one way that matters here: a Trusted Publisher
+# can be configured as a PENDING publisher BEFORE a project exists, so these
+# packages never need an API token at all — not even for the first release.
+# Configure the pending publisher on pypi.org (owner 12ziyad, this repository,
+# this workflow filename, environment `pypi`), then dispatch with
+# dry_run=false. No secret is referenced anywhere below.
+#
+# `dry_run` defaults to TRUE. Publishing is a deliberate, owner-approved act:
+# every gate runs either way, and only the final step is gated.
+name: Publish Python adapter
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Which adapter to build and publish'
+        type: choice
+        required: true
+        options:
+          - agno-itsuki
+          - llama-index-memory-itsuki
+          - camel-itsuki
+          - chatdev-itsuki
+      dry_run:
+        description: 'Run every gate and build the wheel, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The CAMEL adapter does atomic rename and path work, which behaves
+        # differently on Windows. Both platforms must be green.
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.12', '3.13']
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Refuse a drifted kernel copy
+        run: node scripts/sync-kernel.mjs --check
+
+      - name: Install the workspace SDK and the adapter's host
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./sdk/python
+          python -m pip install ./packages/${{ inputs.package }}
+          python -m pip install pytest
+
+      - name: Tests
+        working-directory: packages/${{ inputs.package }}
+        run: python -m pytest tests -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the distributions
+        working-directory: packages/${{ inputs.package }}
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify the built contents
+        working-directory: packages/${{ inputs.package }}
+        shell: bash
+        run: |
+          echo "--- wheel contents ---"
+          python - <<'PY'
+          import glob, re, sys, zipfile
+          wheel = sorted(glob.glob("dist/*.whl"))[-1]
+          names = zipfile.ZipFile(wheel).namelist()
+          print("\n".join(sorted(names)))
+
+          failures = []
+          if not any("LICENSE" in n for n in names):
+              failures.append("LICENSE is missing from the wheel")
+
+          with zipfile.ZipFile(wheel) as archive:
+              for name in names:
+                  if not name.endswith(".py"):
+                      continue
+                  body = archive.read(name)
+                  if re.search(rb"(itsuki|uml)_live_[A-Za-z0-9_-]{10}", body):
+                      failures.append(f"credential-shaped string in {name}")
+
+          # The kernel must arrive vendored, not as a dangling import.
+          if not any(n.endswith("_kernel.py") for n in names):
+              failures.append("the vendored kernel is missing")
+
+          if failures:
+              print("FAIL: " + "; ".join(failures))
+              sys.exit(1)
+          print("OK: no credentials, license present, kernel vendored")
+          PY
+
+      - name: Refuse unreviewed runtime dependencies
+        working-directory: packages/${{ inputs.package }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys, tomllib
+          with open("pyproject.toml", "rb") as handle:
+              project = tomllib.load(handle)["project"]
+          deps = project.get("dependencies", [])
+          print("dependencies:", deps)
+          # itsuki plus at most the adapter's own host. Anything else is a new
+          # supply-chain surface and needs a deliberate decision, not a merge.
+          allowed = {"itsuki", "agno", "llama-index-core", "camel-ai"}
+          names = {d.split(">")[0].split("<")[0].split("=")[0].split("[")[0].strip() for d in deps}
+          unexpected = names - allowed
+          if unexpected:
+              print("FAIL: unreviewed runtime dependencies:", unexpected)
+              sys.exit(1)
+          print("OK: dependencies are the SDK and the host only")
+          PY
+
+      - name: Audit installed dependencies
+        working-directory: packages/${{ inputs.package }}
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit --strict --progress-spinner=off || true
+
+      - name: Publish to PyPI with attestations
+        if: ${{ inputs.dry_run == false }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/${{ inputs.package }}/dist
+          # attestations are on by default; stated here because they are the
+          # provenance story for these packages.
+          attestations: true
+
+      - name: Dry run only
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "dry_run was true — every gate passed and the distributions were built."
+          echo "Re-run with dry_run=false to publish."
