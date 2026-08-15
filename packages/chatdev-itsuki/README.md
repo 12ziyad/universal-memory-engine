@@ -2,13 +2,22 @@
 
 Itsuki memory for [ChatDev 2.0](https://github.com/OpenBMB/ChatDev) workflows.
 
-> **Operator-wired, not built in.** ChatDev has no plugin discovery, so a
-> deployment must import this package once to register the store. Until the
-> upstream change lands, `type: itsuki` is not available in a fresh ChatDev
-> checkout. This README will say "built in" when that is true and not before.
+> **Operator-wired, and held from release.** ChatDev has no plugin discovery,
+> so a deployment must import this package once to register the store, and
+> until an upstream change lands `type: itsuki` is not present in a fresh
+> ChatDev checkout. This README will say "built in" when that is true and not
+> before.
+>
+> This package binds to ChatDev's real memory contract (`BaseConfig`,
+> `MemoryBase`, `MemoryItem`, `MemoryWritePayload`), which resolve only inside a
+> ChatDev deployment — install it there, not into a bare environment. The store
+> and its full manager lifecycle are proven against ChatDev's real host types
+> in the test suite. A full multi-agent workflow driven by a live LLM has not
+> yet been executed here, so the package is **held from publication** pending
+> that proof; the other five Itsuki framework integrations are unaffected.
 
 ```bash
-pip install chatdev-itsuki
+pip install chatdev-itsuki  # into a ChatDev 2.0 deployment
 ```
 
 Add one line to your ChatDev entrypoint:

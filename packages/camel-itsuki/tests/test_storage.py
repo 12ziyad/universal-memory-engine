@@ -207,6 +207,43 @@ def test_clear_touches_server_memory_only_with_an_explicit_opt_in(tmp_path):
     assert f"source={SOURCE}" in str(deletes[0].url)
 
 
+# ---------------------------------------------------- filename safety (CAMEL-01)
+def test_a_traversal_identifier_cannot_escape_the_state_directory(tmp_path, monkeypatch):
+    from camel_itsuki.storage import _mirror_filename, _state_root
+
+    monkeypatch.setenv("ITSUKI_STATE_DIR", str(tmp_path))
+    root = _state_root().resolve()
+    for hostile in ["../../escape", "..\\..\\escape", "a/b/c", "..", "/etc/passwd",
+                    "con", "a\x00b", "....//....//x"]:
+        name = _mirror_filename(hostile, None)
+        target = (_state_root() / name).resolve()
+        assert target.parent == root, f"{hostile!r} escaped to {target}"
+        # The filename itself carries no path separators or traversal.
+        assert "/" not in name and "\\" not in name and ".." not in name
+
+
+def test_distinct_identities_never_collide_after_sanitizing(tmp_path, monkeypatch):
+    from camel_itsuki.storage import _mirror_filename
+
+    monkeypatch.setenv("ITSUKI_STATE_DIR", str(tmp_path))
+    # Two identifiers that sanitize to the same prefix must still map to
+    # different files, or one tenant would read another tenant's history.
+    a = _mirror_filename("a/b", None)
+    b = _mirror_filename("a_b", None)
+    assert a != b
+
+
+def test_the_default_mirror_path_stays_inside_the_state_dir(tmp_path, monkeypatch):
+    from camel_itsuki.storage import _state_root
+
+    monkeypatch.setenv("ITSUKI_STATE_DIR", str(tmp_path))
+    client, _ = make_client()
+    # No mirror_path override, so the default derivation is exercised with a
+    # hostile identifier.
+    storage = ItsukiStorage(user_id="../../escape", client=client)
+    assert storage._path.resolve().parent == _state_root().resolve()
+
+
 # ------------------------------------------------------------- multi-agent
 def test_two_agents_do_not_read_each_others_history(tmp_path):
     client, _ = make_client()

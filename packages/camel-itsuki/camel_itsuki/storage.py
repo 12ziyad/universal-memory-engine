@@ -23,8 +23,10 @@ own history.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 from pathlib import Path
@@ -57,6 +59,21 @@ def _state_root() -> Path:
     if override:
         return Path(override)
     return Path.home() / ".itsuki" / "camel"
+
+
+def _mirror_filename(user_id: str, agent_id: Optional[str]) -> str:
+    """A safe, deterministic filename for a tenant's mirror.
+
+    Traversal-proof by construction: the identity is hashed, so no ``..``, path
+    separator or reserved character in a user id can reach the resulting name.
+    A short sanitized prefix is kept purely so the directory is legible to a
+    human debugging it. Two distinct tenants cannot collide, because the hash
+    covers the full raw identity, not the sanitized prefix.
+    """
+    identity = f"{user_id}\x00{agent_id or ''}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    prefix = re.sub(r"[^A-Za-z0-9._-]", "_", user_id)[:32].strip("._-") or "tenant"
+    return f"{prefix}-{digest}.json"
 
 
 def _text_of(record: Dict[str, Any]) -> str:
@@ -124,8 +141,20 @@ class ItsukiStorage(BaseKeyValueStorage):
         self.event_hook = event_hook
         self._lock = threading.Lock()
 
-        name = f"{self.user_id}--{self.agent_id or 'default'}".replace(os.sep, "_")
-        self._path = Path(mirror_path) if mirror_path else _state_root() / f"{name}.json"
+        # A tenant identifier is not a filename. A user_id of "../../secrets"
+        # or "a/b/c" would otherwise steer the mirror out of the state directory
+        # — writing an agent's transcript wherever the identifier points, or
+        # overwriting an unrelated file. The identity is hashed into the name,
+        # which is traversal-proof by construction and still deterministic (the
+        # same tenant always resolves to the same file). A short sanitized
+        # prefix is kept only so a human debugging the directory can tell the
+        # files apart. An explicit mirror_path is the developer's own choice and
+        # is trusted as given.
+        self._path = (
+            Path(mirror_path)
+            if mirror_path
+            else _state_root() / _mirror_filename(self.user_id, self.agent_id)
+        )
 
         if client is not None:
             self.client = client

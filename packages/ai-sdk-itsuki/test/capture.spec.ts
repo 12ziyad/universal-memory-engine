@@ -171,6 +171,33 @@ describe("capture modes", () => {
 		expect(saveCalls(api.calls)).toHaveLength(1);
 	});
 
+	it("a failing background capture never becomes an unhandled rejection", async () => {
+		// A detached promise that rejects crashes a Node process. capture()
+		// catches everything internally and resolves with an outcome, and
+		// schedule() wraps it defensively — this pins both.
+		const rejections: unknown[] = [];
+		const onRejection = (reason: unknown) => rejections.push(reason);
+		process.on("unhandledRejection", onRejection);
+		try {
+			const api = fakeFetch((call) =>
+				call.url.endsWith("/v1/recall")
+					? json(200, { ok: true, context: "" })
+					: json(500, { error: "boom" }));
+			const wrapped = withItsuki(model("ok"), config({
+				fetchImpl: api.fetch,
+				capture: "background",
+				maxRetries: 0,
+			}));
+
+			await generateText({ model: wrapped, prompt: "remember this" });
+			await flushMicrotasks(10);
+
+			expect(rejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onRejection);
+		}
+	});
+
 	it("still captures when waitUntil throws outside a request scope", async () => {
 		const api = scriptedApi({ context: "" });
 		const wrapped = withItsuki(model("ok"), config({

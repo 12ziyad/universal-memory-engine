@@ -28,13 +28,16 @@ on:
         type: boolean
         default: true
 
+# No workflow-wide id-token: only the publish job mints one, and only it needs
+# to. The test matrix runs with read-only contents and nothing else.
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +75,11 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: read
+      # Trusted publishing and attestations both need a signed OIDC token. This
+      # is the only job that has one.
+      id-token: write
 
     steps:
       - name: Check out the exact commit

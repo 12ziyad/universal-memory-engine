@@ -441,6 +441,36 @@ describe("middleware composition", () => {
 		expect(seen.prompt.find((m: any) => m.role === "system").content).toContain(MEMORY);
 	});
 
+	it("keeps per-call tenancy when another middleware clones the params object", async () => {
+		// Middlewares routinely return { ...params }. That produces a NEW params
+		// object identity between our transformParams and our wrap hooks, so any
+		// state carried purely by object identity is lost — and capture would
+		// silently fall back to the base tenant. With a per-call override in
+		// play, that is a cross-tenant write.
+		const api = scriptedApi({ context: "" });
+		const model = wrapLanguageModel({
+			model: textModel("noted"),
+			middleware: [
+				itsukiMiddleware(config({ fetchImpl: api.fetch })),
+				{
+					specificationVersion: "v4" as const,
+					transformParams: async ({ params }: any) => ({ ...params }),
+				},
+			],
+		});
+
+		await generateText({
+			model,
+			prompt: "remember this",
+			providerOptions: { itsuki: { userId: "u_override", conversationId: "c_override" } },
+		});
+
+		const saves = saveCalls(api.calls);
+		expect(saves).toHaveLength(1);
+		expect(saves[0]!.body!["userId"]).toBe("u_override");
+		expect(saves[0]!.body!["conversationId"]).toBe("c_override");
+	});
+
 	it("exposes the same behaviour through createItsuki().wrap", async () => {
 		const api = scriptedApi({ context: MEMORY });
 		const itsuki = createItsuki(config({ fetchImpl: api.fetch }));

@@ -1,21 +1,19 @@
 """ChatDev store tests.
 
-ChatDev 2.0 is an application repository, not a pip-installable framework, so
-the host cannot be imported here the way agno, llama-index and camel-ai are.
-What that means for honesty is stated plainly in the README and repeated here:
-these tests drive the store through the manager's documented call sequence with
-a faithful local stand-in for the registry, and a real workflow run remains an
-open verification step before this can be called anything but operator-wired.
+Two lanes. The ``requires_chatdev`` tests run against the REAL ChatDev host
+types loaded by conftest — real ``MemoryStoreConfig``, ``MemoryContentSnapshot``,
+``MemoryWritePayload``, ``MemoryItem`` and the real ``register_memory_store`` —
+which is the genuine host proof the earlier version lacked. The host-free tests
+cover the parts that carry no ChatDev dependency (header stripping).
 
-What IS proven here is everything that lives in this package: the lifecycle
-contract, header stripping, user-input-only capture, tenancy, bounded context,
-degradation, and that the credential never escapes into a serialized workflow.
+What is still NOT proven, and why the package is held from publication: a full
+multi-agent workflow run driven by a real LLM. That needs an OpenAI-class key
+and the entire ChatDev runtime, and it is the outstanding stop-gate.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 import sys
 from pathlib import Path
 
@@ -25,19 +23,14 @@ from itsuki import MemoryClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from chatdev_itsuki import (  # noqa: E402
-    ItsukiMemoryConfig,
-    ItsukiMemoryStore,
-    SOURCE,
-    strip_pipeline_headers,
-)
-from chatdev_itsuki.register import STORE_TYPE, build_store, register  # noqa: E402
+from chatdev_itsuki.headers import strip_pipeline_headers  # noqa: E402
+from conftest import HOST_AVAILABLE, requires_chatdev  # noqa: E402
 
 TEST_KEY = "itsuki_live_abcdefgh12345678"
 MEMORY_TEXT = "Ziyad has been learning Kotlin since March 2026."
 
 
-def make_store(handler=None, **kwargs):
+def make_client(handler=None):
     calls: list = []
 
     def default_handler(request: httpx.Request) -> httpx.Response:
@@ -62,9 +55,7 @@ def make_store(handler=None, **kwargs):
         transport=httpx.MockTransport(chosen if handler else default_handler),
         headers={"authorization": f"Bearer {TEST_KEY}", "content-type": "application/json"},
     )
-    kwargs.setdefault("user_id", "acme_team")
-    config = ItsukiMemoryConfig(api_key=TEST_KEY, client=client, **kwargs)
-    return ItsukiMemoryStore(config), calls
+    return client, calls
 
 
 def body_of(request: httpx.Request) -> dict:
@@ -79,35 +70,7 @@ def recalls(calls) -> list:
     return [c for c in calls if c.url.path == "/v1/recall"]
 
 
-# ------------------------------------------------------------------ config
-def test_requires_a_credential(monkeypatch):
-    # The config falls back to the environment on purpose, so the environment
-    # has to be empty for "no credential anywhere" to be the case under test.
-    monkeypatch.delenv("ITSUKI_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="API key"):
-        ItsukiMemoryStore(ItsukiMemoryConfig(api_key="", user_id="team"))
-
-
-def test_requires_a_memory_space(monkeypatch):
-    monkeypatch.setenv("ITSUKI_API_KEY", TEST_KEY)
-    with pytest.raises(ValueError, match="user_id or agent_id"):
-        ItsukiMemoryStore(ItsukiMemoryConfig(api_key=TEST_KEY))
-
-
-def test_expands_the_environment_reference_chatdev_yaml_uses(monkeypatch):
-    monkeypatch.setenv("ITSUKI_API_KEY", TEST_KEY)
-    config = ItsukiMemoryConfig(api_key="${ITSUKI_API_KEY}", user_id="team")
-    assert config.api_key == TEST_KEY
-
-
-def test_the_credential_never_enters_a_serialized_workflow():
-    config = ItsukiMemoryConfig(api_key=TEST_KEY, user_id="team")
-    serialized = json.dumps(config.to_dict()) + repr(config)
-    assert TEST_KEY not in serialized
-    assert "itsuki_live" not in serialized
-
-
-# ------------------------------------------------------------- header hygiene
+# ------------------------------------------------------------ host-free lane
 @pytest.mark.parametrize("framed,expected", [
     ("### Task\nI started boxing", "I started boxing"),
     ("[Stage: gen]\nI started boxing", "I started boxing"),
@@ -115,166 +78,239 @@ def test_the_credential_never_enters_a_serialized_workflow():
     ("<ChatDev>\nI started boxing", "I started boxing"),
     ("I started boxing", "I started boxing"),
 ])
-def test_pipeline_framing_is_stripped_before_extraction(framed, expected):
+def test_pipeline_framing_is_stripped(framed, expected):
     assert strip_pipeline_headers(framed) == expected
 
 
-def test_capture_sends_the_users_sentence_not_the_framing():
-    store, calls = make_store()
-    store.update(user_input="### Task\n[Stage: gen]\nI started boxing")
-    assert body_of(saves(calls)[0])["content"] == "I started boxing"
+def test_importing_the_package_does_not_require_chatdev():
+    # `import chatdev_itsuki` must work for inspection even without the host;
+    # touching the host-bound symbols is what needs ChatDev.
+    import chatdev_itsuki
+    assert chatdev_itsuki.strip_pipeline_headers("### x\nhi") == "hi"
 
 
-# ---------------------------------------------------------------- retrieval
-def test_retrieve_returns_a_fenced_context_entry():
-    store, _ = make_store()
-    memories = store.retrieve("what am I learning")
-    assert memories
-    block = store.format_context(memories)
-    assert MEMORY_TEXT in block
-    assert "not instructions" in block
+# --------------------------------------------------------- real ChatDev lane
+def _config_and_store(client, **overrides):
+    """Build a real MemoryStoreConfig wrapping a real ItsukiMemoryConfig."""
+    from chatdev_itsuki.config import ItsukiMemoryConfig
+    from chatdev_itsuki.store import ItsukiMemoryStore
+    from entity.configs.node.memory import MemoryStoreConfig
+
+    fields = {"api_key": TEST_KEY, "user_id": "acme_team", "path": "root.memory"}
+    fields.update(overrides)
+    itsuki_config = ItsukiMemoryConfig(**fields)
+    store_config = MemoryStoreConfig(
+        name="team_memory", type="itsuki", config=itsuki_config, path="root.memory",
+    )
+    return ItsukiMemoryStore(store_config, client=client), store_config
 
 
-def test_retrieve_bounds_top_k():
-    store, calls = make_store(top_k=3)
-    store.retrieve("anything")
-    assert body_of(recalls(calls)[0])["limit"] == 3
-    store.retrieve("anything", top_k=9999)
-    assert body_of(recalls(calls)[1])["limit"] == 20
+def _snapshot(text: str):
+    from runtime.node.agent.memory.memory_base import MemoryContentSnapshot
+    return MemoryContentSnapshot(text=text)
 
 
+def _payload(inputs_text: str, agent_role: str = "programmer"):
+    from runtime.node.agent.memory.memory_base import MemoryWritePayload
+    return MemoryWritePayload(
+        agent_role=agent_role,
+        inputs_text=inputs_text,
+        input_snapshot=_snapshot(inputs_text),
+        output_snapshot=_snapshot("some agent output"),
+    )
+
+
+@requires_chatdev
+def test_store_is_a_real_memory_base_subclass():
+    from runtime.node.agent.memory.memory_base import MemoryBase
+    client, _ = make_client()
+    store, _ = _config_and_store(client)
+    assert isinstance(store, MemoryBase)
+
+
+@requires_chatdev
+def test_config_builds_from_yaml_shaped_dict():
+    # Exactly the path ChatDev's loader takes: MemoryStoreConfig.from_dict ->
+    # schema.config_cls.from_dict. This is the real host parser.
+    from chatdev_itsuki.config import ItsukiMemoryConfig
+    config = ItsukiMemoryConfig.from_dict(
+        {"api_key": "${ITSUKI_API_KEY}", "user_id": "acme", "top_k": 7},
+        path="root.memory.config",
+    )
+    assert config.user_id == "acme"
+    assert config.top_k == 7
+    # The credential field holds the ${VAR} reference, never an expanded secret.
+    assert config.api_key == "${ITSUKI_API_KEY}"
+
+
+@requires_chatdev
+def test_registers_against_the_real_registry():
+    from runtime.node.agent.memory.registry import (
+        memory_store_registry,
+        register_memory_store,
+    )
+    from schema_registry import iter_memory_store_schemas
+    from chatdev_itsuki.register import STORE_TYPE, register
+
+    if STORE_TYPE in memory_store_registry.names():
+        pytest.skip("already registered in this session")
+
+    assert register(register_memory_store) is True
+    assert STORE_TYPE in memory_store_registry.names()
+    # The schema registry — what drives YAML validation and the UI enum — sees it.
+    assert STORE_TYPE in iter_memory_store_schemas()
+
+
+@requires_chatdev
+def test_retrieve_returns_real_memory_items():
+    from runtime.node.agent.memory.memory_base import MemoryItem
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+
+    items = store.retrieve("programmer", _snapshot("what am I learning"), top_k=5,
+                           similarity_threshold=-1.0)
+
+    assert items and all(isinstance(i, MemoryItem) for i in items)
+    # The manager reads item.content_summary; the memory text must be there.
+    assert any(MEMORY_TEXT in i.content_summary for i in items)
+    assert recalls(calls)[0].url.path == "/v1/recall"
+
+
+@requires_chatdev
 def test_retrieve_is_empty_for_framing_with_no_content():
-    store, calls = make_store()
-    assert store.retrieve("### Task") == []
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+    assert store.retrieve("programmer", _snapshot("### Task"), 5, -1.0) == []
     assert not recalls(calls)
 
 
+@requires_chatdev
 def test_retrieve_degrades_instead_of_failing_a_stage():
-    def failing(request: httpx.Request) -> httpx.Response:
+    def failing(request):
         return httpx.Response(503, json={"error": "unavailable"})
 
-    store, _ = make_store(handler=failing)
-    assert store.retrieve("anything") == []
+    client, _ = make_client(failing)
+    store, _ = _config_and_store(client)
+    assert store.retrieve("programmer", _snapshot("anything"), 5, -1.0) == []
 
 
-# ------------------------------------------------------------------ capture
-def test_only_user_input_is_memorized():
-    store, calls = make_store()
-    store.update(user_input="I started boxing", agent_output="Here is a Python file.")
+@requires_chatdev
+def test_update_memorizes_only_the_user_input():
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+
+    store.update(_payload("### Task\nI started boxing"))
+
     body = body_of(saves(calls)[0])
     assert body["content"] == "I started boxing"
-    assert "Python file" not in json.dumps(body)
+    assert "agent output" not in json.dumps(body)
+    assert body["source"] == "chatdev"
 
 
-def test_capture_is_idempotent_across_a_re_executed_stage():
-    store, calls = make_store()
-    store.update(user_input="I started boxing")
-    store.update(user_input="I started boxing")
+@requires_chatdev
+def test_update_is_idempotent_across_a_re_executed_stage():
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+    store.update(_payload("I started boxing"))
+    store.update(_payload("I started boxing"))
     keys = {body_of(c)["idempotencyKey"] for c in saves(calls)}
     assert len(keys) == 1
 
 
-def test_capture_scrubs_credentials():
-    store, calls = make_store()
-    store.update(user_input=f"my key is {TEST_KEY}")
+@requires_chatdev
+def test_update_scrubs_credentials():
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+    store.update(_payload(f"my key is {TEST_KEY}"))
     body = json.dumps(body_of(saves(calls)[0]))
     assert TEST_KEY not in body
     assert "REDACTED" in body
 
 
-def test_capture_tags_its_source_and_scope():
-    store, calls = make_store(agent_id="programmer", project_id="proj_1")
-    store.update(user_input="I started boxing")
-    body = body_of(saves(calls)[0])
-    assert body["source"] == SOURCE
-    assert body["memoryScope"] == {"projectId": "proj_1", "agentId": "programmer"}
+@requires_chatdev
+def test_the_expanded_key_never_lands_on_the_config():
+    # ${ITSUKI_API_KEY} is expanded to build the client, but the config the host
+    # would serialize keeps only the reference.
+    import os
+    os.environ["ITSUKI_API_KEY"] = TEST_KEY
+    try:
+        _, store_config = _config_and_store(make_client()[0], api_key="${ITSUKI_API_KEY}")
+        assert store_config.config.api_key == "${ITSUKI_API_KEY}"
+        assert TEST_KEY not in json.dumps(store_config.config.api_key)
+    finally:
+        os.environ.pop("ITSUKI_API_KEY", None)
 
 
-def test_capture_degrades_instead_of_failing_a_stage(caplog):
-    def failing(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, json={"error": "boom"})
-
-    store, _ = make_store(handler=failing)
-    with caplog.at_level(logging.ERROR):
-        store.update(user_input="I started boxing")  # must not raise
-    assert any("itsuki" in record.message for record in caplog.records)
-
-
-# ------------------------------------------------------------------ tenancy
-def test_agent_id_stands_in_when_no_user_is_configured():
-    store, calls = make_store(user_id=None, agent_id="programmer")
-    store.update(user_input="I started boxing")
-    assert body_of(saves(calls)[0])["userId"] == "programmer"
-
-
+@requires_chatdev
 def test_two_workflows_write_to_their_own_spaces():
-    a, calls_a = make_store(user_id="team_a")
-    b, calls_b = make_store(user_id="team_b")
-    a.update(user_input="shared sentence")
-    b.update(user_input="shared sentence")
+    ca, calls_a = make_client()
+    cb, calls_b = make_client()
+    a, _ = _config_and_store(ca, user_id="team_a")
+    b, _ = _config_and_store(cb, user_id="team_b")
+    a.update(_payload("shared sentence"))
+    b.update(_payload("shared sentence"))
     assert body_of(saves(calls_a)[0])["userId"] == "team_a"
     assert body_of(saves(calls_b)[0])["userId"] == "team_b"
     assert body_of(saves(calls_a)[0])["idempotencyKey"] != body_of(saves(calls_b)[0])["idempotencyKey"]
 
 
-# ---------------------------------------------------------------- lifecycle
-def test_load_and_save_are_no_ops_because_the_service_persists():
-    store, calls = make_store()
-    store.load()
-    store.save()
-    assert not calls
+@requires_chatdev
+def test_agent_role_supplies_a_space_only_when_the_node_named_none():
+    # A node with neither user_id nor agent_id must still refuse construction —
+    # the role fallback is for retrieve/update, never for silent tenancy.
+    from chatdev_itsuki.config import ItsukiMemoryConfig
+    from chatdev_itsuki.store import ItsukiMemoryStore
+    from entity.configs.node.memory import MemoryStoreConfig
+
+    config = ItsukiMemoryConfig(api_key=TEST_KEY, path="root")
+    wrapper = MemoryStoreConfig(name="m", type="itsuki", config=config, path="root")
+    with pytest.raises(ValueError, match="user_id or agent_id"):
+        ItsukiMemoryStore(wrapper, client=make_client()[0])
 
 
-def test_clear_does_nothing_unless_explicitly_allowed():
-    store, calls = make_store()
+@requires_chatdev
+def test_clear_is_gated_and_scoped():
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
     store.clear()
     assert not [c for c in calls if c.method == "DELETE"]
 
-
-def test_clear_is_scoped_to_this_adapters_own_writes_when_allowed():
-    store, calls = make_store(allow_clear=True)
-    store.clear()
-    deletes = [c for c in calls if c.method == "DELETE"]
+    client2, calls2 = make_client()
+    allowed, _ = _config_and_store(client2, allow_clear=True)
+    allowed.clear()
+    deletes = [c for c in calls2 if c.method == "DELETE"]
     assert len(deletes) == 1
-    assert f"source={SOURCE}" in str(deletes[0].url)
+    assert "source=chatdev" in str(deletes[0].url)
 
 
-def test_the_manager_call_sequence_works_end_to_end():
-    """retrieve on stage entry, update then save on stage exit."""
-    store, calls = make_store()
-    memories = store.retrieve("### Task\nWhat was I working on?")
-    assert store.format_context(memories)
-    store.update(user_input="### Task\nI started boxing", agent_output="noted")
-    store.save()
-    assert recalls(calls) and saves(calls)
+@requires_chatdev
+def test_the_manager_lifecycle_end_to_end():
+    """retrieve on stage entry, update then save on stage exit — real types."""
+    from runtime.node.agent.memory.memory_base import MemoryManager
+    from entity.configs.node.memory import MemoryAttachmentConfig
+    from entity.enums import AgentExecFlowStage
+
+    client, calls = make_client()
+    store, _ = _config_and_store(client)
+
+    attachment = MemoryAttachmentConfig(
+        name="team_memory", top_k=5, similarity_threshold=-1.0, read=True, write=True,
+        path="root",
+    )
+    manager = MemoryManager(attachments=[attachment], stores={"team_memory": store})
+
+    result = manager.retrieve(
+        "programmer", _snapshot("what was I working on?"),
+        current_stage=AgentExecFlowStage.FINISHED_STAGE,
+    )
+    assert result is not None
+    assert "Related Memories" in result.formatted_text
+    assert MEMORY_TEXT in result.formatted_text
+
+    manager.update(_payload("### Task\nI started boxing"))
+    assert saves(calls), "the manager drove a capture through the store"
 
 
-# ----------------------------------------------------------------- registry
-def test_registers_against_a_registry_shaped_hook():
-    registered: list = []
-
-    def fake_register(name, *, config_cls, factory, summary=None):
-        registered.append((name, config_cls, factory, summary))
-
-    assert register(fake_register) is True
-    name, config_cls, factory, summary = registered[0]
-    assert name == STORE_TYPE == "itsuki"
-    assert config_cls is ItsukiMemoryConfig
-    assert factory is build_store
-    assert summary
-
-
-def test_registers_against_a_registry_without_a_summary_parameter():
-    registered: list = []
-
-    def older_register(name, *, config_cls, factory):
-        registered.append(name)
-
-    assert register(older_register) is True
-    assert registered == [STORE_TYPE]
-
-
-def test_registration_is_a_no_op_when_chatdev_is_absent():
-    # The host is not importable here, which is the normal case for a unit
-    # test, a linter or a docs build. That must not be an error.
-    assert register() is False
+def test_host_availability_is_reported():
+    # A visible signal in the run so a skip is never mistaken for a pass.
+    print(f"\n[chatdev-itsuki] real ChatDev host available: {HOST_AVAILABLE}")
