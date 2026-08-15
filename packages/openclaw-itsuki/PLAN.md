@@ -123,9 +123,10 @@ Legend: **PASS** evidenced · **PENDING** requires an action outside this phase.
 | 20 | Production canary | PASS | real save → receipt `src_b331ac01…` → recall round-trip verbatim |
 | 21 | Canary cleanup verified zero | PASS | no node/page created; counts back to baseline 109/97/12/102/55/5 |
 | 22 | Windows evidence | PASS | entire build and every runtime proof ran on Windows 11 |
-| 23 | **Linux + Windows dry-run CI** | **PENDING** | `.github/workflows/publish-openclaw-plugin.yml` created with both legs and `dry_run` defaulting true; **has not been run** (running it requires pushing this branch, which is outside this phase's boundaries) |
-| 24 | Publication | **NOT DONE — out of scope** | Nothing published to npm or ClawHub |
-| 25 | Site / docs surfaces | **NOT DONE — out of scope** | Untouched; the no-dead-commands test still forbids an `openclaw plugins install` verb, correctly — the package is not live |
+| 23 | Linux + Windows dry-run CI | **PASS** | Run 31849205885: both legs green (after fixing a CI-only SIGPIPE-under-pipefail defect in the tarball-listing grep, run 31849029640) |
+| 24 | Publication | **PASS** | Run 31855934545: `openclaw-itsuki@0.1.0` published with npm provenance. Registry integrity `sha512-ChnhHp/F6YXG…` and shasum `73150d604d5384460fff8fde348acd14476c5a4b` verified against downloaded bytes; 2 attestations (npm publish v0.1 + SLSA provenance v1). Two earlier attempts stopped at npm's own guards (EOTP: token without 2FA bypass; E404: token without create-package scope) — resolved by the owner recreating the token; the plugin was never half-published. NPM_TOKEN secret deleted immediately after; owner told to revoke the npm token |
+| 26 | Clean-registry install + lifecycle | **PASS** | `openclaw plugins install openclaw-itsuki` into a fresh `OPENCLAW_STATE_DIR`; installed integrity === registry integrity; recall-in-prompt, settled capture, restart exactly-once, live `sessions_spawn` subagent with distinct child attribution — all from the public artifact. `plugins disable` → zero itsuki traffic; `plugins uninstall --force` → zero itsuki lines and zero requests |
+| 25 | Site / docs surfaces | **PASS (this commit)** | OpenClaw tab leads with the native variant (access gate as a first-class step); docs page rewritten with Routes A/B/C; no-dead-commands flipped for exactly `openclaw plugins install`; `hermes memory setup` still forbidden. Paired specs green (59) |
 
 **Open findings after build: superseded by the audit below.**
 

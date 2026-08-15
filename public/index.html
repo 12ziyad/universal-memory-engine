@@ -4133,6 +4133,25 @@ console.log(result.recall.context);`,
     "${PRODUCT.name.toLowerCase()}": { "serverUrl": "${origin}/mcp/${mcpToken}" }
   }
 }`,
+		// The native OpenClaw plugin — published as openclaw-itsuki on npm with
+		// provenance. Recall runs before each agent turn reaches the model,
+		// capture after the turn settles; it runs ALONGSIDE OpenClaw's built-in
+		// memory and never claims the exclusive memory slot.
+		openclawNativeInstall: `openclaw plugins install openclaw-itsuki`,
+		openclawNativeConfig: `{
+  "plugins": {
+    "allow": ["itsuki"],
+    "entries": {
+      "itsuki": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true }
+      }
+    }
+  }
+}`,
+		openclawNativeEnv: `# the Gateway's environment
+export ITSUKI_API_KEY=${mcpToken}`,
+		openclawNativeInspect: `openclaw plugins inspect itsuki --runtime --json`,
 		openclawMcpAdd: `openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${origin}/mcp/${mcpToken} --transport streamable-http`,
 		// The agent-driven install: paste once, OpenClaw wires itself up, imports
 		// its own workspace memory through the bounded ingest door, and proves the
@@ -4676,8 +4695,21 @@ function installMethods() {
 					label: "OpenClaw",
 					icon: ICON.spark,
 					docsHref: "/docs/#/install/openclaw",
-					hint: "Both routes use OpenClaw's built-in MCP support. A native package with one-line install is planned.",
+					hint: "The native plugin joins the agent turn: recall before the model, capture after it settles — alongside OpenClaw's built-in memory, never replacing it. The MCP routes remain as fallbacks.",
 					variants: {
+						native: {
+							label: "Native plugin",
+							steps: [
+								{ title: "Install the plugin", body: "One command. Needs Node 22.22.3+, 24.15+, or 25.9+ — OpenClaw's own engine range. Zero runtime dependencies, published with npm provenance.",
+									codeLabel: "terminal", code: () => installSnippets().openclawNativeInstall },
+								{ title: "Grant conversation access", body: "OpenClaw blocks conversation-reading hooks for installed plugins until you opt in — without this the plugin loads but captures nothing. Merge into openclaw.json.",
+									codeLabel: "openclaw.json", code: () => installSnippets().openclawNativeConfig },
+								{ title: "Create your link and set the key", body: "Shown once. The key travels only as an Authorization header.",
+									action: (key) => key ? linkReady : mcpKey, codeLabel: "terminal", code: (key) => installSnippets(key).openclawNativeEnv },
+								{ title: "Restart the Gateway, then verify", body: "diagnostics must be empty. Memory then recalls before every user turn and saves after each settled one — cron and heartbeat runs are never captured.",
+									codeLabel: "terminal", code: () => installSnippets().openclawNativeInspect },
+							],
+						},
 						prompt: {
 							label: "Prompt install",
 							steps: [

@@ -390,13 +390,33 @@ describe("Agents door and the variant chooser", () => {
 		expect(snippets.convexHelper).not.toContain("YOUR_MCP_KEY");
 	});
 
-	it("OpenClaw is the first client with two install routes", () => {
+	it("OpenClaw leads with the published native plugin, MCP routes surviving as fallbacks", () => {
 		const doors = buildMethods();
-		expect(Object.keys(doors.agents.clients.openclaw.variants)).toEqual(["prompt", "manual"]);
+		expect(Object.keys(doors.agents.clients.openclaw.variants)).toEqual(["native", "prompt", "manual"]);
 		for (const variant of Object.values(doors.agents.clients.openclaw.variants)) {
 			expect(Array.isArray(variant.steps)).toBe(true);
 			expect(variant.steps.length).toBeGreaterThan(1);
 		}
+	});
+
+	it("the native OpenClaw plugin names the published package and its real preconditions", () => {
+		const snippets = build(["installSnippets"], "installSnippets")("itsuki_live_oc");
+		// The package is published; the verb is allowed and must match the
+		// registry name exactly.
+		expect(snippets.openclawNativeInstall).toBe("openclaw plugins install openclaw-itsuki");
+		// The conversation-access gate is a real host precondition — without it
+		// the plugin captures nothing. It must be a step, not a footnote.
+		expect(snippets.openclawNativeConfig).toContain('"allowConversationAccess": true');
+		expect(snippets.openclawNativeConfig).toContain('"allow": ["itsuki"]');
+		expect(snippets.openclawNativeEnv).toContain("ITSUKI_API_KEY=itsuki_live_oc");
+		expect(snippets.openclawNativeInspect).toBe("openclaw plugins inspect itsuki --runtime --json");
+		const native = buildMethods().agents.clients.openclaw.variants.native;
+		expect(native.steps.some((s) => /conversation access/i.test(s.title))).toBe(true);
+		// Honesty: coexists with built-in memory; never claims the exclusive
+		// slot, dreaming, or a marketplace listing that is not live.
+		expect(buildMethods().agents.clients.openclaw.hint).toMatch(/alongside/i);
+		expect(script).not.toMatch(/exclusive memory slot (support|replacement|claimed)/i);
+		expect(script).not.toContain("clawhub:openclaw-itsuki");
 	});
 
 	it("the once-dormant variant renderer path is live and wired", () => {
@@ -445,10 +465,10 @@ describe("coding agents via MCP", () => {
 
 describe("no dead commands", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
-		expect(script).not.toContain("openclaw plugins install");
 		expect(script).not.toContain("hermes memory setup");
-		// pi-itsuki is published (npm, provenance), so its verb is now allowed —
-		// and pinned to the exact registry name in the Pi-door test below.
+		// pi-itsuki and openclaw-itsuki are published (npm, provenance), so
+		// their verbs are allowed — each pinned to its exact registry name in
+		// its own door test below.
 	});
 
 	it("builds the OpenClaw routes only from shipped doors", () => {

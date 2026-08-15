@@ -9,6 +9,45 @@ the documentation at <https://itsuki.app/docs/> is the contract.
 
 ---
 
+## OpenClaw plugin — openclaw-itsuki 0.1.0 — 2026-08-15
+
+First release of the native OpenClaw integration, published to npm with SLSA
+provenance from this repository's GitHub Actions workflow.
+
+### Added
+
+- **Memory joins the agent turn.** Recall runs in `agent_turn_prepare` and
+  arrives through `prependContext` before the model reads anything; capture
+  runs in `agent_end` for genuinely settled turns. Cron and heartbeat runs are
+  never captured — automation output is not conversation.
+- **Coexists with built-in memory.** `MEMORY.md`, daily notes and
+  `memory_search` keep working; the plugin never claims OpenClaw's exclusive
+  memory slot (which would disable memory-core for every agent). A packaging
+  gate greps the tarball to keep that promise honest.
+- **Exactly-once capture** under a content-derived `openclaw:v1` idempotency
+  key with a crash-safe local spool: Gateway restarts, handler re-entry,
+  concurrent `agent_end`, compaction rewrites and offline periods all collapse
+  to one write. Watermarks carry a digest of the owned prefix, so compaction
+  is detected rather than double-captured.
+- **Privacy-safe per-sender tenancy** (optional): each channel-scoped sender
+  gets an isolated sub-tenant hashed one-way from channel + sender id. A turn
+  without derivable sender identity skips memory entirely — never a silent
+  fallback into the owner's space.
+- Requires the operator to set
+  `plugins.entries.itsuki.hooks.allowConversationAccess: true` — OpenClaw's
+  own gate for conversation-reading plugins, surfaced as a first-class install
+  step and a loud startup warning when missing.
+- `itsuki_recall` / `itsuki_save` tools; no destructive surface of any kind;
+  local credential scrubbing byte-identical to the server's canonical lane;
+  zero runtime dependencies. Validated against OpenClaw 2026.7.1-2 on Node
+  24.15.0, including a live `sessions_spawn` subagent proof with distinct
+  parent/child attribution.
+
+The dashboard's OpenClaw tab now leads with the native route; the prompt and
+manual MCP routes remain as fallbacks.
+
+---
+
 ## Pi extension — pi-itsuki 0.1.0 — 2026-08-15
 
 First release of the native Pi integration, published to npm with SLSA

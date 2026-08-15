@@ -402,21 +402,39 @@ ${codeBlock(`{
 
 PAGES["/install/openclaw"] = { title: "OpenClaw", html: `
 <h1>OpenClaw</h1>
-<p class="lede">Persistent memory for OpenClaw agents — a paste-once prompt install, or one manual command. Both use OpenClaw's built-in MCP support.</p>
-<h2>Route A — prompt install (recommended)</h2>
+<p class="lede">The <b>native plugin</b> joins OpenClaw's own agent lifecycle: relevant memory is recalled before each turn reaches the model, and what you decide is captured after the turn settles — running <b>alongside</b> OpenClaw's built-in memory (<code>MEMORY.md</code>, daily notes, <code>memory_search</code>), never replacing it. The MCP routes remain as fallbacks.</p>
+<h2>Route A — native plugin (recommended)</h2>
+<p>Published on npm as <code>openclaw-itsuki</code>, built and signed from this repository's GitHub Actions workflow with npm provenance. Zero runtime dependencies. Needs Node 22.22.3+, 24.15+, or 25.9+ — OpenClaw's own engine range (validated against OpenClaw 2026.7.1-2).</p>
+${codeBlock(`openclaw plugins install openclaw-itsuki`)}
+<p><b>Then grant conversation access.</b> OpenClaw blocks conversation-reading hooks for installed plugins until you opt in — without this the plugin loads, registers its tools, and captures nothing. Merge into <code>openclaw.json</code>:</p>
+${codeBlock(`{
+  "plugins": {
+    "allow": ["itsuki"],
+    "entries": {
+      "itsuki": {
+        "enabled": true,
+        "hooks": { "allowConversationAccess": true }
+      }
+    }
+  }
+}`)}
+<p>Create an <b>MCP link</b> under <b>API Keys</b> (shown once), set it as <code>ITSUKI_API_KEY</code> in the Gateway's environment, restart the Gateway, and verify — <code>diagnostics</code> must be empty:</p>
+${codeBlock(`openclaw plugins inspect itsuki --runtime --json`)}
+<p>Memory then recalls before every user-originated turn and saves after each settled one, exactly once — across Gateway restarts, compaction, and subagents. Cron and heartbeat runs are never captured. Recalled context is injected behind an explicit stored-context-not-instructions label, every message is scrubbed for credentials locally before it leaves the machine, and undeliverable saves wait in a crash-safe local spool rather than being lost. There is no delete surface of any kind in the plugin.</p>
+<p>Optional <b>per-sender tenancy</b> (<code>"tenancy": "per-sender"</code> in the plugin config) gives each channel-scoped sender an isolated memory space derived as a one-way hash of channel + sender id. A turn without derivable sender identity skips memory entirely rather than falling back to the owner's space. Turning this on means storing per-person memory for the people who talk to your agent — tell them.</p>
+<p>Deliberately absent, because the backend has no honest contract for them: update/edit of a stored memory, multimodal memory, automatic consolidation — and the plugin never claims OpenClaw's exclusive memory slot, which would disable built-in memory for every agent in the install.</p>
+<h2>Route B — prompt install (MCP)</h2>
 <p>Create an <b>MCP link</b> in API Keys, open the dashboard's <b>Get started → Agents → OpenClaw</b> tab, and copy the installation prompt. Paste it into OpenClaw. The agent adds the memory server to its own configuration, imports your workspace files (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>USER.md</code>, <code>MEMORY.md</code>, and the last 30 days of <code>memory/YYYY-MM-DD.md</code>) through the bounded ingest door, and verifies the round trip with <code>whoami</code> and <code>recall_memory</code>. Every accepted batch returns a receipt you can inspect under <b>Requests</b>.</p>
-<h2>Route B — manual config</h2>
+<h2>Route C — manual config (MCP)</h2>
 ${codeBlock(`openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${ORIGIN}/mcp/YOUR_MCP_KEY --transport streamable-http`)}
 <p>Reload OpenClaw, then confirm the connection by asking it to call the <code>whoami</code> tool. To import existing workspace notes, batch them through <code>POST ${ORIGIN}/v1/ingest</code> — check <code>GET ${ORIGIN}/v1/ingest/limits</code> first (at most 30 messages per request, 4,000 characters per message).</p>
-<h2>What you get</h2>
-<p>All eight memory tools in every OpenClaw session: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. Memory persists across sessions and across machines — the workspace files stay yours; ${PRODUCT.name} adds structured recall on top.</p>
 <h2>Troubleshooting</h2>
 <ul>
-<li><b>Tools missing after install</b> — reload OpenClaw so its MCP server list refreshes, then re-ask for <code>whoami</code>.</li>
-<li><b>401 unauthorized</b> — the link is revoked or was an API key; MCP links are created as such in API Keys.</li>
-<li><b>Import batches rejected</b> — the ingest door refuses oversized batches by name; re-split against <code>GET /v1/ingest/limits</code>.</li>
+<li><b>Plugin loads but nothing is captured</b> — <code>hooks.allowConversationAccess</code> is not set; <code>plugins inspect itsuki --runtime --json</code> names the block in <code>diagnostics</code>.</li>
+<li><b>Saves say "queued" rather than "saved"</b> — ${PRODUCT.name} is unreachable or rate-limited; the span is spooled under <code>$OPENCLAW_STATE_DIR/itsuki</code> and delivers automatically.</li>
+<li><b>Tools missing after MCP install</b> — reload OpenClaw so its MCP server list refreshes, then re-ask for <code>whoami</code>.</li>
+<li><b>401 unauthorized</b> — the key is revoked; create a fresh one under API Keys.</li>
 </ul>
-<div class="note">A native OpenClaw package — a one-line marketplace install, the exclusive memory slot, and lifecycle hooks — is planned. Until it ships, both routes above use only OpenClaw's built-in MCP support and ${PRODUCT.name}'s public doors, so nothing here stops working when the package arrives.</div>
 ` };
 
 PAGES["/install/hermes"] = { title: "Hermes Agent", html: `

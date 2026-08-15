@@ -135,8 +135,23 @@ describe("page contracts", () => {
 
 describe("no dead commands in docs", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
-		expect(script).not.toContain("openclaw plugins install");
 		expect(script).not.toContain("hermes memory setup");
+	});
+
+	it("shows the published OpenClaw plugin under its exact registry name", () => {
+		const ocPage = script.split('PAGES["/install/openclaw"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(ocPage).toContain("openclaw plugins install openclaw-itsuki");
+		// The host's conversation-access gate is a required install step.
+		expect(ocPage).toContain("allowConversationAccess");
+		expect(ocPage).toContain("plugins inspect itsuki --runtime --json");
+		// Coexistence honesty: alongside built-in memory, and the MCP routes
+		// survive as fallbacks.
+		expect(ocPage).toMatch(/alongside/i);
+		expect(ocPage).toContain("openclaw mcp add");
+		expect(ocPage).toMatch(/Deliberately absent/i);
+		// Never claim the exclusive slot or a marketplace listing that is not live.
+		expect(ocPage).toContain("never claims OpenClaw's exclusive memory slot");
+		expect(ocPage).not.toContain("clawhub:");
 	});
 
 	it("shows the published Pi extension under its exact registry name", () => {
