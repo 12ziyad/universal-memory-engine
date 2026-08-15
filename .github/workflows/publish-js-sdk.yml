@@ -76,12 +76,16 @@ jobs:
             exit 1
           fi
           # Refuse to overwrite a published version: npm would reject it anyway,
-          # but failing here keeps the error readable and pre-publish.
-          if npm view "itsuki@$version" version >/dev/null 2>&1; then
+          # but failing here keeps the error readable and pre-publish. Only the
+          # publishing leg enforces this — during a real publish the ubuntu leg
+          # publishes while the slower Windows leg is still testing, and the
+          # sibling's own fresh publish then tripped this check (observed on the
+          # 0.2.1 release run).
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && npm view "itsuki@$version" version >/dev/null 2>&1; then
             echo "FAIL: itsuki@$version already exists on the registry"
             exit 1
           fi
-          echo "OK: $version is unpublished"
+          echo "OK: version gate passed"
 
       - name: Refuse runtime dependencies
         working-directory: sdk/js
