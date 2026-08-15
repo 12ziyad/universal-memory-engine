@@ -83,6 +83,33 @@ describe("tools cannot choose a tenant", () => {
 		expect(saveCalls(api.calls)[0]!.body!["userId"]).toBe("u_real");
 	});
 
+	it("writes to the run's resource when the host supplies one on the options", async () => {
+		// In a real agent run the execute options are an AgentToolExecutionContext
+		// carrying resourceId/threadId — host-supplied, never model input. A
+		// multi-tenant app that relies on resource (and never sets custom context
+		// keys) must have tool-saves land in the run's space, not the default.
+		const { api, tools: registered } = tools();
+		await registered["itsukiSave"].execute(
+			{ content: "I started boxing" },
+			{ resourceId: "u_resource", threadId: "t_thread" },
+		);
+		const save = saveCalls(api.calls)[0]!;
+		expect(save.body!["userId"]).toBe("u_resource");
+		expect(save.body!["conversationId"]).toBe("t_thread");
+	});
+
+	it("lets an explicit request-context override beat the host resource", async () => {
+		const { api, tools: registered } = tools();
+		await registered["itsukiSave"].execute(
+			{ content: "I started boxing" },
+			{
+				resourceId: "u_resource",
+				requestContext: { get: (key: string) => (key === CONTEXT_KEYS.userId ? "u_override" : undefined) },
+			},
+		);
+		expect(saveCalls(api.calls)[0]!.body!["userId"]).toBe("u_override");
+	});
+
 	it("refuses readably when a run has no identity at all", async () => {
 		const { api, tools: registered } = tools({ defaultUserId: undefined });
 		const result = await registered["itsukiSearch"].execute({ query: "anything" }, {});

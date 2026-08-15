@@ -36,6 +36,14 @@ export interface ToolOptions {
 interface ExecutionContext {
 	requestContext?: ContextLike;
 	abortSignal?: AbortSignal;
+	/**
+	 * Host-supplied run identity. When a tool executes inside an agent run,
+	 * Mastra's AgentToolExecutionContext carries the run's resourceId and
+	 * threadId on the options object. These come from the host, never from the
+	 * model — which is exactly why they are allowed to select tenancy.
+	 */
+	resourceId?: string;
+	threadId?: string;
 }
 
 /** A tool result the model can read, whatever happened. */
@@ -52,9 +60,22 @@ export function itsukiTools(config: ResolvedConfig, options: ToolOptions = {}) {
 	/**
 	 * Resolve the run's tenancy. Returns null when there is no identity, which
 	 * every tool reports as a readable refusal rather than a silent write.
+	 *
+	 * Priority mirrors the processors: an explicit request-context override,
+	 * then the host-supplied resource/thread riding the execution options, then
+	 * the configured single-tenant default. Without the middle rung, a
+	 * multi-tenant app that relies on Mastra's own resource would have every
+	 * model tool-save land in the default space — the audit's MASTRA-01.
 	 */
 	const scopeFor = (context: ExecutionContext | undefined): ResolvedConfig | null => {
-		const identity = resolveIdentity(config, [], context?.requestContext);
+		const hostMessages = context?.resourceId || context?.threadId
+			? [{
+				role: "user" as const,
+				resourceId: context?.resourceId || undefined,
+				threadId: context?.threadId || undefined,
+			}]
+			: [];
+		const identity = resolveIdentity(config, hostMessages, context?.requestContext);
 		if (!identity.userId) return null;
 		return configFor(config, identity);
 	};
