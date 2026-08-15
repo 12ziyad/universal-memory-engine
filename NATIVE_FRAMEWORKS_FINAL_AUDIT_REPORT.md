@@ -310,3 +310,119 @@ acceptance lands respectively.
 Zero known Critical, High or release-blocking Medium findings after independent
 adversarial audit and executed release evidence.
 
+---
+
+## 12. Release execution addendum (2026-08-15, same day)
+
+The owner configured `NPM_TOKEN` and approved the release. Executed state:
+
+### Published — npm (all with SLSA provenance v1, verified signatures + attestations)
+
+| Package | Version | Evidence |
+|---|---|---|
+| `itsuki` | **0.2.1** | run `31884450413` (ubuntu leg published); registry tarball SHA-256 `85e7ea1bb0232e2f4f44e66ec0b87fc745f0559ec693f3850b43b0a2b45dc108` — **byte-identical to the local audited build**; `npm audit signatures`: verified signature + attestation |
+| `ai-sdk-itsuki` | **0.1.0** | run `31884609539`; registry tarball `2654ae0ab413…`; all 37 packed `.ts` sources content-identical to the audited tree (modulo EOL); provenance verified |
+| `mastra-itsuki` | **0.1.0** | run `31884611088`; registry tarball `5a81ee864506…`; same content verification; provenance verified |
+
+`NPM_TOKEN` was **deleted from the repository** after the three publications
+(`gh secret list` is empty). **Owner: revoke the token on npmjs.com** (Access
+Tokens), and optionally configure npm Trusted Publishers for the three
+packages (workflows `publish-js-sdk.yml`, `publish-ai-sdk-provider.yml`,
+`publish-mastra-integration.yml`; user `12ziyad`, repository
+`universal-memory-engine`, no environment) so future releases are tokenless.
+
+### Production canaries — npm artifacts, registry bytes, dedicated synthetic spaces
+
+19 checks, all passed:
+
+- **js-sdk lane (6):** save → `enriched` → recall finds it → invalid-key 401
+  taxonomy probe → dry-run preview → zero residue.
+- **ai-sdk lane (7):** REAL `generateText` through the published middleware
+  (model mocked, memory production) → packet staged → `enriched` → recall
+  finds it → **cross-tenant negative** → dry-run preview with true counts →
+  converged cleanup, recall silent.
+- **mastra lane (6):** REAL `@mastra/core` Agent with both processors →
+  packet staged → `enriched` → recall → dry-run preview → converged cleanup,
+  recall silent.
+
+Rate-limit/circuit-breaker behaviour was NOT force-tested against production
+(hammering the live service to provoke 429s is not a canary); it is covered by
+the unit/contract gates. Canary identities were synthetic
+(`canary_<lane>_<epoch>`), spaces dedicated, all verified erased and silent.
+
+### New findings from the canaries — server-side (production), packages not at fault
+
+- **SRV-01 — HIGH (server): source-scoped bulk deletion misses
+  conversation-capture rows and reports zero.** `DELETE /v1/memories?source=X`
+  deleted nothing and counted nothing for memories created through
+  conversation-mode capture, while an unscoped dry-run on the same space
+  showed `{runs:1, nodes:2, slices:2}` and recall still returned the content.
+  Direct single-fact saves filter correctly — the conversation lane appears
+  not to stamp the caller's `source` onto the resulting rows. Until fixed
+  server-side, per-source cleanup of conversation captures silently no-ops;
+  the packages' rollback docs reference `deleteBySource(source=…)` and need
+  this caveat.
+- **SRV-02 — HIGH (server): deletion is not durable against in-flight
+  pipeline passes.** An unscoped full-space erase reported zero residue; ~60s
+  later the same dry-run showed **5 objects** and recall hit again —
+  post-enrichment passes re-materialized the memory from in-flight state.
+  `enriched` is not quiescence. Once the pipeline was quiescent, one erase
+  pass converged and stayed converged. Enterprise erasure semantics require
+  deletion to tombstone in-flight work; recorded with exact repro, not
+  patched here — platform deletion surgery deserves its own campaign, not a
+  same-day hotfix.
+
+Both reproduce via raw REST with no package involved. The canaries now use a
+converge-erase protocol (erase → settle → verify rows AND recall → repeat),
+and every canary space was proven empty and silent.
+
+### CI findings during release
+
+- **CI-03 — cosmetic:** the JS SDK version gate ran on both matrix legs; the
+  ubuntu leg published while the slower Windows leg was mid-run, and the
+  sibling's fresh publish tripped the Windows leg's own overwrite-refusal
+  check, marking the successful release run "failed". The registry-existence
+  check now runs only on the publishing leg (`df68116`).
+
+### PyPI — blocked at the owner boundary, with definitive evidence
+
+Run `31884452183` (`itsuki` 0.3.0, `dry_run=false`): all 6 test legs and every
+gate passed; the publish step failed with **`invalid-publisher: valid token,
+but no corresponding publisher`** — no Trusted Publisher is configured on
+PyPI. Nothing was published to PyPI. The four Python artifacts (SDK 0.3.0 +
+three adapters) remain built, audited, dry-run-green, and ready.
+
+**Exact PyPI configuration (owner, on pypi.org):**
+
+- Existing project `itsuki`: *Manage project → Publishing → Add a new
+  publisher (GitHub)*.
+- New names, three *pending publishers* under *Your account → Publishing*:
+  `agno-itsuki`, `llama-index-memory-itsuki`, `camel-itsuki`.
+- Identical values for all four: Owner `12ziyad` · Repository
+  `universal-memory-engine` · Workflow `publish-pypi.yml` · Environment
+  `pypi`. Do **not** add `chatdev-itsuki` — HELD, and the workflow refuses a
+  real publish for it by name.
+
+After configuration: dispatch `publish-pypi.yml` with `dry_run=false` for
+`itsuki`, then the three adapters; verify; run the prepared Python canary
+lanes; then the single site/docs update, full serial repository gates, and
+`wrangler deploy`.
+
+### Site and docs — deliberately not yet updated
+
+The Get Started doors and Connect-a-tool nav present the integrations as a
+set; updating them for the npm half alone would ship dead `pip install`
+commands or a half-told story, and the repo's contract tests enforce exactly
+this. One coherent site update follows the PyPI publications and Python
+canaries.
+
+### Updated GO/NO-GO
+
+- npm half: **SHIPPED and canary-proven** (`itsuki@0.2.1`,
+  `ai-sdk-itsuki@0.1.0`, `mastra-itsuki@0.1.0`).
+- PyPI half: **GO — waiting only on the four Trusted Publisher entries above.**
+- `chatdev-itsuki`: **HELD**, mechanically refused by the publish workflow.
+- Server findings SRV-01/SRV-02: **open, HIGH, production scope** — deletion
+  semantics must be fixed server-side before any marketing claim about
+  source-scoped cleanup or instant erasure; nothing in the published packages
+  is affected in normal operation.
