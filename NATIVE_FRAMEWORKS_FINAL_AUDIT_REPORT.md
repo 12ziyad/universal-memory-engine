@@ -699,6 +699,14 @@ Started Integrations door carries `agno-native`, `llamaindex-native`,
 `camel-native`, `mastra-native` and `vercel-ai-native`. `chatdev` appears
 nowhere in the shipped page source.
 
+The SRV reattack was then re-run against this deployed version: **14/14
+passed** — the build fingerprint (invalid source labels refused at both write
+doors and the delete filter), SRV-01 scoped deletion exact end to end, and
+SRV-02's variant-D interleaving clean across a 4-minute watch with the job
+ledger reading `failed` / `cancelled_by_delete: true`. Deletion behaviour is
+therefore verified on the exact bytes now serving traffic, not only on the
+build that preceded the site update.
+
 ### FINAL GO/NO-GO
 
 **GO**, with the exceptions named below.
