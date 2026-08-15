@@ -603,6 +603,43 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 	let action = "create";
 	let page = draft;
 
+	// SRV-02: this digest-lane page commit runs asynchronously after a model
+	// call, so like every durable writer it carries the deletion fence in its
+	// own batch — a barrier confirmed after this packet's acceptance rolls the
+	// whole write back instead of publishing content the user just erased.
+	const pageAcceptedAt = Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? NaN);
+	const commitFenced = async (statement) => {
+		if (!Number.isFinite(pageAcceptedAt) || pageAcceptedAt <= 0) return statement.run();
+		return env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO fence_guard (violation)
+				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
+			).bind(userId, pageAcceptedAt),
+			statement,
+		]);
+	};
+	const cancelledPageResult = async () => {
+		await updateExtractionRun(env, userId, runId, {
+			status: "cancelled_by_delete",
+			error: "cancelled_by_delete: a confirmed delete erased this scope while the save was processing",
+			expectStatus: "running",
+		});
+		const receipt = pageReceipt({
+			action: "cancelled",
+			page,
+			runId,
+			received,
+			digested: keptLines,
+			relatedCount: 0,
+			skipped: [{ kind: "memory_page", label: page.title, reason: "cancelled_by_delete", count: 1 }],
+		});
+		receipt.outcome = "cancelled_by_delete";
+		receipt.durable = false;
+		const summary = "A confirmed delete erased this scope while the save was processing; nothing was written.";
+		await storeReceipt(env, userId, "save_conversation", receipt, summary);
+		return { fired: false, processing: false, cancelled: true, summary, receipt };
+	};
+
 	if (match) {
 		action = intent.updateRequested ? "update" : "reinforce";
 		if (isDuplicateCollect(match, draft, sourcePacket)) {
@@ -635,7 +672,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 			return { fired: false, processing: false, summary, receipt };
 		}
 		page = mergePageDraft(match, draft, { preferDraftTitle: intent.updateRequested });
-		await env.DB.prepare(
+		const updateStatement = env.DB.prepare(
 			`UPDATE memory_pages SET
 				title = ?, canonical_title = ?, topic_filter = ?, short_summary = ?, full_markdown = ?,
 				sections_json = ?, key_points_json = ?, decisions_json = ?, next_steps_json = ?,
@@ -670,10 +707,17 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				match.id,
 				userId,
 				projectScope.projectId,
-			)
-			.run();
+			);
+		try {
+			await commitFenced(updateStatement);
+		} catch (error) {
+			if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+				return cancelledPageResult();
+			}
+			throw error;
+		}
 	} else {
-		await env.DB.prepare(
+		const insertStatement = env.DB.prepare(
 			`INSERT INTO memory_pages
 				(id, user_id, node_id, node_kind, source_mode, title, canonical_title, topic_filter,
 				 short_summary, full_markdown, sections_json, key_points_json, decisions_json,
@@ -717,8 +761,15 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				page.role_type,
 				projectScope.projectId,
 				projectScope.projectName,
-			)
-			.run();
+			);
+		try {
+			await commitFenced(insertStatement);
+		} catch (error) {
+			if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+				return cancelledPageResult();
+			}
+			throw error;
+		}
 	}
 
 	const relatedCount = page.related?.length ?? 0;

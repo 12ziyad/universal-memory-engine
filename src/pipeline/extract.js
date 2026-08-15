@@ -894,10 +894,27 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	}
 	if (!proposal._ok) {
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
-		await updateExtractionRun(env, userId, extractionRunId, {
+		// Guarded like the other finalizations: never stomp a concurrent
+		// erasure's cancelled_by_delete back to a retryable `failed`.
+		const failed = await updateExtractionRun(env, userId, extractionRunId, {
 			status: "failed",
 			error: "llm_failed: the extractor returned nothing readable",
+			expectStatus: "running",
 		});
+		if (Number(failed?.changes ?? 0) !== 1) {
+			const row = await env.DB.prepare(
+				"SELECT status FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+			).bind(extractionRunId, userId).first();
+			if (["cancelled_by_delete", "cancelled_by_retention"].includes(row?.status)) {
+				const receipt = emptyReceipt(
+					row.status,
+					"a confirmed deletion boundary superseded this save while it was processing; the save was cancelled",
+					{ ...meta, latency_ms: elapsed() },
+				);
+				receipt.durable = false;
+				return { outcome: row.status, error: row.status, receipt };
+			}
+		}
 		return {
 			outcome: "llm_failed",
 			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", { ...meta, latency_ms: elapsed() }),
@@ -1080,11 +1097,58 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 
 	// Meaningful chunk but nothing approved → keep for retry, do NOT advance.
 	if (!plan.hasWrites) {
+		// SRV-02: the pre-flight barrier check ran BEFORE the model call, so an
+		// erasure confirmed during it is invisible here. A write plan is caught
+		// by the commit fence, but this no-write path commits nothing — it
+		// would finalize `skipped`, settle the job `enriched`, and hand the
+		// messages to the DO's rescue buffer, where a later flush re-extracts
+		// content the user already erased under a fresh acceptance time.
+		// Re-check the barrier post-model: an accepted save that a confirmed
+		// deletion superseded cancels, and its messages are never rescued.
+		if (acceptedAt != null) {
+			const barrier = await env.DB.prepare(
+				"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
+			).bind(userId).first();
+			if (barrier && Number(barrier.barrier_at) > acceptedAt) {
+				console.warn(`extraction cancelled_by_delete post-model (no-write) user=${userId}`);
+				await updateExtractionRun(env, userId, extractionRunId, {
+					status: "cancelled_by_delete",
+					error: "cancelled_by_delete: a confirmed delete erased this scope while the save was processing",
+					expectStatus: "running",
+				});
+				const receipt = emptyReceipt(
+					"cancelled_by_delete",
+					"a confirmed delete erased this scope while the save was processing; the save was cancelled",
+					{ ...meta, latency_ms: elapsed() },
+				);
+				receipt.durable = false;
+				return { outcome: "cancelled_by_delete", error: "cancelled_by_delete", receipt };
+			}
+		}
 		console.warn(`extraction meaningful_no_write user=${userId}`);
-		await updateExtractionRun(env, userId, extractionRunId, {
+		// Guarded: an erasure that cancelled this run by name while the model
+		// was running must not be stomped back to `skipped` by this blind
+		// finalization — that resurrection-shaped overwrite was SRV-02's
+		// phantom-residue specimen.
+		const skipped = await updateExtractionRun(env, userId, extractionRunId, {
 			status: "skipped",
 			skippedObjects: plan.rejected ?? [],
+			expectStatus: "running",
 		});
+		if (Number(skipped?.changes ?? 0) !== 1) {
+			const row = await env.DB.prepare(
+				"SELECT status FROM extraction_runs WHERE id = ? AND user_id = ? LIMIT 1",
+			).bind(extractionRunId, userId).first();
+			if (["cancelled_by_delete", "cancelled_by_retention"].includes(row?.status)) {
+				const receipt = emptyReceipt(
+					row.status,
+					"a confirmed deletion boundary superseded this save while it was processing; the save was cancelled",
+					{ ...meta, latency_ms: elapsed() },
+				);
+				receipt.durable = false;
+				return { outcome: row.status, error: row.status, receipt };
+			}
+		}
 		return {
 			outcome: "meaningful_no_write",
 			rejected: plan.rejected,

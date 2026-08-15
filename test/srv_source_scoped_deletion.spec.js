@@ -349,3 +349,161 @@ describe("SRV-02: deletion is durable against everything that runs later", () =>
 		await stubFor(userId).resetAll();
 	}, 30000);
 });
+
+/**
+ * The reproduced production trigger (forensic variant D, 2026-08-15): the
+ * erasure confirms while the extractor's model call is in flight. Pre-flight
+ * ran before the barrier existed; the commit fence only guards writes — so a
+ * no-write outcome used to stomp the erasure's cancelled_by_delete back to
+ * `skipped`, settle the job `enriched`, and hand the erased messages to the
+ * DO rescue buffer for a later flush to re-extract. These drive that exact
+ * interleaving deterministically via the function-form llmResponse hook.
+ */
+describe("SRV-02: an erasure confirmed DURING the model call", () => {
+	// The D1 half of a confirmed erasure, exactly as cleanup.js performs it —
+	// runnable from inside the drain (bulkDeleteBySource itself would RPC the
+	// DO the test is currently inside of).
+	async function armBarrierLikeErasure(userId) {
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, 'test-midflight')
+			 ON CONFLICT(user_id) DO UPDATE SET
+				barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at)`,
+		).bind(userId, now, now).run();
+		await env.DB.prepare(
+			`UPDATE extraction_runs
+			 SET status = 'cancelled_by_delete',
+				error = 'cancelled_by_delete: a confirmed delete erased this scope while the save was processing',
+				updated_at = ?
+			 WHERE user_id = ? AND status IN ('running', 'committing')`,
+		).bind(now, userId).run();
+		// The real erasure hard-deletes acceptance-time source episodes too.
+		await env.DB.prepare("DELETE FROM source_episodes WHERE user_id = ?").bind(userId).run();
+	}
+
+	const drainWith = (userId, inlineOverrides) => runInDurableObject(
+		stubFor(userId),
+		(instance) => instance.drain({ userId, ignoreBackoff: true, inlineOverrides }),
+	);
+
+	it("no-write outcome cancels: no skipped stomp, no enriched job, no rescue, nothing later", async () => {
+		const userId = `srv02-midflight-${crypto.randomUUID()}`;
+		// Hold the queue so the door's own fire-and-forget poke cannot run the
+		// entry without our canned hooks; the ONLY attempt is the drain below.
+		await runInDurableObject(stubFor(userId), async (_i, state) => {
+			await state.storage.put("lease", { until: Date.now() + 120_000, token: "srv02-midflight-hold" });
+		});
+		const res = await call("POST", "/v1/ingest", {
+			userId,
+			flush: true,
+			source: "ai-sdk",
+			messages: [{ id: "m1", role: "user", content: "The midflight canary metal is cobalt." }],
+		});
+		expect(res.status).toBe(200);
+		await runInDurableObject(stubFor(userId), async (_i, state) => { await state.storage.delete("lease"); });
+
+		let armed = false;
+		const drainResult = await drainWith(userId, {
+			llmResponse: async () => {
+				await armBarrierLikeErasure(userId);
+				armed = true;
+				return { objects: [], notes: "" };
+			},
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+		expect(armed, `the mid-call hook never ran; drain=${JSON.stringify(drainResult)}`).toBe(true);
+
+		// The run stays cancelled — the no-write finalization must not stomp it.
+		const run = await env.DB.prepare(
+			"SELECT status FROM extraction_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+		).bind(userId).first();
+		expect(run?.status, "no-write finalization overwrote the cancellation").toBe("cancelled_by_delete");
+
+		// The job tells the truth: terminal failure naming the cancellation,
+		// never `enriched`.
+		const job = await env.DB.prepare(
+			"SELECT status, error FROM memory_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+		).bind(userId).first();
+		expect(job?.status).toBe("failed");
+		expect(String(job?.error ?? "")).toContain("cancelled_by_delete");
+
+		// Nothing durable now, and the cancelled bookkeeping row is not
+		// deletable residue: preview zero BEFORE any legitimate new content.
+		expect((await liveCounts(userId)).total).toBe(0);
+		const previewAfterCancel = await bulkDeleteBySource(env, userId, {});
+		const allRuns = await env.DB.prepare(
+			"SELECT id, status, tool_name, source_mode, created_at FROM extraction_runs WHERE user_id = ? ORDER BY created_at",
+		).bind(userId).all();
+		expect(
+			previewTotal(previewAfterCancel),
+			`${JSON.stringify(previewAfterCancel.would_delete)} runs=${JSON.stringify(allRuns.results)} drain=${JSON.stringify(drainResult)}`,
+		).toBe(0);
+
+		// Then a legitimate post-erase flush — the erased pre-barrier message
+		// must not ride along into durable memory.
+		await call("POST", "/v1/ingest", {
+			userId,
+			flush: true,
+			messages: [{ id: "m2", role: "user", content: "Unrelated post-erase note about mild weather." }],
+			_test: {
+				llmResponse: { objects: [], notes: "" },
+				edgeResponse: { edges: [] },
+				reflexionResponse: { entities: [], facts: [], edges: [] },
+			},
+		});
+		await settle(userId);
+		for (let round = 0; round < 3; round++) {
+			await runInDurableObject(stubFor(userId), (instance) => instance.alarm());
+			const ctx = createExecutionContext();
+			await worker.scheduled({ scheduledTime: Date.now(), cron: "* * * * *" }, env, ctx);
+			await waitOnExecutionContext(ctx);
+		}
+		expect(await rowsMentioning(userId, "cobalt"), "erased mid-flight content re-materialized").toBe(0);
+		const recall = await call("POST", "/v1/recall", { userId, query: "What is the midflight canary metal?" });
+		expect(/cobalt/i.test(String(recall.body?.context ?? ""))).toBe(false);
+
+		await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
+		await stubFor(userId).resetAll();
+	}, 30000);
+
+	it("write outcome hits the commit fence and cancels (regression)", async () => {
+		const userId = `srv02-midwrite-${crypto.randomUUID()}`;
+		await runInDurableObject(stubFor(userId), async (_i, state) => {
+			await state.storage.put("lease", { until: Date.now() + 120_000, token: "srv02-midwrite-hold" });
+		});
+		const res = await call("POST", "/v1/ingest", {
+			userId,
+			flush: true,
+			source: "ai-sdk",
+			messages: [{ id: "m1", role: "user", content: "The midwrite canary gas is xenon." }],
+		});
+		expect(res.status).toBe(200);
+		await runInDurableObject(stubFor(userId), async (_i, state) => { await state.storage.delete("lease"); });
+
+		await drainWith(userId, {
+			llmResponse: async () => {
+				await armBarrierLikeErasure(userId);
+				return {
+					objects: [
+						{ kind: "node", label: "midwrite canary", category: "other", matches_existing: null, confidence: 0.95 },
+						{ kind: "slice", on: "midwrite canary", text: "the midwrite canary gas is xenon", kind_detail: "technical_detail", confidence: 0.9 },
+					],
+					notes: "",
+				};
+			},
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+
+		expect((await liveCounts(userId)).total, "fenced write still landed rows").toBe(0);
+		expect(await rowsMentioning(userId, "xenon")).toBe(0);
+		const run = await env.DB.prepare(
+			"SELECT status FROM extraction_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+		).bind(userId).first();
+		expect(["cancelled_by_delete"]).toContain(run?.status);
+		await bulkDeleteBySource(env, userId, { dryRun: false, confirm: true });
+		await stubFor(userId).resetAll();
+	}, 30000);
+});

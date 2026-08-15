@@ -1464,6 +1464,33 @@ export async function bulkDeleteBySource(env, userId, {
 			 WHERE user_id = ? AND status = 'running'`,
 		).bind(now, now, userId).run();
 		cancelledAtomicRuns = Number(cancelledAtomic.meta?.changes ?? 0);
+		// SRV-02: the Durable Object holds work D1 never sees — held ingest
+		// chunks, queued entries, and no-write RESCUE buffers that keep raw
+		// messages for a later flush to redeem. Content accepted before this
+		// barrier must not sit there awaiting re-extraction under a fresh
+		// acceptance time. The barrier is durable at this point, so failing
+		// closed is safe: the erase reports failure, the client retries, and
+		// the retry meets an already-armed barrier.
+		if (!env.USER_MEMORY) {
+			throw new Error("a confirmed erasure requires the USER_MEMORY binding to clear held work");
+		}
+		const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+		if (!stub || typeof stub.resetAll !== "function") {
+			throw new Error("a confirmed erasure could not reach the memory coordinator to clear held work");
+		}
+		await stub.resetAll();
+		// The reset just wiped those jobs' queue entries; nothing will ever
+		// drain them. Close their D1 rows terminally (the reset serialized
+		// behind any in-flight drain, so a job still 'queued'/'staged' here is
+		// permanently ownerless). Post-barrier saves mint new jobs, untouched.
+		const orphaned = await env.DB.prepare(
+			`UPDATE memory_jobs
+			 SET status = 'failed',
+				error = 'cancelled_by_delete: a confirmed delete erased this scope before the save was processed',
+				completed_at = ?, updated_at = ?
+			 WHERE user_id = ? AND status IN ('queued', 'staged')`,
+		).bind(now, now, userId).run();
+		cancelledSourceJobs += Number(orphaned.meta?.changes ?? 0);
 	}
 
 	// The read-your-writes staging bridge answers recall until its rows settle,

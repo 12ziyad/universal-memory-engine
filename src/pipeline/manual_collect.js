@@ -231,6 +231,40 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 	const filteredDigest = filterDigestByTopic(digest, intent);
 	const filteredLines = filteredDigest ? filteredDigest.split("\n").filter((line) => line.trim()).length : 0;
 
+	// SRV-02: digestConversation was a model call — an erasure confirmed while
+	// it ran is invisible to any check made before it. Re-check here so a
+	// superseded save cancels (job failed, nothing durable, no rescue) instead
+	// of finalizing bookkeeping and content past the user's deletion.
+	const digestAcceptedAt = Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? NaN);
+	if (Number.isFinite(digestAcceptedAt) && digestAcceptedAt > 0) {
+		const barrier = await env.DB.prepare(
+			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
+		).bind(userId).first();
+		if (barrier && Number(barrier.barrier_at) > digestAcceptedAt) {
+			const receipt = emptyReceipt(
+				"cancelled_by_delete",
+				"a confirmed delete erased this scope while the save was processing; the save was cancelled",
+				{
+					source: "save_conversation",
+					source_mode: "manual_collect",
+					...source,
+					received,
+				},
+			);
+			receipt.durable = false;
+			const summary = "A confirmed delete erased this scope while the save was processing; nothing was written.";
+			await storeReceipt(env, userId, "save_conversation", receipt, summary, { strict: true });
+			await updateMemoryJob(env, userId, job.id, {
+				status: "failed",
+				receiptId: receipt.id ?? null,
+				payload: { ...jobPayload, outcome: "cancelled_by_delete" },
+				error: "cancelled_by_delete: a confirmed deletion boundary superseded this accepted save",
+				completedAt: Date.now(),
+			});
+			return { fired: false, processing: false, cancelled: true, summary, receipt, sourcePacket };
+		}
+	}
+
 	if (!filteredDigest || !filteredDigest.trim()) {
 		const runId = await createExtractionRun(env, userId, {
 			toolName: "save_conversation",
@@ -256,7 +290,7 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 		return settleResult({ fired: false, processing: false, summary, receipt });
 	}
 
-	return settleResult(await saveMemoryPage(env, userId, {
+	const pageResult = await saveMemoryPage(env, userId, {
 		digest: filteredDigest,
 		messages: normalized.messages,
 		intent,
@@ -264,5 +298,19 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 		keptLines: filteredLines || keptLines,
 		conversationId: opts.conversationId,
 		sourcePacket,
-	}));
+	});
+	if (pageResult?.cancelled) {
+		// The page commit's own fence refused the write: a confirmed erasure
+		// superseded this save. The job must say so — an `enriched` here is the
+		// resurrection-shaped lie SRV-02 documented.
+		await updateMemoryJob(env, userId, job.id, {
+			status: "failed",
+			receiptId: pageResult.receipt?.id ?? null,
+			payload: { ...jobPayload, outcome: "cancelled_by_delete" },
+			error: "cancelled_by_delete: a confirmed deletion boundary superseded this accepted save",
+			completedAt: Date.now(),
+		});
+		return { ...pageResult, sourcePacket };
+	}
+	return settleResult(pageResult);
 }
