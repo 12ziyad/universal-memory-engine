@@ -1,4 +1,0 @@
-{
-	"name": "itsuki-probe",
-	"description": "Phase-0 probe plugin. No hooks wired; used only to observe install paths and lifecycle."
-}

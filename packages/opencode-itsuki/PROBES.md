@@ -92,3 +92,59 @@ Fixture digests (sha256, first 16 hex): `plugin-1.18.18-index.d.ts` = `f3ec1a150
 - Probe root `tmp/probes/` deleted in full (host install, npm cache, rootfs tarballs, payload originals) — see final audit in the session log.
 - WSL: no distro registered by this pass (`itsuki-probe` never materialized); `wsl --shutdown` issued; `docker-desktop` left Stopped as found. Docker Desktop processes stopped.
 - Stale prior-campaign wrangler trees: terminated at start gate (20 PIDs), zero remaining.
+
+---
+
+# UPDATE 2026-08-16 — probes EXECUTED on ubuntu-latest (GitHub Actions)
+
+Vehicle: disposable workflow `probe-phase0.yml` (owner-approved: `workflow_dispatch` only, `permissions: contents: read`, no secrets, no OIDC, no publish/deploy, no production Itsuki). Run **`31911313462`**, job `opencode` — **success**. Artifact `opencode-probe-evidence`. Host `opencode-ai@1.18.18`; model traffic to a loopback OpenAI-compatible stub; **248 hook invocations captured**.
+
+**Every result below came from `opencode run` (headless).** The SDK driver failed with `spawn opencode ENOENT` (harness bug — the step never put the binary on PATH), so all evidence is from the `run` path, which makes the P1 answer stronger, not weaker.
+
+## P1 — hooks under `opencode run`: **RESOLVED → BUILD**
+
+`chat.message` ×3, `dispose` ×3, and the full `event` stream all fired headless. Issue #41422 is specific to `tool.execute.*`; it does **not** generalise. Event types observed (counts): `plugin.added` 135, `session.status` 22, `message.updated` 14, `message.part.updated` 14, `session.updated` 11, `catalog.updated` 9, `message.part.delta` 8, `reference.updated` 6, `integration.updated` 6, `session.idle` 4, `session.created` 3, `session.diff` 3, `session.error` 1.
+
+**Contract finding:** `plugin.added`, `catalog.updated`, `reference.updated`, `integration.updated`, `message.part.delta`, `session.diff` are **not** in the shipped SDK's 32-member `Event` union. Runtime emits more than the type declares — never exhaustively `switch` on it.
+
+## P3 — injected part contract: **RESOLVED → BUILD (proven end to end)**
+
+A fully-formed `TextPart` (`id`, `sessionID`, `messageID`, `type`, `text`, `synthetic:true`) pushed in place onto `output.parts` was **accepted by the host and delivered to the model**: the loopback stub recorded `sawMarker: true` on **every** completion. The user message reached the model as two text parts — the user's own, then ours.
+
+Host-native ids look like `prt_00777ec73001PnMFTq2BPUylqs`; our arbitrary `prt_probe9savb6hjo1` was accepted unchanged. Ids need only be unique — but ship the host-like `prt_` prefix. Plugin context: `directory=/…/project`, `worktree=/`, `hasBunShell=true`, `serverUrl=http://localhost:4096/`.
+
+## P2 — title leakage: **CONFIRMED EMPIRICALLY (static finding upheld)**
+
+Every main completion (`nMsgs:3`) was paired with a second small-model call (`nMsgs:2`) that **also** reported `sawMarker: true`. The synthetic recall block reaches title generation on 1.18.18, exactly as the tagged-source `real` filter predicted. Mitigation is a mandatory §10.1 implementation decision, not a hold.
+
+## P4 — success discrimination + the §0.1-1 boundary: **RESOLVED → BUILD**
+
+Success (turns 1 and 3) — assistant `message.updated` progresses
+`finish=undefined, completed=N` → `finish=stop, completed=N` → `finish=stop, completed=Y`, then `status=idle`, then `session.idle`.
+
+Failure (turn 2) — five `status=retry` cycles, then `session.error`, then `session.idle`, and only *afterwards* the assistant `message.updated` carrying **`finish=undefined`, `completed=Y`, `error={APIError, "stub-forced-error"}`**.
+
+Three consequences, all confirming the frozen design:
+1. **`timeCompleted` alone is NOT a success signal** — the errored message also carries it. The `finish === "stop"` allowlist is empirically justified.
+2. **The final `message.updated` can arrive AFTER `session.idle`.** Capture must re-read the transcript (`client.session.messages()`) rather than trust the event snapshot — which §10.1 already does.
+3. **`session.idle` fired twice** for the error session (7 ms apart) and once for each success. Dedup by session + generation is mandatory, as designed.
+
+**§0.1-1 watermark boundary — PROVEN AVAILABLE.** `chat.message` delivers, before the model runs: `input.sessionID`, `input.messageID`, `output.message.id`, `output.message.time.created`, and `partsBefore` containing exactly the user's own text. That is precisely the anchor the owner's override requires — seed the watermark immediately before this identified human message so the current exchange stays capturable. **Capture is unblocked on this axis.**
+
+## P15 — `dispose`: **RESOLVED → BUILD, with a hard constraint**
+
+`dispose` fired on every `opencode run`, but only **19–21 ms after `session.idle`** (16.052→16.071; 34.310→34.331), and the process then exits.
+
+**This is the durability constraint the owner's override #4 anticipated.** A capture that awaits network I/O inside the non-awaited `event` hook will be cut off mid-flight. It vindicates the design: plan → scrub → **atomic temp+rename spool write (the durability point)** must complete inside that window; the network drain is a separate, resumable step; `dispose` is a best-effort flush with a bounded budget, never the durability mechanism.
+
+## P14 — forced-exit durability: **INCONCLUSIVE → headless capture stays HELD**
+
+The `PROBE_WANT_SLOW` turn completed in ~7 s while the kill was scheduled at 12 s, so `kill -9` landed *after* `finish=stop`/idle and never exercised the staging window. Re-probe needed: raise the stub's per-token delay or kill at 2–3 s, then assert the spool envelope survives and the next run drains it exactly once. Not a defect — a harness timing miss, honestly recorded.
+
+## P5 / P13a — subagents and fork anchors: **PENDING**
+
+Both depended on the SDK driver (`session.get().parentID`, `session.fork()` id/timestamp comparison), which never started. No `task` tool ran, so no child sessions appeared. First-sight-only semantics stand; no cross-fork claims.
+
+## P0a — isolation: Linux reproduces the Windows behavior
+
+A bare invocation created `~/.config/opencode`, `~/.local/share/opencode` (`log/`, `repos/`) and `~/.cache/opencode` (`bin/`) under the runner's HOME. The scaffold-on-start behavior is **host behavior, not a Windows quirk** — which is why an ephemeral runner (or disposable user/VM), not an env override, is the correct isolation vehicle.

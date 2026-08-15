@@ -4,7 +4,51 @@ Campaign: FROZEN ARCHITECTURE REPORT v2.1 (§21.0), owner-approved isolated Phas
 Anchor: master `91e7425`. Host pins: Antigravity 2.0 v2.8.1 · CLI `agy` v1.1.13 · IDE v2.5.5 (IDE HELD).
 All writes confined to the probe root plus this file and `test/fixtures/` (§0.1-3).
 
-## Status summary: every runtime probe is PENDING this pass
+## UPDATE 2026-08-16 — credential-free CLI probes EXECUTED on ubuntu-latest
+
+Vehicle: disposable GitHub Actions workflow `probe-phase0.yml` (owner-approved: `workflow_dispatch` only, `permissions: contents: read`, no secrets, no OIDC, no publish/deploy, no production Itsuki). Run **`31911313462`**, job `antigravity` — **success**. Evidence artifact `antigravity-probe-evidence`.
+
+### P6 — install path: **RESOLVED (BUILD)**
+
+`agy plugin install <local-dir>` on **CLI 1.1.13** resolves to the **shared config root**:
+
+```
+/home/runner/.gemini/config/plugins/itsuki-probe/
+/home/runner/.gemini/config/plugins/itsuki-probe/plugin.json
+/home/runner/.gemini/config/plugins/itsuki-probe/skills
+/home/runner/.gemini/config/import_manifest.json
+```
+
+This settles the report §7 item-16 contradiction **in favour of the changelog** (1.0.2 "install… directly to the shared configuration directory (`~/.gemini/config/`)"). The docs' `~/.gemini/antigravity-cli/plugins/<plugin_name>/` is **stale**. Installer targets `~/.gemini/config/plugins/itsuki/`, as the frozen architecture assumed — confirmed, not guessed.
+
+### P12 — plugin lifecycle: **RESOLVED (BUILD)**
+
+Every command exited 0: `install` → `list` → `disable` → `enable` → `uninstall`. `agy plugin list` emits **JSON** (`{"imports":[{"name","source","importedAt","components"}]}`) — machine-readable, so the doctor can assert enablement without scraping. Uninstall printed `Uninstalled plugin "itsuki-probe"` and removed the plugin directory; `~/.gemini/config/plugins/` remained (empty) alongside `import_manifest.json` and a `config.json` (where changelog 1.1.11 says enablement state lives).
+
+Full `agy plugin` surface (captured `--help`): `list · import · install <target> (supports plugin@marketplace) · uninstall · enable · disable · **validate [path]** · link <mp> <target> · help`.
+
+### NEW FINDING — the installer natively processes `hooks` (architecture-relevant)
+
+`agy plugin install` enumerated component processing for our minimal bundle:
+
+```
+[ok]    itsuki-probe
+        ✔ skills      : 1 processed
+        - agents      : skipped (not found)
+        - commands    : skipped (not found)
+        - mcpServers  : skipped (not found)
+        - hooks       : skipped (not found)
+```
+
+So `hooks` is a first-class component of the host's own installer. Consequences for §10.2: (a) `agy plugin install` is a viable, supported install path for the real bundle — the custom installer need not be the only route on CLI; (b) `agy plugin validate <path>` gives the installer and CI a host-authoritative bundle check; (c) a `plugin.json` carrying only `name` + `description` validated and installed cleanly, confirming the minimal manifest choice.
+
+### Still PENDING (unchanged, and correctly so)
+
+P7 (transcript fixtures), P8 (invocationNum/executionNum + terminationReason allowlist), P9 (subagent hook firing), P11 (shell/argv contract + icacls), P13b (fork anchors) all require a **turn**, which requires a Google sign-in or `GEMINI_API_KEY` — deliberately not granted. P16/P17 (desktop) remain owner-assisted. Antigravity capture, auto-capture scope, desktop support and persistent-Windows-credential mode therefore all remain **HELD**.
+
+---
+
+## Original status summary (superseded in part by the update above)
 
 Two independent blockers, both outside this pass's authorization:
 
