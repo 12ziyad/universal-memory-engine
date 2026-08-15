@@ -156,6 +156,7 @@ const NAV = [
 		["/install/pi", "Pi Agent"],
 	]},
 	{ sec: "Frameworks & tools", items: [
+		["/integrations/native", "Native packages"],
 		["/integrations/python", "Python frameworks"],
 		["/integrations/typescript", "TypeScript frameworks"],
 		["/integrations/n8n", "n8n"],
@@ -482,6 +483,77 @@ ${codeBlock(`/itsuki status`)}
 <li><b>Saves say "queued" rather than "saved"</b> — Itsuki is unreachable or rate-limited; the span is spooled and delivers automatically. <code>/itsuki doctor</code> names the reason.</li>
 <li><b>Saves succeed but recall is empty</b> — extraction is asynchronous; allow a few seconds, then recall again.</li>
 </ul>
+` };
+
+PAGES["/integrations/native"] = { title: "Native packages", html: `
+<h1>Native packages</h1>
+<p class="lede">Five frameworks can reach ${PRODUCT.name} through their own memory interface instead of MCP: install one package, pass it where the framework expects memory, and the agent gets recall and capture without learning a tool.</p>
+<p>These need an <b>API key</b> from <b>API Keys</b> — a server credential, not an MCP link. Every package reads <code>ITSUKI_API_KEY</code> from the environment.</p>
+<h2 id="native-agno">Agno</h2>
+${codeBlock(`pip install agno-itsuki
+
+from agno.agent import Agent
+from agno_itsuki import ItsukiTools
+
+agent = Agent(tools=[ItsukiTools(user_id="alex")])`)}
+<p>Model-called memory: the agent decides when to search and when to save.</p>
+<h2 id="native-llamaindex">LlamaIndex</h2>
+${codeBlock(`pip install llama-index-memory-itsuki
+
+from llama_index.memory.itsuki import itsuki_memory
+
+memory = itsuki_memory(user_id="alex", session_id="thread_9")
+response = await agent.run("What am I working on?", memory=memory)`)}
+<p>A memory <i>block</i>, so it composes with the rest of LlamaIndex's memory rather than replacing it.</p>
+<h2 id="native-camel">CAMEL</h2>
+${codeBlock(`pip install camel-itsuki
+
+from camel.memories import ChatHistoryMemory
+from camel_itsuki import ItsukiStorage
+
+memory = ChatHistoryMemory(
+    context_creator,
+    storage=ItsukiStorage(user_id="alex", agent_id="researcher"),
+)`)}
+<p>Agent history persists to ${PRODUCT.name} and to a local mirror, so a run survives a restart.</p>
+<h2 id="native-vercel-ai">Vercel AI SDK</h2>
+${codeBlock(`npm install ai-sdk-itsuki
+
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+import { withItsuki } from "ai-sdk-itsuki";
+
+const model = withItsuki(openai("gpt-5.2"), { userId: "alex" });
+
+const { text } = await generateText({
+  model,
+  prompt: "What am I learning at the moment?",
+});`)}
+<p>A middleware around the model, so recall and capture ride along with every call.</p>
+<h2 id="native-mastra">Mastra</h2>
+${codeBlock(`npm install mastra-itsuki
+
+import { Agent } from "@mastra/core/agent";
+import { createItsuki } from "mastra-itsuki";
+
+const itsuki = createItsuki({ defaultUserId: "alex" });
+
+const agent = new Agent({
+  id: "support",
+  model: "openai/gpt-5.2",
+  instructions: "You help customers.",
+  inputProcessors: [itsuki.recall],
+  outputProcessors: [itsuki.capture],
+  tools: itsuki.tools,
+});`)}
+<p>Recall on the way in, capture on the way out, plus the tools for when the model should decide.</p>
+<h2 id="native-notes">What to expect</h2>
+<ul>
+<li><b>Writes are asynchronous.</b> A save is accepted immediately and finishes processing in the background, so a recall issued in the same breath may not see it yet.</li>
+<li><b>Every write is scoped to one end user.</b> <code>user_id</code> selects an isolated memory space; there is no shared default.</li>
+<li><b>Deleting by source is exact.</b> Pass the same <code>source</code> you wrote with, and only those memories go.</li>
+</ul>
+<div class="note">Every package on this page was published with signed build provenance and exercised against <code>${ORIGIN}</code> from its registry bytes — installed from PyPI or npm, run against production, and cleaned up to zero.</div>
 ` };
 
 PAGES["/integrations/python"] = { title: "Python frameworks", html: `

@@ -31,6 +31,25 @@ describe("navigation", () => {
 		expect(script).toContain('["/install/pi", "Pi Agent"]');
 	});
 
+	it("documents the native packages, and only the ones that shipped", () => {
+		expect(script).toContain('["/integrations/native", "Native packages"]');
+		expect(script).toContain('PAGES["/integrations/native"]');
+		// Each install command names a package that is published and was proven
+		// against production from its registry bytes.
+		for (const command of [
+			"pip install agno-itsuki",
+			"pip install llama-index-memory-itsuki",
+			"pip install camel-itsuki",
+			"npm install ai-sdk-itsuki",
+			"npm install mastra-itsuki",
+		]) {
+			expect(script, command).toContain(command);
+		}
+		// chatdev-itsuki is HELD and unpublished: documenting it would ship a
+		// command that cannot work.
+		expect(script).not.toContain("chatdev");
+	});
+
 	it("lists the Frameworks & tools section", () => {
 		expect(script).toContain('{ sec: "Frameworks & tools", items: [');
 		expect(script).toContain('["/integrations/python", "Python frameworks"]');

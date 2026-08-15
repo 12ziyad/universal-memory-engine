@@ -356,11 +356,19 @@ describe("Agents door and the variant chooser", () => {
 		expect(Object.keys(doors.integrations.clients)).toEqual(["python", "typescript", "n8n", "dify", "convex"]);
 		expect(Object.keys(doors.integrations.clients.python.variants)).toEqual([
 			"langchain", "crewai", "autogen", "agno", "openai-agents", "google-adk", "llamaindex",
+			// Native packages: the framework calls memory through its own
+			// interface instead of MCP. Each is published and canary-proven
+			// against production before it may appear here.
+			"agno-native", "llamaindex-native", "camel-native",
 		]);
-		expect(Object.keys(doors.integrations.clients.typescript.variants)).toEqual(["mastra", "vercel-ai"]);
+		expect(Object.keys(doors.integrations.clients.typescript.variants)).toEqual([
+			"mastra", "vercel-ai", "mastra-native", "vercel-ai-native",
+		]);
 		expect(Object.keys(doors.integrations.clients.n8n.variants)).toEqual(["native", "http", "mcp"]);
 		// Unverified frameworks must not ship — the no-dead-commands rule.
-		expect(script).not.toContain("camel");
+		// chatdev-itsuki is HELD and unpublished, so `pip install chatdev-itsuki`
+		// would be a dead command; camel-itsuki graduated when it was published
+		// and proven, which is exactly what this rule is for.
 		expect(script).not.toContain("chatdev");
 	});
 
