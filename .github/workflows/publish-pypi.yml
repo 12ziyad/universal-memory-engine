@@ -1,11 +1,17 @@
-# Publish one Python adapter to PyPI, with attestations.
+# Publish one Python distribution to PyPI, with attestations.
+#
+# Covers the four framework adapters AND the `itsuki` Python SDK itself
+# (package input `itsuki` → sdk/python). One workflow on purpose: PyPI trusted
+# publishing binds to (owner, repository, workflow filename, environment), so
+# every Python release rides the same audited pipeline and the same `pypi`
+# environment — one set of publisher configurations, one place to protect.
 #
 # PyPI differs from npm in the one way that matters here: a Trusted Publisher
 # can be configured as a PENDING publisher BEFORE a project exists, so these
 # packages never need an API token at all — not even for the first release.
-# Configure the pending publisher on pypi.org (owner 12ziyad, this repository,
-# this workflow filename, environment `pypi`), then dispatch with
-# dry_run=false. No secret is referenced anywhere below.
+# Configure the publisher on pypi.org (owner 12ziyad, repository
+# universal-memory-engine, workflow publish-pypi.yml, environment pypi), then
+# dispatch with dry_run=false. No secret is referenced anywhere below.
 #
 # `dry_run` defaults to TRUE. Publishing is a deliberate, owner-approved act:
 # every gate runs either way, and only the final step is gated.
@@ -15,10 +21,11 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Which adapter to build and publish'
+        description: 'Which distribution to build and publish'
         type: choice
         required: true
         options:
+          - itsuki
           - agno-itsuki
           - llama-index-memory-itsuki
           - camel-itsuki
@@ -57,19 +64,43 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Resolve the distribution directory
+        id: resolve
+        shell: bash
+        # inputs.package comes from a fixed choice list, so it is not
+        # injectable. The SDK lives outside packages/.
+        run: |
+          if [ "${{ inputs.package }}" = "itsuki" ]; then
+            echo "dir=sdk/python" >> "$GITHUB_OUTPUT"
+            echo "sdk=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=packages/${{ inputs.package }}" >> "$GITHUB_OUTPUT"
+            echo "sdk=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Refuse a drifted kernel copy
         run: node scripts/sync-kernel.mjs --check
 
-      - name: Install the workspace SDK and the adapter's host
+      - name: Install the workspace SDK and the target distribution
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install ./sdk/python
-          python -m pip install ./packages/${{ inputs.package }}
+          if [ "${{ steps.resolve.outputs.sdk }}" != "true" ]; then
+            python -m pip install ./${{ steps.resolve.outputs.dir }}
+          fi
           python -m pip install pytest
 
       - name: Tests
-        working-directory: packages/${{ inputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         run: python -m pytest tests -q
+
+      - name: Strict types (SDK only)
+        if: ${{ steps.resolve.outputs.sdk == 'true' }}
+        working-directory: sdk/python
+        run: |
+          python -m pip install mypy
+          python -m mypy --strict itsuki tests/type_contract.py
 
   publish:
     needs: test
@@ -92,20 +123,45 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Resolve the distribution directory
+        id: resolve
+        shell: bash
+        run: |
+          if [ "${{ inputs.package }}" = "itsuki" ]; then
+            echo "dir=sdk/python" >> "$GITHUB_OUTPUT"
+            echo "sdk=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=packages/${{ inputs.package }}" >> "$GITHUB_OUTPUT"
+            echo "sdk=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse a held package
+        if: ${{ inputs.package == 'chatdev-itsuki' && inputs.dry_run == false }}
+        run: |
+          echo "chatdev-itsuki is HELD: it has no live-LLM workflow proof yet."
+          echo "Editing this workflow to lift the hold is a deliberate, reviewed act."
+          exit 1
+
       - name: Build the distributions
-        working-directory: packages/${{ inputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         run: |
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
 
+      - name: Report artifact hashes
+        working-directory: ${{ steps.resolve.outputs.dir }}
+        run: sha256sum dist/*
+
       - name: Verify the built contents
-        working-directory: packages/${{ inputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         shell: bash
+        env:
+          IS_SDK: ${{ steps.resolve.outputs.sdk }}
         run: |
           echo "--- wheel contents ---"
           python - <<'PY'
-          import glob, re, sys, zipfile
+          import glob, os, re, sys, zipfile
           wheel = sorted(glob.glob("dist/*.whl"))[-1]
           names = zipfile.ZipFile(wheel).namelist()
           print("\n".join(sorted(names)))
@@ -122,39 +178,47 @@ jobs:
                   if re.search(rb"(itsuki|uml)_live_[A-Za-z0-9_-]{10}", body):
                       failures.append(f"credential-shaped string in {name}")
 
-          # The kernel must arrive vendored, not as a dangling import.
-          if not any(n.endswith("_kernel.py") for n in names):
-              failures.append("the vendored kernel is missing")
+          # Adapters must arrive with the kernel vendored, not as a dangling
+          # import. The SDK IS the shared transport; it carries no kernel.
+          if os.environ.get("IS_SDK") != "true":
+              if not any(n.endswith("_kernel.py") for n in names):
+                  failures.append("the vendored kernel is missing")
 
           if failures:
               print("FAIL: " + "; ".join(failures))
               sys.exit(1)
-          print("OK: no credentials, license present, kernel vendored")
+          print("OK: no credentials, license present, kernel policy satisfied")
           PY
 
       - name: Refuse unreviewed runtime dependencies
-        working-directory: packages/${{ inputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         shell: bash
+        env:
+          IS_SDK: ${{ steps.resolve.outputs.sdk }}
         run: |
           python - <<'PY'
-          import sys, tomllib
+          import os, sys, tomllib
           with open("pyproject.toml", "rb") as handle:
               project = tomllib.load(handle)["project"]
           deps = project.get("dependencies", [])
           print("dependencies:", deps)
-          # itsuki plus at most the adapter's own host. Anything else is a new
-          # supply-chain surface and needs a deliberate decision, not a merge.
-          allowed = {"itsuki", "agno", "llama-index-core", "camel-ai"}
+          # The SDK is allowed exactly its transport. An adapter is allowed
+          # exactly the SDK and its host. Anything else is a new supply-chain
+          # surface and needs a deliberate decision, not a merge.
+          if os.environ.get("IS_SDK") == "true":
+              allowed = {"httpx"}
+          else:
+              allowed = {"itsuki", "agno", "llama-index-core", "camel-ai"}
           names = {d.split(">")[0].split("<")[0].split("=")[0].split("[")[0].strip() for d in deps}
           unexpected = names - allowed
           if unexpected:
               print("FAIL: unreviewed runtime dependencies:", unexpected)
               sys.exit(1)
-          print("OK: dependencies are the SDK and the host only")
+          print("OK: dependency set is exactly what was reviewed")
           PY
 
       - name: Audit installed dependencies
-        working-directory: packages/${{ inputs.package }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
         run: |
           python -m pip install pip-audit
           python -m pip_audit --strict --progress-spinner=off || true
@@ -163,7 +227,7 @@ jobs:
         if: ${{ inputs.dry_run == false }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: packages/${{ inputs.package }}/dist
+          packages-dir: ${{ steps.resolve.outputs.dir }}/dist
           # attestations are on by default; stated here because they are the
           # provenance story for these packages.
           attestations: true
