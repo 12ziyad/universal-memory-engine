@@ -359,7 +359,15 @@ export class MemoryClient {
 			}
 			const remainingMs = deadline - Date.now();
 			if (remainingMs <= 0) break;
-			await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remainingMs)));
+			if (remainingMs <= intervalMs) {
+				// The budget is spent by the time this capped sleep ends. Sleeping
+				// and then re-reading the same clock lands exactly on the boundary
+				// — a timer waking at 19ms of a 20ms budget raced one extra poll
+				// on CI. The outcome is decided here, at the cap, not by a re-read.
+				await new Promise((resolve) => setTimeout(resolve, remainingMs));
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, intervalMs));
 		}
 
 		return { ...(last ?? { status: "unknown" }), timed_out: true };

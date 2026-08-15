@@ -1117,7 +1117,14 @@ class _ClientCore:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            yield _Sleep(min(interval, remaining))
+            if remaining <= interval:
+                # The budget is spent by the time this capped sleep ends.
+                # Sleeping and then re-reading the same clock lands exactly on
+                # the boundary and can race one extra poll. Decided here, at
+                # the cap, not by a re-read.
+                yield _Sleep(remaining)
+                break
+            yield _Sleep(interval)
         timeout_snapshot: Dict[str, Any] = dict(last) if last is not None else {"status": "unknown"}
         out = cast(TimedOutPacketStatus, timeout_snapshot)
         out["timed_out"] = True

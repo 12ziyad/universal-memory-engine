@@ -453,16 +453,25 @@ def test_wait_for_accepts_completed_as_a_terminal_compatibility_status(monkeypat
 
 
 def test_wait_for_caps_poll_sleep_to_remaining_budget(monkeypatch):
-    statuses = iter(["processing", "completed"])
+    # One poll, one budget-capped sleep, then the timed-out snapshot. The old
+    # behaviour squeezed a second poll into the sub-millisecond sliver after
+    # sleeping the ENTIRE remaining budget — observable only with a frozen
+    # clock here, and the exact boundary race the JS suite pins the other way
+    # ("does not oversleep or issue a late poll"). Both SDKs now agree: a
+    # budget-capped sleep ends the wait deterministically.
+    calls = []
     sleeps = []
 
     def handler(request):
-        return httpx.Response(200, json={"ok": True, "status": next(statuses)})
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True, "status": "processing"})
 
     monkeypatch.setattr("itsuki.time.sleep", lambda seconds: sleeps.append(seconds))
     result = make_client(handler).wait_for("packet-1", timeout=0.02, interval=60)
 
-    assert result["status"] == "completed"
+    assert result["status"] == "processing"
+    assert result["timed_out"] is True
+    assert len(calls) == 1
     assert len(sleeps) == 1
     assert 0 < sleeps[0] <= 0.020001
 
