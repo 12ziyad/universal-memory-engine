@@ -1,0 +1,58 @@
+{
+	"name": "antigravity-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for Google Antigravity: bounded recall before each turn, capture after a settled one, with an installer and doctor.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"antigravity",
+		"antigravity-plugin",
+		"memory",
+		"ai",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/antigravity-itsuki"
+	},
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"bin": {
+		"antigravity-itsuki": "dist/cli.js"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"plugin",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"devDependencies": {
+		"@types/node": "^22.15.0",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	}
+}

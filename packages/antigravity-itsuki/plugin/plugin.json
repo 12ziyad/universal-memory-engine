@@ -1,0 +1,5 @@
+{
+	"$schema": "https://antigravity.google/schemas/v1/plugin.json",
+	"name": "itsuki",
+	"description": "Persistent memory for Antigravity agents, backed by Itsuki. Recalls relevant context before each turn and captures settled turns."
+}
