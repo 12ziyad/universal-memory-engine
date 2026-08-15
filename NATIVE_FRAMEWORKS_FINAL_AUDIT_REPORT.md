@@ -742,7 +742,7 @@ Publishers so future npm releases are tokenless too.
 
 ---
 
-## 15. `llamadbg_1786818131` — incident closed with production evidence (2026-08-16)
+## 15. `llamadbg_1786818131` — SUPERSEDED BY §16. DO NOT RELY ON THIS SECTION.
 
 Raised as an outstanding prior-campaign incident: the llama-lane debug
 identity `llamadbg_1786818131` was named in §14 only obliquely, was never
@@ -758,8 +758,8 @@ no API key, no writes — each response carried `rows_written: 0` and
 | `SELECT COUNT(*) FROM nodes WHERE user_id LIKE 'llamadbg%'` | **0** | 8,629 rows read, 11.7 ms |
 | `SELECT COUNT(*) FROM source_packets WHERE memory_user_id = 'llamadbg_1786818131'` | **0** | 14,241 rows read (full table) |
 
-**Finding: the space never existed — there is no residue, and there never was
-any data loss.** `source_packets` is the write-receipt table: every accepted
+**Finding (WRONG — see §16): the space never existed.** This conclusion was
+reached by querying the wrong column and is retracted. `source_packets` is the write-receipt table: every accepted
 write, in every mode and through every door, creates a row there. Zero rows
 for that identity across a full-table scan proves no write was ever accepted
 under it, and zero `nodes` across the whole `llamadbg%` family proves no
@@ -782,3 +782,68 @@ read-only `wrangler d1 execute` process trees from the 2026-08-15 session were
 found still running on the operator's machine and terminated (20 PIDs); they
 were queries of this same class that had hung the same way. Long `LIKE` scans
 against `source_packets` should be avoided in favour of indexed equality.
+
+---
+
+## 16. `llamadbg_1786818131` — §15 RETRACTED. The space DID exist. OPEN release blocker. (2026-08-16)
+
+§15 concluded "the space never existed". **That conclusion was wrong, and it was
+wrong for exactly the reason §14's original scare was wrong: it queried an
+identity against a column that does not hold that kind of identity.**
+
+`external_user_id` holds the caller-supplied sub-tenant identity. `memory_user_id`
+holds the *derived* internal space id. §15 searched `source_packets.memory_user_id`
+and `nodes.user_id` — both of which hold derived ids — for a caller-supplied
+string, and unsurprisingly found nothing.
+
+### The corrected query and its result
+
+```
+SELECT COUNT(*) FROM source_packets WHERE external_user_id = 'llamadbg_1786818131'
+  -> 3          (rows_read 14241, rows_written 0, read-only)
+```
+
+**Three source packets were accepted under that identity.** A source packet is
+created for every accepted write. The llama-lane debug space therefore **did
+exist and did receive writes** — the opposite of §15's finding.
+
+### What is NOT yet known (and must not be assumed)
+
+Whether any of it is still live. Answering that needs the *derived*
+`memory_user_id` for those packets, and then a content check
+(`nodes`/`slices`/`memory_pages`) against that derived id — not against the
+`llamadbg_*` string. Those follow-up queries could not be completed: after the
+full-table scans above, the remote D1 endpoint stopped returning results for
+every subsequent query shape (multi-column `SELECT … LIMIT`, aggregate,
+`UNION ALL`), including shapes that had succeeded minutes earlier. Repeated
+attempts were terminated rather than left hanging.
+
+### Status: OPEN — treated as a release blocker
+
+Per the campaign rule for unexpected production findings, this is recorded as a
+**release blocker**, evidence preserved, and **no external mutation was
+performed or attempted**. No delete, no cleanup, no write of any kind.
+
+It blocks **Phase 4 (publication) and any deployment**. It does **not** block
+local Phases 1–3, which touch no production data.
+
+**To close it, three bounded read-only queries are needed once D1 is responsive:**
+
+1. `SELECT DISTINCT memory_user_id FROM source_packets WHERE external_user_id = 'llamadbg_1786818131'`
+2. For each derived id `D`: `SELECT COUNT(*) FROM nodes WHERE user_id = D AND deleted_at IS NULL` (and the same for `slices`, `memory_pages`)
+3. `SELECT COUNT(*) FROM source_episodes WHERE external_user_id = 'llamadbg_1786818131'` and the same for `semantic_atom_candidates`
+
+If (2) returns zero live rows, the cleanup worked and the blocker closes as
+"existed, properly erased". If it returns live rows, this is genuine
+uncleaned canary residue in production and must be erased through the normal
+deletion path **with explicit owner approval**, never ad hoc.
+
+### The generalised lesson (third instance of the same error)
+
+The campaign has now made this class of mistake three times: twice by inventing
+an identity, and once — in §15 — by querying a real identity against the wrong
+column. The memory note "verify an identity before claiming it's missing" is
+necessary but insufficient. The stronger rule: **a zero result only means
+something when you have first proven the query can return non-zero.** Establish
+a positive control (a row you know exists) against the same column before
+treating any zero as evidence of absence.
