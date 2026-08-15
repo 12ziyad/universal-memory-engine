@@ -79,7 +79,7 @@ def test_client_explicitly_rejects_cross_origin_redirects(monkeypatch):
 
 
 def test_prepared_release_version():
-    assert VERSION == "0.2.1"
+    assert VERSION == "0.3.0"
     assert TERMINAL_JOB_STATUSES == {"enriched", "failed", "completed"}
     assert MemoryMessage is not None
     assert MemoryRules is not None

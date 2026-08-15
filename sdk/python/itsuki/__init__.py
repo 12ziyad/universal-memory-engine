@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import math
 import random
@@ -16,7 +17,21 @@ import time
 import uuid
 from datetime import timezone
 from email.utils import parsedate_to_datetime
-from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Literal, Optional, TypedDict, Union, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    FrozenSet,
+    Generator,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    TypedDict,
+    Union,
+    cast,
+    overload,
+)
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -25,7 +40,7 @@ if TYPE_CHECKING:
     from typing_extensions import Unpack
 
 DEFAULT_BASE_URL = "https://itsuki.app"
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 _MAX_TIMEOUT_SECONDS = 2_147_483.647
 
 MessageRole = Literal["user", "assistant", "system", "tool"]
@@ -616,23 +631,104 @@ def _validate_base_url(value: Any) -> str:
     return value.rstrip("/")
 
 
-class MemoryClient:
-    """Thin synchronous client over the Itsuki REST API.
+# ------------------------------------------------------------------ plans
+# A sync client and an async client that disagree about anything — retry
+# arithmetic, tenant resolution, which errors are retriable — is a bug
+# waiting for whichever caller is unlucky. So every decision lives exactly
+# once, in a plan: a generator that yields the I/O it wants performed and is
+# handed the outcome back. Plans never touch the network and never sleep;
+# the two drivers below are the only code that does, and they are the only
+# place the two worlds differ.
 
-    api_key:  itsuki_live_... Bearer key (legacy uml_live_ keys also work).
-    user_id:  optional sub-tenant selector — a stable string per end user of
-              YOUR app; each value maps to an isolated memory space.
+
+class _Sleep(NamedTuple):
+    seconds: float
+
+
+class _Send(NamedTuple):
+    method: str
+    path: str
+    params: Optional[Dict[str, Any]]
+    body: Optional[Dict[str, Any]]
+    timeout: float
+
+
+class _Outcome(NamedTuple):
+    """What a driver hands back after performing one _Send."""
+
+    failure: Optional["MemoryAPIError"] = None
+    success: bool = False
+    status: int = 0
+    data: Any = None
+    retry_after: Optional[float] = None
+
+
+_Action = Union[_Sleep, _Send]
+_Plan = Generator[_Action, Optional[_Outcome], Any]
+
+
+def _default_headers(api_key: str) -> Dict[str, str]:
+    return {
+        "authorization": f"Bearer {api_key}",
+        "content-type": "application/json",
+        "user-agent": f"itsuki-python/{VERSION}",
+    }
+
+
+def _read_response(res: "httpx.Response") -> _Outcome:
+    try:
+        data = res.json()
+    except (ValueError, UnicodeError):
+        data = None
+    return _Outcome(
+        success=res.is_success,
+        status=res.status_code,
+        data=data,
+        retry_after=_parse_retry_after(res.headers.get("retry-after")),
+    )
+
+
+def _timed_out(seconds: float) -> _Outcome:
+    return _Outcome(
+        failure=MemoryAPIError(
+            f"request timed out after {seconds:g}s",
+            status=0,
+            code="timeout",
+        )
+    )
+
+
+def _transport_failed(exc: Exception) -> _Outcome:
+    return _Outcome(
+        failure=MemoryAPIError(
+            f"request failed: {exc}",
+            status=0,
+            code="transport_error",
+        )
+    )
+
+
+class _ClientCore:
+    """Everything both clients decide identically.
+
+    Subclasses supply only a transport and a driver. Nothing here performs
+    I/O, so the whole decision surface is testable without a network or an
+    event loop.
     """
 
-    def __init__(
+    user_id: Optional[str]
+    timeout: float
+    max_retries: int
+
+    # ------------------------------------------------------- construction
+    def _configure(
         self,
         api_key: str,
-        *,
-        base_url: str = DEFAULT_BASE_URL,
-        user_id: Optional[str] = None,
-        timeout: float = 30.0,
-        max_retries: int = 2,
-    ):
+        base_url: str,
+        user_id: Optional[str],
+        timeout: float,
+        max_retries: int,
+    ) -> str:
         if not isinstance(api_key, str) or not api_key.strip():
             raise _argument_error("api_key is required")
         if api_key != api_key.strip():
@@ -654,438 +750,18 @@ class MemoryClient:
             raise _argument_error(
                 "timeout must be greater than zero and no greater than 2147483.647 seconds"
             )
-        base_url = _validate_base_url(base_url)
+        validated_base_url = _validate_base_url(base_url)
         self.user_id = _validate_user_id(user_id)
         self.timeout = float(timeout)
         self.max_retries = max_retries
-        self._client = httpx.Client(
-            base_url=base_url,
-            timeout=timeout,
-            follow_redirects=False,
-            headers={
-                "authorization": f"Bearer {api_key}",
-                "content-type": "application/json",
-                "user-agent": f"itsuki-python/{VERSION}",
-            },
-        )
+        return validated_base_url
 
-    # ----------------------------------------------------------- write
-    @overload
-    def add(self, content: str, /, **opts: Unpack[AddOptions]) -> WriteResult: ...
-
-    @overload
-    def add(self, *, content: str, **opts: Unpack[AddOptions]) -> WriteResult: ...
-
-    @overload
-    def add(self, *, messages: List[MemoryMessage], **opts: Unpack[AddOptions]) -> WriteResult: ...
-
-    def add(  # Runtime parser accepts positional and keyword primaries.
-        self,
-        *args: Any,
-        **opts: Any,
-    ) -> WriteResult:
-        """Save one durable fact, or a list of messages.
-
-        user_id="alice" scopes this write to one of YOUR end users — an
-        isolated memory space inside your account. Omit it and the memory
-        belongs to the key's owner.
-
-            memory.add("Ada prefers email.", user_id="ada")
-            memory.add(messages=[{"role": "user", "content": "..."}], user_id="ada")
-        """
-        if len(args) > 1:
-            raise _argument_error("add accepts at most one positional content argument")
-        content = _primary_argument(
-            args[0] if args else _UNSET,
-            opts,
-            "content",
-            "add options",
-        )
-        messages = _primary_argument(_UNSET, opts, "messages", "add options")
-        _reject_reserved_options(opts, "add options", frozenset(("mode",)))
-        if messages is not _UNSET:
-            if content is not _UNSET:
-                raise _argument_error("Pass either content= or messages=, not both.")
-            return self.add_conversation(_validate_messages(messages, allow_empty=False), **opts)
-        if content is _UNSET:
-            raise _argument_error(
-                "add() needs content='...' (a sentence to remember) or "
-                "messages=[{'role': 'user', 'content': '...'}]."
-            )
-        validated_content = _validate_non_empty_string(content, "content")
-        return cast(
-            WriteResult,
-            self._request("POST", "/v1/save", {**opts, "content": validated_content}),
-        )
-
-    save = add
-
-    @overload
-    def add_conversation(
-        self, messages: List[MemoryMessage], /, **opts: Unpack[AddConversationOptions]
-    ) -> WriteResult: ...
-
-    @overload
-    def add_conversation(
-        self, *, messages: List[MemoryMessage], **opts: Unpack[AddConversationOptions]
-    ) -> WriteResult: ...
-
-    def add_conversation(
-        self, *args: Any, **opts: Any
-    ) -> WriteResult:
-        """Save a conversation (messages oldest first)."""
-        if len(args) > 1:
-            raise _argument_error(
-                "add_conversation accepts at most one positional messages argument"
-            )
-        messages = _primary_argument(
-            args[0] if args else _UNSET,
-            opts,
-            "messages",
-            "add_conversation options",
-        )
-        _reject_reserved_options(
-            opts,
-            "add_conversation options",
-            frozenset(("content", "mode")),
-        )
-        messages = _validate_messages(messages, allow_empty=False)
-        return cast(
-            WriteResult,
-            self._request(
-                "POST",
-                "/v1/save",
-                {**opts, "mode": "conversation", "messages": messages},
-            ),
-        )
-
-    @overload
-    def turn(self, messages: List[MemoryMessage], /, **opts: Unpack[TurnOptions]) -> TurnResult: ...
-
-    @overload
-    def turn(self, *, messages: List[MemoryMessage], **opts: Unpack[TurnOptions]) -> TurnResult: ...
-
-    def turn(self, *args: Any, **opts: Any) -> TurnResult:
-        """Recall + auto-capture in one call — send the latest chat messages."""
-        if len(args) > 1:
-            raise _argument_error("turn accepts at most one positional messages argument")
-        messages = _primary_argument(
-            args[0] if args else _UNSET,
-            opts,
-            "messages",
-            "turn options",
-        )
-        messages = _validate_messages(messages, allow_empty=True)
-        if not messages and (
-            not isinstance(opts.get("query"), str) or not opts["query"].strip()
-        ):
-            raise _argument_error("turn needs at least one message or a non-empty query")
-        return cast(
-            TurnResult,
-            self._request("POST", "/v1/turn", {**opts, "messages": messages}),
-        )
-
-    @overload
-    def ingest(self, messages: List[MemoryMessage], /, **opts: Unpack[IngestOptions]) -> WriteResult: ...
-
-    @overload
-    def ingest(self, *, messages: List[MemoryMessage], **opts: Unpack[IngestOptions]) -> WriteResult: ...
-
-    def ingest(self, *args: Any, **opts: Any) -> WriteResult:
-        """Bulk ingestion; pass flush=True to force digestion now."""
-        if len(args) > 1:
-            raise _argument_error("ingest accepts at most one positional messages argument")
-        messages = _primary_argument(
-            args[0] if args else _UNSET,
-            opts,
-            "messages",
-            "ingest options",
-        )
-        messages = _validate_messages(messages, allow_empty=True)
-        return cast(
-            WriteResult,
-            self._request("POST", "/v1/ingest", {**opts, "messages": messages}),
-        )
-
-    # ------------------------------------------------------------ read
-    @overload
-    def search(self, query: str, /, **opts: Unpack[RecallOptions]) -> RecallResult: ...
-
-    @overload
-    def search(self, *, query: str, **opts: Unpack[RecallOptions]) -> RecallResult: ...
-
-    def search(self, *args: Any, **opts: Any) -> RecallResult:
-        """Look up relevant memory. result["context"] is the prompt-ready block."""
-        if len(args) > 1:
-            raise _argument_error("search accepts at most one positional query argument")
-        query = _primary_argument(
-            args[0] if args else _UNSET,
-            opts,
-            "query",
-            "search options",
-        )
-        query = _validate_non_empty_string(query, "query")
-        return cast(
-            RecallResult,
-            self._request("POST", "/v1/recall", {**opts, "query": query}),
-        )
-
-    recall = search
-
-    def graph(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
-        return cast(Dict[str, Any], self._request("GET", "/v1/graph", user_id=user_id))
-
-    def status(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
-        return cast(Dict[str, Any], self._request("GET", "/v1/status", user_id=user_id))
-
-    def receipts(
-        self,
-        limit: int = 50,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> ReceiptsResult:
-        validated_limit = _validate_number(limit, "limit", minimum=1, integer=True)
-        return cast(
-            ReceiptsResult,
-            self._request(
-                "GET",
-                "/v1/receipts",
-                params={"limit": validated_limit},
-                user_id=user_id,
-            ),
-        )
-
-    def usage(
-        self,
-        range: UsageRange = "30d",
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> Dict[str, Any]:
-        if not isinstance(range, str) or range not in _USAGE_RANGES:
-            raise _argument_error("range must be 1d, 7d, 30d, or all")
-        return cast(
-            Dict[str, Any],
-            self._request("GET", "/v1/usage", params={"range": range}, user_id=user_id),
-        )
-
-    def get_rules(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
-        return cast(Dict[str, Any], self._request("GET", "/v1/rules", user_id=user_id))
-
-    def set_rules(
-        self,
-        rules: MemoryRules,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> Dict[str, Any]:
-        if not isinstance(rules, dict):
-            raise _argument_error("rules must be an object")
-        return cast(
-            Dict[str, Any],
-            self._request("PUT", "/v1/rules", {"rules": rules}, user_id=user_id),
-        )
-
-    def export_all(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
-        return cast(Dict[str, Any], self._request("GET", "/v1/export", user_id=user_id))
-
-    def delete(
-        self,
-        memory_id: str,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> DeleteResult:
-        """Delete one memory object (node_/page_/slice_/candidate_ id)."""
-        memory_id = _validate_identifier(memory_id, "memory_id")
-        return cast(DeleteResult, self._request(
-            "DELETE",
-            f"/v1/memories/{quote(memory_id, safe='')}",
-            user_id=user_id,
-        ))
-
-    def delete_by_source(
-        self,
-        source: Optional[str] = None,
-        before: Optional[float] = None,
-        after: Optional[float] = None,
-        confirm: bool = False,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> DeleteResult:
-        """Bulk delete by source lane and/or time window.
-
-        SAFE BY DEFAULT: without ``confirm=True`` this is a dry run that only
-        reports what would go.
-        """
-        if not isinstance(confirm, bool):
-            raise _argument_error("confirm must be a boolean")
-        validated_source = None if source is None else _validate_identifier(source, "source")
-        validated_before = (
-            None
-            if before is None
-            else _validate_number(before, "before", minimum=1)
-        )
-        validated_after = (
-            None
-            if after is None
-            else _validate_number(after, "after", minimum=1)
-        )
-        params: Dict[str, Any] = {
-            "source": validated_source,
-            "before": validated_before,
-            "after": validated_after,
-        }
-        if confirm:
-            params["confirm"] = "true"
-            params["dry_run"] = "false"
-        return cast(
-            DeleteResult,
-            self._request("DELETE", "/v1/memories", params=params, user_id=user_id),
-        )
-
-    def packet_status(
-        self,
-        source_packet_id: str,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> PacketStatus:
-        """Background-processing status for one accepted write, by packet id."""
-        source_packet_id = _validate_identifier(source_packet_id, "source_packet_id")
-        return self._packet_status_request(source_packet_id, user_id=user_id)
-
-    def _packet_status_request(
-        self,
-        source_packet_id: str,
-        *,
-        user_id: Optional[str],
-        retry_deadline: Optional[float] = None,
-        request_timeout: Optional[float] = None,
-        max_retries: Optional[int] = None,
-    ) -> PacketStatus:
-        return cast(PacketStatus, self._request(
-            "GET",
-            f"/v1/packets/{quote(source_packet_id, safe='')}/status",
-            user_id=user_id,
-            retry_deadline=retry_deadline,
-            request_timeout=request_timeout,
-            max_retries=max_retries,
-        ))
-
-    def jobs(
-        self,
-        status: Optional[JobStatus] = None,
-        since: Optional[float] = None,
-        limit: Optional[int] = None,
-        *,
-        user_id: Optional[str] = _USER_ID_DEFAULT,
-    ) -> JobsResult:
-        """The jobs ledger: every accepted write and where it is."""
-        if status is not None and (
-            not isinstance(status, str) or status not in _JOB_STATUSES
-        ):
-            raise _argument_error(
-                "status must be one of: queued, staged, processing, enriched, failed, completed"
-            )
-        validated_since = (
-            None if since is None else _validate_number(since, "since", minimum=1)
-        )
-        validated_limit = (
-            None
-            if limit is None
-            else _validate_number(limit, "limit", minimum=1, integer=True)
-        )
-        return cast(JobsResult, self._request(
-            "GET",
-            "/v1/jobs",
-            params={"status": status, "since": validated_since, "limit": validated_limit},
-            user_id=user_id,
-        ))
-
-    def wait_for(self, source_packet_id: str, timeout: float = 60.0,
-                 interval: float = 1.5, *,
-                 user_id: Optional[str] = _USER_ID_DEFAULT) -> Union[
-                     PacketStatus, TimedOutPacketStatus
-                 ]:
-        """Wait for an accepted write to finish background processing.
-
-        Polls until ``enriched``, ``failed``, or compatibility status
-        ``completed``, or until the timeout passes — then the last seen status
-        is returned with ``timed_out: True``, never an exception (a timeout is
-        not a failure)::
-
-            receipt = memory.ingest(messages, flush=True)
-            done = memory.wait_for(receipt["source_packet_id"])
-        """
-        if (
-            not _is_finite_number(timeout)
-            or timeout < 0
-            or timeout > _MAX_TIMEOUT_SECONDS
-        ):
-            raise _argument_error(
-                "timeout must be non-negative and no greater than 2147483.647 seconds"
-            )
-        if (
-            not _is_finite_number(interval)
-            or interval <= 0
-            or interval > _MAX_TIMEOUT_SECONDS
-        ):
-            raise _argument_error(
-                "interval must be greater than zero and no greater than 2147483.647 seconds"
-            )
-
-        deadline = time.monotonic() + timeout
-        # Always inspect once. timeout=0 means one immediate status check.
-        source_packet_id = _validate_identifier(source_packet_id, "source_packet_id")
-        last: Optional[PacketStatus] = None
-        first_poll = True
-        while first_poll or time.monotonic() < deadline:
-            initial_poll = first_poll
-            first_poll = False
-            remaining_before_poll = deadline - time.monotonic()
-            request_timeout = (
-                self.timeout
-                if initial_poll and timeout == 0
-                else max(0.001, min(self.timeout, remaining_before_poll))
-            )
-            try:
-                last = self._packet_status_request(
-                    source_packet_id,
-                    user_id=user_id,
-                    retry_deadline=deadline,
-                    request_timeout=request_timeout,
-                    max_retries=0,
-                )
-            except MemoryAPIError as error:
-                if error.code != "timeout" or timeout == 0 or time.monotonic() < deadline:
-                    raise
-                break
-            if last.get("status") in TERMINAL_JOB_STATUSES:
-                if timeout == 0 or time.monotonic() < deadline:
-                    return last
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            time.sleep(min(interval, remaining))
-        timeout_snapshot: Dict[str, Any] = dict(last) if last is not None else {"status": "unknown"}
-        out = cast(TimedOutPacketStatus, timeout_snapshot)
-        out["timed_out"] = True
-        return out
-
-    # --------------------------------------------------------- helpers
+    # ------------------------------------------------------------ helpers
     @staticmethod
     def new_idempotency_key() -> str:
         """A fresh idempotency key — pass to writes to make retries safe."""
         return f"idem_{uuid.uuid4()}"
 
-    def close(self) -> None:
-        self._client.close()
-
-    def __enter__(self) -> "MemoryClient":
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        self.close()
-
-    # -------------------------------------------------------- internal
     # Python callers write snake_case; the wire is camelCase. Translating here
     # is what keeps `add(..., user_id="alice")` from becoming an unrecognised
     # key — which is exactly how sub-tenancy once failed silently.
@@ -1119,7 +795,293 @@ class MemoryClient:
             out[wire] = value
         return out
 
-    def _request(
+    # ------------------------------------------------------- write plans
+    def _plan_add(self, *args: Any, **opts: Any) -> _Plan:
+        if len(args) > 1:
+            raise _argument_error("add accepts at most one positional content argument")
+        content = _primary_argument(
+            args[0] if args else _UNSET,
+            opts,
+            "content",
+            "add options",
+        )
+        messages = _primary_argument(_UNSET, opts, "messages", "add options")
+        _reject_reserved_options(opts, "add options", frozenset(("mode",)))
+        if messages is not _UNSET:
+            if content is not _UNSET:
+                raise _argument_error("Pass either content= or messages=, not both.")
+            return self._plan_add_conversation(
+                _validate_messages(messages, allow_empty=False), **opts
+            )
+        if content is _UNSET:
+            raise _argument_error(
+                "add() needs content='...' (a sentence to remember) or "
+                "messages=[{'role': 'user', 'content': '...'}]."
+            )
+        validated_content = _validate_non_empty_string(content, "content")
+        return self._request_plan("POST", "/v1/save", {**opts, "content": validated_content})
+
+    def _plan_add_conversation(self, *args: Any, **opts: Any) -> _Plan:
+        if len(args) > 1:
+            raise _argument_error(
+                "add_conversation accepts at most one positional messages argument"
+            )
+        messages = _primary_argument(
+            args[0] if args else _UNSET,
+            opts,
+            "messages",
+            "add_conversation options",
+        )
+        _reject_reserved_options(
+            opts,
+            "add_conversation options",
+            frozenset(("content", "mode")),
+        )
+        messages = _validate_messages(messages, allow_empty=False)
+        return self._request_plan(
+            "POST",
+            "/v1/save",
+            {**opts, "mode": "conversation", "messages": messages},
+        )
+
+    def _plan_turn(self, *args: Any, **opts: Any) -> _Plan:
+        if len(args) > 1:
+            raise _argument_error("turn accepts at most one positional messages argument")
+        messages = _primary_argument(
+            args[0] if args else _UNSET,
+            opts,
+            "messages",
+            "turn options",
+        )
+        messages = _validate_messages(messages, allow_empty=True)
+        if not messages and (
+            not isinstance(opts.get("query"), str) or not opts["query"].strip()
+        ):
+            raise _argument_error("turn needs at least one message or a non-empty query")
+        return self._request_plan("POST", "/v1/turn", {**opts, "messages": messages})
+
+    def _plan_ingest(self, *args: Any, **opts: Any) -> _Plan:
+        if len(args) > 1:
+            raise _argument_error("ingest accepts at most one positional messages argument")
+        messages = _primary_argument(
+            args[0] if args else _UNSET,
+            opts,
+            "messages",
+            "ingest options",
+        )
+        messages = _validate_messages(messages, allow_empty=True)
+        return self._request_plan("POST", "/v1/ingest", {**opts, "messages": messages})
+
+    # -------------------------------------------------------- read plans
+    def _plan_search(self, *args: Any, **opts: Any) -> _Plan:
+        if len(args) > 1:
+            raise _argument_error("search accepts at most one positional query argument")
+        query = _primary_argument(
+            args[0] if args else _UNSET,
+            opts,
+            "query",
+            "search options",
+        )
+        query = _validate_non_empty_string(query, "query")
+        return self._request_plan("POST", "/v1/recall", {**opts, "query": query})
+
+    def _plan_graph(self, *, user_id: Optional[str]) -> _Plan:
+        return self._request_plan("GET", "/v1/graph", user_id=user_id)
+
+    def _plan_status(self, *, user_id: Optional[str]) -> _Plan:
+        return self._request_plan("GET", "/v1/status", user_id=user_id)
+
+    def _plan_receipts(self, limit: int, *, user_id: Optional[str]) -> _Plan:
+        validated_limit = _validate_number(limit, "limit", minimum=1, integer=True)
+        return self._request_plan(
+            "GET",
+            "/v1/receipts",
+            params={"limit": validated_limit},
+            user_id=user_id,
+        )
+
+    def _plan_usage(self, range: UsageRange, *, user_id: Optional[str]) -> _Plan:
+        if not isinstance(range, str) or range not in _USAGE_RANGES:
+            raise _argument_error("range must be 1d, 7d, 30d, or all")
+        return self._request_plan(
+            "GET", "/v1/usage", params={"range": range}, user_id=user_id
+        )
+
+    def _plan_get_rules(self, *, user_id: Optional[str]) -> _Plan:
+        return self._request_plan("GET", "/v1/rules", user_id=user_id)
+
+    def _plan_set_rules(self, rules: MemoryRules, *, user_id: Optional[str]) -> _Plan:
+        if not isinstance(rules, dict):
+            raise _argument_error("rules must be an object")
+        return self._request_plan("PUT", "/v1/rules", {"rules": rules}, user_id=user_id)
+
+    def _plan_export_all(self, *, user_id: Optional[str]) -> _Plan:
+        return self._request_plan("GET", "/v1/export", user_id=user_id)
+
+    # ------------------------------------------------------ delete plans
+    def _plan_delete(self, memory_id: str, *, user_id: Optional[str]) -> _Plan:
+        memory_id = _validate_identifier(memory_id, "memory_id")
+        return self._request_plan(
+            "DELETE",
+            f"/v1/memories/{quote(memory_id, safe='')}",
+            user_id=user_id,
+        )
+
+    def _plan_delete_by_source(
+        self,
+        source: Optional[str],
+        before: Optional[float],
+        after: Optional[float],
+        confirm: bool,
+        *,
+        user_id: Optional[str],
+    ) -> _Plan:
+        if not isinstance(confirm, bool):
+            raise _argument_error("confirm must be a boolean")
+        validated_source = None if source is None else _validate_identifier(source, "source")
+        validated_before = (
+            None if before is None else _validate_number(before, "before", minimum=1)
+        )
+        validated_after = (
+            None if after is None else _validate_number(after, "after", minimum=1)
+        )
+        params: Dict[str, Any] = {
+            "source": validated_source,
+            "before": validated_before,
+            "after": validated_after,
+        }
+        if confirm:
+            params["confirm"] = "true"
+            params["dry_run"] = "false"
+        return self._request_plan("DELETE", "/v1/memories", params=params, user_id=user_id)
+
+    # --------------------------------------------------- lifecycle plans
+    def _plan_packet_status(self, source_packet_id: str, *, user_id: Optional[str]) -> _Plan:
+        source_packet_id = _validate_identifier(source_packet_id, "source_packet_id")
+        return self._packet_status_plan(source_packet_id, user_id=user_id)
+
+    def _packet_status_plan(
+        self,
+        source_packet_id: str,
+        *,
+        user_id: Optional[str],
+        retry_deadline: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+    ) -> _Plan:
+        return self._request_plan(
+            "GET",
+            f"/v1/packets/{quote(source_packet_id, safe='')}/status",
+            user_id=user_id,
+            retry_deadline=retry_deadline,
+            request_timeout=request_timeout,
+            max_retries=max_retries,
+        )
+
+    def _plan_jobs(
+        self,
+        status: Optional[JobStatus],
+        since: Optional[float],
+        limit: Optional[int],
+        *,
+        user_id: Optional[str],
+    ) -> _Plan:
+        if status is not None and (
+            not isinstance(status, str) or status not in _JOB_STATUSES
+        ):
+            raise _argument_error(
+                "status must be one of: queued, staged, processing, enriched, failed, completed"
+            )
+        validated_since = (
+            None if since is None else _validate_number(since, "since", minimum=1)
+        )
+        validated_limit = (
+            None
+            if limit is None
+            else _validate_number(limit, "limit", minimum=1, integer=True)
+        )
+        return self._request_plan(
+            "GET",
+            "/v1/jobs",
+            params={"status": status, "since": validated_since, "limit": validated_limit},
+            user_id=user_id,
+        )
+
+    def _plan_wait_for(
+        self,
+        source_packet_id: str,
+        timeout: float,
+        interval: float,
+        *,
+        user_id: Optional[str],
+    ) -> _Plan:
+        if (
+            not _is_finite_number(timeout)
+            or timeout < 0
+            or timeout > _MAX_TIMEOUT_SECONDS
+        ):
+            raise _argument_error(
+                "timeout must be non-negative and no greater than 2147483.647 seconds"
+            )
+        if (
+            not _is_finite_number(interval)
+            or interval <= 0
+            or interval > _MAX_TIMEOUT_SECONDS
+        ):
+            raise _argument_error(
+                "interval must be greater than zero and no greater than 2147483.647 seconds"
+            )
+        source_packet_id = _validate_identifier(source_packet_id, "source_packet_id")
+        return self._wait_plan(source_packet_id, timeout, interval, user_id=user_id)
+
+    def _wait_plan(
+        self,
+        source_packet_id: str,
+        timeout: float,
+        interval: float,
+        *,
+        user_id: Optional[str],
+    ) -> _Plan:
+        deadline = time.monotonic() + timeout
+        # Always inspect once. timeout=0 means one immediate status check.
+        last: Optional[PacketStatus] = None
+        first_poll = True
+        while first_poll or time.monotonic() < deadline:
+            initial_poll = first_poll
+            first_poll = False
+            remaining_before_poll = deadline - time.monotonic()
+            request_timeout = (
+                self.timeout
+                if initial_poll and timeout == 0
+                else max(0.001, min(self.timeout, remaining_before_poll))
+            )
+            try:
+                last = cast(PacketStatus, (yield from self._packet_status_plan(
+                    source_packet_id,
+                    user_id=user_id,
+                    retry_deadline=deadline,
+                    request_timeout=request_timeout,
+                    max_retries=0,
+                )))
+            except MemoryAPIError as error:
+                if error.code != "timeout" or timeout == 0 or time.monotonic() < deadline:
+                    raise
+                break
+            if last.get("status") in TERMINAL_JOB_STATUSES:
+                if timeout == 0 or time.monotonic() < deadline:
+                    return last
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            yield _Sleep(min(interval, remaining))
+        timeout_snapshot: Dict[str, Any] = dict(last) if last is not None else {"status": "unknown"}
+        out = cast(TimedOutPacketStatus, timeout_snapshot)
+        out["timed_out"] = True
+        return out
+
+    # ------------------------------------------------------ request plan
+    def _request_plan(
         self,
         method: str,
         path: str,
@@ -1130,7 +1092,7 @@ class MemoryClient:
         retry_deadline: Optional[float] = None,
         request_timeout: Optional[float] = None,
         max_retries: Optional[int] = None,
-    ) -> Any:
+    ) -> _Plan:
         body = self._to_wire(body)
         params = {key: value for key, value in (params or {}).items() if value is not None}
 
@@ -1182,7 +1144,7 @@ class MemoryClient:
                 )
                 if not math.isfinite(delay) or delay < 0:
                     delay = 0.0
-                time.sleep(min(delay, remaining))
+                yield _Sleep(min(delay, remaining))
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -1195,52 +1157,28 @@ class MemoryClient:
                 if attempt == 0 and remaining <= 0
                 else min(attempt_timeout, remaining)
             )
-            try:
-                res = self._client.request(
-                    method,
-                    path,
-                    params=params or None,
-                    json=body,
-                    timeout=current_timeout,
-                )
-            except httpx.TimeoutException as exc:
-                last_error = MemoryAPIError(
-                    f"request timed out after {current_timeout:g}s",
-                    status=0,
-                    code="timeout",
-                )
+            outcome = yield _Send(method, path, params or None, body, current_timeout)
+            assert outcome is not None  # a driver always answers a _Send
+            if outcome.failure is not None:
+                last_error = outcome.failure
                 continue
-            except httpx.HTTPError as exc:
-                last_error = MemoryAPIError(
-                    f"request failed: {exc}",
-                    status=0,
-                    code="transport_error",
-                )
-                continue
-            except (TypeError, ValueError, OverflowError) as exc:
-                raise _argument_error("request body must be JSON-serializable") from exc
+            if outcome.success:
+                return outcome.data
 
-            try:
-                data = res.json()
-            except (ValueError, UnicodeError):
-                data = None
-            if res.is_success:
-                return data
-
+            data = outcome.data
             error_data = data if isinstance(data, dict) else {}
             raw_message = error_data.get("message") or error_data.get("error")
             message = raw_message if isinstance(raw_message, str) and raw_message else None
             raw_code = error_data.get("code") or error_data.get("error")
             code = raw_code if isinstance(raw_code, str) and raw_code else None
-            retry_after = _parse_retry_after(res.headers.get("retry-after"))
             error = MemoryAPIError(
-                str(message) if message else f"{method} {path} failed with {res.status_code}",
-                status=res.status_code,
+                str(message) if message else f"{method} {path} failed with {outcome.status}",
+                status=outcome.status,
                 code=code,
                 body=data,
-                retry_after=retry_after,
+                retry_after=outcome.retry_after,
             )
-            if res.status_code == 429 or res.status_code >= 500:
+            if outcome.status == 429 or outcome.status >= 500:
                 last_error = error
                 continue
             raise error
@@ -1250,4 +1188,517 @@ class MemoryClient:
         raise last_error
 
 
+class MemoryClient(_ClientCore):
+    """Thin synchronous client over the Itsuki REST API.
+
+    api_key:  itsuki_live_... Bearer key (legacy uml_live_ keys also work).
+    user_id:  optional sub-tenant selector — a stable string per end user of
+              YOUR app; each value maps to an isolated memory space.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = DEFAULT_BASE_URL,
+        user_id: Optional[str] = None,
+        timeout: float = 30.0,
+        max_retries: int = 2,
+    ):
+        base_url = self._configure(api_key, base_url, user_id, timeout, max_retries)
+        self._client = httpx.Client(
+            base_url=base_url,
+            timeout=timeout,
+            follow_redirects=False,
+            headers=_default_headers(api_key),
+        )
+
+    # ----------------------------------------------------------- write
+    @overload
+    def add(self, content: str, /, **opts: Unpack[AddOptions]) -> WriteResult: ...
+
+    @overload
+    def add(self, *, content: str, **opts: Unpack[AddOptions]) -> WriteResult: ...
+
+    @overload
+    def add(self, *, messages: List[MemoryMessage], **opts: Unpack[AddOptions]) -> WriteResult: ...
+
+    def add(  # Runtime parser accepts positional and keyword primaries.
+        self,
+        *args: Any,
+        **opts: Any,
+    ) -> WriteResult:
+        """Save one durable fact, or a list of messages.
+
+        user_id="alice" scopes this write to one of YOUR end users — an
+        isolated memory space inside your account. Omit it and the memory
+        belongs to the key's owner.
+
+            memory.add("Ada prefers email.", user_id="ada")
+            memory.add(messages=[{"role": "user", "content": "..."}], user_id="ada")
+        """
+        return cast(WriteResult, self._drive(self._plan_add(*args, **opts)))
+
+    save = add
+
+    @overload
+    def add_conversation(
+        self, messages: List[MemoryMessage], /, **opts: Unpack[AddConversationOptions]
+    ) -> WriteResult: ...
+
+    @overload
+    def add_conversation(
+        self, *, messages: List[MemoryMessage], **opts: Unpack[AddConversationOptions]
+    ) -> WriteResult: ...
+
+    def add_conversation(self, *args: Any, **opts: Any) -> WriteResult:
+        """Save a conversation (messages oldest first)."""
+        return cast(WriteResult, self._drive(self._plan_add_conversation(*args, **opts)))
+
+    @overload
+    def turn(self, messages: List[MemoryMessage], /, **opts: Unpack[TurnOptions]) -> TurnResult: ...
+
+    @overload
+    def turn(self, *, messages: List[MemoryMessage], **opts: Unpack[TurnOptions]) -> TurnResult: ...
+
+    def turn(self, *args: Any, **opts: Any) -> TurnResult:
+        """Recall + auto-capture in one call — send the latest chat messages."""
+        return cast(TurnResult, self._drive(self._plan_turn(*args, **opts)))
+
+    @overload
+    def ingest(self, messages: List[MemoryMessage], /, **opts: Unpack[IngestOptions]) -> WriteResult: ...
+
+    @overload
+    def ingest(self, *, messages: List[MemoryMessage], **opts: Unpack[IngestOptions]) -> WriteResult: ...
+
+    def ingest(self, *args: Any, **opts: Any) -> WriteResult:
+        """Bulk ingestion; pass flush=True to force digestion now."""
+        return cast(WriteResult, self._drive(self._plan_ingest(*args, **opts)))
+
+    # ------------------------------------------------------------ read
+    @overload
+    def search(self, query: str, /, **opts: Unpack[RecallOptions]) -> RecallResult: ...
+
+    @overload
+    def search(self, *, query: str, **opts: Unpack[RecallOptions]) -> RecallResult: ...
+
+    def search(self, *args: Any, **opts: Any) -> RecallResult:
+        """Look up relevant memory. result["context"] is the prompt-ready block."""
+        return cast(RecallResult, self._drive(self._plan_search(*args, **opts)))
+
+    recall = search
+
+    def graph(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_graph(user_id=user_id)))
+
+    def status(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_status(user_id=user_id)))
+
+    def receipts(
+        self,
+        limit: int = 50,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> ReceiptsResult:
+        return cast(ReceiptsResult, self._drive(self._plan_receipts(limit, user_id=user_id)))
+
+    def usage(
+        self,
+        range: UsageRange = "30d",
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_usage(range, user_id=user_id)))
+
+    def get_rules(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_get_rules(user_id=user_id)))
+
+    def set_rules(
+        self,
+        rules: MemoryRules,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_set_rules(rules, user_id=user_id)))
+
+    def export_all(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], self._drive(self._plan_export_all(user_id=user_id)))
+
+    def delete(
+        self,
+        memory_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> DeleteResult:
+        """Delete one memory object (node_/page_/slice_/candidate_ id)."""
+        return cast(DeleteResult, self._drive(self._plan_delete(memory_id, user_id=user_id)))
+
+    def delete_by_source(
+        self,
+        source: Optional[str] = None,
+        before: Optional[float] = None,
+        after: Optional[float] = None,
+        confirm: bool = False,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> DeleteResult:
+        """Bulk delete by source lane and/or time window.
+
+        SAFE BY DEFAULT: without ``confirm=True`` this is a dry run that only
+        reports what would go.
+        """
+        return cast(DeleteResult, self._drive(
+            self._plan_delete_by_source(source, before, after, confirm, user_id=user_id)
+        ))
+
+    def packet_status(
+        self,
+        source_packet_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> PacketStatus:
+        """Background-processing status for one accepted write, by packet id."""
+        return cast(PacketStatus, self._drive(
+            self._plan_packet_status(source_packet_id, user_id=user_id)
+        ))
+
+    def jobs(
+        self,
+        status: Optional[JobStatus] = None,
+        since: Optional[float] = None,
+        limit: Optional[int] = None,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> JobsResult:
+        """The jobs ledger: every accepted write and where it is."""
+        return cast(JobsResult, self._drive(
+            self._plan_jobs(status, since, limit, user_id=user_id)
+        ))
+
+    def wait_for(self, source_packet_id: str, timeout: float = 60.0,
+                 interval: float = 1.5, *,
+                 user_id: Optional[str] = _USER_ID_DEFAULT) -> Union[
+                     PacketStatus, TimedOutPacketStatus
+                 ]:
+        """Wait for an accepted write to finish background processing.
+
+        Polls until ``enriched``, ``failed``, or compatibility status
+        ``completed``, or until the timeout passes — then the last seen status
+        is returned with ``timed_out: True``, never an exception (a timeout is
+        not a failure)::
+
+            receipt = memory.ingest(messages, flush=True)
+            done = memory.wait_for(receipt["source_packet_id"])
+        """
+        return cast(Union[PacketStatus, TimedOutPacketStatus], self._drive(
+            self._plan_wait_for(source_packet_id, timeout, interval, user_id=user_id)
+        ))
+
+    # --------------------------------------------------------- lifecycle
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "MemoryClient":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    # ---------------------------------------------------------- driver
+    def _perform(self, send: _Send) -> _Outcome:
+        try:
+            res = self._client.request(
+                send.method,
+                send.path,
+                params=send.params,
+                json=send.body,
+                timeout=send.timeout,
+            )
+        except httpx.TimeoutException:
+            return _timed_out(send.timeout)
+        except httpx.HTTPError as exc:
+            return _transport_failed(exc)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise _argument_error("request body must be JSON-serializable") from exc
+        return _read_response(res)
+
+    def _drive(self, plan: _Plan) -> Any:
+        outcome: Optional[_Outcome] = None
+        try:
+            while True:
+                try:
+                    action = plan.send(outcome)
+                except StopIteration as stop:
+                    return stop.value
+                if isinstance(action, _Sleep):
+                    if action.seconds > 0:
+                        time.sleep(action.seconds)
+                    outcome = None
+                else:
+                    outcome = self._perform(action)
+        finally:
+            plan.close()
+
+
+class AsyncMemoryClient(_ClientCore):
+    """Asynchronous client over the Itsuki REST API.
+
+    The same surface as :class:`MemoryClient`, awaited. Both clients share one
+    decision path, so retries, tenant resolution, redirect refusal and error
+    classification cannot drift apart between them::
+
+        async with AsyncMemoryClient(api_key) as memory:
+            found = await memory.search("boxing", user_id="ada")
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = DEFAULT_BASE_URL,
+        user_id: Optional[str] = None,
+        timeout: float = 30.0,
+        max_retries: int = 2,
+    ):
+        base_url = self._configure(api_key, base_url, user_id, timeout, max_retries)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout,
+            follow_redirects=False,
+            headers=_default_headers(api_key),
+        )
+
+    # ----------------------------------------------------------- write
+    @overload
+    async def add(self, content: str, /, **opts: Unpack[AddOptions]) -> WriteResult: ...
+
+    @overload
+    async def add(self, *, content: str, **opts: Unpack[AddOptions]) -> WriteResult: ...
+
+    @overload
+    async def add(
+        self, *, messages: List[MemoryMessage], **opts: Unpack[AddOptions]
+    ) -> WriteResult: ...
+
+    async def add(self, *args: Any, **opts: Any) -> WriteResult:
+        """Save one durable fact, or a list of messages."""
+        return cast(WriteResult, await self._adrive(self._plan_add(*args, **opts)))
+
+    save = add
+
+    @overload
+    async def add_conversation(
+        self, messages: List[MemoryMessage], /, **opts: Unpack[AddConversationOptions]
+    ) -> WriteResult: ...
+
+    @overload
+    async def add_conversation(
+        self, *, messages: List[MemoryMessage], **opts: Unpack[AddConversationOptions]
+    ) -> WriteResult: ...
+
+    async def add_conversation(self, *args: Any, **opts: Any) -> WriteResult:
+        """Save a conversation (messages oldest first)."""
+        return cast(WriteResult, await self._adrive(self._plan_add_conversation(*args, **opts)))
+
+    @overload
+    async def turn(
+        self, messages: List[MemoryMessage], /, **opts: Unpack[TurnOptions]
+    ) -> TurnResult: ...
+
+    @overload
+    async def turn(
+        self, *, messages: List[MemoryMessage], **opts: Unpack[TurnOptions]
+    ) -> TurnResult: ...
+
+    async def turn(self, *args: Any, **opts: Any) -> TurnResult:
+        """Recall + auto-capture in one call — send the latest chat messages."""
+        return cast(TurnResult, await self._adrive(self._plan_turn(*args, **opts)))
+
+    @overload
+    async def ingest(
+        self, messages: List[MemoryMessage], /, **opts: Unpack[IngestOptions]
+    ) -> WriteResult: ...
+
+    @overload
+    async def ingest(
+        self, *, messages: List[MemoryMessage], **opts: Unpack[IngestOptions]
+    ) -> WriteResult: ...
+
+    async def ingest(self, *args: Any, **opts: Any) -> WriteResult:
+        """Bulk ingestion; pass flush=True to force digestion now."""
+        return cast(WriteResult, await self._adrive(self._plan_ingest(*args, **opts)))
+
+    # ------------------------------------------------------------ read
+    @overload
+    async def search(self, query: str, /, **opts: Unpack[RecallOptions]) -> RecallResult: ...
+
+    @overload
+    async def search(self, *, query: str, **opts: Unpack[RecallOptions]) -> RecallResult: ...
+
+    async def search(self, *args: Any, **opts: Any) -> RecallResult:
+        """Look up relevant memory. result["context"] is the prompt-ready block."""
+        return cast(RecallResult, await self._adrive(self._plan_search(*args, **opts)))
+
+    recall = search
+
+    async def graph(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_graph(user_id=user_id)))
+
+    async def status(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_status(user_id=user_id)))
+
+    async def receipts(
+        self,
+        limit: int = 50,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> ReceiptsResult:
+        return cast(ReceiptsResult, await self._adrive(self._plan_receipts(limit, user_id=user_id)))
+
+    async def usage(
+        self,
+        range: UsageRange = "30d",
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_usage(range, user_id=user_id)))
+
+    async def get_rules(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_get_rules(user_id=user_id)))
+
+    async def set_rules(
+        self,
+        rules: MemoryRules,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_set_rules(rules, user_id=user_id)))
+
+    async def export_all(self, *, user_id: Optional[str] = _USER_ID_DEFAULT) -> Dict[str, Any]:
+        return cast(Dict[str, Any], await self._adrive(self._plan_export_all(user_id=user_id)))
+
+    async def delete(
+        self,
+        memory_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> DeleteResult:
+        """Delete one memory object (node_/page_/slice_/candidate_ id)."""
+        return cast(DeleteResult, await self._adrive(
+            self._plan_delete(memory_id, user_id=user_id)
+        ))
+
+    async def delete_by_source(
+        self,
+        source: Optional[str] = None,
+        before: Optional[float] = None,
+        after: Optional[float] = None,
+        confirm: bool = False,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> DeleteResult:
+        """Bulk delete by source lane and/or time window.
+
+        SAFE BY DEFAULT: without ``confirm=True`` this is a dry run that only
+        reports what would go.
+        """
+        return cast(DeleteResult, await self._adrive(
+            self._plan_delete_by_source(source, before, after, confirm, user_id=user_id)
+        ))
+
+    async def packet_status(
+        self,
+        source_packet_id: str,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> PacketStatus:
+        """Background-processing status for one accepted write, by packet id."""
+        return cast(PacketStatus, await self._adrive(
+            self._plan_packet_status(source_packet_id, user_id=user_id)
+        ))
+
+    async def jobs(
+        self,
+        status: Optional[JobStatus] = None,
+        since: Optional[float] = None,
+        limit: Optional[int] = None,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> JobsResult:
+        """The jobs ledger: every accepted write and where it is."""
+        return cast(JobsResult, await self._adrive(
+            self._plan_jobs(status, since, limit, user_id=user_id)
+        ))
+
+    async def wait_for(
+        self,
+        source_packet_id: str,
+        timeout: float = 60.0,
+        interval: float = 1.5,
+        *,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Union[PacketStatus, TimedOutPacketStatus]:
+        """Wait for an accepted write to finish background processing.
+
+        Polls until a terminal status or the timeout, then returns the last
+        seen status with ``timed_out: True`` — never an exception. The wait
+        yields to the event loop between polls, so it never blocks a host's
+        other work::
+
+            receipt = await memory.ingest(messages, flush=True)
+            done = await memory.wait_for(receipt["source_packet_id"])
+        """
+        return cast(Union[PacketStatus, TimedOutPacketStatus], await self._adrive(
+            self._plan_wait_for(source_packet_id, timeout, interval, user_id=user_id)
+        ))
+
+    # --------------------------------------------------------- lifecycle
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def __aenter__(self) -> "AsyncMemoryClient":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
+
+    # ---------------------------------------------------------- driver
+    async def _aperform(self, send: _Send) -> _Outcome:
+        try:
+            res = await self._client.request(
+                send.method,
+                send.path,
+                params=send.params,
+                json=send.body,
+                timeout=send.timeout,
+            )
+        except httpx.TimeoutException:
+            return _timed_out(send.timeout)
+        except httpx.HTTPError as exc:
+            return _transport_failed(exc)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise _argument_error("request body must be JSON-serializable") from exc
+        return _read_response(res)
+
+    async def _adrive(self, plan: _Plan) -> Any:
+        outcome: Optional[_Outcome] = None
+        try:
+            while True:
+                try:
+                    action = plan.send(outcome)
+                except StopIteration as stop:
+                    return stop.value
+                if isinstance(action, _Sleep):
+                    # asyncio.sleep, never time.sleep: a backoff that blocks the
+                    # loop would stall every other task in the host process.
+                    if action.seconds > 0:
+                        await asyncio.sleep(action.seconds)
+                    outcome = None
+                else:
+                    outcome = await self._aperform(action)
+        finally:
+            plan.close()
+
+
 Memory = MemoryClient
+AsyncMemory = AsyncMemoryClient
