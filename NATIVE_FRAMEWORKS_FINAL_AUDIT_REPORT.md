@@ -532,3 +532,194 @@ be dead. One coherent site update follows the PyPI publications and canaries.
 - Owner actions outstanding: (1) four PyPI Trusted Publisher entries;
   (2) revoke the old npm token on npmjs.com (the GitHub secret is already
   deleted).
+
+---
+
+## 14. PyPI release, canaries, and the final GO/NO-GO (2026-08-15)
+
+The owner configured four Trusted Publishers, each with its own environment.
+Everything below was executed after that.
+
+### Per-package publishing environments, and an identity assertion
+
+`publish-pypi.yml` now carries the package -> environment mapping itself,
+hardcoded and exhaustive, in its own `plan` job (a job-level `environment:`
+may read `needs` but not `steps`):
+
+| Package | GitHub environment | PyPI project |
+|---|---|---|
+| `itsuki` | `pypi` | itsuki |
+| `agno-itsuki` | `pypi-agno-itsuki` | agno-itsuki |
+| `llama-index-memory-itsuki` | `pypi-llama-index-memory-itsuki` | llama-index-memory-itsuki |
+| `camel-itsuki` | `pypi-camel-itsuki` | camel-itsuki |
+| `chatdev-itsuki` | mapped, **HELD** | not published |
+
+This is worth the extra job: the OIDC `sub` claim carries the environment
+name, so a publisher configured for one package cannot upload another. The
+publish job asserts its own minted identity against the intended publisher
+**before** uploading — repository, environment, `sub` and `workflow_ref` must
+match or the run fails with a readable diff instead of a bare PyPI
+`invalid-publisher`. The token is never printed or exported; only the four
+public claims PyPI matches on are logged.
+
+All four environments (including the pre-existing `pypi`) are restricted to
+deployments from `master`. Required reviewers were deliberately NOT added:
+they would have blocked the authorised autonomous run. Branch restriction
+gives the protection without the stall.
+
+Dry runs for all four packages passed every gate, and each printed its own
+distinct identity — evidence, not assumption:
+
+```
+sub=repo:12ziyad/universal-memory-engine:environment:pypi                            (itsuki)
+sub=repo:12ziyad/universal-memory-engine:environment:pypi-agno-itsuki                (agno)
+sub=repo:12ziyad/universal-memory-engine:environment:pypi-llama-index-memory-itsuki  (llama)
+sub=repo:12ziyad/universal-memory-engine:environment:pypi-camel-itsuki               (camel)
+```
+
+### Published
+
+| Package | Version | Wheel sha256 |
+|---|---|---|
+| `itsuki` | **0.3.0** | `8e3fadb42a1b19803dcc6f783f24d773753d7e1675114aa486912cd3b568a361` |
+| `agno-itsuki` | **0.1.1** | `c3e9487d7d1d4071d1d41d98152ab3b17c785c1bc8db365768b2c6e5459c4800` |
+| `llama-index-memory-itsuki` | **0.1.1** | `6dc76f874be1b500deaf9fe59f3389d3fd042f927ca7b8a729a5d991d68658e8` |
+| `camel-itsuki` | **0.1.1** | `f4b633b42df3c01846db21da719f020ce94874607d641726ebd748854edfcf12` |
+
+`chatdev-itsuki` returns **404** on PyPI — still held, and the workflow
+refuses a real publish for it by name.
+
+**32/32 artifact checks passed**: version is latest, wheel and sdist both
+present, a PEP 740 attestation bundle exists whose publisher is this
+repository's workflow and the package's own environment, the registry bytes
+re-hash to the advertised sha256, and each installs into a clean venv from
+the registry alone, imports, and self-reports its version.
+
+One honest note on method: the first install pass FAILED for the three
+0.1.1 adapters with `No matching distribution found` while the JSON API
+already advertised 0.1.1. That was PyPI's simple index trailing its JSON API
+by about a minute. It was confirmed by watching the index catch up, not
+assumed — and only then re-run to 32/32.
+
+### PY-ADAPTER-01 — found by canary, fixed, republished (HIGH)
+
+The agno toolkit returned `{"ok": false, "error": "timeout"}` after 8.13s
+while the server went on to **store the memory** — job `enriched`, content
+recallable. A false negative, not a slow call: an agent retries it, or tells
+someone their fact was not remembered.
+
+The cause was structural. A blocking save waits for its receipt and the
+service's own budget for that is 9s (`SAVE_WAIT_BUDGET_MS`), while all four
+Python adapters defaulted to an **8s** client ceiling — the client abandons a
+request the server is still honestly working on. Measured direct saves
+against production: 2.6s, 6.5s, 6.2s, 7.2s. The old ceiling sat inside the
+normal range.
+
+Fixed in the shared Python kernel, which now names both numbers, with every
+adapter deriving its default from it: **30s**, matching the Python SDK. Each
+package gained a test asserting the default clears twice the service budget
+and that the constructor a caller actually reaches uses it. Verified in the
+published bytes by importing the installed distributions and reading the real
+defaults: agno 30.0, camel 30.0, llama-index client 30.0.
+
+Not affected: both SDKs (30s). The TS adapters clear the budget at 10s but
+only by 1s — recorded as a follow-up, not silently republished, because the
+npm packages were explicitly out of scope for republication.
+
+### Production canaries — published bytes, 31 checks, all passed
+
+Run from a venv built only from PyPI, against the live service, with every
+synthetic identity printed so no id is ever guessed.
+
+- **sdk (17)** — lifecycle (save, terminal receipt, recall, list, get);
+  idempotent replay returns the original packet; cross-tenant negative;
+  invalid key -> 401; empty content refused *before any request is issued*;
+  **SRV-01** scoped preview sees the labelled rows, scoped delete converges
+  to zero, deleted source unrecallable, sibling source survives;
+  **SRV-02** mid-flight erase never undone across a 3-minute watch; cleanup
+  converges with recall silent.
+- **agno (6)** — real toolkit save/recall, cross-tenant negative, dry-run
+  preview, converged cleanup.
+- **llama (5)** — real LlamaIndex memory block capture and recall (511
+  chars, needle present), preview, converged cleanup.
+- **camel (7)** — lossless local round-trip, mirror staged a packet, server
+  recall, preview, converged cleanup, local clear.
+- **limits (2)** — a modest read burst is answered or cleanly rate-limited;
+  no 429 within the documented allowance. Production was deliberately not
+  hammered to force one.
+
+Two canary defects were found and fixed in the harness, and neither was a
+product defect — both are recorded because the first draft of each looked
+like one:
+
+1. **The empty-content assertion was wrong.** The Python SDK exposes ONE
+   error type and marks client-side refusals with `status=0`. Proven against
+   an unroutable `base_url`: an argument error, not a connection error, so no
+   request is issued. (Cross-SDK asymmetry: the JS client throws a distinct
+   type. Not a defect in either; worth knowing.)
+2. **The llama lane drove two `asyncio.run()` calls.** That tears down the
+   loop the block's async HTTP client is bound to. In one loop — as a real
+   host runs an agent — recall returns 511 chars and emits `recall.ok`.
+
+A third scare was **my own error and no defect at all**: a space appeared to
+have lost its memories, but the user id had been invented rather than read
+from the probe's output, so the query targeted a space that never existed. A
+dedicated persistence probe (save, then re-check at +0s, +30s, +90s) showed
+memories intact throughout. The canaries now print every synthetic identity.
+
+Observation, not a defect: `ItsukiMemoryBlock._aget` deliberately swallows
+every recall exception and returns empty context, so a misconfiguration
+degrades silently unless the event hook is attached. That is a documented
+design choice (a memory outage should cost context, not the answer), and the
+hook does report `recall.fail`.
+
+### Get Started and the docs — updated only after the proof
+
+The Integrations door now offers a native route beside the MCP one for Agno,
+LlamaIndex, CAMEL, Mastra and the Vercel AI SDK; the docs gained a **Native
+packages** page. Every snippet is taken from the package's own README and
+tested API, not invented.
+
+`camel-itsuki`'s prohibition in the Get Started contract was removed because
+it graduated — published and canary-proven, so its install command is real.
+`chatdev-itsuki` keeps its prohibition in BOTH contracts, and the docs
+contract now additionally pins every advertised install command to a package
+that actually shipped. The "no dead commands" rule therefore still blocks the
+one package that would print a command that cannot work.
+
+### Deployment
+
+Worker version **`2426bec8-1d99-4ed9-8dfa-a568b1f96609`** (itsuki.app),
+deployed from master `c061d73` after the complete serial gates: 1773 Workers
+tests, 572 Node tests, kernel parity in sync.
+
+Live verification against the deployed build: the docs **Native packages**
+page renders all five packages with their real install commands, and the Get
+Started Integrations door carries `agno-native`, `llamaindex-native`,
+`camel-native`, `mastra-native` and `vercel-ai-native`. `chatdev` appears
+nowhere in the shipped page source.
+
+### FINAL GO/NO-GO
+
+**GO**, with the exceptions named below.
+
+- **Server deletion semantics (SRV-01, SRV-02): FIXED, production-verified.**
+  Source-scoped cleanup is exact for every lane the published packages use,
+  and a confirmed erasure is durable against in-flight processing. Evidence
+  in section 13 plus the sdk canary lane above.
+- **npm half: SHIPPED** (`itsuki@0.2.1`, `ai-sdk-itsuki@0.1.0`,
+  `mastra-itsuki@0.1.0`) — untouched this session, as instructed.
+- **PyPI half: SHIPPED** — four artifacts, each attested to its own
+  publisher, verified from registry bytes, canary-proven against production.
+- **`chatdev-itsuki`: HELD** — unpublished (404), mechanically refused by the
+  workflow, absent from every published surface.
+- **Not claimed:** native parity with any competitor, and enterprise
+  readiness as a whole. Neither was measured here.
+- **Follow-ups (not blockers):** the TS adapters' 10s default clears the 9s
+  service budget by only 1s and deserves the same treatment as
+  PY-ADAPTER-01 at the next npm release; rate limiting was observed, never
+  force-tested against production.
+
+**Owner actions outstanding:** revoke the old npm token on npmjs.com (the
+GitHub secret was already deleted); optionally configure npm Trusted
+Publishers so future npm releases are tokenless too.
