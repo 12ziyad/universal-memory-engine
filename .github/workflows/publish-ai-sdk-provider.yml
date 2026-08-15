@@ -1,0 +1,156 @@
+# Publish ai-sdk-itsuki to npm, with provenance.
+#
+# Modelled on publish-openclaw-plugin.yml, which shipped with SLSA provenance.
+# Provenance needs a supported CI (this workflow, on a GitHub-hosted runner)
+# plus `id-token: write`, so npm can mint an OIDC token and sign an attestation
+# binding the tarball to this commit and this file. That is independent of how
+# we AUTHENTICATE:
+#
+#   1. Trusted publishing (tokenless, preferred). Configurable on npmjs.com
+#      only after a package exists, so it cannot cover a first publication.
+#      Once configured, delete the NPM_TOKEN secret — the env below resolves
+#      to empty and npm falls back to OIDC.
+#   2. A granular access token in NPM_TOKEN. Required for the FIRST publish of
+#      a new package name.
+#
+# `dry_run` defaults to TRUE. Publishing is a deliberate, owner-approved act:
+# every gate below runs either way, and only the final step is gated.
+name: Publish AI SDK provider
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every gate and pack the tarball, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The AI SDK requires Node >= 22. Both platforms must be green: this
+        # package is pure ESM with no Node built-ins, and a path or newline
+        # assumption would show up on exactly one of them.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Pin npm to a trusted-publishing-capable major
+        run: npm install -g npm@11
+
+      - name: Report toolchain
+        run: |
+          node --version
+          npm --version
+
+      - name: Refuse a drifted kernel copy
+        run: node scripts/sync-kernel.mjs --check
+
+      - name: Install dependencies
+        working-directory: packages/ai-sdk-itsuki
+        run: npm install
+
+      - name: Typecheck
+        working-directory: packages/ai-sdk-itsuki
+        run: npm run typecheck
+
+      - name: Unit, contract, host-runtime and adversarial tests
+        working-directory: packages/ai-sdk-itsuki
+        run: npm test
+
+      - name: Build
+        working-directory: packages/ai-sdk-itsuki
+        run: npm run build
+
+      - name: Refuse unreviewed runtime dependencies
+        working-directory: packages/ai-sdk-itsuki
+        shell: bash
+        run: |
+          echo "--- runtime dependencies ---"
+          node -e "const p=require('./package.json');const d=p.dependencies||{};console.log(JSON.stringify(d));if(Object.keys(d).length){console.error('FAIL: this package must have zero runtime dependencies');process.exit(1)}"
+          echo "OK: zero runtime dependencies"
+
+      - name: Audit
+        working-directory: packages/ai-sdk-itsuki
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Verify the packed contents
+        working-directory: packages/ai-sdk-itsuki
+        shell: bash
+        run: |
+          npm pack --silent
+          echo "--- tarball contents ---"
+          # Capture the listing once: grep -q on a live tar pipe SIGPIPEs tar
+          # under the runner's default pipefail and fails the step spuriously.
+          tar -tzf ai-sdk-itsuki-*.tgz | sort > tarball-contents.txt
+          cat tarball-contents.txt
+          echo "--- the entry point and its types must ship ---"
+          grep -q 'package/dist/index.js' tarball-contents.txt
+          grep -q 'package/dist/index.d.ts' tarball-contents.txt
+          echo "OK: entry point present"
+          echo "--- refuse to ship secrets ---"
+          if tar -xzOf ai-sdk-itsuki-*.tgz | grep -qE '(itsuki|uml)_live_[A-Za-z0-9_-]{10}'; then
+            echo "FAIL: a credential-shaped string is present in the tarball"
+            exit 1
+          fi
+          echo "OK: no credential-shaped strings"
+          echo "--- refuse to ship a postinstall hook ---"
+          if node -e "process.exit(require('./package.json').scripts.postinstall ? 1 : 0)"; then
+            echo "OK: no postinstall script"
+          else
+            echo "FAIL: package declares a postinstall script"
+            exit 1
+          fi
+          echo "--- no destructive operation is reachable from this package ---"
+          # The shared kernel defines deletion for the adapters that expose it.
+          # This one exposes none, so nothing outside the kernel may call it.
+          if tar -xzOf ai-sdk-itsuki-*.tgz --wildcards 'package/dist/*.js' 2>/dev/null | grep -qE '\.(deleteMemory|deleteBySource)\('; then
+            echo "FAIL: package code calls a deletion endpoint"
+            exit 1
+          fi
+          echo "OK: no deletion call sites outside the kernel"
+          echo "--- must run on edge runtimes: no Node built-ins ---"
+          if tar -xzOf ai-sdk-itsuki-*.tgz --wildcards 'package/dist/*.js' 'package/dist/kernel/*.js' 2>/dev/null | grep -qE 'require\("node:|from "node:'; then
+            echo "FAIL: package imports a Node built-in"
+            exit 1
+          fi
+          echo "OK: no Node built-ins"
+          echo "--- must not bundle a model provider ---"
+          if node -e "const p=require('./package.json');const all={...(p.dependencies||{}),...(p.peerDependencies||{})};const bad=Object.keys(all).filter(n=>n.startsWith('@ai-sdk/')&&n!=='@ai-sdk/provider');console.log(JSON.stringify(all));process.exit(bad.length?1:0)"; then
+            echo "OK: wraps a provider, bundles none"
+          else
+            echo "FAIL: package depends on a concrete model provider"
+            exit 1
+          fi
+
+      # Only one platform publishes; the other exists to prove portability.
+      - name: Publish to npm with provenance
+        if: ${{ inputs.dry_run == false && matrix.os == 'ubuntu-latest' }}
+        working-directory: packages/ai-sdk-itsuki
+        run: npm publish --provenance --access public
+        env:
+          # Empty when trusted publishing is configured; npm then uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run only
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "dry_run was true — every gate passed and the tarball was built."
+          echo "Re-run with dry_run=false to publish."
