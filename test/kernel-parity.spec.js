@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
-import { plannedCopies, tsKernelFiles, pyKernelFiles } from "../scripts/sync-kernel.mjs";
+import { normalizeEol, plannedCopies, tsKernelFiles, pyKernelFiles } from "../scripts/sync-kernel.mjs";
 
 describe("shared kernel", () => {
 	it("ships the modules every adapter is entitled to", () => {
@@ -38,9 +38,12 @@ describe("shared kernel", () => {
 
 describe("vendored copies", () => {
 	for (const copy of plannedCopies()) {
-		it(`${copy.label} is byte-identical to the kernel`, () => {
+		it(`${copy.label} is identical to the kernel (modulo line endings)`, () => {
 			expect(existsSync(copy.target)).toBe(true);
-			expect(readFileSync(copy.target, "utf8")).toBe(copy.content);
+			// EOLs are checkout configuration: autocrlf can smudge the same LF
+			// blob to CRLF on one machine and not another. Content is what the
+			// guard defends.
+			expect(normalizeEol(readFileSync(copy.target, "utf8"))).toBe(copy.content);
 		});
 	}
 

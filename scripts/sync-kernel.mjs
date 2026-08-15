@@ -54,12 +54,24 @@ export function pyKernelFiles() {
 	return readdirSync(PY_KERNEL_DIR).filter((name) => name.endsWith(".py")).sort();
 }
 
+/**
+ * Line endings are checkout configuration, not content. core.autocrlf and the
+ * eol attributes can hand the same blob to two machines with different EOLs —
+ * and did: the Windows CI leg saw the banner (from this eol=lf-forced script)
+ * in LF while the smudged copies were CRLF, and declared every copy stale.
+ * The kernel guard exists to catch CONTENT drift, so everything is compared
+ * and written in normalized LF.
+ */
+export function normalizeEol(text) {
+	return text.replace(/\r\n/g, "\n");
+}
+
 export function expectedTs(name) {
-	return TS_BANNER.replace("%NAME%", name) + readFileSync(join(TS_KERNEL_DIR, name), "utf8");
+	return normalizeEol(TS_BANNER.replace("%NAME%", name) + readFileSync(join(TS_KERNEL_DIR, name), "utf8"));
 }
 
 export function expectedPy(name) {
-	return PY_BANNER.replace("%NAME%", name) + readFileSync(join(PY_KERNEL_DIR, name), "utf8");
+	return normalizeEol(PY_BANNER.replace("%NAME%", name) + readFileSync(join(PY_KERNEL_DIR, name), "utf8"));
 }
 
 export function tsDestination(pkg) {
@@ -104,7 +116,7 @@ function main() {
 	let written = 0;
 
 	for (const copy of plannedCopies()) {
-		const actual = existsSync(copy.target) ? readFileSync(copy.target, "utf8") : null;
+		const actual = existsSync(copy.target) ? normalizeEol(readFileSync(copy.target, "utf8")) : null;
 		if (actual === copy.content) continue;
 		if (check) {
 			stale += 1;

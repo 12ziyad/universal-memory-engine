@@ -6,3 +6,7 @@
 *.html text eol=lf diff
 *.css text eol=lf diff
 *.md text eol=lf diff
+*.ts text eol=lf diff
+*.py text eol=lf diff
+*.yml text eol=lf diff
+*.toml text eol=lf diff
