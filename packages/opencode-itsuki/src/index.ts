@@ -70,8 +70,21 @@ interface Runtime {
 	/** Sessions known to be subagents; cached so we ask the host once. */
 	subagents: Map<string, boolean>;
 	pending: Map<string, PendingInjection>;
-	/** Idle generations already handled, so a repeated idle is not a second capture. */
-	handledIdle: Set<string>;
+	/**
+	 * Sessions with a capture in flight.
+	 *
+	 * Phase 0 measured `session.idle` firing twice, 7ms apart, on the error
+	 * path. This prevents the duplicate WORK. It deliberately does not try to
+	 * prevent duplicate WRITES — that is already guaranteed downstream by the
+	 * assistant-message watermark, the recent-key set and the spool's own
+	 * refusal of a repeated idempotency key.
+	 *
+	 * An earlier version deduplicated on `sessionID:lastCapturedMessageID`
+	 * instead. That value only advances when a capture succeeds, so one failed
+	 * or refused turn pinned the key and silently blocked every later capture
+	 * in the session (REL-03).
+	 */
+	capturing: Set<string>;
 }
 
 function makeRuntime(options: Record<string, unknown> | undefined): Runtime {
@@ -110,7 +123,7 @@ function makeRuntime(options: Record<string, unknown> | undefined): Runtime {
 		ready: Boolean(coordinator),
 		subagents: new Map(),
 		pending: new Map(),
-		handledIdle: new Set(),
+		capturing: new Set(),
 	};
 }
 
@@ -337,15 +350,16 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 					if (status !== "idle") return;
 					const sessionID = String(properties?.sessionID ?? "");
 					if (!sessionID) return;
-					// Phase 0: the error path emits idle TWICE. One capture per idle.
-					const generation = `${sessionID}:${runtime.sessions.load(sessionID).lastCapturedMessageID ?? "none"}`;
-					if (runtime.handledIdle.has(generation)) return;
-					runtime.handledIdle.add(generation);
-					if (runtime.handledIdle.size > 256) {
-						const first = runtime.handledIdle.values().next().value;
-						if (typeof first === "string") runtime.handledIdle.delete(first);
+					// Phase 0: the error path emits idle TWICE, 7ms apart. Serialise
+					// per session so the second one does not duplicate the work; the
+					// write itself is already idempotent further down.
+					if (runtime.capturing.has(sessionID)) return;
+					runtime.capturing.add(sessionID);
+					try {
+						await captureSettled(sessionID);
+					} finally {
+						runtime.capturing.delete(sessionID);
 					}
-					await captureSettled(sessionID);
 					return;
 				}
 				if (type === "session.deleted") {

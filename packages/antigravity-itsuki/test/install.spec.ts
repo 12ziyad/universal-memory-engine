@@ -60,6 +60,18 @@ describe("hook command construction", () => {
 		},
 	);
 
+	it("SEC-03: refuses control characters, including a NUL byte, in a hook path", () => {
+		// A NUL in a path is a truncation vector: the string the guard inspects
+		// and the bytes an exec layer ultimately uses can disagree. The \s class
+		// covers tab and newline but not the rest of the control range, so control
+		// characters are matched explicitly.
+		const ctrl = (code: number) => String.fromCharCode(code);
+		for (const code of [0x00, 0x01, 0x07, 0x1b, 0x1f, 0x7f]) {
+			expect(buildHookCommand("/usr/bin/node", `/opt/a${ctrl(code)}b/h.js`, "Stop").ok).toBe(false);
+			expect(buildHookCommand(`/usr/bin/no${ctrl(code)}de`, "/opt/h.js", "Stop").ok).toBe(false);
+		}
+	});
+
 	it("builds the documented top-level named-block hooks.json shape", () => {
 		const result = buildHooksJson("/usr/bin/node", "/opt/h.js");
 		expect(result.ok).toBe(true);

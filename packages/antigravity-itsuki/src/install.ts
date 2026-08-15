@@ -97,9 +97,26 @@ function listFiles(dir: string, base = dir): string[] {
  * mis-parsed command fails silently.
  */
 export function buildHookCommand(nodePath: string, scriptPath: string, event: string): { ok: true; command: string } | { ok: false; reason: string } {
-	const risky = /["'`$&|;<>()*?!\\\r\n]|\s/;
+	// Shell metacharacters, any whitespace, AND the whole control range.
+	// A NUL is the important one: the string this guard inspects and the bytes
+	// an exec layer eventually uses can disagree across it, so a path that
+	// looks safe here can execute as something shorter (SEC-03).
+	// Written as explicit code-point checks rather than a regex literal. This
+	// pattern travels through several escaping layers, and a mis-escaped \s
+	// silently degrades to "the letter s" — which would reject nearly every
+	// real path while still looking like a working guard.
+	const SHELL_SPECIAL = new Set(Array.from("\"'`$&|;<>()*?!\\"));
+	const isRisky = (value: string): boolean => {
+		for (const char of value) {
+			const code = char.codePointAt(0) ?? 0;
+			// Everything at or below space (NUL, tab, CR, LF, …) and DEL.
+			if (code <= 0x20 || code === 0x7f) return true;
+			if (SHELL_SPECIAL.has(char)) return true;
+		}
+		return false;
+	};
 	for (const [label, value] of [["node", nodePath], ["script", scriptPath]] as const) {
-		if (risky.test(value)) {
+		if (isRisky(value)) {
 			return {
 				ok: false,
 				reason: `the ${label} path contains a character that is unsafe in an unquoted hook command (${value}). Reinstall from a path without spaces or shell metacharacters, or set ITSUKI_STATE_DIR and install elsewhere.`,

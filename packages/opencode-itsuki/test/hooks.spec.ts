@@ -199,3 +199,51 @@ describe("dispose", () => {
 		await expect((hooks as any).dispose()).resolves.toBeUndefined();
 	});
 });
+
+describe("REL-03 — a failed capture must not poison the session", () => {
+	it("still captures the NEXT turn after an earlier turn failed to stage", async () => {
+		// Turn 1 errors, so nothing is captured and lastCapturedMessageID stays
+		// null. Turn 2 succeeds. If the idle-dedup key is derived from
+		// lastCapturedMessageID, turn 2's key equals turn 1's, and turn 2 is
+		// silently dropped forever.
+		const turn1: any[] = [userMessage("m1", "q1"), assistantMessage("m2", "", { finish: undefined, error: { name: "E" } })];
+		const turn2: any[] = [userMessage("m1", "q1"), assistantMessage("m2", "", { finish: undefined, error: { name: "E" } }), userMessage("m3", "q2", 2000), assistantMessage("m4", "answer two")];
+
+		let current = turn1;
+		const host = {
+			client: {
+				app: { log: async () => undefined },
+				session: {
+					get: async () => ({ data: { id: "ses_1" } }),
+					messages: async () => ({ data: current }),
+				},
+			},
+		};
+		const { hooks } = await loadPlugin(host);
+
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m1" }, { message: turn1[0].info, parts: turn1[0].parts });
+		await (hooks as any).event({ event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } });
+
+		const { Spool } = await import("../src/spool.js");
+		expect(new Spool(root).list()).toHaveLength(0); // turn 1 correctly refused
+
+		current = turn2;
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m3" }, { message: turn2[2].info, parts: turn2[2].parts });
+		await (hooks as any).event({ event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } });
+
+		// Turn 2 settled successfully and MUST be captured.
+		expect(new Spool(root).list()).toHaveLength(1);
+	});
+
+	it("still collapses the double idle Phase 0 measured on the error path", async () => {
+		const messages: any[] = [userMessage("m1", "q"), assistantMessage("m2", "a")];
+		const host = makeHost({ messages });
+		const { hooks } = await loadPlugin(host);
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m1" }, { message: messages[0].info, parts: messages[0].parts });
+		const idle = { event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } };
+		await Promise.all([(hooks as any).event(idle), (hooks as any).event(idle)]);
+		await (hooks as any).event(idle);
+		const { Spool } = await import("../src/spool.js");
+		expect(new Spool(root).list()).toHaveLength(1);
+	});
+});
