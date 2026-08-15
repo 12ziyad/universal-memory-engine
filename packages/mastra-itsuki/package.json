@@ -1,0 +1,61 @@
+{
+	"name": "mastra-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for Mastra: automatic recall and capture through agent processors, plus typed tools when you want the model to decide.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"mastra",
+		"memory",
+		"ai",
+		"agent",
+		"workflow",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/mastra-itsuki"
+	},
+	"engines": {
+		"node": ">=22.13.0"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"peerDependencies": {
+		"@mastra/core": ">=1.59.0 <2.0.0",
+		"zod": "^3.25.0 || ^4.0.0"
+	},
+	"devDependencies": {
+		"@mastra/core": "^1.59.0",
+		"@types/node": "^22.15.0",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4",
+		"zod": "^4.1.8"
+	}
+}

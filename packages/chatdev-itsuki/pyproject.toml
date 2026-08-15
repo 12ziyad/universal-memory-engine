@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chatdev-itsuki"
+version = "0.1.0"
+description = "Itsuki memory store for ChatDev 2.0 workflows (operator-wired)."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["itsuki>=0.3,<0.4"]
+keywords = ["chatdev", "devall", "memory", "ai", "agent", "llm", "itsuki"]
+
+[project.urls]
+Repository = "https://github.com/12ziyad/universal-memory-engine"
+Documentation = "https://itsuki.app/docs/"
+Issues = "https://github.com/12ziyad/universal-memory-engine/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["chatdev_itsuki"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/chatdev_itsuki", "/LICENSE", "/README.md", "/pyproject.toml"]

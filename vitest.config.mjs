@@ -56,6 +56,7 @@ export default defineConfig(async () => {
 				"test/hook_batching.spec.js",
 				"test/hook_manifest.spec.js",
 				"test/hook_outbox.spec.js",
+				"test/kernel-parity.spec.js",
 				"test/migrations_append_only.spec.js",
 				"test/project_identity.spec.js",
 				"test/sdk_js.spec.js",

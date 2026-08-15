@@ -197,13 +197,17 @@ describe("MCP tool rate limiting", () => {
 		const seen = [];
 		env.SAVE_LIMITER = refusingLimiter(seen);
 
-		await mcpCall(token, 9, "save_memory", { content: "fact one", memoryScope: { projectId: "proj_a" } });
-		await mcpCall(token, 10, "save_memory", { content: "fact two", memoryScope: { projectId: "proj_b" } });
+		// The caller-supplied ids must be impossible substrings of the server's
+		// own bound project id (proj_ + 32 hex chars): "proj_a"/"proj_b" matched
+		// a legitimate proj_a…/proj_b… hex id one run in eight, failing the
+		// not.toContain below against the SERVER's id rather than the caller's.
+		await mcpCall(token, 9, "save_memory", { content: "fact one", memoryScope: { projectId: "proj_caller_alpha" } });
+		await mcpCall(token, 10, "save_memory", { content: "fact two", memoryScope: { projectId: "proj_caller_beta" } });
 
 		expect(seen).toHaveLength(2);
 		expect(seen[0]).toBe(seen[1]); // same credential, same bucket — attribution cannot rotate it
-		expect(seen[0]).not.toContain("proj_a");
-		expect(seen[0]).not.toContain("proj_b");
+		expect(seen[0]).not.toContain("proj_caller_alpha");
+		expect(seen[0]).not.toContain("proj_caller_beta");
 	});
 
 	it("a permission refusal consumes no limiter budget", async () => {

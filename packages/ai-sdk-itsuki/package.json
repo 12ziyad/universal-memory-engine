@@ -1,0 +1,62 @@
+{
+	"name": "ai-sdk-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for the Vercel AI SDK: bounded recall injected before every call, exactly-once capture after each settled generation. Wraps any provider — it does not replace one.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"ai-sdk",
+		"vercel",
+		"memory",
+		"ai",
+		"llm",
+		"middleware",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/ai-sdk-itsuki"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"peerDependencies": {
+		"ai": "^7.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.0",
+		"ai": "^7.0.66",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4",
+		"zod": "^4.1.8"
+	}
+}
