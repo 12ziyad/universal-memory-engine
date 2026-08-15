@@ -24,6 +24,7 @@ from itsuki import MemoryAPIError, MemoryClient
 from ._kernel import (
     DEFAULT_MAX_CONTEXT_CHARS,
     DEFAULT_MAX_ITEMS,
+    DEFAULT_TIMEOUT_SECONDS,
     bound_items,
     capture_idempotency_key,
     clamp,
@@ -81,7 +82,7 @@ class ItsukiTools(Toolkit):
         recall_scope: Optional[str] = None,
         max_items: int = DEFAULT_MAX_ITEMS,
         max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
-        timeout: float = 8.0,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
         enable_save: bool = True,
         enable_search: bool = True,
         enable_list: bool = True,

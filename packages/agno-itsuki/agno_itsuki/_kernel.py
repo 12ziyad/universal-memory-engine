@@ -41,6 +41,19 @@ TRUNCATION_NOTE = "[truncated to fit the configured recall budget]"
 DEFAULT_MAX_CONTEXT_CHARS = 4_000
 DEFAULT_MAX_ITEMS = 10
 
+# PY-ADAPTER-01. A blocking save deliberately waits for its receipt, and the
+# service's own wait budget for that is 9s. Any client ceiling at or below
+# that abandons a request the server is still honestly working on — and the
+# write usually lands anyway, so the caller is told "failed" about a memory
+# that was in fact stored. That false negative is worse than a slow call: an
+# agent retries it, or tells someone their fact was not remembered.
+#
+# This default therefore sits well clear of the service budget rather than
+# beside it, and matches the Python SDK's own 30s default so a caller who
+# passes nothing gets the same patience everywhere.
+SERVICE_SAVE_WAIT_BUDGET_SECONDS = 9.0
+DEFAULT_TIMEOUT_SECONDS = 30.0
+
 _MIN_LINE_CHARACTERS = 24
 _MIN_ALPHANUMERIC_CHARACTERS = 12
 _MAX_LINE_CHARACTERS = 2_000

@@ -9,7 +9,7 @@ from itsuki import AsyncMemoryClient
 from llama_index.core.memory import Memory
 
 from .block import DEFAULT_SEARCH_MSG_LIMIT, ItsukiMemoryBlock
-from ._kernel import DEFAULT_MAX_CONTEXT_CHARS, DEFAULT_MAX_ITEMS
+from ._kernel import DEFAULT_MAX_CONTEXT_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_TIMEOUT_SECONDS
 
 SETUP_HINT = (
     "Create a key at https://itsuki.app under API Keys, then set ITSUKI_API_KEY "
@@ -20,7 +20,7 @@ SETUP_HINT = (
 def itsuki_client(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-    timeout: float = 8.0,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> AsyncMemoryClient:
     """An async client, resolved from the argument then the environment."""
     resolved = (api_key or os.environ.get("ITSUKI_API_KEY") or "").strip()

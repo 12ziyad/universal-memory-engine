@@ -314,3 +314,17 @@ def test_the_manager_lifecycle_end_to_end():
 def test_host_availability_is_reported():
     # A visible signal in the run so a skip is never mistaken for a pass.
     print(f"\n[chatdev-itsuki] real ChatDev host available: {HOST_AVAILABLE}")
+
+
+def test_default_timeout_clears_the_service_save_wait_budget():
+    """PY-ADAPTER-01: a client ceiling at or below the service's own save wait
+    budget abandons a request the server is still honestly working on. The
+    write lands anyway, so the caller is told "failed" about a memory that was
+    stored — a false negative an agent will retry or report to its user.
+    Keep a real margin, not a coincidence.
+    """
+    from chatdev_itsuki.config import ItsukiConfig
+    from chatdev_itsuki._kernel import DEFAULT_TIMEOUT_SECONDS, SERVICE_SAVE_WAIT_BUDGET_SECONDS
+
+    assert DEFAULT_TIMEOUT_SECONDS >= SERVICE_SAVE_WAIT_BUDGET_SECONDS * 2
+    assert ItsukiConfig.__dataclass_fields__['timeout_s'].default == DEFAULT_TIMEOUT_SECONDS

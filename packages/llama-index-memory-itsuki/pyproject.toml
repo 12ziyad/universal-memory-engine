@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llama-index-memory-itsuki"
-version = "0.1.0"
+version = "0.1.1"
 description = "Itsuki long-term memory block for LlamaIndex."
 readme = "README.md"
 license = "Apache-2.0"

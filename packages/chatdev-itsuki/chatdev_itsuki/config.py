@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from ._kernel import DEFAULT_TIMEOUT_SECONDS
 from entity.configs.base import (
     BaseConfig,
     ConfigFieldSpec,
@@ -82,7 +83,7 @@ class ItsukiMemoryConfig(BaseConfig):
     project_id: str | None = None
     top_k: int = 5
     max_context_chars: int = 4_000
-    timeout_s: float = 8.0
+    timeout_s: float = DEFAULT_TIMEOUT_SECONDS
     allow_clear: bool = False
 
     @classmethod

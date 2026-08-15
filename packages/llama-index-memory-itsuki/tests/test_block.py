@@ -244,3 +244,24 @@ def test_the_host_places_the_block_content_into_the_prompt():
     messages = run(main())
     rendered = "\n".join(str(m.content) for m in messages)
     assert MEMORY_TEXT in rendered
+
+
+def test_default_timeout_clears_the_service_save_wait_budget():
+    """PY-ADAPTER-01: a client ceiling at or below the service's own save wait
+    budget abandons a request the server is still honestly working on. The
+    write lands anyway, so the caller is told "failed" about a memory that was
+    stored — a false negative an agent will retry or report to its user.
+    Keep a real margin, not a coincidence.
+    """
+    import inspect
+
+    from llama_index.memory.itsuki._kernel import (
+        DEFAULT_TIMEOUT_SECONDS,
+        SERVICE_SAVE_WAIT_BUDGET_SECONDS,
+    )
+    from llama_index.memory.itsuki.factory import itsuki_client
+
+    assert DEFAULT_TIMEOUT_SECONDS >= SERVICE_SAVE_WAIT_BUDGET_SECONDS * 2
+    # itsuki_memory_block builds its client here, so this is the ceiling a
+    # caller who passes nothing actually gets.
+    assert inspect.signature(itsuki_client).parameters["timeout"].default == DEFAULT_TIMEOUT_SECONDS

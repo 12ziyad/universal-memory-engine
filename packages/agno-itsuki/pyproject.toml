@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agno-itsuki"
-version = "0.1.0"
+version = "0.1.1"
 description = "Itsuki memory tools for Agno agents."
 readme = "README.md"
 license = "Apache-2.0"

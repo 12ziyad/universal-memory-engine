@@ -18,4 +18,4 @@ __all__ = [
     "SETUP_HINT",
     "SOURCE",
 ]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

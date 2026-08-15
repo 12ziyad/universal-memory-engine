@@ -266,3 +266,18 @@ def test_delete_all_is_scoped_to_this_adapters_own_writes():
     request = [c for c in calls if c.method == "DELETE"][0]
     assert f"source={SOURCE}" in str(request.url)
     assert "confirm=true" in str(request.url)
+
+
+def test_default_timeout_clears_the_service_save_wait_budget():
+    """PY-ADAPTER-01: a client ceiling at or below the service's own save wait
+    budget abandons a request the server is still honestly working on. The
+    write lands anyway, so the caller is told "failed" about a memory that was
+    stored — a false negative an agent will retry or report to its user.
+    Keep a real margin, not a coincidence.
+    """
+    from agno_itsuki import ItsukiTools
+    import inspect
+    from agno_itsuki._kernel import DEFAULT_TIMEOUT_SECONDS, SERVICE_SAVE_WAIT_BUDGET_SECONDS
+
+    assert DEFAULT_TIMEOUT_SECONDS >= SERVICE_SAVE_WAIT_BUDGET_SECONDS * 2
+    assert inspect.signature(ItsukiTools.__init__).parameters['timeout'].default == DEFAULT_TIMEOUT_SECONDS

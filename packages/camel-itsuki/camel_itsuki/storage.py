@@ -36,6 +36,7 @@ from camel.storages.key_value_storages import BaseKeyValueStorage
 from itsuki import MemoryClient
 
 from ._kernel import (
+    DEFAULT_TIMEOUT_SECONDS,
     capture_idempotency_key,
     clamp,
     emit,
@@ -121,7 +122,7 @@ class ItsukiStorage(BaseKeyValueStorage):
         project_id: Optional[str] = None,
         mirror_path: Optional[str] = None,
         max_records: int = DEFAULT_MAX_RECORDS,
-        timeout: float = 8.0,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
         mirror_to_itsuki: bool = True,
         allow_remote_clear: bool = False,
         event_hook: Any = None,
