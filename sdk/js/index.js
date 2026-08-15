@@ -333,6 +333,14 @@ export class MemoryClient {
 			const requestTimeoutMs = initialPoll && timeoutMs === 0
 				? this.timeoutMs
 				: Math.max(1, Math.min(this.timeoutMs, remainingBeforePoll));
+			// Whether this poll is bounded by the POLLING budget rather than the
+			// client's own request timeout. Decided here, at dispatch: a timeout
+			// of a budget-bounded poll IS the polling deadline expiring, and
+			// re-reading the clock in the catch below raced the abort timer —
+			// when the timer fired a hair before the deadline, waitFor threw
+			// instead of returning the documented timed_out snapshot.
+			const budgetBounded = !(initialPoll && timeoutMs === 0)
+				&& remainingBeforePoll <= this.timeoutMs;
 			try {
 				last = await this.#request("GET", statusPath, undefined, {
 					userId,
@@ -342,8 +350,7 @@ export class MemoryClient {
 			} catch (error) {
 				if (!(error instanceof MemoryAPIError)
 					|| error.code !== "timeout"
-					|| timeoutMs === 0
-					|| Date.now() < deadline) throw error;
+					|| !budgetBounded) throw error;
 				break;
 			}
 			if (last && TERMINAL_JOB_STATUSES.has(last.status)) {

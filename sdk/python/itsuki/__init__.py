@@ -1088,6 +1088,16 @@ class _ClientCore:
                 if initial_poll and timeout == 0
                 else max(0.001, min(self.timeout, remaining_before_poll))
             )
+            # Whether this poll is bounded by the POLLING budget rather than the
+            # client's own request timeout. Decided here, at dispatch: a timeout
+            # of a budget-bounded poll IS the polling deadline expiring, and
+            # re-reading the clock in the except below raced the abort timer —
+            # when the request timed out a hair before the deadline, wait_for
+            # raised instead of returning the documented timed_out snapshot.
+            budget_bounded = (
+                not (initial_poll and timeout == 0)
+                and remaining_before_poll <= self.timeout
+            )
             try:
                 last = cast(PacketStatus, (yield from self._packet_status_plan(
                     source_packet_id,
@@ -1097,7 +1107,7 @@ class _ClientCore:
                     max_retries=0,
                 )))
             except MemoryAPIError as error:
-                if error.code != "timeout" or timeout == 0 or time.monotonic() < deadline:
+                if error.code != "timeout" or not budget_bounded:
                     raise
                 break
             if last.get("status") in TERMINAL_JOB_STATUSES:

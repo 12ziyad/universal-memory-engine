@@ -107,6 +107,18 @@ syntax (`\.deleteBySource\(`), the same form the ai-sdk workflow already used.
 only the publish job mints an OIDC token; the test matrix runs with read-only
 contents.
 
+### SDK-01 — NONBLOCKING MEDIUM (post-report addendum) — waitFor deadline race
+Found by the new JS SDK release workflow's Ubuntu leg: waitFor's final poll is
+dispatched with exactly the remaining polling budget, and the catch decided
+"deadline reached?" by re-reading the wall clock — racing the request's own
+abort timer. When the timer fired a hair early, waitFor THREW a timeout instead
+of returning the documented timed_out snapshot ("a timeout is not a failure,
+never an exception"). Both SDKs shared the flaw; both now decide at dispatch
+whether a poll is budget-bounded, making the outcome deterministic. Fixed in
+sdk/js/index.js and the shared Python plan; JS contract spec stable across four
+consecutive runs, Python 147 + strict mypy green. SDK artifact hashes in §6
+reflect the fixed bytes.
+
 ### Attacked and verified sound (no defect)
 - **ai-sdk middleware state under composition:** `wrapLanguageModel` passes each
   layer's own transformed params object to that layer's wrap hooks by identity
@@ -189,8 +201,8 @@ gated off. No publication occurred.
 |---|---|
 | `ai-sdk-itsuki-0.1.0.tgz` | `d56f6d7f840f5ba890058a114063fcb9d424fbe54497f3f2b6126eb42a7153dd` |
 | `mastra-itsuki-0.1.0.tgz` | `2d6807fa6ede3c7ff9ef2de0a7b979c763331c7db0163b675be3c344fbe16736` |
-| `itsuki-0.2.1.tgz` (JS SDK) | `fef9ca6b365914c50a760cdf212d3f1e654f65db486e1b51b83401d2eafca66a` |
-| `itsuki-0.3.0-py3-none-any.whl` | `877674b547892776fbf21a05bd3be916c81240812c3e0091ffc3c768cf1e7e1f` |
+| `itsuki-0.2.1.tgz` (JS SDK) | `61761c9a1864cc0c20fd5ae6bdbfdb3e26f3842aac4f357597297e18c7d38736` |
+| `itsuki-0.3.0-py3-none-any.whl` | `137cdb3fbe09f4fa7836c267ad50a71899978788e1945a4cabad9ea8bd810706` |
 | `agno_itsuki-0.1.0-py3-none-any.whl` | `1f3a66342294771b3d4d97b5352e57ec75637b96cd27a141ba0781aa6d051ce9` |
 | `llama_index_memory_itsuki-0.1.0-py3-none-any.whl` | `f4f5a16738dd9bd130c7a2522465fb340477211cdd7d2306a6b6852b62f88b3e` |
 | `camel_itsuki-0.1.0-py3-none-any.whl` | `a95dde97e8798fbadfdce7ef1fbc9ebf794af0f427a266afc4398d53c2455edb` |
