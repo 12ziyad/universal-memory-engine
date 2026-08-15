@@ -3,15 +3,23 @@
 # Covers the four framework adapters AND the `itsuki` Python SDK itself
 # (package input `itsuki` → sdk/python). One workflow on purpose: PyPI trusted
 # publishing binds to (owner, repository, workflow filename, environment), so
-# every Python release rides the same audited pipeline and the same `pypi`
-# environment — one set of publisher configurations, one place to protect.
+# every Python release rides the same audited pipeline and the same gates.
+#
+# Each package publishes from its OWN GitHub environment, and the mapping is
+# hardcoded below (`plan.outputs.environment`). That is the security property
+# worth the extra job: the OIDC token's `sub` claim carries the environment
+# name, so a publisher configured for `pypi-agno-itsuki` cannot be used to
+# publish anything else, even from this same workflow. The publish job asserts
+# its own minted identity against the intended publisher BEFORE upload, so a
+# mismatch fails on our side with a readable diff instead of as a bare PyPI
+# `invalid-publisher`.
 #
 # PyPI differs from npm in the one way that matters here: a Trusted Publisher
 # can be configured as a PENDING publisher BEFORE a project exists, so these
 # packages never need an API token at all — not even for the first release.
-# Configure the publisher on pypi.org (owner 12ziyad, repository
-# universal-memory-engine, workflow publish-pypi.yml, environment pypi), then
-# dispatch with dry_run=false. No secret is referenced anywhere below.
+# Configure each publisher on pypi.org (owner 12ziyad, repository
+# universal-memory-engine, workflow publish-pypi.yml, environment as mapped
+# below), then dispatch with dry_run=false. No secret is referenced anywhere.
 #
 # `dry_run` defaults to TRUE. Publishing is a deliberate, owner-approved act:
 # every gate runs either way, and only the final step is gated.
@@ -41,6 +49,46 @@ permissions:
   contents: read
 
 jobs:
+  # The package → (directory, GitHub environment) mapping, resolved once. A
+  # job-level `environment:` may read `needs`, which is why this is its own
+  # job rather than a step. Every arm is hardcoded: an unmapped package can
+  # never reach the publish job at all.
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      dir: ${{ steps.map.outputs.dir }}
+      sdk: ${{ steps.map.outputs.sdk }}
+      environment: ${{ steps.map.outputs.environment }}
+    steps:
+      - name: Map the package to its directory and publishing environment
+        id: map
+        shell: bash
+        # inputs.package comes from a fixed choice list, so it is not
+        # injectable; the case below is exhaustive over that list.
+        run: |
+          case "${{ inputs.package }}" in
+            itsuki)
+              dir=sdk/python; sdk=true; environment=pypi ;;
+            agno-itsuki)
+              dir=packages/agno-itsuki; sdk=false; environment=pypi-agno-itsuki ;;
+            llama-index-memory-itsuki)
+              dir=packages/llama-index-memory-itsuki; sdk=false; environment=pypi-llama-index-memory-itsuki ;;
+            camel-itsuki)
+              dir=packages/camel-itsuki; sdk=false; environment=pypi-camel-itsuki ;;
+            chatdev-itsuki)
+              # HELD. Mapped so the gates can still run in dry_run; the publish
+              # job refuses a real publish for it by name.
+              dir=packages/chatdev-itsuki; sdk=false; environment=pypi-chatdev-itsuki ;;
+            *)
+              echo "unmapped package: ${{ inputs.package }}" >&2; exit 1 ;;
+          esac
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "package=${{ inputs.package }} dir=$dir environment=$environment"
+
   test:
     runs-on: ${{ matrix.os }}
     permissions:
@@ -103,9 +151,9 @@ jobs:
           python -m mypy --strict itsuki tests/type_contract.py
 
   publish:
-    needs: test
+    needs: [plan, test]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: ${{ needs.plan.outputs.environment }}
     permissions:
       contents: read
       # Trusted publishing and attestations both need a signed OIDC token. This
@@ -123,17 +171,50 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Resolve the distribution directory
-        id: resolve
+      - name: Verify this job's OIDC identity matches the intended publisher
         shell: bash
+        env:
+          EXPECTED_ENVIRONMENT: ${{ needs.plan.outputs.environment }}
         run: |
-          if [ "${{ inputs.package }}" = "itsuki" ]; then
-            echo "dir=sdk/python" >> "$GITHUB_OUTPUT"
-            echo "sdk=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "dir=packages/${{ inputs.package }}" >> "$GITHUB_OUTPUT"
-            echo "sdk=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          # Mint the same kind of token the upload will use and assert its
+          # claims. The token itself is never printed, written, or exported —
+          # only the three public claims PyPI matches on. A mismatch here is a
+          # misconfiguration, and failing on it is the whole point.
+          RESPONSE="$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=pypi")"
+          claims="$(RESPONSE="$RESPONSE" python - <<'PY'
+          import base64, json, os
+          token = json.loads(os.environ["RESPONSE"])["value"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print(json.dumps({k: claims.get(k) for k in ("sub", "repository", "workflow_ref", "environment")}))
+          PY
+          )"
+          unset RESPONSE
+          echo "claims: $claims"
+          EXPECTED_SUB="repo:12ziyad/universal-memory-engine:environment:${EXPECTED_ENVIRONMENT}"
+          CLAIMS="$claims" EXPECTED_SUB="$EXPECTED_SUB" EXPECTED_ENVIRONMENT="$EXPECTED_ENVIRONMENT" python - <<'PY'
+          import json, os, sys
+          claims = json.loads(os.environ["CLAIMS"])
+          expected = {
+              "sub": os.environ["EXPECTED_SUB"],
+              "repository": "12ziyad/universal-memory-engine",
+              "environment": os.environ["EXPECTED_ENVIRONMENT"],
+          }
+          failures = [f"{k}: expected {v!r}, got {claims.get(k)!r}"
+                      for k, v in expected.items() if claims.get(k) != v]
+          workflow_ref = claims.get("workflow_ref") or ""
+          if not workflow_ref.startswith("12ziyad/universal-memory-engine/.github/workflows/publish-pypi.yml@"):
+              failures.append(f"workflow_ref: unexpected {workflow_ref!r}")
+          if failures:
+              print("FAIL: OIDC identity does not match the intended PyPI publisher")
+              print("\n".join(failures))
+              sys.exit(1)
+          print(f"OK: identity matches the {expected['environment']} publisher for "
+                f"{os.environ.get('GITHUB_REPOSITORY')} via publish-pypi.yml")
+          PY
 
       - name: Refuse a held package
         if: ${{ inputs.package == 'chatdev-itsuki' && inputs.dry_run == false }}
@@ -143,21 +224,21 @@ jobs:
           exit 1
 
       - name: Build the distributions
-        working-directory: ${{ steps.resolve.outputs.dir }}
+        working-directory: ${{ needs.plan.outputs.dir }}
         run: |
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
 
       - name: Report artifact hashes
-        working-directory: ${{ steps.resolve.outputs.dir }}
+        working-directory: ${{ needs.plan.outputs.dir }}
         run: sha256sum dist/*
 
       - name: Verify the built contents
-        working-directory: ${{ steps.resolve.outputs.dir }}
+        working-directory: ${{ needs.plan.outputs.dir }}
         shell: bash
         env:
-          IS_SDK: ${{ steps.resolve.outputs.sdk }}
+          IS_SDK: ${{ needs.plan.outputs.sdk }}
         run: |
           echo "--- wheel contents ---"
           python - <<'PY'
@@ -191,10 +272,10 @@ jobs:
           PY
 
       - name: Refuse unreviewed runtime dependencies
-        working-directory: ${{ steps.resolve.outputs.dir }}
+        working-directory: ${{ needs.plan.outputs.dir }}
         shell: bash
         env:
-          IS_SDK: ${{ steps.resolve.outputs.sdk }}
+          IS_SDK: ${{ needs.plan.outputs.sdk }}
         run: |
           python - <<'PY'
           import os, sys, tomllib
@@ -218,7 +299,7 @@ jobs:
           PY
 
       - name: Audit installed dependencies
-        working-directory: ${{ steps.resolve.outputs.dir }}
+        working-directory: ${{ needs.plan.outputs.dir }}
         run: |
           python -m pip install pip-audit
           python -m pip_audit --strict --progress-spinner=off || true
@@ -227,7 +308,7 @@ jobs:
         if: ${{ inputs.dry_run == false }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ${{ steps.resolve.outputs.dir }}/dist
+          packages-dir: ${{ needs.plan.outputs.dir }}/dist
           # attestations are on by default; stated here because they are the
           # provenance story for these packages.
           attestations: true
