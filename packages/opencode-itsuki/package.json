@@ -1,0 +1,60 @@
+{
+	"name": "opencode-itsuki",
+	"version": "0.1.0",
+	"description": "Itsuki memory for OpenCode: bounded recall before every new human turn, exactly-once capture after each settled one.",
+	"license": "Apache-2.0",
+	"homepage": "https://itsuki.app",
+	"keywords": [
+		"opencode",
+		"opencode-plugin",
+		"memory",
+		"ai",
+		"agent",
+		"itsuki"
+	],
+	"author": {
+		"name": "Itsuki",
+		"email": "kayotenetwork@gmail.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/12ziyad/universal-memory-engine.git",
+		"directory": "packages/opencode-itsuki"
+	},
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"engines": {
+		"opencode": ">=1.18.18 <2",
+		"node": ">=22"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"prepack": "npm run build"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"peerDependencies": {
+		"@opencode-ai/plugin": ">=1.18.18 <2"
+	},
+	"devDependencies": {
+		"@opencode-ai/plugin": "1.18.18",
+		"@opencode-ai/sdk": "1.18.18",
+		"@types/node": "^22.15.0",
+		"typescript": "^5.9.2",
+		"vitest": "^3.2.4"
+	}
+}

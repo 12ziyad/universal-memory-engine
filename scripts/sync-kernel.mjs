@@ -28,7 +28,7 @@ export const PY_KERNEL_DIR = join(repoRoot, "packages", "_kernel", "py");
  * copies and rewriting a published package to prove a point is not a
  * refactor, it is a risk.
  */
-export const TS_CONSUMERS = ["ai-sdk-itsuki", "mastra-itsuki"];
+export const TS_CONSUMERS = ["ai-sdk-itsuki", "mastra-itsuki", "opencode-itsuki", "antigravity-itsuki"];
 export const PY_CONSUMERS = [
 	{ pkg: "llama-index-memory-itsuki", module: join("llama_index", "memory", "itsuki") },
 	{ pkg: "agno-itsuki", module: "agno_itsuki" },
