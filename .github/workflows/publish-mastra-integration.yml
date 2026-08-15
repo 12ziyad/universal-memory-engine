@@ -119,11 +119,16 @@ jobs:
             exit 1
           fi
           echo "--- bulk deletion must never be exposed to a model ---"
-          if tar -xzOf mastra-itsuki-*.tgz --wildcards 'package/dist/*.js' 2>/dev/null | grep -q 'deleteBySource'; then
-            echo "FAIL: package code can bulk-delete"
+          # The vendored kernel transport DEFINES deleteBySource for adapters
+          # that deliberately expose guarded deletion; defining is not calling.
+          # What this package must never contain is a CALL SITE — tar wildcards
+          # match slashes, so the kernel files are matched too and the grep
+          # looks for invocation syntax rather than the bare method name.
+          if tar -xzOf mastra-itsuki-*.tgz --wildcards 'package/dist/*.js' 2>/dev/null | grep -qE '\.deleteBySource\('; then
+            echo "FAIL: package code invokes bulk deletion"
             exit 1
           fi
-          echo "OK: no bulk deletion"
+          echo "OK: no bulk-deletion call site"
           echo "--- must run on edge runtimes: no Node built-ins ---"
           if tar -xzOf mastra-itsuki-*.tgz --wildcards 'package/dist/*.js' 'package/dist/kernel/*.js' 2>/dev/null | grep -qE 'require\("node:|from "node:'; then
             echo "FAIL: package imports a Node built-in"
