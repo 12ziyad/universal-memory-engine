@@ -18,3 +18,4 @@ export * from "./batching.js";
 export * from "./idempotency.js";
 export * from "./events.js";
 export * from "./transport.js";
+export * from "./memory.js";

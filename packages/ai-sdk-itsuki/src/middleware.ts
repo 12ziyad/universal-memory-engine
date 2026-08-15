@@ -28,7 +28,7 @@ import {
 	type ItsukiConfig,
 	type ResolvedConfig,
 } from "./config.js";
-import { ItsukiMemory } from "./client.js";
+import { ItsukiMemory } from "./kernel/memory.js";
 import {
 	assistantTextFromContent,
 	injectContext,

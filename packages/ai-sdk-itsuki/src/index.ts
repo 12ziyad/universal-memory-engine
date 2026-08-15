@@ -28,7 +28,7 @@ import {
 	type HelperOptions,
 	type SaveResult,
 } from "./helpers.js";
-import { ItsukiMemory } from "./client.js";
+import { ItsukiMemory } from "./kernel/memory.js";
 
 /**
  * Wrap a language model so every call recalls before and captures after.
@@ -84,7 +84,7 @@ export function createItsuki(config: ItsukiConfig): ItsukiToolkit {
 
 export { itsukiMiddleware, INJECTION_MARKER } from "./middleware.js";
 export { retrieveMemories, getMemories, saveMemories, waitForMemory } from "./helpers.js";
-export { ItsukiMemory } from "./client.js";
+export { ItsukiMemory } from "./kernel/memory.js";
 export { ItsukiError } from "./kernel/errors.js";
 export {
 	RECALL_OPEN_MARKER,
@@ -96,4 +96,4 @@ export type { ErrorClass } from "./kernel/errors.js";
 export type { ItsukiEvent, EventHook } from "./kernel/events.js";
 export type { CaptureMessage, RecallScope, MemoryListItem } from "./kernel/types.js";
 export type { HelperOptions, SaveResult } from "./helpers.js";
-export type { RecallOutcome, CaptureOutcome } from "./client.js";
+export type { RecallOutcome, CaptureOutcome } from "./kernel/memory.js";

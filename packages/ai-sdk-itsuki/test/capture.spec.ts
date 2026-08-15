@@ -12,7 +12,7 @@ import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
 import { withItsuki } from "../src/index.js";
-import { ItsukiMemory } from "../src/client.js";
+import { ItsukiMemory } from "../src/kernel/memory.js";
 import { resolveConfig } from "../src/config.js";
 import { settledExchange } from "../src/messages.js";
 import { config, scriptedApi, saveCalls, fakeFetch, json, flushMicrotasks, TEST_KEY, BASE_URL } from "./helpers.js";

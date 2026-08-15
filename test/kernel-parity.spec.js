@@ -23,6 +23,7 @@ describe("shared kernel", () => {
 			"idempotency.ts",
 			"index.ts",
 			"inject.ts",
+			"memory.ts",
 			"scrub.ts",
 			"transport.ts",
 			"types.ts",

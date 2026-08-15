@@ -80,6 +80,8 @@ export interface ItsukiConfig {
 export interface ResolvedConfig {
 	apiKey: string;
 	baseUrl: string;
+	source: string;
+	userAgent: string;
 	userId: string;
 	conversationId: string | undefined;
 	projectId: string | undefined;
@@ -159,6 +161,8 @@ export function resolveConfig(config: ItsukiConfig): ResolvedConfig {
 	return {
 		apiKey,
 		baseUrl,
+		source: SOURCE,
+		userAgent: USER_AGENT,
 		userId,
 		conversationId: config.conversationId?.trim() || undefined,
 		projectId,

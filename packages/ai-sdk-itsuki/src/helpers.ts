@@ -9,7 +9,7 @@
  * know when the lookup failed.
  */
 
-import { ItsukiMemory } from "./client.js";
+import { ItsukiMemory } from "./kernel/memory.js";
 import { resolveConfig, SOURCE, type ItsukiConfig, type ResolvedConfig } from "./config.js";
 import { captureIdempotencyKey } from "./kernel/idempotency.js";
 import { formatRecallBlock } from "./kernel/inject.js";

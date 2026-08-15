@@ -1,21 +1,52 @@
+// GENERATED FILE — do not edit here.
+// Source: packages/_kernel/ts/memory.ts
+// Regenerate: node scripts/sync-kernel.mjs
 /**
- * The memory operations this package performs, above the shared transport.
+ * The recall and capture operations every TypeScript adapter performs.
  *
- * Recall never throws to a caller and capture never throws to a caller: both
- * report through the result type and the event hook. That is the fail-open
- * decision made concrete — a memory service that is down must cost the host a
- * degraded answer, never a failed request.
+ * Both are total: recall never throws to a caller and capture never throws to
+ * a caller. That is the fail-open decision made concrete — a memory service
+ * that is down must cost the host a degraded answer, never a failed request.
+ * Outcomes are reported through the return type and the event hook instead.
+ *
+ * The host-specific part — WHEN to call these, and what counts as a settled
+ * exchange in that host's lifecycle — deliberately stays in each package.
  */
 
-import { planBatches } from "./kernel/batching.js";
-import { emit, SKIP_REASONS, type EventHook } from "./kernel/events.js";
-import { ItsukiError } from "./kernel/errors.js";
-import { echoFingerprints, echoSessionKey, formatRecallBlock } from "./kernel/inject.js";
-import { captureIdempotencyKey } from "./kernel/idempotency.js";
-import { scrubText } from "./kernel/scrub.js";
-import { ItsukiTransport } from "./kernel/transport.js";
-import type { CaptureMessage } from "./kernel/types.js";
-import { SOURCE, USER_AGENT, type ResolvedConfig } from "./config.js";
+import { planBatches } from "./batching.js";
+import { emit, SKIP_REASONS, type EventHook } from "./events.js";
+import { ItsukiError } from "./errors.js";
+import { echoFingerprints, echoSessionKey, formatRecallBlock } from "./inject.js";
+import { captureIdempotencyKey } from "./idempotency.js";
+import { scrubText } from "./scrub.js";
+import { ItsukiTransport } from "./transport.js";
+import type { CaptureMessage, RecallScope } from "./types.js";
+
+
+/** What ItsukiMemory needs from a package's resolved configuration. */
+export interface MemoryRuntimeConfig {
+	apiKey: string;
+	baseUrl: string;
+	/** The adapter's source lane, e.g. "ai-sdk" or "mastra". */
+	source: string;
+	/** The adapter's User-Agent, so server logs name the real caller. */
+	userAgent: string;
+	userId: string;
+	conversationId: string | undefined;
+	projectId: string | undefined;
+	agentId: string | undefined;
+	recallScope: RecallScope;
+	maxContextChars: number;
+	maxItems: number;
+	timeoutMs: number;
+	captureTimeoutMs: number;
+	maxRetries: number;
+	onEvent: EventHook | undefined;
+	fetchImpl: typeof fetch | undefined;
+	sleepImpl: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
+	random: (() => number) | undefined;
+	now: (() => number) | undefined;
+}
 
 export interface RecallOutcome {
 	/** The block to inject, already bounded and marker-wrapped. Null when empty. */
@@ -44,11 +75,11 @@ export class ItsukiMemory {
 	readonly transport: ItsukiTransport;
 	private readonly onEvent: EventHook | undefined;
 
-	constructor(config: ResolvedConfig) {
+	constructor(config: MemoryRuntimeConfig) {
 		this.transport = new ItsukiTransport({
 			apiKey: config.apiKey,
 			baseUrl: config.baseUrl,
-			userAgent: USER_AGENT,
+			userAgent: config.userAgent,
 			timeoutMs: config.timeoutMs,
 			maxRetries: config.maxRetries,
 			...(config.fetchImpl ? { fetchImpl: config.fetchImpl } : {}),
@@ -65,7 +96,7 @@ export class ItsukiMemory {
 	 */
 	async recall(
 		query: string,
-		config: ResolvedConfig,
+		config: MemoryRuntimeConfig,
 		signal?: AbortSignal,
 	): Promise<RecallOutcome> {
 		const trimmed = query.trim();
@@ -116,7 +147,7 @@ export class ItsukiMemory {
 	 */
 	async capture(
 		messages: CaptureMessage[],
-		config: ResolvedConfig,
+		config: MemoryRuntimeConfig,
 		options: { signal?: AbortSignal | undefined } = {},
 	): Promise<CaptureOutcome> {
 		if (messages.length === 0) {
@@ -147,7 +178,7 @@ export class ItsukiMemory {
 						userId: config.userId,
 						conversationId: config.conversationId,
 						projectId: config.projectId,
-						source: SOURCE,
+						source: config.source,
 					},
 					messages: batch,
 					discriminator: batches.length > 1 ? `batch:${index}/${batches.length}` : undefined,
@@ -158,7 +189,7 @@ export class ItsukiMemory {
 					conversationId: config.conversationId,
 					projectId: config.projectId,
 					agentId: config.agentId,
-					source: SOURCE,
+					source: config.source,
 					timeoutMs: config.captureTimeoutMs,
 					...(options.signal ? { signal: options.signal } : {}),
 				});
