@@ -661,11 +661,19 @@ like one:
    loop the block's async HTTP client is bound to. In one loop — as a real
    host runs an agent — recall returns 511 chars and emits `recall.ok`.
 
-A third scare was **my own error and no defect at all**: a space appeared to
-have lost its memories, but the user id had been invented rather than read
-from the probe's output, so the query targeted a space that never existed. A
-dedicated persistence probe (save, then re-check at +0s, +30s, +90s) showed
-memories intact throughout. The canaries now print every synthetic identity.
+A third and fourth scare were **my own error and no defect at all** — and this
+paragraph originally under-reported them as one. On two separate occasions a
+space appeared to have lost its memories, but in each case the user id had
+been *invented* rather than read from the probe's own output, so the query
+targeted a space that never existed: `probe_agno_<stamp>` in the agno lane and
+**`llamadbg_1786818131`** in the llama debugging lane. A dedicated persistence
+probe (save, then re-check at +0s, +30s, +90s) showed memories intact
+throughout. The canaries now print every synthetic identity.
+
+Note also that `llamadbg_*` did **not** follow this campaign's own canary
+naming convention (`canary_<lane>_<epoch>`, §12), so the blanket cleanup
+claim above — "every canary space was proven empty and silent" — never
+actually covered it. That gap is closed by the verification in §15.
 
 Observation, not a defect: `ItsukiMemoryBlock._aget` deliberately swallows
 every recall exception and returns empty context, so a misconfiguration
@@ -731,3 +739,46 @@ build that preceded the site update.
 **Owner actions outstanding:** revoke the old npm token on npmjs.com (the
 GitHub secret was already deleted); optionally configure npm Trusted
 Publishers so future npm releases are tokenless too.
+
+---
+
+## 15. `llamadbg_1786818131` — incident closed with production evidence (2026-08-16)
+
+Raised as an outstanding prior-campaign incident: the llama-lane debug
+identity `llamadbg_1786818131` was named in §14 only obliquely, was never
+proven cleaned, and did not match the canary naming convention that the §12
+cleanup claim was scoped to. Resolved here with bounded read-only evidence.
+
+**Method.** Read-only `SELECT` against production D1 (`uml-memory`, `--remote`),
+no API key, no writes — each response carried `rows_written: 0` and
+`changed_db: false`. No Itsuki API, MCP, or canary traffic was involved.
+
+| Query | Result | Cost |
+|---|---|---|
+| `SELECT COUNT(*) FROM nodes WHERE user_id LIKE 'llamadbg%'` | **0** | 8,629 rows read, 11.7 ms |
+| `SELECT COUNT(*) FROM source_packets WHERE memory_user_id = 'llamadbg_1786818131'` | **0** | 14,241 rows read (full table) |
+
+**Finding: the space never existed — there is no residue, and there never was
+any data loss.** `source_packets` is the write-receipt table: every accepted
+write, in every mode and through every door, creates a row there. Zero rows
+for that identity across a full-table scan proves no write was ever accepted
+under it, and zero `nodes` across the whole `llamadbg%` family proves no
+content was ever materialised. The identity was fabricated — the epoch stamp
+`1786818131` (2026-08-15T18:22:11Z) was reconstructed from memory rather than
+copied from the probe's printed output — so the original "missing memories"
+report was querying a space that had never been created.
+
+**Corrections applied to this report:** §14 previously described a single
+identity-fabrication scare; there were two (`probe_agno_<stamp>` and
+`llamadbg_1786818131`), and both are now named. §14 also now records that
+`llamadbg_*` fell outside the `canary_<lane>_<epoch>` convention and was
+therefore never in scope of the §12 cleanup claim.
+
+**Not claimed:** the two hanging `LIKE`-scan variants of these queries
+(multi-table `UNION ALL`, and four-way `OR LIKE` over `source_packets`) did
+not return within a 4-minute bound and were terminated; the two queries above
+are the ones that completed, and they are sufficient. Separately, four stale
+read-only `wrangler d1 execute` process trees from the 2026-08-15 session were
+found still running on the operator's machine and terminated (20 PIDs); they
+were queries of this same class that had hung the same way. Long `LIKE` scans
+against `source_packets` should be avoided in favour of indexed equality.
