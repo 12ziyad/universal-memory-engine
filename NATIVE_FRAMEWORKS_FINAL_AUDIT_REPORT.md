@@ -426,3 +426,109 @@ canaries.
   semantics must be fixed server-side before any marketing claim about
   source-scoped cleanup or instant erasure; nothing in the published packages
   is affected in normal operation.
+
+---
+
+## 13. Server deletion repair campaign (2026-08-15, same day, second session)
+
+The two release-blocking HIGH findings from §12 are **fixed, deployed, and
+production-verified**. Master `5d224c3`; deployed Worker version
+`0228394f-7d6c-473c-acea-2d072f94455b` on itsuki.app.
+
+### SRV-01 — source-scoped deletion was blind to the caller's label (fixed, `6f02a55`)
+
+Root cause: the write doors (`/v1/save` both modes, `/v1/ingest`) accepted the
+published SDKs' `source` body field and dropped it. Runs were stamped only
+with engine lanes (`mcp_save`, `conversation_collect`), so
+`DELETE /v1/memories?source=ai-sdk` matched nothing and reported zero while
+the content stayed live and recallable.
+
+Fix: a canonical `client_source` — validated at every door (1–64 chars, no
+control characters; unmatchable labels are a 400 at save, ingest, the REST
+DELETE filter, and MCP `delete_all_memories` alike), stamped into the source
+packet's `raw_meta_json`, propagated by `sourceMeta()` onto every derived
+`scope_json` (jobs, receipts, runs), and matched by a third arm of the scoped
+deletion filter (`json_extract(scope_json,'$.client_source')`). Deliberately
+excluded from content hashing so every already-issued idempotency key stays
+valid; conditional at every stamp site so pre-fix rows keep byte-identical
+scope_json. **No schema migration.**
+
+### SRV-02 — deletion was not durable against in-flight extraction (fixed, `5d224c3`)
+
+Reproduced in production before fixing (forensic variant D: conversation
+save, unscoped erase ~1.3s later, against pre-fix build `ac93622f`): the
+pre-flight barrier check predates the erase and the commit fence guards only
+content batches, so the **no-write finalization** stomped the erasure's
+`cancelled_by_delete` back to `skipped`, settled the job **`enriched`** with
+`cancelled_by_delete:false`, and left a post-barrier run row that read as
+residue in every later preview. On the no-write outcome the DO also restored
+the raw messages into its **rescue buffer**, where a later flush re-extracts
+erased content under a fresh acceptance time — past every fence. That is the
+§12 "5 objects came back ~60s later" mechanism.
+
+Fix:
+
+- `extract.js`: the no-write and `llm_failed` finalizations re-check the
+  deletion barrier **after** the model call and are `expectStatus`-guarded so
+  they can never overwrite a concurrent erasure's cancellation. A superseded
+  save finalizes `cancelled_by_delete`, its receipt is non-durable, and its
+  messages are never rescued.
+- `cleanup.js`: a **confirmed erasure resets the memory coordinator**
+  (`resetAll()`, serializing behind any in-flight drain — quiescence, not
+  hope) and terminally closes the `queued`/`staged` jobs whose queue entries
+  that wipe orphans. Consequence: an erase may take as long as the in-flight
+  drain it waits for.
+- Digest lane (`manual_collect.js`/`pages.js`): barrier re-check after its
+  model call; its `memory_pages` commits carry the deletion fence inside
+  their own D1 batch, like every other durable writer.
+
+### Evidence
+
+- **Local**: `test/srv_source_scoped_deletion.spec.js` — 11 adversarial
+  tests, including a deterministic mid-model-call erasure via the
+  function-form `llmResponse` hook (arms the barrier inside the model call).
+  Full serial Workers suite **1772 passed**, Node lane **572 passed**,
+  adjacent deletion/fence/MCP suites all green.
+- **Production reattack (post-deploy, registry-independent, 14/14 passed)**:
+  build fingerprint (new 400s live); SRV-01 — scoped preview now **sees**
+  conversation-capture rows (`{runs:1,nodes:3,slices:1,edges:1}`), scoped
+  delete removes them all, unscoped preview zero, recall silent, idempotent
+  repeat clean; SRV-02 — the exact variant-D interleaving now stays at zero
+  residue with silent recall for the full 4-minute watch, and the job ledger
+  reads `failed` with `cancelled_by_delete:true` and the cancellation named.
+- Pre-fix forensic runs (variants A/B/C clean, D resurrected) and post-fix
+  reattack logs are preserved in the session scratchpad.
+
+### PyPI — still blocked at the owner boundary (re-proven on the fixed tree)
+
+Run `31889766483` (dry-run): all 6 test legs green on current master. Run
+`31889880458` (`itsuki` 0.3.0, `dry_run=false`): all 6 test legs green, the
+publish step failed with **`invalid-publisher`** — the Trusted Publisher is
+still not configured. Nothing was published. The OIDC claims PyPI must match
+(from that run's own log): repository `12ziyad/universal-memory-engine`,
+workflow `publish-pypi.yml`, environment `pypi`, ref `refs/heads/master`.
+The §12 owner instructions stand unchanged: one publisher on the existing
+`itsuki` project + three pending publishers (`agno-itsuki`,
+`llama-index-memory-itsuki`, `camel-itsuki`). `chatdev-itsuki` stays HELD and
+the workflow mechanically refuses it.
+
+### Site and docs
+
+Still deliberately untouched: the four Python artifacts are unpublished, and
+the Get Started contract tests enforce that no advertised install command can
+be dead. One coherent site update follows the PyPI publications and canaries.
+
+### Updated GO/NO-GO
+
+- Server deletion semantics (SRV-01/SRV-02): **FIXED — production-verified.**
+  Source-scoped cleanup is exact for every lane the published packages use,
+  and a confirmed erasure is durable against in-flight processing.
+- npm half: **SHIPPED** (§12), unchanged.
+- PyPI half: **GO — waiting only on the four Trusted Publisher entries.**
+  After configuring them: dispatch `publish-pypi.yml` `dry_run=false` for
+  `itsuki`, then the three adapters; verify; run `scratchpad/canary_py.py`;
+  then the single site update, full serial gates, `wrangler deploy`.
+- `chatdev-itsuki`: **HELD.**
+- Owner actions outstanding: (1) four PyPI Trusted Publisher entries;
+  (2) revoke the old npm token on npmjs.com (the GitHub secret is already
+  deleted).
