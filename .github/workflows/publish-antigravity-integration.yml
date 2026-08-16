@@ -133,14 +133,17 @@ jobs:
 
       # Only one platform publishes; the other exists to prove portability.
       - name: Publish to npm with provenance
-        if: ${{ inputs.dry_run == false && matrix.os == 'ubuntu-latest' }}
+        # `inputs.dry_run` is NULL for a push event, and GitHub treats
+        # `null == false` as true — so this guard alone would let a push publish
+        # (CI-04). The event type must be checked explicitly.
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == false && matrix.os == 'ubuntu-latest' }}
         run: npm publish --provenance --access public
         env:
           # Empty when trusted publishing is configured; npm then uses OIDC.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Dry run only
-        if: ${{ inputs.dry_run == true }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == true }}
         run: |
           echo "dry_run was true — every gate passed and the tarball was built."
           echo "Re-run with dry_run=false to publish."
