@@ -38,6 +38,8 @@ on:
           - llama-index-memory-itsuki
           - camel-itsuki
           - chatdev-itsuki
+          - hermes-itsuki
+          - adk-itsuki
       dry_run:
         description: 'Run every gate and build the wheel, but do not publish'
         type: boolean
@@ -77,6 +79,10 @@ jobs:
               dir=packages/llama-index-memory-itsuki; sdk=false; environment=pypi-llama-index-memory-itsuki ;;
             camel-itsuki)
               dir=packages/camel-itsuki; sdk=false; environment=pypi-camel-itsuki ;;
+            hermes-itsuki)
+              dir=packages/hermes-itsuki; sdk=false; environment=pypi-hermes-itsuki ;;
+            adk-itsuki)
+              dir=packages/adk-itsuki; sdk=false; environment=pypi-adk-itsuki ;;
             chatdev-itsuki)
               # HELD. Mapped so the gates can still run in dry_run; the publish
               # job refuses a real publish for it by name.
@@ -99,7 +105,14 @@ jobs:
         # The CAMEL adapter does atomic rename and path work, which behaves
         # differently on Windows. Both platforms must be green.
         os: [ubuntu-latest, windows-latest]
-        python-version: ['3.10', '3.12', '3.13']
+        # Every version a package claims in requires-python gets a leg. The
+        # four packages that shipped before this campaign keep exactly the
+        # list they were released under -- widening their matrix here would be
+        # a change to a published artifact's gate, smuggled in as a refactor.
+        python-version: ${{ fromJSON(
+          inputs.package == 'hermes-itsuki' && '["3.11","3.12","3.13"]'
+          || inputs.package == 'adk-itsuki' && '["3.10","3.11","3.12","3.13"]'
+          || '["3.10","3.12","3.13"]') }}
 
     steps:
       - name: Check out the exact commit
@@ -289,7 +302,7 @@ jobs:
           if os.environ.get("IS_SDK") == "true":
               allowed = {"httpx"}
           else:
-              allowed = {"itsuki", "agno", "llama-index-core", "camel-ai"}
+              allowed = {"itsuki", "agno", "llama-index-core", "camel-ai", "google-adk"}
           names = {d.split(">")[0].split("<")[0].split("=")[0].split("[")[0].strip() for d in deps}
           unexpected = names - allowed
           if unexpected:
