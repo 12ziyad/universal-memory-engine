@@ -440,7 +440,19 @@ ${codeBlock(`openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${ORIGIN}/mcp/
 
 PAGES["/install/hermes"] = { title: "Hermes Agent", html: `
 <h1>Hermes Agent</h1>
-<p class="lede">Persistent memory for Hermes through its built-in MCP support — one YAML block or one interactive command.</p>
+<p class="lede">A native memory provider for Hermes: bounded recall before every real turn, exactly-once capture after each settled one. An MCP route remains for setups that cannot install packages.</p>
+<h2>Native provider (recommended)</h2>
+<p>Needs <b>Hermes 0.19.0 or newer</b>. One runtime dependency, no postinstall.</p>
+${codeBlock(`pip install hermes-itsuki
+hermes-itsuki install
+hermes memory setup      # choose itsuki, paste your key`)}
+<p><code>hermes-itsuki install</code> places the provider in <code>$HERMES_HOME/plugins/itsuki/</code> and makes sure the SDK is importable by Hermes. That location is not incidental: Hermes 0.19.0 has no entry-point discovery, and the official installer's update path prunes anything not in its own lockfile — deploying outside the virtualenv is what makes the provider survive <code>hermes update</code>.</p>
+<p>Check it any time with <code>hermes-itsuki doctor</code>, which reports queue depth, breaker state and anything held back — never your key. <code>hermes-itsuki uninstall</code> removes the provider and keeps pending memories; add <code>--purge</code> to delete the local state and config too.</p>
+<h3>What it remembers, and what it never does</h3>
+<p>Only your message and the assistant's answer. Tool calls, tool results, system prompts and sub-agent work are excluded by construction, not by filtering afterwards. Recalled memories arrive inside <code>&lt;itsuki-recalled-context-v1&gt;</code> markers as untrusted data — never instructions — and the agent gets two read-only tools, <code>itsuki_recall</code> and <code>itsuki_status</code>. There is deliberately no memory-writing tool: automatic capture already stores what you actually saw.</p>
+<h3>Honest limits</h3>
+<p>Echo suppression is byte-exact within 512 entries or 30 minutes, then fails open. The local spool holds 64 envelopes / 8 MiB / 14 days, and past that the oldest is dropped and counted — durable within documented bounds, not lossless. Rotating your key orphans anything still pending under the old one, on purpose: envelopes are partitioned by credential so a re-keyed install can never deliver one project's conversations into another. Hermes runs delegated subagents with memory off, so their work is not captured.</p>
+<h2>MCP route</h2>
 <h2>1. Create your link</h2>
 <p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
 <h2>2. Add the MCP server</h2>
@@ -623,6 +635,25 @@ async with MCPServerStreamableHttp(
 ) as server:
     agent = Agent(name="Assistant", mcp_servers=[server])`)}
 <h2 id="google-adk">Google ADK</h2>
+<p>A native <code>BaseMemoryService</code> plus the automatic capture ADK does not ship. Needs <code>google-adk</code> 2.5–2.7.</p>
+${codeBlock(`pip install adk-itsuki
+
+from google.adk.agents import LlmAgent
+from google.adk.apps.app import App
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import preload_memory
+from adk_itsuki import ItsukiMemoryService, ItsukiMemoryPlugin
+
+memory = ItsukiMemoryService()          # reads ITSUKI_API_KEY
+agent = LlmAgent(name="assistant", model="gemini-2.0-flash", tools=[preload_memory])
+
+app = App(name="my_app", root_agent=agent, plugins=[ItsukiMemoryPlugin(service=memory)])
+runner = Runner(app=app, app_name="my_app",
+                session_service=InMemorySessionService(), memory_service=memory)`)}
+<p><code>preload_memory</code> recalls before every model call; the plugin captures each settled turn. ADK itself never calls <code>add_session_to_memory</code> — that gap is exactly what the plugin fills. Only your message and the <i>root</i> agent's final answer are stored: tool traffic and sub-agent output are excluded, and an invocation that errored, streamed only partials, or is still waiting on a long-running tool is not captured at all.</p>
+<p>Registering the URI scheme (<code>import adk_itsuki; adk_itsuki.register()</code> in a <code>services.py</code>) lets <code>adk web --memory_service_uri=itsuki://</code> construct the service, but it cannot attach the tool or the plugin — treat that route as a partial install. Pending captures live in memory, so recovery after a restart is an explicit <code>add_session_to_memory(session)</code>, which regenerates identical idempotency keys and therefore duplicates nothing.</p>
+<h3>MCP route</h3>
 ${codeBlock(`pip install google-adk
 
 from google.adk.tools.mcp_tool import McpToolset

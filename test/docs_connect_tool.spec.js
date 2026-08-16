@@ -154,7 +154,30 @@ describe("page contracts", () => {
 
 describe("no dead commands in docs", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
-		expect(script).not.toContain("hermes memory setup");
+		// hermes-itsuki and adk-itsuki are published with provenance and are
+		// pinned by name below. chatdev-itsuki is still HELD.
+		expect(script).not.toContain("chatdev-itsuki");
+	});
+
+	it("documents the native Hermes provider under its exact published name", () => {
+		const page = script.split('PAGES["/install/hermes"]')[1]?.split("PAGES[")[0] ?? "";
+		expect(page).toContain("pip install hermes-itsuki");
+		expect(page).toContain("hermes-itsuki install");
+		expect(page).toContain("hermes memory setup");
+		expect(page).toContain("hermes-itsuki doctor");
+		// The floor is a real constraint, not decoration.
+		expect(page).toContain("0.19.0");
+		// The bounds we promise must be stated where a person will read them.
+		expect(page).toMatch(/512 entries|30 minutes/);
+	});
+
+	it("documents the native ADK memory service under its exact published name", () => {
+		expect(script).toContain("pip install adk-itsuki");
+		for (const needed of ["ItsukiMemoryService", "ItsukiMemoryPlugin", "preload_memory"]) {
+			expect(script).toContain(needed);
+		}
+		// The supported host range, stated.
+		expect(script).toMatch(/2\.5/);
 	});
 
 	it("shows the published OpenClaw plugin under its exact registry name", () => {

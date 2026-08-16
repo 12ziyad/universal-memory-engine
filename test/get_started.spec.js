@@ -473,10 +473,38 @@ describe("coding agents via MCP", () => {
 
 describe("no dead commands", () => {
 	it("never shows an install verb for a package that does not exist yet", () => {
-		expect(script).not.toContain("hermes memory setup");
-		// pi-itsuki and openclaw-itsuki are published (npm, provenance), so
-		// their verbs are allowed — each pinned to its exact registry name in
-		// its own door test below.
+		// pi-itsuki, openclaw-itsuki, hermes-itsuki and adk-itsuki are all
+		// published with provenance, so their verbs are allowed — each pinned
+		// to its exact registry name below. chatdev-itsuki is still HELD and
+		// must never gain an install verb here.
+		expect(script).not.toContain("pip install chatdev-itsuki");
+		expect(script).not.toContain("chatdev-itsuki");
+	});
+
+	it("offers the native Hermes provider under its exact published name", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const snippets = installSnippets("itsuki_live_k9");
+		// PyPI name, verified live before this door shipped.
+		expect(snippets.hermesNativeInstall).toContain("pip install hermes-itsuki");
+		expect(snippets.hermesNativeInstall).toContain("hermes-itsuki install");
+		expect(snippets.hermesNativeSetup).toBe("hermes memory setup");
+		expect(snippets.hermesNativeVerify).toBe("hermes-itsuki doctor");
+		// The key never appears in a command we tell someone to paste.
+		expect(snippets.hermesNativeInstall).not.toContain("itsuki_live_k9");
+		expect(snippets.hermesNativeSetup).not.toContain("itsuki_live_k9");
+	});
+
+	it("offers the native ADK memory service under its exact published name", () => {
+		const installSnippets = build(["installSnippets"], "installSnippets");
+		const snippets = installSnippets("itsuki_live_k10");
+		expect(snippets.adkNativeInstall).toBe("pip install adk-itsuki");
+		// The wiring has to name the three pieces that make it work.
+		for (const needed of ["ItsukiMemoryService", "ItsukiMemoryPlugin", "preload_memory"]) {
+			expect(snippets.adkNativeWire).toContain(needed);
+		}
+		// The key belongs in the environment, never in the wiring snippet.
+		expect(snippets.adkNativeWire).not.toContain("itsuki_live_k10");
+		expect(snippets.adkNativeEnv).toContain("ITSUKI_API_KEY");
 	});
 
 	it("builds the OpenClaw routes only from shipped doors", () => {

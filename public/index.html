@@ -4239,6 +4239,12 @@ curl -X POST ${origin}/v1/ingest \\
   }'`,
 		// Hermes reads MCP servers from its YAML config; the path-token URL means
 		// no headers block is needed. `hermes mcp add` is its interactive verb.
+		// The native provider: recall before each real turn, capture after each
+		// settled one. The key is read from Hermes's own .env only.
+		hermesNativeInstall: `pip install hermes-itsuki
+hermes-itsuki install`,
+		hermesNativeSetup: `hermes memory setup`,
+		hermesNativeVerify: `hermes-itsuki doctor`,
 		hermesConfig: `# ~/.hermes/config.yaml
 mcp_servers:
   ${PRODUCT.name.toLowerCase()}:
@@ -4326,6 +4332,26 @@ async with MCPServerStreamableHttp(
     cache_tools_list=True,
 ) as server:
     agent = Agent(name="Assistant", mcp_servers=[server])`,
+		// The native memory service plus the capture plugin ADK does not ship.
+		adkNativeInstall: `pip install adk-itsuki`,
+		adkNativeWire: `from google.adk.agents import LlmAgent
+from google.adk.apps.app import App
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import preload_memory
+from adk_itsuki import ItsukiMemoryService, ItsukiMemoryPlugin
+
+memory = ItsukiMemoryService()          # reads ITSUKI_API_KEY
+agent = LlmAgent(name="assistant", model="gemini-2.0-flash", tools=[preload_memory])
+
+app = App(name="my_app", root_agent=agent, plugins=[ItsukiMemoryPlugin(service=memory)])
+runner = Runner(app=app, app_name="my_app",
+                session_service=InMemorySessionService(), memory_service=memory)`,
+		adkNativeEnv: `# bash/zsh
+export ITSUKI_API_KEY=${mcpToken}
+
+# PowerShell
+$env:ITSUKI_API_KEY = "${mcpToken}"`,
 		googleAdkConnect: `from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPConnectionParams
 
@@ -4581,8 +4607,9 @@ function installMethods() {
 							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
 						] },
 						"google-adk": { label: "Google ADK", steps: [
-							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-							{ title: "Connect the toolset", body: "pip install google-adk. The toolset carries every memory tool.", codeLabel: "python", code: (key) => installSnippets(key).googleAdkConnect },
+							{ title: "Install the memory service", body: "pip install adk-itsuki. A native BaseMemoryService plus the automatic capture ADK does not ship. Needs google-adk 2.5–2.7.", codeLabel: "terminal", code: () => installSnippets().adkNativeInstall },
+							{ title: "Create your link and set the key", body: "Shown once. The service reads ITSUKI_API_KEY from the environment.", action: (key) => key ? linkReady : mcpKey, codeLabel: "terminal", code: (key) => installSnippets(key).adkNativeEnv },
+							{ title: "Wire it into your app", body: "preload_memory recalls before each model call; the plugin captures each settled turn.", codeLabel: "python", code: () => installSnippets().adkNativeWire },
 							{ title: "Test it", body: "Run the agent and ask it to recall.", codeLabel: "say this", code: () => `recall what you know about me from ${name}` },
 						] },
 						llamaindex: { label: "LlamaIndex", steps: [
@@ -4813,16 +4840,32 @@ function installMethods() {
 					label: "Hermes Agent",
 					icon: ICON.hex,
 					docsHref: "/docs/#/install/hermes",
-					hint: "Uses Hermes's built-in MCP support, alongside its own memory files. A native memory provider is planned.",
-					steps: [
-						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add the MCP server", body: "In Hermes's config file — or run the interactive command below and paste the URL when asked.",
-							codeLabel: "config.yaml", code: (key) => installSnippets(key).hermesConfig },
-						{ title: "Or add it interactively", body: "Hermes walks you through it.",
-							codeLabel: "terminal", code: (key) => installSnippets(key).hermesMcpAdd },
-						{ title: "Test connection", body: "Restart Hermes, then ask it to check.",
-							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
-					],
+					hint: "Native memory provider, running alongside Hermes's own memory files. Needs Hermes 0.19.0+.",
+					routes: {
+						native: {
+							label: "Native provider",
+							steps: [
+								{ title: "Install the provider", body: "Two commands. The installer places the provider where every supported Hermes finds it, and makes sure the SDK is importable. One runtime dependency, no postinstall.",
+									codeLabel: "terminal", code: () => installSnippets().hermesNativeInstall },
+								{ title: "Create your link and set the key", body: "Shown once. Hermes stores it in its own .env as ITSUKI_API_KEY — the provider only ever reads it from the environment.",
+									action: (key) => key ? linkReady : mcpKey, codeLabel: "terminal", code: () => installSnippets().hermesNativeSetup },
+								{ title: "Verify", body: "Memory now recalls before every real turn and saves after each settled one. The doctor shows queue depth, breaker state and what is held — never the key.",
+									codeLabel: "terminal", code: () => installSnippets().hermesNativeVerify },
+							],
+						},
+						mcp: {
+							label: "MCP fallback",
+							steps: [
+								{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+								{ title: "Add the MCP server", body: "In Hermes's config file — or run the interactive command below and paste the URL when asked.",
+									codeLabel: "config.yaml", code: (key) => installSnippets(key).hermesConfig },
+								{ title: "Or add it interactively", body: "Hermes walks you through it.",
+									codeLabel: "terminal", code: (key) => installSnippets(key).hermesMcpAdd },
+								{ title: "Test connection", body: "Restart Hermes, then ask it to check.",
+									codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+							],
+						},
+					},
 				},
 				pi: {
 					label: "Pi Agent",
