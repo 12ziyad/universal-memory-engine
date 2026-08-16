@@ -34,6 +34,8 @@ export const PY_CONSUMERS = [
 	{ pkg: "agno-itsuki", module: "agno_itsuki" },
 	{ pkg: "camel-itsuki", module: "camel_itsuki" },
 	{ pkg: "chatdev-itsuki", module: "chatdev_itsuki" },
+	{ pkg: "hermes-itsuki", module: "hermes_itsuki" },
+	{ pkg: "adk-itsuki", module: "adk_itsuki" },
 ];
 
 const TS_BANNER = `// GENERATED FILE — do not edit here.
