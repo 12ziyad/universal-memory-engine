@@ -135,8 +135,24 @@ describe("install", () => {
 		expect(leftovers).toEqual([]);
 	});
 
-	it("fails cleanly when the hook path is unsafe, without installing anything", () => {
+	it("now SUCCEEDS for a space-containing path, via the launcher (P11)", () => {
+		// This used to assert failure. The host's parser ignores quotes, so a
+		// space could not appear in the hook command — but the stock Windows
+		// Node path has one. The launcher moves the quoting somewhere it works,
+		// so a space is no longer a refusal.
 		const outcome = doInstall({ scriptPath: "/opt/my plugins/hook.js" });
+		expect(outcome.ok).toBe(true);
+		if (!outcome.ok) return;
+		const hooks = JSON.parse(readFileSync(join(target(), "hooks.json"), "utf8"));
+		const cmd = String(hooks["itsuki"]["Stop"][0]["command"]);
+		// The command minus its trailing event argument carries no space.
+		expect(cmd.endsWith(" Stop")).toBe(true);
+		expect(cmd.slice(0, -" Stop".length)).not.toContain(" ");
+	});
+
+	it("still fails cleanly, installing nothing, when a path cannot be embedded safely", () => {
+		// A quote would close the launcher's own quoting; refusing is correct.
+		const outcome = doInstall({ scriptPath: '/opt/ev"il/hook.js' });
 		expect(outcome.ok).toBe(false);
 		expect(existsSync(target())).toBe(false);
 	});
