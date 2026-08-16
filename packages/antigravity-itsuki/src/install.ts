@@ -31,6 +31,7 @@ import {
 import { dirname, join, resolve, sep } from "node:path";
 
 import { credentialsPath, PLUGIN_ID, pluginInstallDir, stateRoot } from "./config.js";
+import { ensureLauncher, pathIsHookSafe } from "./launcher.js";
 import { Spool } from "./spool.js";
 import { protectStateTree } from "./statetree.js";
 
@@ -97,31 +98,13 @@ function listFiles(dir: string, base = dir): string[] {
  * mis-parsed command fails silently.
  */
 export function buildHookCommand(nodePath: string, scriptPath: string, event: string): { ok: true; command: string } | { ok: false; reason: string } {
-	// Shell metacharacters, any whitespace, AND the whole control range.
-	// A NUL is the important one: the string this guard inspects and the bytes
-	// an exec layer eventually uses can disagree across it, so a path that
-	// looks safe here can execute as something shorter (SEC-03).
-	// Written as explicit code-point checks rather than a regex literal. This
-	// pattern travels through several escaping layers, and a mis-escaped \s
-	// silently degrades to "the letter s" — which would reject nearly every
-	// real path while still looking like a working guard.
-	const SHELL_SPECIAL = new Set(Array.from("\"'`$&|;<>()*?!\\"));
-	const isRisky = (value: string): boolean => {
-		for (const char of value) {
-			const code = char.codePointAt(0) ?? 0;
-			// Everything at or below space (NUL, tab, CR, LF, …) and DEL.
-			if (code <= 0x20 || code === 0x7f) return true;
-			if (SHELL_SPECIAL.has(char)) return true;
-		}
-		return false;
-	};
-	for (const [label, value] of [["node", nodePath], ["script", scriptPath]] as const) {
-		if (isRisky(value)) {
-			return {
-				ok: false,
-				reason: `the ${label} path contains a character that is unsafe in an unquoted hook command (${value}). Reinstall from a path without spaces or shell metacharacters, or set ITSUKI_STATE_DIR and install elsewhere.`,
-			};
-		}
+	// Kept for callers that already hold a hook-safe pair. The general path is
+	// buildHooksJsonWithLauncher, which can add the launcher indirection.
+	if (!pathIsHookSafe(nodePath)) {
+		return { ok: false, reason: `the node path is not usable unquoted in a hook command (${nodePath})` };
+	}
+	if (!pathIsHookSafe(scriptPath)) {
+		return { ok: false, reason: `the script path is not usable unquoted in a hook command (${scriptPath})` };
 	}
 	return { ok: true, command: `${nodePath} ${scriptPath} ${event}` };
 }
@@ -142,14 +125,35 @@ export function buildHooksJson(nodePath: string, scriptPath: string): { ok: true
 	if (!pre.ok) return pre;
 	const stop = buildHookCommand(nodePath, scriptPath, "Stop");
 	if (!stop.ok) return stop;
+	return { ok: true, hooks: hooksFrom(pre.command, stop.command) };
+}
+
+function hooksFrom(preCommand: string, stopCommand: string): HooksFile {
+	return {
+		itsuki: {
+			PreInvocation: [{ type: "command", command: preCommand, timeout: 10 }],
+			Stop: [{ type: "command", command: stopCommand, timeout: 10 }],
+		},
+	};
+}
+
+/**
+ * Build hooks.json, adding launcher indirection when the raw paths are not
+ * usable unquoted. The host's parser ignores quotes entirely (measured), so a
+ * space-containing Node path — the Windows default — can only be reached
+ * through a launcher that does its own quoting.
+ */
+export function buildHooksJsonWithLauncher(
+	stateRootDir: string,
+	nodePath: string,
+	scriptPath: string,
+): { ok: true; hooks: HooksFile; strategy: string } | { ok: false; reason: string } {
+	const launcher = ensureLauncher(stateRootDir, nodePath, scriptPath);
+	if (!launcher.ok) return launcher;
 	return {
 		ok: true,
-		hooks: {
-			itsuki: {
-				PreInvocation: [{ type: "command", command: pre.command, timeout: 10 }],
-				Stop: [{ type: "command", command: stop.command, timeout: 10 }],
-			},
-		},
+		hooks: hooksFrom(`${launcher.command} PreInvocation`, `${launcher.command} Stop`),
+		strategy: launcher.strategy,
 	};
 }
 
@@ -182,7 +186,7 @@ export function install(input: InstallInput): InstallOutcome {
 		}
 	}
 
-	const hooks = buildHooksJson(nodePath, input.scriptPath);
+	const hooks = buildHooksJsonWithLauncher(stateRoot(env), nodePath, input.scriptPath);
 	if (!hooks.ok) return { ok: false, reason: hooks.reason };
 
 	const staging = `${target}.itsuki-staging-${process.pid}`;

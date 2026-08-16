@@ -22,6 +22,7 @@ export {
 	buildHooksJson,
 	install,
 	readMarker,
+	buildHooksJsonWithLauncher,
 	uninstall,
 	type InstallOutcome,
 	type UninstallOutcome,
@@ -36,3 +37,4 @@ export {
 	type TranscriptResult,
 	type TranscriptTurn,
 } from "./transcript.js";
+export { ensureLauncher, pathIsHookSafe, safeToEmbed, shortPath } from "./launcher.js";

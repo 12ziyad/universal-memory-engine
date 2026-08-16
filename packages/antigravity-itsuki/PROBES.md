@@ -165,3 +165,65 @@ The stock Windows Node path is `C:\Program Files\nodejs\node.exe`, which contain
 - **Desktop (Antigravity 2.0)** — P16/P17 untested; no desktop host on this machine.
 - **P11 short-path resolution** — see above.
 - Antigravity IDE.
+
+---
+
+# P11 CLOSED — the Windows default Node path now works (2026-08-16)
+
+## What the host actually does with quotes
+
+Measured on the live CLI 1.1.13, one variant per turn:
+
+| hook command | result |
+|---|---|
+| `C:/PROGRA~1/nodejs/node.exe … Stop` (8.3, no spaces) | **executed** |
+| `"C:/Program Files/nodejs/node.exe" "…" Stop` (quoted) | **did not run** |
+
+**The hook parser ignores quotes.** A quoted command with spaces silently never
+fires. So refusing spaces was correct — but it also blocked the stock Windows
+Node location, which is where almost every Windows user's Node lives.
+
+## The fix: one level of indirection
+
+`install` now writes a launcher into the plugin's own owner-only state tree and
+points the hook at that:
+
+```
+hooks.json ->  C:/Users/ziyad/.itsuki/antigravity/bin/itsuki-hook.cmd Stop
+launcher   ->  @echo off
+               setlocal
+               "C:/Program Files/nodejs/node.exe" "…/dist/hook-entry.js" %*
+```
+
+The awkward path is quoted inside cmd/sh, where quoting genuinely works, while
+the hook command itself stays space-free. **8.3 short names are not depended
+on** — they are a last resort used only when the state directory itself contains
+a space (a home like `C:\Users\Ada Lovelace`), because 8.3 generation can be
+disabled system-wide. If that fallback is also unavailable, install refuses with
+an actionable message rather than emitting a command that would silently fail.
+
+Protections preserved: values embedded into the launcher are rejected if they
+contain a quote, newline, NUL, `%` or `!` (cmd expansion), so nothing can break
+out of the launcher's own quoting; ownership marker, atomic swap, symlink
+refusal and path containment are unchanged; the launcher lives inside the
+DACL-verified state tree.
+
+## Proven on the real host, with the real path
+
+Installed with `nodePath = C:/Program Files/nodejs/node.exe` (a real space), then
+one live authenticated turn:
+
+```
+{"kind":"recall","q":true}
+{"kind":"save","roles":["user","assistant"],
+ "texts":["Reply with exactly: P11_LIVE_OK","P11_LIVE_OK"]}
+```
+
+Recall and capture both fired, and the payload is only the human's words and the
+model's answer — AG-02's scaffolding stripping still holding.
+
+Lifecycle on that same path: **install → doctor → update → disable → enable →
+uninstall** all succeeded. Doctor reported `windows-dacl — verified`. Uninstall
+preserved state by default. Host residue removed afterwards.
+
+25 launcher regression tests.
