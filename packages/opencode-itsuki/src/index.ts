@@ -287,108 +287,56 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 		},
 
 		/**
-		 * Transient injection. What we push here is sent to the model and then
-		 * discarded with the request — it never lands in the transcript, so it
-		 * cannot reach title generation or any later summarisation.
+		 * Injection, on the SYSTEM channel.
+		 *
+		 * Three real-host runs killed the obvious approach. The host builds ONE
+		 * message array per turn, calls `experimental.chat.messages.transform`
+		 * exactly once, and then reuses that same array for its
+		 * title-generation call. So anything added there is seen by the title
+		 * call too, and there is no second invocation in which to remove it —
+		 * one-shot injection, element copying and strip-then-inject were each
+		 * tried and each still leaked (SEC-04/04b/04c).
+		 *
+		 * `experimental.chat.system.transform` has the discriminator that hook
+		 * lacks: its `sessionID` is OPTIONAL, and the host omits it for the
+		 * small-model calls (title, summary, compaction). Guarding on its
+		 * presence puts memory in front of the real turn and nothing else.
+		 *
+		 * The host also collapses the system array after this hook when it has
+		 * grown beyond two entries, joining everything after the first. Appending
+		 * one entry is therefore safe and stays a single provider system message,
+		 * which also avoids the multi-system-message problem (opencode#34321).
 		 */
-		"experimental.chat.messages.transform": async (_hookInput: any, output: any) => {
+		"experimental.chat.system.transform": async (hookInput: any, output: any) => {
 			try {
-				const messages = output?.messages;
-				if (!Array.isArray(messages) || messages.length === 0) return;
+				const sessionID = hookInput?.sessionID;
+				// No sessionID => not a conversational turn (title/summary/
+				// compaction). Memory must never reach those.
+				if (typeof sessionID !== "string" || !sessionID) return;
 
-				// STRIP FIRST, on every invocation.
-				//
-				// The host builds one message array per turn and reuses it for
-				// BOTH the inference and its title-generation call. Two
-				// real-host runs proved that: making injection one-shot did not
-				// help, and replacing the array element with a copy did not
-				// either, because the array itself is the shared thing. So the
-				// block cannot be scoped to one call by adding alone — it has to
-				// be removed again on any later call. The turn's own inference
-				// runs first and gets memory; the title call arrives second,
-				// finds no pending entry, and leaves clean.
-				let stripped = false;
-				for (let i = 0; i < messages.length; i += 1) {
-					const message = messages[i];
-					const parts = message?.parts;
-					if (!Array.isArray(parts)) continue;
-					const keep = parts.filter(
-						(p: HostPart) => !(typeof p?.text === "string" && p.text.includes(RECALL_OPEN_MARKER)),
-					);
-					if (keep.length !== parts.length) {
-						messages[i] = { ...message, parts: keep };
-						stripped = true;
-					}
-				}
-				if (stripped) log("info", "itsuki removed its recall block from a reused message array");
+				const system = output?.system;
+				if (!Array.isArray(system)) return;
+				if (system.some((entry: unknown) => typeof entry === "string" && entry.includes(RECALL_OPEN_MARKER))) return;
 
-				if (runtime.pending.size === 0) return;
-
-				// The turn this call belongs to is the newest user message.
-				let target: any;
-				for (let i = messages.length - 1; i >= 0; i -= 1) {
-					if (messages[i]?.info?.role === "user") {
-						target = messages[i];
+				// Find the pending recall for this session, whichever turn it is.
+				let pending: PendingInjection | undefined;
+				let pendingMapKey: string | undefined;
+				for (const [key, value] of runtime.pending) {
+					if (value.sessionID === sessionID) {
+						pending = value;
+						pendingMapKey = key;
 						break;
 					}
 				}
-				const info = target?.info;
-				if (!info?.id || !info?.sessionID) return;
+				if (!pending || !pendingMapKey) return;
 
-				const key = pendingKey(String(info.sessionID), String(info.id));
-				const pending = runtime.pending.get(key);
-				if (!pending) return;
-
-				if (!Array.isArray(target.parts)) return;
-				const targetIndex = messages.indexOf(target);
-				if (targetIndex < 0) return;
-
-				// A fully-formed TextPart: the host's Part type requires id,
-				// sessionID and messageID (TextPartInput's optional id is the
-				// server-assigned door, not this one).
-				const injected = {
-					id: `prt_itsuki${Math.random().toString(36).slice(2, 14)}`,
-					sessionID: String(info.sessionID),
-					messageID: String(info.id),
-					type: "text",
-					text: pending.block,
-					synthetic: true,
-				};
-
-				// COPY, never mutate in place.
-				//
-				// This hook hands over the host's own message objects, not
-				// copies. Pushing onto `target.parts` therefore edited state the
-				// host reused for its title-generation call, so the block
-				// appeared there too — proven on a real host, where BOTH
-				// completions carried it even after injection was made one-shot
-				// (SEC-04). Replacing the array element with a shallow copy that
-				// owns a fresh parts array keeps the edit local to this request,
-				// which is what "transient" was always supposed to mean.
-				messages[targetIndex] = { ...target, parts: [...target.parts, injected] };
-
-				// ONE-SHOT. The host's title generator re-reads the same user
-				// message, so a pending entry keyed on message id alone would be
-				// matched a second time and the block would ride into a
-				// non-conversational call — observed on a real host (SEC-04).
-				// Consuming it here means exactly one provider call per human
-				// turn receives memory: the first, which is the inference.
-				//
-				// The trade-off is deliberate: if that call is retried at the
-				// provider level, the retry proceeds without memory rather than
-				// risking the leak. Recall is fail-open, so a turn without it is
-				// a worse answer, never a broken one.
-				runtime.pending.delete(key);
+				system.push(pending.block);
+				runtime.pending.delete(pendingMapKey);
 			} catch {
 				/* injection is best-effort by design */
 			}
 		},
 
-		// NOTE: the parameter is taken raw and destructured INSIDE the try.
-		// Destructuring in the parameter position throws before any handler
-		// can catch it, and the host dispatches this hook fire-and-forget
-		// (`void hook.event?.(...)`), so such a throw becomes a process-level
-		// unhandled rejection rather than a caught error.
 		event: async (payload: any) => {
 			try {
 				const event = payload?.event;

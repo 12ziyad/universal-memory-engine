@@ -81,7 +81,7 @@ describe("plugin module shape", () => {
 	it("registers only the hooks it intends to", async () => {
 		const { hooks } = await loadPlugin(makeHost());
 		expect(Object.keys(hooks).sort()).toEqual(
-			["chat.message", "dispose", "event", "experimental.chat.messages.transform", "experimental.session.compacting", "tool"].sort(),
+			["chat.message", "dispose", "event", "experimental.chat.system.transform", "experimental.session.compacting", "tool"].sort(),
 		);
 	});
 

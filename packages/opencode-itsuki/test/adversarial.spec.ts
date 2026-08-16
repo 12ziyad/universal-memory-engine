@@ -241,7 +241,7 @@ describe("capture never claims success without a receipt", () => {
 	});
 });
 
-describe("transient injection", () => {
+describe("injection on the system channel", () => {
 	async function pluginWith(context: string) {
 		vi.resetModules();
 		process.env["ITSUKI_STATE_DIR"] = root;
@@ -258,146 +258,72 @@ describe("transient injection", () => {
 		return { hooks, restore: () => void (globalThis.fetch = original) };
 	}
 
-	it("injects a fully-formed TextPart into the outgoing messages only", async () => {
+	const primeTurn = async (hooks: any) =>
+		hooks["chat.message"](
+			{ sessionID: "ses_1", messageID: "m1" },
+			{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
+		);
+
+	it("injects into the system array for a real conversational turn", async () => {
 		const { hooks, restore } = await pluginWith("remembered thing");
 		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			const outgoing: any = {
-				messages: [
-					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
-				],
-			};
-			await hooks["experimental.chat.messages.transform"]({}, outgoing);
-			const injected: any = outgoing.messages[0].parts.find((p: any) => String(p.text).includes(RECALL_OPEN_MARKER));
-			expect(injected).toBeTruthy();
-			// The host's Part type requires all three ids.
-			expect(typeof injected.id).toBe("string");
-			expect(injected.sessionID).toBe("ses_1");
-			expect(injected.messageID).toBe("m1");
-			expect(injected.type).toBe("text");
-			expect(injected.synthetic).toBe(true);
+			await primeTurn(hooks);
+			const output: any = { system: ["base prompt"] };
+			await hooks["experimental.chat.system.transform"]({ sessionID: "ses_1", model: {} }, output);
+			expect(output.system).toHaveLength(2);
+			expect(output.system[1]).toContain(RECALL_OPEN_MARKER);
+			expect(output.system[1]).toContain(RECALL_PREAMBLE);
 		} finally {
 			restore();
 		}
 	});
 
-	it("does not inject into a call that belongs to a different message (title/summary)", async () => {
+	it("SEC-04: NEVER injects when sessionID is absent — the title/summary path", async () => {
+		// This is the discriminator messages.transform does not have. Three
+		// real-host runs proved that hook cannot scope the block; this one can.
 		const { hooks, restore } = await pluginWith("remembered thing");
 		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			// The title generator re-reads a DIFFERENT message id.
-			const titleCall = {
-				messages: [
-					{ info: { id: "m_other", role: "user", sessionID: "ses_1" }, parts: [{ id: "p", type: "text", text: "hello" }] },
-				],
-			};
-			await hooks["experimental.chat.messages.transform"]({}, titleCall);
+			await primeTurn(hooks);
+			const titleCall: any = { system: ["title prompt"] };
+			await hooks["experimental.chat.system.transform"]({ model: {} }, titleCall);
+			expect(titleCall.system).toEqual(["title prompt"]);
 			expect(JSON.stringify(titleCall)).not.toContain(RECALL_OPEN_MARKER);
 		} finally {
 			restore();
 		}
 	});
 
-	it("SEC-04: injects into ONE provider call only — the title call must not receive it", async () => {
-		// Found on a real host (run 31917785989): the host's title generator
-		// re-reads the SAME user message, so matching on message id alone let
-		// the block through to a second, non-conversational model call.
-		// Injection is therefore one-shot per human turn.
+	it("injects once: a second call for the same turn adds nothing", async () => {
 		const { hooks, restore } = await pluginWith("remembered thing");
 		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			const mainCall: any = {
-				messages: [
-					{ info: { id: "m0", role: "assistant", sessionID: "ses_1" }, parts: [] },
-					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
-				],
-			};
-			await hooks["experimental.chat.messages.transform"]({}, mainCall);
-			const injectedMain = mainCall.messages[1].parts.filter((p: any) => String(p.text).includes(RECALL_OPEN_MARKER)).length;
-			expect(injectedMain).toBe(1);
-
-			// The title call: same session, same user message id, fresh array.
-			const titleCall: any = {
-				messages: [
-					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
-				],
-			};
-			await hooks["experimental.chat.messages.transform"]({}, titleCall);
-			expect(JSON.stringify(titleCall)).not.toContain(RECALL_OPEN_MARKER);
+			await primeTurn(hooks);
+			const output: any = { system: ["base"] };
+			await hooks["experimental.chat.system.transform"]({ sessionID: "ses_1", model: {} }, output);
+			await hooks["experimental.chat.system.transform"]({ sessionID: "ses_1", model: {} }, output);
+			const blocks = output.system.filter((e: string) => e.includes(RECALL_OPEN_MARKER)).length;
+			expect(blocks).toBe(1);
 		} finally {
 			restore();
 		}
 	});
 
-	it("SEC-04b: never mutates the host's own message object (shared-state leak)", async () => {
-		// The real host reuses the SAME message objects for its title call, so
-		// pushing onto target.parts leaked the block there even with one-shot
-		// injection. The original object must come back untouched.
+	it("never injects into a different session", async () => {
 		const { hooks, restore } = await pluginWith("remembered thing");
 		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			const sharedParts = [{ id: "p1", type: "text", text: "hello" }];
-			const sharedMessage = { info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: sharedParts };
-			const call: any = { messages: [sharedMessage] };
-			await hooks["experimental.chat.messages.transform"]({}, call);
-
-			// This request sees the block...
-			expect(JSON.stringify(call.messages[0])).toContain(RECALL_OPEN_MARKER);
-			// ...but the host's own object and array are untouched.
-			expect(sharedParts).toHaveLength(1);
-			expect(JSON.stringify(sharedMessage)).not.toContain(RECALL_OPEN_MARKER);
+			await primeTurn(hooks);
+			const other: any = { system: ["base"] };
+			await hooks["experimental.chat.system.transform"]({ sessionID: "ses_OTHER", model: {} }, other);
+			expect(other.system).toEqual(["base"]);
 		} finally {
 			restore();
 		}
 	});
 
-	it("SEC-04c: strips its block from a REUSED array, so a later call runs clean", async () => {
-		// The decisive real-host behaviour: one array serves both the inference
-		// and the title call. Adding cannot scope the block to one of them, so
-		// the later call must find it removed.
-		const { hooks, restore } = await pluginWith("remembered thing");
-		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			const shared: any = {
-				messages: [
-					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
-				],
-			};
-			// Inference: receives memory.
-			await hooks["experimental.chat.messages.transform"]({}, shared);
-			expect(JSON.stringify(shared)).toContain(RECALL_OPEN_MARKER);
-
-			// Title call reusing the very same array object.
-			await hooks["experimental.chat.messages.transform"]({}, shared);
-			expect(JSON.stringify(shared)).not.toContain(RECALL_OPEN_MARKER);
-			// And the user's own text survives.
-			expect(JSON.stringify(shared)).toContain("hello");
-		} finally {
-			restore();
-		}
-	});
-
-	it("never throws on a malformed transform payload", async () => {
+	it("never throws on a malformed payload", async () => {
 		const { hooks, restore } = await pluginWith("x");
 		try {
-			await expect(hooks["experimental.chat.messages.transform"]({}, undefined)).resolves.toBeUndefined();
-			await expect(hooks["experimental.chat.messages.transform"]({}, { messages: "nope" })).resolves.toBeUndefined();
-			await expect(hooks["experimental.chat.messages.transform"]({}, { messages: [{}] })).resolves.toBeUndefined();
+			await expect(hooks["experimental.chat.system.transform"](undefined, undefined)).resolves.toBeUndefined();
+			await expect(hooks["experimental.chat.system.transform"]({ sessionID: "ses_1" }, { system: "nope" })).resolves.toBeUndefined();
 		} finally {
 			restore();
 		}
@@ -427,7 +353,7 @@ describe("no unhandled rejections escape any hook", () => {
 			void hooks["chat.message"]({ sessionID: "s", messageID: "m" }, { message: { id: "m" }, parts: [] });
 			void hooks.event({ event: { type: "session.status", properties: { sessionID: "s", status: { type: "idle" } } } });
 			void hooks.event(undefined);
-			void hooks["experimental.chat.messages.transform"]({}, undefined);
+			void hooks["experimental.chat.system.transform"]({ sessionID: "s" }, undefined);
 			void hooks["experimental.session.compacting"]({ sessionID: "s" });
 			void hooks.dispose();
 			await new Promise((r) => setTimeout(r, 150));
