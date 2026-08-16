@@ -218,3 +218,39 @@ async def test_memory_failure_never_breaks_a_run(monkeypatch):
     events = await run_turn(runner)
     assert events, "the turn still produced events with memory unavailable"
     await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_service_uri_route_constructs_through_adks_own_registry(monkeypatch):
+    """A-CLI.
+
+    `adk web --memory_service_uri=itsuki://` reaches us through ADK's service
+    registry, which calls every factory as `cls(uri=..., agents_dir=...)`. This
+    is a PARTIAL installation: it builds the service, and nothing more -- the
+    preload tool and the capture plugin still have to be wired in code.
+    """
+    import adk_itsuki
+    from google.adk.cli.service_registry import get_service_registry
+    from adk_itsuki.config import ConfigError
+    from adk_itsuki.service import ItsukiMemoryService
+
+    monkeypatch.setenv("ITSUKI_API_KEY", "itsuki_live_testkey0123456789")
+    adk_itsuki.register()
+    registry = get_service_registry()
+
+    service = registry.create_memory_service("itsuki://", agents_dir="/tmp/agents")
+    assert isinstance(service, ItsukiMemoryService)
+    assert service.settings.base_url == "https://itsuki.app"
+
+    override = registry.create_memory_service("itsuki://staging.example", agents_dir="/tmp/agents")
+    assert override.settings.base_url == "https://staging.example"
+
+    # A URI ends up in `ps` output and shell history, so a key in one is
+    # refused outright rather than quietly accepted.
+    with pytest.raises(ConfigError):
+        registry.create_memory_service("itsuki://host?api_key=leaked", agents_dir="/tmp/agents")
+
+    # And a credential never reaches a repr, which is where tracebacks look.
+    assert "testkey" not in repr(service.settings)
+    await service.aclose()
+    await override.aclose()
