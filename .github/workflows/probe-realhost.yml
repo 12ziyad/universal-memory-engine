@@ -62,6 +62,8 @@ jobs:
           cp "$GITHUB_WORKSPACE/.github/probe-assets/stub-llm.mjs" "$ROOT/stub-llm.mjs"
           cp "$GITHUB_WORKSPACE/.github/probe-assets/itsuki-stub.mjs" "$ROOT/itsuki-stub.mjs"
           cp "$GITHUB_WORKSPACE/.github/probe-assets/assert.mjs" "$ROOT/assert.mjs"
+          cp "$GITHUB_WORKSPACE/.github/probe-assets/subagent-fork.mjs" "$ROOT/subagent-fork.mjs"
+          npm install --no-audit --no-fund @opencode-ai/sdk@1.18.18
           # Prove we are running packed bytes, not the worktree.
           test -f node_modules/opencode-itsuki/dist/index.js
           node -e "console.log('plugin version:', require('./node_modules/opencode-itsuki/package.json').version)"
@@ -162,6 +164,21 @@ jobs:
             if (closes>1) { console.log('FAIL  forged marker survived into the prompt'); process.exit(1); }
             console.log('PASS  forged closing marker was defanged');
           "
+
+      - name: P5 / P13a — real subagent and fork attribution
+        env:
+          ITSUKI_API_KEY: itsuki_live_probeKEY0123456789
+          ITSUKI_BASE_URL: http://127.0.0.1:4242
+        run: |
+          set -eux
+          cd "$PROBE_ROOT/project"
+          echo ok > "$PROBE_LOG_DIR/stub-mode"
+          export ITSUKI_STATE_DIR="$PROBE_ROOT/state-p5"
+          : > "$PROBE_LOG_DIR/itsuki.jsonl"
+          # The SDK spawns the real `opencode` binary, so it must be reachable.
+          export PATH="$PROBE_ROOT/project/node_modules/.bin:$PATH"
+          which opencode
+          timeout 480 node "$PROBE_ROOT/subagent-fork.mjs"
 
       - name: Collect evidence
         if: always()
