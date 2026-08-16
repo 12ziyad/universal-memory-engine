@@ -284,26 +284,6 @@ describe("transient injection", () => {
 		}
 	});
 
-	it("injects at most once even if the transform fires repeatedly (retry loops)", async () => {
-		const { hooks, restore } = await pluginWith("remembered thing");
-		try {
-			await hooks["chat.message"](
-				{ sessionID: "ses_1", messageID: "m1" },
-				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
-			);
-			const outgoing: any = {
-				messages: [
-					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
-				],
-			};
-			for (let i = 0; i < 5; i += 1) await hooks["experimental.chat.messages.transform"]({}, outgoing);
-			const count = outgoing.messages[0].parts.filter((p: any) => String(p.text).includes(RECALL_OPEN_MARKER)).length;
-			expect(count).toBe(1);
-		} finally {
-			restore();
-		}
-	});
-
 	it("does not inject into a call that belongs to a different message (title/summary)", async () => {
 		const { hooks, restore } = await pluginWith("remembered thing");
 		try {
@@ -378,6 +358,35 @@ describe("transient injection", () => {
 			// ...but the host's own object and array are untouched.
 			expect(sharedParts).toHaveLength(1);
 			expect(JSON.stringify(sharedMessage)).not.toContain(RECALL_OPEN_MARKER);
+		} finally {
+			restore();
+		}
+	});
+
+	it("SEC-04c: strips its block from a REUSED array, so a later call runs clean", async () => {
+		// The decisive real-host behaviour: one array serves both the inference
+		// and the title call. Adding cannot scope the block to one of them, so
+		// the later call must find it removed.
+		const { hooks, restore } = await pluginWith("remembered thing");
+		try {
+			await hooks["chat.message"](
+				{ sessionID: "ses_1", messageID: "m1" },
+				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
+			);
+			const shared: any = {
+				messages: [
+					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
+				],
+			};
+			// Inference: receives memory.
+			await hooks["experimental.chat.messages.transform"]({}, shared);
+			expect(JSON.stringify(shared)).toContain(RECALL_OPEN_MARKER);
+
+			// Title call reusing the very same array object.
+			await hooks["experimental.chat.messages.transform"]({}, shared);
+			expect(JSON.stringify(shared)).not.toContain(RECALL_OPEN_MARKER);
+			// And the user's own text survives.
+			expect(JSON.stringify(shared)).toContain("hello");
 		} finally {
 			restore();
 		}

@@ -295,6 +295,33 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 			try {
 				const messages = output?.messages;
 				if (!Array.isArray(messages) || messages.length === 0) return;
+
+				// STRIP FIRST, on every invocation.
+				//
+				// The host builds one message array per turn and reuses it for
+				// BOTH the inference and its title-generation call. Two
+				// real-host runs proved that: making injection one-shot did not
+				// help, and replacing the array element with a copy did not
+				// either, because the array itself is the shared thing. So the
+				// block cannot be scoped to one call by adding alone — it has to
+				// be removed again on any later call. The turn's own inference
+				// runs first and gets memory; the title call arrives second,
+				// finds no pending entry, and leaves clean.
+				let stripped = false;
+				for (let i = 0; i < messages.length; i += 1) {
+					const message = messages[i];
+					const parts = message?.parts;
+					if (!Array.isArray(parts)) continue;
+					const keep = parts.filter(
+						(p: HostPart) => !(typeof p?.text === "string" && p.text.includes(RECALL_OPEN_MARKER)),
+					);
+					if (keep.length !== parts.length) {
+						messages[i] = { ...message, parts: keep };
+						stripped = true;
+					}
+				}
+				if (stripped) log("info", "itsuki removed its recall block from a reused message array");
+
 				if (runtime.pending.size === 0) return;
 
 				// The turn this call belongs to is the newest user message.
@@ -313,12 +340,6 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 				if (!pending) return;
 
 				if (!Array.isArray(target.parts)) return;
-				// Idempotent within a retry loop: never inject twice.
-				const already = target.parts.some(
-					(p: HostPart) => typeof p?.text === "string" && p.text.includes(RECALL_OPEN_MARKER),
-				);
-				if (already) return;
-
 				const targetIndex = messages.indexOf(target);
 				if (targetIndex < 0) return;
 
