@@ -149,3 +149,65 @@ def test_filename_never_contains_raw_key_material(tmp_path):
     path = spool.stage("idem_../../escape", body())
     assert path is not None
     assert ".." not in path.name and "/" not in path.name
+
+
+def test_thirtytwo_threads_racing_for_one_envelope_yield_one_claim(tmp_path):
+    """1,000-user shape: claim-by-rename must be atomic under contention.
+
+    os.replace is the whole mechanism -- if it ever let two claimants through,
+    the idempotency key would save us server-side, but the local invariant is
+    still one claimant per envelope, and this drives it hard.
+    """
+    import threading
+
+    spool = make(tmp_path)
+    winners = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(32)
+
+    path = spool.stage("idem_contested", body("contested"))
+
+    def contender():
+        barrier.wait()
+        claimed = spool.claim(path)
+        if claimed is not None:
+            with lock:
+                winners.append(claimed)
+
+    threads = [threading.Thread(target=contender) for _ in range(32)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+
+    # AUDIT-06: on Windows, MoveFileEx under simultaneous contention reports
+    # success to every racer holding an open handle, so "my rename returned"
+    # is not ownership. Ownership is holding a claimed file that EXISTS --
+    # and exactly one contender may end up with that.
+    effective = [claimed for claimed in winners if claimed.exists()]
+    assert len(effective) == 1, f"exactly one EFFECTIVE claimant may win, got {len(effective)}"
+    assert spool.read(effective[0]) is not None, "and the winner's envelope must be readable"
+
+
+def test_concurrent_staging_across_many_sessions_stays_bounded_and_separate(tmp_path):
+    """Many senders staging at once: bounds hold, keys never collide."""
+    import threading
+
+    spool = make(tmp_path)
+    barrier = threading.Barrier(16)
+
+    def stage_for(index: int):
+        barrier.wait()
+        for turn in range(8):
+            spool.stage(f"idem_user{index:02d}_turn{turn}", body(f"user {index} turn {turn}"))
+
+    threads = [threading.Thread(target=stage_for, args=(i,)) for i in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+
+    pending = spool.pending()
+    keys = {spool.read(p)["idempotencyKey"] for p in pending if spool.read(p)}
+    assert len(pending) <= 64, "the bound must hold under concurrent staging"
+    assert len(keys) == len(pending), "no two envelopes may share a key"

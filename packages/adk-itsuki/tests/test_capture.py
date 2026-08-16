@@ -179,3 +179,30 @@ async def test_credentials_in_the_transcript_are_scrubbed(service, client):
     )
     await service.capture_invocation(session, invocation_for(session))
     assert "itsuki_live_abcdefghijklmnop" not in json.dumps(client.writes)
+
+
+@pytest.mark.asyncio
+async def test_foreign_runs_never_receive_an_attribution_marker():
+    """AUDIT-04 regression.
+
+    before_agent_callback fires in every run the plugin was forwarded into --
+    including AgentTool children, which never pass the before_run ownership
+    guard. The original code fell back to `agent.name` there, which would have
+    written a marker into a foreign session recording a CHILD as the root.
+    """
+    from adk_itsuki.plugin import ItsukiMemoryPlugin
+
+    plugin = ItsukiMemoryPlugin()
+
+    class FakeState(dict):
+        pass
+
+    class FakeCallbackContext:
+        state = FakeState()
+        invocation_id = "child-invocation-never-guarded"
+
+    class FakeAgent:
+        name = "child_agent"
+
+    await plugin.before_agent_callback(agent=FakeAgent(), callback_context=FakeCallbackContext())
+    assert FakeCallbackContext.state == {}, "a foreign run must never be marked"

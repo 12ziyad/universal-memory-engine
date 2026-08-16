@@ -233,3 +233,84 @@ async def test_a_failed_capture_drains_on_the_next_run(service, client):
     await service.drain()
     assert service.pending_count == 0
     assert service.counters["captured"] == 1
+
+
+@pytest.mark.asyncio
+async def test_deadline_abandoned_calls_count_toward_the_breaker(service, client, monkeypatch):
+    """AUDIT-02 regression.
+
+    A transport hung past our own deadline surfaces as TimeoutError from the
+    daemon pool, not as an SDK error -- and that path skipped the breaker, so
+    a wedged service was retried at full price on every recall forever.
+    """
+    import time as time_module
+
+    def hang(*_a, **_k):
+        time_module.sleep(30)
+
+    client.search = hang  # type: ignore[assignment]
+    service.recall_deadline = 0.05
+
+    for index in range(5):
+        service.tokens.enter(invocation(f"inv-slow-{index}"))
+        await service.search_memory(app_name="app", user_id="user-1", query=f"q{index}")
+        service.tokens.exit(f"inv-slow-{index}")
+
+    assert service.status()["breaker"] == "open", "five deadline timeouts must open the breaker"
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_failure_shapes_are_classified(service, client):
+    """AUDIT-01 regression, ADK side (errors.py is duplicated per package)."""
+    from itsuki import MemoryAPIError
+    from adk_itsuki.errors import NETWORK, TIMEOUT, classify
+
+    assert classify(MemoryAPIError("t", status=0, code="timeout"))[0] == TIMEOUT
+    assert classify(MemoryAPIError("n", status=0, code="transport_error"))[0] == NETWORK
+
+
+@pytest.mark.asyncio
+async def test_hundred_concurrent_sessions_never_cross_tenants(service, client):
+    """1,000-user shape: 10 users x 10 sessions, all in flight at once.
+
+    The assertion is per-wire-body: every capture carries exactly its own
+    session id and its own derived user, and no body ever contains another
+    user's text. Volume without isolation proof is a vanity metric.
+    """
+    from conftest import invocation_for, make_session, text_event
+    from adk_itsuki.identity import derive_user_id
+
+    async def one_turn(user_index: int, session_index: int):
+        user = f"user-{user_index}"
+        session_id = f"sess-{user_index}-{session_index}"
+        session = make_session(
+            [
+                text_event("user", f"question from {user} in {session_id}", invocation_id=f"inv-{session_id}"),
+                text_event("root_agent", f"answer for {user} in {session_id}", invocation_id=f"inv-{session_id}"),
+            ],
+            user_id=user,
+            session_id=session_id,
+        )
+        invocation = invocation_for(session, invocation_id=f"inv-{session_id}")
+        await service.capture_invocation(session, invocation)
+
+    await asyncio.gather(*(one_turn(u, s) for u in range(10) for s in range(10)))
+    await service.drain()
+
+    assert len(client.writes) == 100
+    for write in client.writes:
+        text = write["messages"][0]["content"]
+        # "question from user-3 in sess-3-7" -> its wire identity must match.
+        user = text.split("question from ")[1].split(" in ")[0]
+        session_id = text.split(" in ")[1]
+        assert write["user_id"] == derive_user_id("app", user, None), text
+        assert write["conversation_id"] == session_id, text
+        # No other user's text may ever share a body.
+        for message in write["messages"]:
+            assert f"user-{user}" not in ""  # structural no-op guard
+            for other in range(10):
+                other_user = f"user-{other}"
+                if other_user != user:
+                    assert other_user not in message["content"], (
+                        f"cross-tenant text leak: {other_user} inside {user}'s capture"
+                    )

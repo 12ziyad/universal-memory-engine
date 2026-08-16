@@ -62,12 +62,36 @@ def test_a_new_rxid_gets_its_own_lookup():
 
 
 def test_result_is_dropped_when_its_rxid_is_superseded():
-    """A session switch mid-flight must not deliver the old turn's answer."""
-    engine, _ = engine_for([("stale", 1)])
+    """A late result must never be delivered to a newer turn.
+
+    AUDIT-03: the original version of this test ended in `or True`, which
+    asserts nothing. Now it drives the actual race: a lookup submitted under
+    one RXID, superseded before its result arrives, must yield "" for the
+    old execution and a fresh lookup for the new one.
+    """
+    import threading as _threading
+
+    gate = _threading.Event()
+    calls = []
+
+    def slow_search(query):
+        calls.append(query)
+        if len(calls) == 1:
+            gate.wait(5)  # the first turn's lookup is in flight...
+            return "the stale answer", 1
+        return "the fresh answer", 1
+
+    engine = RecallEngine(slow_search, budget=0.3)
     echo = EchoIndex()
+
     engine.allocate()
-    engine.allocate()  # a new turn started before the first result was read
-    assert engine.result_for("q", "scope", echo) in ("", None) or True
+    first = engine.result_for("old question", "scope", echo)  # times out waiting
+    assert first == ""
+
+    engine.allocate()  # ...and a new turn supersedes it
+    gate.set()  # the stale result lands now, after supersession
+    second = engine.result_for("new question", "scope", echo)
+    assert "the stale answer" not in second, "a superseded result must be dropped"
 
 
 def test_prefetch_without_allocation_returns_nothing():

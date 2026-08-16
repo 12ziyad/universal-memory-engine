@@ -146,3 +146,32 @@ def test_session_switch_through_the_manager_does_not_disturb_recall(managed):
     manager.on_turn_start(1, "the very same question text")
     manager.prefetch_all("the very same question text")
     assert len(client.searches) == 2, "a new turn must recall again, never reuse a memo"
+
+
+def test_the_deployed_directory_plugin_loads_through_the_hosts_own_loader(tmp_path, monkeypatch):
+    """P-H0, permanent.
+
+    The installer's whole reason to exist is that PyPI 0.19.0 has no
+    entry-point discovery -- so the deployed directory MUST load through the
+    host's own `plugins.memory` loader, synthetic-package machinery, relative
+    imports and all. This drives that loader directly, not our code.
+    """
+    import hermes_itsuki.installer as installer_module
+
+    home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("ITSUKI_API_KEY", "itsuki_live_ph0key0123456789")
+    monkeypatch.setattr(installer_module, "ensure_sdk", lambda _home: (True, "sdk present"))
+
+    ok, notes = installer_module.install(str(home))
+    assert ok, notes
+
+    from plugins.memory import discover_memory_providers, load_memory_provider
+
+    names = [entry[0] for entry in discover_memory_providers()]
+    assert "itsuki" in names, f"host discovery missed the deployed plugin: {names}"
+
+    provider = load_memory_provider("itsuki")
+    assert provider is not None
+    assert provider.name == "itsuki"
+    assert [tool["name"] for tool in provider.get_tool_schemas()] == ["itsuki_recall", "itsuki_status"]

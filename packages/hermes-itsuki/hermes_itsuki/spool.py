@@ -17,10 +17,12 @@ worth more than the code that provides them:
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import stat
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -65,6 +67,11 @@ class Spool:
         self.partition = self.root / "spool" / authority
         self.stats = SpoolStats()
         self._clock = clock
+        # In-process synchronisation for the check-then-write bound. Across
+        # processes the bound is enforced approximately (each process trims to
+        # the limit on its next stage/GC); within one it is exact (AUDIT-07).
+        self._lock = threading.Lock()
+        self._claim_seq = itertools.count(1)
 
     # ------------------------------------------------------------- lifecycle
     def ensure(self) -> None:
@@ -91,10 +98,9 @@ class Spool:
         this file.
         """
         self.ensure()
-        self._gc()
-        if not self._has_room():
-            if not self._drop_oldest():
-                return None
+        with self._lock:
+            self._gc()
+            self._trim_to_bound()
         envelope = {
             "schema": SCHEMA,
             "authorityId": self.authority,
@@ -179,11 +185,22 @@ class Spool:
         and POSIX, so ownership is expressed by moving the file rather than by
         a lock file that a crash would leave behind forever.
         """
-        claimed = path.with_suffix(f".claim{os.getpid()}")
+        # The claim name is unique per CLAIMANT, not per process. On Windows,
+        # MoveFileEx under simultaneous contention can report success to every
+        # racer that already holds an open handle -- the rename acts on the
+        # file object, not the name -- so rename alone is not mutual
+        # exclusion there (AUDIT-06, measured: 32 threads, 32 "successful"
+        # renames of one file). With unique targets, the file ends up under
+        # exactly one claimant's name; everyone else finds their claimed path
+        # missing at read time and backs off. Ownership is therefore decided
+        # by read-back, and the rename is just the move.
+        claimed = path.with_suffix(f".claim{os.getpid()}-{next(self._claim_seq)}")
         try:
             os.replace(path, claimed)
         except OSError:
             return None
+        if not claimed.exists():
+            return None  # a simultaneous racer's rename superseded ours
         return claimed
 
     def release(self, claimed: Path, original: Path) -> None:
@@ -238,20 +255,22 @@ class Spool:
                         _unlink(path)
                         self.stats.aged_out += 1
 
-    def _has_room(self) -> bool:
-        entries = list(self.partition.glob("*.json"))
-        if len(entries) >= MAX_ENVELOPES:
-            return False
-        total = sum(_size(p) for p in entries)
-        return total < MAX_TOTAL_BYTES
+    def _trim_to_bound(self) -> None:
+        """Make room for one more envelope, dropping as many oldest as needed.
 
-    def _drop_oldest(self) -> bool:
-        entries = sorted((p for p in self.partition.glob("*.json")), key=_mtime)
-        if not entries:
-            return True
-        _unlink(entries[0])
-        self.stats.dropped_overflow += 1
-        return True
+        Dropping exactly one per stage let a backlog that arrived over-bound
+        stay over-bound forever (AUDIT-07): with 116 envelopes present, each
+        new stage shed one and added one. This trims until the invariant
+        actually holds.
+        """
+        while True:
+            entries = sorted((p for p in self.partition.glob("*.json")), key=_mtime)
+            over_count = len(entries) >= MAX_ENVELOPES
+            over_bytes = sum(_size(p) for p in entries) >= MAX_TOTAL_BYTES
+            if not entries or not (over_count or over_bytes):
+                return
+            _unlink(entries[0])
+            self.stats.dropped_overflow += 1
 
     # ----------------------------------------------------------------- stats
     def depth(self) -> int:

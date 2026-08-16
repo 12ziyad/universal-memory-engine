@@ -54,6 +54,17 @@ def classify(error: BaseException) -> Tuple[str, Optional[float]]:
     code = code.strip().lower() if isinstance(code, str) else ""
     retry_after = _float(getattr(error, "retry_after", None))
 
+    # The SDK reports transport-level failures as MemoryAPIError(status=0,
+    # code="timeout"|"transport_error"). Zero is not an HTTP status, and
+    # missing these codes classified every real-world outage as UNKNOWN --
+    # which meant the breaker never opened against a dead service (AUDIT-01).
+    if code == "timeout":
+        return TIMEOUT, None
+    if code in ("transport_error", "network_error", "connection_error"):
+        return NETWORK, None
+    if status is not None and status <= 0:
+        status = None
+
     if code in (
         IDEMPOTENCY_CONFLICT,
         QUOTA_EXHAUSTED,

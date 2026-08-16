@@ -65,3 +65,24 @@ plus the vendored `_kernel.py` and `py.typed`. Tests in
 9 host-contract tests skip themselves) · `mypy --strict` clean · one runtime
 dependency · no postinstall · wheel contents reviewed by name · clean-room
 wheel-only install and import proven. Full evidence in `PROBES.md`.
+
+
+## Independent audit (Fable, 2026-08-16) — findings and repairs
+
+Audited from `1685dce`; every finding fixed with a regression that fails
+against the defective code.
+
+| ID | Severity | Finding | Fix |
+|---|---|---|---|
+| AUDIT-01 | HIGH | The SDK reports every transport failure as `MemoryAPIError(status=0, code="timeout"\|"transport_error")`; `classify()` knew neither the codes nor that status=0 is not an HTTP status, so real outages classified UNKNOWN and **the breaker never opened against a dead service** (reproduced: 5 real SDK timeouts, breaker still closed) | codes mapped, `status<=0` excluded from the HTTP ladder; regression built from real `MemoryAPIError` shapes |
+| AUDIT-03 | MEDIUM (test integrity) | The superseded-RXID test ended in `or True` — it asserted nothing | rewritten to drive the actual race: a stale in-flight result landing after supersession must never be delivered to the new turn |
+| AUDIT-06 | MEDIUM | **Windows `MoveFileEx` under simultaneous contention reports success to every racer holding an open handle** (measured: 32 threads, 32 "successful" renames of one file) — claim-by-rename alone is not mutual exclusion there, and `claim()` could return a path whose file another racer now owned | claim names are unique per claimant (`pid-seq`), ownership decided by read-back (the file exists under exactly one claimant's name); worst case before the fix was a duplicate wire delivery collapsed by the idempotency key — never a wrong-tenant or lost write |
+| AUDIT-07 | MEDIUM | The spool bound check-then-write raced under concurrent staging (measured 116 > 64), and dropping one-per-stage could never bring an over-bound backlog back under | staging serialised in-process (`threading.Lock`) with trim-to-bound; cross-process enforcement is per-process-approximate and documented as such |
+
+Also executed this audit: **P-H0 as a permanent test** — the deployed directory
+plugin is discovered and loaded by the real 0.19.0 host loader
+(`plugins.memory.load_memory_provider`) alongside the 8 bundled providers, with
+its synthetic-package relative imports intact.
+
+Post-audit gates: **128 passed on real hermes-agent 0.19.0** (118 on the
+stub leg), `mypy --strict` clean, wheel rebuilt and clean-room reinstalled.

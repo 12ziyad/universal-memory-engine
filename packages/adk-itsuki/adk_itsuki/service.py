@@ -33,7 +33,7 @@ from .capture import (
 )
 from .config import Settings, resolve
 from .context import Invocation, TokenRegistry, current
-from .errors import Breaker, ERASED, IDEMPOTENCY_CONFLICT, TERMINAL_CLASSES, classify
+from .errors import Breaker, ERASED, IDEMPOTENCY_CONFLICT, TERMINAL_CLASSES, TIMEOUT, classify
 from .identity import derive_user_id, scope_metadata
 from .sanitize import sanitize_recalled_text
 from .transport import DaemonTransport, TransportClosed
@@ -136,7 +136,16 @@ class ItsukiMemoryService(BaseMemoryService):
                 lambda: self._client.search(query.strip(), user_id=scoped_user, limit=self.recall_limit),
                 self.recall_deadline,
             )
-        except (TimeoutError, TransportClosed):
+        except TimeoutError:
+            # A deadline-abandoned call is a transport failure like any other:
+            # without this, a service hung past our deadline never opened the
+            # breaker and every turn paid the full wait forever (AUDIT-02).
+            with self._lock:
+                self._breaker.record_failure(TIMEOUT)
+            self.counters["recall_failed"] += 1
+            return empty
+        except TransportClosed:
+            # Our own shutdown, not the service's fault: never breaker-counted.
             self.counters["recall_failed"] += 1
             return empty
         except BaseException as exc:  # noqa: BLE001 - degrade, never abort a run
@@ -327,7 +336,13 @@ class ItsukiMemoryService(BaseMemoryService):
                     lambda: self._client.add_conversation(item.messages, **item.options),
                     self.capture_deadline,
                 )
-            except (TimeoutError, TransportClosed):
+            except TimeoutError:
+                with self._lock:
+                    self._breaker.record_failure(TIMEOUT)
+                    self._pending.insert(0, item)
+                self.counters["capture_failed"] += 1
+                return
+            except TransportClosed:
                 with self._lock:
                     self._pending.insert(0, item)
                 self.counters["capture_failed"] += 1

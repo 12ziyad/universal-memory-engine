@@ -155,3 +155,35 @@ def test_the_process_exits_while_the_transport_hangs_forever():
     assert "turn-completed" in result.stdout
     assert result.returncode == 0
     assert elapsed < 10, f"interpreter took {elapsed:.1f}s to exit with a hung transport"
+
+
+def test_real_sdk_transport_failures_open_the_breaker():
+    """AUDIT-01 regression.
+
+    The SDK reports every transport-level failure as
+    MemoryAPIError(status=0, code="timeout" | "transport_error"). The original
+    classifier knew neither the codes nor that status=0 is not an HTTP status,
+    so real-world outages classified as UNKNOWN and the breaker never opened:
+    five straight timeouts against a dead service left it CLOSED, and a
+    thousand users would have paid the full deadline on every turn forever.
+    """
+    from itsuki import MemoryAPIError
+
+    timed_out = MemoryAPIError("request timed out after 3s", status=0, code="timeout")
+    transport = MemoryAPIError("request failed: refused", status=0, code="transport_error")
+
+    assert classify(timed_out)[0] == TIMEOUT
+    assert classify(transport)[0] == NETWORK
+
+    breaker = Breaker(clock=Clock())
+    for _ in range(5):
+        breaker.record_failure(classify(timed_out)[0])
+    assert not breaker.allows(), "five real SDK timeouts must open the breaker"
+
+
+def test_status_zero_is_not_an_http_status():
+    """status=0 must never be walked through the HTTP ladder into UNKNOWN."""
+    from itsuki import MemoryAPIError
+
+    weird = MemoryAPIError("transport hiccup", status=0, code="transport_error")
+    assert classify(weird)[0] == NETWORK

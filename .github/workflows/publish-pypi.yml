@@ -152,6 +152,25 @@ jobs:
           fi
           python -m pip install pytest
 
+      # The two agent packages promise specific host versions, so CI must
+      # prove them against those versions rather than whatever pip resolves.
+      # Existing packages are untouched by these steps.
+      - name: Install the pinned floor host (hermes-itsuki)
+        if: ${{ inputs.package == 'hermes-itsuki' }}
+        run: python -m pip install "hermes-agent==0.19.0"
+
+      - name: Tests (adk-itsuki floor leg, google-adk 2.5.0)
+        if: ${{ inputs.package == 'adk-itsuki' }}
+        working-directory: ${{ steps.resolve.outputs.dir }}
+        run: |
+          python -m pip install "google-adk==2.5.0" pytest-asyncio
+          python -m pytest tests -q
+          python -m pip install "google-adk==2.7.0"
+
+      - name: Install async test support (adk-itsuki)
+        if: ${{ inputs.package == 'adk-itsuki' }}
+        run: python -m pip install pytest-asyncio
+
       - name: Tests
         working-directory: ${{ steps.resolve.outputs.dir }}
         run: python -m pytest tests -q

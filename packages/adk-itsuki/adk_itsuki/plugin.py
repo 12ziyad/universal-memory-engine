@@ -106,11 +106,18 @@ class ItsukiMemoryPlugin(BasePlugin):
             invocation_id = getattr(callback_context, "invocation_id", "") or ""
             if not invocation_id:
                 return None
+            root_name = self._pending_root.get(invocation_id)
+            if root_name is None:
+                # This invocation never passed our before_run guard, so it is
+                # a foreign run -- an AgentTool child, or a runner wired to
+                # some other memory service. Writing a marker there would
+                # pollute a session we do not own, and the agent.name
+                # fallback would record a CHILD as the root (AUDIT-04).
+                return None
             markers = state.get(STATE_KEY)
             markers = dict(markers) if isinstance(markers, dict) else {}
             if invocation_id in markers:
                 return None  # the root already claimed this invocation
-            root_name = self._pending_root.get(invocation_id) or getattr(agent, "name", "") or ""
             markers[invocation_id] = {"root": root_name, "branch": ""}
             state[STATE_KEY] = markers
         except Exception:  # noqa: BLE001 - never let bookkeeping break a run
