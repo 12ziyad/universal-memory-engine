@@ -32,6 +32,7 @@ hermes-itsuki = "hermes_itsuki.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hermes_itsuki"]
+artifacts = ["hermes_itsuki/py.typed"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/hermes_itsuki", "/LICENSE", "/README.md", "/pyproject.toml"]
