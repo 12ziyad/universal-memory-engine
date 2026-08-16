@@ -62,7 +62,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/.github/probe-assets/stub-llm.mjs" "$ROOT/stub-llm.mjs"
           cp "$GITHUB_WORKSPACE/.github/probe-assets/itsuki-stub.mjs" "$ROOT/itsuki-stub.mjs"
           cp "$GITHUB_WORKSPACE/.github/probe-assets/assert.mjs" "$ROOT/assert.mjs"
-          cp "$GITHUB_WORKSPACE/.github/probe-assets/subagent-fork.mjs" "$ROOT/subagent-fork.mjs"
+          cp "$GITHUB_WORKSPACE/.github/probe-assets/subagent-fork.mjs" "$ROOT/project/subagent-fork.mjs"
           npm install --no-audit --no-fund @opencode-ai/sdk@1.18.18
           # Prove we are running packed bytes, not the worktree.
           test -f node_modules/opencode-itsuki/dist/index.js
@@ -178,7 +178,7 @@ jobs:
           # The SDK spawns the real `opencode` binary, so it must be reachable.
           export PATH="$PROBE_ROOT/project/node_modules/.bin:$PATH"
           which opencode
-          timeout 480 node "$PROBE_ROOT/subagent-fork.mjs"
+          timeout 480 node "$PROBE_ROOT/project/subagent-fork.mjs"
 
       - name: Collect evidence
         if: always()
