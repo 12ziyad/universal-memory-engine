@@ -52,7 +52,17 @@ export interface HookPayload {
  * hardcoding a guess would mean capturing turns we do not understand. With no
  * verified value, nothing is ever captured — see PROBES.md.
  */
-export const VERIFIED_SUCCESS_TERMINATIONS: string[] = [];
+/**
+ * Observed on a real host (Antigravity CLI 1.1.13, Windows, 2026-08-16) for a
+ * successful turn: `terminationReason: "NO_TOOL_CALL"`, `fullyIdle: true`, and
+ * `error` present but an EMPTY STRING.
+ *
+ * Note what this is not: the docs' own example value is `model_stop`, which
+ * never appeared. Hardcoding the documented example would have meant capture
+ * silently never firing — which is exactly why this list stayed empty until a
+ * real host filled it.
+ */
+export const VERIFIED_SUCCESS_TERMINATIONS: string[] = ["NO_TOOL_CALL"];
 
 export interface HookResult {
 	response: Record<string, unknown>;

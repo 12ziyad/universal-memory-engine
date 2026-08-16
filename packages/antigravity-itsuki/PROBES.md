@@ -95,3 +95,73 @@ These are the golden inputs for the future `hooks_contract.spec.ts` golden tests
 ## Cleanup record
 
 Shared with `packages/opencode-itsuki/PROBES.md` — probe root fully deleted; no Antigravity software was installed anywhere (neither `agy` nor the desktop app); the real `~/.gemini` was never created or touched.
+
+---
+
+# P7 / P8 CLOSED — real signed-in host, 2026-08-16
+
+Host: **Antigravity CLI 1.1.13** (`C:\Users\ziyad\AppData\Local\agy\bin\agy.exe`), authenticated, Windows 11. Real model turns confirmed (`AGY_AUTH_OK`, `PROBE_P8_TURN`, `AGY_E2E_OK`). Memory traffic went to a loopback stub; production Itsuki was never contacted. No credential was read, printed or moved.
+
+## P7 — transcript schema (CLOSED)
+
+Path matches the docs exactly. **The host passes `transcript_full.jsonl`, not the documented `transcript.jsonl`** — both exist side by side.
+
+Entry shape: `{ step_index: number, source: string, type: string, status: string, created_at: ISO8601, content?: string }`
+
+| source | type | carries content | used |
+|---|---|---|---|
+| `USER_EXPLICIT` | `USER_INPUT` | yes | **user turn** |
+| `MODEL` | `PLANNER_RESPONSE` | yes | **assistant answer** |
+| `SYSTEM` | `CONVERSATION_HISTORY` | no | excluded |
+| `SYSTEM` | `CHECKPOINT` | **yes** | excluded — host state, never uploaded |
+
+Redacted fixture: `test/fixtures/transcripts/cli-1.1.13-windows.jsonl`.
+
+## P8 — Stop contract (CLOSED)
+
+Real payload from a successful turn:
+
+```
+fullyIdle: true
+terminationReason: "NO_TOOL_CALL"
+error: ""            <- present, but an EMPTY STRING
+executionNum: 0
+transcriptPath: …/transcript_full.jsonl   (under brain/)
+workspacePaths: []
+```
+
+**The documented example value `model_stop` never appears.** Hardcoding it — the obvious shortcut — would have meant capture silently never firing. Keeping the allowlist empty until a real host filled it was the correct call.
+
+`PreInvocation` carries `invocationNum`, `initialNumSteps`, `modelName`, `conversationId`, `transcriptPath`, `artifactDirectoryPath`, `workspacePaths`.
+
+**Env propagation into hook subprocesses: CONFIRMED on CLI** (`ITSUKI_API_KEY` visible). Hook cwd is not the workspace.
+
+## Two HIGH defects found only by the real host
+
+**AG-01 — the user's turn was being discarded.** `parseEntries` dropped the first line unconditionally, correct for a truncated tail but wrong when the whole file fits — and on a short conversation that first line *is* the user's message. Every small real transcript was therefore unclassifiable. Now the first line is kept when it parses as a whole object.
+
+**AG-02 — host scaffolding would have been uploaded.** A `USER_INPUT` entry is not the user's message; it wraps it:
+
+```
+<USER_REQUEST>…the person's words…</USER_REQUEST>
+<ADDITIONAL_METADATA>…host state…</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>…environment/settings…</USER_SETTINGS_CHANGE>
+```
+
+Measured: **14 of 435 characters were the person's words.** The rest is environment and settings. Only the `USER_REQUEST` body is now taken, and unrecognised scaffolding fails closed.
+
+## End-to-end proof on real data
+
+Uploaded payload after the fixes: `["Reply: ENVTEST", "ENVTEST"]` — the human's words and the model's answer, nothing else. Four identical `Stop` invocations produced **1 save, 1 idempotency key**.
+
+Install/uninstall exercised through our own installer against the live host; `--purge` removed state; the host's plugin directory is clean.
+
+## P11 — a Windows finding that blocks default installs
+
+The stock Windows Node path is `C:\Program Files\nodejs\node.exe`, which contains a space — and the installer refuses spaces because the host's hook shell and quoting are undocumented. The probes therefore used the 8.3 short path (`C:/PROGRA~1/nodejs/node.exe`), which worked. **Left open:** the installer should resolve a short path itself on Windows rather than refusing, otherwise a default Node install cannot be used. Recorded, not yet implemented.
+
+## Still HELD / open
+
+- **Desktop (Antigravity 2.0)** — P16/P17 untested; no desktop host on this machine.
+- **P11 short-path resolution** — see above.
+- Antigravity IDE.

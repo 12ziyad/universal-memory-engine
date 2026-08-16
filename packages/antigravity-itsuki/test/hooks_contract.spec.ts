@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handlePreInvocation, handleStop, parsePayload, runHook, VERIFIED_SUCCESS_TERMINATIONS } from "../src/hook.js";
 import { Spool } from "../src/spool.js";
 
+const LEAD = "LEAD" + String.fromCharCode(10);
+
 let home: string;
 let env: NodeJS.ProcessEnv;
 let transcriptPath: string;
@@ -115,15 +117,66 @@ describe("capture gating — everything below is a refusal", () => {
 		},
 	);
 
-	it("SHIPS WITH CAPTURE HELD: no verified success reason exists yet", async () => {
-		// Deliberate. Google documents the field with a non-exhaustive "e.g."
-		// list, and probe P8 (which would record the real values) needs a
-		// signed-in host. Guessing here would mean capturing turns we do not
-		// understand, so nothing is captured at all.
-		expect(VERIFIED_SUCCESS_TERMINATIONS).toHaveLength(0);
-		const result = await handleStop(stopPayload({ terminationReason: "model_stop" }), env);
-		expect(result.note).toContain("HELD");
+	it("CAPTURES a real settled turn: verified reason + fullyIdle + a real transcript", async () => {
+		// Enabled only after a real host supplied both halves: the transcript
+		// schema and the actual success terminationReason (NO_TOOL_CALL — the
+		// docs' own model_stop example never appears).
+		expect(VERIFIED_SUCCESS_TERMINATIONS).toEqual(["NO_TOOL_CALL"]);
+		const fixture = readFileSync(
+			join(__dirname, "fixtures", "transcripts", "cli-1.1.13-windows.jsonl"),
+			"utf8",
+		);
+		writeFileSync(transcriptPath, LEAD + fixture);
+		const result = await handleStop(stopPayload({ terminationReason: "NO_TOOL_CALL" }), env);
+		expect(result.response).toEqual({ decision: "stop" });
+		expect(result.note).toContain("staged");
+		expect(spoolDepth()).toBe(1);
+	});
+
+	it("captures the human turn and model answer, and NOTHING system-generated", async () => {
+		const fixture = readFileSync(
+			join(__dirname, "fixtures", "transcripts", "cli-1.1.13-windows.jsonl"),
+			"utf8",
+		);
+		writeFileSync(transcriptPath, LEAD + fixture);
+		await handleStop(stopPayload({ terminationReason: "NO_TOOL_CALL" }), env);
+		const staged = JSON.stringify(new Spool(env["ITSUKI_STATE_DIR"] as string).list()[0]!.envelope);
+		expect(staged).toContain("REDACTED_USER_TEXT");
+		expect(staged).toContain("REDACTED_MODEL_TEXT");
+		// SYSTEM/CHECKPOINT carries content and must never be uploaded.
+		expect(staged).not.toContain("REDACTED_SYSTEM_TEXT");
+	});
+
+	it("is exactly-once across repeated Stop for the same turn", async () => {
+		const fixture = readFileSync(
+			join(__dirname, "fixtures", "transcripts", "cli-1.1.13-windows.jsonl"),
+			"utf8",
+		);
+		writeFileSync(transcriptPath, LEAD + fixture);
+		for (let i = 0; i < 4; i += 1) await handleStop(stopPayload({ terminationReason: "NO_TOOL_CALL", executionNum: i }), env);
+		expect(spoolDepth()).toBe(1);
+	});
+
+	it("still refuses when fullyIdle is false even with a verified reason", async () => {
+		const fixture = readFileSync(
+			join(__dirname, "fixtures", "transcripts", "cli-1.1.13-windows.jsonl"),
+			"utf8",
+		);
+		writeFileSync(transcriptPath, LEAD + fixture);
+		const result = await handleStop(stopPayload({ terminationReason: "NO_TOOL_CALL", fullyIdle: false }), env);
+		expect(result.note).toContain("not fullyIdle");
 		expect(spoolDepth()).toBe(0);
+	});
+
+	it("treats an EMPTY error string as no error (the real host always sends one)", async () => {
+		const fixture = readFileSync(
+			join(__dirname, "fixtures", "transcripts", "cli-1.1.13-windows.jsonl"),
+			"utf8",
+		);
+		writeFileSync(transcriptPath, LEAD + fixture);
+		const result = await handleStop(stopPayload({ terminationReason: "NO_TOOL_CALL", error: "" }), env);
+		expect(result.note).toContain("staged");
+		expect(spoolDepth()).toBe(1);
 	});
 
 	it("refuses a transcript outside the documented root", async () => {

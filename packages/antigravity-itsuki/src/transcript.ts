@@ -50,7 +50,99 @@ export interface TranscriptSchema {
 	extract: (entries: Array<Record<string, unknown>>) => TranscriptTurn[];
 }
 
-export const VERIFIED_SCHEMAS: TranscriptSchema[] = [];
+/**
+ * Verified against a real host: Antigravity CLI 1.1.13 on Windows, 2026-08-16.
+ * Redacted fixture: test/fixtures/transcripts/cli-1.1.13-windows.jsonl
+ *
+ * Observed entry shape:
+ *   { step_index, source, type, status, created_at, content? }
+ *
+ * Observed enumerations:
+ *   source : USER_EXPLICIT | SYSTEM | MODEL
+ *   type   : USER_INPUT | CONVERSATION_HISTORY | PLANNER_RESPONSE | CHECKPOINT
+ *   status : DONE
+ *
+ * Only two of those carry conversation. Everything else is machinery and is
+ * excluded — `SYSTEM/CHECKPOINT` in particular DOES carry content, and it is
+ * host-generated state that must never be uploaded.
+ */
+/**
+ * A real USER_INPUT entry is not the user's message. It is host scaffolding
+ * that CONTAINS the message:
+ *
+ *   <USER_REQUEST>…the human's actual words…</USER_REQUEST>
+ *   <ADDITIONAL_METADATA>…host state…</ADDITIONAL_METADATA>
+ *   <USER_SETTINGS_CHANGE>…environment/settings…</USER_SETTINGS_CHANGE>
+ *
+ * Measured on a real host: 14 of 435 characters were the person's words. The
+ * rest is environment and settings that must never leave the machine (AG-02),
+ * so only the USER_REQUEST body is ever taken.
+ *
+ * Fail closed: if the entry carries scaffolding we do not recognise and no
+ * USER_REQUEST, nothing is extracted rather than guessing which part is safe.
+ */
+export function extractUserRequest(content: string): string | null {
+	const match = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/.exec(content);
+	if (match) return (match[1] ?? "").trim();
+	// No wrapper at all: the whole entry is the message.
+	if (!/<[A-Z][A-Z_]*>/.test(content)) return content.trim();
+	// Unknown scaffolding: refuse.
+	return null;
+}
+
+const CLI_1_1_13: TranscriptSchema = {
+	id: "antigravity-cli/step_index-v1",
+	hosts: ["antigravity-cli 1.1.13"],
+	matches(entries) {
+		// Require the structural fields on every entry, and at least one entry
+		// whose source/type pair we recognise. A partial match is not a match.
+		if (entries.length === 0) return false;
+		const structural = entries.every(
+			(e) =>
+				typeof e["step_index"] === "number" &&
+				typeof e["source"] === "string" &&
+				typeof e["type"] === "string" &&
+				typeof e["status"] === "string" &&
+				typeof e["created_at"] === "string",
+		);
+		if (!structural) return false;
+		return entries.some((e) => e["source"] === "USER_EXPLICIT" && e["type"] === "USER_INPUT");
+	},
+	extract(entries) {
+		const turns: TranscriptTurn[] = [];
+		for (const e of entries) {
+			const source = String(e["source"] ?? "");
+			const type = String(e["type"] ?? "");
+			const content = typeof e["content"] === "string" ? e["content"] : "";
+			if (!content.trim()) continue;
+			// The allowlist is exactly two pairs. CONVERSATION_HISTORY and
+			// CHECKPOINT are system machinery; tool traffic, artifacts and
+			// environment never appear under these two pairs at all.
+			const role =
+				source === "USER_EXPLICIT" && type === "USER_INPUT"
+					? ("user" as const)
+					: source === "MODEL" && type === "PLANNER_RESPONSE"
+						? ("assistant" as const)
+						: null;
+			if (!role) continue;
+			// The user entry is scaffolding around the message; take only the
+			// message. The model entry is the answer itself.
+			const text = role === "user" ? extractUserRequest(content) : content.trim();
+			if (!text) continue;
+			const stamp = Date.parse(String(e["created_at"] ?? ""));
+			turns.push({
+				role,
+				text,
+				// step_index is the stable per-entry anchor within a conversation.
+				id: `${String(e["step_index"])}:${String(e["created_at"] ?? "")}`,
+				createdAt: Number.isFinite(stamp) ? stamp : null,
+			});
+		}
+		return turns;
+	},
+};
+
+export const VERIFIED_SCHEMAS: TranscriptSchema[] = [CLI_1_1_13];
 
 export interface TranscriptTurn {
 	role: "user" | "assistant";
@@ -145,8 +237,23 @@ export async function readTail(path: string, maxBytes = MAX_TAIL_BYTES): Promise
 export function parseEntries(text: string): Array<Record<string, unknown>> {
 	const out: Array<Record<string, unknown>> = [];
 	const lines = text.split(/\r?\n/);
-	// A tail read almost always begins mid-line; drop that fragment.
-	for (let i = 1; i < lines.length; i += 1) {
+	// A tail read that started mid-file begins with a partial line, and that
+	// fragment must be dropped. But when the whole file fits inside the tail
+	// buffer the first line is COMPLETE — and on a short conversation that line
+	// is the user's own turn. Dropping it unconditionally silently discarded
+	// exactly the entry capture depends on (AG-01), so it is kept whenever it
+	// parses as a whole object.
+	let start = 1;
+	const first = (lines[0] ?? "").trim();
+	if (first.startsWith("{")) {
+		try {
+			const parsed = JSON.parse(first);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) start = 0;
+		} catch {
+			// A genuine mid-line fragment: skip it.
+		}
+	}
+	for (let i = start; i < lines.length; i += 1) {
 		const line = lines[i];
 		if (!line) continue;
 		if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) continue;
