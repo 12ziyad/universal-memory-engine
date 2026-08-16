@@ -5,7 +5,11 @@ import { appendFileSync, writeFileSync } from "node:fs";
 
 const PORT = Number(process.env.ITSUKI_STUB_PORT ?? 4242);
 const LOG = process.env.PROBE_LOG_DIR ?? "/tmp";
-const MODE = () => process.env.ITSUKI_STUB_MODE ?? "ok"; // ok | offline | slow | 429 | 500
+// Read at request time from a file, so a running stub can be switched without
+// restarting it. The client's own env cannot reach this process.
+import { readFileSync as _rf } from "node:fs";
+const MODE_FILE = process.env.ITSUKI_STUB_MODE_FILE ?? `${process.env.PROBE_LOG_DIR ?? "/tmp"}/stub-mode`;
+const MODE = () => { try { return _rf(MODE_FILE, "utf8").trim() || "ok"; } catch { return "ok"; } }; // ok | offline | slow | 429 | 500
 
 writeFileSync(`${LOG}/itsuki.jsonl`, "");
 const rec = (o) => { try { appendFileSync(`${LOG}/itsuki.jsonl`, JSON.stringify({ t: Date.now(), ...o }) + "\n"); } catch {} };
