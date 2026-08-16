@@ -247,3 +247,93 @@ describe("REL-03 — a failed capture must not poison the session", () => {
 		expect(new Spool(root).list()).toHaveLength(1);
 	});
 });
+
+describe("AUD-01 — a multi-turn session must not re-capture earlier turns", () => {
+	it("the second settled turn stages ONLY the second exchange", async () => {
+		const turn1: any[] = [userMessage("m1", "TURN_ONE_Q"), assistantMessage("m2", "TURN_ONE_A")];
+		const turn2: any[] = [
+			...turn1,
+			{ info: { id: "m3", role: "user", sessionID: "ses_1", time: { created: 2000 } },
+			  parts: [{ id: "prt_m3", sessionID: "ses_1", messageID: "m3", type: "text", text: "TURN_TWO_Q" }] },
+			{ info: { id: "m4", role: "assistant", sessionID: "ses_1", finish: "stop", time: { created: 2001, completed: 2002 } },
+			  parts: [{ id: "prt_m4", sessionID: "ses_1", messageID: "m4", type: "text", text: "TURN_TWO_A" }] },
+		];
+		let current = turn1;
+		const host = {
+			client: {
+				app: { log: async () => undefined },
+				session: { get: async () => ({ data: { id: "ses_1" } }), messages: async () => ({ data: current }) },
+			},
+		};
+		const { hooks } = await loadPlugin(host);
+		const idle = { event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } };
+
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m1" }, { message: turn1[0].info, parts: turn1[0].parts });
+		await (hooks as any).event(idle);
+
+		current = turn2;
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m3" }, { message: turn2[2].info, parts: turn2[2].parts });
+		await (hooks as any).event(idle);
+
+		const { Spool } = await import("../src/spool.js");
+		const envelopes = new Spool(root).list();
+		expect(envelopes).toHaveLength(2);
+		const second = envelopes
+			.map((e) => JSON.stringify(e.envelope.messages))
+			.find((t) => t.includes("TURN_TWO_Q"));
+		expect(second).toBeTruthy();
+		// The growth bug: without a captured-through watermark, the second span
+		// is a superset carrying turn one again, under a fresh idempotency key
+		// the server cannot collapse.
+		expect(second).not.toContain("TURN_ONE_Q");
+		expect(second).not.toContain("TURN_ONE_A");
+	});
+});
+
+describe("AUD-03 — unknown parentage fails closed for capture, without being cached", () => {
+	it("skips capture while the lookup fails, then captures once it succeeds", async () => {
+		const messages: any[] = [userMessage("m1", "AUD3_Q"), assistantMessage("m2", "AUD3_A")];
+		let calls = 0;
+		let failing = true;
+		const host = {
+			client: {
+				app: { log: async () => undefined },
+				session: {
+					get: async () => {
+						calls += 1;
+						if (failing) throw new Error("host hiccup");
+						return { data: { id: "ses_1" } };
+					},
+					messages: async () => ({ data: messages }),
+				},
+			},
+		};
+		const { hooks } = await loadPlugin(host);
+		const idle = { event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } };
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m1" }, { message: messages[0].info, parts: messages[0].parts });
+		await (hooks as any).event(idle);
+		const { Spool } = await import("../src/spool.js");
+		// The old behaviour cached the thrown lookup as "parent" and captured.
+		expect(new Spool(root).list()).toHaveLength(0);
+		expect(calls).toBeGreaterThan(0);
+
+		failing = false;
+		await (hooks as any).event(idle);
+		expect(new Spool(root).list()).toHaveLength(1);
+	});
+
+	it("never captures while parentage stays unknown", async () => {
+		const messages: any[] = [userMessage("m1", "q"), assistantMessage("m2", "a")];
+		const host = {
+			client: {
+				app: { log: async () => undefined },
+				session: { get: async () => { throw new Error("always down"); }, messages: async () => ({ data: messages }) },
+			},
+		};
+		const { hooks } = await loadPlugin(host);
+		await (hooks as any)["chat.message"]({ sessionID: "ses_1", messageID: "m1" }, { message: messages[0].info, parts: messages[0].parts });
+		for (let i = 0; i < 3; i += 1) await (hooks as any).event({ event: { type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } } });
+		const { Spool } = await import("../src/spool.js");
+		expect(new Spool(root).list()).toHaveLength(0);
+	});
+});

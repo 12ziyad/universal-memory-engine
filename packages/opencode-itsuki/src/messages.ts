@@ -134,6 +134,8 @@ export interface SpanPlan {
 	messages: CaptureMessage[];
 	assistantMessageID: string | null;
 	userMessageIDs: string[];
+	/** Newest time.created across included messages — the AUD-01 watermark. */
+	maxCreatedAt: number | null;
 }
 
 /**
@@ -150,6 +152,13 @@ export function planCaptureSpan(
 	const out: CaptureMessage[] = [];
 	const userIds: string[] = [];
 	let assistantMessageID: string | null = null;
+	let maxCreatedAt: number | null = null;
+	const noteCreated = (info: HostMessageInfo) => {
+		const created = info.time?.created;
+		if (typeof created === "number" && Number.isFinite(created)) {
+			maxCreatedAt = maxCreatedAt === null ? created : Math.max(maxCreatedAt, created);
+		}
+	};
 
 	for (const message of messages) {
 		const info = message.info;
@@ -160,6 +169,7 @@ export function planCaptureSpan(
 			if (text) {
 				out.push({ role: "user", content: text });
 				userIds.push(info.id);
+				noteCreated(info);
 			}
 			continue;
 		}
@@ -171,6 +181,7 @@ export function planCaptureSpan(
 			if (text) {
 				out.push({ role: "assistant", content: text });
 				assistantMessageID = info.id;
+				noteCreated(info);
 			}
 		}
 	}
@@ -178,8 +189,8 @@ export function planCaptureSpan(
 	// A span must contain at least one user turn AND one assistant answer.
 	const hasUser = out.some((m) => m.role === "user");
 	const hasAssistant = out.some((m) => m.role === "assistant");
-	if (!hasUser || !hasAssistant) return { messages: [], assistantMessageID: null, userMessageIDs: [] };
-	return { messages: out, assistantMessageID, userMessageIDs: userIds };
+	if (!hasUser || !hasAssistant) return { messages: [], assistantMessageID: null, userMessageIDs: [], maxCreatedAt: null };
+	return { messages: out, assistantMessageID, userMessageIDs: userIds, maxCreatedAt };
 }
 
 /**

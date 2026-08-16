@@ -142,22 +142,31 @@ function prunePending(runtime: Runtime, now: number): void {
 	}
 }
 
-/** Ask the host once whether a session is a subagent child. */
-async function isSubagent(runtime: Runtime, client: any, sessionID: string): Promise<boolean> {
+/**
+ * Parentage lookup (AUD-03).
+ *
+ * Only DEFINITE answers are cached. An earlier revision cached a thrown
+ * lookup as "not a subagent", permanently — so one transient host hiccup at
+ * recall time meant a subagent's turns were captured for the rest of the
+ * session. Now: unknown parentage lets RECALL proceed (worst case is a wasted
+ * lookup) but CAPTURE fails closed and retries at the next idle.
+ */
+async function classifySession(
+	runtime: Runtime,
+	client: any,
+	sessionID: string,
+): Promise<"parent" | "subagent" | "unknown"> {
 	const cached = runtime.subagents.get(sessionID);
-	if (cached !== undefined) return cached;
-	let verdict = false;
+	if (cached !== undefined) return cached ? "subagent" : "parent";
 	try {
 		const response = await client?.session?.get?.({ path: { id: sessionID } });
 		const info = response?.data ?? response;
-		verdict = Boolean(info?.parentID);
+		const verdict = Boolean(info?.parentID);
+		runtime.subagents.set(sessionID, verdict);
+		return verdict ? "subagent" : "parent";
 	} catch {
-		// Unknown parentage is treated as "not a subagent" for RECALL (the
-		// cost is a harmless extra lookup) but capture re-checks independently.
-		verdict = false;
+		return "unknown";
 	}
-	runtime.subagents.set(sessionID, verdict);
-	return verdict;
 }
 
 async function readMessages(client: any, sessionID: string): Promise<HostMessage[]> {
@@ -204,7 +213,9 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 	const captureSettled = async (sessionID: string): Promise<void> => {
 		const coordinator = runtime.coordinator;
 		if (!coordinator || !runtime.config.capture.enabled) return;
-		if (await isSubagent(runtime, client, sessionID)) return;
+		// Fail CLOSED on unknown parentage: capturing a subagent by mistake is
+		// worse than capturing a real turn one idle later (AUD-03).
+		if ((await classifySession(runtime, client, sessionID)) !== "parent") return;
 
 		const messages = await readMessages(client, sessionID);
 		if (messages.length === 0) return;
@@ -232,7 +243,7 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 		if (outcome.status !== "staged") return;
 
 		for (const key of outcome.keys) {
-			runtime.sessions.noteCaptured(sessionID, key, span.assistantMessageID, Date.now());
+			runtime.sessions.noteCaptured(sessionID, key, span.assistantMessageID, Date.now(), span.maxCreatedAt);
 		}
 		log("info", "itsuki staged a settled turn", { batches: outcome.batches });
 
@@ -263,7 +274,9 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 				runtime.sessions.seed(sessionID, messageID, Number.isFinite(created) ? created : null);
 
 				if (!coordinator || !runtime.config.recall.enabled) return;
-				if (await isSubagent(runtime, client, sessionID)) return;
+				// Recall may proceed on "unknown": it reads the account's own
+				// space either way, so the only cost of a wrong guess is noise.
+				if ((await classifySession(runtime, client, sessionID)) === "subagent") return;
 
 				const query = userText({ info: output?.message, parts: output?.parts });
 				if (!query) return;

@@ -21,6 +21,7 @@
 import { appDataDirs, resolveConfig, stateRoot } from "./config.js";
 import { Coordinator } from "./coordinator.js";
 import { captureScope } from "./identity.js";
+import { echoSessionKey, suppressEchoLines } from "./kernel/inject.js";
 import { ItsukiTransport } from "./kernel/transport.js";
 import { SessionStore, withinOwnedSpan } from "./sessionstate.js";
 import { Spool } from "./spool.js";
@@ -128,6 +129,7 @@ export async function handlePreInvocation(
 		captureScope({ userId: runtime.config.userId, projectId: runtime.config.projectId, sessionID: conversationId }),
 	);
 	state.lastRecallTurnKey = turnKey;
+	state.echoFingerprints = [...outcome.fingerprints].slice(0, 64);
 	runtime.sessions.save(state);
 
 	if (!outcome.block) return { response: {}, note: `recall ${outcome.status}` };
@@ -182,9 +184,21 @@ export async function handleStop(
 			completedAt: null,
 		});
 
+	// M2: a model that repeats a recalled line verbatim must not re-save it
+	// as fresh memory. Fingerprints were persisted at recall time (this hook
+	// runs in a different process), and suppression is line-level, so the rest
+	// of the answer survives.
+	const echoKey = echoSessionKey(conversationId);
+	const fingerprints = new Set(fresh.echoFingerprints ?? []);
 	const messages = transcript.turns
 		.filter(owned)
-		.map((t) => ({ role: t.role, content: t.text }))
+		.map((t) => ({
+			role: t.role,
+			content:
+				t.role === "assistant" && echoKey && fingerprints.size > 0
+					? suppressEchoLines(t.text, fingerprints, echoKey)
+					: t.text,
+		}))
 		.filter((m) => m.content.trim().length > 0);
 	if (!messages.some((m) => m.role === "user") || !messages.some((m) => m.role === "assistant")) {
 		return { response, note: "span is not a complete exchange" };
@@ -197,8 +211,15 @@ export async function handleStop(
 	});
 	const staged = runtime.coordinator.stage(messages, scope, (key) => runtime.sessions.hasKey(conversationId, key));
 	if (staged.status !== "staged") return { response, note: `stage ${staged.status}` };
+	const includedTurns = transcript.turns.filter(owned);
+	let capturedThrough: number | null = null;
+	for (const turn of includedTurns) {
+		if (typeof turn.createdAt === "number" && Number.isFinite(turn.createdAt)) {
+			capturedThrough = capturedThrough === null ? turn.createdAt : Math.max(capturedThrough, turn.createdAt);
+		}
+	}
 	for (const key of staged.keys) {
-		runtime.sessions.noteCaptured(conversationId, key, null, Date.now());
+		runtime.sessions.noteCaptured(conversationId, key, null, Date.now(), capturedThrough);
 	}
 	return { response, note: `staged ${staged.batches}` };
 }

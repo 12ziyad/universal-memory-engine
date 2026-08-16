@@ -413,7 +413,7 @@ export class Coordinator {
 			limit: Math.min(Math.max(limit, 1), 50),
 			timeoutMs: this.recallConfig.timeoutMs * 4,
 		});
-		return wrapAsData(summariseList(payload), this.recallConfig.maxChars);
+		return wrapAsData(defuseMarkers(summariseList(payload)), this.recallConfig.maxChars);
 	}
 
 	/** Read-only inventory: get one by id. */
@@ -422,7 +422,7 @@ export class Coordinator {
 			userId: scope.userId,
 			timeoutMs: this.recallConfig.timeoutMs * 4,
 		});
-		return wrapAsData(JSON.stringify(payload["memory"] ?? payload, null, 1), this.recallConfig.maxChars);
+		return wrapAsData(defuseMarkers(JSON.stringify(payload["memory"] ?? payload, null, 1)), this.recallConfig.maxChars);
 	}
 
 	/** Suppress lines we injected, so recall never re-enters memory as "new". */

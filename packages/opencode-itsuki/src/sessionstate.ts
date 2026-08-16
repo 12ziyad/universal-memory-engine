@@ -36,6 +36,16 @@ export interface SessionState {
 	seedCreatedAt: number | null;
 	/** Newest assistant message id already captured. */
 	lastCapturedMessageID: string | null;
+	/**
+	 * Creation time of the newest message already captured (AUD-01).
+	 *
+	 * The seed watermark alone only excludes history from BEFORE first sight.
+	 * Without this second watermark, every later capture in a growing session
+	 * spans from the seed again — a superset of the previous span, under a
+	 * fresh idempotency key the server cannot collapse, so each turn re-uploads
+	 * the whole conversation so far.
+	 */
+	capturedThroughCreatedAt: number | null;
 	lastCapturedAt: number | null;
 	/** Idempotency keys already staged, newest last, bounded. */
 	recentKeys: string[];
@@ -51,6 +61,7 @@ function emptyState(sessionID: string): SessionState {
 		seedCreatedAt: null,
 		lastCapturedMessageID: null,
 		lastCapturedAt: null,
+		capturedThroughCreatedAt: null,
 		recentKeys: [],
 	};
 }
@@ -129,12 +140,21 @@ export class SessionStore {
 		return this.load(sessionID).recentKeys.includes(key);
 	}
 
-	noteCaptured(sessionID: string, key: string, assistantMessageID: string | null, at: number): void {
+	noteCaptured(
+		sessionID: string,
+		key: string,
+		assistantMessageID: string | null,
+		at: number,
+		capturedThroughCreatedAt?: number | null,
+	): void {
 		const state = this.load(sessionID);
 		if (!state.recentKeys.includes(key)) state.recentKeys.push(key);
 		while (state.recentKeys.length > MAX_RECENT_KEYS) state.recentKeys.shift();
 		state.lastCapturedMessageID = assistantMessageID;
 		state.lastCapturedAt = at;
+		if (typeof capturedThroughCreatedAt === "number" && Number.isFinite(capturedThroughCreatedAt)) {
+			state.capturedThroughCreatedAt = Math.max(state.capturedThroughCreatedAt ?? -Infinity, capturedThroughCreatedAt);
+		}
 		this.save(state);
 	}
 
@@ -164,6 +184,13 @@ export interface SeenMessage {
  */
 export function withinOwnedSpan(state: SessionState, message: SeenMessage): boolean {
 	if (!state.seedMessageID) return false;
+	// AUD-01: the captured-through gate must run BEFORE the seed-id shortcut,
+	// or the seed turn itself is re-included in every later span forever.
+	const capturedThrough = state.capturedThroughCreatedAt;
+	if (capturedThrough !== null) {
+		if (message.createdAt === null) return false;
+		if (message.createdAt <= capturedThrough) return false;
+	}
 	if (message.id === state.seedMessageID) return true;
 	if (state.seedCreatedAt === null || message.createdAt === null) {
 		// Without comparable timestamps the only safe answer is "not ours":

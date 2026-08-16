@@ -139,3 +139,93 @@ describe("AG-02 — only the human's words leave the machine", () => {
 		expect(extractUserRequest("just a plain message")).toBe("just a plain message");
 	});
 })
+
+describe("AUD-01(ag) — repeated Stop across a growing conversation", () => {
+	const entry = (i: number, source: string, type: string, content: string, t: string) =>
+		JSON.stringify({ step_index: i, source, type, status: "DONE", created_at: t, content });
+	const ex1 = [
+		entry(0, "USER_EXPLICIT", "USER_INPUT", "<USER_REQUEST>EXCHANGE_ONE_Q</USER_REQUEST>", "2026-08-16T01:00:00Z"),
+		entry(1, "MODEL", "PLANNER_RESPONSE", "EXCHANGE_ONE_A", "2026-08-16T01:00:01Z"),
+	].join("\n");
+	const ex2 = [
+		entry(2, "USER_EXPLICIT", "USER_INPUT", "<USER_REQUEST>EXCHANGE_TWO_Q</USER_REQUEST>", "2026-08-16T01:05:00Z"),
+		entry(3, "MODEL", "PLANNER_RESPONSE", "EXCHANGE_TWO_A", "2026-08-16T01:05:01Z"),
+	].join("\n");
+
+	it("the second Stop stages ONLY the new exchange", async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { handleStop } = await import("../src/hook.js");
+		const { Spool } = await import("../src/spool.js");
+		const home = mkdtempSync(join(tmpdir(), "itsuki-grow-"));
+		try {
+			const logs = join(home, ".gemini", "antigravity-cli", "brain", "cg", ".system_generated", "logs");
+			mkdirSync(logs, { recursive: true });
+			const tp = join(logs, "transcript.jsonl");
+			const env = { HOME: home, USERPROFILE: home, ITSUKI_STATE_DIR: join(home, "st"), ITSUKI_API_KEY: "itsuki_live_testkey123456" } as NodeJS.ProcessEnv;
+			const stop = (over: Record<string, unknown> = {}) =>
+				handleStop({ conversationId: "cg", transcriptPath: tp, fullyIdle: true, terminationReason: "NO_TOOL_CALL", error: "", ...over } as never, env);
+
+			writeFileSync(tp, ex1 + "\n");
+			await stop();
+			writeFileSync(tp, ex1 + "\n" + ex2 + "\n");
+			await stop({ executionNum: 1 });
+
+			const envelopes = new Spool(join(home, "st")).list();
+			expect(envelopes).toHaveLength(2);
+			const second = envelopes.map((e) => JSON.stringify(e.envelope.messages)).find((t) => t.includes("EXCHANGE_TWO_Q"));
+			expect(second).toBeTruthy();
+			expect(second).not.toContain("EXCHANGE_ONE_Q");
+			expect(second).not.toContain("EXCHANGE_ONE_A");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("M2 — a model echoing a recalled line must not re-save it", () => {
+	it("suppresses the echoed line but keeps the rest of the answer", async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { handleStop } = await import("../src/hook.js");
+		const { SessionStore } = await import("../src/sessionstate.js");
+		const { Spool } = await import("../src/spool.js");
+		const { echoFingerprints, echoSessionKey } = await import("../src/kernel/inject.js");
+
+		const home = mkdtempSync(join(tmpdir(), "itsuki-echo-"));
+		try {
+			const logs = join(home, ".gemini", "antigravity-cli", "brain", "ce", ".system_generated", "logs");
+			mkdirSync(logs, { recursive: true });
+			const tp = join(logs, "transcript.jsonl");
+			const state = join(home, "st");
+			const env = { HOME: home, USERPROFILE: home, ITSUKI_STATE_DIR: state, ITSUKI_API_KEY: "itsuki_live_testkey123456" } as NodeJS.ProcessEnv;
+
+			const recalled = "ECHOED_MEMORY_LINE: the deploy branch is main.";
+			const fresh = "GENUINELY_NEW_FACT: the fallback branch is release.";
+			const e = (i: number, s: string, t: string, c: string, ts: string) =>
+				JSON.stringify({ step_index: i, source: s, type: t, status: "DONE", created_at: ts, content: c });
+			writeFileSync(tp, [
+				e(0, "USER_EXPLICIT", "USER_INPUT", "<USER_REQUEST>what do you know</USER_REQUEST>", "2026-08-16T01:00:00Z"),
+				e(1, "MODEL", "PLANNER_RESPONSE", recalled + "\n" + fresh, "2026-08-16T01:00:01Z"),
+			].join("\n") + "\n");
+
+			// Persist the fingerprints exactly as PreInvocation would have.
+			const store = new SessionStore(state);
+			const s0 = store.load("ce");
+			const key = echoSessionKey("ce")!;
+			s0.echoFingerprints = [...echoFingerprints(recalled, key)];
+			store.save(s0);
+
+			await handleStop({ conversationId: "ce", transcriptPath: tp, fullyIdle: true, terminationReason: "NO_TOOL_CALL", error: "" } as never, env);
+
+			const staged = JSON.stringify(new Spool(state).list()[0]?.envelope ?? {});
+			expect(staged).toContain("GENUINELY_NEW_FACT");
+			// Re-saving our own recalled line would compound memory on every turn.
+			expect(staged).not.toContain("ECHOED_MEMORY_LINE");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
