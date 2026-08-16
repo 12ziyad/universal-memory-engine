@@ -204,3 +204,35 @@ system channel".
   in `plugin:[]` silently loads nothing when unpublished; a stale marker string;
   stub failure modes set on the client's env that the running stub cannot see).
   None were product defects.
+
+---
+
+# P5 / P13a CLOSED — real subagent and fork (run `31921815897`, 2026-08-16)
+
+Driven through OpenCode's own supported APIs against the real pinned host, with
+the PACKED artifact loaded by that host: `session.create({ parentID })` — exactly
+how the built-in `task` tool creates a subagent — and `session.fork`.
+
+| Proof | Result |
+|---|---|
+| parent session captured its own settled turn | PASS (1 save) |
+| the child really is a subagent (`parentID` present) | PASS |
+| **subagent turn produced NO capture** | PASS (1 → 1) |
+| **subagent turn produced NO recall** | PASS |
+| no subagent text ever reached memory | PASS |
+| forking alone captured nothing | PASS (1 → 1) |
+| a NEW turn in the fork captured exactly once | PASS (delta=1) |
+| **the fork did NOT re-capture the parent's inherited turn** | PASS |
+| no duplicate idempotency key across parent + fork | PASS (2 saves, 2 unique) |
+| a second session captured only its own text | PASS |
+| every capture is scoped to a distinct conversation | PASS (3 ids) |
+| no capture was sent without a conversation scope | PASS |
+
+The inherited-history result is the one that matters most: a fork carries the
+parent's messages, and first-sight watermark seeding means those are older than
+the fork's own first sight, so they are never captured a second time. That is
+the behaviour the frozen design claimed and could not previously prove.
+
+All five earlier gates (MAIN, TRANSCRIPT, P14, FAIL-OPEN, POISON) passed in the
+same run, so title-leak protection and crash-safe spool behaviour still hold
+alongside the new proofs.
