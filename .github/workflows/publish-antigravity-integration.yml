@@ -24,17 +24,6 @@ on:
         description: 'Run every gate and pack the tarball, but do not publish'
         type: boolean
         default: true
-  # Branch-scoped gate run. workflow_dispatch only resolves against the default
-  # branch, and this release is not merged until it is proven — so pushes to the
-  # campaign branch run the gates here. `dry_run` defaults to true and a push
-  # supplies no inputs, so a push can only ever dry-run: publishing stays a
-  # deliberate dispatch.
-  push:
-    branches: [feat/native-opencode-antigravity]
-    paths:
-      - 'packages/antigravity-itsuki/**'
-      - '.github/workflows/publish-antigravity-integration.yml'
-
 permissions:
   contents: read
   id-token: write
