@@ -358,6 +358,31 @@ describe("transient injection", () => {
 		}
 	});
 
+	it("SEC-04b: never mutates the host's own message object (shared-state leak)", async () => {
+		// The real host reuses the SAME message objects for its title call, so
+		// pushing onto target.parts leaked the block there even with one-shot
+		// injection. The original object must come back untouched.
+		const { hooks, restore } = await pluginWith("remembered thing");
+		try {
+			await hooks["chat.message"](
+				{ sessionID: "ses_1", messageID: "m1" },
+				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
+			);
+			const sharedParts = [{ id: "p1", type: "text", text: "hello" }];
+			const sharedMessage = { info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: sharedParts };
+			const call: any = { messages: [sharedMessage] };
+			await hooks["experimental.chat.messages.transform"]({}, call);
+
+			// This request sees the block...
+			expect(JSON.stringify(call.messages[0])).toContain(RECALL_OPEN_MARKER);
+			// ...but the host's own object and array are untouched.
+			expect(sharedParts).toHaveLength(1);
+			expect(JSON.stringify(sharedMessage)).not.toContain(RECALL_OPEN_MARKER);
+		} finally {
+			restore();
+		}
+	});
+
 	it("never throws on a malformed transform payload", async () => {
 		const { hooks, restore } = await pluginWith("x");
 		try {

@@ -319,17 +319,32 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 				);
 				if (already) return;
 
+				const targetIndex = messages.indexOf(target);
+				if (targetIndex < 0) return;
+
 				// A fully-formed TextPart: the host's Part type requires id,
 				// sessionID and messageID (TextPartInput's optional id is the
 				// server-assigned door, not this one).
-				target.parts.push({
+				const injected = {
 					id: `prt_itsuki${Math.random().toString(36).slice(2, 14)}`,
 					sessionID: String(info.sessionID),
 					messageID: String(info.id),
 					type: "text",
 					text: pending.block,
 					synthetic: true,
-				});
+				};
+
+				// COPY, never mutate in place.
+				//
+				// This hook hands over the host's own message objects, not
+				// copies. Pushing onto `target.parts` therefore edited state the
+				// host reused for its title-generation call, so the block
+				// appeared there too — proven on a real host, where BOTH
+				// completions carried it even after injection was made one-shot
+				// (SEC-04). Replacing the array element with a shallow copy that
+				// owns a fresh parts array keeps the edit local to this request,
+				// which is what "transient" was always supposed to mean.
+				messages[targetIndex] = { ...target, parts: [...target.parts, injected] };
 
 				// ONE-SHOT. The host's title generator re-reads the same user
 				// message, so a pending entry keyed on message id alone would be
