@@ -11,6 +11,15 @@ name: probe-realhost
 
 on:
   workflow_dispatch:
+  # Scoped to the campaign branch so the proof can run without putting this
+  # disposable workflow on the default branch (workflow_dispatch only resolves
+  # against the default branch).
+  push:
+    branches: [feat/native-opencode-antigravity]
+    paths:
+      - ".github/workflows/probe-realhost.yml"
+      - ".github/probe-assets/**"
+      - "packages/opencode-itsuki/**"
 
 permissions:
   contents: read
