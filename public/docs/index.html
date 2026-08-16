@@ -349,11 +349,36 @@ ${codeBlock(`{
 
 PAGES["/install/opencode"] = { title: "OpenCode", html: `
 <h1>OpenCode</h1>
-<p class="lede">Persistent memory for OpenCode through its remote MCP support — one config block, no plugin required.</p>
-<h2>1. Create your link</h2>
-<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
-<h2>2. Add the remote server</h2>
+<p class="lede">Persistent memory for OpenCode: a native plugin that joins the turn itself, with the remote MCP route as a fallback.</p>
+
+<h2>Native plugin</h2>
+<p>Published on npm as <code>opencode-itsuki</code>, built and signed by this repository&rsquo;s GitHub Actions workflow with npm provenance. Requires OpenCode <b>1.18.18 or newer</b> and Node 22+. Zero runtime dependencies.</p>
+<h3>1. Create an API key</h3>
+<p>In <b>API Keys</b>, create an <b>API key</b> &mdash; a server credential, not an MCP link.</p>
+<h3>2. Install the plugin</h3>
+${codeBlock(`npm install opencode-itsuki`)}
+<h3>3. Point opencode.json at it</h3>
 <p>Project-level <code>opencode.json</code>, or global at <code>~/.config/opencode/opencode.json</code>:</p>
+${codeBlock(`{
+  "plugin": ["opencode-itsuki"]
+}`)}
+<h3>4. Export the key</h3>
+<p>The key is read <b>only</b> from the environment that starts OpenCode &mdash; never from <code>opencode.json</code>. That file expands <code>{env:VAR}</code> before it parses, so a key referenced there is resolved into the options object that config validation and other plugins can read. A secret-shaped option value is refused with a readable message rather than used.</p>
+${codeBlock(`export ITSUKI_API_KEY=your_api_key`)}
+<h3>5. Verify</h3>
+<p>Restart OpenCode and say: <i>use the ${PRODUCT.name.toLowerCase()} status tool and tell me what it reports</i>.</p>
+
+<h3>What it does</h3>
+<p>Recall runs once per genuinely new human turn and is injected on the system channel, so it reaches the model without entering your transcript or your session titles. Capture runs only after a turn that settled successfully &mdash; never on retries, errors, cancellations, tool-only turns, or subagent sessions. Work is staged to disk before any network call, so a crash mid-save loses nothing.</p>
+<p>Five tools are available to the agent: <code>itsuki_recall</code>, <code>itsuki_save</code>, <code>itsuki_memories</code>, <code>itsuki_memory</code>, <code>itsuki_status</code>.</p>
+<p><b>Deliberately absent:</b> updating a memory in place, memory history, and entity operations &mdash; none exist on the server, and no tool here fakes them. Destructive tools are also absent by design: deletion needs a confirmation surface a tool call cannot provide. Use the MCP route below or the dashboard to delete.</p>
+<p>Recalled memories are wrapped in explicit markers and bounded before they reach the model. That is structural delimitation, not a guarantee: no wrapper can force a model to treat remembered text as inert, and that residual risk is inherent to memory injection.</p>
+
+<h2>MCP route</h2>
+<p>Still supported, and the route that carries deletion and the full eight-tool surface.</p>
+<h3>1. Create your link</h3>
+<p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once &mdash; the URL itself is the credential.</p>
+<h3>2. Add the remote server</h3>
 ${codeBlock(`{
   "mcp": {
     "${PRODUCT.name.toLowerCase()}": {
@@ -363,37 +388,48 @@ ${codeBlock(`{
     }
   }
 }`)}
-<h2>3. Verify</h2>
+<h3>3. Verify</h3>
 <p>Restart OpenCode and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>. You should see the connected memory space, scopes, and live counts.</p>
-<h2>What you get</h2>
-<p>All eight memory tools in every OpenCode session: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. Ask naturally — "remember that we deploy from main", "what do you know about this project" — and the agent picks the tool.</p>
-<p>For recall and save without prompting, add the proactive-use instructions from the dashboard's Get started page to your OpenCode rules.</p>
+<h3>What you get</h3>
+<p>All eight memory tools: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. For recall and save without prompting, add the proactive-use instructions from the dashboard&rsquo;s Get started page to your OpenCode rules.</p>
+
 <h2>Troubleshooting</h2>
 <ul>
-<li><b>No tools appearing</b> — restart OpenCode after editing the config, and check the JSON parses.</li>
-<li><b>401 unauthorized</b> — the link is revoked or was an API key. Create an MCP link in API Keys; API keys go in an <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code> instead.</li>
-<li><b>Wrong or missing memories</b> — say <i>use the whoami tool</i> and check which memory space and project the connection reports.</li>
+<li><b>Plugin not loading</b> &mdash; check your OpenCode version is 1.18.18 or newer; the plugin declares that floor and older hosts will refuse it.</li>
+<li><b>Memory inactive</b> &mdash; run the status tool. An unset <code>ITSUKI_API_KEY</code> is reported there rather than failing silently.</li>
+<li><b>No tools appearing (MCP route)</b> &mdash; restart OpenCode after editing the config, and check the JSON parses.</li>
+<li><b>401 unauthorized</b> &mdash; the link is revoked or was an API key. Create an MCP link in API Keys; API keys go in an <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code> instead.</li>
+<li><b>Wrong or missing memories</b> &mdash; say <i>use the whoami tool</i> and check which memory space and project the connection reports.</li>
 </ul>
-<div class="note">The URL carries your credential — treat <code>opencode.json</code> as a secret, and keep it out of version control unless the key is meant to be shared with that repository's collaborators. A native OpenCode plugin with lifecycle hooks is planned; this MCP route stays supported either way.</div>
+<div class="note">On the MCP route the URL carries your credential &mdash; treat <code>opencode.json</code> as a secret, and keep it out of version control unless the key is meant to be shared with that repository&rsquo;s collaborators. The native plugin has no such problem: its key never enters the config file.</div>
 ` };
-
 PAGES["/install/antigravity"] = { title: "Antigravity", html: `
 <h1>Antigravity</h1>
-<p class="lede">Persistent memory for Google Antigravity through its MCP support — one config block in the agent panel.</p>
-<h2>1. Create your link</h2>
+<p class="lede">Persistent memory for Google Antigravity: a native plugin for the CLI, and the MCP route everywhere else.</p>
+<h2>Native plugin — Antigravity CLI only</h2>
+<p>Published on npm as <code>antigravity-itsuki</code>, built and signed from this repository&rsquo;s GitHub Actions workflow with npm provenance. Supported on the <b>Antigravity CLI (<code>agy</code>) 1.1.13 or newer</b>, with Node 22+.</p>
+${codeBlock(`npx antigravity-itsuki install
+export ITSUKI_API_KEY=your_api_key
+npx antigravity-itsuki doctor`)}
+<p>The installer checks your host version first, writes the plugin into <code>~/.gemini/config/plugins/itsuki/</code> with a manifest of exactly what it created, and refuses to overwrite a directory it did not create. Uninstall removes only what that manifest lists and keeps anything still queued unless you pass <code>--purge</code>. The doctor reports what is configured, what is queued and what is held — and never prints your key.</p>
+<p>Recall runs at <code>PreInvocation</code>, before the model sees your turn. Capture runs at <code>Stop</code>, and only for a turn that genuinely settled: <code>fullyIdle</code> true, no error, and a termination reason verified against a real host. Only your own words and the model&rsquo;s answer are captured — host metadata, settings and system checkpoints never leave your machine.</p>
+<p><b>The Antigravity desktop app and the Antigravity IDE are not supported.</b> Hook execution on those surfaces is undocumented and unverified, so the plugin detects them and stays inactive rather than appearing to work. Use the MCP route below there.</p>
+<p><b>Deliberately absent:</b> updating a memory in place, memory history, entity operations, and any destructive tool. Deletion needs a confirmation surface a hook cannot provide — use the MCP route or the dashboard.</p>
+<h2>MCP route — any Antigravity surface</h2>
+<h3>1. Create your link</h3>
 <p>In <b>API Keys</b>, create an <b>MCP link</b>. It is shown once — the URL itself is the credential.</p>
-<h2>2. Add the MCP server</h2>
+<h3>2. Add the MCP server</h3>
 <p>In the agent panel: <b>MCP servers → Manage → open the raw config</b>, then add:</p>
 ${codeBlock(`{
   "mcpServers": {
     "${PRODUCT.name.toLowerCase()}": { "serverUrl": "${ORIGIN}/mcp/YOUR_MCP_KEY" }
   }
 }`)}
-<h2>3. Verify</h2>
+<h3>3. Verify</h3>
 <p>Restart the Antigravity session and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>.</p>
-<h2>What you get</h2>
+<h3>What you get</h3>
 <p>All eight memory tools: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>.</p>
-<h2>Troubleshooting</h2>
+<h3>Troubleshooting</h3>
 <ul>
 <li><b>No tools appearing</b> — restart the session after saving the config.</li>
 <li><b>401 unauthorized</b> — the pasted URL must be an MCP link created in API Keys, not an API key.</li>

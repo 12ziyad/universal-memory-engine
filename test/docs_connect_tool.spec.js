@@ -13,6 +13,17 @@ import app from "../public/index.html?raw";
 
 const script = docs.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 
+/**
+ * Source of one PAGES[...] entry, so a page-scoped assertion cannot be
+ * satisfied by matching text that happens to live on a different page.
+ */
+function docPage(route) {
+	const start = script.indexOf(`PAGES["${route}"]`);
+	if (start === -1) throw new Error(`no docs page ${route}`);
+	const next = script.indexOf('PAGES["', start + 8);
+	return script.slice(start, next === -1 ? script.length : next);
+}
+
 describe("navigation", () => {
 	it("lists the coding-agent pages under Connect a tool", () => {
 		for (const entry of [
@@ -83,6 +94,33 @@ describe("page contracts", () => {
 		expect(script).toContain('PAGES["/install/antigravity"]');
 		expect(script).toContain('"serverUrl"');
 		expect(script).toContain("does not interpolate environment variables");
+	});
+
+	it("the OpenCode page leads with the native plugin and states what it omits", () => {
+		const page = docPage("/install/opencode");
+		expect(page).toContain("npm install opencode-itsuki");
+		// The executed floor, not a guess: nothing below it was ever run.
+		expect(page).toContain("1.18.18");
+		// Environment-only credential, and the reason it is not negotiable.
+		expect(page).toContain("ITSUKI_API_KEY");
+		expect(page).toMatch(/\{env:VAR\}|\{env:/);
+		expect(page).toMatch(/Deliberately absent/i);
+		// The MCP route survives as the documented fallback for deletion.
+		expect(page).toMatch(/mcp/i);
+	});
+
+	it("the Antigravity page ships the CLI plugin and holds desktop and IDE openly", () => {
+		const page = docPage("/install/antigravity");
+		expect(page).toContain("npx antigravity-itsuki install");
+		expect(page).toContain("antigravity-itsuki doctor");
+		// The two verified floors.
+		expect(page).toContain("1.1.13");
+		expect(page).toMatch(/Node 22/);
+		// Desktop and IDE are HELD; the page must say so, not stay silent.
+		expect(page).toMatch(/desktop app and the Antigravity IDE are not supported/i);
+		expect(page).toMatch(/Deliberately absent/i);
+		// And it must not claim the held surfaces work.
+		expect(page).not.toMatch(/(desktop|ide)[^.]{0,30}\b(is|are) supported\b/i);
 	});
 
 	it("OpenClaw documents both routes from shipped doors only", () => {

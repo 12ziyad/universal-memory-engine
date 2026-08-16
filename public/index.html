@@ -4253,6 +4253,14 @@ mcp_servers:
 		// The native Pi extension — published as pi-itsuki on npm with provenance.
 		// Recall runs before each turn's first model call, capture after the turn
 		// settles; the extension reads ITSUKI_API_KEY from the environment only.
+		opencodeNativeInstall: `npm install opencode-itsuki`,
+		opencodeNativeConfig: `{
+  "plugin": ["opencode-itsuki"]
+}`,
+		opencodeNativeEnv: `export ITSUKI_API_KEY=your_api_key`,
+		antigravityNativeInstall: `npx antigravity-itsuki install`,
+		antigravityNativeVerify: `export ITSUKI_API_KEY=your_api_key
+npx antigravity-itsuki doctor`,
 		piNativeInstall: `pi install npm:pi-itsuki`,
 		piNativeEnv: `# bash/zsh — add to your shell profile, then restart pi
 export ITSUKI_API_KEY=${mcpToken}
@@ -4761,7 +4769,16 @@ function installMethods() {
 					label: "OpenCode",
 					icon: ICON.terminal,
 					docsHref: "/docs/#/install/opencode",
-					steps: [
+					hint: "The native plugin joins OpenCode's own turn: recall before the model, capture after the turn settles. The MCP route remains as a fallback.",
+					variants: {
+						native: { label: "Native plugin", steps: [
+							{ title: "Create an API key", body: "A server credential, not the MCP link.", action: apiKey },
+							{ title: "Install the plugin", body: "Needs OpenCode 1.18.18 or newer. Zero runtime dependencies, published with npm provenance.", codeLabel: "terminal", code: () => installSnippets().opencodeNativeInstall },
+							{ title: "Point opencode.json at it", body: "A project file, or the global one at ~/.config/opencode/opencode.json.", codeLabel: "opencode.json", code: () => installSnippets().opencodeNativeConfig },
+							{ title: "Export the key", body: "Read only from the environment that starts OpenCode — never from opencode.json, whose {env:} interpolation would resolve it into the config object.", codeLabel: "terminal", code: () => installSnippets().opencodeNativeEnv },
+							{ title: "Verify", body: "Restart OpenCode. Memory now recalls before each new turn and saves after each settled one.", codeLabel: "say this", code: () => `use the ${name} status tool and tell me what it reports` },
+						] },
+						mcp: { label: "MCP config", steps: [
 						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
 						{ title: "Add the remote MCP server", body: "Project opencode.json, or global at ~/.config/opencode/opencode.json. The URL is the credential — treat the file as a secret.",
 							codeLabel: "opencode.json", code: (key) => installSnippets(key).opencode },
@@ -4769,20 +4786,30 @@ function installMethods() {
 							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
 						{ title: "Ask for proactive tool use", body: "Add to your OpenCode rules or agent instructions so recall and save happen without prompting.",
 							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
-					],
+						] },
+					},
 				},
 				antigravity: {
 					label: "Antigravity",
 					icon: ICON.orbit,
 					docsHref: "/docs/#/install/antigravity",
-					steps: [
-						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add the MCP server", body: "Agent panel → MCP servers → Manage → open the raw config.",
-							codeLabel: "mcp_config.json", code: (key) => installSnippets(key).antigravity,
-							note: "This file does not interpolate environment variables, so the pasted URL carries the credential. Treat the file as a secret." },
-						{ title: "Test connection", body: "Restart the Antigravity session, then ask it to check.",
-							codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
-					],
+					hint: "The native plugin is for the Antigravity CLI (1.1.13+). The Antigravity desktop app and IDE are not supported — use the MCP route there.",
+					variants: {
+						native: { label: "Native plugin (CLI)", steps: [
+							{ title: "Create an API key", body: "A server credential, not the MCP link.", action: apiKey },
+							{ title: "Install for the CLI", body: "Antigravity CLI 1.1.13 or newer, and Node 22+. The installer writes the plugin and verifies your host.", codeLabel: "terminal", code: () => installSnippets().antigravityNativeInstall },
+							{ title: "Set the key, then check", body: "The key is read from the environment, or stored owner-only by the installer. The doctor never prints it.", codeLabel: "terminal", code: () => installSnippets().antigravityNativeVerify },
+							{ title: "What it does", body: "Recall runs before each turn; capture runs after a settled one. The desktop app and IDE are not supported and stay inactive there." },
+						] },
+						mcp: { label: "MCP config", steps: [
+							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
+							{ title: "Add the MCP server", body: "Agent panel → MCP servers → Manage → open the raw config.",
+								codeLabel: "mcp_config.json", code: (key) => installSnippets(key).antigravity,
+								note: "This file does not interpolate environment variables, so the pasted URL carries the credential. Treat the file as a secret." },
+							{ title: "Test connection", body: "Restart the Antigravity session, then ask it to check.",
+								codeLabel: "say this", code: () => `use the ${name} whoami tool and tell me what it reports` },
+						] },
+					},
 				},
 			},
 		},

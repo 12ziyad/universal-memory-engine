@@ -427,6 +427,76 @@ describe("Agents door and the variant chooser", () => {
 		expect(script).not.toContain("clawhub:openclaw-itsuki");
 	});
 
+	it("OpenCode leads with the published native plugin, the MCP route surviving as a fallback", () => {
+		const doors = buildMethods();
+		expect(Object.keys(doors.plugin.clients.opencode.variants)).toEqual(["native", "mcp"]);
+		for (const variant of Object.values(doors.plugin.clients.opencode.variants)) {
+			expect(Array.isArray(variant.steps)).toBe(true);
+			expect(variant.steps.length).toBeGreaterThan(1);
+		}
+	});
+
+	it("the native OpenCode plugin names the published package, its floor, and the env-only key", () => {
+		const snippets = build(["installSnippets"], "installSnippets")("itsuki_live_oc2");
+		expect(snippets.opencodeNativeInstall).toBe("npm install opencode-itsuki");
+		expect(JSON.parse(snippets.opencodeNativeConfig).plugin).toEqual(["opencode-itsuki"]);
+		// The credential is environment-only by design: opencode.json expands
+		// {env:VAR} before parsing, so a key placed there is resolved into the
+		// options object. The config snippet must never carry one.
+		expect(snippets.opencodeNativeConfig).not.toContain("ITSUKI_API_KEY");
+		expect(snippets.opencodeNativeConfig).not.toContain("itsuki_live_oc2");
+		expect(snippets.opencodeNativeEnv).toContain("ITSUKI_API_KEY");
+		expect(snippets.opencodeNativeEnv).not.toContain("itsuki_live_oc2");
+		const native = buildMethods().plugin.clients.opencode.variants.native;
+		// The executed floor is a precondition, not a footnote.
+		expect(native.steps.some((s) => /1\.18\.18/.test(`${s.body ?? ""}`))).toBe(true);
+	});
+
+	it("Antigravity offers the native CLI plugin while holding desktop and IDE openly", () => {
+		const doors = buildMethods();
+		expect(Object.keys(doors.plugin.clients.antigravity.variants)).toEqual(["native", "mcp"]);
+		const client = doors.plugin.clients.antigravity;
+		// The native route is CLI-only. The unsupported surfaces are named on
+		// the door itself, not buried in docs.
+		expect(client.hint).toMatch(/CLI/);
+		expect(client.hint).toMatch(/desktop app and IDE are not supported/i);
+		const native = client.variants.native;
+		expect(native.label).toMatch(/CLI/);
+		expect(native.steps.some((s) => /not supported/i.test(`${s.body ?? ""}`))).toBe(true);
+	});
+
+	it("the native Antigravity plugin names the published package and never prints the key", () => {
+		const snippets = build(["installSnippets"], "installSnippets")("itsuki_live_ag2");
+		expect(snippets.antigravityNativeInstall).toBe("npx antigravity-itsuki install");
+		expect(snippets.antigravityNativeVerify).toContain("antigravity-itsuki doctor");
+		expect(snippets.antigravityNativeVerify).toContain("ITSUKI_API_KEY");
+		for (const snippet of [snippets.antigravityNativeInstall, snippets.antigravityNativeVerify]) {
+			expect(snippet).not.toContain("itsuki_live_ag2");
+		}
+	});
+
+	it("neither native route claims a capability the packages deliberately omit", () => {
+		// update-memory, history and entity operations do not exist on the
+		// server; native destructive tools are refused by design (F-9). No
+		// Get Started copy may imply otherwise.
+		expect(script).not.toMatch(/opencode-itsuki[^"'`]*\b(update|history|entit)/i);
+		expect(script).not.toMatch(/antigravity-itsuki[^"'`]*\b(update|history|entit)/i);
+		// Antigravity Desktop and the IDE stay HELD. Match positive claims only:
+		// an earlier revision of this assertion was tripped by the honest "are
+		// not supported" sentence it exists to protect.
+		for (const claim of [
+			/(desktop|ide)[^.]{0,30}\bis supported\b/i,
+			/(desktop|ide)[^.]{0,30}\bare supported\b/i,
+			/(desktop|ide)[^.]{0,30}\bfully (supported|compatible)\b/i,
+			/works (on|in|with) (the )?antigravity (desktop|ide)/i,
+			/antigravity (desktop|ide)[^.]{0,20}\bcompatible\b(?![^.]{0,20}\bnot\b)/i,
+		]) {
+			expect(script, `positive desktop/IDE claim: ${claim}`).not.toMatch(claim);
+		}
+		// And the honest exclusion must actually be present on the door.
+		expect(buildMethods().plugin.clients.antigravity.hint).toMatch(/not supported/i);
+	});
+
 	it("the once-dormant variant renderer path is live and wired", () => {
 		const view = fnSource("viewInstall");
 		expect(view).toContain("const variants = client.variants ?? null;");
