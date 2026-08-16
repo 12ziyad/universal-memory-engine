@@ -57,12 +57,17 @@ export function runDoctor(env: NodeJS.ProcessEnv = process.env): DoctorReport {
 			);
 		}
 	}
-	lines.push(
-		`antigravity desktop: version detection unsupported (no documented third-party mechanism)`,
-	);
-	held.push(
-		"Desktop (Antigravity 2.0) lifecycle behaviour is HELD: neither a reliable version check nor environment propagation to hook subprocesses has been verified on a real desktop install.",
-	);
+	if (host.desktopVersion && host.desktopProduct === "ide") {
+		lines.push(`antigravity desktop: Antigravity IDE ${host.desktopVersion} detected (unsupported)`);
+		held.push(
+			`Antigravity IDE ${host.desktopVersion} is installed but is NOT supported. Google's IDE changelog never documents hooks and their execution there is unverified at any version, so lifecycle behaviour stays disabled rather than silently doing nothing. Use the Antigravity CLI (>= ${FLOORS.cli}).`,
+		);
+	} else {
+		lines.push("antigravity desktop: not detected");
+		held.push(
+			`Desktop (Antigravity 2.0, floor ${FLOORS.desktop}) is HELD: no installation was found to verify hook firing or environment propagation against.`,
+		);
+	}
 
 	// --- install
 	const marker = existsSync(dir) ? readMarker(dir) : null;

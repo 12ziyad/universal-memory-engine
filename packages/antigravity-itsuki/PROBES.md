@@ -227,3 +227,31 @@ uninstall** all succeeded. Doctor reported `windows-dacl — verified`. Uninstal
 preserved state by default. Host residue removed afterwards.
 
 25 launcher regression tests.
+
+---
+
+# Desktop — P16 answered, support NOT claimed (2026-08-16)
+
+The desktop app on this machine is **Antigravity IDE 1.16.5**, running, with the
+2.0 app-data root present:
+
+```
+resources/app/product.json -> ideVersion = 1.16.5   (the IDE's own version)
+                              version    = 1.107.0  (the VS Code base it forks)
+```
+
+**P16 is answered**: a version IS readable, from `product.json.ideVersion`, and
+`detectHost` now reads it. But what it identifies is the IDE — a different
+product from "Antigravity 2.0" (floor 2.6.0), which is not installed here.
+
+Detection exists to report honestly and stay disabled. The doctor now says
+`Antigravity IDE 1.16.5 detected (unsupported)` and explains why, instead of
+claiming nothing was found. Google's IDE changelog never documents hooks and
+their execution there is unverified at any version, so enabling lifecycle
+behaviour would be a claim without evidence.
+
+**P17 (desktop env propagation) is not attempted**, because it would require a
+GUI turn to prove a surface the architecture already holds. Owner decision
+2026-08-16: **ship CLI-only, desktop HELD.**
+
+Supported surface: **Antigravity CLI >= 1.1.13**, proven end to end.
