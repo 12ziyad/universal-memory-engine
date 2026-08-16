@@ -6,7 +6,8 @@ const read = (f) => existsSync(`${LOG}/${f}`) ? readFileSync(`${LOG}/${f}`, "utf
 
 const itsuki = read("itsuki.jsonl");
 const llm = read("llm.jsonl");
-const recalls = itsuki.filter((e) => e.kind === "recall");
+// The readiness probe posts an empty body; it is harness traffic, not a turn.
+const recalls = itsuki.filter((e) => e.kind === "recall" && e.query);
 const saves = itsuki.filter((e) => e.kind === "save");
 const completions = llm.filter((e) => e.kind === "completion");
 
