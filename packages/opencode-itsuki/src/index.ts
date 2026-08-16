@@ -330,6 +330,19 @@ export const ItsukiPlugin = async (input: any, options?: Record<string, unknown>
 					text: pending.block,
 					synthetic: true,
 				});
+
+				// ONE-SHOT. The host's title generator re-reads the same user
+				// message, so a pending entry keyed on message id alone would be
+				// matched a second time and the block would ride into a
+				// non-conversational call — observed on a real host (SEC-04).
+				// Consuming it here means exactly one provider call per human
+				// turn receives memory: the first, which is the inference.
+				//
+				// The trade-off is deliberate: if that call is retried at the
+				// provider level, the retry proceeds without memory rather than
+				// risking the leak. Recall is fail-open, so a turn without it is
+				// a worse answer, never a broken one.
+				runtime.pending.delete(key);
 			} catch {
 				/* injection is best-effort by design */
 			}

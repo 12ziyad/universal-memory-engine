@@ -22,6 +22,10 @@ if (phase === "main") {
   check("the model SAW the recalled needle", completions.some((c) => c.sawMarker === true));
   check("at least one completion happened", completions.length > 0);
   check("exactly one settled capture was delivered", saves.length === 1, `got ${saves.length}`);
+  // SEC-04: only ONE provider call may carry the block, and it must be the
+  // inference — never the title/summary call.
+  const withBlock = completions.filter((c) => c.sawMarker === true);
+  check("exactly one provider call received the memory block", withBlock.length === 1, `got ${withBlock.length}`);
   if (saves.length === 1) {
     const s = saves[0];
     const text = JSON.stringify(s.messages);

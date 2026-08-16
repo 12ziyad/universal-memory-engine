@@ -26,12 +26,12 @@ http.createServer(async (req, res) => {
     const flat = JSON.stringify(msgs)
     const last = msgs[msgs.length - 1]
     log({ kind: "completion", stream: !!body.stream, model: body.model, nMsgs: msgs.length,
-          sawMarker: flat.includes("PROBE_MARKER_XYZZY"), lastRole: last?.role,
+          sawMarker: flat.includes("itsuki-recalled-context-v1"), lastRole: last?.role,
           lastText: String(typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "")).slice(0, 200) })
     const wantErr = flat.includes("PROBE_WANT_ERROR")
     const wantSlow = flat.includes("PROBE_WANT_SLOW")
     if (wantErr) { res.writeHead(500, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "stub-forced-error", type: "server_error" } })); return }
-    const content = flat.includes("PROBE_MARKER_XYZZY")
+    const content = flat.includes("itsuki-recalled-context-v1")
       ? "PROBE_ANSWER: marker-seen. Fredville confirmed."
       : "PROBE_ANSWER: no-marker."
     const id = "chatcmpl-stub" + Date.now()

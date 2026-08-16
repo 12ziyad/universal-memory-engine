@@ -324,6 +324,40 @@ describe("transient injection", () => {
 		}
 	});
 
+	it("SEC-04: injects into ONE provider call only — the title call must not receive it", async () => {
+		// Found on a real host (run 31917785989): the host's title generator
+		// re-reads the SAME user message, so matching on message id alone let
+		// the block through to a second, non-conversational model call.
+		// Injection is therefore one-shot per human turn.
+		const { hooks, restore } = await pluginWith("remembered thing");
+		try {
+			await hooks["chat.message"](
+				{ sessionID: "ses_1", messageID: "m1" },
+				{ message: { id: "m1", sessionID: "ses_1", time: { created: 1 } }, parts: [{ type: "text", text: "hello" }] },
+			);
+			const mainCall: any = {
+				messages: [
+					{ info: { id: "m0", role: "assistant", sessionID: "ses_1" }, parts: [] },
+					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
+				],
+			};
+			await hooks["experimental.chat.messages.transform"]({}, mainCall);
+			const injectedMain = mainCall.messages[1].parts.filter((p: any) => String(p.text).includes(RECALL_OPEN_MARKER)).length;
+			expect(injectedMain).toBe(1);
+
+			// The title call: same session, same user message id, fresh array.
+			const titleCall: any = {
+				messages: [
+					{ info: { id: "m1", role: "user", sessionID: "ses_1" }, parts: [{ id: "p1", type: "text", text: "hello" }] },
+				],
+			};
+			await hooks["experimental.chat.messages.transform"]({}, titleCall);
+			expect(JSON.stringify(titleCall)).not.toContain(RECALL_OPEN_MARKER);
+		} finally {
+			restore();
+		}
+	});
+
 	it("never throws on a malformed transform payload", async () => {
 		const { hooks, restore } = await pluginWith("x");
 		try {
