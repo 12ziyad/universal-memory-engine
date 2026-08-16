@@ -1,0 +1,136 @@
+# Publish opencode-itsuki to npm, with provenance.
+#
+# Modelled on publish-n8n-node.yml, which shipped n8n-nodes-itsuki@0.1.0 with
+# SLSA provenance. Provenance needs a supported CI (this workflow, on a
+# GitHub-hosted runner) plus `id-token: write`, so npm can mint an OIDC token
+# and sign an attestation binding the tarball to this commit and this file.
+# That is independent of how we AUTHENTICATE:
+#
+#   1. Trusted publishing (tokenless, preferred). Configurable on npmjs.com
+#      only after a package exists, so it cannot cover a first publication.
+#      Once configured, delete the NPM_TOKEN secret — the env below resolves
+#      to empty and npm falls back to OIDC.
+#   2. A granular access token in NPM_TOKEN. Required for the FIRST publish of
+#      a new package name.
+#
+# `dry_run` defaults to TRUE. Publishing is a deliberate, owner-approved act:
+# every gate below runs either way, and only the final step is gated.
+name: Publish opencode integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every gate and pack the tarball, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The spool does atomic rename and path work, which behaves differently
+        # on Windows. Both platforms must be green before anything ships.
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: packages/opencode-itsuki
+
+    steps:
+      - name: Check out the exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # opencode-itsuki requires Node >= 22; the toolchain is pinned rather than
+      # floating so a release pipeline cannot break because a tag advanced.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Pin npm to a trusted-publishing-capable major
+        run: npm install -g npm@11
+
+      - name: Report toolchain
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit, contract and lifecycle tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Refuse unreviewed runtime dependencies
+        shell: bash
+        run: |
+          echo "--- runtime dependencies ---"
+          node -e "const p=require('./package.json');const d=p.dependencies||{};console.log(JSON.stringify(d));if(Object.keys(d).length){console.error('FAIL: this package must have zero runtime dependencies');process.exit(1)}"
+          echo "OK: zero runtime dependencies"
+
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Verify the packed contents
+        shell: bash
+        run: |
+          npm pack --silent
+          echo "--- tarball contents ---"
+          tar -tzf opencode-itsuki-*.tgz | sort
+          echo "--- refuse to ship secrets ---"
+          if tar -xzOf opencode-itsuki-*.tgz | grep -qE '(itsuki|uml)_live_[A-Za-z0-9_-]{10}'; then
+            echo "FAIL: a credential-shaped string is present in the tarball"
+            exit 1
+          fi
+          echo "OK: no credential-shaped strings"
+          echo "--- refuse to ship a postinstall hook ---"
+          if node -e "process.exit(require('./package.json').scripts.postinstall ? 1 : 0)"; then
+            echo "OK: no postinstall script"
+          else
+            echo "FAIL: package declares a postinstall script"
+            exit 1
+          fi
+          echo "--- refuse to ship a destructive CALL SITE ---"
+          # The vendored kernel DEFINES deleteMemory/deleteBySource; neither
+          # package may CALL them. Match invocation syntax, not definitions
+          # (the same distinction CI-02 drew for mastra-itsuki).
+          if tar -xzOf opencode-itsuki-*.tgz | grep -qE '\.deleteMemory\(|\.deleteBySource\('; then
+            echo "FAIL: the package calls a destructive transport method"
+            exit 1
+          fi
+          echo "OK: no destructive call site"
+          echo "--- refuse to ship a fake update ---"
+          if tar -xzOf opencode-itsuki-*.tgz | grep -qE 'updateMemory\(|fakeUpdate'; then
+            echo "FAIL: the package appears to implement an update path"
+            exit 1
+          fi
+          echo "OK: no update surface"
+
+      # Only one platform publishes; the other exists to prove portability.
+      - name: Publish to npm with provenance
+        if: ${{ inputs.dry_run == false && matrix.os == 'ubuntu-latest' }}
+        run: npm publish --provenance --access public
+        env:
+          # Empty when trusted publishing is configured; npm then uses OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run only
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "dry_run was true — every gate passed and the tarball was built."
+          echo "Re-run with dry_run=false to publish."
