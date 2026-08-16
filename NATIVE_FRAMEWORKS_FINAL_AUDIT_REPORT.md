@@ -847,3 +847,74 @@ necessary but insufficient. The stronger rule: **a zero result only means
 something when you have first proven the query can return non-zero.** Establish
 a positive control (a row you know exists) against the same column before
 treating any zero as evidence of absence.
+
+---
+
+## 17. `llamadbg_1786818131` — BLOCKER CLOSED. Deletion succeeded; what remains is a content-free replay fence. (2026-08-16)
+
+§16 left the question open because the follow-up queries never returned. They
+have now been run, one small equality query at a time, paced, each with its own
+positive control. **No production data was mutated.** Every response carried
+`rows_written: 0`.
+
+### The derivation §16 was missing
+
+```
+SELECT DISTINCT memory_user_id FROM source_packets
+  WHERE external_user_id = 'llamadbg_1786818131'
+  -> exactly one: mem_d6d41ce93b4dd5f1ca1b8cae917ec176
+```
+
+### Content check against that exact derived id
+
+Every zero below is paired with a positive control run on the *same column and
+query shape*, because a zero from an untested query proves nothing — that error
+is what produced §15's false conclusion in the first place.
+
+| Table | Column | Target | Positive control | Verdict |
+|---|---|---|---|---|
+| `nodes` | `user_id` | **0** | `user_id='demo'` -> 3 | trustworthy zero |
+| `slices` | `user_id` | **0** | `user_id='demo'` -> 1 | trustworthy zero |
+| `memory_pages` | `user_id` | **0** | (`demo` -> 0, so rejected as a control) `user_f6e5…` -> 12 | trustworthy zero |
+| `source_episodes` | `external_user_id` | **0** | `user_f6e5…` -> 8 | trustworthy zero |
+| `semantic_atom_candidates` | `external_user_id` | **0** | `user_f6e5…` -> 7 | trustworthy zero |
+
+Note the `memory_pages` row: the first control candidate returned zero itself,
+so it was discarded and a real one found. A control that cannot go positive is
+not a control.
+
+### What the three surviving rows actually are
+
+`source_packets` has **no `deleted_at` column** (schema at
+`migrations/0005_auto_mode_phase2.sql`). It is an append-only provenance and
+idempotency ledger — `idempotency_key`, `content_hash`, `seen_count` — and it is
+what makes a replayed write collapse instead of duplicating. Rows there are
+expected to outlive the memories they admitted; that is the mechanism working,
+not residue.
+
+The remaining question was whether those rows carry user content:
+
+```
+SELECT COUNT(content_preview) FROM source_packets
+  WHERE external_user_id = 'llamadbg_1786818131'   -> 0      (all three NULL)
+  -- positive control, same column and shape:
+  WHERE external_user_id = 'user_f6e5…'            -> 419
+```
+
+**All three previews are NULL.** The fence is content-free.
+
+### Verdict
+
+**The canary deletion succeeded.** Zero memories, zero slices, zero pages, zero
+episodes and zero atom candidates survive under the derived space. What remains
+is three content-free idempotency records — an intentional replay fence, in the
+category §16 said to distinguish rather than delete.
+
+**No destructive cleanup is required, and none was performed.** Deleting these
+rows would weaken replay protection while removing nothing a person could read.
+
+### Status: CLOSED — no longer a release blocker.
+
+The three-instance lesson stands and is now enforced in method: a zero result
+counts as evidence only once the same query and column have been shown able to
+return non-zero.
