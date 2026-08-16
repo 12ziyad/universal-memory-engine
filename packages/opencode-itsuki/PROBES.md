@@ -148,3 +148,59 @@ Both depended on the SDK driver (`session.get().parentID`, `session.fork()` id/t
 ## P0a — isolation: Linux reproduces the Windows behavior
 
 A bare invocation created `~/.config/opencode`, `~/.local/share/opencode` (`log/`, `repos/`) and `~/.cache/opencode` (`bin/`) under the runner's HOME. The scaffold-on-start behavior is **host behavior, not a Windows quirk** — which is why an ephemeral runner (or disposable user/VM), not an env override, is the correct isolation vehicle.
+
+---
+
+# REAL-HOST PROOF — PASSED (run `31918424723`, 2026-08-16)
+
+Packed tarball (`npm pack`, not the worktree) installed into a clean project
+beside the real pinned `opencode-ai@1.18.18`. Model and memory service are both
+loopback stubs inside a disposable runner; no secrets, no OIDC, no production
+Itsuki. Every assertion below is on what the host actually did.
+
+| Proof | Result |
+|---|---|
+| exactly one recall per genuinely new human turn | PASS (got 1) |
+| the model received the recalled memory | PASS |
+| exactly one provider call received the block | PASS (got 1) |
+| **NO title-shaped call saw the block** | PASS |
+| the marker is never persisted into the host's own storage | PASS |
+| exactly one settled capture delivered | PASS (got 1) |
+| capture carries the user turn and the assistant answer | PASS |
+| capture contains neither the injected block nor the recalled needle | PASS |
+| capture is conversation mode with an idempotency key | PASS |
+| **P14** envelope survives an unreachable service, on disk | PASS |
+| **P14** drain after restart, no duplicate idempotency keys | PASS (2 saves, 2 unique) |
+| fail-open: turn completes with memory unreachable | PASS |
+| fail-open: nothing injected when recall fails | PASS |
+| poisoned memory: forged closing marker defanged | PASS |
+
+## SEC-04 — found only by the real host, three iterations
+
+The frozen design injected via `experimental.chat.messages.transform`, believing
+it transient. The host disagreed, three times:
+
+1. Both completions carried the block. Made injection one-shot -> still both.
+2. Suspected shared objects; replaced the array element with a copy -> still both.
+3. Added strip-then-inject -> still both, which proved the hook is invoked
+   **once** per turn and the same array is reused for the title call. Nothing
+   added there can be scoped, and there is no second call in which to undo it.
+
+The fix is a different channel. `experimental.chat.system.transform` has an
+OPTIONAL `sessionID` in the shipped types, and the host omits it for the
+small-model calls. Guarding on its presence puts memory in front of the real
+turn and nothing else — now proven: inference `sawMarker=true`, title call
+`sawMarker=false`.
+
+Severity HIGH. Regression tests: `adversarial.spec.ts` -> "injection on the
+system channel".
+
+## Still open
+
+- **P5 / P13a** (subagent, fork anchors) — not exercised by this harness; the
+  scripted `opencode run` turns spawn no child sessions. First-sight semantics
+  stand and no cross-fork claim is made.
+- Three harness defects were found and fixed along the way (a bare package name
+  in `plugin:[]` silently loads nothing when unpublished; a stale marker string;
+  stub failure modes set on the client's env that the running stub cannot see).
+  None were product defects.
