@@ -656,6 +656,221 @@
 	.uchart-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; }
 	.uchart-key.saves { background: var(--accent); }
 	.uchart-key.recalls { background: color-mix(in srgb, var(--green) 80%, transparent); }
+	/* ---- dashboard: project-wide memory operations -------------------------
+	   The dashboard is an operational surface, not a collection of demo cards.
+	   Every selector is namespaced so the denser layout cannot leak into the
+	   Playground, Requests, or setup guides. */
+	.overview-shell { width: min(1360px, 100%); margin: 0 auto; padding-bottom: 32px; }
+	.overview-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px;
+		margin-bottom: 12px; }
+	.overview-title h2 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: -.025em; font-weight: 600; }
+	.overview-title p { margin: 7px 0 0; color: var(--muted); font-size: 13.5px; }
+	.overview-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+	.overview-ranges { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border);
+		border-radius: 9px; background: var(--panel); }
+	.overview-range { min-width: 38px; min-height: 32px; padding: 0 10px; border: 0; border-radius: 7px;
+		background: transparent; color: var(--muted); font: 500 12px/1 var(--font-mono); }
+	.overview-range:hover { color: var(--text); background: var(--panel2); filter: none; }
+	.overview-range[aria-pressed="true"] { color: var(--text); background: var(--panel2); box-shadow: var(--shadow-sm); }
+	.overview-control { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+		padding: 0 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel);
+		color: var(--muted); font-size: 12.5px; }
+	.overview-control:hover { color: var(--text); border-color: var(--border2); filter: none; }
+	.overview-control svg { width: 14px; height: 14px; }
+	.overview-control[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+		background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+	.overview-control.icon-only { width: 36px; padding: 0; }
+	.overview-control[disabled] { opacity: .58; cursor: wait; }
+	.overview-scopebar { min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px;
+		margin-bottom: 14px; color: var(--faint); font: 11px/1.4 var(--font-mono); }
+	.overview-scopebar .scope-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+	.overview-scopebar .scope-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+	.overview-updated { margin-left: auto; white-space: nowrap; }
+	.overview-error { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px;
+		border: 1px solid var(--danger-border); border-radius: 10px; background: var(--danger-bg); color: var(--red); }
+	.overview-error span { flex: 1; }
+	.overview-error button { min-height: 30px; border: 1px solid currentColor; background: transparent; color: inherit;
+		border-radius: 7px; padding: 0 10px; }
+	.overview-loading { display: grid; gap: 14px; }
+	.overview-skeleton { min-height: 136px; border: 1px solid var(--border); border-radius: 13px; background:
+		linear-gradient(100deg, var(--panel) 25%, var(--panel2) 42%, var(--panel) 58%); background-size: 220% 100%;
+		animation: overview-shimmer 1.4s ease-in-out infinite; }
+	@keyframes overview-shimmer { to { background-position-x: -220%; } }
+	.overview-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+	.overview-kpi { position: relative; min-width: 0; min-height: 142px; padding: 15px 17px 14px;
+		border: 1px solid var(--border); border-radius: 13px; background: var(--panel); overflow: hidden; }
+	.overview-kpi.is-primary { border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); }
+	.overview-kpi-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+	.overview-kpi-head svg { width: 15px; height: 15px; color: var(--accent); }
+	.overview-kpi-value { display: flex; align-items: baseline; gap: 6px; margin-top: 9px; min-width: 0; }
+	.overview-kpi-value strong { font: 600 29px/1 var(--font-mono); letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+	.overview-kpi-value span { color: var(--faint); font-size: 11px; }
+	.overview-kpi-meta { margin-top: 10px; min-height: 17px; color: var(--faint); font: 11px/1.45 var(--font-mono);
+		overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.overview-kpi-foot { display: flex; align-items: flex-end; gap: 8px; margin-top: 7px; min-height: 18px; }
+	.overview-delta { font: 11px/1.35 var(--font-mono); color: var(--faint); }
+	.overview-delta.up { color: var(--green); }
+	.overview-delta.down, .overview-delta.warn { color: var(--amber); }
+	.overview-mini-progress { flex: 1; height: 3px; margin-bottom: 5px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+	.overview-mini-progress > i { display: block; height: 100%; border-radius: inherit; background: var(--amber); }
+	.overview-card { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; }
+	.overview-card-head { min-height: 63px; display: flex; align-items: center; gap: 10px; padding: 13px 17px;
+		border-bottom: 1px solid var(--border); }
+	.overview-card-title { min-width: 0; }
+	.overview-card-title h3 { margin: 0; font-size: 15px; line-height: 1.25; font-weight: 600; }
+	.overview-card-title p { margin: 4px 0 0; color: var(--faint); font-size: 11.5px; }
+	.overview-card-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+	.overview-modes { display: flex; align-items: center; gap: 2px; padding: 2px; background: var(--panel2);
+		border: 1px solid var(--border); border-radius: 9px; }
+	.overview-mode { min-height: 30px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
+		color: var(--faint); font-size: 12px; }
+	.overview-mode[aria-selected="true"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm); }
+	.overview-pulse { margin-bottom: 14px; }
+	.overview-pulse-body { min-height: 330px; padding: 16px 17px 14px; overflow-x: auto; }
+	.overview-chart { min-width: 640px; }
+	.overview-chart-legend { display: flex; align-items: center; gap: 12px; min-height: 24px; margin-bottom: 8px;
+		color: var(--muted); font-size: 11.5px; }
+	.overview-chart-key { display: inline-flex; align-items: center; gap: 6px; }
+	.overview-chart-key i { width: 8px; height: 8px; border-radius: 3px; background: var(--accent); }
+	.overview-chart-key.recall i { background: var(--green); }
+	.overview-chart-key.neutral i { background: var(--faint); }
+	.overview-chart-key.warn i { background: var(--amber); }
+	.overview-chart-key.fail i { background: var(--red); }
+	.overview-buckets { height: 222px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(54px, 1fr);
+		align-items: end; gap: 8px; border-bottom: 1px solid var(--border2); background:
+		repeating-linear-gradient(to top, transparent 0, transparent 54px, var(--border) 55px); }
+	.overview-bucket { height: 100%; min-width: 0; display: flex; align-items: flex-end; justify-content: center; gap: 3px;
+		padding: 0 3px; border: 0; border-radius: 6px 6px 0 0; background: transparent; }
+	.overview-bucket:hover, .overview-bucket:focus-visible { background: color-mix(in srgb, var(--accent) 5%, transparent); filter: none; }
+	.overview-bar { width: min(24px, 42%); min-height: 0; border-radius: 4px 4px 0 0; background: var(--accent); }
+	.overview-bar.recall { background: var(--green); }
+	.overview-bar.neutral { background: var(--faint); }
+	.overview-bar.warn { background: var(--amber); }
+	.overview-bar.fail { background: var(--red); }
+	.overview-bar.compare { opacity: .28; background: transparent; border: 1px dashed currentColor; }
+	.overview-bucket-labels { min-width: 640px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(54px, 1fr);
+		gap: 8px; margin-top: 8px; color: var(--faint); font: 10px/1.2 var(--font-mono); text-align: center; }
+	.overview-health-ribbon { min-width: 640px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(54px, 1fr);
+		gap: 2px; margin-top: 12px; }
+	.overview-health-ribbon span { height: 5px; border-radius: 2px; background: var(--green); }
+	.overview-health-ribbon span.warn { background: var(--amber); }
+	.overview-health-ribbon span.fail { background: var(--red); }
+	.overview-health-ribbon span.empty { background: var(--border2); }
+	.overview-table-toggle { margin-left: auto; }
+	.overview-data-table { margin-top: 14px; max-height: 250px; overflow: auto; border-top: 1px solid var(--border); }
+	.overview-data-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+	.overview-data-table th, .overview-data-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+	.overview-data-table th:first-child, .overview-data-table td:first-child { text-align: left; }
+	.overview-data-table th { position: sticky; top: 0; background: var(--panel); color: var(--faint); font-weight: 600; }
+	.overview-outcomes { display: grid; gap: 12px; max-width: 880px; margin: 8px auto 0; }
+	.overview-outcome-row { display: grid; grid-template-columns: minmax(120px, 190px) minmax(120px, 1fr) auto;
+		align-items: center; gap: 12px; min-width: 0; }
+	.overview-outcome-row > span:first-child { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+		white-space: nowrap; text-transform: capitalize; }
+	.overview-outcome-row strong { min-width: 50px; text-align: right; font: 500 12px/1 var(--font-mono); }
+	.overview-outcome-track { display: block; height: 8px; border-radius: 8px; background: var(--panel2); overflow: hidden; }
+	.overview-outcome-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+	.overview-stat-chart { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; max-width: 980px;
+		margin: 28px auto 0; }
+	.overview-stat-chart > div { min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: 11px;
+		background: var(--panel2); }
+	.overview-stat-chart span, .overview-stat-chart small { display: block; color: var(--faint); font-size: 11px; }
+	.overview-stat-chart strong { display: block; margin: 10px 0 8px; font: 600 20px/1.1 var(--font-mono); }
+	.overview-jobs { margin-bottom: 14px; }
+	.overview-job-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px 17px; }
+	.overview-job { min-width: 0; padding: 12px 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); }
+	.overview-job.warn { border-color: var(--warning-border); background: var(--warning-bg); }
+	.overview-job.fail { border-color: var(--danger-border); background: var(--danger-bg); }
+	.overview-job span { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.overview-job strong { display: block; margin-top: 8px; font: 600 22px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+	.overview-job-grid + .overview-job-meta { border-top: 1px solid var(--border); }
+	.overview-job-meta { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+	.overview-job-meta div { min-width: 0; padding: 11px 17px; border-left: 1px solid var(--border); }
+	.overview-job-meta div:first-child { border-left: 0; }
+	.overview-job-meta span { display: block; color: var(--faint); font-size: 10.5px; }
+	.overview-job-meta strong { display: block; margin-top: 4px; font: 500 14px/1.2 var(--font-mono); }
+	.overview-lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+	.overview-list-head { display: grid; grid-template-columns: minmax(0,1fr) 82px 82px; gap: 10px; padding: 9px 17px;
+		color: var(--faint); font: 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .07em; }
+	.overview-list-row { display: grid; grid-template-columns: minmax(0,1fr) 82px 82px; gap: 10px; align-items: center;
+		min-height: 56px; padding: 9px 17px; border-top: 1px solid var(--border); }
+	.overview-list-row .lane-name { min-width: 0; }
+	.overview-list-row .lane-name b { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.overview-list-row .lane-bar { display: block; height: 3px; margin-top: 7px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+	.overview-list-row .lane-bar i { display: block; height: 100%; background: var(--accent); }
+	.overview-list-row > span { text-align: right; font: 11.5px/1.2 var(--font-mono); }
+	.overview-composition-bar { display: flex; gap: 3px; height: 10px; margin: 0 17px 10px; }
+	.overview-composition-bar span { min-width: 2px; border-radius: 3px; background: var(--accent); }
+	.overview-composition-row { min-height: 58px; display: grid; grid-template-columns: 12px minmax(0,1fr) auto;
+		align-items: center; gap: 10px; padding: 9px 17px; border-top: 1px solid var(--border); }
+	.overview-composition-row i { width: 8px; height: 8px; border-radius: 3px; background: var(--accent); }
+	.overview-composition-row b { display: block; font-size: 12.5px; }
+	.overview-composition-row small { display: block; margin-top: 2px; color: var(--faint); font-size: 10.5px; }
+	.overview-composition-row strong { font: 500 12px/1.2 var(--font-mono); }
+	.overview-signals { margin-top: 14px; }
+	.overview-signal { min-height: 54px; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px;
+		align-items: center; padding: 10px 17px; border-top: 1px solid var(--border); }
+	.overview-signal:first-child { border-top: 0; }
+	.overview-signal-icon { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border);
+		border-radius: 8px; color: var(--green); background: var(--success-bg); }
+	.overview-signal.warn .overview-signal-icon { color: var(--amber); border-color: var(--warning-border); background: var(--warning-bg); }
+	.overview-signal.fail .overview-signal-icon { color: var(--red); border-color: var(--danger-border); background: var(--danger-bg); }
+	.overview-signal-icon svg { width: 14px; height: 14px; }
+	.overview-signal b { display: block; font-size: 12.5px; }
+	.overview-signal small { display: block; margin-top: 2px; color: var(--faint); font-size: 11px; }
+	.overview-empty { padding: 26px 18px; color: var(--muted); text-align: center; }
+	.overview-first-run { margin-bottom: 14px; }
+	.overview-pulse.is-expanded { position: relative; width: 100%; height: 100%; margin: 0; display: flex; flex-direction: column;
+		box-shadow: var(--shadow-lg); }
+	.overview-pulse.is-expanded .overview-pulse-body { flex: 1; min-height: 0; }
+	.overview-pulse-backdrop { position: fixed; inset: 0; z-index: 85; padding: 16px; background: var(--overlay); backdrop-filter: blur(4px); }
+	.overview-dialog-head { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+	.overview-dialog-head > div { min-width: 0; flex: 1; }
+	.overview-dialog-head h3 { margin: 0; font-size: 16px; }
+	.overview-dialog-head p { margin: 4px 0 0; color: var(--faint); font-size: 11.5px; }
+	.overview-jobs-dialog { width: min(760px, calc(100vw - 32px)); max-height: min(720px, calc(100dvh - 32px)); overflow: hidden; }
+	.overview-jobs-table { max-height: min(520px, calc(100dvh - 190px)); overflow: auto; }
+	.overview-jobs-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+	.overview-jobs-table caption { padding: 10px 18px; color: var(--faint); text-align: left; }
+	.overview-jobs-table th, .overview-jobs-table td { padding: 10px 18px; border-bottom: 1px solid var(--border); text-align: left; }
+	.overview-jobs-table th { position: sticky; top: 0; background: var(--panel); color: var(--faint); z-index: 1; }
+	body.overview-expanded { overflow: hidden; }
+	@media (max-width: 1120px) {
+		.overview-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.overview-job-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	}
+	@media (max-width: 900px) {
+		.overview-head { align-items: flex-start; flex-direction: column; }
+		.overview-toolbar { width: 100%; justify-content: flex-start; }
+		.overview-lower { grid-template-columns: minmax(0, 1fr); }
+		.overview-stat-chart { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.overview-job-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.overview-job-meta div:nth-child(odd):not(:first-child) { border-left: 0; }
+		.overview-job-meta div:nth-child(n+3) { border-top: 1px solid var(--border); }
+	}
+	@media (max-width: 620px) {
+		.overview-title h2 { font-size: 24px; }
+		.overview-toolbar { align-items: stretch; }
+		.overview-ranges { width: 100%; }
+		.overview-range { flex: 1; }
+		.overview-kpis, .overview-job-grid { grid-template-columns: minmax(0, 1fr); }
+		.overview-kpi { min-height: 126px; }
+		.overview-card-head { align-items: flex-start; flex-direction: column; }
+		.overview-card-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
+		.overview-modes { width: 100%; overflow-x: auto; }
+		.overview-mode { flex: 1; }
+		.overview-job-meta { grid-template-columns: minmax(0, 1fr); }
+		.overview-job-meta div { border-left: 0; border-top: 1px solid var(--border); }
+		.overview-list-head { display: none; }
+		.overview-list-row { grid-template-columns: minmax(0,1fr) auto; }
+		.overview-list-row > span:last-child { display: none; }
+		.overview-outcome-row { grid-template-columns: minmax(100px, 1fr) minmax(90px, 2fr) auto; gap: 8px; }
+		.overview-stat-chart { grid-template-columns: minmax(0, 1fr); }
+		.overview-pulse-backdrop { padding: 0; }
+		.overview-pulse.is-expanded { border-radius: 0; }
+		.overview-jobs-dialog { width: 100%; max-height: 100dvh; border-radius: 0; }
+	}
+	@media (prefers-reduced-motion: reduce) { .overview-skeleton { animation: none; } }
 	/* Requests / Memory exports control strip. */
 	.rq-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
 	.rq-controls input { flex: 1; min-width: min(100%, 280px); }
@@ -2054,6 +2269,7 @@
 <div id="projectModal" class="modal-backdrop" hidden></div>
 <div id="inviteModal" class="modal-backdrop" hidden></div>
 <div id="settingsModal" class="modal-backdrop" hidden></div>
+<div id="overviewJobsModal" class="modal-backdrop" hidden></div>
 <div id="legalView" class="legal-shell" hidden></div>
 
 <script>
@@ -2251,6 +2467,11 @@ const S = {
 	projects: [], organizations: [], organizationsError: "", projectId: "", projectEpoch: 0, projectController: null,
 	projectSwitching: false, projectSettingsBusy: false,
 	projectCapabilities: null, projectCapabilitiesLoading: false,
+	overview: {
+		range: "7d", mode: "activity", compare: false, table: false, expanded: false,
+		data: null, loading: false, error: "", requestId: 0, updatedAt: null, stale: false,
+		jobsOpen: false,
+	},
 	devMode: new URLSearchParams(location.search).has("dev") || localStorage.getItem("uml_dev") === "1",
 	data: null, receipts: [], candidates: [], selected: null, network: null,
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
@@ -2739,6 +2960,14 @@ async function refreshProjects() {
 
 function resetProjectBoundUiState() {
 	cleanupInstallUi({ restoreFocus: false });
+	closeOverviewJobsPanel({ restoreFocus: false });
+	closeOverviewExpanded({ restoreFocus: false, render: false });
+	Object.assign(S.overview, {
+		data: null, loading: false, error: "", expanded: false, jobsOpen: false,
+		requestId: S.overview.requestId + 1, updatedAt: null, stale: false,
+	});
+	const jobsHost = document.getElementById("overviewJobsModal");
+	if (jobsHost) { jobsHost.hidden = true; jobsHost.innerHTML = ""; }
 	S.data = null;
 	S.receipts = [];
 	S.candidates = [];
@@ -3628,6 +3857,10 @@ function setView(v, { updateHash = true, allowCopyOnce = false } = {}) {
 	}
 	if (requestedView === "rules") SET.section = "project-extraction";
 	if (S.view === "install" && v !== "install") cleanupInstallUi({ restoreFocus: false });
+	if (S.view === "overview" && v !== "overview") {
+		closeOverviewJobsPanel({ restoreFocus: false });
+		closeOverviewExpanded({ restoreFocus: false, render: false });
+	}
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
@@ -3647,7 +3880,7 @@ function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
 	// Setup screens must never wait on /v1/graph — a brand-new account has no
 	// graph to load, and Get started is the first thing they open.
-	if (!S.data && !["memory","connect","settings","rules","receipts","install","playground","keys","requests","exports","webhooks"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	if (!S.data && !["overview","memory","connect","settings","rules","receipts","install","playground","keys","requests","exports","webhooks"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -3681,117 +3914,584 @@ function renderView() {
 	}[S.view] || viewOverview)(v);
 }
 
-function viewOverview(v) {
-	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
-	const empty = !s.pages && !s.nodes;
-	const name = S.me?.user?.name || S.me?.user?.email || "there";
-	const wrap = el("div");
+const OVERVIEW_RANGES = Object.freeze(["1d", "7d", "30d", "90d"]);
+const OVERVIEW_MODES = Object.freeze(["activity", "outcomes", "latency", "ai"]);
+const OVERVIEW_JOB_STATUSES = Object.freeze([
+	"awaiting_source", "queued", "staged", "processing", "enriched", "failed", "completed",
+]);
 
-	// First-run onboarding: shown until the account has a connection or a
-	// memory, or the user dismisses it. One decision per step, nothing to read.
-	const canOnboard = projectCan("project.keys.manage") && projectCan("project.memory.write");
-	const needsOnboarding = canOnboard && empty && !S.tokens.length && !localStorage.getItem("uml_onboarded");
-	const onboarding = needsOnboarding ? `
-		<div class="box onboard-card" style="max-width:980px;margin-bottom:14px">
-			<h3>Welcome — set up in 3 steps</h3>
-			<div class="onboard-step"><b>1</b><div><b>Create your private memory link</b><div class="help">One click. This is the key AI tools use to reach your memory.</div></div>
-				<button onclick="onboardCreateLink()"${S.onboardKeyBusy ? " disabled" : ""}>${S.onboardKeyBusy ? "Creating…" : "Create link"}</button></div>
-			<div class="onboard-step"><b>2</b><div><b>Connect Claude or ChatGPT</b><div class="help">Paste the link into your AI tool — Get started shows exactly where (on a computer, not the phone app).</div></div>
-				<button class="ghost" onclick="setView('install')"${S.onboardKeyBusy ? " disabled" : ""}>Show me</button></div>
-			<div class="onboard-step"><b>3</b><div><b>Save your first memory</b><div class="help">Tell it something worth remembering — "I'm learning Kotlin" — and watch your graph grow.</div></div>
-				<button class="ghost" onclick="setView('memory')"${S.onboardKeyBusy ? " disabled" : ""}>Save one</button></div>
-			<div style="margin-top:10px"><a class="help" href="#" aria-disabled="${S.onboardKeyBusy}" onclick="dismissOnboarding(event)">I'll do this later</a></div>
-		</div>` : "";
-
-	// Real usage, counted from this account's own receipts (recent window).
-	const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-	const recent = (S.receipts || []).filter((r) => Number(r.created_at) > monthAgo);
-	const saves30 = recent.filter((r) => r.source !== "recall").length;
-	const recalls30 = recent.filter((r) => r.source === "recall").length;
-	const range = S.usageRange || "30d";
-	const usage = S.usage;
-	const rangeButton = (key, label) =>
-		`<button class="term-tab ${range === key ? "active" : ""}" onclick="setUsageRange('${key}')">${label}</button>`;
-	const t = usage?.totals || {};
-	wrap.innerHTML = onboarding + `
-		<div class="page-head">
-			<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-				<div><h2 class="page-title">Welcome back, ${esc(name)}</h2>
-					<p class="page-sub">${empty ? "Your memory is empty — the Playground is the fastest way to see it work." : "Your private memory, at a glance."}</p></div>
-				<div class="terminal-tabs">${rangeButton("1d", "1d")}${rangeButton("7d", "7d")}${rangeButton("30d", "30d")}${rangeButton("all", "All time")}</div>
-			</div>
-		</div>
-		<div class="panel-grid" style="max-width:1080px">
-			<div class="action-box"><h3>Total memories</h3><div class="stat-big">${usage ? t.memories : "…"}</div><div class="help">${usage ? `${t.nodes} memories · ${t.pages} notes · ${t.slices} details` : "Loading…"}</div></div>
-			<div class="action-box"><h3>Saves</h3><div class="stat-big">${usage ? t.saves : "…"}</div><div class="help">Writes in this range, by you or your connected tools.</div></div>
-			<div class="action-box"><h3>Recalls</h3><div class="stat-big">${usage ? t.recalls : "…"}</div><div class="help">Times a tool looked something up.</div></div>
-			<div class="action-box"><h3>Requests</h3><div class="stat-big">${usage ? t.requests : "…"}</div><div class="help">Saves + recalls in this range · ${S.tokens.length} active key${S.tokens.length === 1 ? "" : "s"}.</div></div>
-			<div class="action-box"><h3>AI plan</h3><div class="stat-big">${usage?.quota ? `${usage.quota.used}<span style="color:var(--faint);font-size:.55em"> / ${usage.quota.limit}</span>` : "…"}</div><div class="help">${usage?.quota ? (usage.quota.capped ? `Monthly AI saves used up — resets ${usage.quota.resets_at.slice(0, 10)}.` : `AI saves this month · resets ${usage.quota.resets_at.slice(0, 10)}.`) : "Loading…"}</div></div>
-		</div>
-		<div class="box" style="max-width:1080px">
-			<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-				<h3 style="margin:0">Activity</h3>
-				<label class="pg-toggle" style="margin:0"><input type="checkbox" id="usageBreakdown" ${S.usageBreakdown ? "checked" : ""} onchange="S.usageBreakdown=this.checked;renderView()" /> breakdown by source</label>
-			</div>
-			${usage ? usageChart(usage.by_day) : `<div class="help" style="padding:24px 0">Loading your activity…</div>`}
-			${S.usageBreakdown && usage ? usageBreakdownTable(usage.by_source) : ""}
-		</div>
-		<div class="box" style="max-width:1080px">
-			<h3>Explore ${PRODUCT.name}</h3>
-			<div class="explore-grid">
-				${projectCan("project.playground.read") ? `<a class="explore-card" href="#" onclick="setView('playground');return false"><b>Try the Playground</b><span>Add a memory and search it back, live, before wiring anything.</span></a>` : ""}
-				<a class="explore-card" href="#" onclick="setView('install');return false"><b>Connect a tool</b><span>Claude, ChatGPT, Cursor, or your own app — one key each.</span></a>
-				<a class="explore-card" href="/docs/" target="_blank" rel="noopener"><b>Read the docs ↗</b><span>API reference, SDK guides, and how memory works.</span></a>
-				<a class="explore-card" href="#" onclick="setView('settings');return false"><b>Tune what's remembered</b><span>Rules decide what ${PRODUCT.name} saves and what it never touches.</span></a>
-			</div>
-		</div>`;
-	v.appendChild(wrap);
-	if (!usage) refreshUsage();
+function overviewFinite(value) {
+	if (value === null || value === undefined || value === "") return null;
+	const number = Number(value);
+	return Number.isFinite(number) ? number : null;
 }
 
-async function refreshUsage() {
+function overviewCount(value) {
+	const number = overviewFinite(value);
+	if (number === null) return "—";
+	return new Intl.NumberFormat(undefined, { notation: Math.abs(number) >= 10_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(number);
+}
+
+function overviewExact(value) {
+	const number = overviewFinite(value);
+	return number === null ? "—" : new Intl.NumberFormat().format(number);
+}
+
+function overviewPercent(value, digits = 1) {
+	const number = overviewFinite(value);
+	return number === null ? "—" : `${number.toFixed(digits)}%`;
+}
+
+function overviewDuration(value) {
+	const milliseconds = overviewFinite(value);
+	if (milliseconds === null) return "Not measured";
+	if (milliseconds < 1_000) return `${Math.round(milliseconds)} ms`;
+	if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`;
+	const minutes = Math.floor(milliseconds / 60_000);
+	const seconds = Math.round((milliseconds % 60_000) / 1_000);
+	return `${minutes}m ${seconds}s`;
+}
+
+function overviewUtcDate(value, options = { month: "short", day: "numeric" }) {
+	const milliseconds = overviewFinite(value);
+	if (milliseconds === null) return "—";
+	return new Intl.DateTimeFormat(undefined, { ...options, timeZone: "UTC" }).format(new Date(milliseconds));
+}
+
+function overviewDelta(current, previous, { lowerIsBetter = false, suffix = "%" } = {}) {
+	const now = overviewFinite(current);
+	const before = overviewFinite(previous);
+	if (now === null || before === null || before === 0) return `<span class="overview-delta">No prior comparison</span>`;
+	const delta = ((now - before) / Math.abs(before)) * 100;
+	const favorable = lowerIsBetter ? delta < 0 : delta > 0;
+	const kind = Math.abs(delta) < .05 ? "" : favorable ? "up" : "warn";
+	const sign = delta > 0 ? "+" : "";
+	return `<span class="overview-delta ${kind}">${sign}${delta.toFixed(1)}${suffix} vs previous</span>`;
+}
+
+function overviewPointDelta(current, previous) {
+	const now = overviewFinite(current);
+	const before = overviewFinite(previous);
+	if (now === null || before === null) return `<span class="overview-delta">No prior comparison</span>`;
+	const delta = now - before;
+	const kind = Math.abs(delta) < .05 ? "" : delta > 0 ? "up" : "warn";
+	const sign = delta > 0 ? "+" : "";
+	return `<span class="overview-delta ${kind}">${sign}${delta.toFixed(1)} pts vs previous</span>`;
+}
+
+function overviewTimestamp(value) {
+	const numeric = overviewFinite(value);
+	if (numeric !== null && numeric > 0) return numeric;
+	const parsed = Date.parse(String(value || ""));
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function overviewIcon(name) {
+	return ICON[name] || ICON.blocks;
+}
+
+function overviewStatusMap(rows) {
+	return Object.fromEntries((Array.isArray(rows) ? rows : []).map((row) => [String(row.status || ""), Number(row.count) || 0]));
+}
+
+function overviewOutcomeMap(rows) {
+	return Object.fromEntries((Array.isArray(rows) ? rows : []).map((row) => [String(row.outcome || "unknown"), Number(row.count) || 0]));
+}
+
+function overviewRecallRate(operations) {
+	const samples = overviewFinite(operations?.matched_samples);
+	const matchedOperations = overviewFinite(operations?.matched_operations);
+	return samples && matchedOperations !== null ? (matchedOperations / samples) * 100 : null;
+}
+
+function overviewKpi({ label, icon, value, unit = "", meta = "", foot = "", primary = false, progress = null }) {
+	const boundedProgress = Math.max(0, Math.min(100, overviewFinite(progress) ?? 0));
+	return `<article class="overview-kpi${primary ? " is-primary" : ""}">
+		<div class="overview-kpi-head">${overviewIcon(icon)}<span>${esc(label)}</span></div>
+		<div class="overview-kpi-value"><strong>${value}</strong>${unit ? `<span>${esc(unit)}</span>` : ""}</div>
+		<div class="overview-kpi-meta">${meta}</div>
+		<div class="overview-kpi-foot">${progress === null ? foot : `${foot}<span class="overview-mini-progress" aria-hidden="true"><i style="width:${boundedProgress}%"></i></span>`}</div>
+	</article>`;
+}
+
+function overviewRangeControls() {
+	return `<div class="overview-ranges" role="group" aria-label="Dashboard time range">
+		${OVERVIEW_RANGES.map((range) => `<button type="button" class="overview-range" aria-pressed="${S.overview.range === range}"
+			onclick="setOverviewRange('${range}')">${range}</button>`).join("")}
+	</div>`;
+}
+
+function overviewLoadingMarkup() {
+	return `<div class="overview-loading" role="status" aria-live="polite" aria-label="Loading dashboard">
+		<div class="overview-kpis">${Array.from({ length: 6 }, () => `<div class="overview-skeleton"></div>`).join("")}</div>
+		<div class="overview-skeleton" style="min-height:360px"></div><span class="sr-only">Loading project dashboard.</span>
+	</div>`;
+}
+
+function overviewOnboarding(data) {
+	const empty = Number(data?.inventory?.nodes || 0) + Number(data?.inventory?.pages || 0) === 0;
+	const canOnboard = projectCan("project.keys.manage") && projectCan("project.memory.write");
+	if (!canOnboard || !empty || S.tokens.length || localStorage.getItem("uml_onboarded")) return "";
+	return `<section class="overview-card overview-first-run" aria-labelledby="overviewStartTitle">
+		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewStartTitle">Start your first memory</h3></div>
+			<div class="overview-card-actions">
+				<button type="button" onclick="onboardCreateLink()"${S.onboardKeyBusy ? " disabled" : ""}>${S.onboardKeyBusy ? "Creating…" : "Create private link"}</button>
+				<button type="button" class="ghost" onclick="setView('install')">Get started</button>
+				${projectCan("project.playground.read") ? `<button type="button" class="ghost" onclick="setView('playground')">Open Playground</button>` : ""}
+			</div>
+		</div>
+	</section>`;
+}
+
+function overviewMetrics(data) {
+	const inventory = data.inventory || {};
+	const current = data.periods?.current || {};
+	const previous = data.periods?.previous || {};
+	const operations = current.operations || {};
+	const previousOperations = previous.operations || {};
+	const latency = current.latency_ms || {};
+	const previousLatency = previous.latency_ms || {};
+	const quota = data.ai?.quota;
+	const recallRate = overviewRecallRate(operations);
+	const previousRecallRate = overviewRecallRate(previousOperations);
+	const quotaPercent = quota?.limit ? (Number(quota.used || 0) / Number(quota.limit)) * 100 : null;
+	return `<section class="overview-kpis" aria-label="Key metrics">
+		${overviewKpi({ label: "Structured memory objects", icon: "database", value: overviewCount(inventory.total_objects), unit: "records", primary: true,
+			meta: `${overviewExact(inventory.nodes)} nodes · ${overviewExact(inventory.pages)} pages · ${overviewExact(inventory.slices)} details`,
+			foot: `<span class="overview-delta">Current project-wide inventory</span>` })}
+		${overviewKpi({ label: "Write operations", icon: "save", value: overviewCount(operations.saves), unit: "operations",
+			meta: `${overviewExact(operations.saved_objects)} object actions · ${overviewExact(operations.skipped)} items skipped`,
+			foot: overviewDelta(operations.saves, previousOperations.saves) })}
+		${overviewKpi({ label: "Recall operations", icon: "search", value: overviewCount(operations.recalls), unit: "operations",
+			meta: `${overviewExact(operations.matched)} returned context · ${overviewExact(operations.matched_samples)} measured`,
+			foot: overviewDelta(operations.recalls, previousOperations.recalls) })}
+		${overviewKpi({ label: "Recall hit rate", icon: "shield", value: recallRate === null ? "—" : overviewPercent(recallRate, 1), unit: recallRate === null ? "not measured" : "of measured recalls",
+			meta: recallRate === null ? "No measured recall outcomes in this range" : `${overviewExact(operations.matched_operations)} of ${overviewExact(operations.matched_samples)} recalls returned context`,
+			foot: recallRate === null ? `<span class="overview-delta">Awaiting samples</span>` : overviewPointDelta(recallRate, previousRecallRate) })}
+		${overviewKpi({ label: "P95 measured processing latency", icon: "clock", value: latency.p95 == null ? "—" : overviewCount(latency.p95), unit: latency.p95 == null ? "not measured" : "ms",
+			meta: `${overviewExact(latency.samples)} samples · ${overviewPercent(Number(latency.coverage || 0) * 100, 0)} coverage`,
+			foot: overviewDelta(latency.p95, previousLatency.p95, { lowerIsBetter: true }) })}
+		${overviewKpi({ label: "AI saves this month", icon: "cpu", value: quota ? overviewCount(quota.used) : "—", unit: quota ? `/ ${overviewExact(quota.limit)}` : "unavailable",
+			meta: quota ? `Account-wide · resets ${overviewUtcDate(overviewTimestamp(quota.resets_at), { month: "short", day: "numeric", year: "numeric" })}` : "Account-wide quota is unavailable",
+			foot: quota ? `<span class="overview-delta ${quota.capped ? "warn" : ""}">${overviewExact(quota.remaining)} remaining · ai_writes</span>` : `<span class="overview-delta">Not measured</span>`,
+			progress: quotaPercent })}
+	</section>`;
+}
+
+function overviewModeControls() {
+	const labels = { activity: "Activity", outcomes: "Outcomes", latency: "Latency", ai: "AI" };
+	return `<div class="overview-modes" role="tablist" aria-label="Pulse mode">
+		${OVERVIEW_MODES.map((mode) => `<button id="overviewMode-${mode}" type="button" class="overview-mode" role="tab"
+			aria-selected="${S.overview.mode === mode}" aria-controls="overviewPulsePanel" tabindex="${S.overview.mode === mode ? "0" : "-1"}"
+			onclick="setOverviewMode('${mode}')" onkeydown="onOverviewModeKeydown(event,'${mode}')">${labels[mode]}</button>`).join("")}
+	</div>`;
+}
+
+function overviewBucketLabel(bucket) {
+	return overviewUtcDate(bucket?.from_ms, { month: "short", day: "numeric" });
+}
+
+function overviewActivityChart(data) {
+	const rows = Array.isArray(data.periods?.current?.daily) ? data.periods.current.daily : [];
+	const previousRows = Array.isArray(data.periods?.previous?.daily) ? data.periods.previous.daily : [];
+	if (!rows.length) return `<div class="overview-empty">No memory operations in this range.</div>`;
+	const max = Math.max(1,
+		...rows.flatMap((row) => [Number(row.saves) || 0, Number(row.recalls) || 0]),
+		...(S.overview.compare ? previousRows.map((row) => Number(row.total) || 0) : []));
+	const bars = rows.map((row, index) => {
+		const writes = Number(row.saves) || 0;
+		const recalls = Number(row.recalls) || 0;
+		const previousTotal = Number(previousRows[index]?.total) || 0;
+		const writeHeight = writes ? Math.max(3, Math.round((writes / max) * 100)) : 0;
+		const recallHeight = recalls ? Math.max(3, Math.round((recalls / max) * 100)) : 0;
+		return `<span class="overview-bucket" role="img" tabindex="0" aria-label="${esc(overviewBucketLabel(row))}: ${writes} writes, ${recalls} recalls${S.overview.compare ? `, ${previousTotal} operations in the previous period` : ""}">
+			<span class="overview-bar" style="height:${writeHeight}%"></span><span class="overview-bar recall" style="height:${recallHeight}%"></span>
+			${S.overview.compare ? `<span class="overview-bar compare" style="height:${Math.min(100, Math.max(previousTotal ? 3 : 0, Math.round((previousTotal / max) * 100)))}%"></span>` : ""}
+		</span>`;
+	}).join("");
+	return `<div class="overview-chart" role="group" aria-describedby="overviewChartSummary">
+		<div class="overview-chart-legend"><span class="overview-chart-key"><i></i>Writes</span><span class="overview-chart-key recall"><i></i>Recalls</span>
+			${S.overview.compare ? `<span class="overview-chart-key neutral"><i></i>Previous total</span>` : ""}</div>
+		<div class="overview-buckets">${bars}</div>
+		<div class="overview-bucket-labels">${rows.map((row) => `<span>${esc(overviewBucketLabel(row))}</span>`).join("")}</div>
+	</div>`;
+}
+
+function overviewOutcomeChart(data) {
+	const outcomes = Array.isArray(data.periods?.current?.operations?.outcomes) ? data.periods.current.operations.outcomes : [];
+	if (!outcomes.length) return `<div class="overview-empty">No operation outcomes in this range.</div>`;
+	const total = Math.max(1, outcomes.reduce((sum, row) => sum + (Number(row.count) || 0), 0));
+	return `<div class="overview-outcomes" role="group" aria-describedby="overviewChartSummary">
+		${outcomes.map((row) => {
+			const count = Number(row.count) || 0;
+			const width = Math.max(count ? 2 : 0, (count / total) * 100);
+			return `<div class="overview-outcome-row"><span>${esc(String(row.outcome || "unknown").replaceAll("_", " "))}</span>
+				<span class="overview-outcome-track" aria-hidden="true"><i style="width:${width}%"></i></span><strong>${overviewExact(count)}</strong></div>`;
+		}).join("")}
+	</div>`;
+}
+
+function overviewLatencyChart(data) {
+	const current = data.periods?.current?.latency_ms || {};
+	const previous = data.periods?.previous?.latency_ms || {};
+	const points = [["P50", current.p50, previous.p50], ["P95", current.p95, previous.p95], ["P99", current.p99, previous.p99]];
+	return `<div class="overview-stat-chart" role="group" aria-describedby="overviewChartSummary">
+		${points.map(([label, value, before]) => `<div><span>${label}</span><strong>${value == null ? "—" : `${overviewExact(value)} ms`}</strong>
+			<small>${value == null ? "Not measured" : `${overviewDelta(value, before, { lowerIsBetter: true }).replace(/<[^>]+>/g, "")}`}</small></div>`).join("")}
+		<div><span>Coverage</span><strong>${overviewPercent(Number(current.coverage || 0) * 100, 0)}</strong><small>${overviewExact(current.samples)} of ${overviewExact(current.eligible)} eligible</small></div>
+	</div>`;
+}
+
+function overviewAiChart(data) {
+	const current = data.ai?.current;
+	const previous = data.ai?.previous;
+	if (!data.ai?.available || !current) return `<div class="overview-empty">AI usage is unavailable for this range.</div>`;
+	const points = [
+		["AI calls", current.calls, previous?.calls],
+		["Successful", current.successful_calls, previous?.successful_calls],
+		["Tokens", current.total_tokens, previous?.total_tokens],
+		["Compute estimate", current.total_neurons_estimate, previous?.total_neurons_estimate],
+	];
+	return `<div class="overview-stat-chart" role="group" aria-describedby="overviewChartSummary">
+		${points.map(([label, value, before]) => `<div><span>${esc(label)}</span><strong>${overviewCount(value)}</strong>
+			<small>${overviewDelta(value, before).replace(/<[^>]+>/g, "")}</small></div>`).join("")}
+	</div>`;
+}
+
+function overviewChartSummary(data) {
+	const current = data.periods?.current || {};
+	const operations = current.operations || {};
+	if (S.overview.mode === "outcomes") return `${overviewExact(operations.total)} memory operations grouped by recorded outcome.`;
+	if (S.overview.mode === "latency") return `${overviewExact(current.latency_ms?.samples)} measured latency samples; P95 is ${current.latency_ms?.p95 == null ? "unavailable" : `${overviewExact(current.latency_ms.p95)} milliseconds`}.`;
+	if (S.overview.mode === "ai") return data.ai?.available ? `${overviewExact(data.ai.current?.calls)} AI calls and ${overviewExact(data.ai.current?.total_tokens)} reported tokens in the selected range.` : "AI usage is unavailable.";
+	return `${overviewExact(operations.saves)} write operations and ${overviewExact(operations.recalls)} recall operations in the selected range.`;
+}
+
+function overviewChartForMode(data) {
+	if (S.overview.mode === "outcomes") return overviewOutcomeChart(data);
+	if (S.overview.mode === "latency") return overviewLatencyChart(data);
+	if (S.overview.mode === "ai") return overviewAiChart(data);
+	return overviewActivityChart(data);
+}
+
+function overviewDataTable(data) {
+	const mode = S.overview.mode;
+	if (mode === "activity") {
+		const rows = data.periods?.current?.daily || [];
+		return `<table><caption>Daily memory operations, UTC</caption><thead><tr><th>Bucket</th><th>Writes</th><th>Recalls</th><th>Object actions</th><th>Items skipped</th></tr></thead>
+			<tbody>${rows.map((row) => `<tr><td>${esc(overviewBucketLabel(row))}</td><td>${overviewExact(row.saves)}</td><td>${overviewExact(row.recalls)}</td><td>${overviewExact(row.saved_objects)}</td><td>${overviewExact(row.skipped)}</td></tr>`).join("")}</tbody></table>`;
+	}
+	if (mode === "outcomes") {
+		const rows = data.periods?.current?.operations?.outcomes || [];
+		return `<table><caption>Recorded operation outcomes</caption><thead><tr><th>Outcome</th><th>Operations</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${esc(row.outcome)}</td><td>${overviewExact(row.count)}</td></tr>`).join("")}</tbody></table>`;
+	}
+	if (mode === "latency") {
+		const current = data.periods?.current?.latency_ms || {};
+		const previous = data.periods?.previous?.latency_ms || {};
+		return `<table><caption>Measured processing latency</caption><thead><tr><th>Period</th><th>P50</th><th>P95</th><th>P99</th><th>Samples</th><th>Coverage</th></tr></thead><tbody>
+			<tr><td>Current</td><td>${overviewDuration(current.p50)}</td><td>${overviewDuration(current.p95)}</td><td>${overviewDuration(current.p99)}</td><td>${overviewExact(current.samples)}</td><td>${overviewPercent(Number(current.coverage || 0) * 100, 0)}</td></tr>
+			<tr><td>Previous</td><td>${overviewDuration(previous.p50)}</td><td>${overviewDuration(previous.p95)}</td><td>${overviewDuration(previous.p99)}</td><td>${overviewExact(previous.samples)}</td><td>${overviewPercent(Number(previous.coverage || 0) * 100, 0)}</td></tr></tbody></table>`;
+	}
+	const current = data.ai?.current || {};
+	const previous = data.ai?.previous || {};
+	return `<table><caption>Account AI usage</caption><thead><tr><th>Period</th><th>Calls</th><th>Failed</th><th>Input tokens</th><th>Output tokens</th><th>Compute estimate</th></tr></thead><tbody>
+		<tr><td>Current</td><td>${overviewExact(current.calls)}</td><td>${overviewExact(current.failed_calls)}</td><td>${overviewExact(current.input_tokens)}</td><td>${overviewExact(current.output_tokens)}</td><td>${overviewExact(current.total_neurons_estimate)}</td></tr>
+		<tr><td>Previous</td><td>${overviewExact(previous.calls)}</td><td>${overviewExact(previous.failed_calls)}</td><td>${overviewExact(previous.input_tokens)}</td><td>${overviewExact(previous.output_tokens)}</td><td>${overviewExact(previous.total_neurons_estimate)}</td></tr></tbody></table>`;
+}
+
+function overviewPulse(data) {
+	const expanded = S.overview.expanded;
+	const modeLabel = { activity: "Activity", outcomes: "Outcomes", latency: "Latency", ai: "AI usage" }[S.overview.mode];
+	const panel = `<section class="overview-card overview-pulse${expanded ? " is-expanded" : ""}" aria-labelledby="overviewPulseTitle"${expanded ? ` role="document"` : ""}>
+		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewPulseTitle">Memory pulse</h3><p>${esc(modeLabel)} · selected project</p></div>
+			<div class="overview-card-actions">${overviewModeControls()}
+				<button type="button" class="overview-control" aria-expanded="${S.overview.table}" onclick="toggleOverviewTable()">${overviewIcon("table")}<span>${S.overview.table ? "Hide data table" : "Show data table"}</span></button>
+				<button id="overviewExpandButton" type="button" class="overview-control icon-only" aria-label="${expanded ? "Collapse Memory pulse" : "Expand Memory pulse"}" aria-expanded="${expanded}" onclick="toggleOverviewExpanded()">${overviewIcon(expanded ? "collapse" : "expand")}</button>
+			</div>
+		</div>
+		<div id="overviewPulsePanel" class="overview-pulse-body" role="tabpanel" aria-labelledby="overviewMode-${S.overview.mode}">
+			<p id="overviewChartSummary" class="sr-only">${esc(overviewChartSummary(data))}</p>${overviewChartForMode(data)}
+			<div class="overview-data-table"${S.overview.table ? "" : " hidden"}>${overviewDataTable(data)}</div>
+		</div>
+	</section>`;
+	if (!expanded) return panel;
+	return `<div id="overviewPulseExpanded" class="modal-backdrop overview-pulse-backdrop" role="dialog" aria-modal="true" aria-labelledby="overviewPulseTitle" tabindex="-1" onclick="if(event.target===this) closeOverviewExpanded()">${panel}</div>`;
+}
+
+function overviewJobs(data) {
+	const jobs = data.jobs || {};
+	const current = jobs.current || {};
+	const statuses = { awaiting_source: 0, queued: 0, staged: 0, processing: 0, ...(current.statuses || {}) };
+	const allTimeStatuses = overviewStatusMap(jobs.all_time?.status_counts);
+	const ranged = jobs.periods?.current || {};
+	const waiting = Number(statuses.awaiting_source || 0) + Number(statuses.queued || 0) + Number(statuses.staged || 0);
+	const cancellations = Number(ranged.cancelled_by_delete || 0) + Number(ranged.cancelled_by_retention || 0);
+	// Keep every ledger status explicit in the contract: awaiting_source, queued,
+	// staged, processing, enriched, failed, completed. Retrying is not a status.
+	const allStatuses = OVERVIEW_JOB_STATUSES.map((status) => `${status}:${overviewExact(statuses[status] ?? allTimeStatuses[status] ?? 0)}`).join(" · ");
+	return `<section class="overview-card overview-jobs" aria-labelledby="overviewJobsTitle">
+		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewJobsTitle">Current job state</h3><p>Project-wide · as of ${esc(overviewUtcDate(jobs.as_of_ms, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))} UTC</p></div>
+			<div class="overview-card-actions"><button type="button" class="overview-control" aria-label="View jobs" onclick="openOverviewJobsPanel('jobs')">View jobs →</button></div></div>
+		<span class="sr-only">${esc(allStatuses)}</span>
+		<div class="overview-job-grid">
+			<div class="overview-job${current.backlog_depth ? " warn" : ""}"><span>Backlog now</span><strong>${overviewExact(current.backlog_depth)}</strong></div>
+			<div class="overview-job"><span>Awaiting source</span><strong>${overviewExact(statuses.awaiting_source)}</strong></div>
+			<div class="overview-job"><span>Queued / staged</span><strong>${overviewExact(Number(statuses.queued || 0) + Number(statuses.staged || 0))}</strong></div>
+			<div class="overview-job"><span>Processing now</span><strong>${overviewExact(statuses.processing)}</strong></div>
+			<div class="overview-job${current.stuck_over_15m ? " fail" : ""}"><span>Stuck over 15m</span><strong>${overviewExact(current.stuck_over_15m)}</strong></div>
+		</div>
+		<div class="overview-job-meta">
+			<div><span>Accepted · selected range</span><strong>${overviewExact(ranged.accepted)}</strong></div>
+			<div><span>Settled · selected range</span><strong>${overviewExact(ranged.settled)}</strong></div>
+			<div><span>Genuine failures</span><strong>${overviewExact(ranged.genuine_failures)}</strong></div>
+			<div><span>Retries</span><strong>${overviewExact(ranged.accepted_jobs_with_retries)}</strong></div>
+			<div><span>Cancellations</span><strong>${overviewExact(cancellations)}</strong></div>
+		</div>
+	</section>`;
+}
+
+function overviewLaneLabel(source, mode) {
+	const sourceLabels = { save_memory: "Direct memory writes", save_conversation: "Conversation writes", ingest: "Ingest", recall: "Recall", ui_test: "Verification" };
+	const base = sourceLabels[source] || String(source || "unknown").replaceAll("_", " ");
+	return mode && mode !== source ? `${base} · ${String(mode).replaceAll("_", " ")}` : base;
+}
+
+function overviewLanes(data) {
+	const lanes = data.periods?.current?.operations?.lanes || [];
+	const total = Math.max(1, lanes.reduce((sum, row) => sum + (Number(row.count) || 0), 0));
+	if (!lanes.length) return `<div class="overview-empty">No operation lanes in this range.</div>`;
+	return `<div class="overview-list-head"><span>Operation lane</span><span>Operations</span><span>Share</span></div>
+		${lanes.slice(0, 8).map((row) => {
+			const count = Number(row.count) || 0;
+			const share = (count / total) * 100;
+			return `<div class="overview-list-row"><div class="lane-name"><b>${esc(overviewLaneLabel(row.source, row.source_mode))}</b><span class="lane-bar" aria-hidden="true"><i style="width:${share}%"></i></span></div><span>${overviewExact(count)}</span><span>${overviewPercent(share, 0)}</span></div>`;
+		}).join("")}`;
+}
+
+function overviewComposition(data) {
+	const inventory = data.inventory || {};
+	const rows = [
+		["Memory nodes", "People, projects, tools, and topics", inventory.nodes, "var(--accent)"],
+		["Conversation pages", "Long-form conversation context", inventory.pages, "#745bc8"],
+		["Facts & details", "Current and historical detail records", inventory.slices, "var(--green)"],
+		["Events", "Changes recorded over time", inventory.events, "var(--amber)"],
+		["Relationships", "Links between memory nodes", inventory.edges, "var(--faint)"],
+	];
+	const total = Math.max(0, Number(inventory.total_objects) || rows.reduce((sum, row) => sum + (Number(row[2]) || 0), 0));
+	return `<div class="overview-composition-bar" aria-hidden="true">${rows.map((row) => `<span style="flex:${Math.max(0, Number(row[2]) || 0)};background:${row[3]}"></span>`).join("")}</div>
+		${rows.map(([label, detail, count, color]) => `<div class="overview-composition-row"><i style="background:${color}"></i><div><b>${esc(label)}</b><small>${esc(detail)}</small></div><strong>${overviewExact(count)}${total ? ` · ${overviewPercent((Number(count || 0) / total) * 100, 0)}` : ""}</strong></div>`).join("")}`;
+}
+
+function overviewSignals(data) {
+	const signals = Array.isArray(data.signals) ? data.signals : [];
+	if (!signals.length) return "";
+	const copy = {
+		jobs_stuck: ["Stuck processing jobs", "Open the job list to inspect the current backlog.", "fail"],
+		jobs_backlog: ["Processing backlog", "Accepted writes are waiting to settle.", "warn"],
+		ai_quota_capped: ["AI saves paused", "The account-wide monthly AI-write limit has been reached.", "warn"],
+	};
+	return `<section class="overview-card overview-signals" aria-labelledby="overviewSignalsTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewSignalsTitle">Needs attention</h3></div></div>
+		${signals.map((signal) => {
+			const [title, detail, kind] = copy[signal.type] || [String(signal.type || "Operational signal").replaceAll("_", " "), "Review the current project state.", "warn"];
+			return `<div class="overview-signal ${kind}"><span class="overview-signal-icon">${overviewIcon(kind === "fail" ? "alert" : "activity")}</span><div><b>${esc(title)}</b><small>${esc(detail)}</small></div><button type="button" class="ghost mini" onclick="${signal.type === "ai_quota_capped" ? "setView('settings')" : "openOverviewJobsPanel('jobs')"}">Review →</button></div>`;
+		}).join("")}
+	</section>`;
+}
+
+function overviewDashboardMarkup(data) {
+	return `${overviewOnboarding(data)}${overviewMetrics(data)}${overviewPulse(data)}${overviewJobs(data)}
+		<div class="overview-lower">
+			<section class="overview-card" aria-labelledby="overviewLanesTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewLanesTitle">Operation lanes</h3><p>Recorded memory-operation sources · selected range</p></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="The operation log opens the selected project's root memory space" aria-label="View the root-space operation log" onclick="setView('requests')">View root log →</button></div></div>${overviewLanes(data)}</section>
+			<section class="overview-card" aria-labelledby="overviewCompositionTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewCompositionTitle">Current memory structure</h3><p>Project-wide inventory · ${overviewExact(data.inventory?.total_objects)} records</p></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="Memories opens the selected project's root memory space" aria-label="View memories in the root memory space" onclick="setView('memory')">View root memories →</button></div></div>${overviewComposition(data)}</section>
+		</div>${overviewSignals(data)}`;
+}
+
+function viewOverview(v) {
+	const state = S.overview;
+	const data = state.data;
+	const wrap = el("div", "overview-shell");
+	const project = selectedManagedProject();
+	const currentRange = data?.range?.current || {};
+	wrap.setAttribute("aria-busy", String(state.loading));
+	wrap.innerHTML = `<header class="overview-head"><div class="overview-title"><h2>Memory operations</h2><p>Storage, retrieval, and processing health for ${esc(project?.name || "this project")}.</p></div>
+		<div class="overview-toolbar">${overviewRangeControls()}
+			<button type="button" class="overview-control" aria-pressed="${state.compare}" onclick="toggleOverviewCompare()">Compare with previous period</button>
+			<button type="button" class="overview-control icon-only" aria-label="Refresh dashboard" onclick="refreshOverview({ manual: true })"${state.loading ? " disabled" : ""}>${overviewIcon("refresh")}</button>
+		</div></header>
+		<div class="overview-scopebar"><span class="scope-pill">Project-wide · ${overviewExact(data?.scope?.memory_spaces)} memory spaces</span>
+			<span class="scope-pill" title="Quota unit: ai_writes">Account-wide monthly AI writes</span>
+			${data ? `<span>${overviewUtcDate(currentRange.from_ms)} → ${overviewUtcDate(currentRange.to_ms)} UTC</span>` : ""}
+			<span class="overview-updated" aria-live="polite">${state.updatedAt ? `Updated ${esc(ago(state.updatedAt))}${state.stale ? " · showing last good data" : ""}` : ""}</span></div>
+		${state.error ? `<div class="overview-error" role="alert"><span>${esc(state.error)}${state.data ? " Last good data is still visible." : ""}</span><button type="button" onclick="refreshOverview({ manual: true })">Retry</button></div>` : ""}
+		${!data ? (state.loading ? overviewLoadingMarkup() : `<div class="overview-card overview-empty">Dashboard data is unavailable. Retry when the service is ready.</div>`) : overviewDashboardMarkup(data)}`;
+	v.appendChild(wrap);
+	if (!data && !state.loading && !state.error) refreshOverview();
+	if (state.expanded) requestAnimationFrame(lockOverviewBackground);
+}
+
+async function refreshOverview({ manual = false } = {}) {
+	const requestId = ++S.overview.requestId;
+	const projectEpoch = S.projectEpoch;
+	const range = S.overview.range;
+	S.overview.loading = true;
+	S.overview.error = "";
+	if (!S.overview.data || manual) renderView();
 	try {
-		const res = await api(`/v1/usage?range=${encodeURIComponent(S.usageRange || "30d")}`);
-		S.usage = res;
+		const response = await api(`/v1/dashboard?range=${encodeURIComponent(range)}`);
+		if (requestId !== S.overview.requestId || projectEpoch !== S.projectEpoch || range !== S.overview.range) return;
+		S.overview.data = response;
+		S.overview.updatedAt = Date.parse(response.generated_at || "") || Number(response.generated_at) || Date.now();
+		S.overview.stale = false;
+	} catch (error) {
+		if (requestId !== S.overview.requestId || projectEpoch !== S.projectEpoch) return;
+		if (error?.projectChanged) return;
+		S.overview.error = error?.message || "Dashboard data could not be loaded.";
+		S.overview.stale = Boolean(S.overview.data);
+	} finally {
+		if (requestId !== S.overview.requestId || projectEpoch !== S.projectEpoch) return;
+		S.overview.loading = false;
 		if (S.view === "overview") renderView();
-	} catch {
-		// Dashboard degrades to placeholders; the next visit retries.
 	}
 }
 
-function setUsageRange(range) {
-	S.usageRange = range;
-	S.usage = null;
+function setOverviewRange(range) {
+	if (!OVERVIEW_RANGES.includes(range) || range === S.overview.range) return;
+	S.overview.range = range;
+	S.overview.data = null;
+	S.overview.error = "";
+	S.overview.updatedAt = null;
+	S.overview.stale = false;
+	refreshOverview();
+}
+
+function setOverviewMode(mode) {
+	if (!OVERVIEW_MODES.includes(mode)) return;
+	S.overview.mode = mode;
 	renderView();
-	refreshUsage();
+	requestAnimationFrame(() => document.getElementById(`overviewMode-${mode}`)?.focus());
 }
 
-/** Dependency-free area/bar chart: saves + recalls per day. */
-function usageChart(byDay) {
-	if (!byDay || !byDay.length) return `<div class="help" style="padding:24px 0">No activity in this range yet — the Playground is a good place to make some.</div>`;
-	const max = Math.max(1, ...byDay.map((d) => Math.max(Number(d.saves) || 0, Number(d.recalls) || 0)));
-	const cols = byDay.map((d) => {
-		const savePct = Math.round(((Number(d.saves) || 0) / max) * 100);
-		const recallPct = Math.round(((Number(d.recalls) || 0) / max) * 100);
-		return `<div class="uchart-col" title="${d.day}: ${d.saves} saves · ${d.recalls} recalls · ${d.memories_added} new memories">
-			<div class="uchart-bars">
-				<div class="uchart-bar saves" style="height:${Math.max(d.saves > 0 ? 6 : 2, savePct)}%"></div>
-				<div class="uchart-bar recalls" style="height:${Math.max(d.recalls > 0 ? 6 : 2, recallPct)}%"></div>
-			</div>
-			<span>${d.day.slice(5)}</span>
-		</div>`;
-	}).join("");
-	return `<div class="uchart">${cols}</div>
-		<div class="help" style="margin-top:8px"><span class="uchart-key saves"></span> saves&nbsp;&nbsp;<span class="uchart-key recalls"></span> recalls</div>`;
+function onOverviewModeKeydown(event, mode) {
+	if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+	event.preventDefault();
+	const current = Math.max(0, OVERVIEW_MODES.indexOf(mode));
+	let next = current;
+	if (event.key === "Home") next = 0;
+	else if (event.key === "End") next = OVERVIEW_MODES.length - 1;
+	else next = (current + (event.key === "ArrowRight" ? 1 : -1) + OVERVIEW_MODES.length) % OVERVIEW_MODES.length;
+	setOverviewMode(OVERVIEW_MODES[next]);
 }
 
-function usageBreakdownTable(bySource) {
-	if (!bySource || !bySource.length) return "";
-	const label = { save_memory: "Saved memories", save_conversation: "Saved conversations", ingest: "Auto-captured", recall: "Recalls", ui_test: "Tests" };
-	return `<div class="keys-table-wrap" style="margin-top:12px"><table class="keys-table">
-		<thead><tr><th>Source</th><th>Requests</th><th>Objects written</th></tr></thead>
-		<tbody>${bySource.map((row) => `<tr><td>${esc(label[row.source] || row.source)}</td><td>${row.count}</td><td>${row.saved_total ?? 0}</td></tr>`).join("")}</tbody>
-	</table></div>`;
+function toggleOverviewCompare() {
+	S.overview.compare = !S.overview.compare;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(".overview-toolbar [aria-pressed]")?.focus());
+}
+
+function toggleOverviewTable() {
+	S.overview.table = !S.overview.table;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(".overview-card-actions [aria-expanded]")?.focus());
+}
+
+const OVERVIEW_UI = { bodyOverflow: "", inertNodes: [] };
+const OVERVIEW_JOBS_UI = { bodyOverflow: "", inertNodes: [] };
+
+function lockOverviewBackground() {
+	if (!S.overview.expanded || OVERVIEW_UI.inertNodes.length) return;
+	OVERVIEW_UI.bodyOverflow = document.body.style.overflow;
+	document.body.classList.add("overview-expanded");
+	const modal = document.getElementById("overviewPulseExpanded");
+	const shell = modal?.closest(".overview-shell");
+	// The expanded panel lives inside #detail, so that ancestor must remain
+	// interactive. Inert only the surrounding shell and the panel's siblings.
+	const nodes = ["appHeader", "rail", "memoryBrowser"].map((id) => document.getElementById(id)).filter(Boolean);
+	if (shell) nodes.push(...[...shell.children].filter((node) => node !== modal));
+	OVERVIEW_UI.inertNodes = nodes.map((node) => ({ node, inert: node.inert }));
+	OVERVIEW_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
+	modal?.focus();
+}
+
+function unlockOverviewBackground() {
+	document.body.classList.remove("overview-expanded");
+	document.body.style.overflow = OVERVIEW_UI.bodyOverflow;
+	OVERVIEW_UI.inertNodes.forEach(({ node, inert }) => { if (node?.isConnected) node.inert = inert; });
+	OVERVIEW_UI.inertNodes = [];
+}
+
+function openOverviewExpanded() {
+	if (S.overview.expanded) return;
+	rememberModalOpener("overviewPulseExpanded");
+	S.overview.expanded = true;
+	renderView();
+	requestAnimationFrame(() => { lockOverviewBackground(); document.querySelector("#overviewPulseExpanded .overview-control[aria-label^='Collapse']")?.focus(); });
+}
+
+function closeOverviewExpanded({ restoreFocus = true, render = true } = {}) {
+	if (!S.overview?.expanded && !OVERVIEW_UI.inertNodes.length) return;
+	S.overview.expanded = false;
+	unlockOverviewBackground();
+	if (render && S.view === "overview") renderView();
+	if (restoreFocus) restoreModalOpener("overviewPulseExpanded", "overviewExpandButton");
+	else MODAL_FOCUS_RETURN.delete("overviewPulseExpanded");
+}
+
+function toggleOverviewExpanded() {
+	if (S.overview.expanded) closeOverviewExpanded();
+	else openOverviewExpanded();
+}
+
+function lockOverviewJobsBackground() {
+	if (OVERVIEW_JOBS_UI.inertNodes.length) return;
+	OVERVIEW_JOBS_UI.bodyOverflow = document.body.style.overflow;
+	document.body.style.overflow = "hidden";
+	OVERVIEW_JOBS_UI.inertNodes = ["appHeader", "rail", "memoryBrowser", "detail"]
+		.map((id) => document.getElementById(id)).filter(Boolean)
+		.map((node) => ({ node, inert: node.inert }));
+	OVERVIEW_JOBS_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
+}
+
+function unlockOverviewJobsBackground() {
+	document.body.style.overflow = OVERVIEW_JOBS_UI.bodyOverflow;
+	OVERVIEW_JOBS_UI.inertNodes.forEach(({ node, inert }) => { if (node?.isConnected) node.inert = inert; });
+	OVERVIEW_JOBS_UI.inertNodes = [];
+}
+
+function renderOverviewJobsPanel() {
+	const host = document.getElementById("overviewJobsModal");
+	if (!host) return;
+	host.hidden = !S.overview.jobsOpen;
+	if (!S.overview.jobsOpen) { host.innerHTML = ""; return; }
+	host.onclick = (event) => { if (event.target === host) closeOverviewJobsPanel(); };
+	const jobs = Array.isArray(S.overview.data?.jobs?.recent) ? S.overview.data.jobs.recent : [];
+	host.innerHTML = `<section class="project-modal overview-jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="overviewJobsDialogTitle" tabindex="-1">
+		<div class="overview-dialog-head"><div><h3 id="overviewJobsDialogTitle">Recent processing jobs</h3><p>Project-wide metadata · newest first</p></div><button type="button" class="ghost icon" aria-label="Close jobs" onclick="closeOverviewJobsPanel()">${overviewIcon("close")}</button></div>
+		${jobs.length ? `<div class="overview-jobs-table"><table><caption>Up to ${overviewExact(S.overview.data.jobs.recent_limit || jobs.length)} recent jobs</caption><thead><tr><th>Type</th><th>Status</th><th>Attempts</th><th>Updated</th></tr></thead><tbody>${jobs.map((job) => {
+			const cancellation = String(job.cancel_reason || "");
+			const status = cancellation ? `cancelled ${cancellation.replace(/^cancelled_by_/, "by ").replaceAll("_", " ")}` : String(job.status || "queued").replaceAll("_", " ");
+			const state = cancellation ? "cancelled" : String(job.status || "queued");
+			return `<tr><td>${esc(String(job.type || "job").replaceAll("_", " "))}</td><td><span class="badge state-${esc(state)}">${esc(status)}</span></td><td>${overviewExact(job.attempts)}</td><td>${esc(ago(job.updated_at || job.created_at))}</td></tr>`;
+		}).join("")}</tbody></table></div>` : `<div class="overview-empty">No recent jobs.</div>`}
+		<div class="project-modal-actions"><button type="button" class="ghost" onclick="closeOverviewJobsPanel()">Close</button><button type="button" onclick="closeOverviewJobsPanel({ restoreFocus:false });setView('requests')">View operation log</button></div>
+	</section>`;
+}
+
+function openOverviewJobsPanel(kind = "jobs") {
+	if (kind !== "jobs") return;
+	rememberModalOpener("overviewJobsModal");
+	S.overview.jobsOpen = true;
+	renderOverviewJobsPanel();
+	lockOverviewJobsBackground();
+	requestAnimationFrame(() => document.querySelector("#overviewJobsModal .overview-jobs-dialog")?.focus());
+}
+
+function closeOverviewJobsPanel({ restoreFocus = true } = {}) {
+	if (!S.overview?.jobsOpen && !OVERVIEW_JOBS_UI.inertNodes.length) return;
+	S.overview.jobsOpen = false;
+	renderOverviewJobsPanel();
+	unlockOverviewJobsBackground();
+	if (restoreFocus) restoreModalOpener("overviewJobsModal");
+	else MODAL_FOCUS_RETURN.delete("overviewJobsModal");
 }
 
 
@@ -4592,6 +5292,14 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 	close: `<path d="m6 6 12 12M18 6 6 18"/>`,
 	copy: `<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15.5V5.5a2.5 2.5 0 0 1 2.5-2.5H17"/>`,
 	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
+	save: `<path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 19.5h16"/>`,
+	shield: `<path d="M12 3 20 6v5.5c0 4.7-3.2 8-8 9.5-4.8-1.5-8-4.8-8-9.5V6z"/><path d="m8.5 12 2.3 2.3 4.8-5"/>`,
+	clock: `<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>`,
+	cpu: `<rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 9.5h5v5h-5zM9 2.5v4M15 2.5v4M9 17.5v4M15 17.5v4M2.5 9h4M2.5 15h4M17.5 9h4M17.5 15h4"/>`,
+	activity: `<path d="M3 12h4l2.2-6 4.1 12 2.2-6H21"/>`,
+	refresh: `<path d="M20 7.5V3l-2 2a8.5 8.5 0 1 0 2.1 9"/>`,
+	table: `<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>`,
+	alert: `<path d="M12 3 2.8 20h18.4z"/><path d="M12 9v4M12 17h.01"/>`,
 	trash: `<path d="M4 6.5h16"/><path d="M9 6.5V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 6.5 7.5 20a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-13.5"/>`,
 	external: `<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 11 13"/><path d="M18 14.5v4a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6h4"/>`,
 });
@@ -14332,6 +15040,8 @@ window.addEventListener("keydown", (event) => {
 		else closeKeyModal();
 		return;
 	}
+	if (modal?.id === "overviewJobsModal") { event.preventDefault(); closeOverviewJobsPanel(); return; }
+	if (modal?.id === "overviewPulseExpanded") { event.preventDefault(); closeOverviewExpanded(); return; }
 	if (modal?.id === "installExpanded") { event.preventDefault(); closeInstallExpanded(); return; }
 	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }
 	toggleProjectMenu(false);

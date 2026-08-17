@@ -39,5 +39,6 @@
  "0038_managed_projects.sql": "c1041760f5c4ffa36cac79dc55437d33a4ace1c2049acd4a2c99862d13c6ec9e",
  "0039_organizations_rbac.sql": "9f0d2597cabb8d1451b900b5e946aea269552a62fa370204af66a230ad58f5d8",
  "0040_enterprise_settings.sql": "0034ba291d0754454d5b2111075322a707c7ac87540463211708687a1d1b4790",
- "0041_ai_account_attribution.sql": "1b4844dc551e23733685e5bb794ab8afce639c6ac615d2f2e461e835adc8c07a"
+ "0041_ai_account_attribution.sql": "1b4844dc551e23733685e5bb794ab8afce639c6ac615d2f2e461e835adc8c07a",
+ "0042_dashboard_analytics.sql": "f05a73ec58241ab4d252d97bddde2e7c0e69cbbe82f100a0afd6e3968fcdfeac"
 }

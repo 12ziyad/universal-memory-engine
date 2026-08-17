@@ -154,6 +154,7 @@ import {
 } from "./pipeline/webhooks.js";
 import { listJobs, packetStatus, queueCounters } from "./pipeline/jobs_api.js";
 import { operatorOverview } from "./pipeline/ops.js";
+import { DashboardRangeError, projectDashboard } from "./pipeline/dashboard.js";
 import {
 	createThread,
 	deleteThread,
@@ -3346,6 +3347,69 @@ const routes = {
 			range: url.searchParams.get("range") ?? "7d",
 			limit: url.searchParams.get("limit") ?? undefined,
 		}));
+	},
+
+	"GET /v1/dashboard": async (request, env) => {
+		const url = new URL(request.url);
+		if (url.searchParams.getAll("range").length > 1) {
+			return json({
+				error: "duplicate_query_parameter",
+				code: "duplicate_query_parameter",
+				field: "range",
+				message: "The dashboard accepts exactly one range parameter.",
+			}, 400, { "cache-control": "private, no-store" });
+		}
+		for (const key of url.searchParams.keys()) {
+			if (key !== "range") {
+				return json({
+					error: "unsupported_query_parameter",
+					code: "unsupported_query_parameter",
+					field: key,
+					message: "The dashboard accepts only the range parameter. Project scope comes from the authenticated credential and x-itsuki-project header.",
+				}, 400, { "cache-control": "private, no-store" });
+			}
+		}
+		const auth = await requireMemoryUser(request, env, null, {
+			requiredScope: MEMORY_READ_SCOPE,
+			allowLegacy: false,
+			registerSpace: false,
+		});
+		if (auth.response) {
+			if (await isAuthorized(request, env)) {
+				return json({
+					error: "account_scope_required",
+					code: "account_scope_required",
+					message: "The dashboard needs a signed-in session or a project-bound Bearer API token.",
+				}, 400, { "cache-control": "private, no-store" });
+			}
+			return auth.response;
+		}
+		if (!auth.managedProject?.id || !auth.memoryScope?.ownerUserId) {
+			return json({
+				error: "managed_project_required",
+				code: "managed_project_required",
+			}, 400, { "cache-control": "private, no-store" });
+		}
+		if (!(await allowRate(env.READ_LIMITER, managedActorRateKey("dashboard", auth)))) {
+			return tooManyFor("read");
+		}
+		try {
+			return json(await projectDashboard(env, {
+				projectId: auth.managedProject.id,
+				memoryOwnerUserId: auth.memoryScope.ownerUserId,
+				accountUserId: auth.memoryScope.accountUserId ?? auth.auth?.userId ?? null,
+				range: url.searchParams.get("range") ?? "7d",
+			}), 200, { "cache-control": "private, no-store" });
+		} catch (error) {
+			if (error instanceof DashboardRangeError || error?.name === "DashboardRangeError") {
+				return json({
+					error: error.code ?? "invalid_dashboard_range",
+					code: error.code ?? "invalid_dashboard_range",
+					message: String(error.message),
+				}, Number(error.status ?? 400), { "cache-control": "private, no-store" });
+			}
+			throw error;
+		}
 	},
 
 	"GET /v1/receipts": async (request, env) => {
