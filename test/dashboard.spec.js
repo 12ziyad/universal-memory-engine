@@ -166,12 +166,14 @@ describe("dashboard script", () => {
 		expect(script).toContain("function installSnippets(");
 		expect(script).toContain("won't be shown again");
 		expect(script).toContain('authorization: Bearer');
-		// Get started is a numbered stepper: three method cards, per-client tabs,
-		// and one instruction + one copyable thing per step.
+		// Get started is a searchable product catalog with one instruction and one
+		// copyable thing per setup step.
 		expect(script).toContain("function installMethods(");
-		expect(script).toContain("function setInstallMethod(");
-		expect(script).toContain('class="method-card');
-		expect(script).toContain('class="step-num"');
+		expect(script).toContain("function installCatalog(");
+		expect(script).toContain("function openInstallProduct(");
+		expect(script).toContain('class="integration-card');
+		expect(script).toContain('class="setup-step-button"');
+		expect(script).toContain('class="setup-guide-section');
 		expect(script).toContain("Connections created here access only");
 		expect(script).toContain("x-itsuki-project");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");

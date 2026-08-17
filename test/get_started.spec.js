@@ -65,7 +65,7 @@ describe("the key rule", () => {
 		expect(script).toContain('S.oneTimeToken?.tokenRecord?.type === "mcp"');
 		// Every code() takes the key as its argument; nothing reaches around it.
 		expect(script).toContain("code: (key) => installSnippets(key).mcpUrl");
-		expect(script).toContain("const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;");
+		expect(script).toContain("const code = step.code ? step.code(key ?? MCP_KEY_PLACEHOLDER) : null;");
 	});
 
 	it("substitutes the real key into every snippet that carries one", () => {
@@ -99,16 +99,16 @@ describe("the key rule", () => {
 });
 
 describe("one config, one state, one renderer", () => {
-	it("declares five doors and renders from state alone", () => {
+	it("keeps the five proven setup doors behind one catalog renderer", () => {
 		expect(script).toContain("appConnect: {");
 		expect(script).toMatch(/\n\t\tsdk: \{/);
 		expect(script).toMatch(/\n\t\tintegrations: \{/);
 		expect(script).toMatch(/\n\t\tplugin: \{/);
 		expect(script).toContain("const doors = installMethods();");
-		expect(script).toContain("const state = {");
-		// One markup template for every step, not nine near-identical blocks.
-		expect((script.match(/class="step-num"/g) ?? [])).toHaveLength(1);
-		expect((script.match(/class="method-card /g) ?? [])).toHaveLength(1);
+		expect(script).toContain("const catalog = installCatalog(doors);");
+		// One markup template for every step, not dozens of product-specific blocks.
+		expect((script.match(/class="setup-guide-section/g) ?? [])).toHaveLength(1);
+		expect((script.match(/class="integration-card"/g) ?? [])).toHaveLength(1);
 	});
 
 	it("offers both validated coding-agent plugins", () => {
@@ -258,29 +258,31 @@ describe("Cursor tab", () => {
 });
 
 describe("the visual redesign", () => {
-	it("centers a compact setup canvas instead of pinning it to the rail", () => {
+	it("centers a wider catalog canvas instead of pinning it to the rail", () => {
 		expect(fnSource("viewInstall")).toContain('wrap.className = "install-layout";');
 		expect(fnSource("viewOverview")).not.toContain('wrap.className = "install-layout";');
-		expect(css).toContain(".install-layout { width: min(1080px, 100%); margin: 0 auto; }");
-		expect(css).toMatch(/\.step-row \{[^}]*grid-template-columns: minmax\(220px, 340px\) minmax\(0, 1fr\)/s);
+		expect(css).toContain(".install-layout { width: min(1160px, 100%); margin: 0 auto; }");
+		expect(css).toMatch(/\.setup-console \{[^}]*grid-template-columns: 210px 1px minmax\(0, 1fr\)/s);
 	});
 
-	it("drops the panel that wrapped the steps", () => {
-		expect(script).toContain('<div class="steps">');
+	it("keeps setup steps scoped away from unrelated page steppers", () => {
+		expect(script).toContain('class="setup-console');
+		expect(script).toContain('class="setup-guide-section');
 		expect(script).not.toContain('class="steps-panel"');
+		expect(script).not.toContain('<div class="steps">');
 		expect(css).not.toContain(".steps-panel {");
-		// The horizontal dividers are replaced by one vertical hairline.
-		expect(css).not.toMatch(/\.step-row \{[^}]*border-bottom/);
-		expect(css).toContain(".step-row:not(:last-child) .step-left::before");
+		// Compact mode uses one divider; expanded mode adds a vertical timeline.
+		expect(css).toContain(".setup-console-divider { background: var(--border); }");
+		expect(css).toContain(".setup-expanded-dialog .setup-guide-section::before");
 	});
 
-	it("gives every method card and client tab an icon", () => {
+	it("gives every catalog card either a self-hosted icon or a monogram", () => {
 		for (const door of ["ICON.link", "ICON.code", "ICON.plug"]) expect(script).toContain(`icon: ${door}`);
 		for (const client of ["BRAND.claude", "BRAND.chatgpt", "ICON.pointer", "BRAND.python", "BRAND.typescript", "ICON.chevron", "BRAND.codex"]) {
 			expect(script).toContain(`icon: ${client}`);
 		}
-		expect(script).toContain('<span class="mc-icon">${m.icon ?? ""}</span>');
-		expect(script).toContain('">${c.icon ?? ""}${esc(c.label)}</button>');
+		expect(script).toContain('<span class="integration-mark">${installCardMark(card)}</span>');
+		expect(script).toContain("function installCardMark(");
 		// Neutral glyphs stay inline and product marks stay self-hosted; no icon CDN.
 		expect(script).toContain('const ICON = ((paths) =>');
 		expect(script).toContain('const BRAND = Object.freeze({');
@@ -296,8 +298,78 @@ describe("the visual redesign", () => {
 		expect(script).not.toContain("One link — Claude and ChatGPT remember you");
 	});
 
-	it("uses a compact product-accent step badge", () => {
-		expect(css).toMatch(/\.step-num \{[^}]*width: 22px; height: 22px[^}]*background: var\(--accent\)[^}]*color: var\(--on-accent\)/s);
+	it("uses a compact, contrast-safe product-accent step marker", () => {
+		expect(css).toMatch(/\.setup-step-index \{[^}]*flex: 0 0 22px/s);
+		expect(css).toContain(".setup-step-button[aria-current=\"step\"] .setup-step-index { color: var(--accent); }");
+		expect(css).toContain("background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent);");
+		expect(css).toContain('.setup-step-button[aria-current="step"] { border-left-color: transparent; border-bottom-color: var(--accent); }');
+	});
+
+	it("uses one accessible setup console in compact and expanded modes", () => {
+		const consoleSource = fnSource("installSetupConsole");
+		const renderer = fnSource("viewInstall");
+		expect(consoleSource).toContain('const navRole = "navigation";');
+		expect(consoleSource).toContain('aria-current="step"');
+		expect(consoleSource).toContain('role="region" tabindex="0"');
+		expect(consoleSource).not.toContain('role="tab"');
+		expect(consoleSource).not.toContain("aria-controls");
+		expect(renderer).toContain('role="dialog"');
+		expect(renderer).toContain('aria-modal="true"');
+		expect(renderer).toContain('const consoleMarkup = installSetupConsole(');
+
+		const renderConsole = new Function(
+			"S", "esc", "installStepContent", "ICON",
+			`${consoleSource}\nreturn installSetupConsole;`,
+		)(
+			{ installStepIndex: 1 },
+			(value) => String(value),
+			(_step, _key, index) => `<span data-secret="${index}">SECRET-${index}</span>`,
+			{ collapse: "−", expand: "+" },
+		);
+		const active = { steps: [{ title: "One" }, { title: "Two" }, { title: "Three" }] };
+		const card = { id: "fixture" };
+		const compact = renderConsole(active, {}, card, "secret", false);
+		const expanded = renderConsole(active, {}, card, "secret", true);
+		expect(compact.match(/class="setup-console(?:\s|")/g)).toHaveLength(1);
+		expect(compact.match(/data-secret=/g)).toHaveLength(1);
+		expect(expanded.match(/class="setup-console(?:\s|")/g)).toHaveLength(1);
+		expect(expanded.match(/data-secret=/g)).toHaveLength(active.steps.length);
+	});
+
+	it("makes the expanded guide modal-safe, responsive, and deterministic", () => {
+		for (const name of ["lockInstallBackground", "unlockInstallBackground", "cleanupInstallUi", "openInstallExpanded", "closeInstallExpanded", "syncInstallResponsive"]) {
+			expect(script).toContain(`function ${name}(`);
+		}
+		expect(fnSource("onInstallGuideScroll")).toContain("pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4");
+		expect(fnSource("syncInstallResponsive")).toContain('window.matchMedia("(max-width: 820px)").matches');
+		expect(fnSource("syncInstallResponsive")).toContain('scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" })');
+		expect(script).toContain('window.addEventListener("orientationchange", syncInstallResponsive);');
+		expect(css).toContain("body.install-overlay-open { overflow: hidden; }");
+		expect(css).toContain("#keyModal { z-index: 96; }");
+		expect(fnSource("openKeyModal")).toContain("if (S.installExpanded) closeInstallExpanded({ restoreFocus: false });");
+		expect(css).toMatch(/\.setup-step-nav \{[^}]*overflow-y: auto;/s);
+		expect(css).toContain(".setup-guide-section:focus-visible { outline: 2px solid var(--focus-ring);");
+	});
+
+	it("restores keyboard focus after setup controls and the key modal rerender", () => {
+		expect(fnSource("restoreModalOpener")).toContain("document.getElementById(fallbackId)");
+		expect(fnSource("setInstallRoute")).toContain("input[name=\"install-route\"]:checked");
+		expect(fnSource("setInstallCategory")).toContain("installCategory-${category}");
+		expect(fnSource("clearInstallFilters")).toContain('document.getElementById("installSearch")?.focus()');
+		const closeStart = script.indexOf("function closeKeyModal(");
+		const close = script.slice(closeStart, script.indexOf("\nfunction renderKeyModal(", closeStart));
+		expect(close).toContain('S.view === "keys" ? "createApiKeyButton" : "installSetupTitle"');
+		expect(close.lastIndexOf("restoreModalOpener")).toBeGreaterThan(close.lastIndexOf("renderView"));
+	});
+
+	it("ships labelled examples and announces clipboard outcomes without duplicating secrets", () => {
+		expect(fnSource("installExampleMeta")).toContain("Example screen — interface may change");
+		expect(fnSource("renderInstallExample")).toContain("aria-label=\"Open larger example:");
+		expect(fnSource("openInstallLightbox")).toContain('aria-modal');
+		expect(script).toContain('id="installLiveRegion"');
+		expect(fnSource("copyCode")).toContain('announceInstallStatus("Copied to clipboard.")');
+		expect(fnSource("copyCode")).toContain('announceInstallStatus("Copy failed. Select the text and copy it manually.")');
+		expect(script.match(/YOUR_MCP_KEY/g) ?? []).toHaveLength(1);
 	});
 
 	it("restyles code blocks: light surface, labelled header, copy icon", () => {
@@ -338,6 +410,90 @@ function buildMethods() {
 		() => "",
 	)();
 }
+
+/** Build the user-facing catalog against the real setup graph. */
+function buildCatalog(doors = buildMethods()) {
+	const iconProxy = new Proxy({}, { get: () => "<svg/>" });
+	return new Function(
+		"ICON",
+		`${fnSource("installCatalog")}\nreturn installCatalog;`,
+	)(iconProxy)(doors);
+}
+
+function buildTargetResolver() {
+	return new Function(`${fnSource("resolveInstallTarget")}\nreturn resolveInstallTarget;`)();
+}
+
+describe("the integration catalog contract", () => {
+	it("lists each of the 26 supported products exactly once", () => {
+		const catalog = buildCatalog();
+		expect(catalog).toHaveLength(26);
+		expect(new Set(catalog.map((card) => card.id)).size).toBe(catalog.length);
+		for (const category of ["apps", "coding", "runtimes", "frameworks", "automation", "sdk"]) {
+			expect(catalog.some((card) => card.category === category)).toBe(true);
+		}
+	});
+
+	it("groups products with multiple supported methods into one card", () => {
+		const catalog = buildCatalog();
+		for (const [id, methods] of [
+			["agno", ["native", "mcp"]],
+			["llamaindex", ["native", "mcp"]],
+			["mastra", ["native", "mcp"]],
+			["vercel-ai", ["native", "mcp"]],
+			["n8n", ["native", "http", "mcp"]],
+		]) {
+			expect(catalog.filter((card) => card.id === id)).toHaveLength(1);
+			expect(catalog.find((card) => card.id === id)?.methods.map((method) => method.id)).toEqual(methods);
+		}
+	});
+
+	it("makes every setup leaf reachable once and resolves every route to steps", () => {
+		const doors = buildMethods();
+		const catalog = buildCatalog(doors);
+		const resolve = buildTargetResolver();
+		const graphLeaves = new Set();
+		for (const [doorId, door] of Object.entries(doors)) {
+			for (const [clientId, client] of Object.entries(door.clients)) {
+				if (client.variants) {
+					for (const variantId of Object.keys(client.variants)) graphLeaves.add(`${doorId}/${clientId}/${variantId}`);
+				} else {
+					graphLeaves.add(`${doorId}/${clientId}/root`);
+				}
+			}
+		}
+
+		const catalogLeaves = [];
+		for (const card of catalog) {
+			for (const route of card.methods) {
+				const target = resolve(doors, card, route);
+				expect(Array.isArray(target.active?.steps), `${card.id}/${route.id}`).toBe(true);
+				expect(target.active.steps.length, `${card.id}/${route.id}`).toBeGreaterThan(0);
+				catalogLeaves.push(`${card.door}/${card.client}/${route.variant ?? "root"}`);
+			}
+		}
+
+		expect(catalogLeaves).toHaveLength(38);
+		expect(new Set(catalogLeaves)).toEqual(graphLeaves);
+	});
+
+	it("renders searchable categories, accessible filters, methods, and an empty state", () => {
+		const view = fnSource("viewInstall");
+		expect(view).toContain('type="search"');
+		expect(view).toContain('aria-label="Integration categories"');
+		expect(view).toContain('aria-pressed="${entry.id === category}"');
+		expect(view).toContain('aria-live="polite"');
+		expect(fnSource("installMethodPicker")).toContain('name="install-route"');
+		expect(view).toContain("No integrations found");
+		expect(script).toContain('aliases: ["langgraph"]');
+	});
+
+	it("normalizes Hermes to the same variants contract as every other multi-route client", () => {
+		const hermes = buildMethods().agents.clients.hermes;
+		expect(Object.keys(hermes.variants)).toEqual(["native", "mcp"]);
+		expect(hermes).not.toHaveProperty("routes");
+	});
+});
 
 describe("Agents door and the variant chooser", () => {
 	it("declares the agents door at the same two-tab level as the others", () => {
@@ -497,24 +653,22 @@ describe("Agents door and the variant chooser", () => {
 		expect(buildMethods().plugin.clients.antigravity.hint).toMatch(/not supported/i);
 	});
 
-	it("the once-dormant variant renderer path is live and wired", () => {
+	it("resolves product methods into the existing variant graph", () => {
 		const view = fnSource("viewInstall");
-		expect(view).toContain("const variants = client.variants ?? null;");
-		expect(view).toContain("variant-tabs");
-		expect(view).toContain("variants[state.variant]");
-		expect(script).toContain("function setInstallVariant(");
+		expect(view).toContain("resolveInstallTarget(doors, selected, route)");
+		expect(fnSource("installMethodPicker")).toContain('name="install-route"');
+		expect(fnSource("installMethodPicker")).toContain("setInstallRoute('${entry.id}')");
+		expect(script).toContain("function resolveInstallTarget(");
 	});
 
-	it("every framed-stage client carries a docs link", () => {
-		// The stage template interpolates client.docsHref unguarded, so a client
-		// without one would render a dead 'View docs' link.
+	it("renders docs links only when the selected catalog card has one", () => {
 		const doors = buildMethods();
 		for (const doorId of ["plugin", "agents", "integrations"]) {
 			for (const [id, client] of Object.entries(doors[doorId].clients)) {
 				expect(typeof client.docsHref, `${doorId}.${id}`).toBe("string");
 			}
 		}
-		expect(fnSource("viewInstall")).toContain('["plugin", "agents", "integrations"].includes(state.method)');
+		expect(fnSource("installSetupHead")).toContain('selected.docsHref ? `<a class="install-docs"');
 	});
 
 	it("gives the new doors and clients their inline glyphs", () => {

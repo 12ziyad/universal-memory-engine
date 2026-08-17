@@ -157,9 +157,9 @@
 	body.app-mode .box h3, body.app-mode .action-box h3, body.app-mode .detail h2,
 	body.app-mode .card .title, body.app-mode .section-h {
 		font-size: 16px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; }
-	body.app-mode .card .summary, body.app-mode .method-card .mc-text > span {
+	body.app-mode .card .summary, body.app-mode .integration-card-desc {
 		font-size: 13.5px; font-weight: 400; letter-spacing: 0; font-style: normal; color: var(--muted); }
-	body.app-mode .method-card b { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+	body.app-mode .integration-card-name { font-size: 15px; font-weight: 600; letter-spacing: 0; }
 	body.app-mode .step-title { font-size: 14px; font-weight: 600; letter-spacing: 0; }
 	body.app-mode .step-desc, body.app-mode .help, body.app-mode .kv, body.app-mode .empty {
 		font-size: 13.5px; font-weight: 400; letter-spacing: 0; line-height: 1.55; max-width: 680px; }
@@ -417,83 +417,244 @@
 	/* Setup content is centered instead of pinned against the navigation rail.
 	   The fixed maximum creates the deliberate desktop gutter from the reference
 	   while still collapsing to the full available width on smaller screens. */
-	.install-layout { width: min(1080px, 100%); margin: 0 auto; }
-	.install-intro { max-width: 1080px; }
-	body.app-mode .install-intro.page-head { margin-bottom: 28px; }
-	.method-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-		gap: 16px; max-width: 1080px; margin-bottom: 32px; }
-	.method-card { display: flex; align-items: center; gap: 11px; text-align: left; color: var(--text);
-		background: var(--panel); border: 1px solid var(--border);
-		border-radius: 12px; min-height: 78px; padding: 14px 16px; cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .12s; }
-	.method-card .mc-icon { flex: 0 0 auto; width: 18px; height: 18px; color: var(--faint); }
-	.method-card .mc-icon svg { width: 100%; height: 100%; display: block; }
-	.method-card .mc-text { min-width: 0; }
-	.method-card b { display: block; color: var(--text); margin-bottom: 4px; }
-	.method-card span.mc-text > span { display: block; color: var(--muted); }
-	.method-card:hover { border-color: var(--border2); filter: none; transform: translateY(-1px); }
-	.method-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-	.method-card.active b, .method-card.active .mc-icon { color: var(--accent); }
-	.client-tabs { display: flex; gap: 3px; flex-wrap: wrap; width: fit-content; max-width: 1080px;
-		margin-bottom: 28px; padding: 4px; border-radius: 11px; background: var(--panel2); }
-	/* Without a plan note between them, tabs → steps still lands on the 32px
-	   between-groups gap (12 + 20). */
-	.client-tabs + .steps { margin-top: 20px; }
-	.variant-tabs + .steps { margin-top: 20px; }
-	/* When a client offers two install routes, the variant row belongs to its
-	   client row — pull it up so the pair reads as one chooser. */
-	.client-tabs:has(+ .variant-tabs) { margin-bottom: 12px; }
-	.client-tabs .term-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; }
-	.client-tabs .term-tab svg, .client-tabs .term-tab .brand-icon { width: 18px; height: 18px; flex: 0 0 auto; }
+	.install-layout { width: min(1160px, 100%); margin: 0 auto; }
+	.install-intro { max-width: 820px; }
+	body.app-mode .install-intro.page-head { margin-bottom: 30px; }
+	.install-project-scope { display: inline-flex; align-items: center; gap: 7px; margin-top: 13px;
+		padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted);
+		background: var(--panel); font-size: 12px; }
+	.install-project-scope b { color: var(--text); font-weight: 600; }
+	.catalog-toolbar { display: grid; gap: 16px; margin-bottom: 22px; }
+	.catalog-search { position: relative; display: block; max-width: 680px; }
+	.catalog-search svg { position: absolute; left: 14px; top: 50%; width: 18px; height: 18px;
+		transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+	.catalog-search input { width: 100%; min-height: 46px; padding: 10px 42px; border-radius: 11px;
+		border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; }
+	.catalog-search input::placeholder { color: var(--faint); }
+	.catalog-search input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+		outline-offset: 1px; border-color: var(--accent); }
+	.catalog-search-clear { position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+		width: 32px; height: 32px; border: 0; border-radius: 7px; background: transparent;
+		color: var(--faint); font-size: 18px; line-height: 1; }
+	.catalog-search-clear:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.catalog-filters { display: flex; gap: 8px; overflow-x: auto; padding: 1px 1px 6px;
+		scrollbar-width: none; }
+	.catalog-filters::-webkit-scrollbar { display: none; }
+	.catalog-filter { flex: 0 0 auto; min-height: 40px; padding: 8px 13px; border-radius: 9px;
+		border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+		font-size: 12px; font-weight: 600; white-space: nowrap; }
+	.catalog-filter:hover { border-color: var(--border2); color: var(--text); filter: none; }
+	.catalog-filter[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+		background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); }
+	.catalog-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+		margin-bottom: 26px; min-height: 28px; color: var(--muted); font-size: 12px; }
+	.catalog-meta strong { color: var(--text); font-weight: 600; }
+	.catalog-clear { border: 0; background: transparent; color: var(--accent); padding: 4px 0;
+		font-size: 12px; font-weight: 600; }
+	.catalog-clear:hover { text-decoration: underline; filter: none; }
+	.integration-group { margin-bottom: 40px; }
+	.integration-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+		margin: 0 0 12px; }
+	.integration-group-title { margin: 0; font-size: 15px; font-weight: 650; color: var(--text); }
+	.integration-group-count { color: var(--faint); font-size: 11px; }
+	.integration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+	.integration-card { min-width: 0; min-height: 184px; display: flex; flex-direction: column;
+		text-align: left; padding: 20px; border: 1px solid var(--border); border-radius: 13px;
+		background: var(--panel); color: var(--text); cursor: pointer;
+		transition: border-color .12s, box-shadow .12s, transform .12s; }
+	.integration-card:hover { border-color: var(--border2); box-shadow: var(--shadow-sm);
+		transform: translateY(-1px); filter: none; }
+	.integration-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.integration-card-top { display: flex; align-items: flex-start; gap: 14px; }
+	.integration-card-copy { min-width: 0; flex: 1; }
+	.integration-card-name { display: block; margin: 1px 0 6px; font-size: 15px; font-weight: 650; line-height: 1.25; }
+	.integration-card-desc { display: block; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+	.integration-mark { flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center;
+		border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border)); border-radius: 10px;
+		background: color-mix(in srgb, var(--accent) 8%, var(--panel2)); color: var(--accent);
+		font-size: 12px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; }
+	.integration-mark svg, .integration-mark .brand-icon { width: 22px; height: 22px; }
+	.integration-card-arrow { flex: 0 0 auto; color: var(--faint); font-size: 17px; line-height: 1; }
+	.integration-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 18px; }
+	.integration-badge { display: inline-flex; align-items: center; min-height: 23px; padding: 3px 7px;
+		border: 1px solid var(--border); border-radius: 6px; background: var(--panel2);
+		color: var(--muted); font-size: 10px; font-weight: 600; }
+	.integration-badge.qualifier { border-style: dashed; color: var(--faint); background: transparent; }
+	.catalog-empty { border: 1px dashed var(--border2); border-radius: 13px; padding: 44px 20px;
+		text-align: center; color: var(--muted); }
+	.catalog-empty b { display: block; color: var(--text); margin-bottom: 6px; }
+	.install-detail { width: min(900px, 100%); margin: 0 auto; }
+	.install-back { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin: 0 0 22px;
+		padding: 6px 9px; border: 0; border-radius: 8px; background: transparent;
+		color: var(--muted); font-size: 12px; font-weight: 600; }
+	.install-back:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.install-back svg { width: 15px; height: 15px; }
+	.setup-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+		margin-bottom: 22px; }
+	.setup-identity { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+	.setup-identity .integration-mark { width: 46px; height: 46px; flex-basis: 46px; }
+	.setup-eyebrow { color: var(--accent); font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+		letter-spacing: .07em; margin-bottom: 5px; }
+	.setup-title { margin: 0 0 6px; font-size: 25px; line-height: 1.15; outline: 0; }
+	.setup-title:focus-visible { outline: 0; }
+	.setup-description { max-width: 680px; margin: 0; color: var(--muted); line-height: 1.55; }
+	.setup-methods { min-width: 0; margin: 0 0 18px; padding: 0; border: 0; }
+	.setup-methods legend { margin-bottom: 8px; color: var(--faint); font-size: 11px; font-weight: 650; }
+	.setup-method-grid { width: max-content; max-width: 100%; display: flex; gap: 3px; flex-wrap: wrap;
+		padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); }
+	.setup-method-option { position: relative; min-width: 0; display: flex; align-items: center;
+		min-height: 34px; padding: 7px 12px; border: 1px solid transparent;
+		border-radius: 6px; background: transparent; cursor: pointer; }
+	.setup-method-option:has(input:checked) { border-color: var(--border);
+		background: var(--panel); box-shadow: var(--shadow-sm); }
+	.setup-method-option input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
+	.setup-method-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.setup-method-label { display: block; color: var(--muted); font-size: 11.5px; font-weight: 650; }
+	.setup-method-option:has(input:checked) .setup-method-label { color: var(--text); }
+	.setup-recommended { display: inline; margin-left: 6px; color: var(--accent); font-size: 9.5px; font-weight: 650; }
 	.brand-icon { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
 		border-radius: 5px; }
 	.brand-icon.typescript { object-position: center top; }
 	/* One muted line, no coloured box. A banner for a plan requirement was
 	   louder than the requirement deserves. */
-	.install-hint { max-width: 1080px; margin: 0 0 32px; }
-	.steps { max-width: 1080px; }
-	.step-row { position: relative; display: grid; grid-template-columns: minmax(220px, 340px) minmax(0, 1fr);
-		gap: 48px; padding: 0 0 36px; align-items: start; }
-	.step-row:last-child { padding-bottom: 0; }
-	.step-left { display: flex; gap: 12px; }
-	/* A hairline joining the badges, instead of a divider under every step. */
-	.step-row:not(:last-child) .step-left::before { content: ""; position: absolute;
-		left: 11px; top: 26px; bottom: 0; width: 1px;
-		background: color-mix(in srgb, var(--accent) 32%, var(--border)); }
-	.step-num { position: relative; z-index: 1; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%;
-		background: var(--accent); color: var(--on-accent); display: grid; place-items: center;
-		font-size: 11px; font-weight: 600; margin-top: 1px; }
-	.step-title { margin-bottom: 6px; }
+	.install-hint { max-width: 760px; margin: 0 0 18px; color: var(--muted); font-size: 12.5px; }
+	.setup-console { position: relative; display: grid; grid-template-columns: 210px 1px minmax(0, 1fr);
+		height: 330px; min-height: 330px; overflow: hidden; border: 1px solid var(--border);
+		border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-sm); }
+	.setup-console-divider { background: var(--border); }
+	.setup-step-nav { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-self: stretch; gap: 3px;
+		padding: 20px 16px; overflow-x: hidden; overflow-y: auto; }
+	.setup-step-button { width: 100%; min-height: 39px; display: flex; align-items: center; gap: 10px;
+		padding: 7px 10px; border: 0; border-left: 2px solid transparent; border-radius: 0 7px 7px 0;
+		background: transparent; color: var(--muted); text-align: left; font-size: 12.5px; font-weight: 500; }
+	.setup-step-button:hover { background: var(--panel2); color: var(--text); filter: none; }
+	.setup-step-button[aria-selected="true"], .setup-step-button[aria-current="step"] {
+		border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
+		color: var(--text); font-weight: 650; }
+	.setup-step-index { flex: 0 0 22px; color: var(--faint); font: 11px/1 var(--font-mono); }
+	.setup-step-button[aria-selected="true"] .setup-step-index,
+	.setup-step-button[aria-current="step"] .setup-step-index { color: var(--accent); }
+	.setup-guide-pane { min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 48px 34px 30px; }
+	.setup-guide-section { min-width: 0; }
+	.setup-guide-section:focus:not(:focus-visible) { outline: 0; }
+	.setup-guide-section:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; border-radius: 8px; }
+	.setup-guide-section + .setup-guide-section { margin-top: 34px; }
+	.setup-guide-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+	.step-title { margin: 0 0 7px; font-size: 15px; font-weight: 650; line-height: 1.3; }
 	.step-title-link { display: inline-block; width: 13px; height: 13px; margin-left: 5px;
 		color: var(--faint); vertical-align: -1px; }
 	.step-title-link:hover { color: var(--accent); }
 	.step-title-link svg { width: 100%; height: 100%; display: block; }
-	.step-desc { color: var(--muted); }
-	/* Right-column items top-align with the step title, not the row box. An
-	   action button's padding pushed its text 3px below the title's top edge. */
-	.step-right > button.mini:first-child { margin-top: -3px; }
-	.step-right .install-code + .install-code { margin-top: 8px; }
-	.step-note { color: var(--faint); margin-top: 8px; }
+	.step-desc { max-width: 58ch; color: var(--muted); line-height: 1.6; }
+	.step-content { margin-top: 16px; }
+	.step-content > button.mini:first-child { margin-top: 0; }
+	.step-content .install-code + .install-code { margin-top: 10px; }
+	.step-note { color: var(--faint); margin-top: 10px; font-size: 12px; }
 	.step-done { border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
 		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 8px;
 		padding: 8px 11px; font-size: 13px; }
 	.install-foot { max-width: 880px; margin-top: 20px; }
-	.plugin-stage { max-width: 1080px; border: 1px solid var(--border); border-radius: 14px;
-		background: var(--panel); padding: 18px 20px 22px; box-shadow: var(--shadow-sm); }
-	.plugin-stage-head { display: flex; align-items: center; justify-content: space-between; gap: 16px;
-		padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
-	.plugin-stage-title { display: inline-flex; align-items: center; gap: 9px; min-width: 0; font-weight: 600; }
-	.plugin-stage-title .brand-icon { width: 20px; height: 20px; }
+	.setup-expand { position: absolute; z-index: 3; top: 10px; right: 10px; min-height: 30px;
+		display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid var(--border);
+		border-radius: 7px; background: var(--panel2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
+	.setup-expand:hover { border-color: var(--border2); color: var(--text); filter: none; }
+	.setup-expand svg { width: 14px; height: 14px; }
+	.install-expanded-backdrop { z-index: 84; padding: 16px; }
+	.setup-expanded-dialog { width: min(1180px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 32px));
+		min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 22px;
+		border: 1px solid var(--border2); border-radius: 16px; background: var(--bg); box-shadow: var(--shadow-lg); }
+	.setup-expanded-dialog .setup-head { flex: 0 0 auto; margin-bottom: 14px; padding-right: 112px; }
+	.setup-expanded-dialog .setup-methods { flex: 0 0 auto; margin-bottom: 14px; }
+	.setup-expanded-dialog .install-hint { flex: 0 0 auto; margin-bottom: 12px; }
+	.setup-expanded-dialog .setup-console { flex: 1; min-height: 0; height: auto;
+		grid-template-columns: 220px 1px minmax(0, 1fr); }
+	.setup-expanded-dialog .setup-guide-pane { overflow-y: auto; overflow-x: hidden; padding: 34px 42px 64px;
+		scrollbar-gutter: stable; overscroll-behavior: contain; }
+	.setup-expanded-dialog .setup-guide-section { position: relative; padding-left: 36px; }
+	.setup-expanded-dialog .setup-guide-section::before { content: ""; position: absolute; left: 10px; top: 26px;
+		bottom: -35px; width: 1px; background: var(--border); }
+	.setup-expanded-dialog .setup-guide-section:last-child::before { display: none; }
+	.setup-expanded-dialog .setup-guide-section::after { content: attr(data-step-number); position: absolute;
+		left: 0; top: 0; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid var(--border2);
+		border-radius: 50%; background: var(--panel2); color: var(--muted); font: 9.5px/1 var(--font-mono); }
+	.setup-expanded-dialog .setup-guide-section.is-current::after { border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent); }
+	.setup-expanded-dialog .setup-guide-section + .setup-guide-section { margin-top: 42px; }
+	.setup-expanded-dialog .setup-expand { top: 22px; right: 22px; }
+	body.install-overlay-open { overflow: hidden; }
+	.setup-example { margin: 16px 0 0; }
+	.setup-example-button { width: 100%; max-width: 620px; display: block; padding: 0; border: 0;
+		border-radius: 11px; background: transparent; color: inherit; text-align: left; cursor: zoom-in; }
+	.setup-example-button:hover { filter: none; }
+	.setup-example-frame { display: block; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--border2);
+		border-radius: 10px; background: #faf9f7; box-shadow: var(--shadow-sm); }
+	.setup-example-caption { display: block; margin-top: 7px; color: var(--muted); font-size: 11.5px; }
+	.example-window { display: flex; flex-direction: column; height: 100%; color: #191b20; background: #faf9f7; }
+	.example-window-bar { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 11px;
+		border-bottom: 1px solid #e6e4df; background: #f2f0ec; color: #646b77; font-size: 9px; }
+	.example-window-dot { width: 6px; height: 6px; border-radius: 50%; background: #cfccc6; }
+	.example-settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 31% 1fr; text-align: left; }
+	.example-settings-nav { display: flex; flex-direction: column; gap: 7px; padding: 14px 12px;
+		border-right: 1px solid #e6e4df; color: #646b77; font-size: 9.5px; }
+	.example-settings-nav b { color: #191b20; }
+	.example-settings-nav .selected { padding: 4px 7px; border-radius: 4px; background: #efeeeb; color: #191b20; }
+	.example-settings-main { position: relative; display: flex; flex-direction: column; gap: 9px; padding: 14px; min-width: 0; }
+	.example-settings-main h4 { margin: 0; font-size: 12px; }
+	.example-settings-line { height: 9px; border-radius: 3px; background: #efeeeb; }
+	.example-settings-line.wide { width: 72%; }
+	.example-settings-line.short { width: 50%; }
+	.example-connector-card { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+		padding: 8px; border: 1px solid #e6e4df; border-radius: 5px; background: #fff; font-size: 9.5px; }
+	.example-badge { padding: 2px 6px; border: 1px solid rgba(91,79,207,.25); border-radius: 3px;
+		background: rgba(91,79,207,.08); color: #5b4fcf; font-size: 8px; }
+	.example-dialog { position: absolute; inset: 0; display: grid; place-items: center; padding: 18px;
+		background: rgba(24,24,32,.28); }
+	.example-dialog-card { width: min(300px, 88%); display: grid; gap: 8px; padding: 13px;
+		border: 1px solid #cfccc6; border-radius: 7px; background: #fff; box-shadow: 0 12px 30px rgba(24,24,32,.18); }
+	.example-field { padding: 6px 8px; border: 1px solid #e6e4df; border-radius: 4px; color: #646b77;
+		font: 9px/1.4 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.example-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 9px; padding: 15px; }
+	.example-chat-row { max-width: 76%; padding: 7px 9px; border: 1px solid #e6e4df; border-radius: 8px;
+		background: #fff; color: #191b20; font-size: 9.5px; }
+	.example-chat-row.user { align-self: flex-end; background: #efeeeb; }
+	.example-chat-input { margin-top: auto; height: 34px; border: 1px solid #e6e4df; border-radius: 8px; background: #fff; }
+	.install-lightbox { z-index: 90; }
+	.install-lightbox-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto;
+		padding: 18px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; background: #101116;
+		box-shadow: 0 28px 84px rgba(0,0,0,.56); color: #fff; }
+	.install-lightbox-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+	.install-lightbox-head h3 { margin: 0; font-size: 15px; }
+	.install-lightbox-dialog .setup-example-frame { max-height: calc(100dvh - 120px); aspect-ratio: 16 / 9; }
+	.install-live-region { position: fixed; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.install-docs { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none;
 		border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; }
 	.install-docs:hover { color: var(--text); border-color: var(--border2); }
 	.install-docs svg { width: 13px; height: 13px; }
-	.plugin-stage .step-row { grid-template-columns: minmax(210px, 300px) minmax(0, 1fr); gap: 40px; }
-	.plugin-stage .step-row:last-child { padding-bottom: 0; }
-	@media (max-width: 780px) {
-		.step-row { grid-template-columns: 1fr; gap: 12px; padding-bottom: 20px; }
-		.plugin-stage { padding: 14px; }
-		.plugin-stage .step-row { grid-template-columns: 1fr; gap: 12px; }
-		.step-row:not(:last-child) .step-left::before { display: none; }
+	@media (max-width: 980px) {
+		.integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	}
+	@media (max-width: 820px) {
+		.setup-head { display: block; }
+		.setup-head .install-docs { margin-top: 14px; }
+		.setup-console { display: block; height: auto; min-height: 0; overflow: visible; }
+		.setup-console-divider, .setup-expand { display: none; }
+		.setup-step-nav { flex-direction: row; gap: 6px; padding: 12px; overflow-x: auto; overflow-y: hidden;
+			border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+		.setup-step-button { width: auto; min-width: max-content; border-left: 0; border-bottom: 2px solid transparent;
+			border-radius: 7px 7px 0 0; }
+		.setup-step-button[aria-current="step"] { border-left-color: transparent; border-bottom-color: var(--accent); }
+		.setup-guide-pane { padding: 24px 20px 28px; }
+	}
+	@media (max-width: 620px) {
+		.integration-grid { grid-template-columns: 1fr; }
+		.integration-card { min-height: 158px; padding: 17px; }
+		.catalog-meta { align-items: flex-start; }
+		.setup-method-grid { width: 100%; }
+		.setup-method-option { flex: 1 1 auto; justify-content: center; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.integration-card { transition: none; }
+		.setup-guide-pane { scroll-behavior: auto !important; }
 	}
 	.install-card .install-head { margin-bottom: 4px; }
 	/* Light code surface with a thin header strip: a small monospace label on
@@ -1195,6 +1356,8 @@
 	.policy-list li { margin: 5px 0; }
 	.modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: var(--overlay); backdrop-filter: blur(8px); }
 	.modal-backdrop[hidden] { display: none; }
+	/* Key creation can be launched from the expanded setup guide; keep it above that dialog. */
+	#keyModal { z-index: 96; }
 	.policy-modal { width: min(760px, 100%); max-height: min(82vh, 760px); overflow: auto; background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 18px; }
 	.policy-modal header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 0 0 12px; border: 0; background: transparent; }
 	.policy-modal h2 { margin: 0; font-size: 20px; }
@@ -2126,6 +2289,8 @@ const S = {
 	userId: localStorage.getItem("uml_user") || "",
 	key: localStorage.getItem("uml_key") || "",
 	view: "overview",
+	installCatalogId: null, installRouteId: null, installCategory: "all", installQuery: "",
+	installStepIndex: 0, installExpanded: false, installLightbox: null,
 	graphMode: "clean",
 	focusCluster: "",
 	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true, recallResult: null, memoryQuery: "",
@@ -2230,10 +2395,13 @@ const MODAL_FOCUS_RETURN = new Map();
 function rememberModalOpener(id) {
 	if (document.activeElement instanceof HTMLElement) MODAL_FOCUS_RETURN.set(id, document.activeElement);
 }
-function restoreModalOpener(id) {
+function restoreModalOpener(id, fallbackId = "") {
 	const opener = MODAL_FOCUS_RETURN.get(id);
 	MODAL_FOCUS_RETURN.delete(id);
-	requestAnimationFrame(() => opener?.isConnected && opener.focus());
+	requestAnimationFrame(() => {
+		const target = opener?.isConnected ? opener : (fallbackId ? document.getElementById(fallbackId) : null);
+		target?.focus();
+	});
 }
 function openModalHost() {
 	return [...document.querySelectorAll(".modal-backdrop:not([hidden])")].at(-1) ?? null;
@@ -2617,6 +2785,7 @@ async function refreshProjects() {
 }
 
 function resetProjectBoundUiState() {
+	cleanupInstallUi({ restoreFocus: false });
 	S.data = null;
 	S.receipts = [];
 	S.candidates = [];
@@ -3505,6 +3674,7 @@ function setView(v, { updateHash = true, allowCopyOnce = false } = {}) {
 		SET.loading = false;
 	}
 	if (requestedView === "rules") SET.section = "project-extraction";
+	if (S.view === "install" && v !== "install") cleanupInstallUi({ restoreFocus: false });
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
@@ -4462,6 +4632,11 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 	layers: `<path d="M12 3.5 20.5 8 12 12.5 3.5 8 12 3.5Z"/><path d="m4.5 12.5 7.5 4 7.5-4"/><path d="m4.5 16.5 7.5 4 7.5-4"/>`,
 	database: `<ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8v-13"/><path d="M4.5 12c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8"/>`,
 	chevron: `<path d="m4.5 7 4.5 5-4.5 5"/><path d="M12 17h7.5"/>`,
+	search: `<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>`,
+	arrowLeft: `<path d="m14.5 5-7 7 7 7"/><path d="M8 12h11"/>`,
+	expand: `<path d="M8.5 3.5h-5v5M15.5 3.5h5v5M20.5 15.5v5h-5M3.5 15.5v5h5"/><path d="m8.5 8.5-5-5M15.5 8.5l5-5M15.5 15.5l5 5M8.5 15.5l-5 5"/>`,
+	collapse: `<path d="M8.5 8.5h-5v-5M15.5 8.5h5v-5M20.5 15.5h-5v5M3.5 15.5h5v5"/><path d="m8.5 8.5-5-5M15.5 8.5l5-5M15.5 15.5l5 5M8.5 15.5l-5 5"/>`,
+	close: `<path d="m6 6 12 12M18 6 6 18"/>`,
 	copy: `<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15.5V5.5a2.5 2.5 0 0 1 2.5-2.5H17"/>`,
 	check: `<path d="m5 12.5 4.5 4.5L19 7"/>`,
 	trash: `<path d="M4 6.5h16"/><path d="M9 6.5V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 6.5 7.5 20a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-13.5"/>`,
@@ -4477,7 +4652,7 @@ const BRAND = Object.freeze({
 });
 
 /**
- * Get started — three doors, one config, one renderer.
+ * Get started — one proven setup graph behind a beginner-friendly catalog.
  *
  * A step is always the same shape: { title, body, code(key), action, note,
  * done }. A step that needs a button and a step that needs a code block differ
@@ -4868,7 +5043,7 @@ function installMethods() {
 					icon: ICON.hex,
 					docsHref: "/docs/#/install/hermes",
 					hint: "Native memory provider, running alongside Hermes's own memory files. Needs Hermes 0.19.0+.",
-					routes: {
+				variants: {
 						native: {
 							label: "Native provider",
 							steps: [
@@ -4928,24 +5103,209 @@ function installMethods() {
 	};
 }
 
-function setInstallMethod(method) {
-	S.installMethod = method;
-	S.installClient = null;
-	// A stale variant key from another door's client must not survive the
-	// switch — with several variant-bearing clients, key collisions are real.
-	S.installVariant = null;
-	renderView();
+const INSTALL_CATEGORIES = Object.freeze([
+	{ id: "all", label: "All" },
+	{ id: "apps", label: "Apps & Assistants" },
+	{ id: "coding", label: "Coding Agents" },
+	{ id: "runtimes", label: "Agent Runtimes" },
+	{ id: "frameworks", label: "Frameworks" },
+	{ id: "automation", label: "Automation & Tools" },
+	{ id: "sdk", label: "SDKs & API" },
+]);
+
+/**
+ * User-facing integration catalog. The targets point into installMethods(), so
+ * this layer owns only discovery copy and grouping — never commands or secrets.
+ * Products with native and MCP routes appear once and expose those routes only
+ * after the user chooses the product.
+ */
+function installCatalog(doors = installMethods()) {
+	const method = (id, label, variant = null, recommended = false) => ({
+		id, label, variant, recommended,
+	});
+	const card = (id, category, label, description, door, client, methods, extra = {}) => {
+		const source = doors[door]?.clients?.[client];
+		return {
+			id, category, label, description, door, client, methods,
+			icon: extra.mark ? null : (extra.icon ?? source?.icon ?? ICON.blocks),
+			mark: extra.mark ?? "",
+			flags: extra.flags ?? [],
+			aliases: extra.aliases ?? [],
+			docsHref: extra.docsHref ?? source?.docsHref ?? "",
+		};
+	};
+	return [
+		card("claude", "apps", "Claude", "Give Claude persistent memory across conversations.",
+			"appConnect", "claude", [method("mcp", "MCP", null, true)]),
+		card("chatgpt", "apps", "ChatGPT", "Add save and recall tools to your workspace.",
+			"appConnect", "chatgpt", [method("mcp", "MCP", null, true)]),
+
+		card("claude-code", "coding", "Claude Code", "Recall project context and capture useful learnings automatically.",
+			"plugin", "claude-code", [method("plugin", "Plugin", null, true)]),
+		card("codex", "coding", "Codex", "Carry useful project context between coding sessions.",
+			"plugin", "codex", [method("plugin", "Plugin", null, true)]),
+		card("cursor", "coding", "Cursor", "Add Itsuki memory tools through MCP.",
+			"plugin", "cursor", [method("mcp", "MCP", null, true)]),
+		card("opencode", "coding", "OpenCode", "Recall before each turn and capture after it settles.",
+			"plugin", "opencode", [method("native", "Native plugin", "native", true), method("mcp", "MCP", "mcp")]),
+		card("antigravity", "coding", "Antigravity", "Persistent memory for Antigravity CLI, with an MCP fallback.",
+			"plugin", "antigravity", [method("native", "Native CLI", "native", true), method("mcp", "MCP", "mcp")],
+			{ flags: ["CLI only"] }),
+
+		card("openclaw", "runtimes", "OpenClaw", "Recall before each turn and capture after it settles.",
+			"agents", "openclaw", [method("native", "Native plugin", "native", true), method("prompt", "Guided setup", "prompt"), method("manual", "Manual MCP", "manual")]),
+		card("hermes", "runtimes", "Hermes Agent", "Use Itsuki alongside Hermes' existing memory system.",
+			"agents", "hermes", [method("native", "Native provider", "native", true), method("mcp", "MCP", "mcp")]),
+		card("pi", "runtimes", "Pi Agent", "Add persistent memory through Pi's native extension.",
+			"agents", "pi", [method("native", "Native extension", "native", true), method("rest", "REST", "rest")]),
+
+		card("langchain", "frameworks", "LangChain / LangGraph", "Expose Itsuki memory tools to agents and graphs.",
+			"integrations", "python", [method("mcp", "MCP", "langchain", true)], { mark: "LC", aliases: ["langgraph"] }),
+		card("crewai", "frameworks", "CrewAI", "Give crews shared, user-scoped long-term memory.",
+			"integrations", "python", [method("mcp", "MCP", "crewai", true)], { mark: "CR" }),
+		card("autogen", "frameworks", "AutoGen", "Add memory tools to multi-agent teams.",
+			"integrations", "python", [method("mcp", "MCP", "autogen", true)], { mark: "AG" }),
+		card("agno", "frameworks", "Agno", "Use a native toolkit or MCP memory tools.",
+			"integrations", "python", [method("native", "Native toolkit", "agno-native", true), method("mcp", "MCP", "agno")], { mark: "AN" }),
+		card("openai-agents", "frameworks", "OpenAI Agents SDK", "Attach Itsuki as an MCP server per agent.",
+			"integrations", "python", [method("mcp", "MCP", "openai-agents", true)], { mark: "OA", aliases: ["openai"] }),
+		card("google-adk", "frameworks", "Google ADK", "Use Itsuki as an ADK memory service with automatic capture.",
+			"integrations", "python", [method("native", "Native service", "google-adk", true)], { mark: "AD", aliases: ["adk"] }),
+		card("llamaindex", "frameworks", "LlamaIndex", "Use a memory block or connect through MCP.",
+			"integrations", "python", [method("native", "Native memory", "llamaindex-native", true), method("mcp", "MCP", "llamaindex")], { mark: "LI" }),
+		card("camel", "frameworks", "CAMEL", "Persist agent history through Itsuki storage.",
+			"integrations", "python", [method("native", "Native storage", "camel-native", true)], { mark: "CA" }),
+		card("mastra", "frameworks", "Mastra", "Recall on input and capture on output.",
+			"integrations", "typescript", [method("native", "Native processors", "mastra-native", true), method("mcp", "MCP", "mastra")], { mark: "MA" }),
+		card("vercel-ai", "frameworks", "Vercel AI SDK", "Wrap model calls with persistent memory.",
+			"integrations", "typescript", [method("native", "Native middleware", "vercel-ai-native", true), method("mcp", "MCP", "vercel-ai")], { mark: "VA", aliases: ["ai sdk"] }),
+
+		card("n8n", "automation", "n8n", "Save and recall memory in workflows and AI Agents.",
+			"integrations", "n8n", [method("native", "Native node", "native", true), method("http", "HTTP", "http"), method("mcp", "MCP", "mcp")],
+			{ flags: ["Self-hosted native"] }),
+		card("dify", "automation", "Dify", "Import Itsuki tools through Dify's MCP client.",
+			"integrations", "dify", [method("mcp", "MCP", null, true)]),
+		card("convex", "automation", "Convex", "Call memory from Convex actions and applications.",
+			"integrations", "convex", [method("sdk", "SDK", null, true)]),
+
+		card("python-sdk", "sdk", "Python SDK", "Add user-scoped memory to Python applications.",
+			"sdk", "python", [method("sdk", "SDK", null, true)], { docsHref: "/docs/#/sdk/python" }),
+		card("typescript-sdk", "sdk", "TypeScript SDK", "Add typed memory to Node.js applications.",
+			"sdk", "typescript", [method("sdk", "SDK", null, true)], { docsHref: "/docs/#/sdk/js" }),
+		card("rest-api", "sdk", "REST API", "Call save and recall endpoints from any backend.",
+			"sdk", "curl", [method("rest", "REST / cURL", null, true)], { mark: "API", docsHref: "/docs/#/api/rest", aliases: ["curl", "http"] }),
+	];
 }
 
-function setInstallClient(client) {
-	S.installClient = client;
-	S.installVariant = null;
-	renderView();
+function installCategoryLabel(id) {
+	return INSTALL_CATEGORIES.find((category) => category.id === id)?.label ?? "Integrations";
 }
 
-function setInstallVariant(variant) {
-	S.installVariant = variant;
+function installCardMark(card) {
+	if (card.icon) return card.icon;
+	if (card.mark) return esc(card.mark);
+	return esc(card.label.split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase());
+}
+
+function installCardSearchText(card) {
+	return [card.label, card.description, installCategoryLabel(card.category), ...card.aliases,
+		...card.methods.map((entry) => entry.label), ...card.flags].join(" ").toLowerCase();
+}
+
+function resolveInstallTarget(doors, card, route) {
+	const door = doors[card.door];
+	const client = door?.clients?.[card.client];
+	const variants = client?.variants ?? null;
+	const active = route?.variant ? variants?.[route.variant] : client;
+	return { door, client, active };
+}
+
+function applyInstallTarget(card, route) {
+	S.installCatalogId = card.id;
+	S.installRouteId = route.id;
+	S.installMethod = card.door;
+	S.installClient = card.client;
+	S.installVariant = route.variant;
+	S.installStepIndex = 0;
+}
+
+function openInstallProduct(id) {
+	const card = installCatalog().find((entry) => entry.id === id);
+	if (!card) return;
+	cleanupInstallUi({ restoreFocus: false });
+	applyInstallTarget(card, card.methods[0]);
 	renderView();
+	requestAnimationFrame(() => document.getElementById("installSetupTitle")?.focus());
+}
+
+function setInstallRoute(routeId) {
+	const card = installCatalog().find((entry) => entry.id === S.installCatalogId);
+	const route = card?.methods.find((entry) => entry.id === routeId);
+	if (!card || !route) return;
+	applyInstallTarget(card, route);
+	renderView();
+	requestAnimationFrame(() => {
+		if (S.installExpanded) lockInstallBackground("expanded");
+		document.querySelector('input[name="install-route"]:checked')?.focus();
+	});
+}
+
+function showInstallCatalog() {
+	const previous = S.installCatalogId;
+	cleanupInstallUi({ restoreFocus: false });
+	S.installCatalogId = null;
+	S.installRouteId = null;
+	S.installStepIndex = 0;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(`[data-integration-id="${previous}"]`)?.focus());
+}
+
+function setInstallCategory(category) {
+	if (!INSTALL_CATEGORIES.some((entry) => entry.id === category)) return;
+	S.installCategory = category;
+	renderView();
+	requestAnimationFrame(() => document.getElementById(`installCategory-${category}`)?.focus());
+}
+
+function filterInstallCatalog(value) {
+	S.installQuery = String(value || "");
+	const query = S.installQuery.trim().toLowerCase();
+	const root = document.querySelector(".integration-catalog");
+	if (!root) return;
+	let visible = 0;
+	root.querySelectorAll(".integration-card").forEach((card) => {
+		const matches = !query || String(card.dataset.search || "").includes(query);
+		card.hidden = !matches;
+		if (matches) visible += 1;
+	});
+	root.querySelectorAll(".integration-group").forEach((group) => {
+		const count = group.querySelectorAll(".integration-card:not([hidden])").length;
+		group.hidden = count === 0;
+		const countNode = group.querySelector(".integration-group-count");
+		if (countNode) countNode.textContent = `${count} ${count === 1 ? "integration" : "integrations"}`;
+	});
+	const result = document.getElementById("installResultCount");
+	if (result) result.textContent = `${visible} ${visible === 1 ? "integration" : "integrations"}`;
+	const empty = document.getElementById("installCatalogEmpty");
+	if (empty) empty.hidden = visible !== 0;
+	const searchClear = document.getElementById("installSearchClear");
+	if (searchClear) searchClear.hidden = !query;
+	const clear = document.getElementById("installCatalogClear");
+	if (clear) clear.hidden = !query && (S.installCategory ?? "all") === "all";
+}
+
+function clearInstallSearch() {
+	const input = document.getElementById("installSearch");
+	if (input) input.value = "";
+	filterInstallCatalog("");
+	input?.focus();
+}
+
+function clearInstallFilters() {
+	S.installQuery = "";
+	S.installCategory = "all";
+	renderView();
+	requestAnimationFrame(() => document.getElementById("installSearch")?.focus());
 }
 
 /** Every "create a key" affordance on Get started goes through the modal. */
@@ -4969,93 +5329,408 @@ function installKeyGuard() {
 	});
 }
 
-/** The Get started renderer. Reads { method, client, variant, key } and nothing else. */
+const INSTALL_UI = {
+	locks: new Set(), bodyOverflow: "", viewOverflow: "", viewScrollTop: 0,
+	inertNodes: [], scrollFrame: 0, lightboxViewWasInert: false,
+};
+
+function lockInstallBackground(reason) {
+	if (INSTALL_UI.locks.has(reason)) return;
+	if (!INSTALL_UI.locks.size) {
+		const view = document.getElementById("view");
+		INSTALL_UI.bodyOverflow = document.body.style.overflow;
+		INSTALL_UI.viewOverflow = view?.style.overflow || "";
+		INSTALL_UI.viewScrollTop = view?.scrollTop || 0;
+		document.body.classList.add("install-overlay-open");
+		if (view) view.style.overflow = "hidden";
+		INSTALL_UI.inertNodes = ["appHeader", "rail", "memoryBrowser", "detail"]
+			.map((id) => document.getElementById(id)).filter(Boolean)
+			.map((node) => ({ node, inert: node.inert }));
+		INSTALL_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
+	}
+	INSTALL_UI.locks.add(reason);
+}
+
+function unlockInstallBackground(reason, { force = false } = {}) {
+	if (force) INSTALL_UI.locks.clear();
+	else INSTALL_UI.locks.delete(reason);
+	if (INSTALL_UI.locks.size) return;
+	document.body.classList.remove("install-overlay-open");
+	document.body.style.overflow = INSTALL_UI.bodyOverflow;
+	const view = document.getElementById("view");
+	if (view) {
+		view.style.overflow = INSTALL_UI.viewOverflow;
+		view.scrollTop = INSTALL_UI.viewScrollTop;
+	}
+	INSTALL_UI.inertNodes.forEach(({ node, inert }) => { if (node?.isConnected) node.inert = inert; });
+	INSTALL_UI.inertNodes = [];
+}
+
+function cleanupInstallUi({ restoreFocus = false } = {}) {
+	closeInstallLightbox({ restoreFocus: false });
+	S.installExpanded = false;
+	S.installLightbox = null;
+	unlockInstallBackground("expanded", { force: true });
+	MODAL_FOCUS_RETURN.delete("installExpanded");
+	if (restoreFocus) requestAnimationFrame(() => document.getElementById("installExpandButton")?.focus());
+}
+
+function openInstallExpanded() {
+	if (window.matchMedia("(max-width: 820px)").matches || S.installExpanded) return;
+	rememberModalOpener("installExpanded");
+	S.installExpanded = true;
+	renderView();
+	lockInstallBackground("expanded");
+	requestAnimationFrame(() => {
+		updateInstallExpandedSelection(S.installStepIndex, { scroll: true });
+		document.getElementById("installCollapseButton")?.focus();
+	});
+}
+
+function closeInstallExpanded({ restoreFocus = true, rerender = true } = {}) {
+	if (!S.installExpanded && !INSTALL_UI.locks.has("expanded")) return;
+	S.installExpanded = false;
+	unlockInstallBackground("expanded");
+	if (rerender && S.view === "install") renderView();
+	if (restoreFocus) restoreModalOpener("installExpanded");
+	else MODAL_FOCUS_RETURN.delete("installExpanded");
+	if (restoreFocus) requestAnimationFrame(() => document.getElementById("installExpandButton")?.focus());
+}
+
+function syncInstallResponsive() {
+	const mobile = window.matchMedia("(max-width: 820px)").matches;
+	if (S.installExpanded && mobile) {
+		closeInstallExpanded({ restoreFocus: false });
+	}
+	if (mobile) requestAnimationFrame(() => document.querySelector('.setup-step-button[aria-current="step"]')
+		?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" }));
+}
+
+function installExampleMeta(id) {
+	return {
+		"claude-connectors": { title: "Claude connector settings", caption: "Example screen — interface may change" },
+		"claude-enable": { title: "Enable Itsuki in a Claude chat", caption: "Example screen — interface may change" },
+		"claude-profile": { title: "Claude custom instructions", caption: "Example screen — interface may change" },
+	}[id] ?? null;
+}
+
+function installExampleMarkup(id) {
+	if (id === "claude-enable") return `<div class="example-window">
+		<div class="example-window-bar"><span class="example-window-dot"></span><span class="example-window-dot"></span><span class="example-window-dot"></span><span>Claude</span></div>
+		<div class="example-chat"><div class="example-chat-row">How can I help?</div><div class="example-chat-row user">Save my preference for concise project updates.</div><div class="example-chat-row"><span class="example-badge">Itsuki enabled</span> I can use the connected memory tools when appropriate.</div><div class="example-chat-input"></div></div>
+	</div>`;
+	const profile = id === "claude-profile";
+	return `<div class="example-window">
+		<div class="example-window-bar"><span class="example-window-dot"></span><span class="example-window-dot"></span><span class="example-window-dot"></span><span>Settings</span></div>
+		<div class="example-settings">
+			<div class="example-settings-nav"><b>Settings</b><span class="${profile ? "" : "selected"}">Connectors</span><span class="${profile ? "selected" : ""}">Profile</span><span>Privacy</span></div>
+			<div class="example-settings-main"><h4>${profile ? "Custom instructions" : "Connectors"}</h4>
+				<div class="example-settings-line wide"></div><div class="example-settings-line short"></div>
+				${profile ? `<div class="example-dialog-card"><div class="example-field">Use Itsuki to recall relevant context before answering…</div><span class="example-badge">Save</span></div>` : `<div class="example-connector-card"><span>Itsuki</span><span class="example-badge">Connected</span></div>`}
+			</div>
+		</div>
+	</div>`;
+}
+
+function installExampleFor(cardId, index) {
+	if (cardId !== "claude") return null;
+	return ({ 1: "claude-connectors", 2: "claude-enable", 3: "claude-profile" })[index] ?? null;
+}
+
+function renderInstallExample(id) {
+	const meta = installExampleMeta(id);
+	if (!meta) return "";
+	return `<figure class="setup-example">
+		<button class="setup-example-button" type="button" onclick="openInstallLightbox('${id}')"
+			aria-label="Open larger example: ${esc(meta.title)}">
+			<span class="setup-example-frame">${installExampleMarkup(id)}</span>
+			<span class="setup-example-caption">${esc(meta.caption)} · Select to enlarge</span>
+		</button>
+	</figure>`;
+}
+
+function openInstallLightbox(id) {
+	const meta = installExampleMeta(id);
+	if (!meta) return;
+	closeInstallLightbox({ restoreFocus: false });
+	rememberModalOpener("installLightbox");
+	S.installLightbox = id;
+	const host = document.createElement("div");
+	host.id = "installLightbox";
+	host.className = "modal-backdrop install-lightbox";
+	host.setAttribute("role", "dialog");
+	host.setAttribute("aria-modal", "true");
+	host.setAttribute("aria-labelledby", "installLightboxTitle");
+	host.tabIndex = -1;
+	host.onclick = (event) => { if (event.target === host) closeInstallLightbox(); };
+	host.innerHTML = `<div class="install-lightbox-dialog">
+		<div class="install-lightbox-head"><h3 id="installLightboxTitle">${esc(meta.title)}</h3>
+			<button class="ghost" type="button" onclick="closeInstallLightbox()" aria-label="Close example">${ICON.close}</button></div>
+		<div class="setup-example-frame">${installExampleMarkup(id)}</div>
+		<div class="setup-example-caption">${esc(meta.caption)}</div>
+	</div>`;
+	const view = document.getElementById("view");
+	INSTALL_UI.lightboxViewWasInert = Boolean(view?.inert);
+	if (view) view.inert = true;
+	document.body.appendChild(host);
+	lockInstallBackground("lightbox");
+	requestAnimationFrame(() => host.querySelector("button")?.focus());
+}
+
+function closeInstallLightbox({ restoreFocus = true } = {}) {
+	const host = document.getElementById("installLightbox");
+	if (!host && !S.installLightbox) return;
+	host?.remove();
+	S.installLightbox = null;
+	const view = document.getElementById("view");
+	if (view) view.inert = INSTALL_UI.lightboxViewWasInert;
+	unlockInstallBackground("lightbox");
+	if (restoreFocus) restoreModalOpener("installLightbox");
+	else MODAL_FOCUS_RETURN.delete("installLightbox");
+}
+
+function installStepContent(step, key, index, card) {
+	const code = step.code ? step.code(key ?? MCP_KEY_PLACEHOLDER) : null;
+	const action = code?.includes(MCP_KEY_PLACEHOLDER)
+		? ""
+		: typeof step.action === "function" ? step.action(key) : step.action;
+	const titleLink = step.titleHref
+		? ` <a class="step-title-link" href="${esc(step.titleHref)}" target="_blank" rel="noopener"
+				title="${esc(step.titleHrefLabel ?? "Open")}" aria-label="${esc(step.titleHrefLabel ?? "Open")}">${ICON.external}</a>`
+		: "";
+	const example = installExampleFor(card.id, index);
+	return `<div class="setup-guide-title-row"><div><h3 class="step-title">${esc(step.title)}${titleLink}</h3>
+		<div class="step-desc">${esc(step.body)}</div></div></div>
+		<div class="step-content">${action ?? ""}${code ? installCodeBlock(code, step.codeLabel) : ""}
+			${step.done ? `<div class="step-done">${step.done}</div>` : ""}
+			${step.note ? `<div class="step-note">${step.note}</div>` : ""}
+			${example ? renderInstallExample(example) : ""}</div>`;
+}
+
+function updateInstallExpandedSelection(index, { scroll = false } = {}) {
+	const pane = document.getElementById("installGuidePane");
+	const sections = [...document.querySelectorAll(".setup-guide-section")];
+	if (!sections.length) return;
+	const safeIndex = Math.max(0, Math.min(Number(index) || 0, sections.length - 1));
+	S.installStepIndex = safeIndex;
+	document.querySelectorAll(".setup-step-button").forEach((button, buttonIndex) => {
+		button.toggleAttribute("aria-current", buttonIndex === safeIndex);
+		if (buttonIndex === safeIndex) button.setAttribute("aria-current", "step");
+		else button.removeAttribute("aria-current");
+	});
+	sections.forEach((section, sectionIndex) => section.classList.toggle("is-current", sectionIndex === safeIndex));
+	if (scroll && pane) {
+		const top = Math.max(0, sections[safeIndex].offsetTop - 30);
+		pane.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+	}
+}
+
+function setInstallStep(index, { focusPanel = false } = {}) {
+	S.installStepIndex = Math.max(0, Number(index) || 0);
+	if (S.installExpanded) {
+		updateInstallExpandedSelection(S.installStepIndex, { scroll: true });
+		requestAnimationFrame(() => document.getElementById(`installStepTab-${S.installStepIndex}`)?.focus());
+		return;
+	}
+	renderView();
+	requestAnimationFrame(() => {
+		const target = document.getElementById(focusPanel ? `installStepPanel-${S.installStepIndex}` : `installStepTab-${S.installStepIndex}`);
+		target?.focus();
+	});
+}
+
+function onInstallStepKeydown(event, index, count) {
+	const keys = ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"];
+	if (!keys.includes(event.key)) return;
+	event.preventDefault();
+	let next = index;
+	if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % count;
+	if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + count) % count;
+	if (event.key === "Home") next = 0;
+	if (event.key === "End") next = count - 1;
+	setInstallStep(next);
+}
+
+function onInstallGuideScroll(pane) {
+	if (!S.installExpanded || INSTALL_UI.scrollFrame) return;
+	INSTALL_UI.scrollFrame = requestAnimationFrame(() => {
+		INSTALL_UI.scrollFrame = 0;
+		const sections = [...pane.querySelectorAll(".setup-guide-section")];
+		if (!sections.length) return;
+		let index = 0;
+		if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4) index = sections.length - 1;
+		else {
+			const threshold = pane.scrollTop + 56;
+			sections.forEach((section, candidate) => { if (section.offsetTop <= threshold) index = candidate; });
+		}
+		updateInstallExpandedSelection(index);
+	});
+}
+
+function installSetupHead(selected, project) {
+	return `<div class="setup-head">
+		<div class="setup-identity"><span class="integration-mark">${installCardMark(selected)}</span><div>
+			<div class="setup-eyebrow">${esc(installCategoryLabel(selected.category))}</div>
+			<h2 id="installSetupTitle" class="setup-title" tabindex="-1">${esc(selected.label)}</h2>
+			<p class="setup-description">${esc(selected.description)}</p>
+			<div class="install-project-scope">This connection belongs only to <b>${esc(project?.name || "the selected project")}</b>.</div>
+		</div></div>
+		${selected.docsHref ? `<a class="install-docs" href="${esc(selected.docsHref)}" target="_blank" rel="noopener">Documentation ${ICON.external}</a>` : ""}
+	</div>`;
+}
+
+function installMethodPicker(selected, route) {
+	return `<fieldset class="setup-methods"><legend>Setup method</legend><div class="setup-method-grid">
+		${selected.methods.map((entry) => `<label class="setup-method-option"><input type="radio" name="install-route" value="${esc(entry.id)}"
+			onchange="setInstallRoute('${entry.id}')" ${entry.id === route.id ? "checked" : ""} />
+			<span><span class="setup-method-label">${esc(entry.label)}</span>${entry.recommended ? `<span class="setup-recommended">Recommended</span>` : ""}</span></label>`).join("")}
+	</div></fieldset>`;
+}
+
+function installSetupConsole(active, route, selected, key, expanded) {
+	const count = active.steps.length;
+	const selectedIndex = Math.max(0, Math.min(Number(S.installStepIndex) || 0, count - 1));
+	S.installStepIndex = selectedIndex;
+	const navRole = "navigation";
+	const nav = active.steps.map((step, index) => `<button id="installStepTab-${index}" class="setup-step-button" type="button"
+		${index === selectedIndex ? `aria-current="step"` : ""}
+		onclick="setInstallStep(${index})" onkeydown="onInstallStepKeydown(event, ${index}, ${count})">
+		<span class="setup-step-index">${String(index + 1).padStart(2, "0")}</span><span>${esc(step.title)}</span></button>`).join("");
+	const visibleSteps = expanded ? active.steps.map((step, index) => ({ step, index })) : [{ step: active.steps[selectedIndex], index: selectedIndex }];
+	const sections = visibleSteps.map(({ step, index }) => `<section id="installStepPanel-${index}"
+		class="setup-guide-section${index === selectedIndex ? " is-current" : ""}" data-step-number="${String(index + 1).padStart(2, "0")}"
+		role="region" tabindex="0" aria-labelledby="installStepTab-${index}">
+		${installStepContent(step, key, index, selected)}</section>`).join("");
+	return `<div class="setup-console${expanded ? " is-expanded" : ""}">
+		<div class="setup-step-nav" role="${navRole}" aria-label="${expanded ? "Setup steps" : "Choose a setup step"}">${nav}</div>
+		<div class="setup-console-divider" aria-hidden="true"></div>
+		<div id="installGuidePane" class="setup-guide-pane" ${expanded ? `onscroll="onInstallGuideScroll(this)"` : ""}>${sections}</div>
+		<button id="${expanded ? "installCollapseButton" : "installExpandButton"}" class="setup-expand" type="button"
+			onclick="${expanded ? "closeInstallExpanded()" : "openInstallExpanded()"}" aria-expanded="${expanded}"
+			aria-label="${expanded ? "Collapse setup guide" : "Expand setup guide"}">${expanded ? ICON.collapse : ICON.expand}<span>${expanded ? "Collapse" : "Expand"}</span></button>
+	</div>`;
+}
+
+/** The Get started renderer: catalog first, focused setup second. */
 function viewInstall(v) {
 	const project = selectedManagedProject();
 	const doors = installMethods();
-	const state = {
-		method: doors[S.installMethod] ? S.installMethod : "appConnect",
-		client: null,
-		variant: null,
-		key: installKey(),
-	};
-	const door = doors[state.method];
-	state.client = door.clients[S.installClient] ? S.installClient : Object.keys(door.clients)[0];
-	const client = door.clients[state.client];
-	// Some clients offer two install routes (plugin bundle vs raw MCP): a second
-	// tab row appears only for those, exactly where the choice actually exists.
-	const variants = client.variants ?? null;
-	if (variants) state.variant = variants[S.installVariant] ? S.installVariant : Object.keys(variants)[0];
-	const active = variants ? variants[state.variant] : client;
-
-	const steps = active.steps.map((step, i) => {
-		const code = step.code ? step.code(state.key ?? MCP_KEY_PLACEHOLDER) : null;
-		// A locked code block already carries the create-link button. Showing the
-		// step's own one above it would offer the same action twice.
-		const action = code?.includes(MCP_KEY_PLACEHOLDER)
-			? ""
-			: typeof step.action === "function" ? step.action(state.key) : step.action;
-		// A link on the title costs no line of prose, which a note under the
-		// step would. That matters on a page whose whole problem was crowding.
-		const titleLink = step.titleHref
-			? ` <a class="step-title-link" href="${esc(step.titleHref)}" target="_blank" rel="noopener"
-					title="${esc(step.titleHrefLabel ?? "Open")}" aria-label="${esc(step.titleHrefLabel ?? "Open")}">${ICON.external}</a>`
-			: "";
-		return `
-		<div class="step-row">
-			<div class="step-left">
-				<div class="step-num">${i + 1}</div>
-				<div>
-					<div class="step-title">${esc(step.title)}${titleLink}</div>
-					<div class="step-desc">${esc(step.body)}</div>
-				</div>
-			</div>
-			<div class="step-right">
-				${action ?? ""}
-				${code ? installCodeBlock(code, step.codeLabel) : ""}
-				${step.done ? `<div class="step-done">${step.done}</div>` : ""}
-				${step.note ? `<div class="step-note">${step.note}</div>` : ""}
-			</div>
-		</div>`;
-	}).join("");
-
+	const catalog = installCatalog(doors);
+	const selected = catalog.find((entry) => entry.id === S.installCatalogId) ?? null;
+	const key = installKey();
+	const keyWarning = key ? `<div class="key-warning" role="status" style="margin-bottom:18px">
+		This one-time MCP link is visible in the setup below. Copy it before leaving this project; it cannot be retrieved again.
+		<button class="ghost mini" onclick="dismissInstallSecret()">Dismiss secret</button>
+	</div>` : "";
 	const wrap = el("div");
 	wrap.className = "install-layout";
-	wrap.innerHTML = `
-		<div class="install-intro page-head">
-			<h2 class="page-title">Get started with ${PRODUCT.name}</h2>
-			<p class="page-sub">Connections created here access only <b>${esc(project?.name || "the selected project")}</b>. Switch projects before creating a connection for another workspace.</p>
-		</div>
-		${state.key ? `<div class="key-warning" role="status" style="margin-bottom:14px">
-			This one-time MCP link is visible in the setup below. Copy it before leaving this project; it cannot be retrieved again.
-			<button class="ghost mini" onclick="dismissInstallSecret()">Dismiss secret</button>
-		</div>` : ""}
-		<div class="method-cards">
-			${Object.entries(doors).map(([id, m]) => `
-				<button class="method-card ${id === state.method ? "active" : ""}" onclick="setInstallMethod('${id}')">
-					<span class="mc-icon">${m.icon ?? ""}</span>
-					<span class="mc-text"><b>${esc(m.label)}</b><span>${esc(m.blurb)}</span></span>
-				</button>`).join("")}
-		</div>
-		${Object.keys(door.clients).length > 1 ? `
-			<div class="client-tabs">
-				${Object.entries(door.clients).map(([id, c]) => `
-					<button class="term-tab ${id === state.client ? "active" : ""}" onclick="setInstallClient('${id}')">${c.icon ?? ""}${esc(c.label)}</button>`).join("")}
-			</div>` : ""}
-		${variants ? `
-			<div class="client-tabs variant-tabs">
-				${Object.entries(variants).map(([id, variant]) => `
-					<button class="term-tab ${id === state.variant ? "active" : ""}" onclick="setInstallVariant('${id}')">${esc(variant.label)}</button>`).join("")}
-			</div>` : ""}
-		${client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : ""}
-		${["plugin", "agents", "integrations"].includes(state.method) ? `
-			<div class="plugin-stage">
-				<div class="plugin-stage-head">
-					<div class="plugin-stage-title">${client.icon ?? ""}<span>${esc(client.label)}</span></div>
-					<a class="install-docs" href="${esc(client.docsHref)}" target="_blank" rel="noopener">View docs ${ICON.external}</a>
+
+	if (!selected) {
+		const category = INSTALL_CATEGORIES.some((entry) => entry.id === S.installCategory)
+			? S.installCategory : "all";
+		const query = String(S.installQuery || "").trim().toLowerCase();
+		const categoryCards = catalog.filter((card) => category === "all" || card.category === category);
+		const visibleCount = categoryCards.filter((card) => !query || installCardSearchText(card).includes(query)).length;
+		const groupCategories = INSTALL_CATEGORIES.slice(1).filter((entry) => category === "all" || entry.id === category);
+		const groups = groupCategories.map((group) => {
+			const cards = categoryCards.filter((card) => card.category === group.id);
+			if (!cards.length) return "";
+			const visibleInGroup = cards.filter((card) => !query || installCardSearchText(card).includes(query)).length;
+			return `<section class="integration-group" data-integration-group="${esc(group.id)}"${visibleInGroup ? "" : " hidden"}>
+				<div class="integration-group-head">
+					<h3 class="integration-group-title">${esc(group.label)}</h3>
+					<span class="integration-group-count">${visibleInGroup} ${visibleInGroup === 1 ? "integration" : "integrations"}</span>
 				</div>
-				<div class="steps">${steps}</div>
-			</div>` : `<div class="steps">${steps}</div>`}`;
+				<div class="integration-grid">
+					${cards.map((card) => {
+						const matches = !query || installCardSearchText(card).includes(query);
+						return `<button class="integration-card" data-integration-id="${esc(card.id)}"
+							data-search="${esc(installCardSearchText(card))}" onclick="openInstallProduct('${card.id}')"
+							aria-label="${esc(`${card.label}: ${card.description}`)}"${matches ? "" : " hidden"}>
+							<div class="integration-card-top">
+								<span class="integration-mark">${installCardMark(card)}</span>
+								<span class="integration-card-copy"><span class="integration-card-name">${esc(card.label)}</span><span class="integration-card-desc">${esc(card.description)}</span></span>
+								<span class="integration-card-arrow" aria-hidden="true">&rarr;</span>
+							</div>
+							<span class="integration-badges">
+								${card.methods.map((entry) => `<span class="integration-badge">${esc(entry.label)}</span>`).join("")}
+								${card.flags.map((flag) => `<span class="integration-badge qualifier">${esc(flag)}</span>`).join("")}
+							</span>
+						</button>`;
+					}).join("")}
+				</div>
+			</section>`;
+		}).join("");
+
+		wrap.innerHTML = `
+			<div class="install-intro page-head">
+				<h2 class="page-title">Connect ${PRODUCT.name}</h2>
+				<p class="page-sub">Choose the app, agent, framework, or API you already use. We'll show the quickest supported setup.</p>
+				<div class="install-project-scope">Connections created here access only <b>${esc(project?.name || "the selected project")}</b>.</div>
+			</div>
+			${keyWarning}
+			<div class="integration-catalog">
+				<div class="catalog-toolbar">
+					<label class="catalog-search">
+						<span class="sr-only">Search integrations</span>${ICON.search}
+						<input id="installSearch" type="search" value="${esc(S.installQuery || "")}"
+							placeholder="Search Claude, LangChain, n8n…" autocomplete="off"
+							oninput="filterInstallCatalog(this.value)" />
+						<button id="installSearchClear" class="catalog-search-clear" type="button"
+							onclick="clearInstallSearch()" aria-label="Clear search"${query ? "" : " hidden"}>&times;</button>
+					</label>
+					<div class="catalog-filters" aria-label="Integration categories">
+						${INSTALL_CATEGORIES.map((entry) => `<button id="installCategory-${entry.id}" class="catalog-filter" type="button"
+							onclick="setInstallCategory('${entry.id}')" aria-pressed="${entry.id === category}">${esc(entry.label)}</button>`).join("")}
+					</div>
+				</div>
+				<div class="catalog-meta">
+					<span id="installResultCount" aria-live="polite"><strong>${visibleCount}</strong> ${visibleCount === 1 ? "integration" : "integrations"}</span>
+					<button id="installCatalogClear" class="catalog-clear" type="button" onclick="clearInstallFilters()"
+						${query || category !== "all" ? "" : "hidden"}>Clear filters</button>
+				</div>
+				${groups}
+				<div id="installCatalogEmpty" class="catalog-empty"${visibleCount ? " hidden" : ""}>
+					<b>No integrations found</b>
+					Try another name or clear the current filters.<br />
+					<button class="catalog-clear" type="button" onclick="clearInstallFilters()">Clear filters</button>
+				</div>
+			</div>`;
+		v.appendChild(wrap);
+		return;
+	}
+
+	const route = selected.methods.find((entry) => entry.id === S.installRouteId) ?? selected.methods[0];
+	const { client, active } = resolveInstallTarget(doors, selected, route);
+	if (!client || !active?.steps) {
+		wrap.innerHTML = `<button class="install-back" onclick="showInstallCatalog()">${ICON.arrowLeft} All integrations</button>
+			<div class="catalog-empty"><b>Setup unavailable</b>This integration could not be loaded. Return to the catalog and try again.</div>`;
+		v.appendChild(wrap);
+		return;
+	}
+
+	wrap.classList.add("install-detail");
+	const head = installSetupHead(selected, project);
+	const methods = installMethodPicker(selected, route);
+	const hint = client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : "";
+	const consoleMarkup = installSetupConsole(active, route, selected, key, S.installExpanded);
+	const liveRegion = `<div id="installLiveRegion" class="install-live-region" aria-live="polite" aria-atomic="true"></div>`;
+
+	if (S.installExpanded) {
+		wrap.innerHTML = `<div id="installExpanded" class="modal-backdrop install-expanded-backdrop" role="dialog"
+			aria-modal="true" aria-labelledby="installSetupTitle" tabindex="-1"
+			onclick="if(event.target===this) closeInstallExpanded()">
+			<div class="setup-expanded-dialog" onclick="event.stopPropagation()">
+				${keyWarning}${head}${methods}${hint}${consoleMarkup}
+			</div>
+		</div>${liveRegion}`;
+		v.appendChild(wrap);
+		requestAnimationFrame(() => lockInstallBackground("expanded"));
+		return;
+	}
+
+	wrap.innerHTML = `<button class="install-back" type="button" onclick="showInstallCatalog()">${ICON.arrowLeft} All integrations</button>
+		${keyWarning}${head}${methods}${hint}${consoleMarkup}${liveRegion}`;
 	v.appendChild(wrap);
 }
 
@@ -5079,12 +5754,20 @@ function installCodeBlock(text, label = "code") {
 	</div>`;
 }
 
-/** Copy, then swap the icon to a tick for a moment. No toast — the icon says it. */
+function announceInstallStatus(message) {
+	const region = document.getElementById("installLiveRegion");
+	if (!region) return;
+	region.textContent = "";
+	requestAnimationFrame(() => { region.textContent = message; });
+}
+
+/** Copy, then swap the icon to a tick and announce the result. */
 async function copyCode(button, text) {
 	const copied = await copyText(text, null);
-	if (!copied) return;
+	if (!copied) { announceInstallStatus("Copy failed. Select the text and copy it manually."); return; }
 	button.innerHTML = ICON.check;
 	button.classList.add("copied");
+	announceInstallStatus("Copied to clipboard.");
 	setTimeout(() => { button.innerHTML = ICON.copy; button.classList.remove("copied"); }, 1400);
 }
 
@@ -7406,8 +8089,8 @@ function viewKeys(v) {
 				<div><h2 class="page-title">API keys</h2>
 					<p class="page-sub">Every key created here is permanently bound to <b>${esc(project?.name || "this project")}</b>. It cannot read or write another project. To connect a chat app, create an MCP link in <a href="#" onclick="setView('install');return false">Get started</a>.</p></div>
 				${canManage
-					? '<button onclick="openKeyModal(\'api\')">Create API key</button>'
-					: '<button disabled title="Your role cannot create project keys.">Create API key</button>'}
+					? '<button id="createApiKeyButton" onclick="openKeyModal(\'api\')">Create API key</button>'
+					: '<button id="createApiKeyButton" disabled title="Your role cannot create project keys.">Create API key</button>'}
 			</div>
 		</div>
 		<div class="box" style="max-width:1080px">
@@ -7442,6 +8125,9 @@ function openKeyModal(type = "api") {
 	if (installKey()) return toast("Dismiss the visible one-time link before creating another key.", true);
 	if (KEYMODAL.busy || KEYMODAL.result) return toast("Finish with the visible key before creating another one.", true);
 	if (typeof rememberModalOpener === "function") rememberModalOpener("keyModal");
+	// Never expose two aria-modal dialogs at once. The setup step and route stay
+	// selected, so the user returns to the same compact guide after closing.
+	if (S.installExpanded) closeInstallExpanded({ restoreFocus: false });
 	KEYMODAL.open = true;
 	KEYMODAL.type = type;
 	KEYMODAL.busy = false;
@@ -7480,12 +8166,14 @@ function closeKeyModal({ explicit = false } = {}) {
 	KEYMODAL.error = "";
 	KEYMODAL.mutation = null;
 	renderKeyModal();
-	if (typeof restoreModalOpener === "function") restoreModalOpener("keyModal");
 	// An MCP close acknowledges the modal, then moves the still-visible secret
 	// into Get started. That internal handoff is the only navigation permitted
 	// while the one-time token is live; all ordinary navigation stays locked.
 	if (revealInstallSecret && S.view !== "install") setView("connect", { allowCopyOnce: true });
 	else if (["install", "keys"].includes(S.view)) renderView();
+	if (typeof restoreModalOpener === "function") {
+		restoreModalOpener("keyModal", S.view === "keys" ? "createApiKeyButton" : "installSetupTitle");
+	}
 }
 
 function renderKeyModal() {
@@ -13692,10 +14380,13 @@ $("#key").addEventListener("keydown", e=>{ if(e.key==="Enter") load(); });
 $("#tabs").addEventListener("click", e=>{ const t=e.target.closest(".tab"); if (t && t.dataset.view) setView(t.dataset.view); });
 window.addEventListener("popstate", handlePopState);
 window.addEventListener("hashchange", handleHashChange);
+window.addEventListener("resize", syncInstallResponsive);
+window.addEventListener("orientationchange", syncInstallResponsive);
 window.addEventListener("keydown", (event) => {
 	if (trapModalFocus(event)) return;
 	if (event.key !== "Escape") return;
 	const modal = openModalHost();
+	if (modal?.id === "installLightbox") { event.preventDefault(); closeInstallLightbox(); return; }
 	if (modal?.id === "inviteModal") { event.preventDefault(); dismissInvitationRedemption(); return; }
 	if (modal?.id === "projectModal") { event.preventDefault(); closeProjectModal(); return; }
 	if (modal?.id === "settingsModal") { event.preventDefault(); closeSettingsModal(); return; }
@@ -13706,6 +14397,9 @@ window.addEventListener("keydown", (event) => {
 		else closeKeyModal();
 		return;
 	}
+	if (modal?.id === "installExpanded") { event.preventDefault(); closeInstallExpanded(); return; }
+	if (S.installLightbox) { event.preventDefault(); closeInstallLightbox(); return; }
+	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }
 	toggleProjectMenu(false);
 });
 document.addEventListener("click", (event) => {
