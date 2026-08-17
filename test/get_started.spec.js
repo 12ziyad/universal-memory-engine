@@ -261,7 +261,16 @@ describe("the visual redesign", () => {
 	it("centers a wider catalog canvas instead of pinning it to the rail", () => {
 		expect(fnSource("viewInstall")).toContain('wrap.className = "install-layout";');
 		expect(fnSource("viewOverview")).not.toContain('wrap.className = "install-layout";');
-		expect(css).toContain(".install-layout { width: min(1160px, 100%); margin: 0 auto; }");
+		expect(css).toContain(".install-layout { width: min(1080px, 100%); margin: 0 auto; }");
+		expect(css).toContain(".integration-catalog { width: min(800px, 100%); margin-inline: auto; }");
+		expect(css).toContain(".integration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }");
+		expect(css).toMatch(/\.integration-card \{[^}]*height: 208px;[^}]*align-items: center;[^}]*text-align: center;[^}]*padding: 22px 20px 16px;/s);
+		expect(css).toMatch(/\.integration-mark \{[^}]*width: 44px; height: 44px;/s);
+		expect(css).toMatch(/\.integration-card-desc \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/s);
+		const desktopNarrowCss = css.slice(css.indexOf("@media (max-width: 980px)"), css.indexOf("@media (max-width: 820px)"));
+		const tabletCss = css.slice(css.indexOf("@media (max-width: 820px)"), css.indexOf("@media (max-width: 620px)"));
+		expect(desktopNarrowCss).toContain(".integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }");
+		expect(tabletCss).toContain(".integration-grid { grid-template-columns: 1fr; }");
 		expect(css).toMatch(/\.setup-console \{[^}]*grid-template-columns: 210px 1px minmax\(0, 1fr\)/s);
 	});
 
@@ -276,19 +285,43 @@ describe("the visual redesign", () => {
 		expect(css).toContain(".setup-expanded-dialog .setup-guide-section::before");
 	});
 
-	it("gives every catalog card either a self-hosted icon or a monogram", () => {
-		for (const door of ["ICON.link", "ICON.code", "ICON.plug"]) expect(script).toContain(`icon: ${door}`);
-		for (const client of ["BRAND.claude", "BRAND.chatgpt", "ICON.pointer", "BRAND.python", "BRAND.typescript", "ICON.chevron", "BRAND.codex"]) {
-			expect(script).toContain(`icon: ${client}`);
+	it("gives all 26 products a stable non-text mark from one visual system", () => {
+		const hueSource = script.match(/const INSTALL_PRODUCT_HUES = Object\.freeze\((\{[\s\S]*?\})\);/)?.[1];
+		expect(hueSource).toBeTruthy();
+		const hues = new Function(`return (${hueSource});`)();
+		const shapeCount = Number(script.match(/const INSTALL_PRODUCT_SHAPE_COUNT = (\d+);/)?.[1]);
+		expect(shapeCount).toBe(12);
+		const renderMark = new Function(
+			"INSTALL_PRODUCT_SHAPE_COUNT",
+			`${fnSource("installProductMark")}\nreturn installProductMark;`,
+		)(shapeCount);
+		const catalog = buildCatalog();
+		expect(new Set(Object.keys(hues))).toEqual(new Set(catalog.map((card) => card.id)));
+		const visualPairs = [];
+		const usedShapes = new Set();
+		for (const card of catalog) {
+			expect(Number.isInteger(hues[card.id]) && hues[card.id] >= 0 && hues[card.id] <= 359, card.id).toBe(true);
+			const mark = renderMark(card.id);
+			expect(mark, card.id).toContain(`data-product-icon="${card.id}"`);
+			expect(mark, card.id).toContain('aria-hidden="true"');
+			expect(mark, card.id).toContain('class="product-shape-primary"');
+			expect(mark, card.id).toContain('class="product-shape-secondary"');
+			expect(mark, card.id).not.toMatch(/>(LC|CR|AG|AN|OA|AD|LI|CA|MA|VA|API)</);
+			const shape = Number(mark.match(/product-shape-(\d+)/)?.[1]);
+			expect(shape >= 0 && shape < shapeCount, card.id).toBe(true);
+			usedShapes.add(shape);
+			visualPairs.push(`${hues[card.id]}:${shape}`);
+			expect(card).not.toHaveProperty("mark");
 		}
-		expect(script).toContain('<span class="integration-mark">${installCardMark(card)}</span>');
-		expect(script).toContain("function installCardMark(");
-		// Neutral glyphs stay inline and product marks stay self-hosted; no icon CDN.
-		expect(script).toContain('const ICON = ((paths) =>');
-		expect(script).toContain('const BRAND = Object.freeze({');
-		for (const path of ["/assets/brands/claude.png", "/assets/brands/codex.png", "/assets/brands/python.png", "/assets/brands/typescript.png"]) {
-			expect(script).toContain(path);
-		}
+		expect(usedShapes).toEqual(new Set([0, 1, 2, 3, 4, 6, 8, 9, 11]));
+		expect(new Set(visualPairs).size).toBe(26);
+		for (const shape of Array.from({ length: 12 }, (_, index) => index)) expect(css).toContain(`.product-shape-${shape} .product-shape-primary`);
+		expect(css).toMatch(/\.product-shape-2 \.product-shape-secondary \{[^}]*background: currentColor;/);
+		expect(css).toContain("--install-mark-lightness: 38%");
+		expect(css).toContain("--install-mark-lightness: 72%");
+		expect(fnSource("installCatalog")).not.toContain("ICON.blocks");
+		expect(fnSource("installSetupHead")).toContain("installCardMark(selected)");
+		expect(fnSource("viewInstall")).toContain("installCardMark(card)");
 	});
 
 	it("shortens the method card subtitles", () => {
@@ -413,11 +446,13 @@ function buildMethods() {
 
 /** Build the user-facing catalog against the real setup graph. */
 function buildCatalog(doors = buildMethods()) {
-	const iconProxy = new Proxy({}, { get: () => "<svg/>" });
 	return new Function(
-		"ICON",
+		"installProductMark", "installProductHue",
 		`${fnSource("installCatalog")}\nreturn installCatalog;`,
-	)(iconProxy)(doors);
+	)(
+		(id) => `<svg data-product-icon="${id}" aria-hidden="true"/>`,
+		(id) => id,
+	)(doors);
 }
 
 function buildTargetResolver() {
@@ -427,11 +462,31 @@ function buildTargetResolver() {
 describe("the integration catalog contract", () => {
 	it("lists each of the 26 supported products exactly once", () => {
 		const catalog = buildCatalog();
-		expect(catalog).toHaveLength(26);
+		const ids = [
+			"claude", "chatgpt", "claude-code", "codex", "cursor", "opencode", "antigravity",
+			"openclaw", "hermes", "pi", "langchain", "crewai", "autogen", "agno",
+			"openai-agents", "google-adk", "llamaindex", "camel", "mastra", "vercel-ai",
+			"n8n", "dify", "convex", "python-sdk", "typescript-sdk", "rest-api",
+		];
+		expect(catalog.map((card) => card.id)).toEqual(ids);
 		expect(new Set(catalog.map((card) => card.id)).size).toBe(catalog.length);
 		for (const category of ["apps", "coding", "runtimes", "frameworks", "automation", "sdk"]) {
 			expect(catalog.some((card) => card.category === category)).toBe(true);
 		}
+	});
+
+	it("keeps the approved featured order in the flat catalog", () => {
+		const featuredSource = script.match(/const INSTALL_FEATURED_ORDER = Object\.freeze\((\[[\s\S]*?\])\);/)?.[1];
+		expect(featuredSource).toBeTruthy();
+		const featured = new Function(`return (${featuredSource});`)();
+		const order = new Function(
+			"INSTALL_FEATURED_ORDER",
+			`${fnSource("orderInstallCatalog")}\nreturn orderInstallCatalog;`,
+		)(featured);
+		expect(Array.from(order(buildCatalog()), (card) => card.id)).toEqual(Array.from(featured));
+		expect(fnSource("viewInstall")).toContain("orderInstallCatalog(catalog)");
+		expect(fnSource("viewInstall")).toContain('id="installCatalogGrid" class="integration-grid"');
+		expect(fnSource("viewInstall")).not.toContain("integration-group");
 	});
 
 	it("groups products with multiple supported methods into one card", () => {
@@ -480,12 +535,23 @@ describe("the integration catalog contract", () => {
 	it("renders searchable categories, accessible filters, methods, and an empty state", () => {
 		const view = fnSource("viewInstall");
 		expect(view).toContain('type="search"');
-		expect(view).toContain('aria-label="Integration categories"');
-		expect(view).toContain('aria-pressed="${entry.id === category}"');
+		expect(view).toContain('role="tablist" aria-label="Integration categories"');
+		expect(view).toContain('role="tab" aria-controls="installCatalogGrid"');
+		expect(view).toContain('aria-selected="${entry.id === category}"');
+		expect(view).not.toContain('aria-pressed="${entry.id === category}"');
 		expect(view).toContain('aria-live="polite"');
+		expect(view).toContain('<div id="installCatalogGrid" class="integration-grid"');
+		expect(view).not.toContain("integration-group");
+		expect(fnSource("filterInstallCatalog")).not.toContain("integration-group");
 		expect(fnSource("installMethodPicker")).toContain('name="install-route"');
 		expect(view).toContain("No integrations found");
 		expect(script).toContain('aliases: ["langgraph"]');
+		expect(script).toContain('{ id: "apps", label: "AI Assistants" }');
+		expect(script).toContain('{ id: "frameworks", label: "Agent Frameworks" }');
+		expect(script).toContain('{ id: "automation", label: "Workflow Automation" }');
+		expect(script).toContain('{ id: "sdk", label: "SDKs & APIs" }');
+		expect(view).toContain('lang="ja" aria-hidden="true"');
+		expect(view).toContain("One memory layer, every tool you already use.");
 	});
 
 	it("normalizes Hermes to the same variants contract as every other multi-route client", () => {

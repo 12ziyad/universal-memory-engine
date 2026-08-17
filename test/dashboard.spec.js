@@ -172,9 +172,11 @@ describe("dashboard script", () => {
 		expect(script).toContain("function installCatalog(");
 		expect(script).toContain("function openInstallProduct(");
 		expect(script).toContain('class="integration-card');
+		expect(script).toContain('id="installCatalogGrid" class="integration-grid"');
+		expect(script).not.toContain('class="integration-group');
 		expect(script).toContain('class="setup-step-button"');
 		expect(script).toContain('class="setup-guide-section');
-		expect(script).toContain("Connections created here access only");
+		expect(script).toContain("This connection belongs only to");
 		expect(script).toContain("x-itsuki-project");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.
