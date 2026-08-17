@@ -16,6 +16,11 @@ import html from "../public/index.html?raw";
 
 const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+const integrationAssetSources = import.meta.glob("../public/assets/integrations/*.{svg,png}", {
+	eager: true,
+	query: "?raw",
+	import: "default",
+});
 
 // The origin the specs simulate the page running on. One constant so a domain
 // move is a one-line change here; the page itself only ever sees location.origin.
@@ -286,43 +291,70 @@ describe("the visual redesign", () => {
 		expect(css).toContain(".setup-expanded-dialog .setup-guide-section::before");
 	});
 
-	it("gives all 26 products a stable non-text mark from one visual system", () => {
+	it("gives all 26 products a vetted self-hosted icon with a safe local fallback", () => {
 		const hueSource = script.match(/const INSTALL_PRODUCT_HUES = Object\.freeze\((\{[\s\S]*?\})\);/)?.[1];
+		const assetSource = script.match(/const INSTALL_PRODUCT_ASSETS = Object\.freeze\((\{[\s\S]*?\})\);/)?.[1];
+		const fallback = script.match(/const INSTALL_PRODUCT_FALLBACK = "([^"]+)";/)?.[1];
 		expect(hueSource).toBeTruthy();
+		expect(assetSource).toBeTruthy();
+		expect(fallback).toBe("/assets/integrations/integration.svg");
 		const hues = new Function(`return (${hueSource});`)();
-		const shapeCount = Number(script.match(/const INSTALL_PRODUCT_SHAPE_COUNT = (\d+);/)?.[1]);
-		expect(shapeCount).toBe(12);
+		const assets = new Function(`return (${assetSource});`)();
 		const renderMark = new Function(
-			"INSTALL_PRODUCT_SHAPE_COUNT",
+			"INSTALL_PRODUCT_ASSETS", "INSTALL_PRODUCT_FALLBACK",
 			`${fnSource("installProductMark")}\nreturn installProductMark;`,
-		)(shapeCount);
+		)(assets, fallback);
 		const catalog = buildCatalog();
 		expect(new Set(Object.keys(hues))).toEqual(new Set(catalog.map((card) => card.id)));
-		const visualPairs = [];
-		const usedShapes = new Set();
+		expect(new Set(Object.keys(assets))).toEqual(new Set(catalog.map((card) => card.id)));
+		expect(new Set(Object.values(assets)).size).toBe(26);
 		for (const card of catalog) {
 			expect(Number.isInteger(hues[card.id]) && hues[card.id] >= 0 && hues[card.id] <= 359, card.id).toBe(true);
+			const asset = assets[card.id];
+			expect(asset, card.id).toMatch(/^\/assets\/integrations\/[a-z0-9-]+\.(?:svg|png)$/);
+			expect(asset, card.id).not.toMatch(/(?:https?:|\/\/|data:|blob:|\.\.)/i);
+			const source = integrationAssetSources[`../public${asset}`];
+			expect(typeof source, card.id).toBe("string");
+			expect(source.length, card.id).toBeGreaterThan(0);
+			if (asset.endsWith(".svg")) {
+				const svg = source;
+				expect(svg, card.id).toMatch(/<svg\b/i);
+				expect(svg, card.id).not.toMatch(/<script\b|<foreignObject\b|\son[a-z]+\s*=/i);
+				expect(svg, card.id).not.toMatch(/(?:href|src)=["'](?:https?:|\/\/|data:|blob:)/i);
+			}
 			const mark = renderMark(card.id);
+			expect(mark, card.id).toContain(`src="${asset}"`);
 			expect(mark, card.id).toContain(`data-product-icon="${card.id}"`);
+			expect(mark, card.id).toContain('class="integration-product-icon"');
+			expect(mark, card.id).toContain('alt=""');
 			expect(mark, card.id).toContain('aria-hidden="true"');
-			expect(mark, card.id).toContain('class="product-shape-primary"');
-			expect(mark, card.id).toContain('class="product-shape-secondary"');
-			expect(mark, card.id).not.toMatch(/>(LC|CR|AG|AN|OA|AD|LI|CA|MA|VA|API)</);
-			const shape = Number(mark.match(/product-shape-(\d+)/)?.[1]);
-			expect(shape >= 0 && shape < shapeCount, card.id).toBe(true);
-			usedShapes.add(shape);
-			visualPairs.push(`${hues[card.id]}:${shape}`);
+			expect(mark, card.id).toContain('width="28" height="28"');
 			expect(card).not.toHaveProperty("mark");
 		}
-		expect(usedShapes).toEqual(new Set([0, 1, 2, 3, 4, 6, 8, 9, 11]));
-		expect(new Set(visualPairs).size).toBe(26);
-		for (const shape of Array.from({ length: 12 }, (_, index) => index)) expect(css).toContain(`.product-shape-${shape} .product-shape-primary`);
-		expect(css).toMatch(/\.product-shape-2 \.product-shape-secondary \{[^}]*background: currentColor;/);
-		expect(css).toContain("--install-mark-lightness: 38%");
-		expect(css).toContain("--install-mark-lightness: 72%");
+		expect(integrationAssetSources[`../public${fallback}`]?.length).toBeGreaterThan(0);
+		expect(renderMark("unknown-product")).toContain(`src="${fallback}"`);
+		expect(css).toContain(".integration-product-icon");
+		expect(css).toContain("object-fit: contain");
+		expect(css).not.toContain(".product-shape-");
+		expect(script).not.toContain("INSTALL_PRODUCT_SHAPE_COUNT");
 		expect(fnSource("installCatalog")).not.toContain("ICON.blocks");
 		expect(fnSource("installSetupHead")).toContain("installCardMark(selected)");
 		expect(fnSource("viewInstall")).toContain("installCardMark(card)");
+		expect(script).toContain('document.addEventListener("error", handleInstallProductIconError, true)');
+
+		const handleError = new Function(
+			"INSTALL_PRODUCT_FALLBACK",
+			`${fnSource("handleInstallProductIconError")}\nreturn handleInstallProductIconError;`,
+		)(fallback);
+		const icon = {
+			classList: { contains: (name) => name === "integration-product-icon" },
+			dataset: {}, src: assets.claude, hidden: false,
+		};
+		handleError({ target: icon });
+		expect(icon.src).toBe(fallback);
+		expect(icon.dataset.fallbackApplied).toBe("true");
+		handleError({ target: icon });
+		expect(icon.hidden).toBe(true);
 	});
 
 	it("shortens the method card subtitles", () => {

@@ -107,7 +107,7 @@
 		--input-bg: #ffffff; --border: #e0e2e7; --border2: #cdd1d8;
 		/* Three text levels, not two: primary (near-black) for headings, secondary
 		   for body prose, muted for hints and footnotes. Flat UI is usually two. */
-		--text: #17191f; --muted: #5f6672; --faint: #8a909b; --accent: #5b4fcf; --install-mark-lightness: 38%;
+		--text: #17191f; --muted: #5f6672; --faint: #8a909b; --accent: #5b4fcf;
 		--accent-hover: #4b40bd; --on-accent: #ffffff; --focus-ring: rgba(91,79,207,.38);
 		--green: #067647; --amber: #b54708; --red: #b42318; --purple: #6941c6;
 		--success-bg: #ecfdf3; --warning-bg: #fffaeb; --danger-bg: #fef3f2;
@@ -121,7 +121,7 @@
 	html[data-theme="dark"] body.app-mode {
 		--bg: #111216; --panel: #17181d; --panel2: #1e2026; --panel3: #22242a;
 		--input-bg: #1b1d22; --border: #2a2d34; --border2: #3a3e48;
-		--text: #f3f4f6; --muted: #a7adb8; --faint: #777e8a; --accent: #8b7cf6; --install-mark-lightness: 72%;
+		--text: #f3f4f6; --muted: #a7adb8; --faint: #777e8a; --accent: #8b7cf6;
 		--accent-hover: #a69af8; --on-accent: #ffffff; --focus-ring: rgba(139,124,246,.48);
 		--green: #6ce9a6; --amber: #fec84b; --red: #fda29b; --purple: #b692f6;
 		--success-bg: #102a20; --warning-bg: #30230f; --danger-bg: #321714;
@@ -471,54 +471,10 @@
 	.integration-card-desc { display: -webkit-box; max-width: 220px; margin: 0; overflow: hidden; color: var(--muted);
 		font-size: 12.5px; line-height: 1.45; text-align: center; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 	.integration-mark { flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center;
-		border: 0; border-radius: 3px; background: hsl(var(--mark-hue) 40% 50% / .13);
-		box-shadow: inset 0 0 0 1px hsl(var(--mark-hue) 45% 55% / .22);
-		color: hsl(var(--mark-hue) 52% var(--install-mark-lightness)); overflow: hidden; }
-	.integration-product-mark { position: relative; display: block; width: 24px; height: 24px; }
-	.integration-product-mark > span { position: absolute; left: 50%; top: 50%; background: currentColor; }
-	.integration-product-mark .product-shape-secondary { display: none;
-		background: color-mix(in oklab, currentColor 46%, transparent); }
-	.product-shape-0 .product-shape-primary { width: 20px; height: 20px; border-radius: 50%; background: transparent;
-		box-shadow: inset 0 0 0 3px currentColor; transform: translate(-50%, -50%); }
-	.product-shape-1 .product-shape-primary { width: 15px; height: 15px; border-radius: 2px;
-		transform: translate(-50%, -50%) rotate(45deg); }
-	.product-shape-2 .product-shape-primary { width: 19px; height: 19px; border-radius: 2px; background: transparent;
-		box-shadow: inset 0 0 0 2.5px currentColor; transform: translate(-50%, -50%); }
-	.product-shape-2 .product-shape-secondary { display: block; width: 7px; height: 7px; border-radius: 50%;
-		background: currentColor; transform: translate(-50%, -50%); }
-	.product-shape-3 .product-shape-primary { width: 5px; height: 19px; border-radius: 1px;
-		transform: translate(-50%, -50%) translateX(-5px); }
-	.product-shape-3 .product-shape-secondary { display: block; width: 5px; height: 11px; border-radius: 1px;
-		transform: translate(-50%, -50%) translateX(5px); }
-	.product-shape-4 .product-shape-primary { width: 9px; height: 18px; border-radius: 9px 0 0 9px;
-		transform: translate(-50%, -50%) translateX(-4.5px); }
-	.product-shape-4 .product-shape-secondary { display: block; width: 9px; height: 18px; border-radius: 0 9px 9px 0;
-		transform: translate(-50%, -50%) translateX(4.5px); }
-	.product-shape-5 .product-shape-primary { width: 19px; height: 5px; border-radius: 1px;
-		transform: translate(-50%, -50%); }
-	.product-shape-5 .product-shape-secondary { display: block; width: 5px; height: 19px; border-radius: 1px;
-		transform: translate(-50%, -50%); }
-	.product-shape-6 .product-shape-primary { width: 18px; height: 18px; border-radius: 50%; background: transparent;
-		box-shadow: inset 0 0 0 2.5px currentColor; transform: translate(-50%, -50%); }
-	.product-shape-6 .product-shape-secondary { display: block; width: 18px; height: 4px; border-radius: 1px;
-		background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); }
-	.product-shape-7 .product-shape-primary { width: 16px; height: 16px; border-radius: 3px 10px 3px 10px;
-		transform: translate(-50%, -50%); }
-	.product-shape-8 .product-shape-primary { width: 8px; height: 8px; border-radius: 50%;
-		transform: translate(-50%, -50%) translate(-5px, -5px); }
-	.product-shape-8 .product-shape-secondary { display: block; width: 16px; height: 16px; border-radius: 2px;
-		transform: translate(-50%, -50%) translate(3px, 3px); }
-	.product-shape-9 .product-shape-primary { width: 19px; height: 19px; border-radius: 2px; background: transparent;
-		box-shadow: inset 0 0 0 2.5px currentColor; transform: translate(-50%, -50%) rotate(45deg); }
-	.product-shape-9 .product-shape-secondary { display: block; width: 6px; height: 6px; border-radius: 1px;
-		background: currentColor; transform: translate(-50%, -50%) rotate(45deg); }
-	.product-shape-10 .product-shape-primary { width: 6px; height: 6px; border-radius: 50%;
-		box-shadow: 0 11px 0 currentColor, 0 -11px 0 color-mix(in oklab, currentColor 46%, transparent);
-		transform: translate(-50%, -50%); }
-	.product-shape-11 .product-shape-primary { width: 20px; height: 10px; border-radius: 10px 10px 0 0;
-		transform: translate(-50%, -50%) translateY(-5px); }
-	.product-shape-11 .product-shape-secondary { display: block; width: 10px; height: 10px; border-radius: 0 0 10px 10px;
-		transform: translate(-50%, -50%) translate(-5px, 5px); }
+		border: 0; border-radius: 5px; background: #fff;
+		box-shadow: inset 0 0 0 1px rgb(15 23 42 / .13), 0 1px 2px rgb(15 23 42 / .08); overflow: hidden; }
+	.integration-product-icon { display: block; width: 28px; height: 28px; object-fit: contain;
+		object-position: center; pointer-events: none; user-select: none; }
 	.integration-card-arrow { margin-top: auto; color: var(--accent); font-size: 12px; line-height: 1; }
 	.catalog-empty { border: 1px dashed var(--border2); border-radius: 13px; padding: 44px 20px;
 		text-align: center; color: var(--muted); }
@@ -4641,11 +4597,11 @@ const ICON = ((paths) => Object.fromEntries(Object.entries(paths).map(([name, d]
 });
 
 const BRAND = Object.freeze({
-	claude: `<img class="brand-icon claude" src="/assets/brands/claude.png" alt="" aria-hidden="true" />`,
-	chatgpt: `<img class="brand-icon chatgpt" src="/assets/brands/codex.png" alt="" aria-hidden="true" />`,
-	codex: `<img class="brand-icon codex" src="/assets/brands/codex.png" alt="" aria-hidden="true" />`,
-	python: `<img class="brand-icon python" src="/assets/brands/python.png" alt="" aria-hidden="true" />`,
-	typescript: `<img class="brand-icon typescript" src="/assets/brands/typescript.png" alt="" aria-hidden="true" />`,
+	claude: `<img class="brand-icon claude" src="/assets/integrations/claude.svg" alt="" aria-hidden="true" />`,
+	chatgpt: `<img class="brand-icon chatgpt" src="/assets/integrations/chatgpt.svg" alt="" aria-hidden="true" />`,
+	codex: `<img class="brand-icon codex" src="/assets/integrations/codex.svg" alt="" aria-hidden="true" />`,
+	python: `<img class="brand-icon python" src="/assets/integrations/python-sdk.svg" alt="" aria-hidden="true" />`,
+	typescript: `<img class="brand-icon typescript" src="/assets/integrations/typescript-sdk.svg" alt="" aria-hidden="true" />`,
 });
 
 /**
@@ -5114,9 +5070,9 @@ const INSTALL_CATEGORIES = Object.freeze([
 	{ id: "sdk", label: "SDKs & APIs" },
 ]);
 
-/* The approved catalog uses one coherent family of product marks rather than a
-   mixture of vendor rasters, initials and generic fallback icons. Hue and shape
-   are stable per product, so cards stay recognizable without loading a CDN. */
+/* Product identity stays entirely self-hosted. Hues remain stable metadata for
+   setup accents; the visible catalog/detail marks use the vetted local assets
+   below, with one neutral local fallback for a missing or failed image. */
 const INSTALL_PRODUCT_HUES = Object.freeze({
 	claude: 24, chatgpt: 162, "python-sdk": 210, "typescript-sdk": 222, "rest-api": 192,
 	langchain: 142, crewai: 18, autogen: 205, agno: 266, "openai-agents": 172,
@@ -5125,7 +5081,36 @@ const INSTALL_PRODUCT_HUES = Object.freeze({
 	opencode: 146, antigravity: 216, openclaw: 96, hermes: 46, pi: 286,
 });
 
-const INSTALL_PRODUCT_SHAPE_COUNT = 12;
+const INSTALL_PRODUCT_ASSETS = Object.freeze({
+	claude: "/assets/integrations/claude.svg",
+	chatgpt: "/assets/integrations/chatgpt.svg",
+	"python-sdk": "/assets/integrations/python-sdk.svg",
+	"typescript-sdk": "/assets/integrations/typescript-sdk.svg",
+	n8n: "/assets/integrations/n8n.svg",
+	"claude-code": "/assets/integrations/claude-code.svg",
+	"rest-api": "/assets/integrations/rest-api.svg",
+	langchain: "/assets/integrations/langchain.svg",
+	llamaindex: "/assets/integrations/llamaindex.svg",
+	crewai: "/assets/integrations/crewai.svg",
+	autogen: "/assets/integrations/autogen.svg",
+	agno: "/assets/integrations/agno.png",
+	camel: "/assets/integrations/camel.png",
+	"openai-agents": "/assets/integrations/openai-agents.svg",
+	"google-adk": "/assets/integrations/google-adk.svg",
+	mastra: "/assets/integrations/mastra.svg",
+	"vercel-ai": "/assets/integrations/vercel-ai.svg",
+	dify: "/assets/integrations/dify.svg",
+	convex: "/assets/integrations/convex.svg",
+	codex: "/assets/integrations/codex.svg",
+	cursor: "/assets/integrations/cursor.svg",
+	opencode: "/assets/integrations/opencode.svg",
+	antigravity: "/assets/integrations/antigravity.svg",
+	openclaw: "/assets/integrations/openclaw.svg",
+	hermes: "/assets/integrations/hermes.svg",
+	pi: "/assets/integrations/pi.svg",
+});
+
+const INSTALL_PRODUCT_FALLBACK = "/assets/integrations/integration.svg";
 
 function installProductHue(id) {
 	return INSTALL_PRODUCT_HUES[id] ?? 260;
@@ -5133,13 +5118,19 @@ function installProductHue(id) {
 
 function installProductMark(id) {
 	const key = String(id || "integration");
-	const shapeKey = ({ pi: "pi-agent", "typescript-sdk": "ts-sdk", "rest-api": "rest" })[key] ?? key;
-	let hash = 0;
-	for (let index = 0; index < shapeKey.length; index += 1) {
-		hash = (hash * 131 + shapeKey.charCodeAt(index) * (index + 7)) >>> 0;
+	const src = INSTALL_PRODUCT_ASSETS[key] ?? INSTALL_PRODUCT_FALLBACK;
+	return `<img class="integration-product-icon" src="${src}" data-product-icon="${key}" alt="" aria-hidden="true" width="28" height="28" loading="lazy" decoding="async" />`;
+}
+
+function handleInstallProductIconError(event) {
+	const icon = event?.target;
+	if (!icon?.classList?.contains("integration-product-icon")) return;
+	if (icon.dataset.fallbackApplied === "true") {
+		icon.hidden = true;
+		return;
 	}
-	const shape = hash % INSTALL_PRODUCT_SHAPE_COUNT;
-	return `<span class="integration-product-mark product-shape-${shape}" data-product-icon="${key}" aria-hidden="true"><span class="product-shape-primary"></span><span class="product-shape-secondary"></span></span>`;
+	icon.dataset.fallbackApplied = "true";
+	icon.src = INSTALL_PRODUCT_FALLBACK;
 }
 
 const INSTALL_FEATURED_ORDER = Object.freeze([
@@ -14321,6 +14312,7 @@ window.addEventListener("popstate", handlePopState);
 window.addEventListener("hashchange", handleHashChange);
 window.addEventListener("resize", syncInstallResponsive);
 window.addEventListener("orientationchange", syncInstallResponsive);
+document.addEventListener("error", handleInstallProductIconError, true);
 window.addEventListener("keydown", (event) => {
 	if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && S.view === "install" && !openModalHost()) {
 		event.preventDefault();
