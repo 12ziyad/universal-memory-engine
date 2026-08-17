@@ -176,7 +176,7 @@ describe("dashboard script", () => {
 		expect(script).not.toContain('class="integration-group');
 		expect(script).toContain('class="setup-step-button"');
 		expect(script).toContain('class="setup-guide-section');
-		expect(script).toContain("This connection belongs only to");
+		expect(script).not.toContain('class="install-project-scope"');
 		expect(script).toContain("x-itsuki-project");
 		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
 		// The Rules tab is a working form wired to /v1/rules.

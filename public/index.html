@@ -425,10 +425,6 @@
 	body.app-mode .install-intro .page-title { font-size: 32px; line-height: 1.18; }
 	body.app-mode .install-intro .page-sub { max-width: none; font-size: 14px; }
 	.install-tree { color: var(--accent); }
-	.install-project-scope { display: inline-flex; align-items: center; gap: 7px; margin-top: 13px;
-		padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted);
-		background: var(--panel); font-size: 12px; }
-	.install-project-scope b { color: var(--text); font-weight: 600; }
 	.integration-catalog { width: min(800px, 100%); margin-inline: auto; }
 	.catalog-toolbar { display: grid; gap: 14px; margin-bottom: 28px; }
 	.catalog-search { position: relative; display: block; width: 100%; }
@@ -527,58 +523,54 @@
 	.catalog-empty { border: 1px dashed var(--border2); border-radius: 13px; padding: 44px 20px;
 		text-align: center; color: var(--muted); }
 	.catalog-empty b { display: block; color: var(--text); margin-bottom: 6px; }
-	.install-detail { width: min(900px, 100%); margin: 0 auto; }
-	.install-back { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin: 0 0 22px;
-		padding: 6px 9px; border: 0; border-radius: 8px; background: transparent;
-		color: var(--muted); font-size: 12px; font-weight: 600; }
-	.install-back:hover { background: var(--panel2); color: var(--text); filter: none; }
-	.install-back svg { width: 15px; height: 15px; }
-	.setup-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
-		margin-bottom: 22px; }
-	.setup-identity { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
-	.setup-identity .integration-mark { width: 46px; height: 46px; flex-basis: 46px; }
-	.setup-eyebrow { color: var(--accent); font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-		letter-spacing: .07em; margin-bottom: 5px; }
-	.setup-title { margin: 0 0 6px; font-size: 25px; line-height: 1.15; outline: 0; }
+	.install-detail { width: min(820px, 100%); margin: 0 auto; }
+	.install-back { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin: 0;
+		padding: 0; border: 0; background: transparent; color: var(--muted);
+		font-size: 12.5px; font-weight: 500; }
+	.install-back:hover { background: transparent; color: var(--accent); filter: none; }
+	.install-back svg { width: 14px; height: 14px; }
+	.setup-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 18px;
+		margin: 16px 0 0; }
+	.setup-identity { display: flex; align-items: center; gap: 14px; min-width: 0; }
+	.setup-identity .integration-mark { width: 42px; height: 42px; flex-basis: 42px; }
+	.setup-title { margin: 0 0 4px; font-size: 19px; font-weight: 600; line-height: 1.25; outline: 0; }
 	.setup-title:focus-visible { outline: 0; }
-	.setup-description { max-width: 680px; margin: 0; color: var(--muted); line-height: 1.55; }
-	.setup-methods { min-width: 0; margin: 0 0 18px; padding: 0; border: 0; }
-	.setup-methods legend { margin-bottom: 8px; color: var(--faint); font-size: 11px; font-weight: 650; }
-	.setup-method-grid { width: max-content; max-width: 100%; display: flex; gap: 3px; flex-wrap: wrap;
-		padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); }
+	.setup-description { max-width: 620px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+	.setup-methods { min-width: 0; display: flex; justify-content: center; margin: 18px 0 0; padding: 0; border: 0; }
+	.setup-method-grid { width: max-content; max-width: 100%; display: flex; gap: 2px; flex-wrap: wrap;
+		padding: 2px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel2); }
 	.setup-method-option { position: relative; min-width: 0; display: flex; align-items: center;
-		min-height: 34px; padding: 7px 12px; border: 1px solid transparent;
-		border-radius: 6px; background: transparent; cursor: pointer; }
-	.setup-method-option:has(input:checked) { border-color: var(--border);
-		background: var(--panel); box-shadow: var(--shadow-sm); }
+		min-height: 30px; padding: 0 15px; border: 1px solid transparent;
+		border-radius: 3px; background: transparent; cursor: pointer; }
+	.setup-method-option:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+		background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
 	.setup-method-option input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
 	.setup-method-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.setup-method-label { display: block; color: var(--muted); font-size: 11.5px; font-weight: 650; }
-	.setup-method-option:has(input:checked) .setup-method-label { color: var(--text); }
-	.setup-recommended { display: inline; margin-left: 6px; color: var(--accent); font-size: 9.5px; font-weight: 650; }
+	.setup-method-label { display: block; color: var(--muted); font: 11px/1 var(--font-mono); letter-spacing: .03em; }
+	.setup-method-option:has(input:checked) .setup-method-label { color: var(--accent); font-weight: 700; }
 	.brand-icon { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
 		border-radius: 5px; }
 	.brand-icon.typescript { object-position: center top; }
 	/* One muted line, no coloured box. A banner for a plan requirement was
 	   louder than the requirement deserves. */
-	.install-hint { max-width: 760px; margin: 0 0 18px; color: var(--muted); font-size: 12.5px; }
-	.setup-console { position: relative; display: grid; grid-template-columns: 210px 1px minmax(0, 1fr);
-		height: 330px; min-height: 330px; overflow: hidden; border: 1px solid var(--border);
-		border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-sm); }
+	.install-hint { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 12.5px; }
+	.setup-console { position: relative; display: grid; grid-template-columns: 200px 1px minmax(0, 1fr);
+		height: auto; min-height: 276px; margin-top: 18px; overflow: hidden; border: 1px solid var(--border);
+		border-radius: 4px; background: var(--panel); }
 	.setup-console-divider { background: var(--border); }
-	.setup-step-nav { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-self: stretch; gap: 3px;
-		padding: 20px 16px; overflow-x: hidden; overflow-y: auto; }
-	.setup-step-button { width: 100%; min-height: 39px; display: flex; align-items: center; gap: 10px;
-		padding: 7px 10px; border: 0; border-left: 2px solid transparent; border-radius: 0 7px 7px 0;
-		background: transparent; color: var(--muted); text-align: left; font-size: 12.5px; font-weight: 500; }
+	.setup-step-nav { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-self: stretch; gap: 2px;
+		padding: 20px; overflow: hidden; }
+	.setup-step-button { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 8px;
+		padding: 0 10px; border: 0; border-left: 2px solid transparent; border-radius: 0;
+		background: transparent; color: var(--muted); text-align: left; font-size: 13.5px; font-weight: 500; }
 	.setup-step-button:hover { background: var(--panel2); color: var(--text); filter: none; }
 	.setup-step-button[aria-selected="true"], .setup-step-button[aria-current="step"] {
 		border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
 		color: var(--text); font-weight: 650; }
-	.setup-step-index { flex: 0 0 22px; color: var(--faint); font: 11px/1 var(--font-mono); }
+	.setup-step-index { flex: 0 0 22px; color: var(--faint); font: 12px/1 var(--font-mono); }
 	.setup-step-button[aria-selected="true"] .setup-step-index,
 	.setup-step-button[aria-current="step"] .setup-step-index { color: var(--accent); }
-	.setup-guide-pane { min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 48px 34px 30px; }
+	.setup-guide-pane { min-width: 0; min-height: 276px; overflow: visible; padding: 22px 24px; }
 	.setup-guide-section { min-width: 0; }
 	.setup-guide-section:focus:not(:focus-visible) { outline: 0; }
 	.setup-guide-section:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; border-radius: 8px; }
@@ -598,81 +590,39 @@
 		background: color-mix(in srgb, var(--green) 6%, transparent); border-radius: 8px;
 		padding: 8px 11px; font-size: 13px; }
 	.install-foot { max-width: 880px; margin-top: 20px; }
-	.setup-expand { position: absolute; z-index: 3; top: 10px; right: 10px; min-height: 30px;
-		display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid var(--border);
-		border-radius: 7px; background: var(--panel2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
+	.setup-expand { position: absolute; z-index: 3; top: 8px; right: 8px; min-height: 28px;
+		display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--border);
+		border-radius: 4px; background: var(--panel2); color: var(--muted); font-size: 11.5px; font-weight: 600; }
 	.setup-expand:hover { border-color: var(--border2); color: var(--text); filter: none; }
 	.setup-expand svg { width: 14px; height: 14px; }
 	.install-expanded-backdrop { z-index: 84; padding: 16px; }
-	.setup-expanded-dialog { width: min(1180px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 32px));
-		min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 22px;
-		border: 1px solid var(--border2); border-radius: 16px; background: var(--bg); box-shadow: var(--shadow-lg); }
-	.setup-expanded-dialog .setup-head { flex: 0 0 auto; margin-bottom: 14px; padding-right: 112px; }
-	.setup-expanded-dialog .setup-methods { flex: 0 0 auto; margin-bottom: 14px; }
-	.setup-expanded-dialog .install-hint { flex: 0 0 auto; margin-bottom: 12px; }
+	.setup-expanded-dialog { width: min(1400px, calc(100vw - 32px)); height: calc(100dvh - 32px);
+		min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 6px 16px 16px;
+		border: 1px solid var(--border2); border-radius: 6px; background: var(--bg); box-shadow: var(--shadow-lg); }
+	.setup-expanded-dialog .setup-head { flex: 0 0 auto; margin-top: 16px; padding-right: 112px; }
+	.setup-expanded-dialog .setup-methods { flex: 0 0 auto; }
+	.setup-expanded-dialog .install-hint { flex: 0 0 auto; margin-top: 10px; }
 	.setup-expanded-dialog .setup-console { flex: 1; min-height: 0; height: auto;
-		grid-template-columns: 220px 1px minmax(0, 1fr); }
-	.setup-expanded-dialog .setup-guide-pane { overflow-y: auto; overflow-x: hidden; padding: 34px 42px 64px;
+		grid-template-columns: 200px 1px minmax(0, 1fr); }
+	.setup-expanded-dialog .setup-step-nav { overflow-x: hidden; overflow-y: auto; }
+	.setup-expanded-dialog .setup-guide-pane { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px 28px 30px;
 		scrollbar-gutter: stable; overscroll-behavior: contain; }
-	.setup-expanded-dialog .setup-guide-section { position: relative; padding-left: 36px; }
+	.setup-expanded-dialog .setup-guide-section { position: relative; padding-left: 38px; }
 	.setup-expanded-dialog .setup-guide-section::before { content: ""; position: absolute; left: 10px; top: 26px;
-		bottom: -35px; width: 1px; background: var(--border); }
+		bottom: -30px; width: 1px; background: var(--border); }
 	.setup-expanded-dialog .setup-guide-section:last-child::before { display: none; }
 	.setup-expanded-dialog .setup-guide-section::after { content: attr(data-step-number); position: absolute;
-		left: 0; top: 0; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid var(--border2);
+		left: 0; top: 0; width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--border2);
 		border-radius: 50%; background: var(--panel2); color: var(--muted); font: 9.5px/1 var(--font-mono); }
 	.setup-expanded-dialog .setup-guide-section.is-current::after { border-color: var(--accent);
 		background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent); }
-	.setup-expanded-dialog .setup-guide-section + .setup-guide-section { margin-top: 42px; }
-	.setup-expanded-dialog .setup-expand { top: 22px; right: 22px; }
+	.setup-expanded-dialog .setup-guide-section + .setup-guide-section { margin-top: 30px; }
+	.setup-expanded-dialog .setup-expand { top: 8px; right: 8px; }
 	body.install-overlay-open { overflow: hidden; }
-	.setup-example { margin: 16px 0 0; }
-	.setup-example-button { width: 100%; max-width: 620px; display: block; padding: 0; border: 0;
-		border-radius: 11px; background: transparent; color: inherit; text-align: left; cursor: zoom-in; }
-	.setup-example-button:hover { filter: none; }
-	.setup-example-frame { display: block; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--border2);
-		border-radius: 10px; background: #faf9f7; box-shadow: var(--shadow-sm); }
-	.setup-example-caption { display: block; margin-top: 7px; color: var(--muted); font-size: 11.5px; }
-	.example-window { display: flex; flex-direction: column; height: 100%; color: #191b20; background: #faf9f7; }
-	.example-window-bar { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 11px;
-		border-bottom: 1px solid #e6e4df; background: #f2f0ec; color: #646b77; font-size: 9px; }
-	.example-window-dot { width: 6px; height: 6px; border-radius: 50%; background: #cfccc6; }
-	.example-settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 31% 1fr; text-align: left; }
-	.example-settings-nav { display: flex; flex-direction: column; gap: 7px; padding: 14px 12px;
-		border-right: 1px solid #e6e4df; color: #646b77; font-size: 9.5px; }
-	.example-settings-nav b { color: #191b20; }
-	.example-settings-nav .selected { padding: 4px 7px; border-radius: 4px; background: #efeeeb; color: #191b20; }
-	.example-settings-main { position: relative; display: flex; flex-direction: column; gap: 9px; padding: 14px; min-width: 0; }
-	.example-settings-main h4 { margin: 0; font-size: 12px; }
-	.example-settings-line { height: 9px; border-radius: 3px; background: #efeeeb; }
-	.example-settings-line.wide { width: 72%; }
-	.example-settings-line.short { width: 50%; }
-	.example-connector-card { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-		padding: 8px; border: 1px solid #e6e4df; border-radius: 5px; background: #fff; font-size: 9.5px; }
-	.example-badge { padding: 2px 6px; border: 1px solid rgba(91,79,207,.25); border-radius: 3px;
-		background: rgba(91,79,207,.08); color: #5b4fcf; font-size: 8px; }
-	.example-dialog { position: absolute; inset: 0; display: grid; place-items: center; padding: 18px;
-		background: rgba(24,24,32,.28); }
-	.example-dialog-card { width: min(300px, 88%); display: grid; gap: 8px; padding: 13px;
-		border: 1px solid #cfccc6; border-radius: 7px; background: #fff; box-shadow: 0 12px 30px rgba(24,24,32,.18); }
-	.example-field { padding: 6px 8px; border: 1px solid #e6e4df; border-radius: 4px; color: #646b77;
-		font: 9px/1.4 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.example-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 9px; padding: 15px; }
-	.example-chat-row { max-width: 76%; padding: 7px 9px; border: 1px solid #e6e4df; border-radius: 8px;
-		background: #fff; color: #191b20; font-size: 9.5px; }
-	.example-chat-row.user { align-self: flex-end; background: #efeeeb; }
-	.example-chat-input { margin-top: auto; height: 34px; border: 1px solid #e6e4df; border-radius: 8px; background: #fff; }
-	.install-lightbox { z-index: 90; }
-	.install-lightbox-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto;
-		padding: 18px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; background: #101116;
-		box-shadow: 0 28px 84px rgba(0,0,0,.56); color: #fff; }
-	.install-lightbox-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-	.install-lightbox-head h3 { margin: 0; font-size: 15px; }
-	.install-lightbox-dialog .setup-example-frame { max-height: calc(100dvh - 120px); aspect-ratio: 16 / 9; }
 	.install-live-region { position: fixed; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-	.install-docs { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none;
-		border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; }
-	.install-docs:hover { color: var(--text); border-color: var(--border2); }
+	.install-docs { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--accent);
+		text-decoration: none; font-size: 12.5px; font-weight: 500; }
+	.install-docs:hover { color: var(--text); }
 	.install-docs svg { width: 13px; height: 13px; }
 	@media (max-width: 980px) {
 		.integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -690,7 +640,7 @@
 		.setup-step-button { width: auto; min-width: max-content; border-left: 0; border-bottom: 2px solid transparent;
 			border-radius: 7px 7px 0 0; }
 		.setup-step-button[aria-current="step"] { border-left-color: transparent; border-bottom-color: var(--accent); }
-		.setup-guide-pane { padding: 24px 20px 28px; }
+		.setup-guide-pane { min-height: 0; padding: 24px 20px 28px; }
 	}
 	@media (max-width: 620px) {
 		.setup-method-grid { width: 100%; }
@@ -2337,7 +2287,7 @@ const S = {
 	key: localStorage.getItem("uml_key") || "",
 	view: "overview",
 	installCatalogId: null, installRouteId: null, installCategory: "all", installQuery: "",
-	installStepIndex: 0, installExpanded: false, installLightbox: null,
+	installStepIndex: 0, installExpanded: false,
 	graphMode: "clean",
 	focusCluster: "",
 	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true, recallResult: null, memoryQuery: "",
@@ -4734,15 +4684,19 @@ function installMethods() {
 					hint: "Beta on all Claude plans; Free is limited to one custom connector.",
 					steps: [
 						{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
-						{ title: "Add it to Claude", body: "Customize → Connectors → + → Add custom connector.",
+						{ title: "Open Connectors", body: "In Claude, open Customize → Connectors → + → Add custom connector.",
 							// The one-click path to the exact settings screen, kept as an
 							// icon on the title so it costs no line of prose.
 							titleHref: "https://claude.ai/settings/connectors?modal=add-custom-connector",
-							titleHrefLabel: "Open Claude's add-connector screen",
+							titleHrefLabel: "Open Claude's add-connector screen" },
+						{ title: "Name and paste", body: `Name the connector ${name}, then paste the project-scoped URL below.`,
 							codeLabel: "mcp url", code: (key) => installSnippets(key).mcpUrl },
-						{ title: "Turn it on", body: `Tap +, choose Connectors, enable ${name}.`,
-							codeLabel: "say this", code: () => `save this to ${name}` },
-						{ title: "Ask for proactive tool use", body: "Paste into Claude → Settings → Profile (preferences box), or a Project's instructions. This requests proactive recall and save calls; the host still controls tool use.",
+						{ title: "Enable in chat", body: `Start a new chat, select + → Connectors, then enable ${name}.` },
+						{ title: "Test saving", body: "Send one clear preference and allow the save tool if Claude asks for confirmation.",
+							codeLabel: "say this", code: () => `Save this to ${name}: I prefer concise project updates.` },
+						{ title: "Test recall", body: "Open another chat with the connector enabled and ask for the saved preference.",
+							codeLabel: "say this", code: () => "What project-update style do I prefer?" },
+						{ title: "Proactive memory", body: "Optional: paste this into Claude → Settings → Profile, or a Project's instructions. The host still decides when tools run.",
 							codeLabel: "custom instructions", code: () => installSnippets().autoInstructions },
 					],
 				},
@@ -4956,7 +4910,7 @@ function installMethods() {
 					docsHref: "/docs/#/install/plugin",
 					steps: [
 						{ title: "Install the plugin", body: "Add the Itsuki marketplace, then install the canonical plugin.", codeLabel: "terminal", code: () => installSnippets().claudePluginInstall },
-						{ title: "Connect Itsuki", body: "Choose an absolute Node executable (22 or 24 LTS) and add your API key in the masked key prompt.", action: apiKey, codeLabel: "claude code", code: () => `/plugin configure itsuki@itsuki-plugins\n/reload-plugins` },
+						{ title: "Connect Itsuki", body: "Choose an absolute Node executable (22 or 24 LTS) and add your API key in the masked key prompt.", action: apiKey, codeLabel: "claude code", code: () => installSnippets().claudeConfigure },
 						{ title: "Test connection", body: "Run the built-in diagnostic. It reports credential status without printing the key.", codeLabel: "claude code", code: () => installSnippets().claudeVerify },
 					],
 				},
@@ -5021,7 +4975,7 @@ function installMethods() {
 							{ title: "Create an API key", body: "A server credential, not the MCP link.", action: apiKey },
 							{ title: "Install for the CLI", body: "Antigravity CLI 1.1.13 or newer, and Node 22+. The installer writes the plugin and verifies your host.", codeLabel: "terminal", code: () => installSnippets().antigravityNativeInstall },
 							{ title: "Set the key, then check", body: "The key is read from the environment, or stored owner-only by the installer. The doctor never prints it.", codeLabel: "terminal", code: () => installSnippets().antigravityNativeVerify },
-							{ title: "What it does", body: "Recall runs before each turn; capture runs after a settled one. The desktop app and IDE are not supported and stay inactive there." },
+							{ title: "What it does", body: "Recall runs before each turn. Automatic capture is currently held until Antigravity exposes a verified transcript contract; use the MCP tools to save explicitly. The desktop app and IDE are not supported." },
 						] },
 						mcp: { label: "MCP config", steps: [
 							{ title: "Create your link", body: "Shown once. Save it.", action: (key) => key ? linkReady : mcpKey },
@@ -5426,7 +5380,7 @@ function installKeyGuard() {
 
 const INSTALL_UI = {
 	locks: new Set(), bodyOverflow: "", viewOverflow: "", viewScrollTop: 0,
-	inertNodes: [], scrollFrame: 0, lightboxViewWasInert: false,
+	inertNodes: [], scrollFrame: 0,
 };
 
 function lockInstallBackground(reason) {
@@ -5462,9 +5416,7 @@ function unlockInstallBackground(reason, { force = false } = {}) {
 }
 
 function cleanupInstallUi({ restoreFocus = false } = {}) {
-	closeInstallLightbox({ restoreFocus: false });
 	S.installExpanded = false;
-	S.installLightbox = null;
 	unlockInstallBackground("expanded", { force: true });
 	MODAL_FOCUS_RETURN.delete("installExpanded");
 	if (restoreFocus) requestAnimationFrame(() => document.getElementById("installExpandButton")?.focus());
@@ -5501,89 +5453,6 @@ function syncInstallResponsive() {
 		?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" }));
 }
 
-function installExampleMeta(id) {
-	return {
-		"claude-connectors": { title: "Claude connector settings", caption: "Example screen — interface may change" },
-		"claude-enable": { title: "Enable Itsuki in a Claude chat", caption: "Example screen — interface may change" },
-		"claude-profile": { title: "Claude custom instructions", caption: "Example screen — interface may change" },
-	}[id] ?? null;
-}
-
-function installExampleMarkup(id) {
-	if (id === "claude-enable") return `<div class="example-window">
-		<div class="example-window-bar"><span class="example-window-dot"></span><span class="example-window-dot"></span><span class="example-window-dot"></span><span>Claude</span></div>
-		<div class="example-chat"><div class="example-chat-row">How can I help?</div><div class="example-chat-row user">Save my preference for concise project updates.</div><div class="example-chat-row"><span class="example-badge">Itsuki enabled</span> I can use the connected memory tools when appropriate.</div><div class="example-chat-input"></div></div>
-	</div>`;
-	const profile = id === "claude-profile";
-	return `<div class="example-window">
-		<div class="example-window-bar"><span class="example-window-dot"></span><span class="example-window-dot"></span><span class="example-window-dot"></span><span>Settings</span></div>
-		<div class="example-settings">
-			<div class="example-settings-nav"><b>Settings</b><span class="${profile ? "" : "selected"}">Connectors</span><span class="${profile ? "selected" : ""}">Profile</span><span>Privacy</span></div>
-			<div class="example-settings-main"><h4>${profile ? "Custom instructions" : "Connectors"}</h4>
-				<div class="example-settings-line wide"></div><div class="example-settings-line short"></div>
-				${profile ? `<div class="example-dialog-card"><div class="example-field">Use Itsuki to recall relevant context before answering…</div><span class="example-badge">Save</span></div>` : `<div class="example-connector-card"><span>Itsuki</span><span class="example-badge">Connected</span></div>`}
-			</div>
-		</div>
-	</div>`;
-}
-
-function installExampleFor(cardId, index) {
-	if (cardId !== "claude") return null;
-	return ({ 1: "claude-connectors", 2: "claude-enable", 3: "claude-profile" })[index] ?? null;
-}
-
-function renderInstallExample(id) {
-	const meta = installExampleMeta(id);
-	if (!meta) return "";
-	return `<figure class="setup-example">
-		<button class="setup-example-button" type="button" onclick="openInstallLightbox('${id}')"
-			aria-label="Open larger example: ${esc(meta.title)}">
-			<span class="setup-example-frame">${installExampleMarkup(id)}</span>
-			<span class="setup-example-caption">${esc(meta.caption)} · Select to enlarge</span>
-		</button>
-	</figure>`;
-}
-
-function openInstallLightbox(id) {
-	const meta = installExampleMeta(id);
-	if (!meta) return;
-	closeInstallLightbox({ restoreFocus: false });
-	rememberModalOpener("installLightbox");
-	S.installLightbox = id;
-	const host = document.createElement("div");
-	host.id = "installLightbox";
-	host.className = "modal-backdrop install-lightbox";
-	host.setAttribute("role", "dialog");
-	host.setAttribute("aria-modal", "true");
-	host.setAttribute("aria-labelledby", "installLightboxTitle");
-	host.tabIndex = -1;
-	host.onclick = (event) => { if (event.target === host) closeInstallLightbox(); };
-	host.innerHTML = `<div class="install-lightbox-dialog">
-		<div class="install-lightbox-head"><h3 id="installLightboxTitle">${esc(meta.title)}</h3>
-			<button class="ghost" type="button" onclick="closeInstallLightbox()" aria-label="Close example">${ICON.close}</button></div>
-		<div class="setup-example-frame">${installExampleMarkup(id)}</div>
-		<div class="setup-example-caption">${esc(meta.caption)}</div>
-	</div>`;
-	const view = document.getElementById("view");
-	INSTALL_UI.lightboxViewWasInert = Boolean(view?.inert);
-	if (view) view.inert = true;
-	document.body.appendChild(host);
-	lockInstallBackground("lightbox");
-	requestAnimationFrame(() => host.querySelector("button")?.focus());
-}
-
-function closeInstallLightbox({ restoreFocus = true } = {}) {
-	const host = document.getElementById("installLightbox");
-	if (!host && !S.installLightbox) return;
-	host?.remove();
-	S.installLightbox = null;
-	const view = document.getElementById("view");
-	if (view) view.inert = INSTALL_UI.lightboxViewWasInert;
-	unlockInstallBackground("lightbox");
-	if (restoreFocus) restoreModalOpener("installLightbox");
-	else MODAL_FOCUS_RETURN.delete("installLightbox");
-}
-
 function installStepContent(step, key, index, card) {
 	const code = step.code ? step.code(key ?? MCP_KEY_PLACEHOLDER) : null;
 	const action = code?.includes(MCP_KEY_PLACEHOLDER)
@@ -5593,13 +5462,11 @@ function installStepContent(step, key, index, card) {
 		? ` <a class="step-title-link" href="${esc(step.titleHref)}" target="_blank" rel="noopener"
 				title="${esc(step.titleHrefLabel ?? "Open")}" aria-label="${esc(step.titleHrefLabel ?? "Open")}">${ICON.external}</a>`
 		: "";
-	const example = installExampleFor(card.id, index);
 	return `<div class="setup-guide-title-row"><div><h3 class="step-title">${esc(step.title)}${titleLink}</h3>
 		<div class="step-desc">${esc(step.body)}</div></div></div>
 		<div class="step-content">${action ?? ""}${code ? installCodeBlock(code, step.codeLabel) : ""}
 			${step.done ? `<div class="step-done">${step.done}</div>` : ""}
-			${step.note ? `<div class="step-note">${step.note}</div>` : ""}
-			${example ? renderInstallExample(example) : ""}</div>`;
+			${step.note ? `<div class="step-note">${step.note}</div>` : ""}</div>`;
 }
 
 function updateInstallExpandedSelection(index, { scroll = false } = {}) {
@@ -5662,23 +5529,22 @@ function onInstallGuideScroll(pane) {
 	});
 }
 
-function installSetupHead(selected, project) {
+function installSetupHead(selected) {
 	return `<div class="setup-head">
 		<div class="setup-identity"><span class="integration-mark" style="--mark-hue:${Number(selected.hue)}">${installCardMark(selected)}</span><div>
-			<div class="setup-eyebrow">${esc(installCategoryLabel(selected.category))}</div>
 			<h2 id="installSetupTitle" class="setup-title" tabindex="-1">${esc(selected.label)}</h2>
 			<p class="setup-description">${esc(selected.description)}</p>
-			<div class="install-project-scope">This connection belongs only to <b>${esc(project?.name || "the selected project")}</b>.</div>
 		</div></div>
 		${selected.docsHref ? `<a class="install-docs" href="${esc(selected.docsHref)}" target="_blank" rel="noopener">Documentation ${ICON.external}</a>` : ""}
 	</div>`;
 }
 
 function installMethodPicker(selected, route) {
-	return `<fieldset class="setup-methods"><legend>Setup method</legend><div class="setup-method-grid">
+	if (selected.methods.length <= 1) return "";
+	return `<fieldset class="setup-methods"><legend class="sr-only">Setup method</legend><div class="setup-method-grid">
 		${selected.methods.map((entry) => `<label class="setup-method-option"><input type="radio" name="install-route" value="${esc(entry.id)}"
 			onchange="setInstallRoute('${entry.id}')" ${entry.id === route.id ? "checked" : ""} />
-			<span><span class="setup-method-label">${esc(entry.label)}</span>${entry.recommended ? `<span class="setup-recommended">Recommended</span>` : ""}</span></label>`).join("")}
+			<span class="setup-method-label">${esc(entry.label)}</span></label>`).join("")}
 	</div></fieldset>`;
 }
 
@@ -5708,7 +5574,6 @@ function installSetupConsole(active, route, selected, key, expanded) {
 
 /** The Get started renderer: catalog first, focused setup second. */
 function viewInstall(v) {
-	const project = selectedManagedProject();
 	const doors = installMethods();
 	const catalog = installCatalog(doors);
 	const selected = catalog.find((entry) => entry.id === S.installCatalogId) ?? null;
@@ -5784,7 +5649,7 @@ function viewInstall(v) {
 	}
 
 	wrap.classList.add("install-detail");
-	const head = installSetupHead(selected, project);
+	const head = installSetupHead(selected);
 	const methods = installMethodPicker(selected, route);
 	const hint = client.hint ? `<div class="install-hint">${esc(client.hint)}</div>` : "";
 	const consoleMarkup = installSetupConsole(active, route, selected, key, S.installExpanded);
@@ -5795,7 +5660,7 @@ function viewInstall(v) {
 			aria-modal="true" aria-labelledby="installSetupTitle" tabindex="-1"
 			onclick="if(event.target===this) closeInstallExpanded()">
 			<div class="setup-expanded-dialog" onclick="event.stopPropagation()">
-				${keyWarning}${head}${methods}${hint}${consoleMarkup}
+				${keyWarning}${head}${methods}${consoleMarkup}${hint}
 			</div>
 		</div>${liveRegion}`;
 		v.appendChild(wrap);
@@ -5804,7 +5669,7 @@ function viewInstall(v) {
 	}
 
 	wrap.innerHTML = `<button class="install-back" type="button" onclick="showInstallCatalog()">${ICON.arrowLeft} All integrations</button>
-		${keyWarning}${head}${methods}${hint}${consoleMarkup}${liveRegion}`;
+		${keyWarning}${head}${methods}${consoleMarkup}${hint}${liveRegion}`;
 	v.appendChild(wrap);
 }
 
@@ -14465,7 +14330,6 @@ window.addEventListener("keydown", (event) => {
 	if (trapModalFocus(event)) return;
 	if (event.key !== "Escape") return;
 	const modal = openModalHost();
-	if (modal?.id === "installLightbox") { event.preventDefault(); closeInstallLightbox(); return; }
 	if (modal?.id === "inviteModal") { event.preventDefault(); dismissInvitationRedemption(); return; }
 	if (modal?.id === "projectModal") { event.preventDefault(); closeProjectModal(); return; }
 	if (modal?.id === "settingsModal") { event.preventDefault(); closeSettingsModal(); return; }
@@ -14477,7 +14341,6 @@ window.addEventListener("keydown", (event) => {
 		return;
 	}
 	if (modal?.id === "installExpanded") { event.preventDefault(); closeInstallExpanded(); return; }
-	if (S.installLightbox) { event.preventDefault(); closeInstallLightbox(); return; }
 	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }
 	toggleProjectMenu(false);
 });

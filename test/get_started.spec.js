@@ -179,13 +179,8 @@ describe("Claude tab", () => {
 	// The setup page's job is to be short. These strings are the agreed copy;
 	// if someone re-expands them into paragraphs, this goes red.
 	it("uses the short step copy, one line each", () => {
-		for (const [title, body] of [
-			["Create your link", '"Shown once. Save it."'],
-			["Add it to Claude", '"Customize → Connectors → + → Add custom connector."'],
-			["Turn it on", "`Tap +, choose Connectors, enable ${name}.`"],
-		]) {
-			expect(script, title).toContain(`{ title: "${title}", body: ${body},`);
-		}
+		for (const title of ["Create your link", "Open Connectors", "Name and paste", "Enable in chat",
+			"Test saving", "Test recall", "Proactive memory"]) expect(script).toContain(`{ title: "${title}"`);
 		// The paragraph-length versions are gone.
 		expect(script).not.toContain("It carries your private key, so it is shown once and never again.");
 		expect(script).not.toContain("Use a computer — the phone apps cannot add connectors.");
@@ -206,7 +201,8 @@ describe("Claude tab", () => {
 	});
 
 	it("names the tool in the phrase to say", () => {
-		expect(script).toContain('codeLabel: "say this", code: () => `save this to ${name}`');
+		expect(script).toContain('codeLabel: "say this", code: () => `Save this to ${name}: I prefer concise project updates.`');
+		expect(script).toContain('codeLabel: "say this", code: () => "What project-update style do I prefer?"');
 		expect(script).not.toContain('Then simply say <i>"remember this"</i>');
 	});
 });
@@ -271,7 +267,12 @@ describe("the visual redesign", () => {
 		const tabletCss = css.slice(css.indexOf("@media (max-width: 820px)"), css.indexOf("@media (max-width: 620px)"));
 		expect(desktopNarrowCss).toContain(".integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }");
 		expect(tabletCss).toContain(".integration-grid { grid-template-columns: 1fr; }");
-		expect(css).toMatch(/\.setup-console \{[^}]*grid-template-columns: 210px 1px minmax\(0, 1fr\)/s);
+		expect(css).toContain(".install-detail { width: min(820px, 100%); margin: 0 auto; }");
+		expect(css).toMatch(/\.setup-head \{[^}]*min-height: 68px;[^}]*align-items: center;/s);
+		expect(css).toMatch(/\.setup-identity \.integration-mark \{[^}]*width: 42px; height: 42px;/s);
+		expect(css).toContain(".setup-title { margin: 0 0 4px; font-size: 19px;");
+		expect(css).toMatch(/\.setup-console \{[^}]*grid-template-columns: 200px 1px minmax\(0, 1fr\);[^}]*min-height: 276px;[^}]*border-radius: 4px;/s);
+		expect(css).toContain(".setup-guide-pane { min-width: 0; min-height: 276px; overflow: visible; padding: 22px 24px; }");
 	});
 
 	it("keeps setup steps scoped away from unrelated page steppers", () => {
@@ -378,10 +379,26 @@ describe("the visual redesign", () => {
 		expect(fnSource("syncInstallResponsive")).toContain('scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" })');
 		expect(script).toContain('window.addEventListener("orientationchange", syncInstallResponsive);');
 		expect(css).toContain("body.install-overlay-open { overflow: hidden; }");
+		expect(css).toMatch(/\.setup-expanded-dialog \{[^}]*width: min\(1400px, calc\(100vw - 32px\)\);[^}]*height: calc\(100dvh - 32px\);[^}]*padding: 6px 16px 16px;[^}]*border-radius: 6px;/s);
+		expect(css).toMatch(/\.setup-expanded-dialog \.setup-console \{[^}]*grid-template-columns: 200px 1px minmax\(0, 1fr\);/s);
+		expect(css).toMatch(/\.setup-expanded-dialog \.setup-guide-pane \{[^}]*padding: 24px 28px 30px;/s);
+		expect(css).toMatch(/\.setup-expanded-dialog \.setup-head \{[^}]*margin-top: 16px;/s);
+		expect(css).toMatch(/\.setup-expand \{[^}]*top: 8px; right: 8px; min-height: 28px;[^}]*padding: 0 10px;[^}]*border-radius: 4px;/s);
+		expect(css).toMatch(/\.setup-methods \{[^}]*justify-content: center;/s);
+		expect(css).toMatch(/@media \(max-width: 820px\)[\s\S]*?\.setup-guide-pane \{ min-height: 0;/s);
 		expect(css).toContain("#keyModal { z-index: 96; }");
 		expect(fnSource("openKeyModal")).toContain("if (S.installExpanded) closeInstallExpanded({ restoreFocus: false });");
 		expect(css).toMatch(/\.setup-step-nav \{[^}]*overflow-y: auto;/s);
 		expect(css).toContain(".setup-guide-section:focus-visible { outline: 2px solid var(--focus-ring);");
+	});
+
+	it("shows setup-method controls only when a product has alternatives", () => {
+		const picker = new Function("esc", `${fnSource("installMethodPicker")}\nreturn installMethodPicker;`)((value) => String(value));
+		expect(picker({ methods: [{ id: "only", label: "Only" }] }, { id: "only" })).toBe("");
+		const multiple = picker({ methods: [{ id: "native", label: "Native" }, { id: "mcp", label: "MCP" }] }, { id: "native" });
+		expect(multiple).toContain('class="setup-methods"');
+		expect(multiple).toContain('<legend class="sr-only">Setup method</legend>');
+		expect(multiple).toContain('name="install-route"');
 	});
 
 	it("restores keyboard focus after setup controls and the key modal rerender", () => {
@@ -395,10 +412,13 @@ describe("the visual redesign", () => {
 		expect(close.lastIndexOf("restoreModalOpener")).toBeGreaterThan(close.lastIndexOf("renderView"));
 	});
 
-	it("ships labelled examples and announces clipboard outcomes without duplicating secrets", () => {
-		expect(fnSource("installExampleMeta")).toContain("Example screen — interface may change");
-		expect(fnSource("renderInstallExample")).toContain("aria-label=\"Open larger example:");
-		expect(fnSource("openInstallLightbox")).toContain('aria-modal');
+	it("ships only real setup content and announces clipboard outcomes without duplicating secrets", () => {
+		for (const removed of ["installExampleMeta", "installExampleMarkup", "installExampleFor", "renderInstallExample",
+			"openInstallLightbox", "closeInstallLightbox"]) expect(script).not.toContain(removed);
+		for (const removed of [".setup-example", ".example-window", ".install-lightbox"])
+			expect(css).not.toContain(removed);
+		expect(html).not.toContain("Example screen — interface may change");
+		expect(fnSource("installStepContent")).not.toContain("Example");
 		expect(script).toContain('id="installLiveRegion"');
 		expect(fnSource("copyCode")).toContain('announceInstallStatus("Copied to clipboard.")');
 		expect(fnSource("copyCode")).toContain('announceInstallStatus("Copy failed. Select the text and copy it manually.")');
@@ -530,6 +550,27 @@ describe("the integration catalog contract", () => {
 
 		expect(catalogLeaves).toHaveLength(38);
 		expect(new Set(catalogLeaves)).toEqual(graphLeaves);
+	});
+
+	it("keeps every code-bearing route free of prototype commands and package placeholders", () => {
+		const doors = buildMethods();
+		const resolve = buildTargetResolver();
+		let codeSteps = 0;
+		for (const card of buildCatalog(doors)) {
+			for (const route of card.methods) {
+				const { active } = resolve(doors, card, route);
+				for (const step of active.steps) {
+					if (typeof step.code !== "function") continue;
+					codeSteps++;
+					const output = String(step.code("itsuki_live_test"));
+					expect(output, `${card.id}/${route.id}/${step.title}`).not.toContain("<itsuki-sdk-package>");
+					expect(output, `${card.id}/${route.id}/${step.title}`).not.toContain("<itsuki-mcp-package>");
+					expect(output, `${card.id}/${route.id}/${step.title}`).not.toMatch(/\bYOUR_KEY\b/);
+					expect(output, `${card.id}/${route.id}/${step.title}`).not.toMatch(/<[^>]*(package|command|url)[^>]*>/i);
+				}
+			}
+		}
+		expect(codeSteps).toBeGreaterThan(0);
 	});
 
 	it("renders searchable categories, accessible filters, methods, and an empty state", () => {
@@ -685,6 +726,9 @@ describe("Agents door and the variant chooser", () => {
 		const native = client.variants.native;
 		expect(native.label).toMatch(/CLI/);
 		expect(native.steps.some((s) => /not supported/i.test(`${s.body ?? ""}`))).toBe(true);
+		expect(native.steps.some((s) => /automatic capture is currently held/i.test(`${s.body ?? ""}`))).toBe(true);
+		expect(native.steps.some((s) => /use the MCP tools to save explicitly/i.test(`${s.body ?? ""}`))).toBe(true);
+		expect(native.steps.map((s) => `${s.body ?? ""} ${s.note ?? ""}`).join(" ")).not.toMatch(/capture runs at Stop/i);
 	});
 
 	it("the native Antigravity plugin names the published package and never prints the key", () => {

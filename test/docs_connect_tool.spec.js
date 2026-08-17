@@ -118,6 +118,9 @@ describe("page contracts", () => {
 		expect(page).toMatch(/Node 22/);
 		// Desktop and IDE are HELD; the page must say so, not stay silent.
 		expect(page).toMatch(/desktop app and the Antigravity IDE are not supported/i);
+		expect(page).toMatch(/Automatic capture is currently held/i);
+		expect(page).toMatch(/Save explicitly through the MCP tools/i);
+		expect(page).not.toMatch(/Capture runs at <code>Stop<\/code>/i);
 		expect(page).toMatch(/Deliberately absent/i);
 		// And it must not claim the held surfaces work.
 		expect(page).not.toMatch(/(desktop|ide)[^.]{0,30}\b(is|are) supported\b/i);
