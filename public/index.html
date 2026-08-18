@@ -608,6 +608,8 @@
 	@media (prefers-reduced-motion: reduce) {
 		.integration-card { transition: none; }
 		.setup-guide-pane { scroll-behavior: auto !important; }
+		.overview-series-bar, .overview-series-line, .overview-heatmap-cell,
+		.overview-bucket-drawer, .overview-chart { animation: none !important; }
 	}
 	.install-card .install-head { margin-bottom: 4px; }
 	/* Light code surface with a thin header strip: a small monospace label on
@@ -660,16 +662,15 @@
 	   The dashboard is an operational surface, not a collection of demo cards.
 	   Every selector is namespaced so the denser layout cannot leak into the
 	   Playground, Requests, or setup guides. */
-	.view:not(.pad0) > .overview-shell { width: min(1360px, 100%); max-width: 1360px; margin: 0 auto; padding-bottom: 32px; }
+	.view:not(.pad0) > .overview-shell { width: min(1360px, 100%); max-width: 1360px; margin: 0 auto; padding-bottom: 40px; }
 	.overview-shell, .overview-jobs-dialog { --faint: var(--muted); }
-	.overview-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px;
-		margin-bottom: 14px; }
-	.overview-title h2 { margin: 0; font-size: 23px; line-height: 1.15; letter-spacing: -.025em; font-weight: 600; }
-	.overview-title p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+	.overview-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+	.overview-title h2 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: -.035em; font-weight: 600; }
+	.overview-title p { margin: 7px 0 0; color: var(--muted); font-size: 13.5px; }
 	.overview-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 	.overview-ranges { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border);
 		border-radius: 9px; background: var(--panel); }
-	.overview-range { min-width: 38px; min-height: 32px; padding: 0 10px; border: 0; border-radius: 7px;
+	.overview-range { min-width: 42px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 7px;
 		background: transparent; color: var(--muted); font: 500 12px/1 var(--font-mono); }
 	.overview-range:hover { color: var(--text); background: var(--panel2); filter: none; }
 	.overview-range[aria-pressed="true"] { color: var(--text); background: var(--panel2); box-shadow: var(--shadow-sm); }
@@ -682,13 +683,7 @@
 		background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 	.overview-control.icon-only { width: 36px; padding: 0; }
 	.overview-control[disabled] { opacity: .58; cursor: wait; }
-	#overviewCompareButton[disabled] { cursor: not-allowed; }
-	.overview-scopebar { min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px;
-		margin-bottom: 12px; color: var(--faint); font: 11px/1.4 var(--font-mono); }
-	.overview-scopebar .scope-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-	.overview-scopebar .scope-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-	.overview-updated { margin-left: auto; white-space: nowrap; }
-	.overview-copy-link { min-height: 30px; padding-inline: 9px; }
+	.overview-updated { margin: 0; color: var(--faint); font: 10.5px/1 var(--font-mono); white-space: nowrap; }
 	.overview-error { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px;
 		border: 1px solid var(--danger-border); border-radius: 10px; background: var(--danger-bg); color: var(--red); }
 	.overview-error span { flex: 1; }
@@ -699,18 +694,19 @@
 		linear-gradient(100deg, var(--panel) 25%, var(--panel2) 42%, var(--panel) 58%); background-size: 220% 100%;
 		animation: overview-shimmer 1.4s ease-in-out infinite; }
 	@keyframes overview-shimmer { to { background-position-x: -220%; } }
-	.overview-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-	.overview-kpi { position: relative; width: 100%; min-width: 0; min-height: 142px; display: flex; flex-direction: column;
-		gap: 9px; padding: 13px 14px 12px; border: 1px solid var(--border); border-radius: 12px;
-		background: var(--panel); color: var(--text); text-align: left; overflow: hidden; transition: background .16s, border-color .16s; }
-	.overview-kpi:hover { background: var(--panel2); border-color: var(--border2); filter: none; }
+	.overview-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+	.overview-kpi { position: relative; width: 100%; min-width: 0; min-height: 150px; display: flex; flex-direction: column;
+		gap: 10px; padding: 15px 16px 13px; border: 1px solid var(--border); border-radius: 12px;
+		background: var(--panel); color: var(--text); text-align: left; overflow: hidden;
+		transition: background .16s, border-color .16s, transform .16s; }
+	.overview-kpi:hover { background: var(--panel2); border-color: var(--border2); filter: none; transform: translateY(-1px); }
 	.overview-kpi[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
 		background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 	.overview-kpi-head { width: 100%; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 	.overview-kpi-head svg { width: 14px; height: 14px; color: var(--accent); flex: none; }
 	.overview-kpi-chevron { margin-left: auto; color: var(--faint); font-size: 16px; line-height: 1; opacity: .72; }
 	.overview-kpi-value { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
-	.overview-kpi-value strong { font: 600 25px/1 var(--font-mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+	.overview-kpi-value strong { font: 600 27px/1 var(--font-mono); letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
 	.overview-kpi-value span { color: var(--faint); font-size: 11px; }
 	.overview-kpi-meta { min-height: 15px; color: var(--faint); font: 10.5px/1.4 var(--font-mono);
 		overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -724,124 +720,156 @@
 	.overview-sparkline path { fill: none; stroke: var(--border2); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 	.overview-kpi[aria-pressed="true"] .overview-sparkline path { stroke: var(--accent); }
 	.overview-card { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; }
-	.overview-card-head { min-height: 63px; display: flex; align-items: center; gap: 10px; padding: 14px 17px 13px;
+	.overview-card-head { min-height: 60px; display: flex; align-items: center; gap: 10px; padding: 13px 18px;
 		border-bottom: 1px solid var(--border); }
 	.overview-card-title { min-width: 0; }
-	.overview-card-title h3 { margin: 0; font-size: 15px; line-height: 1.25; font-weight: 600; }
-	.overview-card-title p { margin: 4px 0 0; color: var(--faint); font-size: 11.5px; }
+	.overview-card-title h3 { margin: 0; font-size: 14px; line-height: 1.25; font-weight: 600; }
+	.overview-card-title p { margin: 4px 0 0; color: var(--faint); font-size: 11px; }
 	.overview-card-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 	.overview-modes { display: flex; align-items: center; gap: 2px; padding: 2px; background: var(--panel2);
 		border: 1px solid var(--border); border-radius: 9px; }
-	.overview-mode { min-height: 30px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
+	.overview-mode { min-height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: transparent;
 		color: var(--faint); font-size: 12px; }
+	.overview-mode:hover { color: var(--text); background: color-mix(in srgb, var(--panel) 55%, transparent); filter: none; }
 	.overview-mode[aria-selected="true"] { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm); }
-	.overview-pulse { margin-top: 14px; margin-bottom: 14px; border-radius: 14px; }
-	.overview-pulse-body { min-height: 360px; padding: 14px 17px 16px; overflow-x: auto; }
-	.overview-chart { min-width: 680px; }
-	.overview-chart-legend { display: flex; align-items: center; gap: 12px; min-height: 24px; margin-bottom: 8px;
-		color: var(--muted); font-size: 11.5px; }
-	.overview-chart-legend .overview-axis-note { margin-left: auto; color: var(--faint); font: 10px/1.2 var(--font-mono); }
-	.overview-chart-key { display: inline-flex; align-items: center; gap: 6px; }
-	.overview-chart-key i { width: 8px; height: 8px; border-radius: 3px; background: var(--accent); }
-	.overview-chart-key.recall i { background: var(--green); }
-	.overview-chart-key.neutral i { background: var(--faint); }
-	.overview-chart-key.warn i { background: var(--amber); }
-	.overview-chart-key.fail i { background: var(--red); }
-	.overview-plot-wrap { position: relative; min-width: 680px; border-top: 1px solid var(--border); }
-	.overview-plot { display: block; width: 100%; height: 258px; overflow: visible; }
+	.overview-pulse { margin: 0 0 16px; border-radius: 14px; }
+	.overview-pulse-toolbar { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+		padding: 12px 18px; border-bottom: 1px solid var(--border); }
+	.overview-pulse-body { min-height: 420px; padding: 0; overflow-x: auto; }
+	.overview-chart { min-width: 760px; animation: overview-fade .2s ease-out both; }
+	.overview-chart-legend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 54px;
+		padding: 12px 18px; margin: 0; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+	.overview-chart-legend .overview-axis-note, .overview-axis-note { margin-left: auto; color: var(--faint); font: 10px/1.3 var(--font-mono); }
+	.overview-chart-key { min-height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px;
+		border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); font-size: 11.5px; }
+	button.overview-chart-key { cursor: pointer; }
+	button.overview-chart-key:hover { background: var(--panel2); filter: none; }
+	.overview-chart-key[aria-pressed="false"] { color: var(--faint); opacity: .66; }
+	.overview-chart-key i { width: 9px; height: 9px; border: 1px solid var(--series-color, var(--accent)); border-radius: 3px;
+		background: var(--series-color, var(--accent)); }
+	.overview-chart-key[aria-pressed="false"] i { background: transparent; border-color: var(--border2); }
+	.overview-chart-key.line i { height: 2px; border: 0; border-radius: 2px; }
+	.overview-plot-wrap { position: relative; min-width: 760px; padding: 18px 18px 4px; border-top: 0; }
+	.overview-plot { display: block; width: 100%; height: 320px; overflow: visible; }
 	.overview-grid-line { stroke: var(--border); stroke-width: 1; }
 	.overview-axis-line { stroke: var(--border2); stroke-width: 1; }
 	.overview-axis-label { fill: var(--faint); font: 10px var(--font-mono); }
-	.overview-series-bar { fill: var(--accent); }
+	.overview-series-bar { fill: var(--accent); transform-box:fill-box; transform-origin:center bottom; animation:overview-bar-rise .48s cubic-bezier(.2,.75,.3,1) both; animation-delay:calc(var(--series-index,0) * 34ms); }
 	.overview-series-bar.secondary { fill: var(--green); }
 	.overview-series-bar.warn { fill: var(--amber); }
 	.overview-series-bar.fail { fill: var(--red); }
 	.overview-series-bar.compare { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 4 4; opacity: .72; }
-	.overview-series-line { fill: none; stroke: var(--accent); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+	.overview-series-line { fill:none; stroke:var(--series-color,var(--accent)); stroke-width:2.35; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:1; animation:overview-line-draw .62s cubic-bezier(.2,.75,.3,1) both; }
 	.overview-series-line.secondary { stroke: var(--green); }
 	.overview-series-line.warn { stroke: var(--amber); }
-	.overview-series-line.compare { stroke-dasharray: 5 4; opacity: .54; stroke-width: 1.5; }
-	.overview-chart-footer { min-width: 680px; display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; color: var(--faint); font-size: 10.5px; }
+	.overview-series-line.compare { stroke-width: 1.5; stroke-dasharray: .03 .025; opacity: .55; animation: none; }
+	.overview-series-dot { fill: var(--panel); stroke: var(--series-color, var(--accent)); stroke-width: 2; }
+	.overview-bucket-band { fill: transparent; cursor: pointer; }
+	.overview-bucket-band:hover, .overview-bucket-band:focus { fill: color-mix(in srgb, var(--accent) 6%, transparent); outline: none; }
+	.overview-hover-line { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 3 4; pointer-events: none; }
+	.overview-tooltip { position: absolute; z-index: 5; width: 210px; padding: 10px 11px; border: 1px solid var(--border2);
+		border-radius: 10px; background: var(--panel2); box-shadow: var(--shadow-lg); color: var(--text);
+		pointer-events: none; transform: translateX(-50%); animation: overview-fade .12s ease-out; }
+	.overview-tooltip b { display: block; margin-bottom: 7px; font-size: 11.5px; }
+	.overview-tooltip-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px;
+		color: var(--muted); font-size: 11px; }
+	.overview-tooltip-row strong { color: var(--text); font: 500 11px/1 var(--font-mono); }
+	.overview-health-ribbon { display: flex; height: 8px; margin: 0 18px 3px 55px; overflow: hidden; }
+	.overview-health-ribbon span { flex: 1; border-left: 1px solid var(--panel); background: var(--green); }
+	.overview-health-ribbon span:first-child { border-left: 0; }
+	.overview-chart-footer { min-width: 760px; display: flex; align-items: center; gap: 10px; margin: 0;
+		padding: 10px 18px 15px; color: var(--faint); font-size: 10.5px; }
 	.overview-chart-footer p { margin: 0; line-height: 1.5; }
-	.overview-comparison-panel { min-width: 680px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
-	.overview-comparison-plot { min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); }
-	.overview-comparison-plot h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; }
-	.overview-comparison-plot > p { margin: 0 0 15px; color: var(--faint); font-size: 10.5px; }
-	.overview-comparison-row { display: grid; grid-template-columns: minmax(92px, 140px) minmax(90px, 1fr) auto; align-items: center; gap: 10px; margin-top: 11px; }
-	.overview-comparison-row span:first-child { color: var(--muted); font-size: 11.5px; }
-	.overview-comparison-track { height: 8px; border-radius: 8px; background: var(--panel); overflow: hidden; }
-	.overview-comparison-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
-	.overview-comparison-row strong { min-width: 58px; text-align: right; font: 500 11.5px/1 var(--font-mono); }
-	.overview-quota-panel { min-width: 680px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); gap: 14px; }
-	.overview-quota-main, .overview-quota-stats { padding: 20px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); }
-	.overview-quota-value { display: flex; align-items: baseline; gap: 7px; }
-	.overview-quota-value strong { font: 600 28px/1 var(--font-mono); }
-	.overview-quota-value span { color: var(--faint); font-size: 11px; }
-	.overview-quota-track { height: 8px; margin-top: 18px; border-radius: 8px; background: var(--panel); overflow: hidden; }
-	.overview-quota-track i { display: block; height: 100%; border-radius: inherit; background: var(--amber); }
-	.overview-quota-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 9px; color: var(--faint); font: 10.5px/1.4 var(--font-mono); }
-	.overview-quota-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; padding: 0; overflow: hidden; background: var(--border); }
-	.overview-quota-stat { padding: 15px; background: var(--panel2); }
-	.overview-quota-stat span { display: block; color: var(--faint); font-size: 10.5px; }
-	.overview-quota-stat strong { display: block; margin-top: 7px; font: 600 15px/1.2 var(--font-mono); }
-	.overview-table-toggle { margin-left: auto; }
-	.overview-data-table { margin-top: 14px; max-height: 250px; overflow: auto; border-top: 1px solid var(--border); }
+	.overview-data-table { margin: 0; max-height: 290px; overflow: auto; border-top: 1px solid var(--border); }
 	.overview-data-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
-	.overview-data-table th, .overview-data-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+	.overview-data-table caption { padding: 10px 12px; text-align: left; color: var(--faint); }
+	.overview-data-table th, .overview-data-table td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--border); }
 	.overview-data-table th:first-child, .overview-data-table td:first-child { text-align: left; }
 	.overview-data-table th { position: sticky; top: 0; background: var(--panel); color: var(--faint); font-weight: 600; }
-	.overview-jobs { margin-bottom: 14px; }
-	.overview-job-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px 17px; }
-	.overview-job { min-width: 0; padding: 12px 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); }
+	.overview-heatmap { padding: 0 18px 18px; border-top: 1px solid var(--border); }
+	.overview-heatmap-head { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	.overview-heatmap-head h4 { margin: 0; font-size: 12.5px; }
+	.overview-heatmap-grid { display: grid; gap: 3px; align-items: stretch; }
+	.overview-heatmap-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 7px;
+		color: var(--faint); font: 10px/1 var(--font-mono); }
+	.overview-heatmap-cell { min-height: 18px; border-radius: 2px;
+		background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 100%), var(--panel2));
+		opacity: var(--cell-opacity, 1); animation: overview-cell-in .28s ease-out both;
+		animation-delay: calc(var(--cell-index, 0) * 14ms); }
+	.overview-heatmap-date { padding-top: 5px; text-align: center; color: var(--faint); font: 10px/1 var(--font-mono); }
+	.overview-rel-toggle { display: flex; gap: 2px; margin-left: auto; padding: 2px; border: 1px solid var(--border);
+		border-radius: 8px; background: var(--panel2); }
+	.overview-rel-toggle button { min-height: 27px; padding: 0 9px; border: 0; border-radius: 6px;
+		background: transparent; color: var(--faint); font-size: 11px; }
+	.overview-rel-toggle button[aria-pressed="true"] { color: var(--text); background: var(--panel); }
+	.overview-jobs, .overview-first-run { margin-bottom: 16px; }
+	.overview-job-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 16px 18px; }
+	.overview-job { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel2); }
 	.overview-job.warn { border-color: var(--warning-border); background: var(--warning-bg); }
 	.overview-job.fail { border-color: var(--danger-border); background: var(--danger-bg); }
 	.overview-job-top { display: flex; align-items: center; gap: 7px; }
-	.overview-job-icon { width: 23px; height: 23px; display: grid; place-items: center; flex: none; border-radius: 7px; color: var(--muted); background: var(--panel); }
+	.overview-job-icon { width: 24px; height: 24px; display: grid; place-items: center; flex: none; border-radius: 7px; color: var(--muted); background: var(--panel); }
 	.overview-job-icon svg { width: 13px; height: 13px; }
 	.overview-job-badge { margin-left: auto; color: var(--faint); font: 9px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
 	.overview-job span { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.overview-job strong { display: block; margin-top: 8px; font: 600 22px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-	.overview-job-track { display: block; height: 3px; margin-top: 11px; border-radius: 4px; background: var(--panel); overflow: hidden; }
+	.overview-job strong { display: block; margin-top: 10px; font: 600 23px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+	.overview-job-track { display: block; height: 3px; margin-top: 12px; border-radius: 4px; background: var(--panel); overflow: hidden; }
 	.overview-job-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 	.overview-job.warn .overview-job-track i { background: var(--amber); }
 	.overview-job.fail .overview-job-track i { background: var(--red); }
 	.overview-job-grid + .overview-job-meta { border-top: 1px solid var(--border); }
 	.overview-job-meta { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
-	.overview-job-meta div { min-width: 0; padding: 11px 17px; border-left: 1px solid var(--border); }
+	.overview-job-meta div { min-width: 0; padding: 12px 18px; border-left: 1px solid var(--border); }
 	.overview-job-meta div:first-child { border-left: 0; }
 	.overview-job-meta span { display: block; color: var(--faint); font-size: 10.5px; }
 	.overview-job-meta strong { display: block; margin-top: 4px; font: 500 14px/1.2 var(--font-mono); }
-	.overview-lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-	.overview-list-head { display: grid; grid-template-columns: minmax(0,1fr) 82px 82px; gap: 10px; padding: 9px 17px;
+	.overview-lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+	.overview-list-head { display: grid; grid-template-columns: minmax(0,1fr) 88px 70px; gap: 10px; padding: 10px 18px;
 		color: var(--faint); font: 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .07em; }
-	.overview-list-row { display: grid; grid-template-columns: minmax(0,1fr) 82px 82px; gap: 10px; align-items: center;
-		min-height: 56px; padding: 9px 17px; border-top: 1px solid var(--border); }
+	.overview-list-row { display: grid; grid-template-columns: minmax(0,1fr) 88px 70px; gap: 10px; align-items: center;
+		min-height: 58px; padding: 10px 18px; border-top: 1px solid var(--border); }
 	.overview-list-row .lane-name { min-width: 0; }
 	.overview-list-row .lane-name b { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.overview-list-row .lane-bar { display: block; height: 3px; margin-top: 7px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+	.overview-list-row .lane-bar { display: block; height: 3px; margin-top: 8px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
 	.overview-list-row .lane-bar i { display: block; height: 100%; background: var(--accent); }
 	.overview-list-row > span { text-align: right; font: 11.5px/1.2 var(--font-mono); }
-	.overview-composition-bar { display: flex; gap: 3px; height: 10px; margin: 0 17px 10px; }
+	.overview-composition-bar { display: flex; gap: 3px; height: 10px; margin: 0 18px 10px; }
 	.overview-composition-bar span { min-width: 2px; border-radius: 3px; background: var(--accent); }
 	.overview-composition-row { min-height: 58px; display: grid; grid-template-columns: 12px minmax(0,1fr) auto;
-		align-items: center; gap: 10px; padding: 9px 17px; border-top: 1px solid var(--border); }
+		align-items: center; gap: 10px; padding: 10px 18px; border-top: 1px solid var(--border); }
 	.overview-composition-row i { width: 8px; height: 8px; border-radius: 3px; background: var(--accent); }
 	.overview-composition-row b { display: block; font-size: 12.5px; }
 	.overview-composition-row small { display: block; margin-top: 2px; color: var(--faint); font-size: 10.5px; }
 	.overview-composition-row strong { font: 500 12px/1.2 var(--font-mono); }
-	.overview-signals { margin-top: 14px; }
-	.overview-signal { min-height: 54px; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px;
-		align-items: center; padding: 10px 17px; border-top: 1px solid var(--border); }
+	.overview-signals { margin-top: 16px; }
+	.overview-signal { min-height: 58px; display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 11px;
+		align-items: center; padding: 11px 18px; border-top: 1px solid var(--border); }
 	.overview-signal:first-child { border-top: 0; }
-	.overview-signal-icon { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border);
+	.overview-signal-icon { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border);
 		border-radius: 8px; color: var(--green); background: var(--success-bg); }
 	.overview-signal.warn .overview-signal-icon { color: var(--amber); border-color: var(--warning-border); background: var(--warning-bg); }
 	.overview-signal.fail .overview-signal-icon { color: var(--red); border-color: var(--danger-border); background: var(--danger-bg); }
 	.overview-signal-icon svg { width: 14px; height: 14px; }
 	.overview-signal b { display: block; font-size: 12.5px; }
 	.overview-signal small { display: block; margin-top: 2px; color: var(--faint); font-size: 11px; }
-	.overview-empty { padding: 26px 18px; color: var(--muted); text-align: center; }
-	.overview-first-run { margin-bottom: 14px; }
+	.overview-empty { min-height: 300px; display: grid; place-items: center; padding: 30px 20px; color: var(--muted); text-align: center; }
+	.overview-bucket-backdrop { position: fixed; inset: 0; z-index: 89; background: rgba(0,0,0,.48); animation: overview-fade .16s ease-out; }
+	.overview-bucket-drawer { position: fixed; inset: 0 0 0 auto; z-index: 90; width: min(428px, 100vw); display: flex;
+		flex-direction: column; background: var(--panel); border-left: 1px solid var(--border2); box-shadow: var(--shadow-lg);
+		animation: overview-drawer-in .22s cubic-bezier(.4,0,.2,1); }
+	.overview-bucket-head { display: flex; align-items: flex-start; gap: 12px; padding: 19px 20px 16px; border-bottom: 1px solid var(--border); }
+	.overview-bucket-head > div { flex: 1; min-width: 0; }
+	.overview-bucket-kicker, .overview-bucket-group h4 { margin: 0 0 7px; color: var(--faint); font: 10px/1 var(--font-mono);
+		letter-spacing: .09em; text-transform: uppercase; }
+	.overview-bucket-head h3 { margin: 0; font-size: 18px; }
+	.overview-bucket-scroll { flex: 1; overflow: auto; padding: 4px 20px 22px; }
+	.overview-bucket-group { padding: 18px 0 10px; border-bottom: 1px solid var(--border); }
+	.overview-bucket-row { min-height: 39px; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center;
+		gap: 12px; color: var(--muted); font-size: 12.5px; }
+	.overview-bucket-row i { width: 8px; height: 8px; margin-right: 8px; display: inline-block; border-radius: 3px;
+		vertical-align: 0; background: var(--row-color, var(--accent)); }
+	.overview-bucket-row strong { color: var(--text); font: 500 12px/1 var(--font-mono); }
+	.overview-bucket-row small { min-width: 38px; text-align: right; color: var(--faint); font: 10px/1 var(--font-mono); }
 	.overview-pulse.is-expanded { position: relative; width: 100%; height: 100%; margin: 0; display: flex; flex-direction: column;
 		box-shadow: var(--shadow-lg); }
 	.overview-pulse.is-expanded .overview-pulse-body { flex: 1; min-height: 0; }
@@ -857,6 +885,11 @@
 	.overview-jobs-table th, .overview-jobs-table td { padding: 10px 18px; border-bottom: 1px solid var(--border); text-align: left; }
 	.overview-jobs-table th { position: sticky; top: 0; background: var(--panel); color: var(--faint); z-index: 1; }
 	body.overview-expanded { overflow: hidden; }
+	@keyframes overview-fade { from { opacity: .25; } to { opacity: 1; } }
+	@keyframes overview-bar-rise { from { transform: scaleY(0); opacity: .25; } to { transform: scaleY(1); opacity: 1; } }
+	@keyframes overview-line-draw { from { stroke-dashoffset: 1; opacity: .2; } to { stroke-dashoffset: 0; opacity: 1; } }
+	@keyframes overview-cell-in { from { opacity: 0; transform: scale(.9); } to { opacity: var(--cell-opacity, 1); transform: scale(1); } }
+	@keyframes overview-drawer-in { from { transform: translateX(22px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 	@media (max-width: 1320px) {
 		.overview-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 		.overview-job-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -869,7 +902,6 @@
 		.overview-job-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 		.overview-job-meta div:nth-child(odd):not(:first-child) { border-left: 0; }
 		.overview-job-meta div:nth-child(n+3) { border-top: 1px solid var(--border); }
-		.overview-comparison-panel, .overview-quota-panel { grid-template-columns: minmax(0, 1fr); }
 	}
 	@media (max-width: 560px) {
 		.overview-title h2 { font-size: 24px; }
@@ -887,11 +919,17 @@
 		.overview-list-head { display: none; }
 		.overview-list-row { grid-template-columns: minmax(0,1fr) auto; }
 		.overview-list-row > span:last-child { display: none; }
+		.overview-updated { width: 100%; }
+		.overview-pulse-toolbar { align-items: flex-start; flex-direction: column; }
 		.overview-pulse-backdrop { padding: 0; }
 		.overview-pulse.is-expanded { border-radius: 0; }
 		.overview-jobs-dialog { width: 100%; max-height: 100dvh; border-radius: 0; }
 	}
-	@media (prefers-reduced-motion: reduce) { .overview-skeleton { animation: none; } }
+	@media (prefers-reduced-motion: reduce) {
+		.overview-skeleton, .overview-series-bar, .overview-series-line, .overview-heatmap-cell,
+		.overview-bucket-drawer, .overview-chart { animation: none !important; }
+		.overview-kpi { transition: none; }
+	}
 	/* Requests / Memory exports control strip. */
 	.rq-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
 	.rq-controls input { flex: 1; min-width: min(100%, 280px); }
@@ -2491,7 +2529,7 @@ const S = {
 	overview: {
 		range: "7d", mode: "activity", metric: "memory", compare: false, table: false, expanded: false,
 		data: null, loading: false, error: "", requestId: 0, updatedAt: null, stale: false,
-		jobsOpen: false,
+		jobsOpen: false, bucketIndex: null, legendOff: {}, heatmap: true, reliabilityView: "share",
 	},
 	devMode: new URLSearchParams(location.search).has("dev") || localStorage.getItem("uml_dev") === "1",
 	data: null, receipts: [], candidates: [], selected: null, network: null,
@@ -2983,9 +3021,10 @@ function resetProjectBoundUiState() {
 	cleanupInstallUi({ restoreFocus: false });
 	closeOverviewJobsPanel({ restoreFocus: false });
 	closeOverviewExpanded({ restoreFocus: false, render: false });
+	closeOverviewBucket({ restoreFocus: false, render: false });
 	Object.assign(S.overview, {
 		mode: "activity", metric: "memory", data: null, loading: false, error: "", expanded: false, jobsOpen: false,
-		requestId: S.overview.requestId + 1, updatedAt: null, stale: false,
+		requestId: S.overview.requestId + 1, updatedAt: null, stale: false, bucketIndex: null, legendOff: {}, heatmap: true, reliabilityView: "share",
 	});
 	const jobsHost = document.getElementById("overviewJobsModal");
 	if (jobsHost) { jobsHost.hidden = true; jobsHost.innerHTML = ""; }
@@ -3881,6 +3920,7 @@ function setView(v, { updateHash = true, allowCopyOnce = false } = {}) {
 	if (S.view === "overview" && v !== "overview") {
 		closeOverviewJobsPanel({ restoreFocus: false });
 		closeOverviewExpanded({ restoreFocus: false, render: false });
+		closeOverviewBucket({ restoreFocus: false, render: false });
 	}
 	S.view = v;
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
@@ -4059,10 +4099,10 @@ function overviewSparkline(values) {
 	return `<svg class="overview-sparkline" viewBox="0 0 54 17" aria-hidden="true" focusable="false"><path d="${path}"></path></svg>`;
 }
 
-function overviewKpi({ id, label, icon, value, unit = "", meta = "", foot = "", progress = null, sparkline = [] }) {
+function overviewKpi({ id, label, icon, value, unit = "", meta = "", foot = "", progress = null, sparkline = [], title = "" }) {
 	const boundedProgress = Math.max(0, Math.min(100, overviewFinite(progress) ?? 0));
 	const selected = S.overview.metric === id;
-	return `<button id="overviewMetric-${esc(id)}" type="button" class="overview-kpi" data-overview-metric="${esc(id)}"
+	return `<button id="overviewMetric-${esc(id)}" type="button" class="overview-kpi" data-overview-metric="${esc(id)}"${title ? ` title="${esc(title)}"` : ""}
 		aria-pressed="${selected}" aria-controls="overviewPulsePanel" onclick="setOverviewMetric('${esc(id)}')">
 		<div class="overview-kpi-head">${overviewIcon(icon)}<span>${esc(label)}</span><span class="overview-kpi-chevron" aria-hidden="true">›</span></div>
 		<div class="overview-kpi-value"><strong>${value}</strong>${unit ? `<span>${esc(unit)}</span>` : ""}</div>
@@ -4110,14 +4150,14 @@ function overviewMetrics(data) {
 	const latency = current.latency_ms || {};
 	const previousLatency = previous.latency_ms || {};
 	const daily = Array.isArray(current.daily) ? current.daily : [];
-	const currentSettlement = overviewSettlement(data.jobs?.periods?.current);
-	const previousSettlement = overviewSettlement(data.jobs?.periods?.previous);
+	const currentReliability = overviewReliabilityAggregate(data, "current");
+	const previousReliability = overviewReliabilityAggregate(data, "previous");
 	const quota = data.ai?.quota;
 	const quotaPercent = quota?.limit ? (Number(quota.used || 0) / Number(quota.limit)) * 100 : null;
 	return `<section class="overview-kpis" aria-label="Key metrics">
 		${overviewKpi({ id: "memory", label: "Memory objects", icon: "database", value: overviewCount(inventory.total_objects), unit: "objects",
 			meta: `${overviewExact(inventory.nodes)} entities · ${overviewExact(inventory.pages)} pages · ${overviewExact(inventory.slices)} details`,
-			foot: `<span class="overview-delta">Current project-wide inventory</span>` })}
+			foot: `<span class="overview-delta">Current inventory</span>` })}
 		${overviewKpi({ id: "saves", label: "Saves", icon: "save", value: overviewCount(operations.saves), unit: "operations",
 			meta: `${overviewExact(operations.saved_objects)} object actions · ${overviewExact(operations.skipped)} items skipped`,
 			foot: overviewDelta(operations.saves, previousOperations.saves), sparkline: daily.map((row) => row.saves) })}
@@ -4125,23 +4165,27 @@ function overviewMetrics(data) {
 			meta: `${overviewExact(operations.matched)} context items · ${overviewExact(operations.matched_operations)} hit recalls`,
 			foot: overviewDelta(operations.recalls, previousOperations.recalls), sparkline: daily.map((row) => row.recalls) })}
 		${overviewKpi({ id: "reliability", label: "Reliability", icon: "shield",
-			value: currentSettlement.rate === null ? "—" : overviewPercent(currentSettlement.rate, 2), unit: currentSettlement.rate === null ? "not measured" : "write processing",
-			meta: `${overviewExact(currentSettlement.successful)} successful · ${overviewExact(currentSettlement.failures)} genuine failures`,
-			foot: currentSettlement.rate === null ? `<span class="overview-delta">No evaluated settlements</span>` : overviewPointDelta(currentSettlement.rate, previousSettlement.rate),
-			sparkline: [previousSettlement.rate, currentSettlement.rate] })}
+			value: currentReliability.rate === null ? "—" : overviewPercent(currentReliability.rate, 2), unit: currentReliability.rate === null ? "not measured" : "of operations",
+			meta: `${overviewExact(currentReliability.genuine_failure)} failures · ${overviewCoverage(currentReliability.coverage)} classified`,
+			foot: currentReliability.rate === null ? `<span class="overview-delta">No classified operations</span>` : overviewPointDelta(currentReliability.rate, previousReliability.rate),
+			sparkline: currentReliability.rows.map((row) => {
+				const classified = row.classified ?? ["successful", "meaningful_no_write", "policy_skipped", "cancelled", "genuine_failure"].reduce((sum, key) => sum + (Number(row[key]) || 0), 0);
+				const evaluated = Math.max(0, classified - (Number(row.cancelled) || 0));
+				return evaluated ? ((evaluated - (Number(row.genuine_failure) || 0)) / evaluated) * 100 : null;
+			}) })}
 		${overviewKpi({ id: "latency", label: "Operation latency", icon: "clock", value: latency.p95 == null ? "—" : overviewCount(latency.p95), unit: latency.p95 == null ? "not measured" : "ms p95",
 			meta: `${overviewExact(latency.samples)} samples · ${overviewCoverage(latency.coverage)} coverage`,
 			foot: overviewDelta(latency.p95, previousLatency.p95, { lowerIsBetter: true }), sparkline: [previousLatency.p95, latency.p95] })}
 		${overviewKpi({ id: "ai", label: "AI write quota", icon: "cpu", value: quota ? overviewCount(quota.used) : "—", unit: quota ? `/ ${overviewExact(quota.limit)}` : "unavailable",
-			meta: quota ? `Account-wide · resets ${overviewUtcDate(overviewTimestamp(quota.resets_at), { month: "short", day: "numeric", year: "numeric" })}` : "Account-wide quota is unavailable",
+			meta: quota ? `Resets ${overviewUtcDate(overviewTimestamp(quota.resets_at), { month: "short", day: "numeric", year: "numeric" })}` : "Quota unavailable",
 			foot: quota ? `<span class="overview-delta ${quota.capped ? "warn" : ""}">${overviewExact(quota.remaining)} remaining · ai_writes</span>` : `<span class="overview-delta">Not measured</span>`,
-			progress: quotaPercent })}
+			progress: quotaPercent, title: "Account-wide monthly AI write quota" })}
 	</section>`;
 }
 
 function overviewModeControls() {
 	const labels = { activity: "Activity", reliability: "Reliability", latency: "Latency", ai: "AI usage" };
-	return `<div class="overview-modes" role="tablist" aria-label="Pulse mode">
+	return `<div class="overview-modes" role="tablist" aria-label="Analytics mode">
 		${OVERVIEW_MODES.map((mode) => `<button id="overviewMode-${mode}" type="button" class="overview-mode" role="tab"
 			aria-selected="${S.overview.mode === mode}" aria-controls="overviewPulsePanel" tabindex="${S.overview.mode === mode ? "0" : "-1"}"
 			onclick="setOverviewMode('${mode}')" onkeydown="onOverviewModeKeydown(event,'${mode}')">${labels[mode]}</button>`).join("")}
@@ -4152,182 +4196,364 @@ function overviewBucketLabel(bucket) {
 	return overviewUtcDate(bucket?.from_ms, { month: "short", day: "numeric" });
 }
 
-function overviewComparisonRows(rows, maxValue = null) {
-	const maximum = Math.max(1, maxValue === null || maxValue === undefined
-		? Math.max(0, ...rows.map((row) => overviewFinite(row[1]) ?? 0))
-		: (Number(maxValue) || 0));
-	return rows.map(([label, value, color = "var(--accent)"]) => {
-		const measured = overviewFinite(value);
-		const numeric = Math.max(0, measured ?? 0);
-		const width = numeric ? Math.max(2, (numeric / maximum) * 100) : 0;
-		return `<div class="overview-comparison-row"><span>${esc(label)}</span><span class="overview-comparison-track" aria-hidden="true"><i style="width:${width}%;background:${color}"></i></span><strong>${measured === null ? "—" : overviewExact(numeric)}</strong></div>`;
-	}).join("");
-}
-
-function overviewMemoryChart(data) {
-	const inventory = data.inventory || {};
-	const operations = data.periods?.current?.operations || {};
-	const composition = [
-		["Entities", inventory.nodes, "var(--accent)"],
-		["Conversation pages", inventory.pages, "#745bc8"],
-		["Facts & details", inventory.slices, "var(--green)"],
-		["Events", inventory.events, "var(--amber)"],
-		["Relationships", inventory.edges, "var(--faint)"],
-	];
-	const activity = [
-		["Object actions", operations.saved_objects, "var(--accent)"],
-		["Write operations", operations.saves, "var(--green)"],
-		["Items skipped", operations.skipped, "var(--amber)"],
-	];
-	const compositionMax = Math.max(1, ...composition.map((row) => Number(row[1]) || 0));
-	const activityMax = Math.max(1, ...activity.map((row) => Number(row[1]) || 0));
-	return `<div class="overview-comparison-panel" role="group" aria-describedby="overviewChartSummary">
-		<section class="overview-comparison-plot"><h4>${overviewExact(inventory.total_objects)} current objects</h4><p>Project-wide inventory snapshot · not a historical trend</p>${overviewComparisonRows(composition, compositionMax)}</section>
-		<section class="overview-comparison-plot"><h4>Changes recorded in range</h4><p>Actions may create, update, reinforce, or supersede memory</p>${overviewComparisonRows(activity, activityMax)}</section>
+function overviewLatencyChart(data) {
+	const rows=overviewDaily(data), mapped=rows.map(overviewLatencyRow), previous=overviewDaily(data,"previous");
+	if (!rows.length || !mapped.some((row)=>row && [row.p50,row.p95,row.p99].some((value)=>value!==null))) return `<div class="overview-empty">Daily latency telemetry is unavailable for this range.</div>`;
+	const definitions=[{key:"p50",label:"P50",color:OVERVIEW_COLORS.p50},{key:"p95",label:"P95",color:OVERVIEW_COLORS.p95},{key:"p99",label:"P99",color:OVERVIEW_COLORS.p99}];
+	const visible=definitions.filter(({key})=>overviewSeriesVisible(key)), geometry=overviewChartGeometry(rows);
+	const values=mapped.flatMap((row)=>visible.map(({key})=>row?.[key]).filter((value)=>value!==null));
+	if (S.overview.compare) values.push(...previous.map(overviewLatencyRow).map((row)=>row?.p95).filter((value)=>value!==null));
+	const maximum=Math.max(1,...values), baseline=geometry.height-geometry.bottom;
+	const y=(value)=>geometry.top+geometry.plotHeight-(Math.max(0,Number(value)||0)/maximum)*geometry.plotHeight;
+	const lines=visible.map(({key,color})=>overviewPolylineSegments(mapped,(row)=>row?.[key],geometry,y,color)).join("");
+	const prior=S.overview.compare ? overviewPolylineSegments(previous.map(overviewLatencyRow),(row)=>row?.p95,geometry,y,OVERVIEW_COLORS.p95,"compare") : "";
+	const totals=data.periods?.current?.latency_ms || {};
+	return `<div class="overview-chart" role="group" aria-describedby="overviewChartSummary">
+		${overviewLegend(definitions.map((definition)=>({...definition,line:true,value:overviewDuration(totals[definition.key])})),`<span class="overview-axis-note">${S.overview.compare ? "dashed P95 = previous period · " : ""}milliseconds</span>`)}
+		<div class="overview-plot-wrap"><svg class="overview-plot" style="min-width:${geometry.width}px" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Daily operation latency percentiles"><title>Daily operation latency percentiles</title>${overviewGrid(geometry,maximum)}${lines}${prior}${overviewXAxis(rows,geometry)}<line class="overview-hover-line" y1="${geometry.top}" y2="${baseline}" hidden></line>${overviewBucketTargets(rows,geometry)}</svg><div class="overview-tooltip" role="tooltip" hidden></div></div>
+		<div class="overview-chart-footer"><button id="overviewTableButton" type="button" class="overview-control" aria-expanded="${S.overview.table}" aria-controls="overviewPulseDataTable" onclick="toggleOverviewTable()">${S.overview.table ? "Hide data table" : "Show data table"}</button></div>
+		${overviewLatencyHeatmap(rows)}
 	</div>`;
 }
 
-function overviewActivitySpec(metric) {
-	if (metric === "saves") return {
-		title: "Write operations by UTC bucket", axis: "operations",
-		series: [["saves", "Saves", ""], ["saved_objects", "Object actions", "secondary"]],
-		footer: "Object actions are recorded changes, not net inventory growth.",
-	};
+function overviewAiChart(data) {
+	const rows=overviewAiDaily(data), mapped=rows.map(overviewAiRow), previous=overviewAiDaily(data,"previous");
+	if (!data.ai?.project || !rows.length || !mapped.some(Boolean)) return `<div class="overview-empty">Project-attributed AI telemetry is unavailable for this range.</div>`;
+	const definitions=[
+		{key:"calls",label:"AI calls",color:OVERVIEW_COLORS.calls},
+		{key:"neurons",label:"Neurons",color:OVERVIEW_COLORS.neurons,line:true},
+		{key:"input_tokens",label:"Input tokens",color:OVERVIEW_COLORS.input_tokens,line:true},
+		{key:"output_tokens",label:"Output tokens",color:OVERVIEW_COLORS.output_tokens,line:true},
+	];
+	const visible=definitions.filter(({key})=>overviewSeriesVisible(key)), geometry=overviewChartGeometry(rows,{rightAxis:true});
+	const leftValues=mapped.map((row)=>row?.calls).filter((value)=>value!==null);
+	if (S.overview.compare) leftValues.push(...previous.map(overviewAiRow).map((row)=>row?.calls).filter((value)=>value!==null));
+	const rightKeys=["neurons","input_tokens","output_tokens"].filter((key)=>overviewSeriesVisible(key));
+	const rightValues=mapped.flatMap((row)=>rightKeys.map((key)=>row?.[key]).filter((value)=>value!==null));
+	const leftMax=Math.max(1,...leftValues), rightMax=Math.max(1,...rightValues), baseline=geometry.height-geometry.bottom;
+	const yLeft=(value)=>geometry.top+geometry.plotHeight-(Math.max(0,Number(value)||0)/leftMax)*geometry.plotHeight;
+	const yRight=(value)=>geometry.top+geometry.plotHeight-(Math.max(0,Number(value)||0)/rightMax)*geometry.plotHeight;
+	const barWidth=Math.min(geometry.slot*.55,62);
+	const bars=overviewSeriesVisible("calls") ? mapped.map((row,index)=>{ const value=row?.calls||0,x=geometry.left+index*geometry.slot+(geometry.slot-barWidth)/2,barY=yLeft(value); return `<rect class="overview-series-bar" style="fill:${OVERVIEW_COLORS.calls};--series-index:${index}" x="${x.toFixed(2)}" y="${barY.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${Math.max(0,baseline-barY).toFixed(2)}" rx="3"></rect>`; }).join("") : "";
+	const lines=rightKeys.map((key)=>overviewPolylineSegments(mapped,(row)=>row?.[key],geometry,yRight,OVERVIEW_COLORS[key])).join("");
+	const prior=S.overview.compare ? overviewPolylineSegments(previous.map(overviewAiRow),(row)=>row?.calls,geometry,yLeft,OVERVIEW_COLORS.calls,"compare") : "";
+	const aggregate=data.ai.project.periods?.current || {}, valueFor=(key)=>overviewCount(key==="calls" ? aggregate.calls : key==="neurons" ? aggregate.total_neurons_estimate : aggregate[key]);
+	const rightTicks=Array.from({length:5},(_,index)=>Math.round(rightMax*(1-index/4)));
+	return `<div class="overview-chart" role="group" aria-describedby="overviewChartSummary">
+		${overviewLegend(definitions.map((definition)=>({...definition,value:valueFor(definition.key)})),`<span class="overview-axis-note">${S.overview.compare ? "dashed calls = previous period · " : ""}calls left · compute right</span>`)}
+		<div class="overview-plot-wrap"><svg class="overview-plot" style="min-width:${geometry.width}px" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Daily project-attributed AI usage"><title>Daily project-attributed AI usage</title>${overviewGrid(geometry,leftMax,{rightTicks})}${bars}${lines}${prior}${overviewXAxis(rows,geometry)}<line class="overview-hover-line" y1="${geometry.top}" y2="${baseline}" hidden></line>${overviewBucketTargets(rows,geometry)}</svg><div class="overview-tooltip" role="tooltip" hidden></div></div>
+		<div class="overview-chart-footer"><button id="overviewTableButton" type="button" class="overview-control" aria-expanded="${S.overview.table}" aria-controls="overviewPulseDataTable" onclick="toggleOverviewTable()">${S.overview.table ? "Hide data table" : "Show data table"}</button></div>
+	</div>`;
+}
+
+function overviewPolylineSegments(rows, valueFor, geometry, y, color, className = "") {
+	const segments=[]; let points=[]; const markers=[];
+	rows.forEach((row,index)=>{
+		const value=overviewFinite(valueFor(row));
+		if (value===null) { if (points.length>1) segments.push(points); points=[]; return; }
+		const x=(geometry.left+index*geometry.slot+geometry.slot/2).toFixed(2), pointY=y(value).toFixed(2);
+		points.push(`${x},${pointY}`); markers.push(`<circle class="overview-series-dot" style="--series-color:${color}" cx="${x}" cy="${pointY}" r="3"></circle>`);
+	});
+	if (points.length>1) segments.push(points);
+	return `${segments.map((segment)=>`<polyline class="overview-series-line${className ? ` ${className}` : ""}" pathLength="1" style="--series-color:${color}" points="${segment.join(" ")}"></polyline>`).join("")}${className === "compare" ? "" : markers.join("")}`;
+}
+
+function overviewLatencyHeatmap(rows) {
+	const mapped=rows.map(overviewLatencyRow), hasBands=mapped.some((row)=>Array.isArray(row?.bands));
+	if (!hasBands) return "";
+	const labels=["800 ms+","400–800","200–400","100–200","50–100","< 50 ms"];
+	let maximumShare=0;
+	mapped.forEach((row)=>{ const total=row?.bands?.reduce((sum,value)=>sum+value,0)||0; if(total) row.bands.forEach((value)=>{ maximumShare=Math.max(maximumShare,value/total); }); });
+	const columns=`96px repeat(${rows.length}, minmax(38px,1fr))`;
+	const cells=[];
+	labels.forEach((label,displayIndex)=>{
+		cells.push(`<span class="overview-heatmap-label">${label}</span>`);
+		mapped.forEach((row,column)=>{
+			const bandIndex=5-displayIndex, total=row?.bands?.reduce((sum,value)=>sum+value,0)||0;
+			const count=total ? row.bands[bandIndex]||0 : 0, share=total ? count/total : 0, heat=maximumShare ? Math.max(.04,share/maximumShare) : 0;
+			cells.push(`<span class="overview-heatmap-cell" style="--heat:${heat.toFixed(3)};--cell-opacity:${total ? 1 : .42};--cell-index:${displayIndex*rows.length+column}" title="${esc(overviewBucketLabel(rows[column]))}: ${overviewExact(count)} samples (${overviewPercent(share*100,1)})"></span>`);
+		});
+	});
+	cells.push(`<span></span>`,...rows.map((row)=>`<span class="overview-heatmap-date">${esc(overviewBucketLabel(row))}</span>`));
+	return `<section class="overview-heatmap" aria-labelledby="overviewHeatmapTitle"><div class="overview-heatmap-head"><h4 id="overviewHeatmapTitle">Latency distribution</h4><button type="button" class="overview-control" aria-expanded="${S.overview.heatmap}" onclick="toggleOverviewHeatmap()">${S.overview.heatmap ? "Hide distribution" : "Show distribution"}</button></div>${S.overview.heatmap ? `<div class="overview-heatmap-grid" style="grid-template-columns:${columns}" role="img" aria-label="Daily latency sample distribution">${cells.join("")}</div>` : ""}</section>`;
+}
+
+/* The dashboard renders only additive fields that the API actually supplies;
+	 absent series remain honestly unavailable. */
+const OVERVIEW_COLORS = Object.freeze({
+	saves: "var(--accent)", recalls: "var(--green)", successful: "var(--green)",
+	meaningful_no_write: "var(--accent)", policy_skipped: "var(--faint)", cancelled: "#9aa0aa",
+	genuine_failure: "var(--red)", other: "var(--border2)", p50: "#9aa0aa", p95: "var(--accent)",
+	p99: "var(--amber)", calls: "var(--accent)", neurons: "var(--green)", input_tokens: "#9b8ff5",
+	output_tokens: "var(--amber)",
+});
+
+function overviewDaily(data, period = "current") {
+	return Array.isArray(data?.periods?.[period]?.daily) ? data.periods[period].daily : [];
+}
+
+function overviewAiDaily(data, period = "current") {
+	return Array.isArray(data?.ai?.project?.periods?.[period]?.daily) ? data.ai.project.periods[period].daily : [];
+}
+
+function overviewReliabilityRow(row) {
+	const value = row?.reliability;
+	if (!value || typeof value !== "object") return null;
 	return {
-		title: "Recall operations by UTC bucket", axis: "operations",
-		series: [["recalls", "Recalls", ""], ["matched_operations", "Hit recalls", "secondary"]],
-		footer: "Hit recalls are recall operations that returned at least one matched item.",
+		successful: overviewFinite(value.successful), meaningful_no_write: overviewFinite(value.meaningful_no_write),
+		policy_skipped: overviewFinite(value.policy_skipped), cancelled: overviewFinite(value.cancelled),
+		genuine_failure: overviewFinite(value.genuine_failure), other: overviewFinite(value.other),
+		classified: overviewFinite(value.classified), eligible: overviewFinite(value.eligible), coverage: overviewFinite(value.coverage),
 	};
 }
 
-function overviewActivityChart(data) {
-	if (S.overview.metric === "memory") return overviewMemoryChart(data);
-	const metric = S.overview.metric === "recalls" ? "recalls" : "saves";
-	const spec = overviewActivitySpec(metric);
-	const rows = Array.isArray(data.periods?.current?.daily) ? data.periods.current.daily : [];
-	const previousRows = Array.isArray(data.periods?.previous?.daily) ? data.periods.previous.daily : [];
-	if (!rows.length) return `<div class="overview-empty">No ${metric === "saves" ? "write" : "recall"} operations in this range.</div>`;
-	const width = Math.max(900, rows.length * 24 + 72);
-	const height = 258;
-	const left = 52;
-	const right = 14;
-	const top = 18;
-	const bottom = 38;
-	const plotWidth = width - left - right;
-	const plotHeight = height - top - bottom;
-	const primaryKey = spec.series[0][0];
-	const values = rows.flatMap((row) => spec.series.map(([key]) => Number(row[key]) || 0));
-	if (S.overview.compare) values.push(...previousRows.map((row) => Number(row[primaryKey]) || 0));
-	const maximum = Math.max(1, ...values);
-	const slot = plotWidth / Math.max(1, rows.length);
-	const barWidth = Math.max(3, Math.min(28, (slot * .68) / spec.series.length));
-	const y = (value) => top + plotHeight - (Math.max(0, Number(value) || 0) / maximum) * plotHeight;
-	const grid = Array.from({ length: 5 }, (_, index) => {
-		const ratio = index / 4;
-		const lineY = top + plotHeight * ratio;
-		const label = Math.round(maximum * (1 - ratio));
-		return `<line class="overview-grid-line" x1="${left}" y1="${lineY}" x2="${width - right}" y2="${lineY}"></line><text class="overview-axis-label" x="${left - 8}" y="${lineY + 3}" text-anchor="end">${overviewCount(label)}</text>`;
+function overviewReliabilityAggregate(data, period = "current") {
+	const rows = overviewDaily(data, period).map(overviewReliabilityRow).filter(Boolean);
+	const keys = ["successful", "meaningful_no_write", "policy_skipped", "cancelled", "genuine_failure", "other", "classified", "eligible"];
+	const totals = Object.fromEntries(keys.map((key) => [key, rows.reduce((sum, row) => sum + Math.max(0, Number(row[key]) || 0), 0)]));
+	const hasExplicitClassified = rows.some((row) => row.classified !== null);
+	const classified = hasExplicitClassified
+		? totals.classified
+		: ["successful", "meaningful_no_write", "policy_skipped", "cancelled", "genuine_failure"].reduce((sum, key) => sum + totals[key], 0);
+	const evaluated = Math.max(0, classified - totals.cancelled);
+	const rate = evaluated ? Math.max(0, Math.min(100, ((evaluated - totals.genuine_failure) / evaluated) * 100)) : null;
+	const coverage = totals.eligible ? Math.max(0, Math.min(1, classified / totals.eligible)) : null;
+	return { ...totals, classified, evaluated, rate, coverage, rows };
+}
+
+function overviewLatencyRow(row) {
+	const value = row?.latency_ms;
+	if (!value || typeof value !== "object") return null;
+	return { p50:overviewFinite(value.p50), p95:overviewFinite(value.p95), p99:overviewFinite(value.p99),
+		samples:overviewFinite(value.samples), eligible:overviewFinite(value.eligible), coverage:overviewFinite(value.coverage),
+		bands:Array.isArray(value.bands) ? value.bands.map((entry) => Math.max(0, Number(typeof entry === "object" ? entry?.count : entry) || 0)).slice(0, 6) : null,
+		band_specs:Array.isArray(value.bands) ? value.bands.map((entry) => typeof entry === "object" ? { min_ms:overviewFinite(entry?.min_ms), max_ms_exclusive:overviewFinite(entry?.max_ms_exclusive) } : null).slice(0, 6) : null };
+}
+
+function overviewAiRow(row) {
+	if (!row || typeof row !== "object") return null;
+	return {
+		calls:overviewFinite(row.calls ?? row.ai_calls), neurons:overviewFinite(row.total_neurons_estimate ?? row.neurons),
+		input_tokens:overviewFinite(row.input_tokens), output_tokens:overviewFinite(row.output_tokens),
+		failed_calls:overviewFinite(row.failed_calls), successful_calls:overviewFinite(row.successful_calls),
+	};
+}
+
+function overviewSeriesVisible(key) { return !S.overview.legendOff?.[key]; }
+
+function toggleOverviewLegend(key) {
+	const supported = new Set(["saves","recalls","successful","meaningful_no_write","policy_skipped","cancelled","genuine_failure","other","p50","p95","p99","calls","neurons","input_tokens","output_tokens"]);
+	if (!supported.has(key)) return;
+	const off = { ...(S.overview.legendOff || {}) };
+	const keys = [...document.querySelectorAll("[data-overview-series]")].map((node) => node.dataset.overviewSeries).filter(Boolean);
+	if (off[key]) delete off[key];
+	else if (keys.filter((candidate) => !off[candidate]).length > 1) off[key] = true;
+	S.overview.legendOff = off;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(`[data-overview-series="${key}"]`)?.focus());
+}
+
+function overviewLegend(definitions, extra = "") {
+	return `<div class="overview-chart-legend">${definitions.map(({ key, label, value = "", color, line = false }) => {
+		const on = overviewSeriesVisible(key);
+		return `<button type="button" class="overview-chart-key${line ? " line" : ""}" data-overview-series="${esc(key)}" aria-pressed="${on}" onclick="toggleOverviewLegend('${esc(key)}')" style="--series-color:${color}"><i></i><span>${esc(label)}${value ? `&nbsp; ${value}` : ""}</span></button>`;
+	}).join("")}${extra}</div>`;
+}
+
+function overviewChartGeometry(rows, { rightAxis = false } = {}) {
+	const width = Math.max(1040, rows.length * 72 + 92);
+	const height = 320, left = 48, right = rightAxis ? 56 : 18, top = 16, bottom = 42;
+	return { width, height, left, right, top, bottom, plotWidth:width-left-right, plotHeight:height-top-bottom,
+		slot:(width-left-right)/Math.max(1,rows.length) };
+}
+
+function overviewGrid(geometry, maximum, { percent = false, rightTicks = null } = {}) {
+	const { width, height, left, right, top, bottom, plotHeight } = geometry;
+	const lines = Array.from({ length:5 }, (_, index) => {
+		const ratio = index / 4, lineY = top + plotHeight * ratio;
+		const value = percent ? Math.round((1-ratio)*100) : Math.round(maximum*(1-ratio));
+		const rightLabel = Array.isArray(rightTicks) ? rightTicks[index] : null;
+		return `<line class="overview-grid-line" x1="${left}" y1="${lineY}" x2="${width-right}" y2="${lineY}"></line><text class="overview-axis-label" x="${left-8}" y="${lineY+3}" text-anchor="end">${percent ? `${value}%` : overviewCount(value)}</text>${rightLabel === null ? "" : `<text class="overview-axis-label" x="${width-right+8}" y="${lineY+3}" text-anchor="start">${overviewCount(rightLabel)}</text>`}`;
 	}).join("");
-	const bars = rows.flatMap((row, index) => spec.series.map(([key, label, kind], seriesIndex) => {
-		const value = Number(row[key]) || 0;
-		const groupWidth = barWidth * spec.series.length;
-		const x = left + index * slot + (slot - groupWidth) / 2 + seriesIndex * barWidth;
-		const barY = y(value);
-		return `<rect class="overview-series-bar${kind ? ` ${kind}` : ""}" x="${x.toFixed(2)}" y="${barY.toFixed(2)}" width="${Math.max(1, barWidth - 1).toFixed(2)}" height="${Math.max(0, top + plotHeight - barY).toFixed(2)}" rx="2"><title>${esc(overviewBucketLabel(row))}: ${overviewExact(value)} ${esc(label.toLowerCase())}</title></rect>`;
+	return `${lines}<line class="overview-axis-line" x1="${left}" y1="${height-bottom}" x2="${width-right}" y2="${height-bottom}"></line>`;
+}
+
+function overviewXAxis(rows, geometry) {
+	const every = Math.max(1, Math.ceil(rows.length / 8));
+	return rows.map((row,index) => (index%every===0 || index===rows.length-1)
+		? `<text class="overview-axis-label" x="${(geometry.left+index*geometry.slot+geometry.slot/2).toFixed(2)}" y="${geometry.height-12}" text-anchor="middle">${esc(overviewBucketLabel(row))}</text>` : "").join("");
+}
+
+function overviewBucketTargets(rows, geometry) {
+	return rows.map((row,index) => {
+		const x = geometry.left + index*geometry.slot, center = x+geometry.slot/2;
+		return `<rect id="overviewBucket-${index}" class="overview-bucket-band" x="${x.toFixed(2)}" y="${geometry.top}" width="${geometry.slot.toFixed(2)}" height="${geometry.plotHeight}" tabindex="0" role="button" aria-label="Inspect ${esc(overviewBucketLabel(row))}" data-center="${center.toFixed(2)}" onmouseenter="showOverviewChartTooltip(event,${index})" onmousemove="positionOverviewChartTooltip(event)" onmouseleave="hideOverviewChartTooltip(event)" onfocus="showOverviewChartTooltip(event,${index})" onblur="hideOverviewChartTooltip(event)" onclick="openOverviewBucket(${index})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openOverviewBucket(${index})}"></rect>`;
+	}).join("");
+}
+
+function overviewTooltipValues(data, index) {
+	const mode = S.overview.mode;
+	const row = mode === "ai" ? overviewAiDaily(data)[index] : overviewDaily(data)[index];
+	if (!row) return [];
+	if (mode === "activity") return [["Saves",row.saves],["Recalls",row.recalls]];
+	if (mode === "reliability") {
+		const value = overviewReliabilityRow(row); if (!value) return [];
+		return [["Successful",value.successful],["Meaningful no-write",value.meaningful_no_write],["Policy skipped",value.policy_skipped],["Cancelled",value.cancelled],["Genuine failure",value.genuine_failure],["Other",value.other]].filter(([,number]) => number !== null);
+	}
+	if (mode === "latency") { const value=overviewLatencyRow(row); return value ? [["P50",overviewDuration(value.p50)],["P95",overviewDuration(value.p95)],["P99",overviewDuration(value.p99)],["Samples",value.samples]] : []; }
+	const value=overviewAiRow(row); return value ? [["AI calls",value.calls],["Neurons",value.neurons],["Input tokens",value.input_tokens],["Output tokens",value.output_tokens]].filter(([,number]) => number !== null) : [];
+}
+
+function showOverviewChartTooltip(event,index) {
+	const chart = event.currentTarget.closest(".overview-chart"), tooltip = chart?.querySelector(".overview-tooltip"), line = chart?.querySelector(".overview-hover-line");
+	if (!tooltip) return;
+	const data = S.overview.data, rows = S.overview.mode === "ai" ? overviewAiDaily(data) : overviewDaily(data), row = rows[index];
+	const values = overviewTooltipValues(data,index);
+	tooltip.innerHTML = `<b>${esc(overviewBucketLabel(row))}</b>${values.map(([label,value]) => `<span class="overview-tooltip-row"><span>${esc(label)}</span><strong>${typeof value === "string" ? esc(value) : overviewExact(value)}</strong></span>`).join("")}`;
+	tooltip.hidden = false;
+	const center = Number(event.currentTarget.dataset.center) || 0, svg = event.currentTarget.ownerSVGElement;
+	const width = Number(svg?.viewBox?.baseVal?.width) || 1;
+	tooltip.style.left = `${Math.max(10,Math.min(90,(center/width)*100))}%`;
+	if (line) { line.hidden = false; line.setAttribute("x1",center); line.setAttribute("x2",center); }
+}
+
+function positionOverviewChartTooltip() {}
+function hideOverviewChartTooltip(event) {
+	const chart = event.currentTarget.closest(".overview-chart"), tooltip=chart?.querySelector(".overview-tooltip"), line=chart?.querySelector(".overview-hover-line");
+	if (tooltip) tooltip.hidden=true; if (line) line.hidden=true;
+}
+
+function overviewActivityChart(data) {
+	const rows = overviewDaily(data), previousRows = overviewDaily(data,"previous");
+	if (!rows.length) return `<div class="overview-empty">No operation activity is available for this range.</div>`;
+	const metric = S.overview.metric;
+	const series = metric === "saves" ? [{key:"saves",label:"Saves",color:OVERVIEW_COLORS.saves}]
+		: metric === "recalls" ? [{key:"recalls",label:"Recalls",color:OVERVIEW_COLORS.recalls}]
+		: [{key:"saves",label:"Saves",color:OVERVIEW_COLORS.saves},{key:"recalls",label:"Recalls",color:OVERVIEW_COLORS.recalls}];
+	const visible = series.filter(({key}) => overviewSeriesVisible(key));
+	const geometry = overviewChartGeometry(rows);
+	const values = rows.flatMap((row) => visible.map(({key}) => Math.max(0,Number(row[key])||0)));
+	if (S.overview.compare) values.push(...previousRows.flatMap((row) => visible.map(({key}) => Math.max(0,Number(row[key])||0))));
+	const maximum = Math.max(1,...values), baseline=geometry.height-geometry.bottom;
+	const y=(value)=>geometry.top+geometry.plotHeight-(Math.max(0,Number(value)||0)/maximum)*geometry.plotHeight;
+	const bars=rows.flatMap((row,index)=>visible.map(({key,color},seriesIndex)=>{
+		const groupWidth=Math.min(geometry.slot*.7,visible.length*36), barWidth=Math.max(4,groupWidth/Math.max(1,visible.length));
+		const x=geometry.left+index*geometry.slot+(geometry.slot-groupWidth)/2+seriesIndex*barWidth;
+		const barY=y(row[key]);
+		return `<rect class="overview-series-bar" style="fill:${color};--series-index:${index}" x="${x.toFixed(2)}" y="${barY.toFixed(2)}" width="${Math.max(2,barWidth-2).toFixed(2)}" height="${Math.max(0,baseline-barY).toFixed(2)}" rx="3"></rect>`;
 	})).join("");
-	const labelEvery = Math.max(1, Math.ceil(rows.length / 8));
-	const labels = rows.map((row, index) => (index % labelEvery === 0 || index === rows.length - 1)
-		? `<text class="overview-axis-label" x="${(left + index * slot + slot / 2).toFixed(2)}" y="${height - 10}" text-anchor="middle">${esc(overviewBucketLabel(row))}</text>` : "").join("");
-	const previousPoints = previousRows.map((row, index) => `${(left + index * slot + slot / 2).toFixed(2)},${y(row[primaryKey]).toFixed(2)}`).join(" ");
-	const previousLine = S.overview.compare && previousRows.length
-		? `<polyline class="overview-series-line compare" points="${previousPoints}"><title>Previous-period ${esc(spec.series[0][1].toLowerCase())}</title></polyline>` : "";
-	const recallRate = metric === "recalls" ? overviewRecallRate(data.periods?.current?.operations) : null;
+	const previous= S.overview.compare ? visible.map(({key,color})=>{
+		if (!previousRows.length) return "";
+		const points=previousRows.map((row,index)=>`${(geometry.left+index*geometry.slot+geometry.slot/2).toFixed(2)},${y(row[key]).toFixed(2)}`).join(" ");
+		return `<polyline class="overview-series-line compare" pathLength="1" style="--series-color:${color}" points="${points}"></polyline>`;
+	}).join("") : "";
+	const ribbonRows=rows.map(overviewReliabilityRow);
+	const ribbon=ribbonRows.some(Boolean) ? `<div class="overview-health-ribbon" aria-label="Daily operation health">${ribbonRows.map((value)=>{
+		if (!value) return `<span style="background:var(--border2)"></span>`;
+		const total=[value.successful,value.meaningful_no_write,value.policy_skipped,value.cancelled,value.genuine_failure,value.other].reduce((sum,entry)=>sum+(entry||0),0);
+		const color=value.genuine_failure && total && value.genuine_failure/total>.03 ? "var(--red)" : value.cancelled && total && value.cancelled/total>.08 ? "var(--amber)" : "var(--green)";
+		return `<span style="background:${color}"></span>`;
+	}).join("")}</div>` : "";
 	return `<div class="overview-chart" role="group" aria-describedby="overviewChartSummary">
-		<div class="overview-chart-legend">${spec.series.map(([, label, kind]) => `<span class="overview-chart-key${kind === "secondary" ? " recall" : ""}"><i></i>${esc(label)}</span>`).join("")}
-			${S.overview.compare ? `<span class="overview-chart-key neutral"><i></i>Previous ${esc(spec.series[0][1])}</span>` : ""}<span class="overview-axis-note">left axis · ${esc(spec.axis)}</span></div>
-		<div class="overview-plot-wrap"><svg class="overview-plot" style="min-width:${width}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(spec.title)}"><title>${esc(spec.title)}</title>${grid}<line class="overview-axis-line" x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}"></line>${bars}${previousLine}${labels}</svg></div>
-		<div class="overview-chart-footer"><p>${esc(spec.footer)}${recallRate === null ? "" : ` Hit rate: ${esc(overviewPercent(recallRate, 1))} across measured recalls.`}</p></div>
+		${overviewLegend(series.map((definition)=>({...definition,value:overviewCount(rows.reduce((sum,row)=>sum+(Number(row[definition.key])||0),0))})),`<span class="overview-axis-note">${S.overview.compare ? "dashes = previous period · " : ""}operations</span>`)}
+		<div class="overview-plot-wrap"><svg class="overview-plot" style="min-width:${geometry.width}px" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Daily save and recall operations"><title>Daily save and recall operations</title>${overviewGrid(geometry,maximum)}${bars}${previous}${overviewXAxis(rows,geometry)}<line class="overview-hover-line" y1="${geometry.top}" y2="${baseline}" hidden></line>${overviewBucketTargets(rows,geometry)}</svg><div class="overview-tooltip" role="tooltip" hidden></div></div>${ribbon}
+		<div class="overview-chart-footer"><button id="overviewTableButton" type="button" class="overview-control" aria-expanded="${S.overview.table}" aria-controls="overviewPulseDataTable" onclick="toggleOverviewTable()">${S.overview.table ? "Hide data table" : "Show data table"}</button></div>
 	</div>`;
 }
 
 function overviewReliabilityChart(data) {
-	const currentPeriod = data.jobs?.periods?.current || {};
-	const previousPeriod = data.jobs?.periods?.previous || {};
-	const current = overviewSettlement(currentPeriod);
-	const previous = overviewSettlement(previousPeriod);
-	const rowsFor = (period, settlement) => [
-		["Successful settlements", settlement.successful, "var(--green)"],
-		["Genuine failures", settlement.failures, "var(--red)"],
-		["Deletion cancellations", period.cancelled_by_delete, "var(--faint)"],
-		["Retention cancellations", period.cancelled_by_retention, "var(--faint)"],
-		["Accepted jobs with retries", period.accepted_jobs_with_retries, "var(--amber)"],
-	];
-	const allRows = [...rowsFor(currentPeriod, current), ...rowsFor(previousPeriod, previous)];
-	const maximum = Math.max(1, ...allRows.map((row) => Number(row[1]) || 0));
-	return `<div class="overview-comparison-panel" role="group" aria-describedby="overviewChartSummary">
-		<section class="overview-comparison-plot"><h4>${current.rate === null ? "Not measured" : `${overviewPercent(current.rate, 2)} write processing success`}</h4><p>Current range · cancellations excluded from the rate</p>${overviewComparisonRows(rowsFor(currentPeriod, current), maximum)}</section>
-		${S.overview.compare ? `<section class="overview-comparison-plot"><h4>${previous.rate === null ? "Not measured" : `${overviewPercent(previous.rate, 2)} write processing success`}</h4><p>Previous adjacent range · same formula</p>${overviewComparisonRows(rowsFor(previousPeriod, previous), maximum)}</section>` : `<section class="overview-comparison-plot"><h4>How this rate is calculated</h4><p>Successful enriched/completed jobs divided by successful jobs plus genuine failures.</p><div class="overview-empty">Enable “Compare with previous period” to inspect the adjacent range.</div></section>`}
-	</div>`;
-}
-
-function overviewLatencyChart(data) {
-	const current = data.periods?.current?.latency_ms || {};
-	const previous = data.periods?.previous?.latency_ms || {};
-	const rowsFor = (period) => [["P50 · ms", period.p50], ["P95 · ms", period.p95], ["P99 · ms", period.p99]];
-	const maximum = Math.max(1, ...rowsFor(current).map((row) => Number(row[1]) || 0), ...rowsFor(previous).map((row) => Number(row[1]) || 0));
-	const panel = (title, period) => `<section class="overview-comparison-plot"><h4>${esc(title)}</h4><p>${overviewExact(period.samples)} samples · ${overviewCoverage(period.coverage)} coverage</p>${overviewComparisonRows(rowsFor(period), maximum)}<p class="overview-chart-footer">${overviewExact(period.samples)} measured of ${overviewExact(period.eligible)} eligible operations.</p></section>`;
-	return `<div class="overview-comparison-panel" role="group" aria-describedby="overviewChartSummary">${panel("Current range · measured processing latency", current)}${S.overview.compare ? panel("Previous adjacent range", previous) : `<section class="overview-comparison-plot"><h4>Tail latency</h4><p>P95 and P99 expose slow operations that an average can hide.</p><div class="overview-empty">Enable comparison to inspect the adjacent range.</div></section>`}</div>`;
-}
-
-function overviewAiChart(data) {
-	const current = data.ai?.current;
-	const previous = data.ai?.previous;
-	const quota = data.ai?.quota;
-	if (!data.ai?.available || !current || !quota) return `<div class="overview-empty">Account AI usage is unavailable right now.</div>`;
-	const quotaPercent = quota.limit ? Math.max(0, Math.min(100, (Number(quota.used || 0) / Number(quota.limit)) * 100)) : 0;
-	const stats = [
-		["AI calls · selected range", current.calls, previous?.calls, {}],
-		["Successful calls", current.successful_calls, previous?.successful_calls, {}],
-		["Failed calls", current.failed_calls, previous?.failed_calls, { lowerIsBetter: true }],
-		["Reported tokens", current.total_tokens, previous?.total_tokens, {}],
-	];
-	return `<div class="overview-quota-panel" role="group" aria-describedby="overviewChartSummary">
-		<section class="overview-quota-main"><div class="overview-quota-value"><strong>${overviewExact(quota.used)}</strong><span>/ ${overviewExact(quota.limit)} AI writes this UTC month</span></div>
-			<div class="overview-quota-track" role="img" aria-label="${overviewPercent(quotaPercent, 0)} of the account-wide monthly AI-write quota used"><i style="width:${quotaPercent}%"></i></div>
-			<div class="overview-quota-meta"><span>${overviewExact(quota.remaining)} remaining</span><span>Resets ${esc(overviewUtcDate(overviewTimestamp(quota.resets_at), { month: "short", day: "numeric", year: "numeric" }))}</span></div>
-			<div class="overview-chart-footer"><p>All AI figures are account-wide. Quota covers the current UTC month; usage statistics cover the selected dashboard range.</p></div></section>
-		<section class="overview-quota-stats">${stats.map(([label, value, before, deltaOptions]) => `<div class="overview-quota-stat"><span>${esc(label)}</span><strong>${overviewCount(value)}</strong>${S.overview.compare ? overviewDelta(value, before, deltaOptions) : ""}</div>`).join("")}</section>
+	const rows=overviewDaily(data), mapped=rows.map(overviewReliabilityRow);
+	if (!rows.length || !mapped.some(Boolean)) return `<div class="overview-empty">Daily reliability telemetry is unavailable for this range.</div>`;
+	const definitions=[
+		{key:"successful",label:"Successful",color:OVERVIEW_COLORS.successful},
+		{key:"meaningful_no_write",label:"Meaningful no-write",color:OVERVIEW_COLORS.meaningful_no_write},
+		{key:"policy_skipped",label:"Policy skipped",color:OVERVIEW_COLORS.policy_skipped},
+		{key:"cancelled",label:"Cancelled",color:OVERVIEW_COLORS.cancelled},
+		{key:"genuine_failure",label:"Genuine failure",color:OVERVIEW_COLORS.genuine_failure},
+		{key:"other",label:"Other",color:OVERVIEW_COLORS.other},
+	].filter(({key})=>mapped.some((row)=>row?.[key]!==null));
+	const visible=definitions.filter(({key})=>overviewSeriesVisible(key));
+	const share=S.overview.reliabilityView!=="counts";
+	const geometry=overviewChartGeometry(rows);
+	const totals=mapped.map((row)=>visible.reduce((sum,{key})=>sum+(row?.[key]||0),0));
+	const maximum=share ? 100 : Math.max(1,...totals), baseline=geometry.height-geometry.bottom;
+	const y=(value)=>geometry.top+geometry.plotHeight-(Math.max(0,Number(value)||0)/maximum)*geometry.plotHeight;
+	const barWidth=Math.min(geometry.slot*.72,72);
+	const stacks=mapped.map((row,index)=>{
+		if (!row) return "";
+		const total=Math.max(0,totals[index]), x=geometry.left+index*geometry.slot+(geometry.slot-barWidth)/2;
+		let cumulative=0;
+		return visible.map(({key,color},seriesIndex)=>{
+			const raw=Math.max(0,row[key]||0), value=share ? (total ? raw/total*100 : 0) : raw;
+			const topValue=cumulative+value, rectY=y(topValue), rectHeight=Math.max(0,y(cumulative)-rectY); cumulative=topValue;
+			return `<rect class="overview-series-bar" style="fill:${color};--series-index:${index+seriesIndex}" x="${x.toFixed(2)}" y="${rectY.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${rectHeight.toFixed(2)}"></rect>`;
+		}).join("");
+	}).join("");
+	const totalsByKey=(key)=>mapped.reduce((sum,row)=>sum+(row?.[key]||0),0);
+	const toggle=`<div class="overview-rel-toggle" role="group" aria-label="Reliability chart units"><button type="button" aria-pressed="${share}" onclick="setOverviewReliabilityView('share')">Share</button><button type="button" aria-pressed="${!share}" onclick="setOverviewReliabilityView('counts')">Counts</button></div><span class="overview-axis-note">${share ? "share of classified outcomes" : "classified outcomes"}</span>`;
+	return `<div class="overview-chart" role="group" aria-describedby="overviewChartSummary">
+		${overviewLegend(definitions.map((definition)=>({...definition,value:overviewCount(totalsByKey(definition.key))})),toggle)}
+		<div class="overview-plot-wrap"><svg class="overview-plot" style="min-width:${geometry.width}px" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="Daily operation reliability"><title>Daily operation reliability</title>${overviewGrid(geometry,maximum,{percent:share})}${stacks}${overviewXAxis(rows,geometry)}<line class="overview-hover-line" y1="${geometry.top}" y2="${baseline}" hidden></line>${overviewBucketTargets(rows,geometry)}</svg><div class="overview-tooltip" role="tooltip" hidden></div></div>
+		<div class="overview-chart-footer"><button id="overviewTableButton" type="button" class="overview-control" aria-expanded="${S.overview.table}" aria-controls="overviewPulseDataTable" onclick="toggleOverviewTable()">${S.overview.table ? "Hide data table" : "Show data table"}</button></div>
 	</div>`;
 }
 
 function overviewChartSummary(data) {
-	const current = data.periods?.current || {};
-	const previous = data.periods?.previous || {};
-	const operations = current.operations || {};
+	if (S.overview.mode === "activity") {
+		const rows = overviewDaily(data);
+		const keys = S.overview.metric === "saves" ? ["saves"] : S.overview.metric === "recalls" ? ["recalls"] : ["saves", "recalls"];
+		const visible = keys.filter(overviewSeriesVisible);
+		if (!rows.length) return "Daily operation activity is unavailable for this range.";
+		const current = visible.map((key) => `${overviewExact(rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0))} ${key}`).join(" and ");
+		if (!S.overview.compare) return `${current} across ${overviewExact(rows.length)} UTC buckets.`;
+		const previous = overviewDaily(data, "previous");
+		return `${current} across ${overviewExact(rows.length)} UTC buckets. Previous adjacent range: ${visible.map((key) => `${overviewExact(previous.reduce((sum, row) => sum + (Number(row[key]) || 0), 0))} ${key}`).join(" and ")}.`;
+	}
 	if (S.overview.mode === "reliability") {
-		const settlement = overviewSettlement(data.jobs?.periods?.current);
-		const prior = overviewSettlement(data.jobs?.periods?.previous);
-		const base = settlement.rate === null ? "No evaluated write settlements in the selected range." : `${overviewPercent(settlement.rate, 2)} write processing success across ${overviewExact(settlement.evaluated)} evaluated settlements; deletion and retention cancellations are excluded.`;
-		return S.overview.compare ? `${base} Previous adjacent range: ${prior.rate === null ? "not measured" : `${overviewPercent(prior.rate, 2)} across ${overviewExact(prior.evaluated)} evaluated settlements`}.` : base;
+		const current = overviewReliabilityAggregate(data);
+		const prior = overviewReliabilityAggregate(data, "previous");
+		const base = current.rate === null ? "Daily reliability telemetry is unavailable." : `${overviewPercent(current.rate, 2)} reliability across ${overviewExact(current.evaluated)} classified, non-cancelled operations; ${overviewExact(current.genuine_failure)} genuine failures; ${overviewCoverage(current.coverage)} classification coverage.`;
+		return S.overview.compare && prior.rate !== null ? `${base} Previous adjacent range: ${overviewPercent(prior.rate, 2)}.` : base;
 	}
 	if (S.overview.mode === "latency") {
-		const base = `${overviewExact(current.latency_ms?.samples)} measured latency samples; P95 is ${current.latency_ms?.p95 == null ? "unavailable" : `${overviewExact(current.latency_ms.p95)} milliseconds`}.`;
-		return S.overview.compare ? `${base} Previous adjacent range P95: ${previous.latency_ms?.p95 == null ? "unavailable" : `${overviewExact(previous.latency_ms.p95)} milliseconds`}.` : base;
+		const rows = overviewDaily(data).map(overviewLatencyRow).filter(Boolean);
+		const aggregate = data.periods?.current?.latency_ms || {};
+		return rows.length ? `${overviewExact(rows.length)} UTC latency buckets; P50 ${overviewDuration(aggregate.p50)}, P95 ${overviewDuration(aggregate.p95)}, P99 ${overviewDuration(aggregate.p99)} across ${overviewExact(aggregate.samples)} samples.` : "Daily latency telemetry is unavailable.";
 	}
-	if (S.overview.mode === "ai") {
-		if (!data.ai?.available) return "Account-wide AI usage is unavailable.";
-		const base = `${overviewExact(data.ai.current?.calls)} account-wide AI calls in the selected range; ${overviewExact(data.ai.quota?.used)} of ${overviewExact(data.ai.quota?.limit)} account-wide AI writes used this UTC month.`;
-		return S.overview.compare ? `${base} Previous adjacent range: ${overviewExact(data.ai.previous?.calls)} account-wide AI calls.` : base;
+	const project = data.ai?.project?.periods?.current;
+	return project ? `${overviewExact(project.calls)} project-attributed AI calls, ${overviewExact(project.total_neurons_estimate)} neurons, ${overviewExact(project.input_tokens)} input tokens, and ${overviewExact(project.output_tokens)} output tokens in this range.` : "Project-attributed AI telemetry is unavailable.";
+}
+
+function overviewDataTable(data) {
+	const currentRows = S.overview.mode === "ai" ? overviewAiDaily(data) : overviewDaily(data);
+	const previousRows = S.overview.mode === "ai" ? overviewAiDaily(data, "previous") : overviewDaily(data, "previous");
+	const compared = S.overview.compare;
+	const periodHead = compared ? "<th scope=\"col\">Period</th>" : "";
+	const renderRows = (rows, label, renderCells) => rows.map((row) => `<tr>${compared ? `<th scope="row">${label}</th>` : ""}<td>${esc(overviewBucketLabel(row))}</td>${renderCells(row)}</tr>`).join("");
+	if (S.overview.mode === "activity") {
+		const definitions = (S.overview.metric === "saves" ? [["saves", "Saves"]] : S.overview.metric === "recalls" ? [["recalls", "Recalls"]] : [["saves", "Saves"], ["recalls", "Recalls"]]).filter(([key]) => overviewSeriesVisible(key));
+		return `<table><caption>Daily operations, UTC</caption><thead><tr>${periodHead}<th scope="col">Bucket</th>${definitions.map(([, label]) => `<th scope="col">${label}</th>`).join("")}</tr></thead><tbody>${renderRows(currentRows, "Current", (row) => definitions.map(([key]) => `<td>${overviewExact(row[key])}</td>`).join(""))}${compared ? renderRows(previousRows, "Previous", (row) => definitions.map(([key]) => `<td>${overviewExact(row[key])}</td>`).join("")) : ""}</tbody></table>`;
 	}
-	if (S.overview.metric === "saves") {
-		const base = `${overviewExact(operations.saves)} write operations and ${overviewExact(operations.saved_objects)} recorded object actions in the selected range.`;
-		return S.overview.compare ? `${base} Previous adjacent range: ${overviewExact(previous.operations?.saves)} write operations.` : base;
+	if (S.overview.mode === "reliability") {
+		const definitions = [["successful", "Successful"], ["meaningful_no_write", "Meaningful no-write"], ["policy_skipped", "Policy skipped"], ["cancelled", "Cancelled"], ["genuine_failure", "Genuine failure"], ["other", "Other"]]
+			.filter(([key]) => overviewSeriesVisible(key) && currentRows.some((row) => overviewReliabilityRow(row)?.[key] !== null));
+		const cells = (row) => {
+			const value = overviewReliabilityRow(row) || {};
+			const total = definitions.reduce((sum, [key]) => sum + (Number(value[key]) || 0), 0);
+			return definitions.map(([key]) => `<td>${S.overview.reliabilityView === "counts" ? overviewExact(value[key]) : (total ? overviewPercent(((Number(value[key]) || 0) / total) * 100, 1) : "—")}</td>`).join("");
+		};
+		return `<table><caption>Daily operation reliability, UTC · ${S.overview.reliabilityView === "counts" ? "counts" : "share of visible classified outcomes"}</caption><thead><tr>${periodHead}<th scope="col">Bucket</th>${definitions.map(([, label]) => `<th scope="col">${label}</th>`).join("")}</tr></thead><tbody>${renderRows(currentRows, "Current", cells)}${compared ? renderRows(previousRows, "Previous", cells) : ""}</tbody></table>`;
 	}
-	if (S.overview.metric === "recalls") {
-		const base = `${overviewExact(operations.recalls)} recall operations; ${overviewExact(operations.matched_operations)} of ${overviewExact(operations.matched_samples)} measured recalls were hit recalls.`;
-		return S.overview.compare ? `${base} Previous adjacent range: ${overviewExact(previous.operations?.recalls)} recall operations.` : base;
+	if (S.overview.mode === "latency") {
+		const definitions = [["p50", "P50"], ["p95", "P95"], ["p99", "P99"]].filter(([key]) => overviewSeriesVisible(key));
+		const hasBands = currentRows.some((row) => Array.isArray(overviewLatencyRow(row)?.bands));
+		const bandLabels = ["<50 ms", "50–100 ms", "100–200 ms", "200–400 ms", "400–800 ms", "800 ms+"];
+		const cells = (row) => { const value = overviewLatencyRow(row) || {}; return `${definitions.map(([key]) => `<td>${overviewDuration(value[key])}</td>`).join("")}<td>${overviewExact(value.samples)}</td>${hasBands ? bandLabels.map((_, index) => `<td>${overviewExact(value.bands?.[index])}</td>`).join("") : ""}`; };
+		return `<table><caption>Daily operation latency and sample distribution, UTC</caption><thead><tr>${periodHead}<th scope="col">Bucket</th>${definitions.map(([, label]) => `<th scope="col">${label}</th>`).join("")}<th scope="col">Samples</th>${hasBands ? bandLabels.map((label) => `<th scope="col">${label}</th>`).join("") : ""}</tr></thead><tbody>${renderRows(currentRows, "Current", cells)}${compared ? renderRows(previousRows, "Previous", cells) : ""}</tbody></table>`;
 	}
-	return `${overviewExact(data.inventory?.total_objects)} current project-wide memory objects, with ${overviewExact(operations.saved_objects)} object actions recorded in the selected range.`;
+	const definitions = [["calls", "AI calls"], ["neurons", "Neurons"], ["input_tokens", "Input tokens"], ["output_tokens", "Output tokens"]].filter(([key]) => overviewSeriesVisible(key));
+	const cells = (row) => { const value = overviewAiRow(row) || {}; return definitions.map(([key]) => `<td>${overviewExact(value[key])}</td>`).join(""); };
+	return `<table><caption>Daily project-attributed AI usage, UTC</caption><thead><tr>${periodHead}<th scope="col">Bucket</th>${definitions.map(([, label]) => `<th scope="col">${label}</th>`).join("")}</tr></thead><tbody>${renderRows(currentRows, "Current", cells)}${compared ? renderRows(previousRows, "Previous", cells) : ""}</tbody></table>`;
 }
 
 function overviewChartForMode(data) {
@@ -4337,75 +4563,45 @@ function overviewChartForMode(data) {
 	return overviewActivityChart(data);
 }
 
-function overviewDataTable(data) {
-	const mode = S.overview.mode;
-	if (mode === "activity") {
-		if (S.overview.metric === "memory") {
-			const inventory = data.inventory || {};
-			const rows = [["Entities", inventory.nodes], ["Conversation pages", inventory.pages], ["Facts & details", inventory.slices], ["Events", inventory.events], ["Relationships", inventory.edges]];
-			return `<table><caption>Current project-wide memory composition</caption><thead><tr><th>Object type</th><th>Records</th><th>Share</th></tr></thead><tbody>${rows.map(([label, count]) => `<tr><td>${esc(label)}</td><td>${overviewExact(count)}</td><td>${inventory.total_objects ? overviewPercent((Number(count || 0) / Number(inventory.total_objects)) * 100, 1) : "—"}</td></tr>`).join("")}</tbody></table>`;
-		}
-		const currentRows = data.periods?.current?.daily || [];
-		const previousRows = S.overview.compare ? (data.periods?.previous?.daily || []) : [];
-		const periodHead = S.overview.compare ? "<th>Period</th>" : "";
-		const cells = (period, row, values) => `<tr>${S.overview.compare ? `<td>${period}</td>` : ""}<td>${esc(overviewBucketLabel(row))}</td>${values}</tr>`;
-		if (S.overview.metric === "recalls") {
-			const render = (period, rows) => rows.map((row) => cells(period, row, `<td>${overviewExact(row.recalls)}</td><td>${overviewExact(row.matched_operations)}</td><td>${overviewExact(row.matched_samples)}</td><td>${overviewPercent(overviewRecallRate(row), 1)}</td>`)).join("");
-			return `<table><caption>Daily recall operations, UTC${S.overview.compare ? " · current and previous adjacent ranges" : ""}</caption><thead><tr>${periodHead}<th>Bucket</th><th>Recalls</th><th>Hit recalls</th><th>Measured recalls</th><th>Hit rate</th></tr></thead><tbody>${render("Current", currentRows)}${render("Previous", previousRows)}</tbody></table>`;
-		}
-		const render = (period, rows) => rows.map((row) => cells(period, row, `<td>${overviewExact(row.saves)}</td><td>${overviewExact(row.saved_objects)}</td><td>${overviewExact(row.skipped)}</td>`)).join("");
-		return `<table><caption>Daily write operations, UTC${S.overview.compare ? " · current and previous adjacent ranges" : ""}</caption><thead><tr>${periodHead}<th>Bucket</th><th>Saves</th><th>Object actions</th><th>Items skipped</th></tr></thead><tbody>${render("Current", currentRows)}${render("Previous", previousRows)}</tbody></table>`;
-	}
-	if (mode === "reliability") {
-		const currentPeriod = data.jobs?.periods?.current || {};
-		const previousPeriod = data.jobs?.periods?.previous || {};
-		const row = (label, period) => {
-			const settlement = overviewSettlement(period);
-			const cancellations = Number(period.cancelled_by_delete || 0) + Number(period.cancelled_by_retention || 0);
-			return `<tr><td>${label}</td><td>${overviewPercent(settlement.rate, 2)}</td><td>${overviewExact(settlement.successful)}</td><td>${overviewExact(settlement.failures)}</td><td>${overviewExact(cancellations)}</td><td>${overviewExact(period.accepted_jobs_with_retries)}</td></tr>`;
-		};
-		return `<table><caption>Write processing settlement</caption><thead><tr><th>Period</th><th>Success rate</th><th>Successful</th><th>Genuine failures</th><th>Cancellations</th><th>Accepted jobs with retries</th></tr></thead><tbody>${row("Current", currentPeriod)}${S.overview.compare ? row("Previous", previousPeriod) : ""}</tbody></table>`;
-	}
-	if (mode === "latency") {
-		const current = data.periods?.current?.latency_ms || {};
-		const previous = data.periods?.previous?.latency_ms || {};
-		return `<table><caption>Measured processing latency</caption><thead><tr><th>Period</th><th>P50</th><th>P95</th><th>P99</th><th>Samples</th><th>Coverage</th></tr></thead><tbody>
-			<tr><td>Current</td><td>${overviewDuration(current.p50)}</td><td>${overviewDuration(current.p95)}</td><td>${overviewDuration(current.p99)}</td><td>${overviewExact(current.samples)}</td><td>${overviewCoverage(current.coverage)}</td></tr>
-			${S.overview.compare ? `<tr><td>Previous</td><td>${overviewDuration(previous.p50)}</td><td>${overviewDuration(previous.p95)}</td><td>${overviewDuration(previous.p99)}</td><td>${overviewExact(previous.samples)}</td><td>${overviewCoverage(previous.coverage)}</td></tr>` : ""}</tbody></table>`;
-	}
-	const current = data.ai?.current || {};
-	const previous = data.ai?.previous || {};
-	return `<table><caption>Account AI usage</caption><thead><tr><th>Period</th><th>Calls</th><th>Failed</th><th>Input tokens</th><th>Output tokens</th><th>Compute estimate</th></tr></thead><tbody>
-		<tr><td>Current</td><td>${overviewExact(current.calls)}</td><td>${overviewExact(current.failed_calls)}</td><td>${overviewExact(current.input_tokens)}</td><td>${overviewExact(current.output_tokens)}</td><td>${overviewExact(current.total_neurons_estimate)}</td></tr>
-		${S.overview.compare ? `<tr><td>Previous</td><td>${overviewExact(previous.calls)}</td><td>${overviewExact(previous.failed_calls)}</td><td>${overviewExact(previous.input_tokens)}</td><td>${overviewExact(previous.output_tokens)}</td><td>${overviewExact(previous.total_neurons_estimate)}</td></tr>` : ""}</tbody></table>`;
+function overviewBucketPayload(data, index) {
+	const primary = S.overview.mode === "ai" ? overviewAiDaily(data)[index] : overviewDaily(data)[index];
+	if (!primary) return null;
+	const matches = (row) => Number(row?.from_ms) === Number(primary.from_ms) && Number(row?.to_ms) === Number(primary.to_ms);
+	return {
+		primary,
+		operation: overviewDaily(data).find(matches) || null,
+		ai: overviewAiDaily(data).find(matches) || null,
+	};
+}
+
+function overviewBucketRows(rows) {
+	const present = rows.filter(([, value]) => value !== null && value !== undefined);
+	return present.map(([label, value, color = "var(--accent)", detail = ""]) => `<div class="overview-bucket-row"><span><i style="--row-color:${color}"></i>${esc(label)}</span><strong>${typeof value === "string" ? esc(value) : overviewExact(value)}</strong><small>${esc(detail)}</small></div>`).join("");
+}
+
+function overviewBucketDrawer(data) {
+	if (!Number.isInteger(S.overview.bucketIndex)) return "";
+	const payload = overviewBucketPayload(data, S.overview.bucketIndex);
+	if (!payload) return "";
+	const operation = payload.operation;
+	const reliability = overviewReliabilityRow(operation);
+	const latency = overviewLatencyRow(operation);
+	const ai = overviewAiRow(payload.ai);
+	const sections = [];
+	if (operation) sections.push(`<section class="overview-bucket-group"><h4>Operations</h4>${overviewBucketRows([["Saves", overviewFinite(operation.saves), OVERVIEW_COLORS.saves], ["Recalls", overviewFinite(operation.recalls), OVERVIEW_COLORS.recalls]])}</section>`);
+	if (reliability) sections.push(`<section class="overview-bucket-group"><h4>Reliability</h4>${overviewBucketRows([["Successful", reliability.successful, OVERVIEW_COLORS.successful], ["Meaningful no-write", reliability.meaningful_no_write, OVERVIEW_COLORS.meaningful_no_write], ["Policy skipped", reliability.policy_skipped, OVERVIEW_COLORS.policy_skipped], ["Cancelled", reliability.cancelled, OVERVIEW_COLORS.cancelled], ["Genuine failure", reliability.genuine_failure, OVERVIEW_COLORS.genuine_failure], ["Other", reliability.other, OVERVIEW_COLORS.other], ["Coverage", reliability.coverage === null ? null : overviewCoverage(reliability.coverage), "var(--faint)"]])}</section>`);
+	if (latency) sections.push(`<section class="overview-bucket-group"><h4>Latency</h4>${overviewBucketRows([["P50", latency.p50 === null ? null : overviewDuration(latency.p50), OVERVIEW_COLORS.p50], ["P95", latency.p95 === null ? null : overviewDuration(latency.p95), OVERVIEW_COLORS.p95], ["P99", latency.p99 === null ? null : overviewDuration(latency.p99), OVERVIEW_COLORS.p99], ["Samples", latency.samples, "var(--faint)"]])}</section>`);
+	if (ai) sections.push(`<section class="overview-bucket-group"><h4>Project AI</h4>${overviewBucketRows([["AI calls", ai.calls, OVERVIEW_COLORS.calls], ["Neurons", ai.neurons, OVERVIEW_COLORS.neurons], ["Input tokens", ai.input_tokens, OVERVIEW_COLORS.input_tokens], ["Output tokens", ai.output_tokens, OVERVIEW_COLORS.output_tokens]])}</section>`);
+	const lanes = Array.isArray(operation?.lanes) ? operation.lanes : [];
+	if (lanes.length) sections.push(`<section class="overview-bucket-group"><h4>Operation lanes</h4>${overviewBucketRows(lanes.map((lane) => [overviewLaneLabel(lane.source, lane.source_mode), overviewFinite(lane.count), "var(--accent)"]))}</section>`);
+	return `<div id="overviewBucketModal" class="modal-backdrop overview-bucket-backdrop" role="presentation" onclick="if(event.target===this)closeOverviewBucket()"><aside class="overview-bucket-drawer" role="dialog" aria-modal="true" aria-labelledby="overviewBucketTitle" tabindex="-1"><header class="overview-bucket-head"><div><p class="overview-bucket-kicker">UTC bucket</p><h3 id="overviewBucketTitle">${esc(overviewBucketLabel(payload.primary))}</h3></div><button id="overviewBucketClose" type="button" class="ghost icon" aria-label="Close bucket details" onclick="closeOverviewBucket()">${overviewIcon("close")}</button></header><div class="overview-bucket-scroll">${sections.length ? sections.join("") : `<div class="overview-empty">Telemetry is unavailable for this bucket.</div>`}</div></aside></div>`;
 }
 
 function overviewPulse(data) {
 	const expanded = S.overview.expanded;
-	const presentations = {
-		memory: ["Memory objects", "Current project-wide composition and recorded changes"],
-		saves: ["Saves", "Write operations and object actions by UTC bucket"],
-		recalls: ["Recalls", "Recall volume and context-returning operations by UTC bucket"],
-		reliability: ["Reliability", "Write processing settlement · cancellations excluded"],
-		latency: ["Operation latency", "Measured P50, P95, and P99 processing latency"],
-		ai: ["AI write quota", "Account-wide monthly quota and account-wide selected-range AI usage"],
-	};
-	const [metricLabel, metricDetail] = presentations[S.overview.metric] || presentations.memory;
-	const panel = `<section class="overview-card overview-pulse${expanded ? " is-expanded" : ""}" aria-labelledby="overviewPulseTitle"${expanded ? ` role="document"` : ""}>
-		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewPulseTitle">Memory pulse · ${esc(metricLabel)}</h3><p>${esc(metricDetail)}</p></div>
-			<div class="overview-card-actions">${overviewModeControls()}
-				<button type="button" class="overview-control" title="The operation log opens the selected project's root memory space" aria-label="View root memory-space operation log" onclick="setView('requests')">View root log →</button>
-				<button id="overviewTableButton" type="button" class="overview-control" aria-expanded="${S.overview.table}" aria-controls="overviewPulseDataTable" onclick="toggleOverviewTable()">${overviewIcon("table")}<span>${S.overview.table ? "Hide data table" : "Show data table"}</span></button>
-				<button id="overviewExpandButton" type="button" class="overview-control icon-only" aria-label="${expanded ? "Collapse Memory pulse" : "Expand Memory pulse"}" aria-expanded="${expanded}" onclick="toggleOverviewExpanded()">${overviewIcon(expanded ? "collapse" : "expand")}</button>
-			</div>
-		</div>
-		<div id="overviewPulsePanel" class="overview-pulse-body" role="tabpanel" aria-labelledby="overviewMode-${S.overview.mode}">
-			<p id="overviewChartSummary" class="sr-only">${esc(overviewChartSummary(data))}</p>${overviewChartForMode(data)}
-			<div id="overviewPulseDataTable" class="overview-data-table" role="region" aria-label="Memory pulse data table"${S.overview.table ? "" : " hidden"}>${overviewDataTable(data)}</div>
-		</div>
-	</section>`;
-	if (!expanded) return panel;
-	return `<div id="overviewPulseExpanded" class="modal-backdrop overview-pulse-backdrop" role="dialog" aria-modal="true" aria-labelledby="overviewPulseTitle" tabindex="-1" onclick="if(event.target===this) closeOverviewExpanded()">${panel}</div>`;
+	const panel = `<section class="overview-card overview-pulse${expanded ? " is-expanded" : ""}" aria-label="Operational analytics"><div class="overview-pulse-toolbar">${overviewModeControls()}<div class="overview-card-actions"><button type="button" class="overview-control" title="Open the root memory-space operation log" aria-label="View root memory-space operation log" onclick="setView('requests')">View root log →</button><button id="overviewExpandButton" type="button" class="overview-control icon-only" aria-label="${expanded ? "Collapse operational analytics" : "Expand operational analytics"}" aria-expanded="${expanded}" onclick="toggleOverviewExpanded()">${overviewIcon(expanded ? "collapse" : "expand")}</button></div></div><div id="overviewPulsePanel" class="overview-pulse-body" role="tabpanel" aria-labelledby="overviewMode-${S.overview.mode}"><p id="overviewChartSummary" class="sr-only">${esc(overviewChartSummary(data))}</p>${overviewChartForMode(data)}<div id="overviewPulseDataTable" class="overview-data-table" role="region" aria-label="Operational analytics data table"${S.overview.table ? "" : " hidden"}>${overviewDataTable(data)}</div></div></section>`;
+	const rendered = expanded ? `<div id="overviewPulseExpanded" class="modal-backdrop overview-pulse-backdrop" role="dialog" aria-modal="true" aria-label="Expanded operational analytics" tabindex="-1" onclick="if(event.target===this)closeOverviewExpanded()">${panel}</div>` : panel;
+	return `${rendered}${overviewBucketDrawer(data)}`;
 }
 
 function overviewJobs(data) {
@@ -4426,7 +4622,7 @@ function overviewJobs(data) {
 	const terminal = jobs.all_time?.terminal || {};
 	const allTimeSummary = `all-time enriched:${overviewExact(terminal.enriched)} · completed:${overviewExact(terminal.completed)} · genuine failures:${overviewExact(terminal.genuine_failures)} · deletion cancellations:${overviewExact(terminal.cancelled_by_delete)} · retention cancellations:${overviewExact(terminal.cancelled_by_retention)}`;
 	return `<section class="overview-card overview-jobs" aria-labelledby="overviewJobsTitle">
-		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewJobsTitle">Current job state</h3><p>Project-wide · as of ${esc(overviewUtcDate(jobs.as_of_ms, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))} UTC</p></div>
+		<div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewJobsTitle">Processing health</h3></div>
 			<div class="overview-card-actions"><button type="button" class="overview-control" aria-label="View jobs" onclick="openOverviewJobsPanel('jobs')">View jobs →</button></div></div>
 		<span class="sr-only">Current job statuses: ${esc(currentStatuses)}. ${esc(allTimeSummary)}.</span>
 		<div class="overview-job-grid">
@@ -4437,8 +4633,8 @@ function overviewJobs(data) {
 			${jobCard({ label: "Stuck over 15m", value: current.stuck_over_15m, icon: "alert", kind: current.stuck_over_15m ? "fail" : "" })}
 		</div>
 		<div class="overview-job-meta">
-			<div><span>Accepted · selected range</span><strong>${overviewExact(ranged.accepted)}</strong></div>
-			<div><span>Settled · selected range</span><strong>${overviewExact(ranged.settled)}</strong></div>
+			<div><span>Accepted</span><strong>${overviewExact(ranged.accepted)}</strong></div>
+			<div><span>Settled</span><strong>${overviewExact(ranged.settled)}</strong></div>
 			<div><span>Genuine failures</span><strong>${overviewExact(ranged.genuine_failures)}</strong></div>
 			<div><span>Accepted jobs with retries</span><strong>${overviewExact(ranged.accepted_jobs_with_retries)}</strong></div>
 			<div><span>Cancellations</span><strong>${overviewExact(cancellations)}</strong></div>
@@ -4485,7 +4681,7 @@ function overviewSignals(data) {
 		jobs_backlog: ["Processing backlog", "Accepted writes are waiting to settle.", "warn"],
 		ai_quota_capped: ["AI saves paused", "The account-wide monthly AI-write limit has been reached.", "warn"],
 	};
-	return `<section class="overview-card overview-signals" aria-labelledby="overviewSignalsTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewSignalsTitle">Recent signals</h3><p>Current operational conditions surfaced by the dashboard</p></div></div>
+	return `<section class="overview-card overview-signals" aria-labelledby="overviewSignalsTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewSignalsTitle">Recent signals</h3></div></div>
 		${signals.length ? signals.map((signal) => {
 			const type = signal.type || signal.code;
 			const [title, detail, defaultKind] = copy[type] || [String(type || "Operational signal").replaceAll("_", " "), "Review the current project state.", "warn"];
@@ -4502,8 +4698,8 @@ function overviewSignals(data) {
 function overviewDashboardMarkup(data) {
 	return `${overviewOnboarding(data)}${overviewMetrics(data)}${overviewPulse(data)}${overviewJobs(data)}
 		<div class="overview-lower">
-			<section class="overview-card" aria-labelledby="overviewLanesTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewLanesTitle">Operation lanes</h3><p>Recorded memory-operation sources · selected range</p></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="The operation log opens the selected project's root memory space" aria-label="View the root-space operation log" onclick="setView('requests')">View root log →</button></div></div>${overviewLanes(data)}</section>
-			<section class="overview-card" aria-labelledby="overviewCompositionTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewCompositionTitle">Current memory structure</h3><p>Project-wide inventory · ${overviewExact(data.inventory?.total_objects)} records</p></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="Memories opens the selected project's root memory space" aria-label="View memories in the root memory space" onclick="setView('memory')">View root memories →</button></div></div>${overviewComposition(data)}</section>
+			<section class="overview-card" aria-labelledby="overviewLanesTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewLanesTitle">Operation lanes</h3></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="Open the selected project's root memory-space operation log" aria-label="View root memory-space operation log" onclick="setView('requests')">View root log →</button></div></div>${overviewLanes(data)}</section>
+			<section class="overview-card" aria-labelledby="overviewCompositionTitle"><div class="overview-card-head"><div class="overview-card-title"><h3 id="overviewCompositionTitle">Memory composition</h3></div><div class="overview-card-actions"><button type="button" class="ghost mini" title="Open memories in the selected project's root memory space" aria-label="View root memory-space memories" onclick="setView('memory')">View root memories →</button></div></div>${overviewComposition(data)}</section>
 		</div>${overviewSignals(data)}`;
 }
 
@@ -4511,25 +4707,19 @@ function viewOverview(v) {
 	const state = S.overview;
 	const data = state.data;
 	const wrap = el("div", "overview-shell");
-	const project = selectedManagedProject();
-	const currentRange = data?.range?.current || {};
 	wrap.setAttribute("aria-busy", String(state.loading));
-	const comparisonUnavailable = state.metric === "memory";
 	wrap.innerHTML = `<header class="overview-head"><div class="overview-title"><h2>Memory operations</h2><p>Understand what your memory layer stored, retrieved, and processed.</p></div>
 		<div class="overview-toolbar">${overviewRangeControls()}
-			<button id="overviewCompareButton" type="button" class="overview-control" aria-pressed="${comparisonUnavailable ? false : state.compare}" onclick="toggleOverviewCompare()"${comparisonUnavailable ? ` disabled title="Historical inventory comparison is not available"` : ""}>Compare with previous period</button>
+			<button id="overviewCompareButton" type="button" class="overview-control" aria-pressed="${state.compare}" onclick="toggleOverviewCompare()">Compare with previous period</button>
 			<button type="button" class="overview-control icon-only" aria-label="Refresh dashboard" onclick="refreshOverview({ manual: true })"${state.loading ? " disabled" : ""}>${overviewIcon("refresh")}</button>
+			<span class="overview-updated" aria-live="polite">${state.updatedAt ? `Updated ${esc(ago(state.updatedAt))}${state.stale ? " · last good data" : ""}` : ""}</span>
 		</div></header>
-		<div class="overview-scopebar"><span class="scope-pill">Project-wide · ${overviewExact(data?.scope?.memory_spaces)} memory spaces</span>
-			<span class="scope-pill" title="Quota unit: ai_writes">Account-wide monthly AI writes</span>
-			${data ? `<span>${overviewUtcDate(currentRange.from_ms)} → ${overviewUtcDate(currentRange.to_ms)} UTC</span>` : ""}
-			<button type="button" class="overview-control overview-copy-link" onclick="copyOverviewLink()">Copy dashboard link</button>
-			<span class="overview-updated" aria-live="polite">${state.updatedAt ? `Updated ${esc(ago(state.updatedAt))}${state.stale ? " · showing last good data" : ""}` : ""}</span></div>
 		${state.error ? `<div class="overview-error" role="alert"><span>${esc(state.error)}${state.data ? " Last good data is still visible." : ""}</span><button type="button" onclick="refreshOverview({ manual: true })">Retry</button></div>` : ""}
 		${!data ? (state.loading ? overviewLoadingMarkup() : `<div class="overview-card overview-empty">Dashboard data is unavailable. Retry when the service is ready.</div>`) : overviewDashboardMarkup(data)}`;
 	v.appendChild(wrap);
 	if (!data && !state.loading && !state.error) refreshOverview();
 	if (state.expanded) requestAnimationFrame(lockOverviewBackground);
+	if (Number.isInteger(state.bucketIndex)) requestAnimationFrame(lockOverviewBucketBackground);
 }
 
 async function refreshOverview({ manual = false } = {}) {
@@ -4564,6 +4754,8 @@ function setOverviewRange(range) {
 	S.overview.error = "";
 	S.overview.updatedAt = null;
 	S.overview.stale = false;
+	S.overview.bucketIndex = null;
+	S.overview.legendOff = {};
 	refreshOverview();
 }
 
@@ -4571,6 +4763,8 @@ function setOverviewMode(mode) {
 	if (!OVERVIEW_MODES.includes(mode)) return;
 	S.overview.mode = mode;
 	S.overview.metric = { activity: "memory", reliability: "reliability", latency: "latency", ai: "ai" }[mode];
+	S.overview.legendOff = {};
+	S.overview.bucketIndex = null;
 	renderView();
 	requestAnimationFrame(() => document.getElementById(`overviewMode-${mode}`)?.focus());
 }
@@ -4579,14 +4773,10 @@ function setOverviewMetric(metric) {
 	if (!OVERVIEW_METRICS.includes(metric)) return;
 	S.overview.metric = metric;
 	S.overview.mode = { memory: "activity", saves: "activity", recalls: "activity", reliability: "reliability", latency: "latency", ai: "ai" }[metric];
+	S.overview.legendOff = {};
+	S.overview.bucketIndex = null;
 	renderView();
 	requestAnimationFrame(() => document.getElementById(`overviewMetric-${metric}`)?.focus());
-}
-
-async function copyOverviewLink() {
-	const url = new URL(location.href);
-	url.searchParams.delete("dev");
-	await copyText(url.toString(), "Dashboard link copied");
 }
 
 function onOverviewModeKeydown(event, mode) {
@@ -4601,8 +4791,8 @@ function onOverviewModeKeydown(event, mode) {
 }
 
 function toggleOverviewCompare() {
-	if (S.overview.metric === "memory") return;
 	S.overview.compare = !S.overview.compare;
+	S.overview.bucketIndex = null;
 	renderView();
 	requestAnimationFrame(() => document.getElementById("overviewCompareButton")?.focus());
 }
@@ -4613,8 +4803,66 @@ function toggleOverviewTable() {
 	requestAnimationFrame(() => document.getElementById("overviewTableButton")?.focus());
 }
 
+function toggleOverviewHeatmap() {
+	S.overview.heatmap = !S.overview.heatmap;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(".overview-heatmap-head button")?.focus());
+}
+
+function setOverviewReliabilityView(view) {
+	if (!["share", "counts"].includes(view) || S.overview.reliabilityView === view) return;
+	S.overview.reliabilityView = view;
+	renderView();
+	requestAnimationFrame(() => document.querySelector(`.overview-rel-toggle button[onclick*="'${view}'"]`)?.focus());
+}
+
 const OVERVIEW_UI = { bodyOverflow: "", inertNodes: [] };
 const OVERVIEW_JOBS_UI = { bodyOverflow: "", inertNodes: [] };
+const OVERVIEW_BUCKET_UI = { bodyOverflow: "", inertNodes: [] };
+
+function lockOverviewBucketBackground() {
+	if (!Number.isInteger(S.overview.bucketIndex)) return;
+	if (OVERVIEW_BUCKET_UI.inertNodes.length) {
+		if (!OVERVIEW_BUCKET_UI.inertNodes.some(({ node }) => !node?.isConnected)) return;
+		unlockOverviewBucketBackground();
+	}
+	const modal = document.getElementById("overviewBucketModal");
+	if (!modal) return;
+	OVERVIEW_BUCKET_UI.bodyOverflow = document.body.style.overflow;
+	document.body.style.overflow = "hidden";
+	const shell = modal.closest(".overview-shell");
+	const nodes = ["appHeader", "rail", "memoryBrowser", "detail"].map((id) => document.getElementById(id)).filter(Boolean);
+	if (shell) nodes.push(...[...shell.children].filter((node) => node !== modal));
+	OVERVIEW_BUCKET_UI.inertNodes = nodes.map((node) => ({ node, inert: node.inert }));
+	OVERVIEW_BUCKET_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
+	document.querySelector("#overviewBucketModal .overview-bucket-drawer")?.focus();
+}
+
+function unlockOverviewBucketBackground() {
+	document.body.style.overflow = OVERVIEW_BUCKET_UI.bodyOverflow;
+	OVERVIEW_BUCKET_UI.inertNodes.forEach(({ node, inert }) => { if (node?.isConnected) node.inert = inert; });
+	OVERVIEW_BUCKET_UI.inertNodes = [];
+}
+
+function openOverviewBucket(index) {
+	const rows = S.overview.mode === "ai" ? overviewAiDaily(S.overview.data) : overviewDaily(S.overview.data);
+	if (!Number.isInteger(index) || !rows[index]) return;
+	if (S.overview.expanded) closeOverviewExpanded({ restoreFocus: false, render: false });
+	rememberModalOpener("overviewBucketModal");
+	S.overview.bucketIndex = index;
+	renderView();
+	requestAnimationFrame(() => { lockOverviewBucketBackground(); document.getElementById("overviewBucketClose")?.focus(); });
+}
+
+function closeOverviewBucket({ restoreFocus = true, render = true } = {}) {
+	if (!Number.isInteger(S.overview?.bucketIndex) && !OVERVIEW_BUCKET_UI.inertNodes.length) return;
+	const bucketIndex = S.overview.bucketIndex;
+	S.overview.bucketIndex = null;
+	unlockOverviewBucketBackground();
+	if (render && S.view === "overview") renderView();
+	if (restoreFocus) restoreModalOpener("overviewBucketModal", Number.isInteger(bucketIndex) ? `overviewBucket-${bucketIndex}` : "");
+	else MODAL_FOCUS_RETURN.delete("overviewBucketModal");
+}
 
 function lockOverviewBackground() {
 	if (!S.overview.expanded) return;
@@ -4689,7 +4937,7 @@ function renderOverviewJobsPanel() {
 	host.onclick = (event) => { if (event.target === host) closeOverviewJobsPanel(); };
 	const jobs = Array.isArray(S.overview.data?.jobs?.recent) ? S.overview.data.jobs.recent : [];
 	host.innerHTML = `<section class="project-modal overview-jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="overviewJobsDialogTitle" tabindex="-1">
-		<div class="overview-dialog-head"><div><h3 id="overviewJobsDialogTitle">Recent processing jobs</h3><p>Project-wide metadata · newest first</p></div><button type="button" class="ghost icon" aria-label="Close jobs" onclick="closeOverviewJobsPanel()">${overviewIcon("close")}</button></div>
+		<div class="overview-dialog-head"><div><h3 id="overviewJobsDialogTitle">Recent processing jobs</h3></div><button type="button" class="ghost icon" aria-label="Close jobs" onclick="closeOverviewJobsPanel()">${overviewIcon("close")}</button></div>
 		${jobs.length ? `<div class="overview-jobs-table"><table><caption>Up to ${overviewExact(S.overview.data.jobs.recent_limit || jobs.length)} recent jobs</caption><thead><tr><th>Type</th><th>Status</th><th>Retries</th><th>Updated</th></tr></thead><tbody>${jobs.map((job) => {
 			const cancellation = String(job.cancel_reason || "");
 			const status = cancellation ? `cancelled ${cancellation.replace(/^cancelled_by_/, "by ").replaceAll("_", " ")}` : String(job.status || "queued").replaceAll("_", " ");
@@ -15265,6 +15513,7 @@ window.addEventListener("keydown", (event) => {
 		return;
 	}
 	if (modal?.id === "overviewJobsModal") { event.preventDefault(); closeOverviewJobsPanel(); return; }
+	if (modal?.id === "overviewBucketModal") { event.preventDefault(); closeOverviewBucket(); return; }
 	if (modal?.id === "overviewPulseExpanded") { event.preventDefault(); closeOverviewExpanded(); return; }
 	if (modal?.id === "installExpanded") { event.preventDefault(); closeInstallExpanded(); return; }
 	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }

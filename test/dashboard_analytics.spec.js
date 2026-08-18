@@ -213,6 +213,34 @@ describe("project dashboard aggregate", () => {
 		expect(dashboard.periods.current.daily).toHaveLength(1);
 		expect(dashboard.periods.current.daily[0].total).toBe(4);
 		expect(dashboard.periods.current.daily[0]).toMatchObject({ matched: 3, matched_operations: 1, matched_samples: 2 });
+		expect(dashboard.periods.current.daily[0].reliability).toEqual({
+			successful: 3,
+			meaningful_no_write: 1,
+			policy_skipped: 0,
+			cancelled: 0,
+			genuine_failure: 0,
+			other: 0,
+			classified: 4,
+			eligible: 4,
+			coverage: 1,
+			retry_scheduled: null,
+		});
+		expect(dashboard.periods.current.daily[0].latency_ms).toEqual({
+			p50: 20,
+			p95: 40,
+			p99: 40,
+			samples: 4,
+			eligible: 4,
+			coverage: 1,
+			bands: [
+				{ min_ms: 0, max_ms_exclusive: 50, count: 4 },
+				{ min_ms: 50, max_ms_exclusive: 100, count: 0 },
+				{ min_ms: 100, max_ms_exclusive: 200, count: 0 },
+				{ min_ms: 200, max_ms_exclusive: 400, count: 0 },
+				{ min_ms: 400, max_ms_exclusive: 800, count: 0 },
+				{ min_ms: 800, max_ms_exclusive: null, count: 0 },
+			],
+		});
 		expect(dashboard.periods.current.latency_ms).toEqual({ p50: 20, p95: 40, p99: 40, samples: 4, eligible: 4, coverage: 1 });
 		expect(dashboard.periods.current.operations.outcomes.map((row) => row.outcome)).not.toContain("archived_secret");
 		expect(dashboard.periods.current.operations.outcomes.map((row) => row.outcome)).not.toContain("foreign_secret");
@@ -220,6 +248,104 @@ describe("project dashboard aggregate", () => {
 		expect(serialized).not.toContain("PRIVATE-");
 		expect(serialized).not.toContain(active);
 		expect(serialized).not.toContain(archived);
+	});
+
+	it("classifies every known receipt outcome honestly and builds exact latency buckets", async () => {
+		const account = await signup("dashboard-reliability");
+		const project = await createProject(account, "Reliability analytics");
+		const root = await managedProjectMemoryOwnerId(account.user.id, project);
+		const outcomes = [
+			"wrote", "recalled", "no_recall", "completed", "promoted_from_candidate", "deleted",
+			"meaningful_no_write", "no_write", "ignored", "duplicate", "skipped_duplicate",
+			"excluded_by_rule", "suppressed",
+			"cancelled_by_delete", "cancelled_by_retention",
+			"llm_failed", "db_write_failed", "internal_error", "extraction_failed_terminal", "enrich_failed",
+			"accepted", "accumulating", "staged", "queue_full", "too_large",
+		];
+		const latencySamples = [49, 50, 100, 200, 400, 800];
+		for (const [index, outcome] of outcomes.entries()) {
+			await insertReceipt({
+				id: `r_${crypto.randomUUID()}`,
+				userId: root,
+				at: NOW - 10_000 + index,
+				outcome,
+				latency: latencySamples[index] ?? null,
+			});
+		}
+
+		const dashboard = await projectDashboard(env, {
+			projectId: project.id,
+			memoryOwnerUserId: root,
+			accountUserId: account.user.id,
+			range: "1d",
+			now: NOW,
+		});
+		const bucket = dashboard.periods.current.daily[0];
+		expect(bucket.total).toBe(outcomes.length);
+		expect(bucket.reliability).toEqual({
+			successful: 6,
+			meaningful_no_write: 5,
+			policy_skipped: 2,
+			cancelled: 2,
+			genuine_failure: 5,
+			other: 5,
+			classified: 20,
+			eligible: 25,
+			coverage: 0.8,
+			retry_scheduled: null,
+		});
+		expect(bucket.latency_ms).toMatchObject({
+			p50: 100,
+			p95: 800,
+			p99: 800,
+			samples: 6,
+			eligible: 25,
+			coverage: 0.24,
+		});
+		expect(bucket.latency_ms.bands.map((band) => band.count)).toEqual([1, 1, 1, 1, 1, 1]);
+		expect(bucket.outcomes).toHaveLength(outcomes.length);
+		expect(bucket.lanes).toEqual([{ source: "save_memory", source_mode: "manual_direct", count: 25 }]);
+	});
+
+	it("bounds adversarial receipt dimensions without losing operation totals", async () => {
+		const account = await signup("dashboard-cardinality");
+		const project = await createProject(account, "Bounded analytics");
+		const root = await managedProjectMemoryOwnerId(account.user.id, project);
+		const inserts = Array.from({ length: 64 }, (_, index) => env.DB.prepare(
+			`INSERT INTO receipts
+			 (id, user_id, source, source_mode, outcome, saved_total, skipped, matched, latency_ms, summary, detail, created_at)
+			 VALUES (?, ?, ?, ?, ?, 0, 0, NULL, NULL, NULL, NULL, ?)`,
+		).bind(
+			`r_${crypto.randomUUID()}`,
+			root,
+			`attacker-source-${index}`,
+			`attacker-mode-${index}`,
+			`attacker-outcome-${index}`,
+			NOW - 1_000 + index,
+		));
+		await env.DB.batch(inserts);
+
+		const dashboard = await projectDashboard(env, {
+			projectId: project.id,
+			memoryOwnerUserId: root,
+			accountUserId: account.user.id,
+			range: "1d",
+			now: NOW,
+		});
+		const period = dashboard.periods.current;
+		expect(period.operations.total).toBe(64);
+		expect(period.operations.saves).toBe(64);
+		expect(period.operations.outcomes).toEqual([{ outcome: "other", count: 64 }]);
+		expect(period.operations.lanes).toEqual([{ source: "other", source_mode: "other", count: 64 }]);
+		expect(period.daily[0].total).toBe(64);
+		expect(period.daily[0].outcomes).toEqual([{ outcome: "other", count: 64 }]);
+		expect(period.daily[0].lanes).toEqual([{ source: "other", source_mode: "other", count: 64 }]);
+		expect(period.daily[0].reliability).toMatchObject({
+			other: 64,
+			classified: 0,
+			eligible: 64,
+			coverage: 0,
+		});
 	});
 
 	it("separates live backlog, all-history outcomes, cancellations, retries, and bounded recent jobs", async () => {
@@ -267,6 +393,8 @@ describe("project dashboard aggregate", () => {
 	it("returns exact account AI usage and degrades only AI accounting on failure", async () => {
 		const account = await signup("dashboard-ai");
 		const project = await createProject(account, "AI analytics");
+		const siblingProject = await createProject(account, "Sibling AI analytics");
+		const outsider = await signup("dashboard-ai-outsider");
 		const root = await managedProjectMemoryOwnerId(account.user.id, project);
 		await env.DB.batch([
 			env.DB.prepare(
@@ -284,6 +412,21 @@ describe("project dashboard aggregate", () => {
 				 (id, user_id, account_user_id, managed_project_id, scope, scope_id, model, input_tokens, output_tokens, total_tokens, neurons, ok, created_at)
 				 VALUES (?, ?, ?, ?, 'recall', ?, 'model-c', 5, 2, 7, NULL, 1, ?)`,
 			).bind(`aicall_${crypto.randomUUID()}`, root, account.user.id, project.id, `scope_${crypto.randomUUID()}`, NOW - DAY - 100),
+			env.DB.prepare(
+				`INSERT INTO ai_calls
+				 (id, user_id, account_user_id, managed_project_id, scope, scope_id, model, input_tokens, output_tokens, total_tokens, neurons, ok, created_at)
+				 VALUES (?, ?, ?, ?, 'recall', ?, 'sibling-model', 99, 9, 108, 12, 1, ?)`,
+			).bind(`aicall_${crypto.randomUUID()}`, root, account.user.id, siblingProject.id, `scope_${crypto.randomUUID()}`, NOW - 80),
+			env.DB.prepare(
+				`INSERT INTO ai_calls
+				 (id, user_id, account_user_id, managed_project_id, scope, scope_id, model, input_tokens, output_tokens, total_tokens, neurons, ok, created_at)
+				 VALUES (?, ?, ?, NULL, 'recall', ?, 'unattributed-model', 88, 8, 96, 11, 1, ?)`,
+			).bind(`aicall_${crypto.randomUUID()}`, root, account.user.id, `scope_${crypto.randomUUID()}`, NOW - 70),
+			env.DB.prepare(
+				`INSERT INTO ai_calls
+				 (id, user_id, account_user_id, managed_project_id, scope, scope_id, model, input_tokens, output_tokens, total_tokens, neurons, ok, created_at)
+				 VALUES (?, ?, ?, ?, 'recall', ?, 'foreign-model', 77, 7, 84, 10, 1, ?)`,
+			).bind(`aicall_${crypto.randomUUID()}`, outsider.user.id, outsider.user.id, project.id, `scope_${crypto.randomUUID()}`, NOW - 60),
 		]);
 
 		const dashboard = await projectDashboard(env, {
@@ -294,18 +437,38 @@ describe("project dashboard aggregate", () => {
 			now: NOW,
 		});
 		expect(dashboard.ai.available).toBe(true);
-		expect(dashboard.ai.current).toMatchObject({ calls: 2, successful_calls: 1, failed_calls: 1, measured_neurons: 7, measured_neuron_calls: 1 });
+		expect(dashboard.ai.current).toMatchObject({ calls: 4, successful_calls: 3, failed_calls: 1, measured_neurons: 30, measured_neuron_calls: 3 });
 		expect(dashboard.ai.current.derived_neuron_top_up).toBeGreaterThan(0);
 		expect(dashboard.ai.quota).toMatchObject({ unit: "ai_writes", scope: "account", period: "calendar_month_utc", used: 2, capped: false });
+		expect(dashboard.ai.project).toMatchObject({
+			scope: "managed_project",
+			project_id: project.id,
+			attribution: "managed_project_id",
+			legacy_unattributed_excluded: true,
+		});
+		expect(dashboard.ai.project.periods.current).toMatchObject({ calls: 2, successful_calls: 1, failed_calls: 1 });
+		expect(dashboard.ai.project.periods.previous).toMatchObject({ calls: 1, successful_calls: 1, failed_calls: 0 });
+		expect(dashboard.ai.project.periods.current.daily).toHaveLength(1);
+		expect(dashboard.ai.project.periods.current.daily[0]).toMatchObject({
+			from_ms: NOW - DAY,
+			to_ms: NOW,
+			calls: 2,
+			input_tokens: 30,
+			output_tokens: 15,
+			total_tokens: 45,
+		});
 
 		const aiFailingDb = {
 			prepare(sql) {
 				if (String(sql).includes("ai_calls")) {
-					return { bind() { return { async all() { throw new Error("AI ledger unavailable"); }, async first() { throw new Error("AI ledger unavailable"); } }; } };
+					return { bind() { return { aiLedgerUnavailable: true }; } };
 				}
 				return env.DB.prepare(sql);
 			},
-			batch(statements) { return env.DB.batch(statements); },
+			batch(statements) {
+				if (statements.some((statement) => statement?.aiLedgerUnavailable)) throw new Error("AI ledger unavailable");
+				return env.DB.batch(statements);
+			},
 		};
 		const degraded = await projectDashboard({ ...env, DB: aiFailingDb }, {
 			projectId: project.id,
@@ -315,7 +478,7 @@ describe("project dashboard aggregate", () => {
 			now: NOW,
 		});
 		expect(degraded.inventory).toEqual(dashboard.inventory);
-		expect(degraded.ai).toEqual({ scope: "account", available: false, current: null, previous: null, quota: null });
+		expect(degraded.ai).toEqual({ scope: "account", available: false, current: null, previous: null, quota: null, project: null });
 	});
 
 	it("returns honest zero and null values for an empty project", async () => {
@@ -341,6 +504,8 @@ describe("project dashboard aggregate", () => {
 		expect(dashboard.periods.current.operations).toMatchObject({ total: 0, matched: null, matched_operations: 0, matched_samples: 0 });
 		expect(dashboard.periods.current.daily).toHaveLength(7);
 		expect(dashboard.periods.current.daily.every((bucket) => bucket.total === 0 && bucket.matched === null && bucket.matched_operations === 0)).toBe(true);
+		expect(dashboard.periods.current.daily.every((bucket) => bucket.reliability.eligible === 0 && bucket.reliability.coverage === null)).toBe(true);
+		expect(dashboard.periods.current.daily.every((bucket) => bucket.latency_ms.samples === 0 && bucket.latency_ms.bands.every((band) => band.count === 0))).toBe(true);
 		expect(dashboard.periods.current.latency_ms).toEqual({ p50: null, p95: null, p99: null, samples: 0, eligible: 0, coverage: null });
 		expect(dashboard.jobs.current.oldest_pending_age_ms).toBeNull();
 		expect(dashboard.jobs.recent).toEqual([]);
