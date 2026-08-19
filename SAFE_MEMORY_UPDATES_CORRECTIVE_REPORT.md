@@ -155,7 +155,7 @@ and the released artifact was verified by clean install.
 
 | Suite | Result |
 |---|---|
-| Workers pool (full) | **151 files / 1,973 tests green** |
+| Workers pool (full) | **151 files / 1,973 tests green** — final uninterrupted run on the exact shipped tree (`b6b1cf1`), zero failures |
 | Unit config | **35 files / 602 passed, 1 intentional skip** |
 | Corrective regressions (`memory_updates_corrections.spec.js`) | 20 — each written failing first |
 | Dashboard UI behaviour (`memory_updates_ui.spec.js`) | 11 |
