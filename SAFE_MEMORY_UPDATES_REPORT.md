@@ -1,5 +1,29 @@
 # Safe memory updates — final campaign report
 
+> **⚠ SUPERSEDED AND PARTLY RETRACTED (2026-08-19).**
+> An independent review found eight release blockers this report did not
+> cover, and several of its claims below were **false**. The corrective
+> campaign is documented in `SAFE_MEMORY_UPDATES_CORRECTIVE_REPORT.md`, which
+> supersedes this file. Specifically retracted:
+>
+> - "every deletion path erases history" — `deleteLastExtraction` did not.
+> - "a stale writer that lost the race cannot overwrite" — six writers bumped
+>   `revision` without CASing the revision they read, so a late background job
+>   could overwrite a newer user edit.
+> - "commit batch re-checks capability" for MCP — the non-audited path
+>   (which MCP used) added no capability guard at all.
+> - "convergent under any provider completion order" / vector `ready` — the
+>   projection was marked ready on enqueue, before Vectorize made it queryable.
+> - "events … editable" without noting that `GET /v1/memories/event_*` returned
+>   400, so events were editable but not readable.
+> - "bounded history" — only the API page size was bounded; stored history was
+>   never pruned and the report implied otherwise.
+> - Package versions: the published PyPI `itsuki` 0.4.0 reported
+>   `VERSION = "0.3.0"`, and the JS SDK claimed 0.3.0 while exporting "0.2.1".
+>
+> The route-by-route evidence below remains accurate for what it actually
+> tested; it simply did not test the paths above.
+
 Date: 2026-08-19 · Verdict: **GO, with two named npm-publication HOLDs (owner action)**
 
 Explicit update, bounded immutable history, and rollback-as-forward-revision are live in production for every supported memory kind, behind exact optimistic concurrency, with history erased by every deletion path. All platform surfaces (REST, MCP, dashboard UI, Python SDK) are shipped and production-canaried. The JS SDK and n8n package releases are built, gated, and tested but cannot reach npm until the owner configures npm Trusted Publishing (or a new token) — every publish attempt fails at `ENEEDAUTH` after all gates pass.

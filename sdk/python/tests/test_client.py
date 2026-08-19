@@ -79,7 +79,14 @@ def test_client_explicitly_rejects_cross_origin_redirects(monkeypatch):
 
 
 def test_prepared_release_version():
-    assert VERSION == "0.3.0"
+    # Assert AGREEMENT with the packaging metadata, never a literal: pinning a
+    # literal is exactly how the published 0.4.0 shipped reporting "0.3.0".
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert VERSION == declared
     assert TERMINAL_JOB_STATUSES == {"enriched", "failed", "completed"}
     assert MemoryMessage is not None
     assert MemoryRules is not None
