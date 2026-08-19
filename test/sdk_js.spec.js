@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import MemoryClient, { Memory, MemoryAPIError, VERSION } from "../sdk/js/index.js";
+import pkg from "../sdk/js/package.json" with { type: "json" };
 
 let calls;
 
@@ -48,8 +49,10 @@ function body(call) {
 }
 
 describe("MemoryClient construction and exports", () => {
-	it("exports the prepared version and both client aliases", () => {
-		expect(VERSION).toBe("0.2.1");
+	it("exports a VERSION that matches package.json, plus both client aliases", () => {
+		// Pinning a literal here is what let the published artifact lie about
+		// its own version. The invariant is that they AGREE.
+		expect(VERSION).toBe(pkg.version);
 		expect(Memory).toBe(MemoryClient);
 		expect(MemoryClient).toBe(Memory);
 	});
@@ -153,7 +156,7 @@ describe("authentication and operation shapes", () => {
 
 		expect(calls[0].url).toBe("https://api.example/v1/save");
 		expect(calls[0].init.headers.authorization).toBe("Bearer itsuki_live_test");
-		expect(calls[0].init.headers["user-agent"]).toBe("itsuki-js/0.2.1");
+		expect(calls[0].init.headers["user-agent"]).toBe(`itsuki-js/${pkg.version}`);
 		expect(body(calls[0])).toEqual({ content: "I run daily.", idempotencyKey: "idem_1" });
 		expect(calls[1].url).toBe("https://api.example/v1/recall");
 		expect(body(calls[1])).toEqual({ query: "running" });
