@@ -718,6 +718,10 @@ describe("Agents door and the variant chooser", () => {
 		// Honesty: coexists with built-in memory; never claims the exclusive
 		// slot, dreaming, or a marketplace listing that is not live.
 		expect(buildMethods().agents.clients.openclaw.hint).toMatch(/alongside/i);
+		// The commands these steps use (plugins inspect, mcp add) do not exist
+		// on older OpenClaw CLIs — the card must carry the validated host
+		// version so a customer on a stale install knows to update first.
+		expect(buildMethods().agents.clients.openclaw.hint).toContain("Validated on OpenClaw 2026.7.1-2");
 		expect(script).not.toMatch(/exclusive memory slot (support|replacement|claimed)/i);
 		expect(script).not.toContain("clawhub:openclaw-itsuki");
 	});

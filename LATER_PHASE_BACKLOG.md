@@ -29,12 +29,15 @@ Finish the active Hermes, Google ADK, OpenCode, and Antigravity implementation/p
 - Include optimistic version checks, conflict responses, immutable history, audit records, rollback/recovery, tenant isolation, and deletion-race protection.
 - Carry the operation through REST, MCP, JavaScript/Python SDKs, n8n, native adapters, docs, and production canaries.
 
-### 3. Get Started and integration-catalog redesign
+### 3. Get Started and integration-catalog redesign — ✅ ABSORBED (2026-08-19, Get Started certification campaign)
 
-- Reorganize the full integration catalog into a clean, understandable hierarchy for new and experienced users.
-- Clearly label MCP/configuration guides, native lifecycle integrations, SDK adapters, marketplace status, supported hosts, and proof level.
-- Preserve accessible keyboard/mobile behavior, responsive spacing, readable typography, copyable commands, and the existing paired UI/docs contract tests.
-- Never display an install command for an unpublished package.
+Certified end to end: 26 cards / 38 routes graph-equality-pinned by contract
+tests; every route's commands executed or parse-verified against published
+artifacts and validated hosts; supported hosts and held limitations labeled
+(incl. the new OpenClaw validated-version hint); no install verb for any
+unpublished package (chatdev absent, registries checked). Evidence:
+GET_STARTED_CERTIFICATION_REPORT.md. Remaining redesign ideas beyond the
+certified catalog are aesthetic, not correctness, and carry no open defect.
 
 ### 4. Project lifecycle — ✅ COMPLETE (2026-08-19, PRODUCTION GO)
 
@@ -93,7 +96,20 @@ Narrow residual follow-ups:
 - Consider Google Drive, Notion, GitHub, S3, OneDrive, Gmail, and web crawling only after OAuth, incremental sync, deletion propagation, retry visibility, retention, audit, and tenant-isolation requirements are frozen.
 - Keep this separate from ordinary `save_memory`, `save_conversation`, and bounded `/v1/ingest` calls.
 
-### 11. Cross-door capture and idempotency proof
+### 11. Cross-door capture and idempotency proof — ✅ ABSORBED (2026-08-19, Get Started certification campaign)
+
+Production-proven on live doors with disposable canaries: same-key replay
+returns the same source packet; same-key/different-payload → 409
+idempotency_conflict; three-way concurrent same-key storm settles clean;
+/v1/turn + explicit save of identical words remain distinct legitimate
+operations; concurrent two-door delivery clean; receipts observable;
+subtenant + cross-account isolation and revocation verified. Full detail in
+GET_STARTED_CERTIFICATION_REPORT.md (batteries A/D/F). The deeper
+fault-injection legs (forced D1-commit-before-Vectorize failure, DO
+eviction replay) remain covered by the deterministic suite rather than
+production probes — retained below only as historical scope notes.
+
+#### (historical scope, retained)
 
 - Keep the current write architecture unless adversarial tests demonstrate a concrete correctness, duplication, cost, or recovery defect; do not introduce a new coordinator merely on speculation.
 - Exercise the same logical operation concurrently through automatic and explicit door pairs, including `/v1/turn` plus `save_memory`, lifecycle-hook capture plus MCP `save_memory` or `save_conversation`, and native/framework capture plus direct SDK/REST writes.
