@@ -1066,7 +1066,6 @@ const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "al
 <tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
 <tr><td><code>turn(messages)</code> · <code>ingest(messages, { flush: true })</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
 <tr><td><code>packetStatus(id)</code> · <code>jobs()</code> · <code>waitFor(id)</code></td><td>GET /v1/packets/:id/status · /v1/jobs</td></tr>
-<tr><td><code>update(id, fields, { expectedRevision })</code> · <code>history(id)</code> · <code>rollback(id, toRevision, { expectedRevision })</code></td><td>Safe updates: PATCH /v1/memories/:id · GET …/history · POST …/rollback (stale revisions refused, never overwritten)</td></tr>
 <tr><td><code>delete(id)</code> · <code>deleteBySource(...)</code></td><td>DELETE /v1/memories/*</td></tr>
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>exportAll()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>getRules()</code> · <code>setRules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
