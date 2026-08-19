@@ -478,6 +478,10 @@ const TARGETS = Object.freeze({
 		ordinaryTarget("source_episodes", "source_episodes"),
 	],
 	semantic_memory: [
+		// Provenance links go first, while the objects they name are still here:
+		// once a slice/event/node row is gone its link is unreachable from every
+		// read path, so sweeping it afterwards would need a separate orphan scan.
+		ordinaryTarget("memory_source_links", "memory_source_links", { idColumn: "object_id" }),
 		ordinaryTarget("semantic_atom_projections", "semantic_atom_projections", { idColumn: "candidate_id" }),
 		ordinaryTarget("semantic_atom_candidates", "semantic_atom_candidates"),
 		customTarget("semantic_atom_capture_runs", "semantic_atom_capture_runs", "id", (limit) => ({

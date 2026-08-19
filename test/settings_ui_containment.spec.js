@@ -243,9 +243,12 @@ describe("Settings containment", () => {
 
 	it("exposes no browser path to the incomplete scoped delete-all route", () => {
 		const danger = fnSource("setDangerZone");
-		expect(danger).toContain("primary and SDK subtenant storage space");
-		expect(danger).toContain("The existing scoped compatibility reset is intentionally not exposed");
-		expect(danger).toContain("disabled");
+		// The panel renders only from the server's lifecycle payload; before the
+		// backend answers, nothing destructive exists to click.
+		expect(danger).toContain("SET.lifecycle");
+		expect(danger).toContain("Loading lifecycle state…");
+		expect(danger).toContain("lcStartAction('memory_purge')");
+		expect(danger).toContain("lcStartAction('project_delete')");
 		for (const forbidden of [
 			"function viewReset(", "function showResetMemoryConfirm(", "function resetSelectedUserMemory(",
 			"function deleteAllMemory(", "/v1/actions/delete-all", "resetConfirmOpen", "DELETE ALL",
@@ -306,15 +309,16 @@ describe("Settings containment", () => {
 		for (const name of ["createWebhookNow", "deleteWebhookNow", "sendWebhookTest"]) {
 			expect(fnSource(name), name).toContain('"project.integrations.manage"');
 		}
-		for (const name of ["saveFactFromForm", "saveConversationFromForm", "candidatePromote", "candidateReject", "candidateMerge"]) {
+		for (const name of ["mwRenderHead", "mwSuggestionAct"]) {
 			expect(fnSource(name), name).toContain('"project.memory.write"');
 		}
-		for (const name of ["archiveSelected", "deleteSelected"]) {
+		for (const name of ["mwArchive", "mwDelete", "archiveSelected", "deleteSelected"]) {
 			expect(fnSource(name), name).toContain('"project.memory.delete"');
 		}
-		expect(fnSource("viewMemory")).toContain("projectCapabilityActionCopy(");
-		expect(fnSource("viewMemoryMain")).toContain("projectCapabilityActionCopy(");
-		expect(fnSource("viewCandidates")).toContain("projectCapabilityActionCopy(");
+		// Viewers get an inspect-only inspector: the head save button and the
+		// suggestion actions both explain themselves instead of failing silently.
+		expect(fnSource("mwRenderHead")).toContain("projectCapabilityActionCopy(");
+		expect(fnSource("mwRenderInsp")).toContain("projectCapabilityActionCopy(");
 	});
 
 	it("fails closed on every project export surface", () => {
@@ -1264,10 +1268,10 @@ describe("Stage 3 enterprise Settings UI", () => {
 		expect(fnSource("projectCategoryBadge")).not.toContain("item.project_category.color");
 		expect(fnSource("drawGraph")).toContain("Outlined rings show project categories");
 		expect(fnSource("drawGraph")).toContain("Project category accent; cluster grouping is unchanged");
-		for (const source of [fnSource("filteredPages"), fnSource("filteredNodes")]) {
-			expect(source).toContain("project_category?.name");
-			expect(source).toContain("project_category?.slug");
-		}
+		// The Memories workspace surfaces the category as a real Overview field
+		// and a server-owned filter rather than a client-side search facet.
+		expect(fnSource("mwInspPanel")).toContain("detail.project_category?.name");
+		expect(fnSource("mwListParams")).toContain("categoryId");
 		expect(fnSource("renderDetail")).toContain("projectCategoryBadge(n)");
 		expect(fnSource("renderPageDetail")).toContain("projectCategoryBadge(p)");
 	});
@@ -1331,8 +1335,10 @@ describe("Stage 3 enterprise Settings UI", () => {
 	});
 
 	it("shows deterministic admission plus bounded no-write category proposals", () => {
-		expect(html).toContain("A future verified workflow will permanently delete this project");
-		expect(html).not.toContain("Permanently deletes this project and everything in it");
+		// The lifecycle Danger Zone is real now, server-gated, and speaks in
+		// preview-first terms; the promissory placeholder copy is gone.
+		expect(html).toContain("Permanently deletes the project: all memory, keys, members and settings");
+		expect(html).not.toContain("A future verified workflow will permanently delete this project");
 		expect(html).toContain("optional no-write category preview");
 		expect(html).toContain("Preview samples are not written to Itsuki memory");
 		expect(html).toContain("Thirty days after an invitation becomes accepted, revoked, or expired");

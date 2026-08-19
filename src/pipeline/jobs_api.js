@@ -15,6 +15,10 @@ const ACCEPT_TIME_TYPES = ["extract", "mcp_enrich"];
 // distinction is published as its own field instead of a new state.
 const CANCELLED_BY_DELETE = "cancelled_by_delete";
 const cancelledByDelete = (row) => String(row?.error ?? "").startsWith(CANCELLED_BY_DELETE);
+// Project archive cancels work the same terminal way; the reason field tells
+// the two user-caused cancellations apart from a genuine processing failure.
+const CANCELLED_BY_ARCHIVE = "cancelled_by_archive";
+const cancelledByArchive = (row) => String(row?.error ?? "").startsWith(CANCELLED_BY_ARCHIVE);
 
 function shapeJob(row) {
 	let payload = {};
@@ -55,7 +59,9 @@ function shapeJob(row) {
 		// Machine-readable reason, so "was this cancelled by my own delete?" is a
 		// field lookup rather than a substring hunt over an error string.
 		cancelled_by_delete: cancelledByDelete(row),
-		outcome_reason: cancelledByDelete(row) ? CANCELLED_BY_DELETE : null,
+		outcome_reason: cancelledByDelete(row)
+			? CANCELLED_BY_DELETE
+			: cancelledByArchive(row) ? CANCELLED_BY_ARCHIVE : null,
 		...(row.error ? { error: row.error } : {}),
 	};
 }

@@ -406,6 +406,19 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 	let repairGeneration = 0;
 	let repairReason = null;
 	if (replay?.job?.status === "failed" && replay.job.type === "extract") {
+		// A project archive terminally cancels accepted-but-unextracted work.
+		// The memory it would have produced is deliberately NOT produced; after
+		// restore the caller must send a genuinely new write, never replay this
+		// one — repairing it would let stale pre-archive work commit post-restore.
+		if (/^cancelled_by_archive:/.test(String(replay.job.error ?? ""))) {
+			return {
+				sourceEpisodeErased: true,
+				jobId: replay.job.id,
+				jobStatus: "failed",
+				sourcePacketId: replay.sourcePacket?.id ?? replay.job.source_packet_id ?? null,
+				summary: "This accepted write was cancelled by a project lifecycle operation and cannot be replayed. Send a genuinely new write if you still want to remember it.",
+			};
+		}
 		// An erasure is a permanent user decision, not an extraction failure that
 		// an exact replay may repair. Re-queuing it would permit source or semantic
 		// evidence to reappear behind the deletion barrier.
@@ -648,7 +661,7 @@ export async function ingestMessages(env, ctx, userId, rawMessages, opts = {}) {
 				summary: "Source evidence is durable but its extraction job could not be activated, so this write was not accepted. Retry safely.",
 			};
 		}
-		if (jobStatus === "failed" && /^(cancelled_by_delete|cancelled_by_retention):/.test(String(sourceActivation.error ?? ""))) {
+		if (jobStatus === "failed" && /^(cancelled_by_delete|cancelled_by_retention|cancelled_by_archive):/.test(String(sourceActivation.error ?? ""))) {
 			return {
 				sourceEpisodeErased: true,
 				jobId,

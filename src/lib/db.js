@@ -357,7 +357,50 @@ export async function updateExtractionRun(env, userId, runId, data = {}) {
 	)
 		.bind(...values, runId, userId, ...guardValues)
 		.run();
-	return { changes: Number(result.meta?.changes ?? 0) };
+	const changes = Number(result.meta?.changes ?? 0);
+	if (changes > 0 && fields.some((field) => LINKED_OBJECT_COLUMNS.has(field.slice(0, field.indexOf(" "))))) {
+		await syncMemorySourceLinks(env, userId, runId);
+	}
+	return { changes };
+}
+
+// The created_*_json columns whose contents are mirrored into
+// memory_source_links. Pages are absent on purpose: memory_pages carries its
+// own source_packet_id and the read path joins that column directly.
+const LINKED_OBJECT_COLUMNS = new Map([
+	["created_nodes_json", "node"],
+	["created_slices_json", "slice"],
+	["created_events_json", "event"],
+]);
+
+/**
+ * Mirror one run's created-object ids into memory_source_links.
+ *
+ * The run row is the only input: nothing is passed in from the caller, so a
+ * partial update ("just the slices this time") still produces the same links a
+ * full replay would. INSERT OR IGNORE makes it idempotent, which matters
+ * because every run is updated several times as it advances.
+ *
+ * Best-effort by design. These links power a read surface; failing a durable
+ * memory write because a provenance index could not be refreshed would trade a
+ * real memory for a column in a table.
+ */
+async function syncMemorySourceLinks(env, userId, runId) {
+	try {
+		const now = Date.now();
+		await env.DB.batch([...LINKED_OBJECT_COLUMNS].map(([column, kind]) => env.DB.prepare(
+			`INSERT OR IGNORE INTO memory_source_links
+				(user_id, object_kind, object_id, source_packet_id, project_id, created_at)
+			 SELECT r.user_id, ?, json_extract(j.value, '$.id'), r.source_packet_id,
+				json_extract(r.scope_json, '$.project_id'), ?
+			 FROM extraction_runs r, json_each(r.${column}) j
+			 WHERE r.id = ? AND r.user_id = ? AND r.source_packet_id IS NOT NULL
+				AND json_valid(r.${column})
+				AND json_extract(j.value, '$.id') IS NOT NULL`,
+		).bind(kind, now, runId, userId)));
+	} catch (error) {
+		console.warn("memory_source_links sync skipped:", error?.message ?? error);
+	}
 }
 
 /**

@@ -12,7 +12,7 @@ describe("dashboard script", () => {
 		expect(script).toContain("function hashView()");
 		expect(script.match(/setView\(S\.view, \{ updateHash: false \}\);/g)).toHaveLength(2);
 		expect(script).toContain('APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"])');
-		expect(script).toContain("function viewCandidates(");
+		expect(script).toContain("function viewMemory(");
 		expect(script).toContain("/v1/candidates");
 		expect(script).toContain("function visibleGraphData()");
 		expect(script).toContain("function computeClusterHulls(");
@@ -154,13 +154,14 @@ describe("dashboard script", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(script).toContain("function viewOverview(");
 		expect(script).toContain("function viewMemory(");
-		expect(script).toContain("Suggestions to review");
-		expect(script).toContain("Promote to Node");
-		expect(script).toContain("Ignore Similar");
-		expect(script).toContain("Everything Itsuki remembers about you, in one place.");
-		expect(script).toContain("Save a memory");
-		expect(script).toContain("Save from a chat or notes");
-		expect(script).toContain("Search your memories");
+		// The Memories page is the three-view workspace over the server-owned
+		// /v1/memories/workspace surface; the inventory is never /v1/graph.
+		expect(script).toContain("/v1/memories/workspace/inventory");
+		expect(script).toContain("/v1/memories/workspace/sources");
+		expect(script).toContain("/v1/memories/workspace/suggestions");
+		expect(script).toContain("No suggestions waiting for review.");
+		expect(script).toContain("Suggestion kept as a memory.");
+		expect(script).toContain("Save memory");
 		expect(script).toContain("function viewInstall(");
 		expect(script).toContain("function viewKeys(");
 		expect(script).toContain("function installSnippets(");
@@ -196,21 +197,16 @@ describe("dashboard script", () => {
 		}
 	});
 
-	it("renders review mode only when candidates exist", () => {
+	it("keeps the pending-suggestion count on the Memories tab", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(html).toContain('id="reviewTabCount"');
-		expect(html).toContain('id="candidateSidebarSection"');
-		expect(script).toContain("function openSuggestions()");
-		expect(script).toContain("suggestion${pending === 1 ? \"\" : \"s\"} waiting for you");
 		expect(script).toContain("function candidateItems()");
 		expect(script).toContain("function updateReviewVisibility()");
-		expect(script).toContain("if (hidden && S.showSuggestions) S.showSuggestions = false;");
 		expect(script).toContain('if (hidden && S.view === "candidates")');
 		expect(script).toContain('history.replaceState(null, "", "/app#overview")');
 		expect(script).toContain("let redirected = false;");
 		expect(script).toContain("redirected = true;");
 		expect(script).toContain("(updateHash || redirected)");
-		expect(script).toContain('Nothing waiting for you.');
 	});
 
 	it("has production legal, privacy, and support modal content", () => {
@@ -270,12 +266,19 @@ describe("dashboard script", () => {
 		expect(script).not.toContain(">Create MCP link</button>");
 	});
 
-	it("does not expose the incomplete scoped reset as project-wide deletion", () => {
+	it("exposes project-wide deletion only through the server-gated lifecycle workflow", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
 		expect(html).toContain('data-view="settings"');
 		expect(script).toContain("function viewSettings(");
-		expect(script).toContain("The existing scoped compatibility reset is intentionally not exposed here");
-		expect(script).toContain("Project-wide deletion arrives with the verified lifecycle workflow");
+		// The controls render only from the server's lifecycle payload — no
+		// static destructive button exists before the backend answers.
+		expect(script).toContain("function setDangerZone(");
+		expect(script).toContain("/v1/settings/lifecycle");
+		expect(script).toContain("Loading lifecycle state…");
+		// Destructive operations require the typed project name and a preview
+		// token, and a 202 is reported as accepted — never as deleted.
+		expect(script).toContain("lcSyncConfirm");
+		expect(script).toContain("accepted. Progress shows below.");
 		expect(script).not.toContain("function viewReset(");
 		expect(script).not.toContain("function resetSelectedUserMemory(");
 		expect(script).not.toContain("function showResetMemoryConfirm(");
@@ -290,12 +293,12 @@ describe("dashboard script", () => {
 		expect(script).toContain("does not combine sibling SDK subtenant spaces");
 		expect(script).toContain("function exportEntityLabel(row)");
 		expect(script).toContain('"Resolved memory space"');
-		expect(script).toContain("Settings does not expose project-wide deletion");
+		expect(script).toContain("verified lifecycle workflow");
 		expect(script).not.toContain("delete all of it, at any time, from Settings");
 		expect(script).not.toContain("Deletion is self-serve and immediate for memory");
 		expect(docsHtml).toContain("the one memory space resolved for the request");
 		expect(docsHtml).toContain("is intentionally not exposed in Settings");
-		expect(docsHtml).toContain("True project-wide deletion is not self-serve");
+		expect(docsHtml).toContain("True project-wide deletion is self-serve from Settings via the verified lifecycle workflow");
 		expect(docsHtml).not.toContain("Settings → danger zone");
 	});
 });

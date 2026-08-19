@@ -21,7 +21,16 @@ export { saveConversation } from "./manual_collect.js";
 
 /** Shape the ingest result into a tool-ready { fired, summary, receipt, processing }. */
 function finalize(res, { prefix = "", processingNote }) {
-	if (res.idempotencyConflict) return res;
+	// Refusals with their own protocol shape pass through untouched: collapsing
+	// them into the generic "nothing durable here" would tell a caller replaying
+	// an ERASED or lifecycle-cancelled write that the content was merely boring.
+	if (
+		res.idempotencyConflict
+		|| res.sourceEpisodeErased
+		|| res.episodePersistenceFailed
+		|| res.extractionFailedTerminal
+		|| res.invalidIngestMessage
+	) return res;
 	if (res.optedOut) {
 		return {
 			fired: false,

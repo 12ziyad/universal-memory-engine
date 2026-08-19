@@ -103,50 +103,54 @@ describe("the API key modal", () => {
 	});
 });
 
-describe("the dashboard save forms", () => {
+describe("the Memories save modal", () => {
 	function harness({ saveOk }) {
-		const factText = { value: "" };
-		const convText = { value: "" };
+		const saveText = { value: "" };
+		const saveButton = { disabled: false, textContent: "Save memory", isConnected: true };
 		const toasts = [];
-		const $ = (sel) => (sel === "#factText" ? factText : sel === "#conversationText" ? convText : null);
-		const built = build(["saveFactFromForm", "saveConversationFromForm"], {
-			$, doSave: async () => saveOk, toast: (m, bad) => toasts.push({ m, bad }),
+		const calls = [];
+		// Mirrors the real mwRenderLayer: the modal is rebuilt from state, so the
+		// textarea would come back EMPTY if the handler re-rendered on failure.
+		const mwRenderLayer = () => { saveText.value = ""; };
+		const $ = (sel) => (sel === "#mwSaveText" ? saveText : sel === "#mwSaveCommit" ? saveButton : null);
+		const api = async (path, init) => {
+			calls.push(JSON.parse(init.body));
+			if (!saveOk) throw new Error("Could not reach the server.");
+			return { summary: "Saved." };
+		};
+		const MW = { saveOpen: true, saveBusy: false };
+		const built = build(["mwCommitSave"], {
+			$, api, MW, mwRenderLayer,
+			toast: (m, bad) => toasts.push({ m, bad }),
+			scopedPayload: (payload) => payload,
+			S: { view: "memory" }, mwRefresh: () => {},
 		});
-		return { ...built, factText, convText, toasts };
+		return { ...built, saveText, saveButton, toasts, calls, MW };
 	}
 
-	it("clears the box after a save that landed", async () => {
+	it("sends what was typed and closes on success", async () => {
 		const h = harness({ saveOk: true });
-		h.factText.value = "I started learning Kotlin this week.";
-		await h.saveFactFromForm();
-		expect(h.factText.value).toBe("");
+		h.saveText.value = "I started learning Kotlin this week.";
+		await h.mwCommitSave();
+		expect(h.calls[0].content).toBe("I started learning Kotlin this week.");
+		expect(h.MW.saveOpen).toBe(false);
 	});
 
 	it("a FAILED save does not eat what was typed", async () => {
-		// doSave used to swallow its error and return undefined, so the caller
-		// cleared the textarea either way — the save was lost AND the sentence.
 		const h = harness({ saveOk: false });
-		h.factText.value = "I started learning Kotlin this week.";
-		await h.saveFactFromForm();
-		expect(h.factText.value).toBe("I started learning Kotlin this week.");
-	});
-
-	it("the same holds for the conversation box", async () => {
-		const ok = harness({ saveOk: true });
-		ok.convText.value = "line one\nline two";
-		await ok.saveConversationFromForm();
-		expect(ok.convText.value).toBe("");
-
-		const bad = harness({ saveOk: false });
-		bad.convText.value = "line one\nline two";
-		await bad.saveConversationFromForm();
-		expect(bad.convText.value).toBe("line one\nline two");
+		h.saveText.value = "I started learning Kotlin this week.";
+		await h.mwCommitSave();
+		expect(h.saveText.value).toBe("I started learning Kotlin this week.");
+		expect(h.MW.saveOpen).toBe(true);
+		expect(h.saveButton.disabled).toBe(false);
+		expect(h.toasts[0].bad).toBe(true);
 	});
 
 	it("an empty submit says what to do and never calls the API", async () => {
 		const h = harness({ saveOk: true });
-		await h.saveFactFromForm();
-		expect(h.toasts[0].m).toBe("Write a fact first.");
+		await h.mwCommitSave();
+		expect(h.toasts[0].m).toBe("Write a memory first.");
+		expect(h.calls).toHaveLength(0);
 	});
 });
 
@@ -311,11 +315,11 @@ describe("in-flight states", () => {
 
 describe("no handler re-renders before it reads (static sweep)", () => {
 	it("every submit handler reads its inputs first", () => {
-		const RENDER = /\b(renderView|renderKeyModal|renderWebhooksTable|renderPlaygroundSide|renderAll)\s*\(/;
+		const RENDER = /\b(renderView|renderKeyModal|renderWebhooksTable|renderPlaygroundSide|renderAll|mwRenderLayer)\s*\(/;
 		const READ = /\$\("#[A-Za-z0-9_-]+"\)\s*\??\.\s*(value|checked)/;
 		const handlers = [
 			"createWebhookNow", "submitKeyModal", "saveRulesForm",
-			"saveFactFromForm", "saveConversationFromForm", "submitAuth",
+			"mwCommitSave", "submitAuth",
 		];
 		for (const name of handlers) {
 			const body = fnSource(name);

@@ -141,6 +141,57 @@ async function finalizeSaveResponse({ mode, source, res, env, userId, sourcePack
 			source_packet_id: res.sourcePacketId ?? res.source_packet_id ?? null,
 		};
 	}
+	// SRV-02 parity for the direct-save lane: an erased/cancelled or
+	// terminally failed replay must keep its honest protocol shape here too,
+	// exactly as the observe/ingest lane reports it.
+	if (res.sourceEpisodeErased) {
+		return {
+			ok: false,
+			sourceEpisodeErased: true,
+			error: "source_write_erased",
+			code: "source_write_erased",
+			http_status: 409,
+			retryable: false,
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
+	if (res.episodePersistenceFailed) {
+		return {
+			ok: false,
+			episodePersistenceFailed: true,
+			error: "source_episode_unavailable",
+			code: "source_episode_unavailable",
+			http_status: res.retryable === false ? 409 : 503,
+			retryable: res.retryable !== false,
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
+	if (res.extractionFailedTerminal) {
+		return {
+			ok: false,
+			extractionFailedTerminal: true,
+			error: "extraction_failed_terminal",
+			http_status: 422,
+			summary: res.summary,
+			job_id: res.jobId ?? null,
+			source_packet_id: res.sourcePacketId ?? null,
+		};
+	}
+	if (res.invalidIngestMessage) {
+		return {
+			ok: false,
+			invalidIngestMessage: true,
+			error: res.error ?? "invalid_ingest_message",
+			code: res.code ?? "duplicate_normalized_message_id",
+			http_status: res.httpStatus ?? 422,
+			retryable: false,
+			summary: res.summary,
+		};
+	}
 	if (res.backpressure) {
 		return {
 			ok: false,

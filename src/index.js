@@ -29,6 +29,7 @@ import {
 	createManagedProject,
 	getManagedProjectForUser,
 	listManagedProjects,
+	MANAGED_PROJECT_HEADER,
 	ManagedProjectError,
 	managedProjectMemoryOwnerId,
 	registerProjectMemorySpace,
@@ -107,6 +108,19 @@ import {
 	scheduleRetentionRuns,
 } from "./lib/retention.js";
 import {
+	cancelLifecycleRun,
+	driveLifecycleRun,
+	executeLifecycleAction,
+	LIFECYCLE_ACTIONS,
+	LifecycleError,
+	lifecycleStatus,
+	listRestorableProjects,
+	previewLifecycleAction,
+	resumeLifecycleRuns,
+	retryLifecycleRun,
+	transferProjectOwnership,
+} from "./lib/project_lifecycle.js";
+import {
 	archiveObject,
 	bulkDeleteBySource,
 	cleanJunkMemories,
@@ -121,6 +135,27 @@ import {
 import { organizeUserClusters, withCluster } from "./pipeline/clusters.js";
 import { cleanClientSource } from "./pipeline/source.js";
 import { getMemory, listMemories, parseInventoryListOptions } from "./lib/memory_inventory.js";
+import {
+	countWorkspaceMemories,
+	countWorkspaceSources,
+	countWorkspaceSuggestions,
+	getWorkspaceMemory,
+	getWorkspaceSource,
+	getWorkspaceSourceContent,
+	listWorkspaceConnections,
+	listWorkspaceEvidence,
+	listWorkspaceMemories,
+	listWorkspaceSourceEvidence,
+	listWorkspaceSourceMemories,
+	listWorkspaceSources,
+	listWorkspaceSuggestions,
+	listWorkspaceTimeline,
+	parseWorkspaceListOptions,
+	parseWorkspaceSourceOptions,
+	parseWorkspaceSuggestionOptions,
+	workspaceCounts,
+	workspaceFacets,
+} from "./lib/memories_workspace.js";
 import { buildGraphLayout } from "./pipeline/layout.js";
 import { listCandidates, mergeCandidate, promoteCandidate, rejectCandidate } from "./pipeline/candidates.js";
 import { buildMemoryServer, decodeMcpToken } from "./mcp/server.js";
@@ -782,6 +817,24 @@ function forbidden(capability) {
 /** Guard a capability on a context that is already resolved. */
 function requireCapability(context, capability) {
 	return can(capability, context.membership ?? {}) ? null : forbidden(capability);
+}
+
+function lifecycleFailure(error) {
+	if (error instanceof LifecycleError || error?.name === "LifecycleError") {
+		return json({
+			error: error.code,
+			code: error.code,
+			message: error.message,
+			...(error.capability ? { capability: error.capability } : {}),
+			...(error.run ? { run: error.run } : {}),
+			...(error.state ? { state: error.state } : {}),
+		}, Number(error.status ?? 400));
+	}
+	if (error?.name === "RetentionError") {
+		return json({ error: error.code ?? "lifecycle_scope_error", code: error.code, message: error.message }, Number(error.status ?? 409));
+	}
+	console.error("lifecycle route failed:", error?.message ?? error);
+	return json({ error: "lifecycle_unavailable", message: "That could not be completed. Nothing was changed beyond what the run status reports. Try again." }, 500);
 }
 
 function orgFailure(error) {
@@ -1615,6 +1668,132 @@ const routes = {
 			});
 			return json({ ok: true, run });
 		} catch (error) { return retentionFailure(error); }
+	},
+
+	// ---- Project lifecycle ------------------------------------------------
+	// Session-only by construction: these doors call getSessionUser directly
+	// and never accept an API key, MCP token, or path token. They must also
+	// resolve ARCHIVED projects (restore needs to see the shell), so they use
+	// the lifecycle resolver rather than requireSessionProject.
+
+	"GET /v1/settings/lifecycle": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const url = new URL(request.url);
+		const projectId = url.searchParams.get("projectId")
+			?? request.headers.get(MANAGED_PROJECT_HEADER);
+		try {
+			const [status, restorable] = await Promise.all([
+				lifecycleStatus(env, { actorUserId: auth.userId, projectId }),
+				listRestorableProjects(env, auth.userId),
+			]);
+			// Polling creates progress: an IDLE non-terminal run is nudged in the
+			// background so convergence never waits for the next cron pass. The
+			// 20s staleness floor plus the driver lease means polls can never
+			// stack drivers onto a run that is actively working.
+			const active = status.active_run;
+			if (
+				active
+				&& ["accepted", "running", "verifying"].includes(active.status)
+				&& Date.now() - Number(active.updated_at ?? 0) > 20000
+			) {
+				ctx?.waitUntil?.(driveLifecycleRun(env, { runId: active.id, budgetMs: 20000 }).catch((error) => {
+					console.warn("lifecycle poll drive failed:", error?.message ?? error);
+				}));
+			}
+			return json({ ok: true, ...status, restorable_projects: restorable });
+		} catch (error) { return lifecycleFailure(error); }
+	},
+
+	"POST /v1/settings/lifecycle/preview": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/preview");
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			const preview = await previewLifecycleAction(env, {
+				actorUserId: auth.userId,
+				sessionRef: auth.session?.id ?? null,
+				projectId: body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+				action: body.action,
+			});
+			return json({ ok: true, preview });
+		} catch (error) { return lifecycleFailure(error); }
+	},
+
+	"POST /v1/settings/lifecycle/execute": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.DELETE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("delete");
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/execute");
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			const result = await executeLifecycleAction(env, ctx, {
+				actorUserId: auth.userId,
+				sessionRef: auth.session?.id ?? null,
+				projectId: body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+				action: body.action,
+				token: body.token ?? null,
+				idempotencyKey: body.idempotencyKey,
+				confirmName: body.confirmName ?? null,
+				requestId: auditRequestId(request),
+			});
+			// 202: accepted and fenced — never "deleted". Completion is a status
+			// the caller polls, not a property of this response.
+			return json({ ok: true, ...result }, result.replayed ? 200 : 202);
+		} catch (error) { return lifecycleFailure(error); }
+	},
+
+	"POST /v1/settings/lifecycle/retry": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/retry");
+		if (parsed.response) return parsed.response;
+		try {
+			const result = await retryLifecycleRun(env, ctx, {
+				actorUserId: auth.userId,
+				projectId: parsed.body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+				runId: parsed.body.runId,
+			});
+			return json({ ok: true, ...result });
+		} catch (error) { return lifecycleFailure(error); }
+	},
+
+	"POST /v1/settings/lifecycle/cancel": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/cancel");
+		if (parsed.response) return parsed.response;
+		try {
+			const result = await cancelLifecycleRun(env, {
+				actorUserId: auth.userId,
+				projectId: parsed.body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+				runId: parsed.body.runId,
+			});
+			return json({ ok: true, ...result });
+		} catch (error) { return lifecycleFailure(error); }
+	},
+
+	"POST /v1/settings/lifecycle/transfer": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/transfer");
+		if (parsed.response) return parsed.response;
+		try {
+			const result = await transferProjectOwnership(env, {
+				actorUserId: auth.userId,
+				projectId: parsed.body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+				recipientUserId: parsed.body.recipientUserId,
+				expectedRevision: parsed.body.expectedRevision ?? request.headers.get("if-match"),
+				requestId: auditRequestId(request),
+			});
+			return json({ ok: true, ...result });
+		} catch (error) { return lifecycleFailure(error); }
 	},
 
 	/**
@@ -3817,6 +3996,11 @@ export default {
 			await scheduleRetentionRuns(env, { now, limit: 50, requestId });
 			await processQueuedRetentionRuns(env, { now, maxRuns: 5, batchSize: 40, requestId });
 		})());
+		// Resume interrupted or transiently failed project-lifecycle runs. The
+		// execute door only guarantees the fence; convergence is cron-guaranteed.
+		ctx.waitUntil(resumeLifecycleRuns(env, { limit: 3, budgetMs: 20000 }).catch((error) => {
+			console.warn("lifecycle resume sweep failed:", error?.message ?? error);
+		}));
 	},
 
 	async fetch(request, env, ctx) {
@@ -4011,6 +4195,14 @@ async function handleRequestInner(request, env, ctx, url) {
 		// keys are scoped to their account (and sub-tenant when userId given).
 		if (request.method === "DELETE" && (url.pathname === "/v1/memories" || url.pathname.startsWith("/v1/memories/"))) {
 			return handleMemoryDeleteRoutes(request, env, url, ctx);
+		}
+
+		// Memories workspace: the dashboard's Memories page (inventory, sources,
+		// suggestions, inspector satellites). Must dispatch before the generic
+		// /v1/memories/:id reader, whose id-prefix parser would otherwise treat
+		// "workspace/…" as a malformed memory id.
+		if (request.method === "GET" && url.pathname.startsWith("/v1/memories/workspace/")) {
+			return handleMemoriesWorkspaceRoutes(request, env, url);
 		}
 
 		// Read-only inventory: the management half of the memory surface. API
@@ -4590,6 +4782,101 @@ async function handleWebhookRoutes(request, env, ctx, url) {
 		return json({ ok: true, sent: true, delivery_id: mutation.deliveryId });
 	}
 	return json({ error: "not found" }, 404);
+}
+
+/**
+ * GET /v1/memories/workspace/* — the Memories page's read surface.
+ *
+ * Everything here is a SELECT in lib/memories_workspace.js. Auth follows the
+ * read-inventory contract exactly: session or Bearer with memory:read, fresh
+ * project.memory.read capability, project resolution via the credential and
+ * x-itsuki-project header, then the READ rate bucket. The resolved memory
+ * user id is the isolation boundary for every query.
+ */
+async function handleMemoriesWorkspaceRoutes(request, env, url) {
+	const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+		requiredScope: MEMORY_READ_SCOPE,
+	});
+	if (auth.response) return auth.response;
+	if (!(await allowRate(env.READ_LIMITER, managedActorRateKey("read", auth)))) return tooManyFor("read");
+	const userId = auth.userId;
+	const rest = url.pathname.slice("/v1/memories/workspace/".length);
+	const params = Object.fromEntries(url.searchParams.entries());
+	const noStore = { "cache-control": "private, no-store" };
+	const fail = (options) => json({ error: options.error, message: options.message }, 400, noStore);
+
+	if (rest === "counts") return json({ ok: true, counts: await workspaceCounts(env, userId) }, 200, noStore);
+	if (rest === "facets") return json({ ok: true, ...(await workspaceFacets(env, userId)) }, 200, noStore);
+
+	if (rest === "inventory") {
+		const options = parseWorkspaceListOptions(params);
+		if (options.error) return fail(options);
+		const [list, totals] = await Promise.all([
+			listWorkspaceMemories(env, userId, options),
+			countWorkspaceMemories(env, userId, options),
+		]);
+		return json({ ok: true, ...list, total: totals.total, by_kind: totals.by_kind }, 200, noStore);
+	}
+
+	if (rest === "sources") {
+		const options = parseWorkspaceSourceOptions(params);
+		if (options.error) return fail(options);
+		const [list, totals] = await Promise.all([
+			listWorkspaceSources(env, userId, options),
+			countWorkspaceSources(env, userId, options),
+		]);
+		return json({ ok: true, ...list, total: totals.total }, 200, noStore);
+	}
+
+	if (rest === "suggestions") {
+		const options = parseWorkspaceSuggestionOptions(params);
+		if (options.error) return fail(options);
+		const [list, totals] = await Promise.all([
+			listWorkspaceSuggestions(env, userId, options),
+			countWorkspaceSuggestions(env, userId, options),
+		]);
+		return json({ ok: true, ...list, total: totals.total }, 200, noStore);
+	}
+
+	const memoryMatch = /^memory\/([^/]+)(?:\/(evidence|timeline|connections))?$/.exec(rest);
+	if (memoryMatch) {
+		const id = decodeURIComponent(memoryMatch[1]);
+		const satellite = memoryMatch[2] ?? null;
+		let result;
+		if (!satellite) result = await getWorkspaceMemory(env, userId, id);
+		else if (satellite === "evidence") result = await listWorkspaceEvidence(env, userId, id, params);
+		else if (satellite === "timeline") result = await listWorkspaceTimeline(env, userId, id, params);
+		else result = await listWorkspaceConnections(env, userId, id, params);
+		if (result?.error === "unrecognized_id") {
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or event_ id." }, 400, noStore);
+		}
+		if (result?.error) return fail(result);
+		if (!result) return json({ error: "not_found" }, 404, noStore);
+		return json({ ok: true, ...result }, 200, noStore);
+	}
+
+	const sourceMatch = /^sources\/([^/]+)(?:\/(memories|evidence|content))?$/.exec(rest);
+	if (sourceMatch) {
+		const id = decodeURIComponent(sourceMatch[1]);
+		const satellite = sourceMatch[2] ?? null;
+		if (!satellite) {
+			const found = await getWorkspaceSource(env, userId, id);
+			if (!found) return json({ error: "not_found" }, 404, noStore);
+			return json({ ok: true, ...found }, 200, noStore);
+		}
+		// Satellites 404 for a source the caller cannot see, rather than
+		// returning an empty list that implies the source exists with no data.
+		const owner = await getWorkspaceSource(env, userId, id);
+		if (!owner) return json({ error: "not_found" }, 404, noStore);
+		let result;
+		if (satellite === "memories") result = await listWorkspaceSourceMemories(env, userId, id, params);
+		else if (satellite === "evidence") result = await listWorkspaceSourceEvidence(env, userId, id, params);
+		else result = await getWorkspaceSourceContent(env, userId, id);
+		if (result?.error) return fail(result);
+		return json({ ok: true, ...result }, 200, noStore);
+	}
+
+	return json({ error: "not found" }, 404, noStore);
 }
 
 /**

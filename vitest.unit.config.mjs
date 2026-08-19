@@ -53,6 +53,8 @@ export default defineConfig({
 			// Source-policy guard: reads the migrations directory from disk, so
 			// it belongs here rather than in the Workers pool.
 			"test/migrations_append_only.spec.js",
+			// Same reason: the lifecycle census parses migrations from disk.
+			"test/schema_census.spec.js",
 			// Same reason: compares each adapter package's vendored kernel copy
 			// against packages/_kernel on disk.
 			"test/kernel-parity.spec.js",

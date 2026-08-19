@@ -141,6 +141,9 @@
 		background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
 	a { color: var(--accent); }
 	button, input, select, textarea { font-family: var(--font-ui); }
+	.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important;
+		margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important;
+		white-space: nowrap !important; border: 0 !important; }
 	pre, code, kbd, samp { font-family: var(--font-mono); }
 
 	/* ---- app type scale ----------------------------------------------------
@@ -1619,7 +1622,7 @@
 	:where(body.app-mode) button { color: var(--on-accent); }
 	body.app-mode button.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border2); }
 	body.app-mode button.danger { background: var(--danger-bg); color: var(--red); border: 1px solid var(--danger-border); }
-	body.app-mode .box, body.app-mode .action-box, body.app-mode .browser-col {
+	body.app-mode .box, body.app-mode .action-box {
 		box-shadow: var(--shadow-sm); }
 	body.app-mode header { box-shadow: var(--shadow-sm); }
 	body.app-mode input, body.app-mode select, body.app-mode textarea { background: var(--input-bg); }
@@ -1678,12 +1681,244 @@
 		margin-left: auto; margin-right: auto; }
 	.view > .pg-shell { max-width: var(--content-wide); }
 
-	/* ---- memory browser (content, shown on Memories) ---- */
-	#memoryBrowser { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;
-		width: min(calc(100% - 48px), var(--content-max)); margin: 24px auto 0; padding: 0; }
-	#memoryBrowser[hidden] { display: none; }
-	.browser-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
-		max-height: 320px; overflow-y: auto; }
+	/* ---- Memories workspace (mw-) ------------------------------------------
+	   The Memories page: three views (Memories · Sources · Suggestions), a
+	   server-paginated inventory and a sticky inspector. All colors come from
+	   the app tokens so light/dark/system follow the shell automatically.
+	   Namespaced under .mw- ; nothing here styles other views.
+	   ------------------------------------------------------------------------ */
+	body.app-mode { --mw-selbg: rgba(91,79,207,.055); }
+	html[data-theme="dark"] body.app-mode { --mw-selbg: rgba(139,124,246,.075); }
+	.mw { max-width: var(--content-wide); margin: 0 auto; font-family: var(--font-ui);
+		--mw-rowpy: 11px; --mw-rowmin: 68px; }
+	.mw-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-bottom: 14px; }
+	.mw-segs { display: flex; gap: 2px; padding: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; }
+	.mw-seg { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px;
+		background: transparent; color: var(--muted); border: 0; border-radius: 7px; cursor: pointer;
+		font-size: 13px; font-weight: 400; white-space: nowrap; }
+	.mw-seg:hover { color: var(--text); }
+	.mw-seg[aria-selected="true"] { background: var(--panel2); color: var(--text); font-weight: 600; }
+	.mw-seg .mw-mono { font-size: 11px; color: var(--faint); }
+	.mw-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+	.mw-btn { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px;
+		background: var(--panel); border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+		font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+	.mw-btn:hover { border-color: var(--border2); color: var(--text); }
+	.mw-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+	.mw-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
+	.mw-btn-primary[disabled] { opacity: .5; cursor: default; }
+	.mw-iconbtn { width: 34px; height: 34px; padding: 0; justify-content: center; }
+	.mw-mono { font-family: var(--font-mono); }
+
+	.mw-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-bottom: 12px; }
+	.mw-search { position: relative; flex: 1 1 300px; min-width: 0; display: flex; align-items: center; }
+	.mw-search svg { position: absolute; left: 11px; pointer-events: none; }
+	.mw-search input { width: 100%; min-height: 34px; padding: 0 64px 0 33px; background: var(--panel);
+		border: 1px solid var(--border); border-radius: 9px; font-size: 13px; color: var(--text); }
+	.mw-search input:focus { border-color: var(--accent); background: var(--input-bg, var(--panel2)); outline: none; }
+	.mw-search kbd { position: absolute; right: 10px; padding: 2px 6px; background: var(--panel2);
+		border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10.5px;
+		color: var(--faint); pointer-events: none; }
+	.mw-search .mw-clearq { position: absolute; right: 42px; width: 22px; height: 22px; display: inline-flex;
+		align-items: center; justify-content: center; background: var(--panel2); border: 0; border-radius: 6px;
+		cursor: pointer; color: var(--muted); }
+	.mw-filter { position: relative; flex: none; }
+	.mw-filter > button { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px;
+		background: var(--panel); border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+		font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+	.mw-filter > button:hover { border-color: var(--border2); color: var(--text); }
+	.mw-filter > button .mw-flabel { color: var(--faint); }
+	.mw-filter > button[data-on="1"] { background: var(--mw-selbg); border-color: var(--accent); color: var(--text); }
+	.mw-menu { position: absolute; left: 0; top: 40px; z-index: 42; min-width: 186px; max-width: 300px;
+		max-height: 290px; overflow-y: auto; padding: 5px; background: var(--panel); border: 1px solid var(--border2);
+		border-radius: 11px; box-shadow: var(--shadow-md); animation: mwRise .14s ease-out; }
+	.mw-menu-right { left: auto; right: 0; }
+	.mw-menu button { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px;
+		background: transparent; color: var(--muted); border: 0; border-radius: 7px; cursor: pointer;
+		text-align: left; font-size: 12.5px; }
+	.mw-menu button:hover, .mw-menu button:focus-visible { background: var(--panel2); color: var(--text); }
+	.mw-menu button[aria-selected="true"] { background: var(--panel2); color: var(--text); }
+	.mw-menu button .mw-opt-count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+	.mw-menu button .mw-opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.mw-menu button.mw-danger { color: var(--red); }
+	.mw-menu button.mw-danger:hover { background: var(--danger-bg, var(--panel2)); color: var(--red); }
+	.mw-clear-filters { background: transparent; border: 1px solid transparent; color: var(--accent);
+		border-radius: 9px; min-height: 34px; padding: 0 9px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+	.mw-clear-filters:hover { border-color: var(--accent); background: var(--mw-selbg); }
+
+	.mw-countline { display: flex; align-items: center; gap: 10px; padding: 2px 0 9px; min-height: 22px; }
+	.mw-countline .mw-count { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .04em; color: var(--faint); white-space: nowrap; }
+	.mw-reopen { margin-left: auto; display: none; }
+
+	.mw-body { display: grid; grid-template-columns: minmax(0, 64fr) minmax(400px, 36fr); gap: 16px; align-items: start; }
+	.mw-inv { min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+		box-shadow: var(--shadow-sm); }
+	.mw-grid-head { position: sticky; top: 0; z-index: 12; display: grid; grid-template-columns: var(--mw-cols);
+		align-items: center; min-height: 34px; background: var(--panel2); border-left: 2px solid transparent;
+		border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+	.mw-grid-head > div { padding: 0 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em;
+		color: var(--faint); white-space: nowrap; overflow: hidden; }
+	.mw-grid-head > div:first-child { padding: 0 10px; }
+	.mw-num { text-align: right; }
+	.mw-row { position: relative; display: grid; grid-template-columns: var(--mw-cols); align-items: center;
+		min-height: var(--mw-rowmin, 72px); border-left: 2px solid transparent; border-bottom: 1px solid var(--border);
+		background: transparent; cursor: pointer; transition: background .16s; }
+	.mw-row:hover { background: var(--panel3); }
+	.mw-row[aria-selected="true"] { background: var(--mw-selbg); border-left-color: var(--accent); }
+	.mw-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.mw-row:last-child { border-bottom: 0; border-radius: 0 0 10px 10px; }
+	.mw-row.mw-done { opacity: .62; }
+	.mw-cell { min-width: 0; padding: 0 8px; overflow: hidden; display: flex; align-items: center; }
+	.mw-cell-main { display: block; padding: var(--mw-rowpy, 12px) 10px; }
+	.mw-cell-main .mw-text { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+		overflow: hidden; font-size: 13px; font-weight: 500; line-height: 1.34; color: var(--text); overflow-wrap: anywhere; }
+	.mw-cell-main .mw-meta { margin: 3px 0 0; font-size: 11.25px; line-height: 1.3; color: var(--faint); white-space: nowrap;
+		overflow: hidden; text-overflow: ellipsis; }
+	.mw-cell .mw-dim { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.mw-cell .mw-upd { font-family: var(--font-mono); font-size: 11.25px; font-variant-numeric: tabular-nums; color: var(--faint); }
+	.mw-chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px;
+		font-size: 11px; white-space: nowrap; border: 1px solid var(--border); background: var(--panel2); color: var(--faint); }
+	.mw-chip-ok { background: var(--success-bg); border-color: var(--success-border); color: var(--green); }
+	.mw-chip-warn { background: var(--warning-bg); border-color: var(--warning-border); color: var(--amber); }
+	.mw-chip-err { background: var(--danger-bg); border-color: var(--danger-border); color: var(--red); }
+	.mw-chip-acc { background: var(--mw-selbg); border-color: var(--accent); color: var(--accent); }
+	.mw-chip .mw-pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: mwPulse 1.8s ease-in-out infinite; }
+	.mw-rowmenu-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+		background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; color: var(--faint);
+		opacity: .62; transition: opacity .14s, border-color .14s, color .14s; }
+	.mw-rowmenu-btn:hover { border-color: var(--border2); color: var(--text); }
+	.mw-row:hover .mw-rowmenu-btn, .mw-row:focus-within .mw-rowmenu-btn { opacity: 1; }
+	.mw-cell-act { position: relative; justify-content: center; overflow: visible; }
+	.mw-cell-act .mw-menu { right: 2px; left: auto; top: 26px; z-index: 40; width: 190px; }
+
+	.mw-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 52px 20px; text-align: center; }
+	.mw-empty p { margin: 0; font-size: 13.5px; color: var(--muted); }
+	.mw-errorbox { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 42px 20px; text-align: center; }
+	.mw-errorbox p { margin: 0; font-size: 13px; color: var(--red); overflow-wrap: anywhere; }
+	.mw-more { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--border); }
+	.mw-skel { min-height: 56px; border-bottom: 1px solid var(--border); padding: 12px 10px; }
+	.mw-skel span { display: block; height: 11px; border-radius: 6px; background: var(--panel2); animation: mwPulse 1.6s ease-in-out infinite; }
+	.mw-skel span + span { margin-top: 8px; width: 55%; }
+	.mw-refreshing { opacity: .6; }
+
+	.mw-insp { position: sticky; top: 12px; max-height: calc(100dvh - 96px); overflow-y: auto;
+		background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+	.mw-insp-empty { display: flex; flex-direction: column; gap: 7px; padding: 26px 18px; }
+	.mw-insp-empty p { margin: 0; font-size: 12.5px; color: var(--faint); line-height: 1.5; }
+	.mw-insp-empty p:first-child { font-size: 13.5px; font-weight: 500; color: var(--text); }
+	.mw-insp-head { position: sticky; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 9px;
+		padding: 12px 14px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+	.mw-insp-toprow { display: flex; align-items: center; gap: 7px; }
+	.mw-insp-toprow .mw-pos { font-family: var(--font-mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
+	.mw-insp-nav { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+	.mw-insp-nav button { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center;
+		background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; color: var(--muted); }
+	.mw-insp-nav button:hover { border-color: var(--border2); color: var(--text); }
+	.mw-insp-nav button[disabled] { opacity: .4; cursor: default; }
+	.mw-insp-close { display: none; }
+	.mw-insp-title { margin: 0; font-size: 14.5px; font-weight: 600; line-height: 1.4; letter-spacing: -.008em; overflow-wrap: anywhere; }
+	.mw-insp-meta { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; color: var(--faint); }
+	.mw-insp-meta2 { margin: -3px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+	.mw-insp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+	.mw-insp-actions .mw-btn { min-height: 29px; padding: 0 10px; }
+	.mw-insp-actions .mw-act-ok { background: var(--success-bg); border-color: var(--success-border); color: var(--green); }
+	.mw-insp-actions .mw-act-more { position: relative; }
+	.mw-insp-actions .mw-menu { top: 33px; }
+	.mw-tabs { display: flex; flex-wrap: nowrap; gap: 2px; margin: 1px -2px -10px; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
+	.mw-tabs::-webkit-scrollbar { height: 0; }
+	.mw-tab { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; background: transparent;
+		color: var(--faint); border: 0; border-bottom: 2px solid transparent; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+	.mw-tab:hover { color: var(--text); }
+	.mw-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+	.mw-tab .mw-mono { font-size: 10.5px; color: var(--faint); }
+	.mw-panel { padding: 14px 14px 20px; }
+	.mw-fields { display: grid; grid-template-columns: minmax(0, 110px) minmax(0, 1fr); gap: 1px 12px; margin: 0 0 14px;
+		padding: 11px 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; }
+	.mw-fields dt { padding: 4px 0; font-size: 12px; color: var(--faint); }
+	.mw-fields dd { margin: 0; padding: 4px 0; font-size: 12.5px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+	.mw-sat { display: flex; flex-direction: column; gap: 7px; }
+	.mw-sat-item { display: flex; gap: 10px; padding: 9px 11px; background: var(--panel2); border: 1px solid var(--border);
+		border-left: 2px solid transparent; border-radius: 10px; }
+	.mw-sat-item .mw-sat-n { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--faint); padding-top: 1px; }
+	.mw-sat-item .mw-sat-b { flex: 1; min-width: 0; }
+	.mw-sat-item .mw-sat-h { margin: 0 0 4px; font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.mw-sat-item .mw-sat-t { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; }
+	.mw-sat-item .mw-sat-f { margin: 5px 0 0; font-size: 11.5px; color: var(--faint); }
+	.mw-sat-open { flex: none; align-self: flex-start; width: 24px; height: 24px; display: inline-flex; align-items: center;
+		justify-content: center; background: transparent; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; color: var(--faint); }
+	.mw-sat-open:hover { border-color: var(--border2); color: var(--text); }
+	.mw-sat-note { margin: 2px 0 0; font-size: 11.5px; color: var(--faint); }
+	.mw-ids { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+	.mw-id-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--panel2);
+		border: 1px solid var(--border); border-radius: 9px; }
+	.mw-id-row .mw-id-k { flex: none; width: 96px; font-size: 12px; color: var(--faint); }
+	.mw-id-row .mw-id-v { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+	.mw-tech { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel2); }
+	.mw-tech summary { min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 11px; cursor: pointer;
+		font-size: 12.5px; color: var(--muted); list-style: none; }
+	.mw-tech summary::-webkit-details-marker { display: none; }
+	.mw-tech summary:hover { color: var(--text); }
+	.mw-tech pre { margin: 0 11px 11px; padding: 10px; background: var(--bg); border: 1px solid var(--border);
+		border-radius: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--muted); overflow-x: auto; }
+	.mw-doc { max-width: 68ch; }
+	.mw-doc .mw-doc-body { font-size: 13px; line-height: 1.66; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.mw-body-note { margin: 0 0 11px; font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+	.mw-inline-note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
+
+	.mw-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 65; animation: mwFade .18s ease-out; }
+	.mw-modal-back { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-start; justify-content: center;
+		padding: 9vh 16px; background: var(--overlay); animation: mwFade .16s ease-out; }
+	.mw-modal { position: relative; width: min(520px, 100%); padding: 16px; background: var(--panel);
+		border: 1px solid var(--border2); border-radius: 14px; box-shadow: var(--shadow-lg); animation: mwRise .17s ease-out; }
+	.mw-modal h2 { margin: 0; font-size: 15px; font-weight: 600; }
+	.mw-modal textarea { width: 100%; padding: 9px 10px; background: var(--input-bg, var(--panel2)); border: 1px solid var(--border);
+		border-radius: 9px; font-size: 13px; line-height: 1.55; color: var(--text); resize: vertical; }
+	.mw-modal textarea:focus { border-color: var(--accent); outline: none; }
+
+	.mw[data-density="compact"] { --mw-rowpy: 8px; --mw-rowmin: 56px; }
+	.mw[data-density="compact"] .mw-row .mw-meta { display: none; }
+	.mw[data-view="memories"] { --mw-cols: minmax(0,1fr) 118px 158px 86px 68px 34px; }
+	.mw[data-view="sources"] { --mw-cols: minmax(0,1fr) 94px 120px 64px 64px 68px 34px; }
+	.mw[data-view="suggestions"] { --mw-cols: minmax(0,1fr) 118px 92px 80px 34px; }
+	@media (hover: none) { .mw-rowmenu-btn { opacity: 1; } }
+
+	@keyframes mwFade { from { opacity: 0; } to { opacity: 1; } }
+	@keyframes mwRise { from { transform: translateY(5px); opacity: 0; } to { transform: none; opacity: 1; } }
+	@keyframes mwPulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+	@media (prefers-reduced-motion: reduce) {
+		.mw-menu, .mw-overlay, .mw-modal-back, .mw-modal, .mw-insp { animation: none !important; transition: none !important; }
+		.mw-chip .mw-pulse, .mw-skel span { animation: none; }
+	}
+
+	/* The app rail consumes 240px, so the inspector becomes a drawer before the
+	   inventory columns get cramped on common 1280/1366px laptops. */
+	@media (max-width: 1439px) {
+		.mw-body { grid-template-columns: minmax(0, 1fr); }
+		.mw-insp { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%); max-height: 100dvh;
+			z-index: 70; border-radius: 0; box-shadow: var(--shadow-lg); transform: translateX(110%);
+			visibility: hidden; transition: transform .22s cubic-bezier(.4,0,.2,1); }
+		body.mw-drawer-open .mw-insp { transform: none; visibility: visible; }
+		.mw-insp-close { display: inline-flex; }
+		.mw-reopen { display: inline-flex; }
+	}
+	@media (prefers-reduced-motion: reduce) { .mw-insp { transition: none; } }
+	@media (max-width: 1023px) {
+		.mw[data-view="memories"] { --mw-cols: minmax(0,1fr) 130px 100px 80px 36px; }
+		.mw[data-view="sources"] { --mw-cols: minmax(0,1fr) 112px 136px 80px 36px; }
+		.mw .mw-col-src, .mw .mw-col-ev, .mw[data-view="sources"] .mw-col-mem { display: none; }
+	}
+	@media (max-width: 767px) {
+		.mw[data-view="memories"] { --mw-cols: minmax(0,1fr) 100px 80px 36px; }
+		.mw[data-view="sources"] { --mw-cols: minmax(0,1fr) 136px 80px 36px; }
+		.mw[data-view="suggestions"] { --mw-cols: minmax(0,1fr) 100px 80px 36px; }
+		.mw .mw-col-type, .mw .mw-col-kind, .mw .mw-col-guess { display: none; }
+		.mw-insp { width: 100%; }
+	}
+	@media (max-width: 520px) {
+		.mw[data-view="memories"], .mw[data-view="suggestions"] { --mw-cols: minmax(0,1fr) 100px 36px; }
+		.mw[data-view="sources"] { --mw-cols: minmax(0,1fr) 136px 36px; }
+		.mw .mw-col-upd { display: none; }
+	}
 
 	@media (max-width: 900px) {
 		main, main.detail-open { grid-template-columns: minmax(0, 1fr); }
@@ -1694,7 +1929,6 @@
 		.project-switcher-button { min-width: 0; width: min(210px, 48vw); }
 		#appHeader .header-divider, #pageTitle { display: none; }
 		.view { padding: 24px 18px 36px; }
-		#memoryBrowser { width: calc(100% - 36px); margin-top: 18px; }
 	}
 
 	/* ---- sidebar ---- */
@@ -1972,7 +2206,6 @@
 	@media (max-width: 560px) {
 		header { min-height: 54px; padding: 8px 14px; }
 		.view { padding: 18px 14px 28px; }
-		#memoryBrowser { width: calc(100% - 28px); margin-top: 14px; grid-template-columns: 1fr; gap: 14px; }
 		.panel-grid, .settings-grid { grid-template-columns: 1fr; gap: 14px; margin-bottom: 24px; }
 		.action-box, .box { padding: 18px; border-radius: 12px; }
 		.public-nav { padding: 10px 14px; gap: 10px; }
@@ -2299,23 +2532,6 @@
 	</aside>
 
 	<div class="content">
-		<!-- The memory browser is content, not chrome: it belongs to Memories and
-		     Graph, not to every screen. Kept in the DOM so render targets never
-		     disappear; shown only where it makes sense. -->
-		<div id="memoryBrowser" hidden>
-			<div class="browser-col">
-				<div class="side-h"><span>Notes</span><span id="pageCount" class="kv"></span></div>
-				<div id="pageList"></div>
-			</div>
-			<div class="browser-col">
-				<div class="side-h"><span>Memories</span><span id="nlCount" class="kv"></span></div>
-				<div id="nodeList"></div>
-			</div>
-			<div class="browser-col" id="candidateSidebarSection">
-				<div class="side-h"><span>Suggestions</span><span id="candCount" class="kv"></span></div>
-				<div id="candList"></div>
-			</div>
-		</div>
 		<div class="view pad0" id="view"></div>
 	</div>
 
@@ -2521,7 +2737,7 @@ const S = {
 	installStepIndex: 0, installExpanded: false,
 	graphMode: "clean",
 	focusCluster: "",
-	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true, recallResult: null, memoryQuery: "",
+	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true,
 	onboardKeyBusy: false, onboardKeyMutationId: 0, onboardKeyMutation: null,
 	projects: [], organizations: [], organizationsError: "", projectId: "", projectEpoch: 0, projectController: null,
 	projectSwitching: false, projectSettingsBusy: false,
@@ -3037,8 +3253,6 @@ function resetProjectBoundUiState() {
 	S.oneTimeToken = null;
 	S.onboardKeyBusy = false;
 	S.onboardKeyMutation = null;
-	S.recallResult = null;
-	S.memoryQuery = "";
 	S.projectCapabilities = null;
 	S.projectCapabilitiesLoading = false;
 	Object.assign(KEYMODAL, {
@@ -3197,7 +3411,9 @@ function routeMode() {
 }
 
 function hashView() {
-	const value = location.hash.replace(/^#/, "");
+	// The Memories page carries selection in the hash (#memory/<view>/<id>);
+	// the app view is always the first segment.
+	const value = location.hash.replace(/^#/, "").split("?")[0].split("/")[0];
 	return APP_VIEWS.has(value) ? value : "";
 }
 
@@ -3743,12 +3959,6 @@ function updateReviewVisibility() {
 	// where the suggestions are reviewed inline.
 	const countEl = $("#reviewTabCount");
 	if (countEl) countEl.textContent = count ? ` (${count})` : "";
-	if (hidden && S.showSuggestions) S.showSuggestions = false;
-	const side = $("#candidateSidebarSection");
-	if (side) {
-		side.hidden = hidden;
-		side.classList.toggle("review-hidden", hidden);
-	}
 	if (hidden && S.view === "candidates") {
 		S.view = "overview";
 		if (document.body.classList.contains("app-mode") && hashView() === "candidates") {
@@ -3760,9 +3970,6 @@ function updateReviewVisibility() {
 function renderAll() {
 	renderStats();
 	renderAppUser();
-	renderPageList();
-	renderNodeList();
-	renderCandidateSidebar();
 	updateReviewVisibility();
 	renderView();
 	renderDetail();
@@ -3773,100 +3980,6 @@ function renderStats() {
 	$("#stats").innerHTML =
 		[["pages",s.pages||0],["nodes",s.nodes],["slices",s.slices],["events",s.events],["edges",s.edges],["candidates",s.candidates]]
 		.map(([k,v]) => `<div class="stat"><b>${v}</b>${k}</div>`).join("");
-}
-
-function renderCandidateSidebar() {
-	const wrap = $("#candList"); wrap.innerHTML = "";
-	const cands = candidateItems();
-	$("#candCount").textContent = cands.length;
-	if (!cands.length) { wrap.innerHTML = ""; return; }
-	for (const c of cands.slice(0, 20)) {
-		const label = c.labelGuess || c.label || "Candidate";
-		const mentions = c.mentionCount || c.mentions || 1;
-		wrap.appendChild(el("div","cand", `<span>${esc(label)} ${projectCategoryBadge(c)}</span><span class="s">${esc(c.strength || "candidate")} · ${mentions} <button class="ghost mini" onclick="setView('candidates')">Review</button></span>`));
-	}
-}
-
-function renderPageList() {
-	const wrap = $("#pageList"); wrap.innerHTML = "";
-	const pages = (S.data && S.data.pages) || [];
-	$("#pageCount").textContent = pages.length;
-	if (!pages.length) { wrap.appendChild(el("div","empty","No pages yet.")); return; }
-	for (const p of [...pages].sort((a,b)=>compareLatestThenName(a,b,"title"))) {
-		const key = pageKey(p.id);
-		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
-		item.innerHTML = `<span class="dot" style="background:${catColor("system")}"></span>
-			<span class="lbl">${esc(p.title)}</span>
-			<span class="meta">${esc(p.cluster_label || "page")}</span>
-			<span class="row-actions"><button class="ghost danger icon dev-only" title="Delete page" onclick="stop(event); deleteSelected('page','${p.id}')">×</button></span>`;
-		item.onclick = () => select(p.id, "page");
-		wrap.appendChild(item);
-	}
-}
-
-function renderNodeList() {
-	const wrap = $("#nodeList"); wrap.innerHTML = "";
-	const nodes = (S.data && S.data.nodes) || [];
-	$("#nlCount").textContent = nodes.length;
-	if (!nodes.length) { wrap.appendChild(el("div","empty","No nodes yet.")); return; }
-	for (const n of [...nodes].sort((a,b)=>compareLatestThenName(a,b,"label"))) {
-		const key = nodeKey(n.id);
-		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
-		item.innerHTML = `<span class="dot" style="background:${catColor(n.category)}"></span>
-			<span class="lbl">${esc(n.label)}</span>
-			<span class="meta">${esc(n.category)}</span>
-			<span class="row-actions"><button class="ghost danger icon dev-only" title="Delete node" onclick="stop(event); deleteSelected('node','${n.id}')">×</button></span>`;
-		item.onclick = () => select(n.id, "node");
-		wrap.appendChild(item);
-	}
-}
-
-function renderCandidates() {
-	const wrap = $("#candList"); wrap.innerHTML = "";
-	const cands = (S.data && S.data.candidates) || [];
-	$("#candCount").textContent = cands.length;
-	if (!cands.length) { wrap.appendChild(el("div","empty","None.")); return; }
-	for (const c of cands) wrap.appendChild(el("div","cand", `<span>${esc(c.label)}</span><span class="s">${esc(c.strength)} ·${c.mentions||1}× <button class="ghost danger icon dev-only" title="Delete candidate" onclick="deleteSelected('candidate','${c.id}')">×</button></span>`));
-}
-
-function renderPageList() {
-	const wrap = $("#pageList"); wrap.innerHTML = "";
-	const pages = (S.data && S.data.pages) || [];
-	$("#pageCount").textContent = pages.length;
-	if (!pages.length) { wrap.appendChild(el("div","empty","No pages yet.")); return; }
-	for (const p of [...pages].sort((a,b)=>compareLatestThenName(a,b,"title"))) {
-		const key = pageKey(p.id);
-		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
-		item.innerHTML = `<span class="dot${projectCategoryToken(p) ? " project-category-ring" : ""}" style="background:${catColor("system")};${projectCategoryRingStyle(p)}"></span>
-			<span class="lbl">${esc(p.title)}</span>
-			<span class="meta">${esc(p.cluster_label || "page")}</span>${projectCategoryBadge(p)}`;
-		item.onclick = () => select(p.id, "page");
-		wrap.appendChild(item);
-	}
-}
-
-function renderNodeList() {
-	const wrap = $("#nodeList"); wrap.innerHTML = "";
-	const nodes = (S.data && S.data.nodes) || [];
-	$("#nlCount").textContent = nodes.length;
-	if (!nodes.length) { wrap.appendChild(el("div","empty","No nodes yet.")); return; }
-	for (const n of [...nodes].sort((a,b)=>compareLatestThenName(a,b,"label"))) {
-		const key = nodeKey(n.id);
-		const item = el("div", "nl-item" + (S.selected===key?" sel":""));
-		item.innerHTML = `<span class="dot${projectCategoryToken(n) ? " project-category-ring" : ""}" style="background:${catColor(n.category)};${projectCategoryRingStyle(n)}"></span>
-			<span class="lbl">${esc(n.label)}</span>
-			<span class="meta">${esc(n.category)}</span>${projectCategoryBadge(n)}`;
-		item.onclick = () => select(n.id, "node");
-		wrap.appendChild(item);
-	}
-}
-
-function renderCandidates() {
-	const wrap = $("#candList"); wrap.innerHTML = "";
-	const cands = (S.data && S.data.candidates) || [];
-	$("#candCount").textContent = cands.length;
-	if (!cands.length) { wrap.appendChild(el("div","empty","None.")); return; }
-	for (const c of cands) wrap.appendChild(el("div","cand", `<span>${esc(c.label)} ${projectCategoryBadge(c)}</span><span class="s">${esc(c.strength || "candidate")} · ${c.mentions||1}</span>`));
 }
 
 /* ---------------- views ---------------- */
@@ -3926,9 +4039,6 @@ function setView(v, { updateHash = true, allowCopyOnce = false } = {}) {
 	document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view===v));
 	const title = $("#pageTitle");
 	if (title) title.textContent = VIEW_TITLES[v] || "Itsuki";
-	// The memory browser belongs to Memories only — everywhere else it is noise.
-	const browser = $("#memoryBrowser");
-	if (browser) browser.hidden = !(v === "memory" && !S.showSuggestions);
 	document.body.classList.remove("rail-open");
 	if ((updateHash || redirected) && APP_VIEWS.has(v) && document.body.classList.contains("app-mode")) {
 		history.replaceState(null, "", `/app#${v}`);
@@ -3947,7 +4057,6 @@ function renderView() {
 		overview: viewOverview,
 		memory: viewMemory,
 		graph: viewGraph,
-		candidates: viewCandidates,
 		connect: viewInstall,
 		install: viewInstall,
 		playground: viewPlayground,
@@ -3960,9 +4069,7 @@ function renderView() {
 		admin: viewAdmin,
 		settings: viewSettings,
 		home: viewOverview,
-		memories: viewMemories,
-		save: viewSave,
-		recall: viewRecall,
+		memories: viewMemory,
 		help: viewHelp,
 		profile: viewProfile,
 		cards: viewCards,
@@ -4831,7 +4938,7 @@ function lockOverviewBucketBackground() {
 	OVERVIEW_BUCKET_UI.bodyOverflow = document.body.style.overflow;
 	document.body.style.overflow = "hidden";
 	const shell = modal.closest(".overview-shell");
-	const nodes = ["appHeader", "rail", "memoryBrowser", "detail"].map((id) => document.getElementById(id)).filter(Boolean);
+	const nodes = ["appHeader", "rail", "detail"].map((id) => document.getElementById(id)).filter(Boolean);
 	if (shell) nodes.push(...[...shell.children].filter((node) => node !== modal));
 	OVERVIEW_BUCKET_UI.inertNodes = nodes.map((node) => ({ node, inert: node.inert }));
 	OVERVIEW_BUCKET_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
@@ -4877,7 +4984,7 @@ function lockOverviewBackground() {
 	const shell = modal?.closest(".overview-shell");
 	// #detail is a sibling of #view and can remain open across navigation, so it
 	// must be isolated with the surrounding chrome while this dialog is active.
-	const nodes = ["appHeader", "rail", "memoryBrowser", "detail"].map((id) => document.getElementById(id)).filter(Boolean);
+	const nodes = ["appHeader", "rail", "detail"].map((id) => document.getElementById(id)).filter(Boolean);
 	if (shell) nodes.push(...[...shell.children].filter((node) => node !== modal));
 	OVERVIEW_UI.inertNodes = nodes.map((node) => ({ node, inert: node.inert }));
 	OVERVIEW_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
@@ -5013,249 +5120,1409 @@ function dismissOnboarding(event) {
 	renderView();
 }
 
+/* =========================================================================
+   Memories workspace — the Memories page.
+
+   Three server-owned views (Memories · Sources · Suggestions) over the
+   /v1/memories/workspace/* read surface, plus governed mutations that reuse
+   the existing routes: /v1/save, /v1/actions/archive-object,
+   DELETE /v1/memories/:id and /v1/candidates/:id/(promote|merge|reject).
+
+   Contracts this code keeps:
+   - Every list is fetched server-side with an opaque cursor; nothing here
+     ever renders inventory from /v1/graph or filters a downloaded corpus.
+   - Requests carry a request id and the project epoch; a stale response can
+     never overwrite current state, and last-good rows survive a refresh.
+   - Selection lives in the URL hash (#memory/<view>/<id>?tab=…) so reload
+     and back/forward restore it.
+   - Conditional inspector tabs render only when their real count is > 0.
+   - Mutations are capability-gated in the UI and, authoritatively, by the
+     server routes they call.
+   ========================================================================= */
+
+// viewMemory leads this section on purpose: the dashboard-overview test
+// harness slices the page script at this declaration to isolate the overview
+// code, so nothing of the workspace may sit above this line.
 function viewMemory(v) {
-	// "Review" is no longer a tab of its own — pending suggestions surface here,
-	// where the memories they would join already live.
-	const pending = candidateCount();
-	if (pending > 0) {
-		const canReview = projectCan("project.memory.write");
-		const reviewCopy = projectCapabilityActionCopy(
-			"project.memory.write",
-			"You can inspect these suggestions, but your viewer role cannot change them.",
-		);
-		const strip = el("div", "box");
-		strip.style.maxWidth = "980px";
-		strip.style.borderColor = "rgba(242,204,96,.35)";
-		strip.innerHTML = `<h3>${pending} suggestion${pending === 1 ? "" : "s"} waiting for you</h3>
-			<div class="help">${canReview ? "Things Itsuki noticed but isn't sure about. Keep the good ones, drop the rest." : esc(reviewCopy)}</div>
-			<div style="margin-top:10px"><button onclick="openSuggestions()">Review ${pending === 1 ? "it" : "them"}</button></div>`;
-		v.appendChild(strip);
+	if (MW.epoch !== S.projectEpoch) mwReset();
+	if (!MW.routeApplied) {
+		mwReadRoute();
+		MW.routeApplied = true;
 	}
-	viewMemoryMain(v);
+	const root = el("div", "mw");
+	root.id = "mwRoot";
+	root.dataset.view = MW.view;
+	root.dataset.density = MW.density;
+	root.innerHTML = `
+		<div class="mw-head" id="mwHead"></div>
+		<div class="mw-toolbar" id="mwToolbar"></div>
+		<div class="mw-countline" id="mwCount"></div>
+		<div class="mw-body">
+			<section class="mw-inv" id="mwInv" aria-label="${esc(mwInvLabel())}"></section>
+			<aside class="mw-insp" id="mwInsp" tabindex="-1" aria-label="Details"></aside>
+		</div>
+		<div id="mwLayer"></div>`;
+	v.appendChild(root);
+	mwInstallGlobalHandlers();
+	mwRenderHead(); mwRenderToolbar(); mwRenderCount(); mwRenderList(); mwRenderInsp(); mwRenderLayer();
+	if (!MW.loaded && !MW.loading) {
+		mwRefresh().then(() => {
+			// A deep-linked selection may name a row beyond page one; the detail
+			// endpoint resolves it regardless.
+			if (MW.sel && !MW.detail && !MW.detailLoading) mwSelect(MW.sel, { tab: MW.tab || null });
+		});
+	} else if (MW.sel && !MW.detail && !MW.detailLoading && !MW.detailError) {
+		mwSelect(MW.sel, { tab: MW.tab || null });
+	}
 }
 
-function openSuggestions() {
-	S.showSuggestions = true;
-	renderView();
+const MW_VIEWS = ["memories", "sources", "suggestions"];
+const MW_SORTS = [["updated_desc", "Newest first"], ["updated_asc", "Oldest first"], ["az", "A to Z"]];
+const MW_SRC_SORTS = [["updated_desc", "Newest first"], ["updated_asc", "Oldest first"]];
+const MW_WINDOWS = [["any", "Any time"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]];
+const MW_KIND_LABELS = { node: "Entity", page: "Page", slice: "Detail", event: "Event" };
+const MW_LIFECYCLES = [["active", "Active"], ["superseded", "Superseded"], ["archived", "Archived"]];
+const MW_SRC_STATES = [["processing", "Processing"], ["processed", "Processed"], ["failed", "Failed"], ["recorded", "Recorded"]];
+const MW_SUG_STATUSES = [["pending", "Pending"], ["reviewed", "Reviewed"]];
+const MW_DENSITY_KEY = "itsuki_mw_density";
+
+function mwDefaults() {
+	return {
+		view: "memories",
+		q: "", sort: "updated_desc",
+		fKind: [], fCat: [], fSrc: [], fLife: [], fState: [], fWindow: "any", sugStatus: "pending",
+		items: [], total: null, cursor: null,
+		loading: false, refreshing: false, loadingMore: false, error: "",
+		counts: null, facets: null,
+		sel: null, detail: null, detailLoading: false, detailError: "",
+		tab: "", sat: {},
+		drawerOpen: false, saveOpen: false, saveBusy: false,
+		openMenu: "", listRequestId: 0, detailRequestId: 0, epoch: null, loaded: false,
+		density: (typeof localStorage !== "undefined" && localStorage.getItem(MW_DENSITY_KEY)) === "comfortable" ? "comfortable" : "compact",
+		routeApplied: false, lastFocusRowId: null, searchTimer: null,
+	};
+}
+let MW = mwDefaults();
+
+function mwReset() {
+	clearTimeout(MW.searchTimer);
+	const density = MW.density;
+	MW = mwDefaults();
+	MW.density = density;
+	MW.epoch = S.projectEpoch;
 }
 
-function closeSuggestions() {
-	S.showSuggestions = false;
-	renderView();
+/* ---- routing ------------------------------------------------------------ */
+
+function mwReadRoute() {
+	const raw = location.hash.replace(/^#/, "");
+	if (!raw.startsWith("memory")) return;
+	const [path, query] = raw.split("?");
+	const parts = path.split("/").filter(Boolean);
+	if (MW_VIEWS.includes(parts[1])) MW.view = parts[1];
+	if (parts[2]) MW.sel = decodeURIComponent(parts[2]);
+	for (const pair of (query || "").split("&")) {
+		const [k, v] = pair.split("=");
+		if (k === "q") MW.q = decodeURIComponent(v || "");
+		if (k === "tab") MW.tab = decodeURIComponent(v || "");
+	}
 }
 
-function viewMemoryMain(v) {
-	if (S.showSuggestions) {
-		const back = el("div");
-		back.innerHTML = `<div style="margin-bottom:12px"><button class="ghost mini" onclick="closeSuggestions()">← Back to memories</button></div>`;
-		v.appendChild(back);
-		viewCandidates(v);
+function mwWriteRoute() {
+	if (S.view !== "memory" || !document.body.classList.contains("app-mode")) return;
+	let route = `memory/${MW.view}`;
+	if (MW.sel) route += `/${encodeURIComponent(MW.sel)}`;
+	const qs = [];
+	if (MW.q.trim()) qs.push(`q=${encodeURIComponent(MW.q.trim())}`);
+	if (MW.sel && MW.tab) qs.push(`tab=${encodeURIComponent(MW.tab)}`);
+	if (qs.length) route += `?${qs.join("&")}`;
+	try { history.replaceState(null, "", `/app#${route}`); } catch {}
+}
+
+/* ---- fetch plumbing ------------------------------------------------------ */
+
+function mwPath(path, params = {}) {
+	const search = new URLSearchParams();
+	if (S.devMode && S.userId) search.set("userId", S.userId);
+	for (const [key, value] of Object.entries(params)) {
+		if (value === null || value === undefined || value === "") continue;
+		search.set(key, value);
+	}
+	const qs = search.toString();
+	return qs ? `${path}?${qs}` : path;
+}
+
+function mwFresh(lane, requestId, epoch) {
+	return requestId === MW[`${lane}RequestId`] && epoch === S.projectEpoch;
+}
+
+function mwListParams() {
+	if (MW.view === "memories") {
+		return {
+			path: "/v1/memories/workspace/inventory",
+			params: {
+				q: MW.q.trim() || null,
+				kind: MW.fKind.length ? MW.fKind.join(",") : null,
+				categoryId: MW.fCat[0] ?? null,
+				sourceId: MW.fSrc[0] ?? null,
+				lifecycle: MW.fLife[0] ?? null,
+				updatedWithin: MW.fWindow !== "any" ? MW.fWindow : null,
+				sort: MW.sort,
+			},
+		};
+	}
+	if (MW.view === "sources") {
+		return {
+			path: "/v1/memories/workspace/sources",
+			params: {
+				q: MW.q.trim() || null,
+				state: MW.fState[0] ?? null,
+				updatedWithin: MW.fWindow !== "any" ? MW.fWindow : null,
+				sort: MW.sort === "az" ? "updated_desc" : MW.sort,
+			},
+		};
+	}
+	return {
+		path: "/v1/memories/workspace/suggestions",
+		params: { q: MW.q.trim() || null, status: MW.sugStatus },
+	};
+}
+
+async function mwFetchCounts() {
+	// List/detail/satellite work has independent request generations. Counts
+	// ride beside those lanes; staleness here is only project and page scope.
+	const epoch = S.projectEpoch;
+	try {
+		const [counts, facets] = await Promise.all([
+			api(mwPath("/v1/memories/workspace/counts")),
+			api(mwPath("/v1/memories/workspace/facets")),
+		]);
+		if (epoch !== S.projectEpoch || S.view !== "memory") return;
+		MW.counts = counts.counts;
+		MW.facets = facets;
+		mwRenderHead();
+		mwRenderToolbar();
+	} catch (error) {
+		if (error?.projectChanged) return;
+		// Counts are decoration on the segmented control; the list is the page.
+	}
+}
+
+async function mwFetchList({ reset = true, cursor = null } = {}) {
+	const requestId = ++MW.listRequestId, epoch = S.projectEpoch;
+	if (reset) {
+		MW.cursor = null;
+		MW.refreshing = MW.items.length > 0;
+		MW.loading = MW.items.length === 0;
+	} else {
+		MW.loadingMore = true;
+	}
+	MW.error = "";
+	mwRenderCount(); mwRenderList();
+	const { path, params } = mwListParams();
+	if (cursor) params.cursor = cursor;
+	try {
+		const body = await api(mwPath(path, params));
+		if (!mwFresh("list", requestId, epoch)) return;
+		MW.items = reset ? body.items : MW.items.concat(body.items);
+		MW.total = typeof body.total === "number" ? body.total : body.items.length;
+		MW.cursor = body.next_cursor ?? null;
+		MW.loaded = true;
+	} catch (error) {
+		if (error?.projectChanged || !mwFresh("list", requestId, epoch)) return;
+		if (!reset && error.code === "invalid_cursor") {
+			// The keyset moved under us (deletion, retention). Start over.
+			MW.loadingMore = false;
+			return mwFetchList({ reset: true });
+		}
+		MW.error = error.message || "The list could not be loaded.";
+	} finally {
+		if (mwFresh("list", requestId, epoch)) {
+			MW.loading = false; MW.refreshing = false; MW.loadingMore = false;
+			mwRenderCount(); mwRenderList(); mwRenderInsp();
+		}
+	}
+}
+
+function mwRefresh() {
+	mwFetchCounts();
+	return mwFetchList({ reset: true });
+}
+
+/* ---- selection and detail ------------------------------------------------ */
+
+function mwItemById(id) { return MW.items.find((item) => item.id === id) || null; }
+
+async function mwSelect(id, { fromRow = null, tab = null } = {}) {
+	MW.sel = id;
+	MW.tab = tab ?? "";
+	MW.detail = null; MW.detailError = ""; MW.sat = {};
+	MW.openMenu = "";
+	if (fromRow) MW.lastFocusRowId = id;
+	mwWriteRoute();
+	mwRenderList(); mwRenderInsp(); mwRenderCount();
+	if (mwNarrow()) mwSetDrawer(true);
+	if (MW.view === "suggestions") {
+		// A suggestion's full record already rides in the list payload.
+		MW.detail = mwItemById(id);
+		mwRenderInsp();
 		return;
 	}
-	const s = (S.data && S.data.stats) || { pages:0, nodes:0, slices:0, events:0, edges:0, candidates:0 };
-	const pages = filteredPages();
-	const nodes = filteredNodes();
-	const canWrite = projectCan("project.memory.write");
-	const writeAccessCopy = projectCapabilityActionCopy(
-		"project.memory.write",
-		"Viewers can search and inspect memory. A project member or admin can save and review changes.",
-	);
-	const writePanels = canWrite ? `
-			<div class="action-box">
-				<h3>Save a memory</h3>
-				<div class="help" style="margin-bottom:10px">Something worth remembering — a fact, a plan, a preference.</div>
-				<textarea id="factText" placeholder="Example: The release checklist requires a receipt for every write path."></textarea>
-				<div style="margin-top:10px"><button onclick="saveFactFromForm()">Save memory</button></div>
-			</div>
-			<div class="action-box">
-				<h3>Save from a chat or notes</h3>
-				<div class="help" style="margin-bottom:10px">Paste a conversation, notes, or anything you want remembered.</div>
-				<textarea id="conversationText" placeholder="Paste useful context. One line per item is fine."></textarea>
-				<div style="margin-top:10px"><button onclick="saveConversationFromForm()">Collect context</button></div>
-			</div>` : `
-			<div class="action-box" role="note">
-				<h3>Read-only project</h3>
-				<div class="help">${esc(writeAccessCopy)}</div>
-			</div>`;
-	const wrap = el("div");
-	wrap.innerHTML = `
-		<div class="box" style="max-width:980px">
-			<h3>Your memories</h3>
-			<div class="help">Everything Itsuki remembers about you, in one place.</div>
-			<div class="stats" style="margin-top:12px">
-				${[["pages",s.pages||0],["nodes",s.nodes||0],["slices",s.slices||0],["events",s.events||0],["edges",s.edges||0]].map(([k,val])=>`<div class="stat"><b>${val}</b>${k}</div>`).join("")}
-			</div>
-			<div class="quick-actions" style="margin-top:14px"><button onclick="setView('graph')">Open Graph</button></div>
+	MW.detailLoading = true;
+	mwRenderInsp();
+	const requestId = ++MW.detailRequestId, epoch = S.projectEpoch;
+	const path = MW.view === "memories"
+		? `/v1/memories/workspace/memory/${encodeURIComponent(id)}`
+		: `/v1/memories/workspace/sources/${encodeURIComponent(id)}`;
+	try {
+		const body = await api(mwPath(path));
+		if (!mwFresh("detail", requestId, epoch) || MW.sel !== id) return;
+		MW.detail = MW.view === "memories" ? body.memory : body.source;
+	} catch (error) {
+		if (error?.projectChanged || !mwFresh("detail", requestId, epoch) || MW.sel !== id) return;
+		MW.detailError = error.status === 404
+			? "This item is gone — it may have been deleted in another session."
+			: (error.message || "Details could not be loaded.");
+	} finally {
+		if (mwFresh("detail", requestId, epoch) && MW.sel === id) {
+			MW.detailLoading = false;
+			mwRenderInsp();
+		}
+	}
+}
+
+function mwCloseInspector({ restoreFocus = true } = {}) {
+	mwSetDrawer(false, { restoreFocus });
+}
+
+async function mwStep(delta) {
+	if (!MW.sel) return;
+	const index = MW.items.findIndex((item) => item.id === MW.sel);
+	if (index < 0) return;
+	const nextIndex = index + delta;
+	if (nextIndex < 0) return;
+	if (nextIndex >= MW.items.length) {
+		if (!MW.cursor || MW.loadingMore) return;
+		await mwFetchList({ reset: false, cursor: MW.cursor });
+		const again = MW.items[index + delta];
+		if (again) mwSelect(again.id);
+		return;
+	}
+	mwSelect(MW.items[nextIndex].id);
+}
+
+/* ---- satellites ----------------------------------------------------------- */
+
+function mwSatKey(tab) { return `${MW.view}:${MW.sel}:${tab}`; }
+
+async function mwLoadSat(tab, { more = false } = {}) {
+	const key = mwSatKey(tab);
+	const existing = MW.sat[key] ?? { items: [], cursor: null, loaded: false, loading: false, error: "" };
+	MW.sat[key] = existing;
+	if (existing.loading || (existing.loaded && !more)) return;
+	existing.loading = true; existing.error = "";
+	mwRenderInsp();
+	const requestId = (existing.requestId ?? 0) + 1, epoch = S.projectEpoch, sel = MW.sel;
+	existing.requestId = requestId;
+	const base = MW.view === "memories"
+		? `/v1/memories/workspace/memory/${encodeURIComponent(sel)}/${tab}`
+		: `/v1/memories/workspace/sources/${encodeURIComponent(sel)}/${tab}`;
+	try {
+		const params = more && existing.cursor ? { cursor: existing.cursor } : {};
+		const body = await api(mwPath(base, params));
+		if (existing.requestId !== requestId || epoch !== S.projectEpoch || MW.sel !== sel) return;
+		if (tab === "content") {
+			existing.content = body.content ?? null;
+		} else {
+			existing.items = more ? existing.items.concat(body.items ?? []) : (body.items ?? []);
+			existing.cursor = body.next_cursor ?? null;
+		}
+		existing.loaded = true;
+	} catch (error) {
+		if (error?.projectChanged || existing.requestId !== requestId || epoch !== S.projectEpoch || MW.sel !== sel) return;
+		existing.error = error.message || "This section could not be loaded.";
+	} finally {
+		if (existing.requestId === requestId && epoch === S.projectEpoch && MW.sel === sel) {
+			existing.loading = false;
+			mwRenderInsp();
+		}
+	}
+}
+
+/* ---- time helpers --------------------------------------------------------- */
+
+function mwRel(ms) {
+	if (!ms) return "—";
+	const s = Math.max(0, (Date.now() - Number(ms)) / 1000);
+	if (s < 90) return "now";
+	if (s < 3600) return `${Math.round(s / 60)}m`;
+	if (s < 86400) return `${Math.round(s / 3600)}h`;
+	if (s < 2592000) return `${Math.round(s / 86400)}d`;
+	return `${Math.round(s / 2592000)}mo`;
+}
+
+function mwFullDate(ms) {
+	if (!ms) return "—";
+	return new Date(Number(ms)).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/* ---- chips ----------------------------------------------------------------- */
+
+function mwChip(state, { pulse = false } = {}) {
+	const map = {
+		active: ["Active", "mw-chip-ok"], processed: ["Processed", "mw-chip-ok"],
+		superseded: ["Superseded", "mw-chip-warn"], suggested: ["Suggested", "mw-chip-warn"],
+		pending: ["Suggested", "mw-chip-warn"],
+		failed: ["Failed", "mw-chip-err"],
+		processing: ["Processing", "mw-chip-acc"],
+		archived: ["Archived", ""], recorded: ["Recorded", ""],
+		promoted: ["Kept", ""], merged: ["Merged", ""], rejected: ["Rejected", ""], suppressed: ["Suppressed", ""],
+	};
+	const [label, cls] = map[state] ?? [state || "—", ""];
+	const dot = pulse ? `<span class="mw-pulse" aria-hidden="true"></span>` : "";
+	return `<span class="mw-chip ${cls}">${dot}${esc(label)}</span>`;
+}
+
+/* ---- capability helpers ----------------------------------------------------- */
+
+function mwCanWrite() { return projectCan("project.memory.write"); }
+function mwCanDelete() { return projectCan("project.memory.delete"); }
+
+/* ---- svg icons -------------------------------------------------------------- */
+
+function mwIcon(d, size = 13) {
+	return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`;
+}
+const MW_ICONS = {
+	dots: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5.6" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="12" cy="18.4" r="1.4"></circle></svg>`,
+	search: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--faint)"><circle cx="10.5" cy="10.5" r="6"></circle><path d="M15 15l4.5 4.5"></path></svg>`,
+	check: "M5.5 12.5 10 17l8.5-9",
+	x: "M6.5 6.5l11 11M17.5 6.5l-11 11",
+	plus: "M12 5.5v13M5.5 12h13",
+	open: "M13.5 5.5h5v5M18 6 11 13M9.5 5.5h-4v13h13v-4",
+	copy: "M9 4.5h8.5v11M6 8h9v11H6z",
+	archive: "M4.5 7.5h15v3h-15zM6 10.5v9h12v-9M10 14h4",
+	trash: "M5.5 7.5h13M9.5 7.5V5h5v2.5M7 7.5l.9 12h8.2l.9-12",
+	graph: "M7 7.5h3v3H7zM14 13.5h3v3h-3zM10 9h4v5",
+	merge: "M6 4.5v4a4 4 0 0 0 4 4h8M15 9.5l3 3-3 3",
+	up: "M8 14.5 12 10.5l4 4",
+	down: "M8 10.5 12 14.5l4-4",
+	chevR: "M9 6.5 14.5 12 9 17.5",
+	export: "M12 15.5V4.5M8 8.5 12 4.5l4 4M4.5 15v4.5h15V15",
+	density: "M4.5 6.5h15M4.5 12h15M4.5 17.5h15",
+	kbd: "M4.5 7.5h15v9h-15zM8 11h.01M12 11h.01M16 11h.01M8.5 14h7",
+	sort: "M5 7.5h11M5 12h8M5 16.5h5M17.5 10.5v8M14.5 15.5l3 3 3-3",
+};
+
+/* ---- root render ------------------------------------------------------------ */
+
+function mwInvLabel() {
+	return MW.view === "memories" ? "Memory inventory" : MW.view === "sources" ? "Source inventory" : "Suggestion queue";
+}
+
+function mwSetView(view) {
+	if (MW.view === view) return;
+	MW.view = view;
+	MW.q = ""; MW.sort = "updated_desc";
+	MW.fKind = []; MW.fCat = []; MW.fSrc = []; MW.fLife = []; MW.fState = []; MW.fWindow = "any"; MW.sugStatus = "pending";
+	MW.items = []; MW.total = null; MW.cursor = null; MW.loaded = false; MW.error = "";
+	MW.sel = null; MW.detail = null; MW.detailError = ""; MW.tab = ""; MW.sat = {}; MW.openMenu = "";
+	mwSetDrawer(false, { restoreFocus: false });
+	const root = $("#mwRoot"); if (root) root.dataset.view = view;
+	mwWriteRoute();
+	mwRenderHead(); mwRenderToolbar(); mwRenderCount(); mwRenderList(); mwRenderInsp();
+	mwFetchList({ reset: true });
+}
+
+/* ---- head ------------------------------------------------------------------- */
+
+function mwRenderHead() {
+	const head = $("#mwHead"); if (!head) return;
+	const counts = MW.counts;
+	const seg = (view, label) => {
+		const count = counts ? counts[view] : null;
+		return `<button type="button" class="mw-seg" role="tab" aria-selected="${MW.view === view}" tabindex="${MW.view === view ? 0 : -1}"
+			data-mw-view="${view}">${esc(label)}${count === null || count === undefined ? "" : ` <span class="mw-mono">${count}</span>`}</button>`;
+	};
+	const canWrite = mwCanWrite();
+	head.innerHTML = `
+		<div class="mw-segs" role="tablist" aria-label="Sections">
+			${seg("memories", "Memories")}${seg("sources", "Sources")}${seg("suggestions", "Suggestions")}
 		</div>
-		<div class="panel-grid">
-			${writePanels}
-			<div class="action-box">
-				<h3>Search your memories</h3>
-				<div class="help" style="margin-bottom:10px">Find what Itsuki already knows.</div>
-				<input id="recallQuery" placeholder="Search or ask your memory..." onkeydown="if(event.key==='Enter') recallFromForm()" />
-				<div style="margin-top:10px"><button onclick="recallFromForm()">Recall</button></div>
-				<div id="recallResults" style="margin-top:10px"></div>
+		<div class="mw-head-actions">
+			<button type="button" class="mw-btn mw-btn-primary" id="mwSaveBtn" ${canWrite ? "" : `disabled title="${esc(projectCapabilityActionCopy("project.memory.write", "Viewers cannot save memory in this project."))}"`}>
+				${mwIcon(MW_ICONS.plus, 14)}Save memory</button>
+			<div style="position:relative">
+				<button type="button" class="mw-btn mw-iconbtn" id="mwHdrMenuBtn" aria-haspopup="menu" aria-expanded="${MW.openMenu === "hdr"}" aria-label="More actions">${MW_ICONS.dots}</button>
+				${MW.openMenu === "hdr" ? `
+				<div class="mw-menu mw-menu-right" role="menu" aria-label="More actions" style="top:39px;width:220px">
+					<button type="button" role="menuitem" data-mw-menu="exports">${mwIcon(MW_ICONS.export)}Open Memory exports</button>
+					<button type="button" role="menuitem" data-mw-menu="density">${mwIcon(MW_ICONS.density)}Density: ${MW.density === "compact" ? "Compact" : "Comfortable"}</button>
+					<button type="button" role="menuitem" data-mw-menu="shortcuts">${mwIcon(MW_ICONS.kbd)}Keyboard shortcuts</button>
+				</div>` : ""}
 			</div>
+		</div>`;
+	head.querySelectorAll("[data-mw-view]").forEach((btn) => {
+		btn.onclick = () => mwSetView(btn.dataset.mwView);
+	});
+	const tablist = head.querySelector("[role=tablist]");
+	if (tablist) tablist.onkeydown = (event) => mwSegKey(event);
+	const saveBtn = $("#mwSaveBtn");
+	if (saveBtn) saveBtn.onclick = () => {
+		if (!requireProjectCapability("project.memory.write", "Viewers cannot save memory in this project.")) return;
+		MW.saveOpen = true; MW.openMenu = "";
+		mwRenderLayer();
+	};
+	const menuBtn = $("#mwHdrMenuBtn");
+	if (menuBtn) menuBtn.onclick = (event) => { event.stopPropagation(); mwToggleMenu("hdr"); };
+	head.querySelectorAll("[data-mw-menu]").forEach((btn) => {
+		btn.onclick = () => {
+			const action = btn.dataset.mwMenu;
+			MW.openMenu = "";
+			if (action === "exports") { setView("exports"); return; }
+			if (action === "density") {
+				MW.density = MW.density === "compact" ? "comfortable" : "compact";
+				localStorage.setItem(MW_DENSITY_KEY, MW.density);
+				const root = $("#mwRoot"); if (root) root.dataset.density = MW.density;
+			}
+			if (action === "shortcuts") toast("Arrows move rows · Enter opens · Escape closes · / searches");
+			mwRenderHead();
+		};
+	});
+}
+
+function mwSegKey(event) {
+	if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+	const tabs = [...event.currentTarget.querySelectorAll("[role=tab]")];
+	const index = tabs.indexOf(event.target);
+	const next = tabs[index + (event.key === "ArrowRight" ? 1 : -1)];
+	if (next) { event.preventDefault(); next.focus(); next.click(); }
+}
+
+/* ---- toolbar ------------------------------------------------------------------ */
+
+function mwAnyFilter() {
+	return Boolean(MW.q.trim()) || MW.fKind.length > 0 || MW.fCat.length > 0 || MW.fSrc.length > 0
+		|| MW.fLife.length > 0 || MW.fState.length > 0 || MW.fWindow !== "any"
+		|| (MW.view === "suggestions" && MW.sugStatus !== "pending");
+}
+
+function mwClearFilters() {
+	MW.q = ""; MW.fKind = []; MW.fCat = []; MW.fSrc = []; MW.fLife = []; MW.fState = []; MW.fWindow = "any"; MW.sugStatus = "pending";
+	MW.openMenu = "";
+	mwWriteRoute();
+	mwRenderToolbar();
+	mwFetchList({ reset: true });
+}
+
+function mwToggleMenu(id) {
+	MW.openMenu = MW.openMenu === id ? "" : id;
+	mwRenderHead(); mwRenderToolbar(); mwRenderList(); mwRenderInsp();
+	if (MW.openMenu) {
+		const menu = document.querySelector(".mw-menu");
+		const first = menu?.querySelector("button");
+		if (first) first.focus();
+	}
+}
+
+function mwFilterButton({ id, label, value, on, items, multi = false, right = false }) {
+	const open = MW.openMenu === `f_${id}`;
+	const options = items.map((item) => `
+		<button type="button" role="option" aria-selected="${item.on}" data-mw-opt="${esc(item.value)}">
+			<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;opacity:${item.on ? 1 : 0}"><path d="${MW_ICONS.check}"></path></svg>
+			<span class="mw-opt-label">${esc(item.label)}</span>
+			${item.count === undefined ? "" : `<span class="mw-opt-count">${item.count}</span>`}
+		</button>`).join("");
+	return `
+	<div class="mw-filter" data-mw-filter="${id}">
+		<button type="button" aria-haspopup="listbox" aria-expanded="${open}" data-on="${on ? 1 : 0}">
+			<span class="mw-flabel">${esc(label)}</span>${esc(value)}
+			<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--faint)"><path d="M6 9.5 12 15.5 18 9.5"></path></svg>
+		</button>
+		${open ? `<div class="mw-menu${right ? " mw-menu-right" : ""}" role="listbox" aria-label="${esc(label)}" aria-multiselectable="${multi}">${options}</div>` : ""}
+	</div>`;
+}
+
+function mwRenderToolbar() {
+	const bar = $("#mwToolbar"); if (!bar) return;
+	const facets = MW.facets;
+	const filters = [];
+	const multiValue = (selected, all, none = "All") => {
+		if (!selected.length) return none;
+		if (selected.length === 1) {
+			const found = all.find(([value]) => value === selected[0]);
+			return found ? found[1] : selected[0];
+		}
+		return `${selected.length} selected`;
+	};
+	if (MW.view === "memories") {
+		const kindItems = Object.entries(MW_KIND_LABELS).map(([value, label]) => ({
+			value, label, on: MW.fKind.includes(value),
+			count: facets ? (facets.kinds?.[value] ?? 0) : undefined,
+		}));
+		filters.push(mwFilterButton({ id: "kind", label: "Type", value: multiValue(MW.fKind, Object.entries(MW_KIND_LABELS)), on: MW.fKind.length > 0, items: kindItems, multi: true }));
+		if (facets?.categories?.length) {
+			filters.push(mwFilterButton({
+				id: "cat", label: "Category",
+				value: MW.fCat.length ? (facets.categories.find((c) => c.id === MW.fCat[0])?.name ?? "1 selected") : "All",
+				on: MW.fCat.length > 0,
+				items: facets.categories.map((c) => ({ value: c.id, label: c.name, on: MW.fCat.includes(c.id), count: c.count })),
+			}));
+		}
+		if (facets?.sources?.length) {
+			filters.push(mwFilterButton({
+				id: "src", label: "Source",
+				value: MW.fSrc.length ? ((facets.sources.find((s) => s.id === MW.fSrc[0])?.title ?? "1 selected").slice(0, 22)) : "All",
+				on: MW.fSrc.length > 0,
+				items: facets.sources.map((s) => ({ value: s.id, label: s.title ?? s.id, on: MW.fSrc.includes(s.id), count: s.count })),
+			}));
+		}
+		filters.push(mwFilterButton({
+			id: "life", label: "State", value: multiValue(MW.fLife, MW_LIFECYCLES), on: MW.fLife.length > 0,
+			items: MW_LIFECYCLES.map(([value, label]) => ({
+				value, label, on: MW.fLife.includes(value),
+				count: facets ? (facets.lifecycle?.[value] ?? 0) : undefined,
+			})),
+		}));
+	}
+	if (MW.view === "sources") {
+		filters.push(mwFilterButton({
+			id: "state", label: "State", value: multiValue(MW.fState, MW_SRC_STATES), on: MW.fState.length > 0,
+			items: MW_SRC_STATES.map(([value, label]) => ({ value, label, on: MW.fState.includes(value) })),
+		}));
+	}
+	if (MW.view === "suggestions") {
+		filters.push(mwFilterButton({
+			id: "sug", label: "Status",
+			value: (MW_SUG_STATUSES.find(([value]) => value === MW.sugStatus) ?? MW_SUG_STATUSES[0])[1],
+			on: MW.sugStatus !== "pending",
+			items: MW_SUG_STATUSES.map(([value, label]) => ({ value, label, on: MW.sugStatus === value })),
+		}));
+	}
+	if (MW.view !== "suggestions") {
+		filters.push(mwFilterButton({
+			id: "upd", label: "Updated",
+			value: (MW_WINDOWS.find(([value]) => value === MW.fWindow) ?? MW_WINDOWS[0])[1],
+			on: MW.fWindow !== "any",
+			items: MW_WINDOWS.map(([value, label]) => ({ value, label, on: MW.fWindow === value })),
+		}));
+		const sorts = MW.view === "memories" ? MW_SORTS : MW_SRC_SORTS;
+		filters.push(mwFilterButton({
+			id: "sort", label: "Sort",
+			value: (sorts.find(([value]) => value === MW.sort) ?? sorts[0])[1],
+			on: false, items: sorts.map(([value, label]) => ({ value, label, on: MW.sort === value })), right: true,
+		}));
+	}
+	const placeholder = MW.view === "memories" ? "Search memories, sources, IDs"
+		: MW.view === "sources" ? "Search sources" : "Search suggestions";
+	bar.innerHTML = `
+		<div class="mw-search">
+			${MW_ICONS.search}
+			<input type="search" id="mwSearch" aria-label="${esc(placeholder)}" placeholder="${esc(placeholder)}" value="${esc(MW.q)}">
+			${MW.q ? `<button type="button" class="mw-clearq" id="mwClearQ" aria-label="Clear search">${mwIcon(MW_ICONS.x, 10)}</button>` : ""}
+			<kbd aria-hidden="true">/</kbd>
 		</div>
-		<div class="box" style="max-width:1100px">
-			<h3>Recent memory pages and items</h3>
-			<div class="search-row">
-				<input id="memorySearch" placeholder="Search memory list" value="${esc(S.memoryQuery)}" oninput="S.memoryQuery=this.value; renderView()" />
-				<button class="ghost" onclick="S.memoryQuery=''; renderView()">Clear</button>
+		${filters.join("")}
+		${mwAnyFilter() ? `<button type="button" class="mw-clear-filters" id="mwClearFilters">${mwIcon(MW_ICONS.x, 11)}Clear filters</button>` : ""}`;
+
+	const search = $("#mwSearch");
+	if (search) {
+		search.oninput = () => {
+			MW.q = search.value;
+			clearTimeout(MW.searchTimer);
+			MW.searchTimer = setTimeout(() => {
+				mwWriteRoute();
+				mwFetchList({ reset: true });
+				const clear = $("#mwClearQ");
+				if (Boolean(MW.q) !== Boolean(clear)) mwRenderToolbar();
+			}, 300);
+		};
+		search.onkeydown = (event) => { if (event.key === "Escape" && MW.q) { MW.q = ""; mwRenderToolbar(); mwFetchList({ reset: true }); } };
+	}
+	const clearQ = $("#mwClearQ");
+	if (clearQ) clearQ.onclick = () => { MW.q = ""; mwRenderToolbar(); $("#mwSearch")?.focus(); mwFetchList({ reset: true }); };
+	const clearAll = $("#mwClearFilters");
+	if (clearAll) clearAll.onclick = () => mwClearFilters();
+
+	bar.querySelectorAll("[data-mw-filter]").forEach((wrap) => {
+		const id = wrap.dataset.mwFilter;
+		const toggle = wrap.querySelector("button[aria-haspopup]");
+		toggle.onclick = (event) => { event.stopPropagation(); mwToggleMenu(`f_${id}`); };
+		wrap.querySelectorAll("[data-mw-opt]").forEach((opt) => {
+			opt.onclick = () => mwPickFilter(id, opt.dataset.mwOpt);
+		});
+	});
+}
+
+function mwPickFilter(id, value) {
+	const toggleIn = (list) => (list.includes(value) ? list.filter((x) => x !== value) : [...list, value]);
+	if (id === "kind") MW.fKind = toggleIn(MW.fKind);
+	else if (id === "cat") { MW.fCat = MW.fCat[0] === value ? [] : [value]; MW.openMenu = ""; }
+	else if (id === "src") { MW.fSrc = MW.fSrc[0] === value ? [] : [value]; MW.openMenu = ""; }
+	else if (id === "life") { MW.fLife = MW.fLife[0] === value ? [] : [value]; MW.openMenu = ""; }
+	else if (id === "state") { MW.fState = MW.fState[0] === value ? [] : [value]; MW.openMenu = ""; }
+	else if (id === "sug") { MW.sugStatus = value; MW.openMenu = ""; }
+	else if (id === "upd") { MW.fWindow = value; MW.openMenu = ""; }
+	else if (id === "sort") { MW.sort = value; MW.openMenu = ""; }
+	mwRenderToolbar();
+	mwFetchList({ reset: true });
+}
+
+/* ---- count line ------------------------------------------------------------------ */
+
+function mwRenderCount() {
+	const line = $("#mwCount"); if (!line) return;
+	let label = "";
+	if (MW.error) label = "";
+	else if (MW.total !== null && MW.loaded) label = `${MW.total} result${MW.total === 1 ? "" : "s"}`;
+	line.innerHTML = `
+		<span class="mw-count" aria-live="polite">${esc(label)}${MW.refreshing ? " · refreshing…" : ""}</span>
+		${MW.sel && MW.detail && !MW.drawerOpen ? `<button type="button" class="mw-btn mw-reopen" id="mwReopen">${mwIcon(MW_ICONS.chevR, 12)}Show details</button>` : ""}`;
+	const reopen = $("#mwReopen");
+	if (reopen) reopen.onclick = () => mwSetDrawer(true);
+}
+
+/* ---- list ------------------------------------------------------------------------ */
+
+function mwHeadCols() {
+	if (MW.view === "memories") {
+		return `<div role="columnheader">MEMORY</div><div role="columnheader" class="mw-col-type">SEMANTIC TYPE</div><div role="columnheader" class="mw-col-src">SOURCE</div><div role="columnheader">STATE</div><div role="columnheader" class="mw-col-upd">UPDATED</div><div role="columnheader"><span class="sr-only">ACTIONS</span></div>`;
+	}
+	if (MW.view === "sources") {
+		return `<div role="columnheader">SOURCE</div><div role="columnheader" class="mw-col-kind">KIND</div><div role="columnheader">PROCESSING STATE</div><div role="columnheader" class="mw-col-mem mw-num">MEMORIES</div><div role="columnheader" class="mw-col-ev mw-num">EVIDENCE</div><div role="columnheader" class="mw-col-upd">UPDATED</div><div role="columnheader"><span class="sr-only">ACTIONS</span></div>`;
+	}
+	return `<div role="columnheader">SUGGESTION</div><div role="columnheader" class="mw-col-guess">CLUSTER GUESS</div><div role="columnheader">STATE</div><div role="columnheader" class="mw-col-upd">DETECTED</div><div role="columnheader"><span class="sr-only">ACTIONS</span></div>`;
+}
+
+function mwColCount() { return MW.view === "memories" ? 6 : MW.view === "sources" ? 7 : 5; }
+
+function mwRowMenuItems(item) {
+	const items = [];
+	if (MW.view === "memories") {
+		items.push({ id: "copy", label: "Copy text", icon: MW_ICONS.copy });
+		items.push({ id: "copyid", label: "Copy memory ID", icon: "M7 12h10M7 8h10M7 16h6" });
+		if (item.source) items.push({ id: "opensrc", label: "Open source", icon: MW_ICONS.open });
+		if (item.kind === "node") items.push({ id: "graph", label: "Open in Graph", icon: MW_ICONS.graph });
+		if (mwCanDelete() && (item.kind === "node" || item.kind === "page")) {
+			items.push({ id: "archive", label: "Archive", icon: MW_ICONS.archive });
+		}
+		if (mwCanDelete() && item.kind !== "event") {
+			items.push({ id: "delete", label: "Delete", icon: MW_ICONS.trash, danger: true });
+		}
+	} else if (MW.view === "sources") {
+		items.push({ id: "copyid", label: "Copy source ID", icon: "M7 12h10M7 8h10M7 16h6" });
+	} else {
+		if (mwCanWrite() && item.status === "pending") {
+			items.push({ id: "keep", label: "Keep", icon: MW_ICONS.check });
+			if (item.merge_target) items.push({ id: "merge", label: "Merge into memory", icon: MW_ICONS.merge });
+			items.push({ id: "reject", label: "Reject", icon: MW_ICONS.x, danger: true });
+		} else {
+			items.push({ id: "copy", label: "Copy text", icon: MW_ICONS.copy });
+		}
+	}
+	return items;
+}
+
+function mwRowCells(item) {
+	if (MW.view === "memories") {
+		return `
+			<div class="mw-cell mw-cell-main" role="gridcell">
+				<p class="mw-text">${esc(item.text)}</p>
+				${item.context ? `<p class="mw-meta">${esc(item.context)}</p>` : ""}
 			</div>
-			<div id="memoryList"></div>
-		</div>`;
-	v.appendChild(wrap);
-	renderRecallResults();
-	renderMemoryList(pages, nodes);
-}
-
-function renderMemoryList(pages, nodes) {
-	const list = $("#memoryList");
-	if (!list) return;
-	const grid = el("div", "cards");
-	for (const p of [...pages].sort((a,b)=>compareLatestThenName(a,b,"title")).slice(0, 12)) {
-		const card = el("div","card page");
-		card.innerHTML = `<div class="top"><span class="dot${projectCategoryToken(p) ? " project-category-ring" : ""}" style="background:#58a6ff;${projectCategoryRingStyle(p)}"></span><span class="title">${esc(p.title)}</span><span class="badge state-active">page</span></div>
-			<div class="cat">${esc(p.cluster_label || p.topic_filter || "manual_collect")} · ${p.updated_at?ago(p.updated_at):""} ${projectCategoryBadge(p)}</div>
-			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}`;
-		card.onclick = () => select(p.id, "page");
-		grid.appendChild(card);
+			<div class="mw-cell mw-col-type" role="gridcell"><span class="mw-dim">${esc(item.semantic_type)}</span></div>
+			<div class="mw-cell mw-col-src" role="gridcell">${item.source ? `<span class="mw-dim" title="${esc(item.source.title ?? item.source.id)}">${esc(item.source.title ?? item.source.id)}</span>` : `<span class="mw-dim" style="color:var(--faint)">—</span>`}</div>
+			<div class="mw-cell" role="gridcell">${mwChip(item.lifecycle)}</div>
+			<div class="mw-cell mw-col-upd" role="gridcell"><span class="mw-upd" title="${esc(mwFullDate(item.updated_at))}">${esc(mwRel(item.updated_at))}</span></div>`;
 	}
-	for (const n of [...nodes].sort((a,b)=>compareLatestThenName(a,b,"label")).slice(0, 16)) {
-		const cur = (n.slices||[]).filter(s=>s.is_current);
-		const card = el("div","card");
-		card.innerHTML = `<div class="top"><span class="dot${projectCategoryToken(n) ? " project-category-ring" : ""}" style="background:${catColor(n.category)};${projectCategoryRingStyle(n)}"></span><span class="title">${esc(n.label)}</span><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
-			<div class="cat">${esc(n.category)} · ${esc(n.cluster_label || "General Memory")} · ${n.updated_at?ago(n.updated_at):""} ${projectCategoryBadge(n)}</div>
-			${n.summary ? `<div class="summary">${esc(n.summary)}</div>` : ""}
-			${cur.slice(0,2).map(s=>`<div class="mini-line">- ${esc(s.text)}</div>`).join("")}`;
-		card.onclick = () => select(n.id, "node");
-		grid.appendChild(card);
+	if (MW.view === "sources") {
+		const failedLine = item.state === "failed" ? "Extraction failed — open for details" : item.state === "processing" ? "Reading the source…" : item.id;
+		return `
+			<div class="mw-cell mw-cell-main" role="gridcell">
+				<p class="mw-text">${esc(item.title ?? item.id)}</p>
+				<p class="mw-meta mw-mono" ${item.state === "failed" ? `style="color:var(--red)"` : ""}>${esc(failedLine)}</p>
+			</div>
+			<div class="mw-cell mw-col-kind" role="gridcell"><span class="mw-dim">${esc(item.kind ?? "—")}</span></div>
+			<div class="mw-cell" role="gridcell">${mwChip(item.state, { pulse: item.state === "processing" })}</div>
+			<div class="mw-cell mw-col-mem mw-num" role="gridcell" style="justify-content:flex-end"><span class="mw-mono mw-dim">${item.state === "processed" ? item.memories : "—"}</span></div>
+			<div class="mw-cell mw-col-ev mw-num" role="gridcell" style="justify-content:flex-end"><span class="mw-mono mw-dim">${item.state === "processed" ? item.evidence : "—"}</span></div>
+			<div class="mw-cell mw-col-upd" role="gridcell"><span class="mw-upd" title="${esc(mwFullDate(item.updated_at))}">${esc(mwRel(item.updated_at))}</span></div>`;
 	}
-	if (!pages.length && !nodes.length) grid.appendChild(el("div","empty","No memories yet. Save memory, collect context, or connect a tool to begin."));
-	list.innerHTML = "";
-	list.appendChild(grid);
-}
-
-function filteredPages() {
-	const q = normalizeSearch(S.memoryQuery);
-	const pages = (S.data?.pages || []);
-	if (!q) return pages;
-	return pages.filter((p) => normalizeSearch([p.title, p.short_summary, p.topic_filter, p.cluster_label,
-		p.project_category?.name, p.project_category?.slug].join(" ")).includes(q));
-}
-
-function filteredNodes() {
-	const q = normalizeSearch(S.memoryQuery);
-	const nodes = (S.data?.nodes || []);
-	if (!q) return nodes;
-	return nodes.filter((n) => normalizeSearch([n.label, n.summary, n.category, n.cluster_label,
-		n.project_category?.name, n.project_category?.slug, ...(n.slices || []).map(s => s.text)].join(" ")).includes(q));
-}
-
-function viewMemories(v) {
-	const pages = filteredPages();
-	const nodes = filteredNodes();
-	const wrap = el("div");
-	wrap.innerHTML = `
-		<div class="search-row">
-			<input id="memorySearch" placeholder="Search pages and nodes" value="${esc(S.memoryQuery)}" oninput="S.memoryQuery=this.value; renderView()" />
-			<button class="ghost" onclick="S.memoryQuery=''; renderView()">Clear</button>
-		</div>`;
-	const grid = el("div","cards");
-	for (const p of [...pages].sort((a,b)=>compareLatestThenName(a,b,"title"))) {
-		const card = el("div","card page");
-		card.innerHTML = `<div class="top"><span class="dot${projectCategoryToken(p) ? " project-category-ring" : ""}" style="background:#58a6ff;${projectCategoryRingStyle(p)}"></span><span class="title">${esc(p.title)}</span><span class="badge state-active">page</span></div>
-			<div class="cat">${esc(p.cluster_label || p.topic_filter || "manual_collect")} · ${p.updated_at?ago(p.updated_at):""} ${projectCategoryBadge(p)}</div>
-			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}`;
-		card.onclick = () => select(p.id, "page");
-		grid.appendChild(card);
-	}
-	for (const n of [...nodes].sort((a,b)=>compareLatestThenName(a,b,"label"))) {
-		const cur = (n.slices||[]).filter(s=>s.is_current);
-		const card = el("div","card");
-		card.innerHTML = `<div class="top"><span class="dot${projectCategoryToken(n) ? " project-category-ring" : ""}" style="background:${catColor(n.category)};${projectCategoryRingStyle(n)}"></span><span class="title">${esc(n.label)}</span><span class="badge state-${esc(n.state)}">${esc(n.state)}</span></div>
-			<div class="cat">${esc(n.category)} · ${esc(n.cluster_label || "General Memory")} · ${n.updated_at?ago(n.updated_at):""} ${projectCategoryBadge(n)}</div>
-			${n.summary ? `<div class="summary">${esc(n.summary)}</div>` : ""}
-			${cur.slice(0,3).map(s=>`<div class="mini-line">• ${esc(s.text)}</div>`).join("")}`;
-		card.onclick = () => select(n.id, "node");
-		grid.appendChild(card);
-	}
-	if (!pages.length && !nodes.length) grid.appendChild(el("div","empty","No matching memories yet."));
-	wrap.appendChild(grid);
-	v.appendChild(wrap);
-}
-
-function viewSave(v) {
-	const wrap = el("div","panel-grid");
-	wrap.innerHTML = `
-		<div class="action-box">
-			<h3>Save a fact</h3>
-			<div class="help" style="margin-bottom:10px">Use Save a fact for one durable memory.</div>
-			<textarea id="factText" placeholder="Example: I prefer concise implementation notes."></textarea>
-			<div style="margin-top:10px"><button onclick="saveFactFromForm()">Save fact</button></div>
+	const reasonBits = [];
+	if (item.reason) reasonBits.push(String(item.reason).replace(/_/g, " "));
+	if (typeof item.confidence === "number") reasonBits.push(`${Math.round(item.confidence * 100)}% confidence`);
+	return `
+		<div class="mw-cell mw-cell-main" role="gridcell">
+			<p class="mw-text">${esc(item.text)}</p>
+			${reasonBits.length ? `<p class="mw-meta">${esc(reasonBits.join(" · "))}</p>` : ""}
 		</div>
-		<div class="action-box">
-			<h3>Collect a conversation</h3>
-			<div class="help" style="margin-bottom:10px">Use Collect conversation for full chats, plans, or decisions.</div>
-			<textarea id="conversationText" placeholder="Paste chat notes or a short transcript. One line per message is fine."></textarea>
-			<div style="margin-top:10px"><button onclick="saveConversationFromForm()">Collect conversation</button></div>
-		</div>`;
-	v.appendChild(wrap);
+		<div class="mw-cell mw-col-guess" role="gridcell"><span class="mw-dim">${esc(item.cluster ?? "—")}</span></div>
+		<div class="mw-cell" role="gridcell">${mwChip(item.status === "pending" ? "suggested" : item.status)}</div>
+		<div class="mw-cell mw-col-upd" role="gridcell"><span class="mw-upd" title="${esc(mwFullDate(item.last_seen_at))}">${esc(mwRel(item.last_seen_at))}</span></div>`;
 }
 
-async function saveFactFromForm() {
-	if (typeof requireProjectCapability === "function"
-		&& !requireProjectCapability("project.memory.write", "Viewers cannot save memory in this project.")) return;
-	const content = $("#factText")?.value || "";
-	if (!content.trim()) return toast("Write a fact first.", true);
-	// Clear ONLY on success: a failed save that also ate your sentence is the
-	// worst of both outcomes.
-	if (await doSave({ mode:"memory", content })) $("#factText").value = "";
-}
-
-async function saveConversationFromForm() {
-	if (typeof requireProjectCapability === "function"
-		&& !requireProjectCapability("project.memory.write", "Viewers cannot save memory in this project.")) return;
-	const raw = $("#conversationText")?.value || "";
-	const lines = raw.split(/\n+/).map(x => x.trim()).filter(Boolean);
-	if (!lines.length) return toast("Paste a conversation first.", true);
-	const ok = await doSave({ mode:"conversation", conversationId:`dashboard-${Date.now()}`, messages: lines.map(content => ({ role:"user", content })) });
-	if (ok) $("#conversationText").value = "";
-}
-
-function viewRecall(v) {
-	const wrap = el("div");
-	wrap.innerHTML = `
-		<div class="box" style="max-width:840px">
-			<h3>Ask your memory</h3>
-			<div class="search-row">
-				<input id="recallQuery" placeholder="Ask your memory..." onkeydown="if(event.key==='Enter') recallFromForm()" />
-				<button onclick="recallFromForm()">Recall</button>
+function mwRenderList() {
+	const inv = $("#mwInv"); if (!inv) return;
+	inv.setAttribute("aria-label", mwInvLabel());
+	inv.setAttribute("aria-busy", String(MW.loading || MW.refreshing || MW.loadingMore));
+	if (MW.loading) {
+		inv.innerHTML = `<div role="grid" aria-label="${esc(mwInvLabel())}" aria-busy="true" aria-colcount="${mwColCount()}">
+			<div class="mw-grid-head" role="row" aria-rowindex="1">${mwHeadCols()}</div>
+			<div role="rowgroup">${Array.from({ length: 6 }, () => `<div class="mw-skel" aria-hidden="true"><span style="width:72%"></span><span></span></div>`).join("")}</div>
+			<span class="sr-only" role="status">Loading…</span></div>`;
+		return;
+	}
+	if (MW.error) {
+		inv.innerHTML = `<div class="mw-errorbox" role="alert"><p>${esc(MW.error)}</p>
+			<button type="button" class="mw-btn" id="mwRetry">Retry</button></div>`;
+		const retry = $("#mwRetry");
+		if (retry) retry.onclick = () => mwRefresh();
+		return;
+	}
+	if (!MW.items.length) {
+		const message = mwAnyFilter()
+			? `No ${MW.view} match this search.`
+			: MW.view === "suggestions" ? "No suggestions waiting for review."
+				: MW.view === "sources" ? "No sources yet. Save a memory or connect a tool to begin."
+					: "Nothing here yet. Save a memory or connect a tool to begin.";
+		inv.innerHTML = `<div class="mw-empty"><p>${esc(message)}</p>
+			${mwAnyFilter() ? `<button type="button" class="mw-btn" id="mwEmptyClear">Clear filters</button>` : ""}</div>`;
+		const clear = $("#mwEmptyClear");
+		if (clear) clear.onclick = () => mwClearFilters();
+		return;
+	}
+	const rovingIndex = Math.max(0, MW.items.findIndex((item) => item.id === MW.sel));
+	const rows = MW.items.map((item, index) => {
+		const selected = MW.sel === item.id;
+		const menuOpen = MW.openMenu === `row_${item.id}`;
+		const menuItems = mwRowMenuItems(item);
+		const done = MW.view === "suggestions" && item.status !== "pending";
+		return `
+		<div class="mw-row${done ? " mw-done" : ""}" role="row" tabindex="${index === rovingIndex ? "0" : "-1"}" aria-rowindex="${index + 2}" aria-selected="${selected}" data-mw-row="${esc(item.id)}"${MW.refreshing ? ` style="opacity:.75"` : ""}>
+			${mwRowCells(item)}
+			<div class="mw-cell mw-cell-act" role="gridcell">
+				<button type="button" class="mw-rowmenu-btn" aria-haspopup="menu" aria-expanded="${menuOpen}" aria-label="Actions for this ${MW.view === "sources" ? "source" : MW.view === "suggestions" ? "suggestion" : "memory"}" data-mw-rowmenu="${esc(item.id)}">${MW_ICONS.dots}</button>
+				${menuOpen ? `<div class="mw-menu" role="menu" aria-label="Row actions">
+					${menuItems.map((mi) => `<button type="button" role="menuitem" class="${mi.danger ? "mw-danger" : ""}" data-mw-rowact="${mi.id}" data-mw-rowid="${esc(item.id)}">${mwIcon(mi.icon)}${esc(mi.label)}</button>`).join("")}
+				</div>` : ""}
 			</div>
-			<div id="recallResults"></div>
 		</div>`;
-	v.appendChild(wrap);
-	renderRecallResults();
+	}).join("");
+	inv.innerHTML = `
+		<div role="grid" aria-label="${esc(mwInvLabel())}" aria-colcount="${mwColCount()}" aria-rowcount="${MW.total === null ? -1 : MW.total + 1}">
+			<div class="mw-grid-head" role="row" aria-rowindex="1">${mwHeadCols()}</div>
+			<div role="rowgroup" id="mwRows">${rows}</div>
+		</div>
+		${MW.cursor ? `<div class="mw-more"><button type="button" class="mw-btn" id="mwMore" ${MW.loadingMore ? "disabled" : ""}>${MW.loadingMore ? "Loading…" : "Load more"}</button></div>` : ""}`;
+
+	const grid = $("#mwRows");
+	if (grid) grid.onkeydown = (event) => mwListKey(event);
+	inv.querySelectorAll("[data-mw-row]").forEach((row) => {
+		row.onclick = () => mwSelect(row.dataset.mwRow, { fromRow: row.dataset.mwRow });
+	});
+	inv.querySelectorAll("[data-mw-rowmenu]").forEach((btn) => {
+		btn.onclick = (event) => { event.stopPropagation(); mwToggleMenu(`row_${btn.dataset.mwRowmenu}`); };
+	});
+	inv.querySelectorAll("[data-mw-rowact]").forEach((btn) => {
+		btn.onclick = (event) => { event.stopPropagation(); mwRowAction(btn.dataset.mwRowact, btn.dataset.mwRowid); };
+	});
+	const more = $("#mwMore");
+	if (more) more.onclick = () => mwFetchList({ reset: false, cursor: MW.cursor });
 }
 
-async function recallFromForm() {
-	const query = $("#recallQuery")?.value || "";
-	if (!query.trim()) return toast("Ask a memory question first.", true);
-	await doRecall(query, { panel: true });
+function mwListKey(event) {
+	if (event.target.closest("button, a, input, select, textarea, [role=menuitem]")) return;
+	const { key } = event;
+	if (key === "Enter" || key === " ") {
+		const row = event.target.closest("[data-mw-row]");
+		if (row) { event.preventDefault(); mwSelect(row.dataset.mwRow, { fromRow: row.dataset.mwRow }); }
+		return;
+	}
+	if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) return;
+	const rows = [...event.currentTarget.querySelectorAll("[data-mw-row]")];
+	const current = event.target.closest("[data-mw-row]");
+	let index = rows.indexOf(current);
+	event.preventDefault();
+	if (key === "Home") index = 0;
+	else if (key === "End") index = rows.length - 1;
+	else index = Math.min(rows.length - 1, Math.max(0, index + (key === "ArrowDown" ? 1 : -1)));
+	const target = rows[index];
+	if (target) {
+		rows.forEach((row) => { row.tabIndex = -1; });
+		target.tabIndex = 0;
+		target.focus();
+	}
 }
 
-function renderRecallResults() {
-	const out = $("#recallResults");
-	if (!out) return;
-	const r = S.recallResult;
-	if (!r) { out.innerHTML = `<div class="empty">Matched pages, nodes, slices, and events will appear here.</div>`; return; }
-	if (!r.nodes?.length && !r.pages?.length) { out.innerHTML = `<div class="empty">No relevant memory found.</div>`; return; }
-	out.innerHTML = [
-		...(r.pages || []).map(p => `<div class="slice"><b>${esc(p.title)}</b><span class="k">${esc(p.short_summary || "Matched memory page")}</span></div>`),
-		...(r.nodes || []).map(n => `<div class="slice"><b>${esc(n.label)}</b><span class="k">${esc(n.category)} · ${(n.slices||[]).slice(0,2).map(s=>esc(s.text)).join("; ")}</span></div>`),
-		r.context ? `<div class="page-md" style="margin-top:10px">${esc(r.context)}</div>` : "",
-	].join("");
+function mwRowAction(action, id) {
+	MW.openMenu = "";
+	const item = mwItemById(id);
+	mwRenderList();
+	if (!item) return;
+	if (action === "copy") return void copyText(item.text ?? "", "Text copied");
+	if (action === "copyid") return void copyText(id, "ID copied");
+	if (action === "opensrc" && item.source) return mwOpenSource(item.source.id);
+	if (action === "graph") return mwOpenInGraph(id);
+	if (action === "archive") return mwArchive(item);
+	if (action === "delete") return mwDelete(item);
+	if (action === "keep") return mwSuggestionAct(id, "keep");
+	if (action === "merge") return mwSuggestionAct(id, "merge");
+	if (action === "reject") return mwSuggestionAct(id, "reject");
+}
+
+/* ---- actions ------------------------------------------------------------------------ */
+
+function mwOpenSource(sourceId) {
+	MW.view = "sources";
+	MW.q = ""; MW.fState = []; MW.fWindow = "any"; MW.sort = "updated_desc";
+	MW.items = []; MW.total = null; MW.cursor = null; MW.loaded = false; MW.error = "";
+	MW.sel = sourceId; MW.detail = null; MW.tab = ""; MW.sat = {}; MW.openMenu = "";
+	const root = $("#mwRoot"); if (root) root.dataset.view = "sources";
+	mwWriteRoute();
+	mwRenderHead(); mwRenderToolbar(); mwRenderCount(); mwRenderList(); mwRenderInsp();
+	const listRequest = mwFetchList({ reset: true });
+	const detailRequest = mwSelect(sourceId);
+	return Promise.allSettled([listRequest, detailRequest]);
+}
+
+function mwOpenMemoryFromSource(memoryId) {
+	MW.view = "memories";
+	MW.q = ""; MW.fKind = []; MW.fCat = []; MW.fSrc = []; MW.fLife = []; MW.fWindow = "any"; MW.sort = "updated_desc";
+	MW.items = []; MW.total = null; MW.cursor = null; MW.loaded = false; MW.error = "";
+	MW.sel = memoryId; MW.detail = null; MW.tab = ""; MW.sat = {}; MW.openMenu = "";
+	const root = $("#mwRoot"); if (root) root.dataset.view = "memories";
+	mwWriteRoute();
+	mwRenderHead(); mwRenderToolbar(); mwRenderCount(); mwRenderList(); mwRenderInsp();
+	const listRequest = mwFetchList({ reset: true });
+	const detailRequest = mwSelect(memoryId);
+	return Promise.allSettled([listRequest, detailRequest]);
+}
+
+function mwOpenInGraph(nodeId) {
+	select(nodeId, "node");
+	setView("graph");
+}
+
+async function mwArchive(item) {
+	if (!requireProjectCapability("project.memory.delete", "Only a project admin can archive memory.")) return;
+	const preview = String(item.text ?? item.title ?? item.id).slice(0, 160);
+	if (!confirm(`Archive this ${MW_KIND_LABELS[item.kind]?.toLowerCase() ?? item.kind}?\n\n“${preview}”\n\nArchived memories leave recall but stay available for audit.`)) return;
+	try {
+		await postAction("/v1/actions/archive-object", { kind: item.kind === "page" ? "page" : item.kind, id: item.id });
+		toast("Archived.");
+		mwRefresh();
+		if (MW.sel === item.id) mwSelect(item.id);
+	} catch (error) { toast(`Archive failed: ${error.message}`, true); }
+}
+
+async function mwDelete(item) {
+	if (!requireProjectCapability("project.memory.delete", "Only a project admin can delete memory.")) return;
+	const preview = String(item.text ?? item.title ?? item.id).slice(0, 160);
+	if (!confirm(`Delete this ${MW_KIND_LABELS[item.kind]?.toLowerCase() ?? item.kind}?\n\n“${preview}”\n\nThis removes it from memory and suppresses re-extraction of the same content.`)) return;
+	try {
+		await api(mwPath(`/v1/memories/${encodeURIComponent(item.id)}`), { method: "DELETE" });
+		toast("Deleted.");
+		if (MW.sel === item.id) { MW.sel = null; MW.detail = null; MW.tab = ""; mwSetDrawer(false, { restoreFocus: false }); mwWriteRoute(); }
+		mwRefresh();
+	} catch (error) { toast(`Delete failed: ${error.message}`, true); }
+}
+
+async function mwSuggestionAct(id, action) {
+	if (!requireProjectCapability("project.memory.write", "Viewers cannot review memory suggestions in this project.")) return;
+	const item = mwItemById(id) ?? (MW.detail?.id === id ? MW.detail : null);
+	if (!item) return;
+	try {
+		if (action === "keep") {
+			await postAction(`/v1/candidates/${encodeURIComponent(id)}/promote`, { action: "promote_to_node" });
+			toast("Suggestion kept as a memory.");
+		} else if (action === "merge") {
+			if (!item.merge_target?.id) return toast("This suggestion has no recorded merge target.", true);
+			await postAction(`/v1/candidates/${encodeURIComponent(id)}/merge`, { nodeId: item.merge_target.id });
+			toast("Suggestion merged into the saved memory.");
+		} else {
+			await postAction(`/v1/candidates/${encodeURIComponent(id)}/reject`, {});
+			toast("Suggestion rejected.");
+		}
+		mwFetchCounts();
+		await mwFetchList({ reset: true });
+		if (MW.sel === id) {
+			const still = mwItemById(id);
+			if (still) { MW.detail = still; mwRenderInsp(); }
+			else { MW.sel = null; MW.detail = null; mwSetDrawer(false, { restoreFocus: false }); mwWriteRoute(); mwRenderInsp(); }
+		}
+	} catch (error) { toast(`Review failed: ${error.message}`, true); }
+}
+
+async function mwCommitSave() {
+	// Read BEFORE any render: the modal is rebuilt from state, so a re-render
+	// here would hand the server an empty textarea (the webhook-form bug).
+	const input = $("#mwSaveText");
+	const content = (input?.value ?? "").trim();
+	if (!content) return toast("Write a memory first.", true);
+	if (MW.saveBusy) return;
+	MW.saveBusy = true;
+	const commit = $("#mwSaveCommit");
+	if (commit) { commit.disabled = true; commit.textContent = "Saving…"; }
+	try {
+		const result = await api("/v1/save", { method: "POST", body: JSON.stringify(scopedPayload({ mode: "memory", content })) });
+		MW.saveOpen = false;
+		MW.saveBusy = false;
+		toast(result.summary || "Saved.");
+		mwRenderLayer();
+		setTimeout(() => { if (S.view === "memory") mwRefresh(); }, 900);
+	} catch (error) {
+		// A failed save must not eat what was typed: no re-render, the textarea
+		// keeps its content, only the button returns to idle.
+		MW.saveBusy = false;
+		toast(`Save failed: ${error.message}`, true);
+		if (commit && commit.isConnected) { commit.disabled = false; commit.textContent = "Save memory"; }
+	}
+}
+
+/* ---- drawer ------------------------------------------------------------------------- */
+
+function mwNarrow() {
+	try { return window.matchMedia("(max-width:1439px)").matches; } catch { return false; }
+}
+
+let mwInertNodes = [];
+function mwSetDrawer(open, { restoreFocus = true } = {}) {
+	MW.drawerOpen = open;
+	document.body.classList.toggle("mw-drawer-open", open);
+	mwRenderLayer(); mwRenderCount();
+	if (open && mwNarrow()) {
+		mwInertNodes = ["appHeader", "rail", "mwInv"].map((id) => document.getElementById(id)).filter(Boolean)
+			.map((node) => ({ node, inert: node.inert }));
+		mwInertNodes.forEach(({ node }) => { node.inert = true; });
+		setTimeout(() => { $("#mwInsp")?.focus(); }, 60);
+	} else {
+		mwInertNodes.forEach(({ node, inert }) => { if (node?.isConnected) node.inert = inert; });
+		mwInertNodes = [];
+		if (restoreFocus && MW.lastFocusRowId) {
+			const row = document.querySelector(`[data-mw-row="${CSS.escape(MW.lastFocusRowId)}"]`);
+			if (row) setTimeout(() => { try { row.focus(); } catch {} }, 30);
+		}
+	}
+}
+
+function mwRenderLayer() {
+	const layer = $("#mwLayer"); if (!layer) return;
+	const overlay = MW.drawerOpen && mwNarrow()
+		? `<div class="mw-overlay" id="mwOverlay" aria-hidden="true"></div>` : "";
+	const modal = MW.saveOpen ? `
+		<div class="mw-modal-back" id="mwModalBack">
+			<div class="mw-modal" role="dialog" aria-modal="true" aria-label="Save memory">
+				<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+					<h2>Save memory</h2>
+					<button type="button" class="mw-btn mw-iconbtn" id="mwSaveClose" aria-label="Close" style="margin-left:auto;width:28px;height:28px">${mwIcon(MW_ICONS.x, 12)}</button>
+				</div>
+				<label for="mwSaveText" style="display:block;margin-bottom:6px;font-size:12px;color:var(--faint)">Memory</label>
+				<textarea id="mwSaveText" rows="3" placeholder="One clear statement Itsuki should remember."></textarea>
+				<div style="display:flex;align-items:center;gap:9px;margin-top:16px">
+					<p style="margin:0;flex:1;min-width:0;font-size:11.5px;color:var(--faint)">Saved into this project’s memory.</p>
+					<button type="button" class="mw-btn" id="mwSaveCancel">Cancel</button>
+					<button type="button" class="mw-btn mw-btn-primary" id="mwSaveCommit" ${MW.saveBusy ? "disabled" : ""}>${MW.saveBusy ? "Saving…" : "Save memory"}</button>
+				</div>
+			</div>
+		</div>` : "";
+	layer.innerHTML = overlay + modal;
+	const overlayEl = $("#mwOverlay");
+	if (overlayEl) overlayEl.onclick = () => mwSetDrawer(false);
+	if (MW.saveOpen) {
+		const back = $("#mwModalBack");
+		back.onclick = (event) => { if (event.target === back) { MW.saveOpen = false; mwRenderLayer(); } };
+		$("#mwSaveClose").onclick = () => { MW.saveOpen = false; mwRenderLayer(); };
+		$("#mwSaveCancel").onclick = () => { MW.saveOpen = false; mwRenderLayer(); };
+		$("#mwSaveCommit").onclick = () => mwCommitSave();
+		const text = $("#mwSaveText");
+		back.addEventListener("keydown", (event) => {
+			if (event.key !== "Tab") return;
+			const focusables = [...back.querySelectorAll("button, textarea")].filter((node) => !node.disabled);
+			const first = focusables[0], last = focusables.at(-1);
+			if (event.shiftKey && event.target === first) { event.preventDefault(); last.focus(); }
+			else if (!event.shiftKey && event.target === last) { event.preventDefault(); first.focus(); }
+		});
+		setTimeout(() => text?.focus(), 40);
+	}
+}
+
+/* ---- inspector -------------------------------------------------------------------------- */
+
+function mwTabsFor(detail) {
+	if (MW.view === "memories") {
+		const tabs = [{ id: "overview", label: "Overview" }];
+		if (detail.evidence_count > 0) tabs.push({ id: "evidence", label: "Evidence", count: detail.evidence_count });
+		if (detail.timeline_count > 0) tabs.push({ id: "timeline", label: "Timeline", count: detail.timeline_count });
+		if (detail.connections_count > 0) tabs.push({ id: "connections", label: "Connections", count: detail.connections_count });
+		tabs.push({ id: "advanced", label: "Advanced" });
+		return tabs;
+	}
+	if (MW.view === "sources") {
+		const tabs = [{ id: "overview", label: "Overview" }];
+		if (detail.memories > 0) tabs.push({ id: "memories", label: "Memories", count: detail.memories });
+		if (detail.evidence > 0) tabs.push({ id: "evidence", label: "Evidence", count: detail.evidence });
+		if (detail.has_content) tabs.push({ id: "content", label: "Content" });
+		return tabs;
+	}
+	return [];
+}
+
+function mwRenderInsp() {
+	const insp = $("#mwInsp"); if (!insp) return;
+	if (!MW.sel) {
+		const hint = MW.view === "memories" ? "Pick a memory to read its details, evidence and history."
+			: MW.view === "sources" ? "Pick a source to see what was extracted from it."
+				: "Pick a suggestion to compare it against saved memories.";
+		insp.innerHTML = `<div class="mw-insp-empty"><p>Nothing selected</p><p>${esc(hint)}</p></div>`;
+		return;
+	}
+	if (MW.detailLoading && !MW.detail) {
+		insp.innerHTML = `<div class="mw-insp-empty" role="status"><p>Loading…</p></div>`;
+		return;
+	}
+	if (MW.detailError) {
+		insp.innerHTML = `<div class="mw-insp-empty" role="alert"><p>Not available</p><p>${esc(MW.detailError)}</p>
+			<div style="display:flex;gap:7px;margin-top:4px">
+				<button type="button" class="mw-btn" id="mwDetailRetry">Retry</button>
+				<button type="button" class="mw-btn" id="mwDetailDismiss">Close</button>
+			</div></div>`;
+		const retry = $("#mwDetailRetry");
+		if (retry) retry.onclick = () => mwSelect(MW.sel);
+		const dismiss = $("#mwDetailDismiss");
+		if (dismiss) dismiss.onclick = () => { MW.sel = null; MW.detailError = ""; mwWriteRoute(); mwRenderList(); mwRenderInsp(); mwRefresh(); };
+		return;
+	}
+	const detail = MW.detail;
+	if (!detail) { insp.innerHTML = `<div class="mw-insp-empty"><p>Loading…</p></div>`; return; }
+
+	const index = MW.items.findIndex((item) => item.id === MW.sel);
+	const total = MW.total ?? MW.items.length;
+	const position = index >= 0 ? `${index + 1} / ${total}` : `— / ${total}`;
+	const prevDisabled = index <= 0;
+	const nextDisabled = index < 0 || (index >= MW.items.length - 1 && !MW.cursor);
+
+	let chipState, title, metaBits = [], meta2 = "", actions = [];
+	if (MW.view === "memories") {
+		chipState = detail.lifecycle;
+		title = detail.text;
+		metaBits = [detail.semantic_type, detail.source?.title, `Updated ${mwRel(detail.updated_at)}`].filter(Boolean);
+		actions = [
+			detail.source ? { id: "opensrc", label: "Open source", icon: MW_ICONS.open } : null,
+			{ id: "copy", label: "Copy text", icon: MW_ICONS.copy },
+			detail.kind === "node" ? { id: "graph", label: "Open in Graph", icon: MW_ICONS.graph } : null,
+		].filter(Boolean);
+	} else if (MW.view === "sources") {
+		chipState = detail.state;
+		title = detail.title ?? detail.id;
+		metaBits = [detail.kind, `Updated ${mwRel(detail.updated_at)}`].filter(Boolean);
+		if (detail.state === "processed") meta2 = `${detail.memories} memories · ${detail.evidence} evidence segments`;
+		actions = [{ id: "copyid", label: "Copy source ID", icon: MW_ICONS.copy }];
+	} else {
+		chipState = detail.status === "pending" ? "suggested" : detail.status;
+		title = detail.text;
+		metaBits = [detail.cluster, detail.reason ? String(detail.reason).replace(/_/g, " ") : null,
+			typeof detail.confidence === "number" ? `${Math.round(detail.confidence * 100)}% confidence` : null].filter(Boolean);
+		if (detail.status === "pending" && mwCanWrite()) {
+			actions = [
+				{ id: "keep", label: "Keep", icon: MW_ICONS.check, cls: "mw-act-ok" },
+				detail.merge_target ? { id: "merge", label: "Merge into saved memory", icon: MW_ICONS.merge } : null,
+				{ id: "reject", label: "Reject", icon: MW_ICONS.x },
+			].filter(Boolean);
+		}
+	}
+
+	const tabs = mwTabsFor(detail);
+	const activeTab = tabs.some((tab) => tab.id === MW.tab) ? MW.tab : (tabs[0]?.id ?? "");
+	const overflow = [];
+	if (MW.view === "memories") {
+		overflow.push({ id: "copyid", label: "Copy memory ID", icon: "M7 12h10M7 8h10M7 16h6" });
+		if (mwCanDelete() && (detail.kind === "node" || detail.kind === "page")) overflow.push({ id: "archive", label: "Archive", icon: MW_ICONS.archive });
+		if (mwCanDelete() && detail.kind !== "event") overflow.push({ id: "delete", label: "Delete", icon: MW_ICONS.trash, danger: true });
+	}
+	const readOnlyNote = MW.view === "suggestions" && detail.status === "pending" && !mwCanWrite()
+		? `<p class="mw-inline-note" role="note">${esc(projectCapabilityActionCopy("project.memory.write", "You can inspect this suggestion; a project member or admin can keep, merge, or reject it."))}</p>` : "";
+
+	insp.innerHTML = `
+		<div class="mw-insp-head">
+			<div class="mw-insp-toprow">
+				${mwChip(chipState, { pulse: chipState === "processing" })}
+				<span aria-hidden="true" style="color:var(--border2)">·</span>
+				<span class="mw-pos">${esc(position)}</span>
+				<div class="mw-insp-nav">
+					<button type="button" id="mwPrev" aria-label="Previous item" title="Previous item" ${prevDisabled ? "disabled" : ""}>${mwIcon(MW_ICONS.up)}</button>
+					<button type="button" id="mwNext" aria-label="Next item" title="Next item" ${nextDisabled ? "disabled" : ""}>${mwIcon(MW_ICONS.down)}</button>
+					<button type="button" id="mwInspClose" class="mw-insp-close" aria-label="Close details" style="width:27px;height:27px;align-items:center;justify-content:center;background:var(--panel2);border:1px solid var(--border);border-radius:7px;cursor:pointer;color:var(--muted)">${mwIcon(MW_ICONS.x, 12)}</button>
+				</div>
+			</div>
+			<h2 class="mw-insp-title">${esc(title ?? "")}</h2>
+			<p class="mw-insp-meta">${metaBits.map((bit) => `<span>${esc(bit)}</span>`).join(`<span aria-hidden="true">·</span>`)}</p>
+			${meta2 ? `<p class="mw-insp-meta2">${esc(meta2)}</p>` : ""}
+			${actions.length || overflow.length ? `<div class="mw-insp-actions">
+				${actions.map((action) => `<button type="button" class="mw-btn ${action.cls ?? ""}" data-mw-inspact="${action.id}">${mwIcon(action.icon)}${esc(action.label)}</button>`).join("")}
+				${overflow.length ? `<div class="mw-act-more">
+					<button type="button" class="mw-btn mw-iconbtn" id="mwInspMoreBtn" aria-haspopup="menu" aria-expanded="${MW.openMenu === "inspmore"}" aria-label="More actions" style="width:29px;height:29px">${MW_ICONS.dots}</button>
+					${MW.openMenu === "inspmore" ? `<div class="mw-menu mw-menu-right" role="menu" aria-label="More actions" style="width:196px">
+						${overflow.map((action) => `<button type="button" role="menuitem" class="${action.danger ? "mw-danger" : ""}" data-mw-inspact="${action.id}">${mwIcon(action.icon)}${esc(action.label)}</button>`).join("")}
+					</div>` : ""}
+				</div>` : ""}
+			</div>` : ""}
+			${readOnlyNote}
+			${tabs.length ? `<div class="mw-tabs" role="tablist" aria-label="Details">
+				${tabs.map((tab) => `<button type="button" class="mw-tab" role="tab" aria-selected="${tab.id === activeTab}" tabindex="${tab.id === activeTab ? 0 : -1}" data-mw-tab="${tab.id}">${esc(tab.label)}${tab.count ? ` <span class="mw-mono">${tab.count}</span>` : ""}</button>`).join("")}
+			</div>` : ""}
+		</div>
+		<div class="mw-panel" role="tabpanel">${mwInspPanel(detail, activeTab)}</div>`;
+
+	$("#mwPrev")?.addEventListener("click", () => mwStep(-1));
+	$("#mwNext")?.addEventListener("click", () => mwStep(1));
+	$("#mwInspClose")?.addEventListener("click", () => mwCloseInspector());
+	insp.querySelectorAll("[data-mw-tab]").forEach((btn) => {
+		btn.onclick = () => {
+			MW.tab = btn.dataset.mwTab;
+			mwWriteRoute();
+			mwRenderInsp();
+			if (["evidence", "timeline", "connections", "memories", "content"].includes(MW.tab)) mwLoadSat(MW.tab);
+		};
+	});
+	const tabRow = insp.querySelector(".mw-tabs");
+	if (tabRow) tabRow.onkeydown = (event) => mwSegKey(event);
+	insp.querySelectorAll("[data-mw-inspact]").forEach((btn) => {
+		btn.onclick = (event) => { event.stopPropagation(); mwInspAction(btn.dataset.mwInspact, detail); };
+	});
+	const moreBtn = $("#mwInspMoreBtn");
+	if (moreBtn) moreBtn.onclick = (event) => { event.stopPropagation(); mwToggleMenu("inspmore"); };
+	insp.querySelectorAll("[data-mw-satmore]").forEach((btn) => {
+		btn.onclick = () => mwLoadSat(btn.dataset.mwSatmore, { more: true });
+	});
+	insp.querySelectorAll("[data-mw-openmem]").forEach((btn) => {
+		btn.onclick = () => mwOpenMemoryFromSource(btn.dataset.mwOpenmem);
+	});
+	insp.querySelectorAll("[data-mw-opennode]").forEach((btn) => {
+		btn.onclick = () => mwSelect(btn.dataset.mwOpennode);
+	});
+	insp.querySelectorAll("[data-mw-copyval]").forEach((btn) => {
+		btn.onclick = () => copyText(btn.dataset.mwCopyval, "Copied");
+	});
+	// Load the deep-linked satellite on first paint of its tab.
+	if (["evidence", "timeline", "connections", "memories", "content"].includes(activeTab) && !MW.sat[mwSatKey(activeTab)]) {
+		mwLoadSat(activeTab);
+	}
+}
+
+function mwInspAction(action, detail) {
+	MW.openMenu = "";
+	if (action === "copy") return void copyText(detail.text ?? detail.title ?? "", "Text copied");
+	if (action === "copyid") return void copyText(detail.id, "ID copied");
+	if (action === "opensrc" && detail.source) return mwOpenSource(detail.source.id);
+	if (action === "graph") return mwOpenInGraph(detail.id);
+	if (action === "archive") return mwArchive(detail);
+	if (action === "delete") return mwDelete(detail);
+	if (["keep", "merge", "reject"].includes(action)) return mwSuggestionAct(detail.id, action);
+	mwRenderInsp();
+}
+
+function mwFieldRows(pairs) {
+	return pairs.filter(([, value]) => value !== null && value !== undefined && value !== "")
+		.map(([key, value, mono]) => `<dt>${esc(key)}</dt><dd${mono ? ` class="mw-mono"` : ""}>${esc(String(value))}</dd>`).join("");
+}
+
+function mwSatList(tab, { numbered = true, openAttr = null, openLabel = "" } = {}) {
+	const sat = MW.sat[mwSatKey(tab)];
+	if (!sat || (sat.loading && !sat.items.length)) return `<p class="mw-inline-note" role="status">Loading…</p>`;
+	if (sat.error) return `<p class="mw-inline-note" role="alert" style="color:var(--red)">${esc(sat.error)}</p>`;
+	if (!sat.items.length) return `<p class="mw-inline-note">Nothing recorded.</p>`;
+	const rows = sat.items.map((item, index) => `
+		<div class="mw-sat-item">
+			<span class="mw-sat-n">${numbered ? String(index + 1).padStart(2, "0") : esc(item.n ?? "→")}</span>
+			<div class="mw-sat-b">
+				${item.head ? `<p class="mw-sat-h">${esc(item.head)}</p>` : ""}
+				<p class="mw-sat-t">${esc(item.text ?? "")}</p>
+				${item.foot ? `<p class="mw-sat-f">${esc(item.foot)}</p>` : ""}
+			</div>
+			${openAttr && item.openId ? `<button type="button" class="mw-sat-open" ${openAttr}="${esc(item.openId)}" aria-label="${esc(openLabel)}">${mwIcon(MW_ICONS.chevR, 12)}</button>` : ""}
+		</div>`).join("");
+	const more = sat.cursor ? `<div style="display:flex;justify-content:center;margin-top:4px">
+		<button type="button" class="mw-btn" data-mw-satmore="${tab}" ${sat.loading ? "disabled" : ""}>${sat.loading ? "Loading…" : "Load more"}</button></div>` : "";
+	return `<div class="mw-sat">${rows}${more}</div>`;
+}
+
+function mwPrepSat(tab, mapItem) {
+	const sat = MW.sat[mwSatKey(tab)];
+	if (sat?.items) sat.items = sat.items.map(mapItem);
+}
+
+function mwInspPanel(detail, tab) {
+	if (MW.view === "suggestions") return mwSuggestionPanel(detail);
+	if (MW.view === "memories") {
+		if (tab === "overview") {
+			const fields = mwFieldRows([
+				["Semantic type", detail.semantic_type],
+				["Lifecycle", detail.lifecycle],
+				["Source", detail.source?.title ?? null],
+				["Entity", detail.node?.label ?? null],
+				["Category", detail.project_category?.name ?? detail.category ?? null],
+				["Cluster", detail.cluster ?? null],
+				["Importance", detail.importance && detail.importance !== "ordinary" ? String(detail.importance).replace(/_/g, " ") : null],
+				["Happened", detail.happened_at ? `${mwFullDate(detail.happened_at)}${detail.event_time_precision ? ` · ${detail.event_time_precision}` : ""}` : null],
+				["Valid from", detail.valid_from ? mwFullDate(detail.valid_from) : null],
+				["Valid to", detail.valid_to ? mwFullDate(detail.valid_to) : null],
+				["Last updated", `${mwFullDate(detail.updated_at)} · ${mwRel(detail.updated_at)} ago`],
+			]);
+			return `<dl class="mw-fields">${fields}</dl>
+				${detail.summary ? `<p class="mw-body-note">${esc(detail.summary)}</p>` : ""}`;
+		}
+		if (tab === "evidence") {
+			mwPrepSat("evidence", (item) => ({ ...item, text: item.text?.startsWith("“") ? item.text : `“${item.text}”`, foot: item.at ? `Recorded ${mwFullDate(item.at)}` : "" }));
+			return mwSatList("evidence");
+		}
+		if (tab === "timeline") {
+			mwPrepSat("timeline", (item) => ({
+				...item,
+				n: mwRel(item.happened_at ?? item.recorded_at),
+				head: [item.happened_at ? mwFullDate(item.happened_at) : `Recorded ${mwFullDate(item.recorded_at)}`, item.action, item.superseded ? "superseded" : null, item.importance].filter(Boolean).join(" · "),
+			}));
+			return mwSatList("timeline", { numbered: false });
+		}
+		if (tab === "connections") {
+			mwPrepSat("connections", (item) => ({
+				...item,
+				n: item.direction === "out" ? "→" : "←",
+				head: [item.type, item.state === "superseded" ? "superseded" : null, typeof item.confidence === "number" ? `${Math.round(item.confidence * 100)}%` : null].filter(Boolean).join(" · "),
+				text: item.fact ?? item.other?.label ?? item.other?.id,
+				foot: item.fact ? item.other?.label : "",
+				openId: item.other?.id,
+			}));
+			return mwSatList("connections", { numbered: false, openAttr: "data-mw-opennode", openLabel: "Open this memory" });
+		}
+		// Advanced
+		const ids = [
+			["Memory ID", detail.id],
+			detail.source ? ["Source ID", detail.source.id] : null,
+			detail.project_id ? ["Project ID", detail.project_id] : null,
+		].filter(Boolean);
+		const raw = JSON.stringify(detail, null, 2);
+		return `<div class="mw-ids">${ids.map(([key, value]) => `
+			<div class="mw-id-row"><span class="mw-id-k">${esc(key)}</span><span class="mw-id-v">${esc(value)}</span>
+			<button type="button" class="mw-sat-open" data-mw-copyval="${esc(value)}" aria-label="Copy ${esc(key)}" title="Copy ${esc(key)}">${mwIcon(MW_ICONS.copy, 12)}</button></div>`).join("")}</div>
+			<details class="mw-tech"><summary>${mwIcon(MW_ICONS.chevR, 12)}Raw metadata</summary><pre>${esc(raw)}</pre></details>`;
+	}
+	// Sources
+	if (tab === "overview") {
+		let body = "";
+		if (detail.state === "failed") {
+			body = `<p class="mw-body-note" style="color:var(--red)">${esc(detail.failure ?? "Extraction failed for this source.")}</p>
+				<p class="mw-body-note">Nothing was extracted, so there are no memories or evidence segments to review. Save the content again to retry the ingest.</p>`;
+		} else if (detail.state === "processing") {
+			body = `<p class="mw-body-note">This source is still being read. Extracted memories and evidence segments appear here once processing finishes.</p>`;
+		} else if (detail.state === "recorded") {
+			body = `<p class="mw-body-note">This source was recorded${detail.created_at ? ` on ${mwFullDate(detail.created_at)}` : ""}. No extraction trace is linked to it yet.</p>`;
+		} else {
+			body = `<p class="mw-body-note">Processed${detail.processed_at ? ` on ${mwFullDate(detail.processed_at)}` : ""}. Extraction produced ${detail.memories} ${detail.memories === 1 ? "memory" : "memories"}${detail.evidence ? ` across ${detail.evidence} evidence segments` : ""}. Open the Memories tab to review what was kept${detail.evidence ? ", or Evidence to read the segments they came from" : ""}.</p>`;
+		}
+		const fields = mwFieldRows([
+			["Kind", detail.kind],
+			["Processing", detail.state],
+			["Messages", detail.message_count || null],
+			["Updated", mwFullDate(detail.updated_at)],
+		]);
+		const tech = mwFieldRows([
+			["Source ID", detail.id, true],
+			["Mode", detail.source_mode, true],
+			["Type", detail.source_type, true],
+			detail.conversation_id ? ["Conversation", detail.conversation_id, true] : null,
+			["Ingested", mwFullDate(detail.created_at), true],
+		].filter(Boolean));
+		return `${body}<dl class="mw-fields">${fields}</dl>
+			<details class="mw-tech"><summary>${mwIcon(MW_ICONS.chevR, 12)}Technical details</summary>
+			<div style="padding:0 11px 11px"><dl class="mw-fields" style="margin:0;border:0;background:transparent;padding:0">${tech}</dl></div></details>`;
+	}
+	if (tab === "memories") {
+		mwPrepSat("memories", (item) => ({ ...item, head: item.semantic_type, openId: item.id }));
+		return mwSatList("memories", { openAttr: "data-mw-openmem", openLabel: "Open this memory" });
+	}
+	if (tab === "evidence") {
+		mwPrepSat("evidence", (item) => ({
+			...item,
+			head: `¶ ${Number(item.position) + 1}${item.role ? ` · ${item.role}` : ""}`,
+			text: item.text?.startsWith("“") ? item.text : `“${item.text}”`,
+			foot: item.source_time ? `Written ${mwFullDate(item.source_time)}` : (item.observed_at ? `Observed ${mwFullDate(item.observed_at)}` : ""),
+		}));
+		return mwSatList("evidence");
+	}
+	if (tab === "content") {
+		const sat = MW.sat[mwSatKey("content")];
+		if (!sat || sat.loading) return `<p class="mw-inline-note" role="status">Loading…</p>`;
+		if (sat.error) return `<p class="mw-inline-note" role="alert" style="color:var(--red)">${esc(sat.error)}</p>`;
+		if (!sat.content) return `<p class="mw-inline-note">No rendered content is stored for this source.</p>`;
+		return `<article class="mw-doc">
+			${sat.content.title ? `<h3 style="margin:0 0 10px;font-size:15px;font-weight:600">${esc(sat.content.title)}</h3>` : ""}
+			<div class="mw-doc-body">${esc(sat.content.markdown ?? "")}</div>
+			${sat.content.truncated ? `<p class="mw-inline-note">Content truncated — the full page exceeds the display limit.</p>` : ""}
+		</article>`;
+	}
+	return "";
+}
+
+function mwSuggestionPanel(detail) {
+	const fields = mwFieldRows([
+		["Cluster guess", detail.cluster],
+		["Why flagged", detail.reason ? String(detail.reason).replace(/_/g, " ") : null],
+		["Confidence", typeof detail.confidence === "number" ? `${Math.round(detail.confidence * 100)}%` : null],
+		["Strength", detail.strength],
+		["Mentions", `${detail.mentions}× across ${detail.sessions} session${detail.sessions === 1 ? "" : "s"}`],
+		["First seen", mwFullDate(detail.first_seen_at)],
+		["Last seen", mwFullDate(detail.last_seen_at)],
+		["Merge target", detail.merge_target ? (detail.merge_target.label ?? detail.merge_target.id) : "None — would be saved as a new memory"],
+		detail.promoted ? ["Kept as", `${detail.promoted.kind ?? "memory"} ${detail.promoted.id}`] : null,
+		detail.reviewed_at ? ["Reviewed", mwFullDate(detail.reviewed_at)] : null,
+	].filter(Boolean));
+	const evidence = (detail.evidence ?? []).map((entry, index) => `
+		<div class="mw-sat-item">
+			<span class="mw-sat-n">${String(index + 1).padStart(2, "0")}</span>
+			<div class="mw-sat-b"><p class="mw-sat-t">“${esc(entry.text)}”</p>
+			${entry.at ? `<p class="mw-sat-f">${esc(mwFullDate(entry.at))}</p>` : ""}</div>
+		</div>`).join("");
+	const target = detail.merge_target ? `
+		<div class="mw-sat-item">
+			<span class="mw-sat-n" style="color:var(--accent)">→</span>
+			<div class="mw-sat-b"><p class="mw-sat-h">Saved memory it would merge into</p>
+			<p class="mw-sat-t">${esc(detail.merge_target.label ?? detail.merge_target.id)}</p></div>
+			<button type="button" class="mw-sat-open" data-mw-opentarget="${esc(detail.merge_target.id)}" aria-label="Open saved memory">${mwIcon(MW_ICONS.chevR, 12)}</button>
+		</div>` : "";
+	setTimeout(() => {
+		document.querySelectorAll("[data-mw-opentarget]").forEach((btn) => {
+			btn.onclick = () => mwOpenMemoryFromSource(btn.dataset.mwOpentarget);
+		});
+	}, 0);
+	return `<dl class="mw-fields">${fields}</dl>
+		${evidence || target ? `<div class="mw-sat">${evidence}${target}</div>` : `<p class="mw-inline-note">No evidence snippet was stored for this suggestion.</p>`}`;
+}
+
+/* ---- global handlers ---------------------------------------------------------------------- */
+
+let mwHandlersInstalled = false;
+function mwInstallGlobalHandlers() {
+	if (mwHandlersInstalled) return;
+	mwHandlersInstalled = true;
+	document.addEventListener("keydown", (event) => {
+		if (S.view !== "memory" || !$("#mwRoot")) return;
+		if (event.key === "Escape") {
+			if (MW.saveOpen) { MW.saveOpen = false; mwRenderLayer(); return; }
+			if (MW.openMenu) { MW.openMenu = ""; mwRenderHead(); mwRenderToolbar(); mwRenderList(); mwRenderInsp(); return; }
+			if (MW.drawerOpen && mwNarrow()) { mwSetDrawer(false); return; }
+		}
+		if (event.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || "") && !MW.saveOpen) {
+			event.preventDefault();
+			$("#mwSearch")?.focus();
+		}
+	});
+	document.addEventListener("click", (event) => {
+		if (S.view !== "memory" || !MW.openMenu) return;
+		if (!event.target.closest(".mw-menu") && !event.target.closest("[aria-haspopup]")) {
+			MW.openMenu = "";
+			mwRenderHead(); mwRenderToolbar(); mwRenderList(); mwRenderInsp();
+		}
+	});
 }
 
 async function refreshTokens() {
@@ -6563,7 +7830,7 @@ function lockInstallBackground(reason) {
 		INSTALL_UI.viewScrollTop = view?.scrollTop || 0;
 		document.body.classList.add("install-overlay-open");
 		if (view) view.style.overflow = "hidden";
-		INSTALL_UI.inertNodes = ["appHeader", "rail", "memoryBrowser", "detail"]
+		INSTALL_UI.inertNodes = ["appHeader", "rail", "detail"]
 			.map((id) => document.getElementById(id)).filter(Boolean)
 			.map((node) => ({ node, inert: node.inert }));
 		INSTALL_UI.inertNodes.forEach(({ node }) => { node.inert = true; });
@@ -10404,50 +11671,6 @@ function viewRules(v) {
 	});
 }
 
-function viewCandidates(v) {
-	const cands = S.candidates || [];
-	const canReview = projectCan("project.memory.write");
-	const reviewCopy = projectCapabilityActionCopy(
-		"project.memory.write",
-		"Read-only — no review action is available to viewers.",
-	);
-	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:980px"><h3>Suggestions to review</h3><div class="help">${canReview
-		? "Things Itsuki noticed but isn’t sure about yet. Keep the ones worth remembering, drop the rest."
-		: "You can inspect these suggestions. Only a project member or admin can promote, merge, reject, or suppress them."}</div></div>`;
-	if (!cands.length) {
-		wrap.appendChild(el("div","empty","Nothing waiting for you."));
-		v.appendChild(wrap);
-		return;
-	}
-	const list = el("div","panel-grid");
-	cands.forEach((c, idx) => {
-		const evidence = (c.evidence || []).map(e => e.text || e.snippet).filter(Boolean).join(" ").slice(0, 360);
-		const label = c.labelGuess || c.label || "Candidate";
-		const role = c.roleGuess || c.clusterGuess || "unknown";
-		const confidence = c.confidence == null ? "n/a" : `${Math.round(Number(c.confidence) * 100)}%`;
-		const card = el("div","action-box");
-		card.innerHTML = `<h3>${idx + 1}. ${esc(label)}</h3>
-			<div class="kv">Type guess: <b>${esc(role)}</b></div>
-			<div class="kv">Confidence: <b>${esc(confidence)}</b></div>
-			<div class="kv">Why candidate: <b>${esc(c.reason || c.strength || "weak/unclear")}</b></div>
-			<div class="help" style="margin-top:8px">${esc(evidence || "No evidence snippet stored.")}</div>
-			<div class="kv" style="margin-top:8px">First seen: <b>${fmtDate(c.firstSeenAt)}</b></div>
-			<div class="kv">Last seen: <b>${fmtDate(c.lastSeenAt)}</b></div>
-			<div class="kv">Mentions / sessions: <b>${c.mentionCount || 1}</b> / <b>${c.sessionCount || 1}</b></div>
-			${canReview ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
-				<button class="ghost mini" onclick="candidatePromote('${esc(c.id)}','promote_to_node')">Promote to Node</button>
-				<button class="ghost mini" onclick="candidatePromote('${esc(c.id)}','promote_to_event')">Promote to Event</button>
-				<button class="ghost mini" onclick="candidateMerge('${esc(c.id)}')">Merge</button>
-				<button class="ghost mini danger" onclick="candidateReject('${esc(c.id)}')">Reject</button>
-				<button class="ghost mini danger" onclick="candidateReject('${esc(c.id)}','suppress_similar')">Ignore Similar</button>
-			</div>` : `<div class="help" role="note" style="margin-top:12px">${esc(reviewCopy)}</div>`}`;
-		list.appendChild(card);
-	});
-	wrap.appendChild(list);
-	v.appendChild(wrap);
-}
-
 function viewHelp(v) {
 	const topics = [
 		["How Itsuki works", "Connected tools save durable context into pages, nodes, slices, events, edges, and clusters. Recall asks that memory for compact context."],
@@ -10529,7 +11752,7 @@ const LEGAL_PAGES = {
 				<li>You grant Itsuki only the limited, non-exclusive license necessary to operate the Service for you: hosting, storing, processing, indexing, backing up, and returning Your Content to you and to the tools you connect. This license ends when you delete the content or your account, except for short-lived infrastructure backups.</li>
 				<li>We do not sell Your Content, do not use it for advertising, and do not use it to train AI models.</li>
 				<li>You are responsible for Your Content and must have the necessary rights to store it. Avoid storing sensitive or regulated data (for example medical records or payment card data) unless you have confirmed the Service is appropriate for that use.</li>
-				<li>You can export the memory space resolved by your current project and session as JSON. A confirmed API request can erase one resolved memory space. Settings does not expose project-wide deletion; that remains unavailable until convergent lifecycle cleanup can verify the primary space and every registered SDK subtenant, index, queue, artifact, and retry path together.</li>
+				<li>You can export the memory space resolved by your current project and session as JSON. A confirmed API request can erase one resolved memory space. Project-wide deletion is available in Settings through the verified lifecycle workflow: preview-first, typed confirmation, and convergent verification across the primary space and every registered SDK subtenant, index, queue, artifact, and retry path before completion is ever reported.</li>
 			</ul>
 
 			<h2>7. AI-generated output</h2>
@@ -11621,6 +12844,8 @@ async function loadSettings() {
 			error: "",
 		};
 		updatePlaygroundVisibility();
+		SET.lifecycle = null;
+		loadLifecycle();
 		loaded = true;
 	} catch (error) {
 		if (error?.projectChanged || projectEpoch !== S.projectEpoch || loadId !== SET.loadId) return;
@@ -11803,20 +13028,270 @@ function setProjectGeneral() {
 }
 
 function setDangerZone() {
-	const canDeleteProject = setCan("project.delete");
+	const lc = SET.lifecycle;
+	if (!lc || lc.unavailable) {
+		// Capability-gated rollout: until the deployed backend answers the
+		// lifecycle probe, the destructive controls stay honestly disabled.
+		return `
+		<div class="set-danger">
+			<div class="set-danger-row">
+				<div><b>Project lifecycle</b>
+					<span>${lc?.unavailable ? "Lifecycle controls are unavailable right now. Reload Settings to try again." : "Loading lifecycle state…"}</span></div>
+			</div>
+		</div>`;
+	}
+	const caps = lc.capabilities ?? {};
+	const runActive = lc.active_run && ["accepted", "running", "verifying", "failed_retryable"].includes(lc.active_run.status);
+	const busy = SET.lcBusy || runActive;
+	const state = lc.project?.lifecycle_state ?? "active";
+	const confirm = SET.lcConfirm;
+	const runBlock = lc.active_run ? `
+			<div class="set-danger-row" id="lcRunRow">
+				<div><b>${esc(lcActionLabel(lc.active_run.action))} — ${esc(lc.active_run.status.replace("_", " "))}</b>
+					<span role="status" aria-live="polite">Phase: ${esc(lc.active_run.phase)}.
+						${lc.active_run.counts?.memory_spaces != null ? `${lc.active_run.counts.spaces_completed ?? 0}/${lc.active_run.counts.memory_spaces} memory spaces.` : ""}
+						${lc.active_run.counts?.deleted != null ? ` ${lc.active_run.counts.deleted} rows removed.` : ""}
+						${lc.active_run.error_code ? ` Last error: ${esc(lc.active_run.error_code)}.` : ""}</span></div>
+				${lc.active_run.status === "failed_retryable"
+					? `<button onclick="lcRetryRun('${esc(lc.active_run.id)}')"${SET.lcBusy ? " disabled" : ""}>Retry</button>`
+					: `<button class="ghost" disabled>In progress…</button>`}
+			</div>` : "";
+	const restorable = (lc.restorable_projects ?? []).filter((p) => p.lifecycle_state === "archived");
+	const transferTargets = (SET.data?.org_members ?? []).filter((m) => m.user_id !== SET.data?.project?.owner_user_id);
+	const confirmBlock = (action) => (confirm && confirm.action === action ? `
+			<div class="set-danger-row set-danger-confirm" id="lcConfirmRow">
+				<span id="lcConfirmSummary">${esc(confirm.summaryText)}</span>
+				<label class="sr-only" for="lcConfirmName">Type the project name to confirm</label>
+				<input id="lcConfirmName" type="text" autocomplete="off" spellcheck="false"
+					placeholder="Type ${esc(SET.data?.project?.name ?? "the project name")} to confirm"
+					oninput="lcSyncConfirm()" />
+				<button class="danger" id="lcConfirmGo" disabled onclick="lcExecuteConfirmed()">${esc(lcActionLabel(action))}</button>
+				<button class="ghost" onclick="lcCancelConfirm()">Cancel</button>
+			</div>` : "");
 	return `
+		${restorable.length ? `
+		<div class="set-danger" style="border-color: var(--warning-border); background: var(--warning-bg);">
+			${restorable.map((p) => `
+			<div class="set-danger-row">
+				<div><b>Restore “${esc(p.name)}”</b>
+					<span>Archived project. Restoring re-enables it with a fresh lifecycle epoch; stale pre-archive work stays cancelled.</span></div>
+				<button onclick="lcRestoreProject('${esc(p.id)}')"${SET.lcBusy ? " disabled" : ""}>Restore</button>
+			</div>`).join("")}
+		</div>` : ""}
+		<div class="set-danger" style="border-color: var(--line, var(--warning-border)); background: transparent;">
+			${runBlock}
+			<div class="set-danger-row">
+				<div><b>Archive project</b>
+					<span>Reversible. Fences all writes and API activity, cancels in-flight processing, preserves every memory. Restore from Settings at any time.</span></div>
+				<button class="ghost" onclick="lcStartAction('archive')"
+					${busy || !caps.archive ? " disabled" : ""}
+					title="${caps.archive ? "Archive this project." : state !== "active" ? "The project is not active." : "You need project admin access."}">Archive</button>
+			</div>
+			<div class="set-danger-row">
+				<div><b>Transfer ownership</b>
+					<span>Moves governance to another member of this organization. Storage, memory-space and vector identities never change. You keep admin access.</span></div>
+				<div class="set-danger-confirm">
+					<label class="sr-only" for="lcTransferTo">New owner</label>
+					<select id="lcTransferTo" ${busy || !lc.transfer_allowed ? "disabled" : ""}>
+						<option value="">Choose a member…</option>
+						${transferTargets.map((m) => `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`).join("")}
+					</select>
+					<button onclick="lcTransferOwnership()"
+						${busy || !lc.transfer_allowed ? " disabled" : ""}
+						title="${lc.transfer_allowed ? "Transfer this project." : "Only the organization owner can transfer an active, non-default project."}">Transfer</button>
+				</div>
+			</div>
+		</div>
 		<div class="set-danger">
 			<div class="set-danger-row">
 				<div><b>Delete project memory</b>
-					<span>Unavailable until the convergent lifecycle cleanup can verify every primary and SDK subtenant storage space, index, queue and artifact has been removed. The existing scoped compatibility reset is intentionally not exposed here because it is not project-wide.</span></div>
-				<button class="danger" disabled title="Project-wide deletion arrives with the verified lifecycle workflow.">Unavailable</button>
+					<span>Deletes every memory in this project — the root space and every SDK subtenant, including sources, vectors, exports and queued work — then returns the empty project to active. Settings, members and keys survive. Irreversible.</span></div>
+				<button class="danger" onclick="lcStartAction('memory_purge')"
+					${busy || !caps.memory_purge ? " disabled" : ""}
+					title="${caps.memory_purge ? "Preview what will be deleted." : "You need project admin access."}">Delete memory…</button>
 			</div>
+			${confirmBlock("memory_purge")}
 			<div class="set-danger-row">
 				<div><b>Delete project</b>
-					<span>A future verified workflow will permanently delete this project and everything in it. It is not available yet because safe deletion must converge across memory, indexes and queues; exposing it earlier could leave data stranded.</span></div>
-				<button class="danger" disabled title="${canDeleteProject ? "Coming with project lifecycle." : "Only the organization owner can delete a project."}">Delete project</button>
+					<span>Permanently deletes the project: all memory, keys, members and settings. A content-free tombstone remains. This cannot be undone.</span></div>
+				<button class="danger" onclick="lcStartAction('project_delete')"
+					${busy || !caps.project_delete ? " disabled" : ""}
+					title="${caps.project_delete ? "Preview permanent deletion." : lc.project?.is_default ? "The default project cannot be deleted." : "Only the organization owner can delete a project."}">Delete project…</button>
 			</div>
+			${confirmBlock("project_delete")}
 		</div>`;
+}
+
+function lcActionLabel(action) {
+	return {
+		memory_purge: "Delete project memory",
+		project_delete: "Delete project",
+		archive: "Archive project",
+		restore: "Restore project",
+	}[action] ?? action;
+}
+
+async function loadLifecycle() {
+	if (!S.projectId) return;
+	const projectEpoch = S.projectEpoch;
+	try {
+		const res = await api(`/v1/settings/lifecycle?projectId=${encodeURIComponent(S.projectId)}`);
+		if (projectEpoch !== S.projectEpoch) return;
+		SET.lifecycle = res;
+	} catch (error) {
+		if (projectEpoch !== S.projectEpoch) return;
+		SET.lifecycle = { unavailable: true, error: error?.message ?? "" };
+	}
+	if (S.view === "settings") renderSettingsSection();
+	lcSchedulePoll();
+}
+
+function lcSchedulePoll() {
+	clearTimeout(SET.lcPollTimer);
+	const run = SET.lifecycle?.active_run;
+	if (!run || !["accepted", "running", "verifying"].includes(run.status)) return;
+	SET.lcPollTimer = setTimeout(() => {
+		if (S.view === "settings") loadLifecycle();
+	}, 4000);
+}
+
+async function lcStartAction(action) {
+	if (SET.lcBusy) return;
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		const res = await api("/v1/settings/lifecycle/preview", {
+			method: "POST",
+			body: JSON.stringify({ projectId: S.projectId, action }),
+		});
+		const p = res.preview;
+		const c = p.counts ?? {};
+		if (action === "archive") {
+			// Reversible: no typed confirmation, but still explicit.
+			SET.lcBusy = false;
+			await lcExecute(action, { idempotencyKey: crypto.randomUUID() });
+			return;
+		}
+		SET.lcConfirm = {
+			action,
+			token: p.confirmation?.token ?? null,
+			expiresAt: p.confirmation?.expires_at ?? 0,
+			summaryText: `${p.memory_spaces} memory space(s): ${c.nodes ?? 0} facts, ${c.pages ?? 0} pages, ${c.source_episodes ?? 0} source episodes, ${c.exports ?? 0} exports, ${c.pending_jobs ?? 0} jobs still processing.`,
+		};
+	} catch (error) {
+		toast(error?.message || "The preview failed.", true);
+	} finally {
+		SET.lcBusy = false;
+		renderSettingsSection();
+		const input = $("#lcConfirmName");
+		if (input) input.focus();
+	}
+}
+
+function lcSyncConfirm() {
+	const go = $("#lcConfirmGo");
+	const input = $("#lcConfirmName");
+	if (go && input) go.disabled = input.value.trim() !== (SET.data?.project?.name ?? "");
+}
+
+function lcCancelConfirm() {
+	SET.lcConfirm = null;
+	renderSettingsSection();
+}
+
+async function lcExecuteConfirmed() {
+	const confirm = SET.lcConfirm;
+	const typed = $("#lcConfirmName")?.value?.trim();
+	if (!confirm || typed !== (SET.data?.project?.name ?? "")) return;
+	await lcExecute(confirm.action, {
+		token: confirm.token,
+		confirmName: typed,
+		idempotencyKey: crypto.randomUUID(),
+	});
+}
+
+async function lcExecute(action, extra) {
+	if (SET.lcBusy) return;
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		await api("/v1/settings/lifecycle/execute", {
+			method: "POST",
+			body: JSON.stringify({ projectId: S.projectId, action, ...extra }),
+		});
+		SET.lcConfirm = null;
+		toast(`${lcActionLabel(action)}: accepted. Progress shows below.`);
+		await loadLifecycle();
+		if (action === "archive") { await refreshProjects().catch(() => {}); }
+	} catch (error) {
+		toast(error?.message || "That lifecycle operation could not start.", true);
+	} finally {
+		SET.lcBusy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
+}
+
+async function lcRetryRun(runId) {
+	if (SET.lcBusy) return;
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		await api("/v1/settings/lifecycle/retry", {
+			method: "POST",
+			body: JSON.stringify({ projectId: S.projectId, runId }),
+		});
+		await loadLifecycle();
+	} catch (error) {
+		toast(error?.message || "The retry could not start.", true);
+	} finally {
+		SET.lcBusy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
+}
+
+async function lcRestoreProject(projectId) {
+	if (SET.lcBusy) return;
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		await api("/v1/settings/lifecycle/execute", {
+			method: "POST",
+			body: JSON.stringify({ projectId, action: "restore", idempotencyKey: crypto.randomUUID() }),
+		});
+		toast("Restore accepted. The project returns to the selector when it completes.");
+		await loadLifecycle();
+		await refreshProjects().catch(() => {});
+	} catch (error) {
+		toast(error?.message || "The restore could not start.", true);
+	} finally {
+		SET.lcBusy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
+}
+
+async function lcTransferOwnership() {
+	if (SET.lcBusy) return;
+	const recipient = $("#lcTransferTo")?.value;
+	if (!recipient) { toast("Choose the new owner first.", true); return; }
+	const revision = SET.lifecycle?.project?.revision;
+	if (!revision) { toast("Reload Settings before transferring.", true); return; }
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		await api("/v1/settings/lifecycle/transfer", {
+			method: "POST",
+			body: JSON.stringify({ projectId: S.projectId, recipientUserId: recipient, expectedRevision: revision }),
+		});
+		toast("Ownership transferred. You keep admin access.");
+		await refreshProjects().catch(() => {});
+		await loadSettings();
+		await loadLifecycle();
+	} catch (error) {
+		toast(error?.message || "The transfer could not complete.", true);
+	} finally {
+		SET.lcBusy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
 }
 
 async function saveProjectGeneral() {
@@ -15068,53 +16543,15 @@ async function doSave(payload) {
 		return true;
 	} catch (e) { toast("Save failed: " + e.message, true); return false; }
 }
-async function doRecall(query, opts = {}) {
+async function doRecall(query) {
 	try {
 		const r = await api("/v1/recall", { method:"POST", body: JSON.stringify(scopedPayload({ query })) });
-		if (opts.panel) {
-			S.recallResult = r;
-			renderRecallResults();
-		}
 		toast(r.context ? `Recall "${query}":\n${r.context}` : `Recall "${query}": nothing found.`);
 	} catch (e) { toast("Recall failed: " + e.message, true); }
 }
 
 async function postAction(path, payload) {
 	return api(path, { method:"POST", body: JSON.stringify(scopedPayload(payload)) });
-}
-
-async function candidatePromote(id, action = "promote_to_node") {
-	if (!requireProjectCapability("project.memory.write", "Viewers cannot review memory suggestions in this project.")) return;
-	try {
-		await postAction(`/v1/candidates/${encodeURIComponent(id)}/promote`, { action });
-		toast("Candidate promoted.");
-		await load();
-		setView("candidates");
-	} catch (e) { toast("Candidate promote failed: " + e.message, true); }
-}
-
-async function candidateReject(id, action = "reject") {
-	if (!requireProjectCapability("project.memory.write", "Viewers cannot review memory suggestions in this project.")) return;
-	try {
-		await postAction(`/v1/candidates/${encodeURIComponent(id)}/reject`, { action });
-		toast(action === "suppress_similar" ? "Candidate suppressed." : "Candidate rejected.");
-		await load();
-		setView("candidates");
-	} catch (e) { toast("Candidate reject failed: " + e.message, true); }
-}
-
-async function candidateMerge(id) {
-	if (!requireProjectCapability("project.memory.write", "Viewers cannot review memory suggestions in this project.")) return;
-	const nodes = (S.data && S.data.nodes) || [];
-	const fallback = nodes[0]?.id || "";
-	const nodeId = prompt("Merge into node id:", fallback);
-	if (!nodeId) return;
-	try {
-		await postAction(`/v1/candidates/${encodeURIComponent(id)}/merge`, { nodeId });
-		toast("Candidate merged.");
-		await load();
-		setView("candidates");
-	} catch (e) { toast("Candidate merge failed: " + e.message, true); }
 }
 
 async function deleteLastRun() {
@@ -15225,9 +16662,6 @@ function viewDev(v) {
 function select(id, kind = "node") {
 	if (String(id).startsWith("node:") || String(id).startsWith("page:")) S.selected = id;
 	else S.selected = itemKey(kind, id);
-	document.querySelectorAll(".nl-item").forEach(x=>x.classList.remove("sel"));
-	renderPageList();
-	renderNodeList();
 	renderDetail();
 	if (S.network && S.view==="graph") {
 		setTimeout(() => {
@@ -15332,8 +16766,6 @@ function closeDetail() {
 	S.selected = null;
 	$("#main").classList.remove("detail-open");
 	$("#detail").innerHTML = "";
-	renderPageList();
-	renderNodeList();
 	if (S.network && S.view==="graph") setTimeout(() => graphFit(260), 180);
 }
 

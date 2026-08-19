@@ -30,7 +30,7 @@ describe("enterprise app shell", () => {
 	});
 
 	it("keeps memory content and onboarding aligned to the same visual system", () => {
-		expect(css).toContain("width: min(calc(100% - 48px), var(--content-max));");
+		expect(css).toContain("grid-template-columns: minmax(0, 64fr) minmax(400px, 36fr);");
 		expect(css).toMatch(/\.setup-step-button\[aria-selected="true"\],[\s\S]{0,180}\.setup-step-button\[aria-current="step"\] \{[\s\S]{0,220}border-left-color: var\(--accent\);/);
 		expect(css).toMatch(/\.setup-expanded-dialog \.setup-guide-section\.is-current::after \{[\s\S]{0,180}border-color: var\(--accent\);[\s\S]{0,180}color: var\(--accent\);/);
 	});

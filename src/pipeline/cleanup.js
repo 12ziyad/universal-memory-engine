@@ -736,6 +736,7 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		"semantic_atom_candidates",
 		"semantic_atom_capture_runs",
 		"staged_memories",
+		"memory_source_links",
 		"webhook_deliveries",
 		"webhooks",
 		"playground_messages",
@@ -945,6 +946,9 @@ export async function deleteAllMemories(env, userId, confirm, { auditIntent = nu
 		"semantic_atom_candidates",
 		"semantic_atom_capture_runs",
 		"staged_memories",
+		// Provenance links carry no text, but a link that outlives the objects it
+		// names is a record that the account once held a memory from that source.
+		"memory_source_links",
 	];
 	const counts = {};
 	for (const table of tables) {

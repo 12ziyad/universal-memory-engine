@@ -58,6 +58,8 @@ export default defineConfig(async () => {
 				"test/hook_outbox.spec.js",
 				"test/kernel-parity.spec.js",
 				"test/migrations_append_only.spec.js",
+				// Parses migrations/*.sql from disk; unit config only.
+				"test/schema_census.spec.js",
 				"test/project_identity.spec.js",
 				"test/sdk_js.spec.js",
 				"test/temporal_holdout.spec.js",

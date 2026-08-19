@@ -1204,7 +1204,7 @@ GET /v1/jobs?cancelled=false   # only work that actually failed`)}
 <tr><td><code>DELETE /v1/memories</code></td><td>API keys and sessions</td><td>Preview-first, addresses the one memory space resolved for the request (including a specifically addressed sub-tenant), and carries the erasure barrier described above. <b>This is the route to build on.</b></td></tr>
 <tr><td><code>POST /v1/actions/delete-all</code></td><td>Signed-in sessions only</td><td>Legacy compatibility route for the session's one resolved memory space. It refuses API keys with <code>token_not_allowed</code> and is intentionally not exposed in Settings.</td></tr>
 </table>
-<p>A project may contain a primary space plus registered SDK sub-tenant spaces. These routes never claim to iterate all of them. True project-wide deletion is not self-serve until the convergent lifecycle workflow can verify every project space, index, queue, artifact, and retry path together.</p>
+<p>A project may contain a primary space plus registered SDK sub-tenant spaces. These routes never claim to iterate all of them. True project-wide deletion is self-serve from Settings via the verified lifecycle workflow: it previews first, requires a typed confirmation bound to your session, then converges across every registered project space, index, queue, artifact, and retry path — and reports completion only after a residual scan proves every store empty.</p>
 
 <h2>What is kept</h2>
 <p>Erasure removes your memory. It retains the bookkeeping that proves the deletion happened — deletion records, job and receipt history, and the timestamps above. That audit trail carries no memory content, and it is what lets a later preview honestly answer "nothing left".</p>
