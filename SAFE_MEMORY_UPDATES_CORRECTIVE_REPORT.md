@@ -2,7 +2,7 @@
 
 Date: 2026-08-19 · Supersedes `SAFE_MEMORY_UPDATES_REPORT.md` (marked retracted)
 
-## Verdict: **GO for the platform** · **HOLD on two npm publications** (external credential)
+## Verdict: **GO for the platform and the Python SDK** · **HOLD on two npm publications** (external credential)
 
 Eight release blockers found by independent review were reproduced with failing
 tests, fixed, and verified — in the deterministic suite and again against
@@ -138,14 +138,18 @@ the same.
 | Artifact | Was | Now |
 |---|---|---|
 | JS SDK | package.json 0.3.0, `VERSION = "0.2.1"` | both 0.3.0; user-agent derives from `VERSION` |
-| Python SDK | **published 0.4.0 reports `VERSION = "0.3.0"`** | corrected to 0.4.1 (0.4.0 is immutable on PyPI) |
+| Python SDK | **published 0.4.0 reports `VERSION = "0.3.0"`** | **0.4.1 PUBLISHED** to PyPI (0.4.0 is immutable); clean-installed and verified: dist 0.4.1 == `VERSION` 0.4.1, all six methods present on sync + async |
 | Tests | pinned literals that enshrined the mismatch | both suites assert **agreement** with packaging metadata |
 | n8n | description-only tests | 8 execute-level tests driving the real branches |
 | Dashboard | markup assertions only | 11 behaviour tests (draft preservation on 412, load-latest rebase, bounded history paging, stale-selection discard, escaping) |
 
 The Python publish gate caught a **second** hardcoded pin (`test_client.py`)
-that I had missed — recorded here because it is exactly the failure mode this
-campaign exists to correct.
+that I had missed, and then a **third** failure — `tomllib` is stdlib only from
+Python 3.11 while this SDK supports 3.9+, so the 3.10 matrix leg failed. Both
+are recorded here because they are exactly the failure mode this campaign
+exists to correct: I changed a version and did not re-run the whole suite, and
+the gate, not the author, caught it. Publication succeeded on the third attempt
+and the released artifact was verified by clean install.
 
 ## Test results (final tree)
 
