@@ -293,6 +293,24 @@ export class MemoryClient {
 		}));
 	}
 
+	/**
+	 * Correct one memory. Long-form name; `update()` is the retained short alias
+	 * and both are supported and tested.
+	 */
+	updateMemory(memoryId, fields, opts = {}) {
+		return this.update(memoryId, fields, opts);
+	}
+
+	/** One memory's revision history. Long-form name for `history()`. */
+	memoryHistory(memoryId, opts = {}) {
+		return this.history(memoryId, opts);
+	}
+
+	/** Restore a revision as a new forward revision. Long-form for `rollback()`. */
+	rollbackMemory(memoryId, toRevision, opts = {}) {
+		return this.rollback(memoryId, toRevision, opts);
+	}
+
 	/** One memory's bounded revision history, newest first. */
 	history(memoryId, opts = {}) {
 		const { cursor, limit, userId } = asOptions(opts, "history options", ["cursor", "limit", "userId"]);

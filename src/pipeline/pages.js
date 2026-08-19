@@ -608,15 +608,26 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 	// own batch — a barrier confirmed after this packet's acceptance rolls the
 	// whole write back instead of publishing content the user just erased.
 	const pageAcceptedAt = Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? NaN);
+	/**
+	 * Commit one page statement behind the deletion barrier, and report how many
+	 * rows it actually changed. Callers MUST inspect `applied`: a revision-fenced
+	 * update that matched nothing means the page moved under this save, and
+	 * reporting it as written would claim work that never landed.
+	 */
 	const commitFenced = async (statement) => {
-		if (!Number.isFinite(pageAcceptedAt) || pageAcceptedAt <= 0) return statement.run();
-		return env.DB.batch([
+		if (!Number.isFinite(pageAcceptedAt) || pageAcceptedAt <= 0) {
+			const direct = await statement.run();
+			return { applied: Number(direct?.meta?.changes ?? 0) > 0, changes: Number(direct?.meta?.changes ?? 0) };
+		}
+		const batched = await env.DB.batch([
 			env.DB.prepare(
 				`INSERT INTO fence_guard (violation)
 				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
 			).bind(userId, pageAcceptedAt),
 			statement,
 		]);
+		const changes = Number(batched?.[1]?.meta?.changes ?? 0);
+		return { applied: changes > 0, changes };
 	};
 	const cancelledPageResult = async () => {
 		await updateExtractionRun(env, userId, runId, {
@@ -682,7 +693,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?,
 				revision = COALESCE(revision, 1) + 1
 			 WHERE id = ? AND user_id = ? AND project_id IS ?
-			   AND (? IS NULL OR COALESCE(revision, 1) = ?)`,
+			   AND COALESCE(revision, 1) = ?`,
 		)
 			.bind(
 				page.title,
@@ -709,14 +720,21 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				match.id,
 				userId,
 				projectScope.projectId,
-				// Fenced on the revision this merge read. NULL keeps the historical
-				// behaviour for rows that predate versioning; a real revision makes
-				// a stale merge lose to an explicit user edit committed since.
-				Number(match?.revision) >= 1 ? Number(match.revision) : null,
-				Number(match?.revision) >= 1 ? Number(match.revision) : null,
+				// The revision this merge read. A legacy NULL revision is logical r1
+				// and is COMPARED — it must never switch the fence off, because a
+				// missing revision is exactly when staleness is most likely.
+				Number(match?.revision) >= 1 ? Number(match.revision) : 1,
 			);
 		try {
-			await commitFenced(updateStatement);
+			const pageWrite = await commitFenced(updateStatement);
+			if (!pageWrite.applied) {
+				// The page advanced past the revision this merge read (an explicit
+				// user edit, or a concurrent save). Losing the CAS is the correct
+				// outcome; claiming a successful update here would be a lie.
+				const stale = new Error("page revision changed during save");
+				stale.code = "PAGE_STALE_REVISION";
+				throw stale;
+			}
 		} catch (error) {
 			if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
 				return cancelledPageResult();

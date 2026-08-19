@@ -46,5 +46,6 @@
  "0045_project_lifecycle.sql": "bb1f750e24288eec36cebd18ce442d39fa329ca0b6ae5b08d48803b9dc4705cf",
  "0046_lifecycle_driver_lease.sql": "4bbaacc819165e47a2c9cbaf225148e6ad0e8893ab8bd4dd7d72259b736c9f21",
  "0047_memory_revisions.sql": "b63232562a8281a4eb63ee787c9829736afeeb4a25e421a0825ed57ec707f728",
- "0048_memory_revision_scope.sql": "c398439ea79f94bdb163c52b9f768cf1dc585dd9b7de03ef0e1de63aea18b437"
+ "0048_memory_revision_scope.sql": "c398439ea79f94bdb163c52b9f768cf1dc585dd9b7de03ef0e1de63aea18b437",
+ "0049_vector_artifact_ledger.sql": "a8841c6deccdda6cd4e5a96c164c928a37a1efbcae188f64713c5dd1fd86e979"
 }

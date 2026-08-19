@@ -53,6 +53,7 @@ import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
 import { settleStagedText } from "./staged_text.js";
 import { runAi } from "../lib/ai_meter.js";
+import { applyFencedUpdate } from "../lib/memory_versions.js";
 import { responseText, extractJson } from "./llm.js";
 
 const SOURCE = "save_conversation";
@@ -1100,7 +1101,14 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		const observed = await env.DB.prepare(
 			"SELECT COALESCE(revision, 1) AS revision FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		).bind(job.pageId, userId).first().catch(() => null);
-		job.observedRevision = observed ? Number(observed.revision) : null;
+		if (!observed) {
+			// No readable revision means no safe fence. Failing here keeps the job
+			// retryable; writing unfenced would risk overwriting a user's edit.
+			const unreadable = new Error("page revision unreadable; enrichment cannot fence safely");
+			unreadable.code = "ENRICH_REVISION_UNREADABLE";
+			throw unreadable;
+		}
+		job.observedRevision = Number(observed.revision);
 	}
 	try {
 		const accountRules = await resolveAdmissionRules(env, userId);
@@ -1214,7 +1222,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			derivedLines,
 			savedAt: job.lastTs ?? Date.now(),
 		});
-		await env.DB.prepare(
+		const enrichStatement = env.DB.prepare(
 			// Enrichment ran against the page revision the job observed. If an
 			// explicit edit landed since, this write must lose: zero changed rows
 			// leaves the page at the user's version and the job is re-driven.
@@ -1223,7 +1231,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 				enrich_status = 'enriched', extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
 				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
 			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
-			   AND (? IS NULL OR COALESCE(revision, 1) = ?)`,
+			   AND COALESCE(revision, 1) = ?`,
 		).bind(
 			title,
 			canonicalTitle(title),
@@ -1236,9 +1244,19 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			job.pageId,
 			userId,
 			project.project_id,
-			job.observedRevision ?? null,
-			job.observedRevision ?? null,
-		).run();
+			// Never NULL: a revision that could not be read fails the job closed
+			// above rather than becoming an unfenced write.
+			job.observedRevision,
+		);
+		const enrichWrite = await applyFencedUpdate(enrichStatement, { label: "mcp page enrichment" });
+		if (!enrichWrite.applied) {
+			// The page moved under this enrichment (an explicit edit, a delete, or a
+			// project fence). Marking the job enriched here would claim work that
+			// never landed, so fail closed and let the job be re-driven.
+			const stale = new Error("page revision changed during enrichment");
+			stale.code = "ENRICH_STALE_REVISION";
+			throw stale;
+		}
 		await updateMemoryJob(env, userId, job.jobId, {
 			status: "enriched",
 			receiptId: receipt?.id ?? null,

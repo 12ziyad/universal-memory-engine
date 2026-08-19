@@ -562,6 +562,11 @@ export async function applyMemoryChange(env, ctx, {
 	// runs on EVERY door (REST and MCP), not only audited ones.
 	const capabilityGuard = buildCapabilityGuard(env, { actor, orgId, projectId: project?.id ?? null, now });
 	if (capabilityGuard) statements.push(capabilityGuard);
+	// The credential itself, not just the role behind it.
+	const credentialGuard = actor?.credential
+		? credentialGuardStatement(env, { credential: actor.credential, actorUserId: actor.userId, now })
+		: null;
+	if (credentialGuard) statements.push(credentialGuard);
 
 	if (changed) {
 		const historyRows = [];
@@ -627,6 +632,11 @@ export async function applyMemoryChange(env, ctx, {
 		if (cause === "fence" || cause === "revision_race") {
 			// Distinguish an authorization loss from a concurrency loss so the
 			// caller gets a truthful code rather than a generic conflict.
+			if (credentialGuard && !(await credentialStillValid(env, { credential: actor.credential, actorUserId: actor.userId }))) {
+				throw new VersionError("credential_invalid",
+					"The credential authorizing this request is no longer valid.", 401,
+					{ credential_kind: actor.credential.kind });
+			}
 			if (capabilityGuard && !(await actorStillAuthorized(env, { actor, orgId, projectId: project?.id ?? null }))) {
 				throw new VersionError("forbidden",
 					"Your permission for this project changed before the update committed.", 403,
@@ -650,6 +660,108 @@ export async function applyMemoryChange(env, ctx, {
 		if (ctx?.waitUntil) ctx.waitUntil(run); else await run.catch(() => {});
 	}
 	return result;
+}
+
+/**
+ * Run one revision-fenced UPDATE and report whether it actually applied.
+ *
+ * Every automatic semantic writer goes through this. A CAS that matched no row
+ * means the object moved under the writer: the correct outcome is `stale`, and
+ * the caller must abandon or recompute — never report success, settle a job, or
+ * start dependent work. Returning a value the caller is forced to read is the
+ * whole point; a bare `.run()` lets a lost CAS pass for a win.
+ */
+export async function applyFencedUpdate(statement, { label = "semantic write" } = {}) {
+	const result = await statement.run();
+	const changes = Number(result?.meta?.changes ?? 0);
+	if (changes > 0) return { applied: true, stale: false, changes };
+	return { applied: false, stale: true, changes: 0, label };
+}
+
+/**
+ * Commit-time CREDENTIAL fence.
+ *
+ * RBAC alone is not enough. Membership can be intact while the specific
+ * credential that authorized this request has been revoked, expired, had its
+ * scopes narrowed, or been rebound to another project between preflight and
+ * commit. This statement re-proves the exact credential row inside the same
+ * batch that writes, so any of those changes aborts the whole mutation.
+ *
+ * Absence is never permission: a credential row that no longer exists fails.
+ */
+function credentialGuardStatement(env, { credential, actorUserId, now = Date.now() }) {
+	if (!credential?.kind) return null;
+	if (credential.kind === "token") {
+		if (!credential.id) return null;
+		return env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+			   SELECT 1 FROM connection_tokens t
+			    WHERE t.id = ?
+			      AND t.user_id = ?
+			      AND t.status = 'active'
+			      AND t.revoked_at IS NULL
+			      -- connection_tokens carries no expiry column; revocation and
+			      -- status are its lifecycle. Sessions below do carry expires_at.
+			      -- The credential must still be bound to the project being written.
+			      AND (? IS NULL OR t.project_id IS NULL OR t.project_id = ?)
+			      -- ...and must still carry the scope this operation requires.
+			      AND (? IS NULL OR EXISTS (
+			        SELECT 1 FROM json_each(COALESCE(t.scopes_json, '[]'))
+			         WHERE json_each.value = ? OR json_each.value = '*'
+			      ))
+			 )`,
+		).bind(
+			credential.id, actorUserId,
+			credential.projectId ?? null, credential.projectId ?? null,
+			credential.requiredScope ?? null, credential.requiredScope ?? null,
+		);
+	}
+	if (credential.kind === "session") {
+		if (!credential.id) return null;
+		return env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+			   SELECT 1 FROM sessions s
+			    WHERE s.id = ?
+			      AND s.user_id = ?
+			      AND s.revoked_at IS NULL
+			      AND (s.expires_at IS NULL OR s.expires_at > ?)
+			 )`,
+		).bind(credential.id, actorUserId, now);
+	}
+	return null;
+}
+
+/** Re-evaluate the credential as a read, to explain a fence abort truthfully. */
+async function credentialStillValid(env, { credential, actorUserId }) {
+	const statement = credentialGuardStatement(env, { credential, actorUserId });
+	if (!statement) return true;
+	try {
+		if (credential.kind === "token") {
+			const row = await env.DB.prepare(
+				`SELECT status, revoked_at, project_id, scopes_json
+				   FROM connection_tokens WHERE id = ? AND user_id = ? LIMIT 1`,
+			).bind(credential.id, actorUserId).first();
+			if (!row) return false;
+			if (row.status !== "active" || row.revoked_at != null) return false;
+			if (credential.projectId && row.project_id != null && row.project_id !== credential.projectId) return false;
+			if (credential.requiredScope) {
+				let scopes = [];
+				try { scopes = JSON.parse(row.scopes_json ?? "[]"); } catch { scopes = []; }
+				if (!scopes.includes(credential.requiredScope) && !scopes.includes("*")) return false;
+			}
+			return true;
+		}
+		const row = await env.DB.prepare(
+			"SELECT revoked_at, expires_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1",
+		).bind(credential.id, actorUserId).first();
+		if (!row) return false;
+		if (row.revoked_at != null) return false;
+		return row.expires_at == null || Number(row.expires_at) > Date.now();
+	} catch {
+		return true;
+	}
 }
 
 /**
@@ -815,6 +927,13 @@ export async function runProjections(env, userId, kind, id, { attempts = PROJECT
 					userId, vectorId, nodeId: id, revision, values,
 					label: head.label, category: head.category,
 				});
+				// Ledger the physical id as soon as the provider accepts it, so a
+				// crash between submit and readback still leaves a deletable record.
+				if (submitted.ok) {
+					await recordVectorArtifact(env, userId, id, vectorId, {
+						revision, mutationId: submitted.mutationId ?? null, state: "submitted",
+					});
+				}
 				if (!submitted.ok) {
 					if (submitted.reason === "vectors_disabled") {
 						// Vectors are switched off for this deployment: there is nothing
@@ -830,6 +949,7 @@ export async function runProjections(env, userId, kind, id, { attempts = PROJECT
 					// Readback: only a provider-visible vector earns `ready`.
 					const visible = await vectorVisible(env, config, vectorId);
 					if (visible) {
+						await markVectorArtifactLive(env, userId, vectorId);
 						await markProjectionApplied(env, userId, id, "vector", { appliedRevision: revision, status: "ready" });
 						await purgeObjectVectors(env, config, userId, id, { keepRevision: revision }).catch(() => {});
 					}
@@ -847,6 +967,160 @@ export async function runProjections(env, userId, kind, id, { attempts = PROJECT
 		).bind(id, userId).first();
 		if (!after || Number(after.revision) === revision) return;
 	}
+}
+
+
+/* ---------------------------------------------------------------------------
+ * Vector artifact ledger.
+ *
+ * The authority for what was actually submitted to Vectorize. Deletion reads
+ * from here instead of guessing a revision window, so a gapped artifact (r25,
+ * r50) is removed as reliably as r1 — and an upsert that only becomes visible
+ * after canonical deletion is still listed, so the reconciler can find it.
+ */
+
+/** Record one submitted physical vector id. Content-free by construction. */
+export async function recordVectorArtifact(env, userId, objectId, vectorId, { revision = null, mutationId = null, state = "submitted" } = {}) {
+	const now = Date.now();
+	await env.DB.prepare(
+		`INSERT INTO memory_vector_artifacts
+			(user_id, object_id, vector_id, revision, state, mutation_id, attempts, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+		 ON CONFLICT(user_id, vector_id) DO UPDATE SET
+		   state = excluded.state,
+		   mutation_id = COALESCE(excluded.mutation_id, memory_vector_artifacts.mutation_id),
+		   updated_at = excluded.updated_at`,
+	).bind(userId, objectId, vectorId, revision, state, mutationId, now, now).run().catch((error) => {
+		console.warn("vector artifact ledger write failed:", error?.message ?? error);
+	});
+}
+
+/** Mark a confirmed-visible revision live, so the sweep stops chasing it. */
+export async function markVectorArtifactLive(env, userId, vectorId) {
+	await env.DB.prepare(
+		"UPDATE memory_vector_artifacts SET state = 'live', updated_at = ? WHERE user_id = ? AND vector_id = ?",
+	).bind(Date.now(), userId, vectorId).run().catch(() => {});
+}
+
+/**
+ * Delete EVERY physical artifact recorded for these objects, plus the legacy
+ * bare id, and keep going until the ledger holds nothing for them.
+ *
+ * Keyset iteration over vector_id — no OFFSET, no fixed revision window, no
+ * assumption that revisions are contiguous. A ledger row is removed only after
+ * the provider delete for it returned, so a failure stays retryable.
+ */
+export async function purgeVectorArtifactsForObjects(env, config, userId, objectIds, { batchSize = 100 } = {}) {
+	const ids = [...new Set((objectIds ?? []).filter(Boolean))];
+	if (!ids.length) return { deleted: 0, pending: 0 };
+	const useProvider = Boolean(config?.useVectors && env.VECTORIZE);
+	let deleted = 0;
+	let pending = 0;
+
+	for (const objectId of ids) {
+		// The legacy bare id predates the ledger; it is always a candidate.
+		await recordVectorArtifact(env, userId, objectId, objectId, { revision: null, state: "orphaned" });
+
+		let after = "";
+		for (;;) {
+			const { results } = await env.DB.prepare(
+				`SELECT vector_id, attempts FROM memory_vector_artifacts
+				  WHERE user_id = ? AND object_id = ? AND vector_id > ?
+				  ORDER BY vector_id ASC LIMIT ?`,
+			).bind(userId, objectId, after, batchSize).all();
+			const rows = results ?? [];
+			if (!rows.length) break;
+			const batch = rows.map((row) => row.vector_id);
+			after = batch[batch.length - 1];
+
+			if (!useProvider) {
+				// Nothing to converge against; the ledger rows are the only residue.
+				const marks = batch.map(() => "?").join(",");
+				await env.DB.prepare(
+					`DELETE FROM memory_vector_artifacts WHERE user_id = ? AND vector_id IN (${marks})`,
+				).bind(userId, ...batch).run().catch(() => {});
+				deleted += batch.length;
+				continue;
+			}
+
+			// 1. Issue the provider delete. A failure leaves every row in place.
+			try {
+				await env.VECTORIZE.deleteByIds(batch);
+			} catch (error) {
+				console.warn("vector artifact delete failed:", error?.message ?? error);
+				await markArtifactsOrphaned(env, userId, batch);
+				pending += batch.length;
+				continue;
+			}
+			await markArtifactsOrphaned(env, userId, batch);
+
+			// 2. Only a CONFIRMED-absent artifact leaves the ledger, and only after
+			//    at least one delete has already been issued for it. Vectorize is
+			//    asynchronous: an upsert still in flight can become visible after
+			//    the delete, so the row must survive to be swept again. Retiring it
+			//    on the first pass is exactly how a late write becomes permanent
+			//    residue.
+			let stillPresent = new Set();
+			try {
+				const found = await env.VECTORIZE.getByIds(batch);
+				stillPresent = new Set((Array.isArray(found) ? found : []).map((entry) => entry?.id).filter(Boolean));
+			} catch (error) {
+				console.warn("vector artifact readback failed:", error?.message ?? error);
+				pending += batch.length;
+				continue;
+			}
+			const converged = batch.filter((id) => !stillPresent.has(id) && Number(rows.find((r) => r.vector_id === id)?.attempts ?? 0) >= 1);
+			const retry = batch.filter((id) => !converged.includes(id));
+			if (converged.length) {
+				const marks = converged.map(() => "?").join(",");
+				await env.DB.prepare(
+					`DELETE FROM memory_vector_artifacts WHERE user_id = ? AND vector_id IN (${marks})`,
+				).bind(userId, ...converged).run().catch(() => {});
+				deleted += converged.length;
+			}
+			pending += retry.length;
+		}
+	}
+	return { deleted, pending };
+}
+
+/** Mark artifacts as needing provider convergence, counting the attempt. */
+async function markArtifactsOrphaned(env, userId, vectorIds) {
+	if (!vectorIds.length) return;
+	const marks = vectorIds.map(() => "?").join(",");
+	await env.DB.prepare(
+		`UPDATE memory_vector_artifacts
+		    SET state = 'orphaned', attempts = attempts + 1, updated_at = ?
+		  WHERE user_id = ? AND vector_id IN (${marks})`,
+	).bind(Date.now(), userId, ...vectorIds).run().catch(() => {});
+}
+
+/**
+ * Reconcile artifacts whose canonical object no longer exists — including an
+ * upsert that only became visible after the object was deleted.
+ */
+export async function reconcileOrphanVectorArtifacts(env, config, { limit = 200 } = {}) {
+	const { results } = await env.DB.prepare(
+		`SELECT a.user_id, a.object_id
+		   FROM memory_vector_artifacts a
+		  WHERE NOT EXISTS (
+		    SELECT 1 FROM nodes n
+		     WHERE n.id = a.object_id AND n.user_id = a.user_id AND n.deleted_at IS NULL
+		  )
+		  GROUP BY a.user_id, a.object_id
+		  ORDER BY MIN(a.updated_at) ASC LIMIT ?`,
+	).bind(limit).all();
+	const byUser = new Map();
+	for (const row of results ?? []) {
+		if (!byUser.has(row.user_id)) byUser.set(row.user_id, new Set());
+		byUser.get(row.user_id).add(row.object_id);
+	}
+	let reconciled = 0;
+	for (const [userId, objectIds] of byUser) {
+		const outcome = await purgeVectorArtifactsForObjects(env, config, userId, [...objectIds]);
+		reconciled += outcome.deleted;
+	}
+	return { reconciled };
 }
 
 /** Provider readback. A throw or an empty result is "not visible", never ready. */
@@ -867,26 +1141,29 @@ async function vectorVisible(env, config, vectorId) {
  * (or the current head) can never be deleted by mistake.
  */
 async function purgeObjectVectors(env, config, userId, objectId, { keepRevision = null } = {}) {
-	if (!config.useVectors || !env.VECTORIZE) return;
-	const { results } = await env.DB.prepare(
-		"SELECT applied_revision FROM memory_projection_state WHERE user_id = ? AND object_id = ? AND projection = 'vector'",
-	).bind(userId, objectId).all().catch(() => ({ results: [] }));
-	const known = new Set();
-	for (const row of results ?? []) {
-		const revision = Number(row.applied_revision);
-		if (Number.isSafeInteger(revision) && revision >= 1) known.add(revision);
+	// Ledger-driven: enumerate exactly what was submitted rather than guessing a
+	// window of recent revisions. A gapped artifact is as removable as r1.
+	if (keepRevision == null) {
+		await purgeVectorArtifactsForObjects(env, config, userId, [objectId]);
+		return;
 	}
-	const highest = keepRevision ?? Math.max(0, ...known);
-	const ids = [];
-	// Bounded sweep of prior revisions plus the legacy unversioned id.
-	for (let revision = Math.max(1, highest - 20); revision < highest; revision++) ids.push(vectorIdFor(objectId, revision));
-	if (keepRevision == null) ids.push(vectorIdFor(objectId, highest));
-	ids.push(objectId);
-	if (!ids.length) return;
+	if (!config?.useVectors || !env.VECTORIZE) return;
+	// Keep the current revision, drop every strictly older recorded artifact.
+	const { results } = await env.DB.prepare(
+		`SELECT vector_id FROM memory_vector_artifacts
+		  WHERE user_id = ? AND object_id = ? AND (revision IS NULL OR revision < ?)
+		  ORDER BY vector_id ASC LIMIT 500`,
+	).bind(userId, objectId, keepRevision).all().catch(() => ({ results: [] }));
+	const stale = (results ?? []).map((row) => row.vector_id);
+	if (!stale.length) return;
 	try {
-		await env.VECTORIZE.deleteByIds(ids);
+		await env.VECTORIZE.deleteByIds(stale);
+		const placeholders = stale.map(() => "?").join(",");
+		await env.DB.prepare(
+			`DELETE FROM memory_vector_artifacts WHERE user_id = ? AND vector_id IN (${placeholders})`,
+		).bind(userId, ...stale).run().catch(() => {});
 	} catch (error) {
-		console.warn("vectorize stale cleanup failed:", error?.message ?? error);
+		console.warn("stale vector cleanup failed:", error?.message ?? error);
 	}
 }
 
@@ -929,7 +1206,10 @@ export async function sweepPendingProjections(env, { limit = 25 } = {}) {
 		seen.add(key);
 		await runProjections(env, row.user_id, kind, row.object_id, { attempts: 1 });
 	}
-	return { swept: seen.size, promoted };
+	// Artifacts whose object is gone — including an upsert that only became
+	// visible after deletion — are removed here, not left to linger.
+	const orphans = await reconcileOrphanVectorArtifacts(env, config, { limit: 200 }).catch(() => ({ reconciled: 0 }));
+	return { swept: seen.size, promoted, reconciled: orphans.reconciled };
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1017,6 +1297,7 @@ export const VERSION_RESIDUE_TABLES = Object.freeze([
 	"memory_revisions",
 	"memory_update_idempotency",
 	"memory_projection_state",
+	"memory_vector_artifacts",
 ]);
 
 /** Bounded revision history for one object, oldest-first, for exports. */

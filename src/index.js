@@ -5069,6 +5069,19 @@ async function handleMemoryUpdateRoutes(request, env, ctx, url) {
 				type: auth.auth.type ?? "user",
 				capability: "project.memory.write",
 				orgId: auth.membership?.orgId ?? auth.managedProject?.effective_organization_id ?? auth.managedProject?.organization_id ?? null,
+				// The exact credential is re-proved inside the committing batch, so
+				// a revocation, scope narrowing, or project rebinding that lands
+				// after preflight aborts the whole mutation.
+				credential: auth.auth.type === "token" && auth.auth.token?.id
+					? {
+						kind: "token",
+						id: auth.auth.token.id,
+						requiredScope: MEMORY_WRITE_SCOPE,
+						projectId: auth.managedProject?.id ?? null,
+					}
+					: auth.auth.type === "session" && auth.auth.session?.id
+						? { kind: "session", id: auth.auth.session.id }
+						: null,
 			}
 			: null,
 		actorClass, actorRef, id, mode,

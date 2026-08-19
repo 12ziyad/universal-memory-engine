@@ -1,4 +1,4 @@
-export const VERSION: "0.2.1";
+export const VERSION: "0.3.0";
 
 export type UserId = string | null;
 export type RecallScope = "global" | "project_only" | "project_then_global";
@@ -367,6 +367,10 @@ export class MemoryClient {
 	setRules(rules: MemoryRules, options?: ScopeOptions): Promise<{ ok: boolean; rules: MemoryRules } & APIResponse>;
 	exportAll(options?: ScopeOptions): Promise<APIResponse>;
 
+	updateMemory(memoryId: string, fields: UpdateFields, options: UpdateOptions): Promise<UpdateResult>;
+	memoryHistory(memoryId: string, options?: HistoryOptions): Promise<HistoryResult>;
+	rollbackMemory(memoryId: string, toRevision: number, options: UpdateOptions): Promise<UpdateResult>;
+	/** Retained short aliases for the three methods above. */
 	update(memoryId: string, fields: UpdateFields, options: UpdateOptions): Promise<UpdateResult>;
 	history(memoryId: string, options?: HistoryOptions): Promise<HistoryResult>;
 	rollback(memoryId: string, toRevision: number, options: UpdateOptions): Promise<UpdateResult>;

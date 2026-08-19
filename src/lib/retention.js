@@ -1227,7 +1227,7 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 			]);
 			const slices = slicesResult.results ?? [];
 			const events = eventsResult.results ?? [];
-			await env.DB.batch([
+			const summaryBatch = await env.DB.batch([
 				env.DB.prepare(
 					// Fenced on the revision this pass observed: a retention rewrite
 					// computed before an explicit edit must lose, not overwrite it.
@@ -1242,11 +1242,18 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 					userId,
 					Number(node?.revision) >= 1 ? Number(node.revision) : 1,
 				),
-				env.DB.prepare(
+			]);
+			// Only invalidate the derived search profile when the canonical write
+			// actually applied. If the CAS lost, the node still holds the user's
+			// newer summary — dropping its profile would delete a projection of
+			// live content and claim a refresh that never happened.
+			const summaryApplied = Number(summaryBatch?.[0]?.meta?.changes ?? 0) > 0;
+			if (summaryApplied) {
+				await env.DB.prepare(
 					`DELETE FROM manual_search_profiles
 					  WHERE user_id = ? AND object_kind = 'node' AND object_id = ?`,
-				).bind(userId, nodeId),
-			]);
+				).bind(userId, nodeId).run();
+			}
 		}
 		// This project-memory rollup may contain labels/summaries from a deleted
 		// node or page. Rebuild it from live rows before the run can advance.

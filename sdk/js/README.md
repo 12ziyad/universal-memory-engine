@@ -222,14 +222,18 @@ try {
 
 The package includes first-party TypeScript declarations for client options, scopes, messages, receipts, jobs, terminal status, deletion, and errors.
 
-## 0.2.1 release changes
+## 0.3.0 release changes
 
-This directory is the `0.2.1` release candidate. `npm install itsuki` resolves the version currently published to the registry; inspect the exported `VERSION` before relying on newly prepared helpers.
+This directory is the `0.3.0` release candidate. `npm install itsuki` resolves
+the version currently published to the registry — inspect the exported
+`VERSION` to confirm which release you actually have.
 
-**Compatibility status: 0.2.1 is current and needs no upgrade.** It was re-verified end to end against the live service after the deletion/erasure work landed, including the erasure flow and the cancellation path described above. No client change was required: the server expresses cancellation through the terminal state this version already knows plus additional response fields, and additive fields are tolerated by construction. There is no 0.2.2 — if you are on 0.2.1, you are on the verified version.
+**0.3.0 adds safe memory updates:** `updateMemory()`, `memoryHistory()` and
+`rollbackMemory()` (short aliases `update()`, `history()`, `rollback()` are
+retained and tested). Updates require the revision you read as
+`expectedRevision`; a stale value is refused with the current revision rather
+than overwriting anyone's edit.
 
-- Adds complete TypeScript declarations.
-- Makes per-call `userId` selection consistent across every supported operation.
-- Treats the compatibility job state `completed` as terminal.
-- Preserves machine-readable API error codes and `Retry-After` metadata.
-- Validates ambiguous client arguments before any network request.
+**Publication status: 0.3.0 is NOT yet on npm.** The registry still serves
+`0.2.1`, which remains correct for everything except the update methods. Do not
+follow an install command for 0.3.0 until this note says it is published.

@@ -576,6 +576,18 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				capability,
 				orgId: authz?.rateContext?.managedProject?.effective_organization_id
 					?? authz?.rateContext?.managedProject?.organization_id ?? null,
+				// Same commit-time credential proof as REST: an MCP connection whose
+				// key is revoked mid-request must not land a write.
+				credential: authz?.rateContext?.auth?.type === "token" && authz?.rateContext?.auth?.token?.id
+					? {
+						kind: "token",
+						id: authz.rateContext.auth.token.id,
+						requiredScope: MEMORY_WRITE_SCOPE,
+						projectId: authz?.memoryScope?.managedProjectId ?? null,
+					}
+					: authz?.rateContext?.auth?.session?.id
+						? { kind: "session", id: authz.rateContext.auth.session.id }
+						: null,
 			}
 			: null,
 	});

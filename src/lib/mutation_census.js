@@ -35,6 +35,22 @@ const EDITABLE_COLUMNS = Object.freeze([
 const REVISION_FENCE = /COALESCE\(\s*revision\s*,\s*1\s*\)\s*=\s*\?|(?:^|[^_\w])revision\s*=\s*\?/i;
 
 /**
+ * A fence a NULL bind can switch off is not a fence. `(? IS NULL OR revision
+ * = ?)` reads as backward compatibility but means "skip the check whenever the
+ * caller could not read a revision" — which is exactly when staleness is most
+ * likely. Legacy NULL revision means logical r1 and must be compared, never
+ * exempted.
+ */
+const NULLABLE_FENCE = /\?\s*IS\s+NULL\s+OR[^)]*revision/i;
+
+/**
+ * A lost CAS must be observable. A writer that never inspects the affected-row
+ * count cannot fail closed: it reports success and starts dependent work after
+ * writing nothing.
+ */
+const RESULT_INSPECTED = /meta\??\.\s*changes|\bapplied\b|\bstale\b|applyFencedUpdate|fencedUpdateStatement/;
+
+/**
  * Deliberate exemptions. Each entry names the file, a unique fragment of the
  * statement, and why staleness is impossible — not merely unlikely.
  */
@@ -107,7 +123,14 @@ export function extractUpdateStatements(source) {
 		let end = window.length;
 		if (endBacktick > 0) end = Math.min(end, endBacktick);
 		if (endQuote > 0) end = Math.min(end, endQuote);
-		statements.push({ table, sql: window.slice(0, end), index: match.index });
+		statements.push({
+			table,
+			sql: window.slice(0, end),
+			index: match.index,
+			// Everything up to the end of the enclosing statement/handler, so the
+			// census can see whether the affected-row count is ever inspected.
+			trailing: source.slice(match.index, match.index + 3200),
+		});
 	}
 	return statements;
 }
@@ -142,7 +165,10 @@ function isAllowlisted(file, sql) {
  */
 export async function auditSemanticWriters({ files = CENSUS_FILES, readFile = null } = {}) {
 	const read = readFile ?? (await defaultReader());
-	const findings = { checked: 0, fenced: [], allowlisted: [], unfenced: [] };
+	const findings = {
+		checked: 0, fenced: [], allowlisted: [], unfenced: [],
+		nullableFence: [], uncheckedResult: [],
+	};
 	for (const file of files) {
 		let source;
 		try {
@@ -157,11 +183,20 @@ export async function auditSemanticWriters({ files = CENSUS_FILES, readFile = nu
 			findings.checked += 1;
 			const where = whereClauseOf(statement.sql);
 			const excerpt = statement.sql.replace(/\s+/g, " ").slice(0, 150);
+			const allowedHere = isAllowlisted(file, statement.sql);
 			if (REVISION_FENCE.test(where)) {
+				// Fenced — but a NULL-bypassable fence is not one, and a fence whose
+				// result is never inspected cannot fail closed.
+				if (NULLABLE_FENCE.test(where)) {
+					findings.nullableFence.push({ file, table: statement.table, columns: assigned, excerpt });
+				}
+				if (!allowedHere && !RESULT_INSPECTED.test(statement.trailing ?? "")) {
+					findings.uncheckedResult.push({ file, table: statement.table, columns: assigned, excerpt });
+				}
 				findings.fenced.push({ file, table: statement.table, columns: assigned, excerpt });
 				continue;
 			}
-			const allowed = isAllowlisted(file, statement.sql);
+			const allowed = allowedHere;
 			if (allowed) {
 				findings.allowlisted.push({ file, table: statement.table, columns: assigned, reason: allowed.reason });
 				continue;

@@ -3,6 +3,7 @@
  * network or a real API key.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import MemoryClient, { Memory, MemoryAPIError, VERSION } from "../sdk/js/index.js";
 import pkg from "../sdk/js/package.json" with { type: "json" };
@@ -494,5 +495,25 @@ describe("status polling and local validation", () => {
 		expect(first).toMatch(/^idem_/);
 		expect(memory.newIdempotencyKey()).toMatch(/^idem_/);
 		expect(memory.newIdempotencyKey()).not.toBe(first);
+	});
+});
+
+describe("package version truth (0.3.0 pre-publication)", () => {
+	it("package.json, runtime VERSION and the TypeScript declaration all agree", async () => {
+		const source = readFileSync(new URL("../sdk/js/index.js", import.meta.url), "utf8");
+		const types = readFileSync(new URL("../sdk/js/index.d.ts", import.meta.url), "utf8");
+		const runtime = source.match(/export const VERSION = "([^"]+)"/)?.[1];
+		const declared = types.match(/export const VERSION: "([^"]+)"/)?.[1];
+		// A literal pinned in one place and forgotten in another is exactly how
+		// the published Python 0.4.0 shipped reporting 0.3.0.
+		expect(runtime, "runtime VERSION must match package.json").toBe(pkg.version);
+		expect(declared, "declaration VERSION must match package.json").toBe(pkg.version);
+	});
+
+	it("exposes the long-form update methods and their retained aliases", async () => {
+		const types = readFileSync(new URL("../sdk/js/index.d.ts", import.meta.url), "utf8");
+		for (const name of ["updateMemory", "memoryHistory", "rollbackMemory", "update", "history", "rollback"]) {
+			expect(types, `${name} must be declared`).toContain(`${name}(`);
+		}
 	});
 });

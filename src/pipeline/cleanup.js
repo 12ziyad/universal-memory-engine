@@ -16,7 +16,7 @@ import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
 import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
-import { versionResidueStatements } from "../lib/memory_versions.js";
+import { applyFencedUpdate, purgeVectorArtifactsForObjects, versionResidueStatements } from "../lib/memory_versions.js";
 import {
 	countSemanticAtomProjections,
 	countSourceEpisodes,
@@ -505,7 +505,9 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		// The full cascade (Part 3.3): the vector goes too (async on Vectorize's
 		// side — recall's live-row filter hides it meanwhile), and neighbours
 		// whose summaries were built from this node's facts are regenerated.
-		await deleteNodeVectors(env, getConfig(env), [id]);
+		// Ledger-driven: removes the legacy bare id AND every revision-qualified
+		// artifact ever submitted for this node, including non-contiguous ones.
+		await purgeVectorArtifactsForObjects(env, getConfig(env), userId, [id]);
 		const neighbourIds = [...new Set((touchingEdges ?? []).flatMap((edge) => [edge.from_node, edge.to_node])
 			.filter((nodeId) => nodeId && nodeId !== id))];
 		if (neighbourIds.length) await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: neighbourIds });
@@ -1169,7 +1171,7 @@ async function repairMemoryPages(env, userId) {
 		const title = repairTitle ? nextTitle : page.title;
 		const cluster = repairCluster ? nextCluster : page.cluster;
 		const fullMarkdown = markdownWithTitleWithoutEvidence(page.full_markdown, title);
-		await env.DB.prepare(
+		const repairWrite = await applyFencedUpdate(env.DB.prepare(
 			// Fenced on the revision this repair pass read: an explicit user edit
 			// committed since must survive, so a stale repair writes nothing.
 			`UPDATE memory_pages
@@ -1187,8 +1189,10 @@ async function repairMemoryPages(env, userId) {
 				page.id,
 				userId,
 				Number(page?.revision) >= 1 ? Number(page.revision) : 1,
-			)
-			.run();
+			), { label: "page repair" });
+		// A lost CAS means an explicit edit landed while the repair was computed.
+		// Counting it as repaired would report work that never happened.
+		if (!repairWrite.applied) { pagesSkipped++; continue; }
 		if (repairTitle) {
 			titlesRepaired++;
 			titleRepairs.push({ id: page.id, from: page.title, to: title });
@@ -1636,7 +1640,7 @@ export async function bulkDeleteBySource(env, userId, {
 			[...touched],
 		);
 		regenerated += Number(regen.regenerated ?? 0);
-		await deleteNodeVectors(env, config, [...sweepIds.nodes]);
+		await purgeVectorArtifactsForObjects(env, config, userId, [...sweepIds.nodes]);
 		if (touched.size) await refreshManualSearchProfiles(env, config, userId, { nodeIds: [...touched] });
 
 		for (const [setName] of ERASURE_TABLES) deletedTotals[setName] += sweepIds[setName].size;

@@ -13,6 +13,7 @@ import { clusterForMemory } from "./clusters.js";
 import { responseText } from "./llm.js";
 import { runAi } from "../lib/ai_meter.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
+import { applyFencedUpdate } from "../lib/memory_versions.js";
 
 // Planner-written bookkeeping events ("updated: was X → now Y"). They belong in
 // the node's timeline, never in its summary.
@@ -235,11 +236,14 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 	let refreshed = 0;
 	let rolledUp = 0;
 	let clustered = 0;
+	let stale = 0;
 	const uniqueNodeIds = [...new Set(affectedNodeIds ?? [])].filter(Boolean);
 	for (const nodeId of uniqueNodeIds) {
 		try {
 			const node = await env.DB.prepare(
-				"SELECT id, label, category, state, summary, cluster FROM nodes WHERE id = ? AND user_id = ?",
+				// COALESCE(revision, 1): a legacy NULL revision is logical r1, so it
+				// is COMPARED, never used to skip the fence.
+				"SELECT id, label, category, state, summary, cluster, COALESCE(revision, 1) AS revision FROM nodes WHERE id = ? AND user_id = ?",
 			)
 				.bind(nodeId, userId)
 				.first();
@@ -258,20 +262,30 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 					...slices.map((s) => s.id),
 					...withoutAuditEvents(events).map((e) => e.id),
 				].slice(0, 40));
+				const observedRevision = Number(node.revision) >= 1 ? Number(node.revision) : 1;
 				const statement = env.DB.prepare(
 					// Revision-fenced: pass 2 computed this from rows it read earlier,
 					// so an explicit edit committed since must win.
 					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?",
-				).bind(summary, cluster, sources, Date.now(), nodeId, userId, Number(node?.revision) >= 1 ? Number(node.revision) : 1);
+				).bind(summary, cluster, sources, Date.now(), nodeId, userId, observedRevision);
+				let applied = false;
 				if (opts.managedProjectId) {
-					await env.DB.batch([
+					const batched = await env.DB.batch([
 						managedMutationGuardStatement(env, {
 							accountUserId: opts.accountUserId ?? null,
 							projectId: opts.managedProjectId,
 						}),
 						statement,
 					]);
-				} else await statement.run();
+					applied = Number(batched?.[1]?.meta?.changes ?? 0) > 0;
+				} else {
+					const outcome = await applyFencedUpdate(statement, { label: "pass2 summary" });
+					applied = outcome.applied;
+				}
+				// A lost CAS means an explicit edit landed while this pass computed.
+				// It is NOT a refresh: counting it would report work that never
+				// happened, and the next pass recomputes from the new head.
+				if (!applied) { stale++; continue; }
 				refreshed++;
 				if (node.cluster !== cluster) clustered++;
 			}

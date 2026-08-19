@@ -72,6 +72,9 @@ export const PURGE_SPACE_TABLES = [
 	"memory_revisions",
 	"memory_update_idempotency",
 	"memory_projection_state",
+	// The vector artifact ledger (0049): content-free, but object-keyed, and the
+	// authority deletion uses to find provider residue.
+	"memory_vector_artifacts",
 ];
 
 export const CENSUS = {
