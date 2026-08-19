@@ -50,14 +50,21 @@ def json_response(payload, status=200):
     return httpx.Response(status, json=payload)
 
 
+def _declared_version() -> str:
+    """Version from pyproject, without tomllib (stdlib only from 3.11; this
+    package supports 3.9+)."""
+    from pathlib import Path
+    import re as _re
+
+    text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    match = _re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+    assert match, "no version in pyproject.toml"
+    return match.group(1)
+
+
 def test_version_string_matches_package_metadata():
     # The published artifact must not lie about which release it is.
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
-    assert VERSION == declared
+    assert VERSION == _declared_version()
 
 
 def test_update_sends_precondition_and_idempotency_key():
