@@ -18,14 +18,41 @@ import {
 
 export const EXPORT_TABLES = [
 	"nodes", "slices", "events", "edges", "memory_pages", "candidates", "receipts", "memory_rules",
+	// Revision snapshots are the customer's own prior wording. Omitting them
+	// would make a "complete export" a false claim, so portability includes
+	// them — bounded, and only for objects that still exist.
+	"memory_revisions",
 ];
 
 const SOFT_DELETABLE_EXPORT_TABLES = new Set([
 	"nodes", "slices", "events", "edges", "memory_pages", "candidates",
 ]);
 
+/**
+ * Hard bound on exported revision rows. History is unbounded in principle, so
+ * the export states plainly when it stopped rather than silently truncating.
+ */
+export const EXPORT_REVISION_LIMIT = 50_000;
+
 /** Prepare the shared live-row selection used by both export surfaces. */
 export function prepareExportRows(env, userId, table) {
+	if (table === "memory_revisions") {
+		// Only history for objects that still exist. Deletion, retention, purge
+		// and erasure already remove revisions; this is the belt-and-braces that
+		// keeps a deleted memory's prior wording out of a portability download.
+		return env.DB.prepare(
+			`SELECT r.* FROM memory_revisions r
+			  WHERE r.user_id = ?
+			    AND (
+			      (r.object_kind = 'node'  AND EXISTS (SELECT 1 FROM nodes n         WHERE n.id = r.object_id AND n.user_id = r.user_id AND n.deleted_at IS NULL))
+			   OR (r.object_kind = 'page'  AND EXISTS (SELECT 1 FROM memory_pages p  WHERE p.id = r.object_id AND p.user_id = r.user_id AND p.deleted_at IS NULL))
+			   OR (r.object_kind = 'slice' AND EXISTS (SELECT 1 FROM slices s        WHERE s.id = r.object_id AND s.user_id = r.user_id AND s.deleted_at IS NULL))
+			   OR (r.object_kind = 'event' AND EXISTS (SELECT 1 FROM events e        WHERE e.id = r.object_id AND e.user_id = r.user_id AND e.deleted_at IS NULL))
+			    )
+			  ORDER BY r.object_id, r.revision
+			  LIMIT ?`,
+		).bind(userId, EXPORT_REVISION_LIMIT);
+	}
 	const liveOnly = SOFT_DELETABLE_EXPORT_TABLES.has(table) ? " AND deleted_at IS NULL" : "";
 	return env.DB.prepare(`SELECT * FROM ${table} WHERE user_id = ?${liveOnly}`).bind(userId);
 }

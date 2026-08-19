@@ -176,8 +176,9 @@ export async function getMemory(env, userId, id) {
 	const kind = id.startsWith("node_") ? "node"
 		: id.startsWith("page_") ? "page"
 			: id.startsWith("slice_") ? "slice"
-				: id.startsWith("cand") ? "candidate"
-					: null;
+				: id.startsWith("event_") ? "event"
+					: id.startsWith("cand") ? "candidate"
+						: null;
 	if (!kind) return { error: "unrecognized_id" };
 
 	if (kind === "node") {
@@ -240,6 +241,38 @@ export async function getMemory(env, userId, id) {
 			"SELECT id, node_id, text, kind, is_current, created_at, COALESCE(revision, 1) AS revision FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		).bind(id, userId).first();
 		return row ? { kind, memory: { ...row, kind: "slice", slice_kind: row.kind } } : null;
+	}
+
+	// Events are editable through the safe-update doors, so they must also be
+	// readable through the same generic get: an id you can PATCH is an id you
+	// can GET, with the revision its precondition needs.
+	if (kind === "event") {
+		const row = await env.DB.prepare(
+			`SELECT id, node_id, action, text, importance, happened_at, happened_at_source,
+				valid_at, invalid_at, project_id, project_name, created_at,
+				COALESCE(revision, 1) AS revision
+			 FROM events WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		).bind(id, userId).first();
+		if (!row) return null;
+		return {
+			kind,
+			memory: {
+				id: row.id,
+				kind: "event",
+				node_id: row.node_id ?? null,
+				action: row.action ?? null,
+				text: row.text ?? "",
+				importance: row.importance ?? null,
+				happened_at: row.happened_at ?? null,
+				happened_at_source: row.happened_at_source ?? null,
+				valid_at: row.valid_at ?? null,
+				invalid_at: row.invalid_at ?? null,
+				project_id: row.project_id ?? null,
+				project_name: row.project_name ?? null,
+				created_at: row.created_at ?? null,
+				revision: Number(row.revision ?? 1),
+			},
+		};
 	}
 
 	const row = await env.DB.prepare(

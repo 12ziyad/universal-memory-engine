@@ -1229,15 +1229,18 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 			const events = eventsResult.results ?? [];
 			await env.DB.batch([
 				env.DB.prepare(
+					// Fenced on the revision this pass observed: a retention rewrite
+					// computed before an explicit edit must lose, not overwrite it.
 					`UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?,
 						revision = COALESCE(revision, 1) + 1
-					  WHERE id = ? AND user_id = ?`,
+					  WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?`,
 				).bind(
 					fallbackSummary(node, slices, events),
 					JSON.stringify([...slices.map((row) => row.id), ...events.map((row) => row.id)].slice(0, 40)),
 					Date.now(),
 					nodeId,
 					userId,
+					Number(node?.revision) >= 1 ? Number(node.revision) : 1,
 				),
 				env.DB.prepare(
 					`DELETE FROM manual_search_profiles

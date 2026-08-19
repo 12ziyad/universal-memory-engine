@@ -1092,6 +1092,16 @@ export async function announceMcpTerminal(env, userId, job, defer = null) {
 export async function enrichMcpConversation(env, userId, job, defer = null) {
 	const config = getConfig(env);
 	const project = projectPayload(job.sourceMeta);
+	// The revision this enrichment starts from. Model work takes seconds, and an
+	// explicit user edit can land in that window; the final page write is fenced
+	// on this value so a stale enrichment loses instead of overwriting the
+	// correction. NULL (a pre-versioning row) keeps the historical behaviour.
+	if (job.observedRevision === undefined && job.pageId) {
+		const observed = await env.DB.prepare(
+			"SELECT COALESCE(revision, 1) AS revision FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+		).bind(job.pageId, userId).first().catch(() => null);
+		job.observedRevision = observed ? Number(observed.revision) : null;
+	}
 	try {
 		const accountRules = await resolveAdmissionRules(env, userId);
 		const rules = job.managedPolicy
@@ -1205,11 +1215,15 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			savedAt: job.lastTs ?? Date.now(),
 		});
 		await env.DB.prepare(
+			// Enrichment ran against the page revision the job observed. If an
+			// explicit edit landed since, this write must lose: zero changed rows
+			// leaves the page at the user's version and the job is re-driven.
 			`UPDATE memory_pages SET
 				title = ?, canonical_title = ?, short_summary = ?, full_markdown = ?,
 				enrich_status = 'enriched', extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
 				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
-			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL`,
+			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+			   AND (? IS NULL OR COALESCE(revision, 1) = ?)`,
 		).bind(
 			title,
 			canonicalTitle(title),
@@ -1222,6 +1236,8 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			job.pageId,
 			userId,
 			project.project_id,
+			job.observedRevision ?? null,
+			job.observedRevision ?? null,
 		).run();
 		await updateMemoryJob(env, userId, job.jobId, {
 			status: "enriched",

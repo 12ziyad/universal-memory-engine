@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from typing_extensions import Unpack
 
 DEFAULT_BASE_URL = "https://itsuki.app"
-VERSION = "0.3.0"
+VERSION = "0.4.1"
 _MAX_TIMEOUT_SECONDS = 2_147_483.647
 
 MessageRole = Literal["user", "assistant", "system", "tool"]

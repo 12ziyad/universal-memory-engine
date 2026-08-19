@@ -259,8 +259,10 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 					...withoutAuditEvents(events).map((e) => e.id),
 				].slice(0, 40));
 				const statement = env.DB.prepare(
-					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ?",
-				).bind(summary, cluster, sources, Date.now(), nodeId, userId);
+					// Revision-fenced: pass 2 computed this from rows it read earlier,
+					// so an explicit edit committed since must win.
+					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?",
+				).bind(summary, cluster, sources, Date.now(), nodeId, userId, Number(node?.revision) >= 1 ? Number(node.revision) : 1);
 				if (opts.managedProjectId) {
 					await env.DB.batch([
 						managedMutationGuardStatement(env, {

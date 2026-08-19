@@ -308,6 +308,12 @@ export async function deleteLastExtraction(env, userId) {
 		 SELECT 1 FROM node_topic_communities WHERE user_id = ? AND community_id = topic_communities.id
 		)`,
 	).bind(userId, userId));
+	// Revision history, idempotency claims, and projection rows are customer
+	// content keyed to these objects; they die in the SAME batch as the objects
+	// so no deletion path can leave an invisible archive behind.
+	for (const statement of versionResidueStatements(env, userId, [...pageIds, ...nodeIds, ...sliceIds, ...eventIds])) {
+		canonicalDeletes.push(statement);
+	}
 	canonicalDeletes.push(env.DB.prepare(
 		"UPDATE extraction_runs SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
 	).bind("deleted", now, run.id, userId));
@@ -343,13 +349,42 @@ export async function deleteLastExtraction(env, userId) {
  * are rebuilt regardless of recorded provenance, which also covers legacy
  * rows from before the provenance column existed.
  */
+
+/** The revision an automatic pass observed for a node row it read. */
+function nodeRevision(row) {
+	const value = Number(row?.revision);
+	return Number.isSafeInteger(value) && value >= 1 ? value : 1;
+}
+
+/**
+ * Apply a regenerated node summary ONLY if the node is still at the revision
+ * the caller computed from. A stale automatic pass returns { stale: true } and
+ * writes nothing, so an explicit user correction can never be overwritten by
+ * work that predates it. The successful write participates in versioning.
+ */
+export async function regenerateNodeSummaryFenced(env, userId, nodeId, { summary, sourcesJson, observedRevision }) {
+	const expected = Number(observedRevision);
+	if (!Number.isSafeInteger(expected) || expected < 1) {
+		return { applied: false, stale: false, reason: "no_observed_revision" };
+	}
+	const result = await env.DB.prepare(
+		`UPDATE nodes
+		 SET summary = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1
+		 WHERE id = ? AND user_id = ?
+		   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
+		   AND COALESCE(revision, 1) = ?`,
+	).bind(summary, sourcesJson, Date.now(), nodeId, userId, expected).run();
+	const changes = result.meta?.changes ?? 0;
+	return changes > 0 ? { applied: true, stale: false } : { applied: false, stale: true };
+}
+
 export async function regenerateDirtySummaries(env, userId, deletedIds = [], touchedNodeIds = []) {
 	const deleted = new Set(deletedIds.filter(Boolean));
 	const touched = new Set(touchedNodeIds.filter(Boolean));
 	if (deleted.size === 0 && touched.size === 0) return { regenerated: 0 };
 
 	const { results: nodes } = await env.DB.prepare(
-		`SELECT id, label, category, state, summary, cluster, summary_sources_json
+		`SELECT id, label, category, state, summary, cluster, summary_sources_json, COALESCE(revision, 1) AS revision
 		 FROM nodes WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
 	).bind(userId).all();
 
@@ -370,10 +405,15 @@ export async function regenerateDirtySummaries(env, userId, deletedIds = [], tou
 		const events = eventsRes.results ?? [];
 		const summary = fallbackSummary(node, slices, events);
 		const provenance = JSON.stringify([...slices.map((s) => s.id), ...events.map((e) => e.id)].slice(0, 40));
-		await env.DB.prepare(
-			"UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ?",
-		).bind(summary, provenance, Date.now(), node.id, userId).run();
-		regenerated++;
+		// The summary was computed from the rows this pass READ. If an explicit
+		// user edit landed in between, that read is stale and this write must
+		// lose rather than overwrite the correction.
+		const applied = await regenerateNodeSummaryFenced(env, userId, node.id, {
+			summary,
+			sourcesJson: provenance,
+			observedRevision: nodeRevision(node),
+		});
+		if (applied.applied) regenerated++;
 	}
 	if (regenerated) await refreshManualSearchProfiles(env, getConfig(env), userId, {});
 	return { regenerated };
@@ -1089,7 +1129,7 @@ function mixedDomainWarning(page, text) {
 
 async function repairMemoryPages(env, userId) {
 	const { results } = await env.DB.prepare(
-		`SELECT id, title, canonical_title, topic_filter, short_summary, full_markdown, key_points_json,
+		`SELECT id, COALESCE(revision, 1) AS revision, title, canonical_title, topic_filter, short_summary, full_markdown, key_points_json,
 		        related_concepts_json, evidence_json, cluster
 		 FROM memory_pages
 		 WHERE user_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL`,
@@ -1130,9 +1170,12 @@ async function repairMemoryPages(env, userId) {
 		const cluster = repairCluster ? nextCluster : page.cluster;
 		const fullMarkdown = markdownWithTitleWithoutEvidence(page.full_markdown, title);
 		await env.DB.prepare(
+			// Fenced on the revision this repair pass read: an explicit user edit
+			// committed since must survive, so a stale repair writes nothing.
 			`UPDATE memory_pages
-			 SET title = ?, canonical_title = ?, cluster = ?, evidence_json = ?, full_markdown = ?, updated_at = ?
-			 WHERE id = ? AND user_id = ?`,
+			 SET title = ?, canonical_title = ?, cluster = ?, evidence_json = ?, full_markdown = ?, updated_at = ?,
+				revision = COALESCE(revision, 1) + 1
+			 WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?`,
 		)
 			.bind(
 				title,
@@ -1143,6 +1186,7 @@ async function repairMemoryPages(env, userId) {
 				Date.now(),
 				page.id,
 				userId,
+				Number(page?.revision) >= 1 ? Number(page.revision) : 1,
 			)
 			.run();
 		if (repairTitle) {

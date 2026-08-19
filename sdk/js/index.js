@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 
 const DEFAULT_BASE_URL = "https://itsuki.app";
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";
 
 const MAX_TIMER_MS = 2_147_483_647;
 const TERMINAL_JOB_STATUSES = new Set(["enriched", "failed", "completed"]);

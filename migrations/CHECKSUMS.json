@@ -45,5 +45,6 @@
  "0044_memory_workspace.sql": "f69a38ec0d7af0254cd38716a4eedaa52ad66e5a27aea6bfba86a7fcb667bf9a",
  "0045_project_lifecycle.sql": "bb1f750e24288eec36cebd18ce442d39fa329ca0b6ae5b08d48803b9dc4705cf",
  "0046_lifecycle_driver_lease.sql": "4bbaacc819165e47a2c9cbaf225148e6ad0e8893ab8bd4dd7d72259b736c9f21",
- "0047_memory_revisions.sql": "b63232562a8281a4eb63ee787c9829736afeeb4a25e421a0825ed57ec707f728"
+ "0047_memory_revisions.sql": "b63232562a8281a4eb63ee787c9829736afeeb4a25e421a0825ed57ec707f728",
+ "0048_memory_revision_scope.sql": "c398439ea79f94bdb163c52b9f768cf1dc585dd9b7de03ef0e1de63aea18b437"
 }

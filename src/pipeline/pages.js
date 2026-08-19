@@ -681,7 +681,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				extraction_run_id = ?, updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
 				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?,
 				revision = COALESCE(revision, 1) + 1
-			 WHERE id = ? AND user_id = ? AND project_id IS ?`,
+			 WHERE id = ? AND user_id = ? AND project_id IS ?
+			   AND (? IS NULL OR COALESCE(revision, 1) = ?)`,
 		)
 			.bind(
 				page.title,
@@ -708,6 +709,11 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				match.id,
 				userId,
 				projectScope.projectId,
+				// Fenced on the revision this merge read. NULL keeps the historical
+				// behaviour for rows that predate versioning; a real revision makes
+				// a stale merge lose to an explicit user edit committed since.
+				Number(match?.revision) >= 1 ? Number(match.revision) : null,
+				Number(match?.revision) >= 1 ? Number(match.revision) : null,
 			);
 		try {
 			await commitFenced(updateStatement);

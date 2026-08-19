@@ -562,10 +562,22 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			...(mapped.body.current_revision ? { current_revision: mapped.body.current_revision } : {}),
 		});
 	};
-	const mcpActor = () => ({
+	const mcpActor = (capability = "project.memory.write") => ({
 		actorClass: authz?.rateContext?.auth?.type === "token" ? "token" : "user",
 		actorRef: authz?.rateContext?.auth?.token?.id ?? userId,
 		project: authz?.memoryScope?.managedProjectId ? { id: authz.memoryScope.managedProjectId } : null,
+		// The MCP door resolved permissions during preflight; this identity makes
+		// the COMMIT re-check them atomically, so a role downgrade or a revoked
+		// credential between the two cannot land a write.
+		actor: authz?.rateContext?.auth?.userId
+			? {
+				userId: authz.rateContext.auth.userId,
+				type: authz.rateContext.auth.type ?? "token",
+				capability,
+				orgId: authz?.rateContext?.managedProject?.effective_organization_id
+					?? authz?.rateContext?.managedProject?.organization_id ?? null,
+			}
+			: null,
 	});
 
 	if (updatesOn && connectionCanWrite) {

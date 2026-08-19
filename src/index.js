@@ -205,6 +205,7 @@ import {
 import { normalizeThreadSettings } from "./pipeline/playground_settings.js";
 import {
 	createExport,
+	EXPORT_REVISION_LIMIT,
 	EXPORT_TABLES,
 	exportFileName,
 	getExport,
@@ -2766,6 +2767,15 @@ const routes = {
 				user_id: auth.userId,
 			};
 			tables.forEach((table, index) => { payload[table] = results[index].results ?? []; });
+			// Honesty: say so when revision history hit its export bound instead
+			// of presenting a truncated download as complete.
+			if ((payload.memory_revisions?.length ?? 0) >= EXPORT_REVISION_LIMIT) {
+				payload.history_truncated = {
+					table: "memory_revisions",
+					limit: EXPORT_REVISION_LIMIT,
+					note: "Revision history was truncated at the export limit. Use GET /v1/memories/:id/history for complete per-object history.",
+				};
+			}
 			return payload;
 		};
 		const payload = auth.managedProject
@@ -4927,7 +4937,7 @@ async function handleMemoryReadRoutes(request, env, url) {
 	if (id) {
 		const found = await getMemory(env, auth.userId, id);
 		if (found?.error === "unrecognized_id") {
-			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id." }, 400);
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, event_, or candidate id." }, 400);
 		}
 		if (!found) return json({ error: "not_found" }, 404);
 		// Strong revision ETag: the update door's If-Match precondition is this
@@ -5050,6 +5060,17 @@ async function handleMemoryUpdateRoutes(request, env, ctx, url) {
 	const change = {
 		userId: auth.userId,
 		project: auth.managedProject ? { id: auth.managedProject.id } : null,
+		// Commit-time authorization identity: the batch re-checks this actor's
+		// membership and capability, so a downgrade or revocation between
+		// preflight and commit loses.
+		actor: auth.auth?.userId
+			? {
+				userId: auth.auth.userId,
+				type: auth.auth.type ?? "user",
+				capability: "project.memory.write",
+				orgId: auth.membership?.orgId ?? auth.managedProject?.effective_organization_id ?? auth.managedProject?.organization_id ?? null,
+			}
+			: null,
 		actorClass, actorRef, id, mode,
 		patch: mode === "update" ? patchFields : null,
 		toRevision: mode === "rollback" ? Number(toRevision) : null,
@@ -5114,7 +5135,7 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 					: id.startsWith("cand") ? "candidate"
 						: null;
 		if (!kind) {
-			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id." }, 400);
+			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, event_, or candidate id." }, 400);
 		}
 		const table = kind === "page" ? "memory_pages"
 			: kind === "node" ? "nodes"
