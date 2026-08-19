@@ -90,10 +90,11 @@ REST (above); MCP tools update_memory/memory_history/rollback_memory (11 tools t
 - [x] Adversarial suites: memory_updates.spec.js (30) + memory_updates_rbac.spec.js (5) — CAS races, same-key storms, replay-after-advance, foreign-revision refusal, Unicode NFC, control-char strip, oversize refusal, recall/list/FTS freshness, RBAC/tenancy/revocation/archived-project, MCP advertisement + round trip, erasure residue = zero
 - [x] Unit config suite: 35 files, 602 passed + 1 intentional skip; migration gates green
 - [x] wrangler.jsonc SAFE_MEMORY_UPDATES="track" (Stage A ready)
-- [ ] Full Workers suite on final tree (bcmggz13f — in flight)
-- [ ] Stage A: Time Travel bookmark `000014ad-00000000-000050cc-e5ff90136c248269915f7e70d59d1855` captured (account b6009ce8…2942, D1 uml-memory 3202df08-e568-4e53-a8cd-a85630db50f8, pending = exactly 0047) → wrangler migrate 0047 → deploy (flag "track") → soak probe
-- [ ] Stage B: flag "on" → deploy → publish itsuki(js) 0.3.0, itsuki(py) 0.4.0, n8n-nodes-itsuki 0.2.0 (registry proof + clean install)
-- [ ] Canary (18 proofs) + lifecycle cleanup + final report + backlog item 2
+- [x] Full Workers suites: first run caught the stale eight-tools pin (fixed → eleven); FRESH UNINTERRUPTED RELEASE RUN: **149 files / 1,942 tests green** on final tree `f498f82`.
+- [x] Stage A SHIPPED: bookmark `000014ad-00000000-000050cc-e5ff90136c248269915f7e70d59d1855`; migration 0047 applied via Wrangler (✅ once; account b6009ce8…2942, D1 3202df08-e568-4e53-a8cd-a85630db50f8); deploy `72aba5ec-6601-45ff-885f-7106dbc33522` flag "track". Soak: health 200; PATCH + history → feature_disabled; production extraction bumped a probe node to revision 3 (automatic writers version-tracking LIVE); probe space wiped via delete-all + logout.
+- [x] Stage B SHIPPED: commit `f36fe75`, deploy `b9bdadd7-8017-4472-95ef-b247cfb3df02` flag "on". Rollback target = Stage A version (trackers keep running under rollback; no unversioned window).
+- [ ] Publishing: publish-js-sdk / publish-pypi(itsuki) / publish-n8n-node dispatched dry_run=false (in flight) → verify registries + clean install.
+- [ ] Canary (18 proofs, bo2o2msrh in flight) + SDK legs + lifecycle cleanup + final report + backlog item 2
 
 ### Deliberate classifications (frozen)
 

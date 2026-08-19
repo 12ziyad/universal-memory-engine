@@ -71,8 +71,8 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           echo "package.json version: $version"
-          if [ "$version" != "0.2.1" ]; then
-            echo "FAIL: expected 0.2.1 — bump this gate deliberately with the version"
+          if [ "$version" != "0.3.0" ]; then
+            echo "FAIL: expected 0.3.0 — bump this gate deliberately with the version"
             exit 1
           fi
           # Refuse to overwrite a published version: npm would reject it anyway,
