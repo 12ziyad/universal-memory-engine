@@ -36,6 +36,20 @@ Memories UI (draft-preserving conflict UX + History/restore), Python SDK 0.4.0
 (published + production-canaried sync+async). Full evidence:
 SAFE_MEMORY_UPDATES_REPORT.md + SAFE_MEMORY_UPDATES_CHECKPOINT.md.
 
+**CLOSED 2026-08-19 after a second corrective pass.** A further independent
+review found three blockers the first correction missed: the commit-time guard
+proved membership but never the CREDENTIAL (so a token revoked between preflight
+and commit still wrote); several writers had NULL-bypassable CAS predicates,
+ignored affected-row counts, and pass2 had been regressed into silently
+no-opping on every r2+ node; and vector cleanup guessed a 20-revision window, so
+gapped artifacts survived deletion. All reproduced with failing tests first,
+fixed, and re-proved in production (canary 19/19). The campaign's own canary
+additionally caught a defect nobody had asked about — a FRESH regeneration
+silently replacing summaries users had just corrected — now fixed so automatic
+regeneration defers to user-authored text and resumes after rollback.
+Migration 0049 adds a durable vector artifact ledger. Authoritative evidence:
+SAFE_MEMORY_UPDATES_CLOSURE_REPORT.md.
+
 **CORRECTED 2026-08-19 (same day).** Independent review found eight release
 blockers the first green suite never covered. All were reproduced with failing
 tests, fixed, and re-verified in production; the public doors were disabled
