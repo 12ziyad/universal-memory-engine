@@ -79,7 +79,7 @@ Static/unit/build, clean-install, and cleanup columns were green for every row u
 
 - Fresh full-suite release run on final tree: 147 files / 1,907 tests green (see checkpoint).
 - Change shipped: OpenClaw version-floor hint (public/index.html) + pinning test. No migrations. No binding changes.
-- Wrangler dry-run: clean. Deploy + version id: recorded in the checkpoint after deploy.
+- Wrangler dry-run: clean. Deployed 2026-08-19, Worker version `de38637f-58f1-4432-9ea6-6091b761e1aa` (itsuki.app, 200 OK). Post-deploy: "Validated on OpenClaw 2026.7.1-2" confirmed in the served app HTML and the docs page.
 - Rollback: Worker-only change; a rollback restores the prior hint text with no data-plane coupling.
 
 ## Disposable-resource ledger (final)

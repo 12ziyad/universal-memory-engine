@@ -101,8 +101,10 @@ PyPI: itsuki 0.3.0 · agno-itsuki 0.1.1 · llama-index-memory-itsuki 0.1.1 · ca
 
 - Release gate: fresh full suite on final tree (b4ltnr5jx); cert-project final delete (bp7l7ahrx).
 
-## Next action
+## CAMPAIGN COMPLETE (2026-08-19)
 
-1. On suite green: commit (public/index.html + test + checkpoint), push, `wrangler deploy` (dry-run already clean), record Worker version.
-2. Post-deploy: verify hint text live + one more UI spot check; confirm cert project 404/410 terminal.
-3. Write final route-by-route certification report + 10 verdicts; update LATER_PHASE_BACKLOG (absorb items 3 partially + 11 evidence); save memory.
+- Final release suite: 147 files / 1,907 tests green (second uninterrupted run).
+- Committed `5ecd2ff`, pushed to origin/master.
+- Deployed Worker version `de38637f-58f1-4432-9ea6-6091b761e1aa`; itsuki.app 200 OK; OpenClaw validated-version hint confirmed live in app + docs.
+- Cert project lifecycle delete reached terminal `deleted`; default projects purged; sessions revoked; browser session logged out.
+- Final report: GET_STARTED_CERTIFICATION_REPORT.md — verdict GO. Backlog items 3 + 11 absorbed. Memory saved.
