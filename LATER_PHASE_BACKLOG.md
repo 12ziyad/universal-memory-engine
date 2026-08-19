@@ -36,12 +36,28 @@ Memories UI (draft-preserving conflict UX + History/restore), Python SDK 0.4.0
 (published + production-canaried sync+async). Full evidence:
 SAFE_MEMORY_UPDATES_REPORT.md + SAFE_MEMORY_UPDATES_CHECKPOINT.md.
 
+**CORRECTED 2026-08-19 (same day).** Independent review found eight release
+blockers the first green suite never covered. All were reproduced with failing
+tests, fixed, and re-verified in production; the public doors were disabled
+(worker `cc3bf740`, tracking kept live) for the duration. Corrections: stale
+automatic writers now CAS the revision they read (+ a static mutation census
+gate), commit-time authorization is enforced on every door including MCP,
+events gained read parity, delete-last-extraction erases revision residue and
+exports carry history, the idempotency fingerprint is normalization-stable and
+complete, projection state is truthful and ordering-safe against asynchronous
+Vectorize (revision-qualified vector ids + readback), migration 0048 scopes
+history uniqueness per tenant+kind, and both SDKs stopped misreporting their
+own versions. Authoritative evidence:
+SAFE_MEMORY_UPDATES_CORRECTIVE_REPORT.md — the original
+SAFE_MEMORY_UPDATES_REPORT.md is superseded and partly retracted.
+
 Held (owner action): npm publications of `itsuki@0.3.0` and
 `n8n-nodes-itsuki@0.2.0` fail at ENEEDAUTH after all gates pass — configure
 npm Trusted Publishing (or a granular NPM_TOKEN) for both packages, then
-re-dispatch publish-js-sdk.yml and publish-n8n-node.yml. No live surface
-advertises the unpublished versions. A real-host n8n run of the three new
-operations follows the npm release.
+re-dispatch publish-js-sdk.yml and publish-n8n-node.yml. Registry state
+re-confirmed 2026-08-19: npm still serves itsuki@0.2.1 and
+n8n-nodes-itsuki@0.1.0. No live surface advertises the unpublished versions.
+A real-host n8n run of the three new operations follows the npm release.
 
 ### 3. Get Started and integration-catalog redesign — ✅ ABSORBED (2026-08-19, Get Started certification campaign)
 
