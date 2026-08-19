@@ -71,10 +71,15 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           echo "package.json version: $version"
-          if [ "$version" != "0.3.0" ]; then
-            echo "FAIL: expected 0.3.0 — bump this gate deliberately with the version"
+          # No literal to forget: the gate proves every in-repo declaration
+          # AGREES, which is the property that actually matters.
+          runtime=$(grep -oE 'export const VERSION = "[^"]+"' index.js | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          declared=$(grep -oE 'export const VERSION: "[^"]+"' index.d.ts | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "$runtime" != "$version" ] || [ "$declared" != "$version" ]; then
+            echo "FAIL: version disagreement — package.json=$version runtime=$runtime declaration=$declared"
             exit 1
           fi
+          echo "OK: package.json, runtime and declaration all agree on $version"
           # Refuse to overwrite a published version: npm would reject it anyway,
           # but failing here keeps the error readable and pre-publish. Only the
           # publishing leg enforces this — during a real publish the ubuntu leg

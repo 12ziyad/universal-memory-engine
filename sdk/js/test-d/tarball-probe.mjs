@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -5,7 +6,15 @@ const sdkPath = process.argv[2];
 if (!sdkPath) throw new Error("installed SDK path argument is required");
 const sdk = await import(pathToFileURL(resolve(sdkPath)).href);
 
-if (sdk.VERSION !== "0.2.1") throw new Error("wrong installed version export");
+// Assert AGREEMENT with the packed metadata, never a literal. A version pinned
+// in one file and forgotten in another is exactly how a release ships lying
+// about which version it is.
+const installedPkg = JSON.parse(
+	readFileSync(new URL("./package.json", pathToFileURL(process.argv[2])), "utf8"),
+);
+if (sdk.VERSION !== installedPkg.version) {
+	throw new Error(`installed VERSION ${sdk.VERSION} does not match packed package.json ${installedPkg.version}`);
+}
 if (sdk.default !== sdk.MemoryClient || sdk.Memory !== sdk.MemoryClient) {
 	throw new Error("exports mismatch");
 }
