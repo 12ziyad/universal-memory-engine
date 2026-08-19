@@ -33,6 +33,9 @@ export const AUDITABLE_FIELDS = new Set([
 	"capture_enabled", "capture_state", "project_count", "replacement_category_id",
 	"assignment_count", "memory_space_count", "run_mode", "deleted_count",
 	"format", "metadata_only", "events_count",
+	// Safe memory updates: revision numbers, the operation kind, and the NAMES
+	// of edited schema fields are structural, never memory content.
+	"revision", "memory_action", "edited_fields", "rolled_back_to",
 ]);
 
 // Names and descriptions are user-authored text. The audit trail may record

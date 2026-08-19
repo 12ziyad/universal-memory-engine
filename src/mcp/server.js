@@ -29,6 +29,9 @@ import { normalizeProjectScope, ProjectScopeError } from "../lib/project_scope.j
 import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js";
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
 import { getMemory, listMemories, memoryCounts, parseInventoryListOptions } from "../lib/memory_inventory.js";
+import {
+	applyMemoryChange, listMemoryHistory, safeUpdatesEnabled, versionErrorResponse,
+} from "../lib/memory_versions.js";
 import { bulkDeleteBySource, deleteObject, storeDeletionTombstone } from "../pipeline/cleanup.js";
 import { cleanClientSource } from "../pipeline/source.js";
 import { tokens } from "../lib/text.js";
@@ -543,6 +546,117 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			return managementResult(payload, parts.join("\n\n"));
 		},
 	);
+
+	// Safe memory updates — registered only when the deployment has the doors
+	// enabled AND this connection's scopes permit the operation, so a
+	// read-only connection is never shown a tool it cannot call.
+	const updatesOn = safeUpdatesEnabled(env);
+	const connectionCanWrite = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_WRITE_SCOPE);
+	const connectionCanRead = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_READ_SCOPE);
+	const versionFailure = (mode, source, error) => {
+		const mapped = versionErrorResponse(error);
+		if (!mapped) throw error;
+		return mcpResult({
+			ok: false, command_mode: mode, source,
+			error: mapped.body.error, summary: mapped.body.message,
+			...(mapped.body.current_revision ? { current_revision: mapped.body.current_revision } : {}),
+		});
+	};
+	const mcpActor = () => ({
+		actorClass: authz?.rateContext?.auth?.type === "token" ? "token" : "user",
+		actorRef: authz?.rateContext?.auth?.token?.id ?? userId,
+		project: authz?.memoryScope?.managedProjectId ? { id: authz.memoryScope.managedProjectId } : null,
+	});
+
+	if (updatesOn && connectionCanWrite) {
+		server.tool(
+			"update_memory",
+			"Correct one stored memory deterministically. Requires the exact current revision (from get_memory/memory_history) — a stale revision is refused, never overwritten. Editable fields depend on kind: node label/category/summary; page title/short_summary/full_markdown; slice text/kind; event text/importance/happened_at.",
+			{
+				id: z.string().trim().min(1).describe("The memory id (node_, page_, slice_, or event_)."),
+				expectedRevision: z.number().int().min(1).describe("The current revision you read. Refused with the fresh revision if stale."),
+				fields: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).describe("The editable fields to change, e.g. {\"summary\": \"corrected text\"}."),
+				reason: z.string().optional().describe("Optional short correction reason, kept in the revision history."),
+				idempotencyKey: z.string().min(8).max(120).describe("Required idempotency key for safe retries."),
+			},
+			async ({ id, expectedRevision, fields, reason, idempotencyKey }) => {
+				const forbidden = ensureScope(authz, "update", "update_memory", MEMORY_WRITE_SCOPE);
+				if (forbidden) return forbidden;
+				const limited = await rateLimited("mcp-save", env.SAVE_LIMITER, "update", "update_memory");
+				if (limited) return limited;
+				try {
+					const result = await applyMemoryChange(env, ctx, {
+						userId, ...mcpActor(), id, mode: "update",
+						patch: fields, reason, idempotencyKey, expectedRevision,
+					});
+					const payload = { ok: true, command_mode: "update", source: "update_memory", ...result };
+					const text = result.noop
+						? `No change — the memory already reads exactly like that (revision ${result.revision}).`
+						: `Updated. The memory is now revision ${result.revision}; the previous content is retained as history.`;
+					return managementResult(payload, text);
+				} catch (error) {
+					return versionFailure("update", "update_memory", error);
+				}
+			},
+		);
+
+		server.tool(
+			"rollback_memory",
+			"Restore one memory to the content of an earlier revision. Creates a NEW forward revision from the retained snapshot — history is never rewound or deleted.",
+			{
+				id: z.string().trim().min(1).describe("The memory id."),
+				toRevision: z.number().int().min(1).describe("The historical revision to restore (from memory_history)."),
+				expectedRevision: z.number().int().min(1).describe("The CURRENT head revision — a stale value is refused."),
+				reason: z.string().optional().describe("Optional reason, kept in the revision history."),
+				idempotencyKey: z.string().min(8).max(120).describe("Required idempotency key for safe retries."),
+			},
+			async ({ id, toRevision, expectedRevision, reason, idempotencyKey }) => {
+				const forbidden = ensureScope(authz, "rollback", "rollback_memory", MEMORY_WRITE_SCOPE);
+				if (forbidden) return forbidden;
+				const limited = await rateLimited("mcp-save", env.SAVE_LIMITER, "rollback", "rollback_memory");
+				if (limited) return limited;
+				try {
+					const result = await applyMemoryChange(env, ctx, {
+						userId, ...mcpActor(), id, mode: "rollback",
+						toRevision, reason, idempotencyKey, expectedRevision,
+					});
+					const payload = { ok: true, command_mode: "rollback", source: "rollback_memory", ...result };
+					return managementResult(payload,
+						`Restored revision ${result.rolled_back_to} as new revision ${result.revision}. Nothing was deleted.`);
+				} catch (error) {
+					return versionFailure("rollback", "rollback_memory", error);
+				}
+			},
+		);
+	}
+
+	if (updatesOn && connectionCanRead) {
+		server.tool(
+			"memory_history",
+			"Read one memory's bounded revision history: every recorded baseline, system capture, update, and rollback, newest first, with snapshots.",
+			{
+				id: z.string().trim().min(1).describe("The memory id."),
+				limit: z.number().int().min(1).max(50).optional().describe("Revisions per page (default 20, max 50)."),
+				cursor: z.string().optional().describe("Cursor from a previous call's next_cursor."),
+			},
+			async ({ id, limit, cursor }) => {
+				const forbidden = ensureScope(authz, "history", "memory_history", MEMORY_READ_SCOPE);
+				if (forbidden) return forbidden;
+				const limited = await rateLimited("mcp-read", env.READ_LIMITER, "history", "memory_history");
+				if (limited) return limited;
+				try {
+					const result = await listMemoryHistory(env, userId, id, { cursor, limit });
+					const payload = { ok: true, command_mode: "history", source: "memory_history", ...result };
+					const lines = result.revisions.map((r) =>
+						`r${r.revision} ${r.action}${r.captured ? " (captured)" : ""}${r.reason ? ` — ${r.reason}` : ""}`);
+					return managementResult(payload,
+						`Revision ${result.current_revision} is current. ${result.revisions.length} recorded:\n${lines.join("\n")}`);
+				} catch (error) {
+					return versionFailure("history", "memory_history", error);
+				}
+			},
+		);
+	}
 
 	server.tool(
 		"delete_memory",

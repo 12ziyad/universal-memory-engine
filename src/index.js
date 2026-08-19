@@ -5062,9 +5062,11 @@ async function handleMemoryUpdateRoutes(request, env, ctx, url) {
 					outcome: applied.noop ? "noop" : "ok",
 					reason: applied.noop ? "no_change" : null,
 					metadata: {
-						action: mode,
+						memory_action: mode,
 						revision: { from: applied.previous_revision ?? applied.revision, to: applied.revision },
-						...(mode === "update" ? { fields: Object.keys(patchFields) } : { rolled_back_to: applied.rolled_back_to ?? null }),
+						...(mode === "update"
+							? { edited_fields: Object.keys(patchFields).sort().join(",").slice(0, 120) }
+							: { rolled_back_to: applied.rolled_back_to ?? null }),
 					},
 				}),
 			)
