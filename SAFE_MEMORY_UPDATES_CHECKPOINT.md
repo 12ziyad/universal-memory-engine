@@ -93,8 +93,12 @@ REST (above); MCP tools update_memory/memory_history/rollback_memory (11 tools t
 - [x] Full Workers suites: first run caught the stale eight-tools pin (fixed → eleven); FRESH UNINTERRUPTED RELEASE RUN: **149 files / 1,942 tests green** on final tree `f498f82`.
 - [x] Stage A SHIPPED: bookmark `000014ad-00000000-000050cc-e5ff90136c248269915f7e70d59d1855`; migration 0047 applied via Wrangler (✅ once; account b6009ce8…2942, D1 3202df08-e568-4e53-a8cd-a85630db50f8); deploy `72aba5ec-6601-45ff-885f-7106dbc33522` flag "track". Soak: health 200; PATCH + history → feature_disabled; production extraction bumped a probe node to revision 3 (automatic writers version-tracking LIVE); probe space wiped via delete-all + logout.
 - [x] Stage B SHIPPED: commit `f36fe75`, deploy `b9bdadd7-8017-4472-95ef-b247cfb3df02` flag "on". Rollback target = Stage A version (trackers keep running under rollback; no unversioned window).
-- [ ] Publishing: publish-js-sdk / publish-pypi(itsuki) / publish-n8n-node dispatched dry_run=false (in flight) → verify registries + clean install.
-- [ ] Canary (18 proofs, bo2o2msrh in flight) + SDK legs + lifecycle cleanup + final report + backlog item 2
+- [x] Publishing: PyPI itsuki 0.4.0 PUBLISHED (trusted publishing + attestations; clean-installed; all six methods). npm itsuki 0.3.0 + n8n-nodes-itsuki 0.2.0 → **HOLD (owner)**: every gate passes, publish fails ENEEDAUTH (npm Trusted Publisher not configured / token revoked). JS version gate deliberately bumped to 0.3.0 (`7534d61`).
+- [x] Canary: main battery + repair leg — all proofs PASS (initial C16/C17 "failures" were the canary racing the archive run; the lifecycle fence behaved correctly). SDK legs: JS 5/5 (repo 0.3.0), Python 5/5 (published 0.4.0, sync+async). ETag surfaces weak via Cloudflare encoding — accepted by If-Match, documented.
+- [x] Cleanup: canary project purged to zero content (4 content-free replay-fence packets minimized by design) then terminal `deleted`; tokens revoked/destroyed; sessions closed on both accounts + soak account. Residue: content-free account shells only (admin-removable).
+- [x] Final Stage B worker `593392de-1e88-4c76-ac8a-7c208d58c1a0` (docs truth fixes). Report: SAFE_MEMORY_UPDATES_REPORT.md. Backlog item 2 updated.
+
+## CAMPAIGN COMPLETE — GO with two named npm publication HOLDs (owner action)
 
 ### Deliberate classifications (frozen)
 

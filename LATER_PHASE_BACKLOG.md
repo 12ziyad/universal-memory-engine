@@ -23,11 +23,25 @@ Finish the active Hermes, Google ADK, OpenCode, and Antigravity implementation/p
 - Prove page/memory idempotency, tenant isolation, lifecycle fencing, linked deletion, retry behavior, and zero page flooding.
 - If lossless large-document storage is required, design it as a separate document/import capability; current Notes are derived pages, not an unlimited file store.
 
-### 2. Safe memory updates
+### 2. Safe memory updates — ✅ SHIPPED (2026-08-19, PRODUCTION GO with two npm-publication holds)
 
-- Add an explicit, authorized `update_memory` contract rather than silently replacing existing content.
-- Include optimistic version checks, conflict responses, immutable history, audit records, rollback/recovery, tenant isolation, and deletion-race protection.
-- Carry the operation through REST, MCP, JavaScript/Python SDKs, n8n, native adapters, docs, and production canaries.
+Explicit update + bounded immutable history + rollback-as-forward-revision live
+for node/page/slice/event behind exact optimistic concurrency (If-Match /
+expectedRevision; 428/412; no last-write-wins), required idempotency keys,
+fresh-capability + lifecycle-epoch + deletion-barrier fences inside the commit
+batch, content-free audit, and history erased by every deletion path.
+Migration 0047; Stage A `72aba5ec` (track) → Stage B `b9bdadd7` → final
+`593392de`. Surfaces live: REST, MCP (11 tools, scope-gated advertisement),
+Memories UI (draft-preserving conflict UX + History/restore), Python SDK 0.4.0
+(published + production-canaried sync+async). Full evidence:
+SAFE_MEMORY_UPDATES_REPORT.md + SAFE_MEMORY_UPDATES_CHECKPOINT.md.
+
+Held (owner action): npm publications of `itsuki@0.3.0` and
+`n8n-nodes-itsuki@0.2.0` fail at ENEEDAUTH after all gates pass — configure
+npm Trusted Publishing (or a granular NPM_TOKEN) for both packages, then
+re-dispatch publish-js-sdk.yml and publish-n8n-node.yml. No live surface
+advertises the unpublished versions. A real-host n8n run of the three new
+operations follows the npm release.
 
 ### 3. Get Started and integration-catalog redesign — ✅ ABSORBED (2026-08-19, Get Started certification campaign)
 
