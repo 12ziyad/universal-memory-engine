@@ -290,3 +290,45 @@ describe("B3 — every physical vector artifact is deleted", () => {
 			"a delayed upsert that appeared after deletion must be reconciled away").toBe(true);
 	});
 });
+
+/* ------------------------------------------------------- deletion privacy */
+
+describe("deleted content must not remain addressable", () => {
+	it("a deleted node's own text is gone from the search projection and canonical reads", async () => {
+		const { deleteObject } = await import("../src/pipeline/cleanup.js");
+		const { refreshManualSearchProfiles } = await import("../src/pipeline/manual_search_profiles.js");
+		const { getConfig } = await import("../src/config.js");
+		const userId = uid();
+		// Two objects: one gets deleted, one stays. Only the DELETED one's unique
+		// phrase may disappear — a marker shared by both would prove nothing.
+		const doomedPhrase = `DOOMED-${crypto.randomUUID().slice(0, 8)}-orrery`;
+		const survivorPhrase = `SURVIVOR-${crypto.randomUUID().slice(0, 8)}-astrolabe`;
+		const doomed = await seedNode(userId, { label: doomedPhrase, summary: `${doomedPhrase} restoration notes.` });
+		const survivor = await seedNode(userId, { label: survivorPhrase, summary: `${survivorPhrase} restoration notes.` });
+		await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: [doomed, survivor] });
+
+		const before = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM manual_search_profiles WHERE user_id = ? AND object_id = ?",
+		).bind(userId, doomed).first();
+		expect(before.n, "the doomed node must be indexed before deletion").toBe(1);
+
+		await deleteObject(env, userId, { kind: "node", id: doomed });
+
+		const profiles = await env.DB.prepare(
+			"SELECT identity_text, semantic_text, context_text FROM manual_search_profiles WHERE user_id = ?",
+		).bind(userId).all();
+		const indexed = JSON.stringify(profiles.results ?? []);
+		expect(indexed, "the deleted node's text must leave the search projection").not.toContain(doomedPhrase);
+		expect(indexed, "an unrelated live node must be untouched").toContain(survivorPhrase);
+
+		// Canonical reads: gone for the deleted one, intact for the survivor.
+		const goneRead = await request(`/v1/memories/${doomed}?userId=${userId}`);
+		expect(goneRead.status).toBe(404);
+		const liveRead = await request(`/v1/memories/${survivor}?userId=${userId}`);
+		expect(liveRead.status).toBe(200);
+
+		// And the inventory listing must not surface the deleted phrase.
+		const list = await request(`/v1/memories?userId=${userId}&q=${encodeURIComponent(doomedPhrase)}`);
+		expect(JSON.stringify(await list.json())).not.toContain(doomedPhrase);
+	});
+});
