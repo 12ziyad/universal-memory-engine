@@ -54,7 +54,7 @@ Explicit update, bounded immutable history, and rollback-as-forward-revision are
 ## Deployment record
 
 - Stage A `72aba5ec-6601-45ff-885f-7106dbc33522` (flag "track"): doors answered `feature_disabled`; health 200; production soak probe: automatic extraction moved a disposable node to revision 3 — version tracking live with the doors closed; probe space wiped.
-- Stage B `b9bdadd7-8017-4472-95ef-b247cfb3df02` (flag "on"), then `593392de-1e88-4c76-ac8a-7c208d58c1a0` (final; removes the JS-SDK method row from live docs until 0.3.0 is on npm). Rollback target: the same tree with flag "track" — trackers keep every semantic mutation versioned under rollback, so no unversioned window can open. Commits: `d5665b4` → `8f13471` → `04065aa` → `f498f82` → `f36fe75` → `7534d61` → `e98e064` (all pushed).
+- Stage B `b9bdadd7-8017-4472-95ef-b247cfb3df02` (flag "on"), then `593392de-1e88-4c76-ac8a-7c208d58c1a0` (docs truth: JS-SDK row held until 0.3.0 on npm), final `8c029a34-22f5-4a39-832f-2dea3c6005b9` (ETag wording + report). Rollback target: the same tree with flag "track" — trackers keep every semantic mutation versioned under rollback, so no unversioned window can open. Commits: `d5665b4` → `8f13471` → `04065aa` → `f498f82` → `f36fe75` → `7534d61` → `e98e064` (all pushed).
 
 ## Packages
 

@@ -96,7 +96,7 @@ REST (above); MCP tools update_memory/memory_history/rollback_memory (11 tools t
 - [x] Publishing: PyPI itsuki 0.4.0 PUBLISHED (trusted publishing + attestations; clean-installed; all six methods). npm itsuki 0.3.0 + n8n-nodes-itsuki 0.2.0 → **HOLD (owner)**: every gate passes, publish fails ENEEDAUTH (npm Trusted Publisher not configured / token revoked). JS version gate deliberately bumped to 0.3.0 (`7534d61`).
 - [x] Canary: main battery + repair leg — all proofs PASS (initial C16/C17 "failures" were the canary racing the archive run; the lifecycle fence behaved correctly). SDK legs: JS 5/5 (repo 0.3.0), Python 5/5 (published 0.4.0, sync+async). ETag surfaces weak via Cloudflare encoding — accepted by If-Match, documented.
 - [x] Cleanup: canary project purged to zero content (4 content-free replay-fence packets minimized by design) then terminal `deleted`; tokens revoked/destroyed; sessions closed on both accounts + soak account. Residue: content-free account shells only (admin-removable).
-- [x] Final Stage B worker `593392de-1e88-4c76-ac8a-7c208d58c1a0` (docs truth fixes). Report: SAFE_MEMORY_UPDATES_REPORT.md. Backlog item 2 updated.
+- [x] Final Stage B worker `8c029a34-22f5-4a39-832f-2dea3c6005b9` (docs truth fixes; health 200, doors live, ETag wording verified). Report: SAFE_MEMORY_UPDATES_REPORT.md. Backlog item 2 updated.
 
 ## CAMPAIGN COMPLETE — GO with two named npm publication HOLDs (owner action)
 
