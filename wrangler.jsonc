@@ -157,7 +157,7 @@
 		// (Stage A). "on": doors enabled (Stage B). Stage B's rollback target
 		// is this same tree with "track" — the version trackers keep running
 		// under rollback, so no unversioned-mutation window can open.
-		"SAFE_MEMORY_UPDATES": "on"
+		"SAFE_MEMORY_UPDATES": "track"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.
