@@ -418,6 +418,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 			env.DB.prepare(
 				`UPDATE nodes
 				 SET state = ?, updated_at = ?, last_seen_at = ?,
+					 revision = COALESCE(revision, 1) + 1,
 					 mention_count = COALESCE(mention_count, 0) + 1,
 					 session_count = COALESCE(session_count, 0) + ?,
 					 heat_score = COALESCE(heat_score, 0) + 1
@@ -490,7 +491,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		trackNext({ kind: "aliasBulk", id: update.id });
 		stmts.push(
 			env.DB.prepare(
-				`UPDATE nodes SET aliases_json = ?, updated_at = ?
+				`UPDATE nodes SET aliases_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1
 				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND (? IS NULL OR EXISTS (
@@ -517,7 +518,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 				 SET aliases_json = json_insert(
 					CASE WHEN json_valid(aliases_json) THEN aliases_json ELSE '[]' END,
 					'$[#]', ?
-				 ), updated_at = ?
+				 ), updated_at = ?, revision = COALESCE(revision, 1) + 1
 				 WHERE id = ? AND user_id = ? AND project_id IS ?
 				   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
 				   AND EXISTS (
@@ -557,7 +558,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		trackNext({ kind: "sliceSuperseded", id: s.id ?? `${s.node_id}:${s.kind}` });
 		stmts.push(
 			env.DB.prepare(
-				`UPDATE slices SET is_current = 0
+				`UPDATE slices SET is_current = 0, revision = COALESCE(revision, 1) + 1
 				 WHERE user_id = ? AND node_id = ? AND (? IS NULL OR kind = ?) AND is_current = 1
 				   AND project_id IS ?
 				   AND (? IS NULL OR semantic_attribute = ?)
@@ -1303,7 +1304,8 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 					source_packet_id = ?, input_hash = ?, idempotency_key = ?,
 					extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
 					updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
-					confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
+					confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?,
+					revision = COALESCE(revision, 1) + 1
 					 WHERE id = ? AND user_id = ? AND project_id IS ?
 					   AND source_mode = 'manual_collect'
 					   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
@@ -1407,7 +1409,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 		const label = String(update.label ?? "");
 		stmts.push(
 			env.DB.prepare(
-				`UPDATE nodes SET summary = COALESCE((
+				`UPDATE nodes SET revision = COALESCE(revision, 1) + 1, summary = COALESCE((
 				  SELECT substr(nodes.label || ' — ' || group_concat(clause, ' '), 1, 320)
 				  FROM (
 				   SELECT trim(fact_clause, ' .;,!?') || '.' AS clause

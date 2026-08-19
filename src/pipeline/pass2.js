@@ -259,7 +259,7 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 					...withoutAuditEvents(events).map((e) => e.id),
 				].slice(0, 40));
 				const statement = env.DB.prepare(
-					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ?",
 				).bind(summary, cluster, sources, Date.now(), nodeId, userId);
 				if (opts.managedProjectId) {
 					await env.DB.batch([
@@ -281,7 +281,7 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 				const sorted = [...slices].sort((a, b) => a.created_at - b.created_at);
 				const demote = sorted.slice(0, slices.length - config.sliceRollupThreshold);
 				for (const s of demote) {
-					const statement = env.DB.prepare("UPDATE slices SET is_current = 0 WHERE id = ? AND user_id = ?")
+					const statement = env.DB.prepare("UPDATE slices SET is_current = 0, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ?")
 						.bind(s.id, userId);
 					if (opts.managedProjectId) {
 						await env.DB.batch([

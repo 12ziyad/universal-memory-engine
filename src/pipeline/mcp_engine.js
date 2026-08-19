@@ -1208,7 +1208,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			`UPDATE memory_pages SET
 				title = ?, canonical_title = ?, short_summary = ?, full_markdown = ?,
 				enrich_status = 'enriched', extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
-				updated_at = ?, last_seen_at = ?
+				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
 			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL`,
 		).bind(
 			title,

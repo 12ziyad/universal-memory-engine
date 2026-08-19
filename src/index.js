@@ -4001,6 +4001,14 @@ export default {
 		ctx.waitUntil(resumeLifecycleRuns(env, { limit: 3, budgetMs: 20000 }).catch((error) => {
 			console.warn("lifecycle resume sweep failed:", error?.message ?? error);
 		}));
+		// Safe-memory-updates projection repair: recompute pending/failed search
+		// and vector projections from the CURRENT canonical rows.
+		ctx.waitUntil((async () => {
+			const { sweepPendingProjections } = await import("./lib/memory_versions.js");
+			await sweepPendingProjections(env, { limit: 25 });
+		})().catch((error) => {
+			console.warn("memory projection sweep failed:", error?.message ?? error);
+		}));
 	},
 
 	async fetch(request, env, ctx) {
@@ -4195,6 +4203,18 @@ async function handleRequestInner(request, env, ctx, url) {
 		// keys are scoped to their account (and sub-tenant when userId given).
 		if (request.method === "DELETE" && (url.pathname === "/v1/memories" || url.pathname.startsWith("/v1/memories/"))) {
 			return handleMemoryDeleteRoutes(request, env, url, ctx);
+		}
+
+		// Safe memory updates: explicit correction, bounded immutable history,
+		// and rollback-as-forward-revision. PATCH/POST are precondition-gated
+		// (If-Match / expectedRevision); GET history dispatches before the
+		// generic reader whose prefix parser would reject "id/history".
+		if (url.pathname.startsWith("/v1/memories/") && (
+			request.method === "PATCH"
+			|| (request.method === "POST" && url.pathname.endsWith("/rollback"))
+			|| (request.method === "GET" && url.pathname.endsWith("/history"))
+		)) {
+			return handleMemoryUpdateRoutes(request, env, ctx, url);
 		}
 
 		// Memories workspace: the dashboard's Memories page (inventory, sources,
@@ -4901,7 +4921,11 @@ async function handleMemoryReadRoutes(request, env, url) {
 			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id." }, 400);
 		}
 		if (!found) return json({ error: "not_found" }, 404);
-		return json({ ok: true, kind: found.kind, memory: found.memory });
+		// Strong revision ETag: the update door's If-Match precondition is this
+		// exact value, so read → edit round trips carry the version contract.
+		const revision = Number(found.memory?.revision ?? 1);
+		return json({ ok: true, kind: found.kind, memory: found.memory }, 200,
+			Number.isSafeInteger(revision) && revision >= 1 ? { etag: `"r${revision}"` } : {});
 	}
 
 	const options = parseInventoryListOptions({
@@ -4921,6 +4945,145 @@ async function handleMemoryReadRoutes(request, env, url) {
  * token_not_allowed on delete routes meant key holders could write forever
  * and remove nothing. Bulk defaults to dry_run; destruction needs confirm.
  */
+/**
+ * Safe memory updates — PATCH /v1/memories/:id, GET /v1/memories/:id/history,
+ * POST /v1/memories/:id/rollback.
+ *
+ * Update/rollback require memory:write scope + fresh project.memory.write
+ * capability and an exact revision precondition (If-Match: "rN" or body
+ * expectedRevision; both present must agree; wildcard is refused). History
+ * needs memory:read + project.memory.read — a role that could read the value
+ * when it was current may read it as history. All lifecycle, epoch, barrier,
+ * and capability checks are re-fenced inside the committing batch.
+ */
+async function handleMemoryUpdateRoutes(request, env, ctx, url) {
+	const {
+		applyMemoryChange, listMemoryHistory, safeUpdatesEnabled, versionErrorResponse,
+	} = await import("./lib/memory_versions.js");
+	if (!safeUpdatesEnabled(env)) {
+		return json({ error: "feature_disabled", message: "Memory updates are not enabled on this deployment yet." }, 404);
+	}
+
+	const isHistory = request.method === "GET";
+	const rest = url.pathname.slice("/v1/memories/".length);
+	const id = decodeURIComponent(rest.replace(/\/(history|rollback)$/, ""));
+
+	if (isHistory) {
+		const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
+			requiredScope: MEMORY_READ_SCOPE,
+			requiredCapability: "project.memory.read",
+		});
+		if (auth.response) return auth.response;
+		if (!(await allowRate(env.READ_LIMITER, managedActorRateKey("read", auth)))) return tooManyFor("read");
+		try {
+			const history = await listMemoryHistory(env, auth.userId, id, {
+				cursor: url.searchParams.get("cursor"),
+				limit: url.searchParams.get("limit") ?? undefined,
+			});
+			return json({ ok: true, ...history }, 200, { "cache-control": "private, no-store" });
+		} catch (error) {
+			const mapped = versionErrorResponse(error);
+			if (mapped) return json(mapped.body, mapped.status);
+			throw error;
+		}
+	}
+
+	const parsed = await readSmallJsonObject(request, url.pathname, 64 * 1024);
+	if (parsed.response) return parsed.response;
+	const body = parsed.body;
+	const auth = await requireMemoryUser(request, env, body.userId ?? url.searchParams.get("userId"), {
+		scopeInput: body.memoryScope ?? body.sourceScope,
+		requiredScope: MEMORY_WRITE_SCOPE,
+		requiredCapability: "project.memory.write",
+	});
+	if (auth.response) return auth.response;
+	if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth)))) return tooManyFor("save");
+
+	// Precondition: If-Match strong ETag "rN" and/or body expectedRevision.
+	const ifMatch = request.headers.get("if-match");
+	let headerRevision = null;
+	if (ifMatch != null && ifMatch !== "") {
+		if (ifMatch.trim() === "*") {
+			return json({
+				error: "wildcard_rejected", code: "wildcard_rejected",
+				message: "If-Match: * would overwrite blindly. Send the exact current revision.",
+			}, 400);
+		}
+		const match = /^(?:W\/)?"r(\d+)"$/.exec(ifMatch.trim());
+		if (!match) {
+			return json({
+				error: "precondition_required", code: "precondition_required",
+				message: "If-Match must be the revision ETag this API returned, e.g. \"r3\".",
+			}, 428);
+		}
+		headerRevision = Number(match[1]);
+	}
+	const bodyRevision = body.expectedRevision === undefined ? null : Number(body.expectedRevision);
+	if (headerRevision != null && bodyRevision != null && headerRevision !== bodyRevision) {
+		return json({
+			error: "precondition_mismatch", code: "precondition_mismatch",
+			message: "If-Match and expectedRevision disagree.",
+		}, 400);
+	}
+	const expectedRevision = headerRevision ?? bodyRevision;
+	if (expectedRevision == null) {
+		return json({
+			error: "precondition_required", code: "precondition_required",
+			message: "Updates require the current revision: send If-Match: \"r<revision>\" or expectedRevision.",
+		}, 428);
+	}
+
+	const mode = request.method === "PATCH" ? "update" : "rollback";
+	const actorClass = auth.auth?.type === "token" ? "token" : "user";
+	const actorRef = auth.auth?.type === "token" ? (auth.auth.token?.id ?? null) : (auth.auth?.userId ?? null);
+	const { userId: _u, memoryScope: _s, sourceScope: _ss, expectedRevision: _r, reason, idempotencyKey, toRevision, ...patchFields } = body;
+
+	const change = {
+		userId: auth.userId,
+		project: auth.managedProject ? { id: auth.managedProject.id } : null,
+		actorClass, actorRef, id, mode,
+		patch: mode === "update" ? patchFields : null,
+		toRevision: mode === "rollback" ? Number(toRevision) : null,
+		reason, idempotencyKey, expectedRevision,
+	};
+
+	try {
+		const result = auth.managedProject
+			? await runContextAuditedMutation(
+				request, env, ctx, managedMemoryAuditContext(auth), "project.memory.write",
+				{
+					action: mode === "rollback" ? "project.memory.rolled_back" : "project.memory.updated",
+					targetType: "memory_object",
+					targetId: id,
+					idempotencyKey: idempotencyKey ?? null,
+				},
+				(intent) => applyMemoryChange(env, ctx, { ...change, auditIntent: intent }),
+				(applied) => ({
+					outcome: applied.noop ? "noop" : "ok",
+					reason: applied.noop ? "no_change" : null,
+					metadata: {
+						action: mode,
+						revision: { from: applied.previous_revision ?? applied.revision, to: applied.revision },
+						...(mode === "update" ? { fields: Object.keys(patchFields) } : { rolled_back_to: applied.rolled_back_to ?? null }),
+					},
+				}),
+			)
+			: await applyMemoryChange(env, ctx, change);
+		if (!result.noop && !result.replayed) {
+			ctx.waitUntil(emitWebhookEvent(env, (p) => ctx.waitUntil(p), auth.userId, "memory.updated", {
+				source: mode === "rollback" ? "rollback_memory" : "update_memory",
+				kind: result.kind,
+				counts: { updated: 1 },
+			}));
+		}
+		return json(result, 200, { etag: `"r${result.revision}"` });
+	} catch (error) {
+		const mapped = versionErrorResponse(error);
+		if (mapped) return json(mapped.body, mapped.status);
+		throw error;
+	}
+}
+
 async function handleMemoryDeleteRoutes(request, env, url) {
 	const auth = await requireMemoryUser(request, env, url.searchParams.get("userId"), {
 		requiredScope: MEMORY_WRITE_SCOPE,

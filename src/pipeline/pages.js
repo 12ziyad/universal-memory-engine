@@ -679,7 +679,8 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 				related_concepts_json = ?, evidence_json = ?, source_conversation_id = COALESCE(?, source_conversation_id),
 				source_packet_id = ?, input_hash = ?, idempotency_key = ?,
 				extraction_run_id = ?, updated_at = ?, last_seen_at = ?, heat_score = COALESCE(heat_score, 0) + 1,
-				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?
+				confidence = MAX(COALESCE(confidence, 0), ?), importance_class = ?, cluster = ?,
+				revision = COALESCE(revision, 1) + 1
 			 WHERE id = ? AND user_id = ? AND project_id IS ?`,
 		)
 			.bind(

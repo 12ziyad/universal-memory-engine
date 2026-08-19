@@ -66,6 +66,12 @@ export const PURGE_SPACE_TABLES = [
 	"memory_jobs",
 	"ai_calls",
 	"error_reports",
+	// Safe memory updates (0047): revision history is customer content and the
+	// idempotency ledger stores bounded result payloads — both purge with the
+	// space. Projection state is operational but object-keyed, so it goes too.
+	"memory_revisions",
+	"memory_update_idempotency",
+	"memory_projection_state",
 ];
 
 export const CENSUS = {

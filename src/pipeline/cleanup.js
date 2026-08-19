@@ -16,6 +16,7 @@ import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
 import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
+import { versionResidueStatements } from "../lib/memory_versions.js";
 import {
 	countSemanticAtomProjections,
 	countSourceEpisodes,
@@ -370,7 +371,7 @@ export async function regenerateDirtySummaries(env, userId, deletedIds = [], tou
 		const summary = fallbackSummary(node, slices, events);
 		const provenance = JSON.stringify([...slices.map((s) => s.id), ...events.map((e) => e.id)].slice(0, 40));
 		await env.DB.prepare(
-			"UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+			"UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ?",
 		).bind(summary, provenance, Date.now(), node.id, userId).run();
 		regenerated++;
 	}
@@ -421,6 +422,9 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 			env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
 				.bind(now, suppress ? now : null, id, userId),
+			// Single-object permanent deletion erases revision history too —
+			// history must never become an undeletable shadow copy.
+			...versionResidueStatements(env, userId, [id]),
 		]);
 		await deleteManualSearchObjects(env, getConfig(env), userId, { pageIds: [id] });
 		return { deleted: true, kind: "memory_page", id };
@@ -453,6 +457,9 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 				id,
 				id,
 			),
+			// Revision history of the node AND every cascading slice/event dies
+			// with the object graph it describes.
+			...versionResidueStatements(env, userId, [id, ...(dyingRows ?? []).map((r) => r.id)]),
 		]);
 		await deleteManualSearchObjects(env, getConfig(env), userId, { nodeIds: [id] });
 		// The full cascade (Part 3.3): the vector goes too (async on Vectorize's
@@ -485,6 +492,7 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 			// canonical key is freed and re-saving that fact later counts as new.
 			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE slices SET deleted_at = ?, is_current = 0 WHERE id = ? AND user_id = ?").bind(now, id, userId),
+			...versionResidueStatements(env, userId, [id]),
 		]);
 		if (nodeId) {
 			// The parent keeps its vector (label and category are unchanged), but
@@ -731,6 +739,9 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		"manual_fact_identities",
 		"manual_page_identities",
 		"manual_page_versions",
+		"memory_revisions",
+		"memory_update_idempotency",
+		"memory_projection_state",
 		"semantic_atom_projections",
 		"source_episodes",
 		"semantic_atom_candidates",
@@ -935,6 +946,9 @@ export async function deleteAllMemories(env, userId, confirm, { auditIntent = nu
 		"manual_fact_identities",
 		"manual_page_identities",
 		"manual_page_versions",
+		"memory_revisions",
+		"memory_update_idempotency",
+		"memory_projection_state",
 		// V3 / P0-D. Hard delete, and the FTS triggers drop the tokens with the
 		// row — an episode surviving a "delete everything" would be the user's own
 		// words, still searchable, after they asked us to erase them.

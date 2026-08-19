@@ -1229,7 +1229,8 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 			const events = eventsResult.results ?? [];
 			await env.DB.batch([
 				env.DB.prepare(
-					`UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?
+					`UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?,
+						revision = COALESCE(revision, 1) + 1
 					  WHERE id = ? AND user_id = ?`,
 				).bind(
 					fallbackSummary(node, slices, events),
@@ -1255,8 +1256,18 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 function auxiliaryDeleteStatements(env, target, scope, ids, now) {
 	const marks = idsClause(ids);
 	const scoped = (sql, ...leading) => env.DB.prepare(sql).bind(...leading, ...ids, ...scopeBinds(scope));
+	// Retention-expired objects lose their revision history, idempotency
+	// results, and projection rows with them — history follows content.
+	const versionResidue = ["nodes", "memory_pages", "slices", "events"].includes(target.table)
+		? [
+			scoped(`DELETE FROM memory_revisions WHERE object_id IN (${marks}) AND ${userScope("memory_revisions")}`),
+			scoped(`DELETE FROM memory_update_idempotency WHERE object_id IN (${marks}) AND ${userScope("memory_update_idempotency")}`),
+			scoped(`DELETE FROM memory_projection_state WHERE object_id IN (${marks}) AND ${userScope("memory_projection_state")}`),
+		]
+		: [];
 	if (target.table === "nodes") {
 		return [
+			...versionResidue,
 			scoped(`DELETE FROM manual_node_identities WHERE node_id IN (${marks}) AND ${userScope("manual_node_identities")}`),
 			scoped(`DELETE FROM manual_fact_identities WHERE (owner_node_id IN (${marks}) OR related_node_id IN (${marks})) AND ${userScope("manual_fact_identities")}`, ...ids),
 			scoped(`DELETE FROM node_topic_communities WHERE node_id IN (${marks}) AND ${userScope("node_topic_communities")}`),
@@ -1274,6 +1285,7 @@ function auxiliaryDeleteStatements(env, target, scope, ids, now) {
 	}
 	if (target.table === "memory_pages") {
 		return [
+			...versionResidue,
 			env.DB.prepare(
 				`INSERT INTO manual_page_write_epochs (user_id, epoch, updated_at)
 				 SELECT DISTINCT p.user_id, 1, ? FROM memory_pages p
@@ -1289,11 +1301,12 @@ function auxiliaryDeleteStatements(env, target, scope, ids, now) {
 	}
 	if (["slices", "events", "edges"].includes(target.table)) {
 		return [
+			...versionResidue,
 			scoped(`DELETE FROM semantic_atom_projections WHERE object_id IN (${marks}) AND ${userScope("semantic_atom_projections")}`),
 			scoped(`DELETE FROM manual_fact_identities WHERE object_id IN (${marks}) AND ${userScope("manual_fact_identities")}`),
 		];
 	}
-	return [];
+	return versionResidue;
 }
 
 function targetMutationStatements(env, target, scope, rows, now) {

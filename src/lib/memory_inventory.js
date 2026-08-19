@@ -68,6 +68,7 @@ function publicNode(row) {
 	return {
 		id: row.id,
 		kind: "node",
+		revision: Number(row.revision ?? 1),
 		label: row.label ?? null,
 		category: row.category ?? null,
 		state: row.state ?? null,
@@ -84,6 +85,7 @@ function publicPage(row) {
 	return {
 		id: row.id,
 		kind: "page",
+		revision: Number(row.revision ?? 1),
 		label: row.title ?? null,
 		title: row.title ?? null,
 		category: row.topic_filter ?? "interest",
@@ -129,14 +131,14 @@ export async function listMemories(env, userId, { kind = "all", limit = LIST_LIM
 	if (kind === "all" || kind === "node") {
 		statements.push(buildQuery(
 			"nodes",
-			"id, label, category, state, summary, cluster, project_id, project_name, created_at, updated_at",
+			"id, label, category, state, summary, cluster, project_id, project_name, created_at, updated_at, COALESCE(revision, 1) AS revision",
 			["label", "summary"],
 		));
 	}
 	if (kind === "all" || kind === "page") {
 		statements.push(buildQuery(
 			"memory_pages",
-			"id, title, topic_filter, short_summary, project_id, project_name, created_at, updated_at",
+			"id, title, topic_filter, short_summary, project_id, project_name, created_at, updated_at, COALESCE(revision, 1) AS revision",
 			["title", "short_summary"],
 		));
 	}
@@ -181,7 +183,7 @@ export async function getMemory(env, userId, id) {
 	if (kind === "node") {
 		const row = await env.DB.prepare(
 			`SELECT id, label, category, state, summary, cluster, project_id, project_name,
-				created_at, updated_at, archived_at, suppressed_at
+				created_at, updated_at, archived_at, suppressed_at, COALESCE(revision, 1) AS revision
 			 FROM nodes WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 		).bind(id, userId).first();
 		if (!row) return null;
@@ -213,7 +215,7 @@ export async function getMemory(env, userId, id) {
 		const row = await env.DB.prepare(
 			`SELECT id, title, canonical_title, topic_filter, short_summary, full_markdown,
 				source_conversation_id, project_id, project_name,
-				created_at, updated_at, archived_at, suppressed_at
+				created_at, updated_at, archived_at, suppressed_at, COALESCE(revision, 1) AS revision
 			 FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 		).bind(id, userId).first();
 		if (!row) return null;
@@ -235,7 +237,7 @@ export async function getMemory(env, userId, id) {
 
 	if (kind === "slice") {
 		const row = await env.DB.prepare(
-			"SELECT id, node_id, text, kind, is_current, created_at FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+			"SELECT id, node_id, text, kind, is_current, created_at, COALESCE(revision, 1) AS revision FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		).bind(id, userId).first();
 		return row ? { kind, memory: { ...row, kind: "slice", slice_kind: row.kind } } : null;
 	}
