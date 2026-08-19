@@ -16,7 +16,7 @@ import { suppressPageKey } from "./pages.js";
 import { dedupeEvidence, scoreDomains, topicSimilarity } from "./signals.js";
 import { canonicalTitle, generateTitle, isBadTitle } from "./title.js";
 import { deleteManualSearchObjects, refreshManualSearchProfiles } from "./manual_search_profiles.js";
-import { applyFencedUpdate, purgeVectorArtifactsForObjects, versionResidueStatements } from "../lib/memory_versions.js";
+import { applyFencedUpdate, purgeVectorArtifactsForObjects, userAuthoredSummaryFence, versionResidueStatements } from "../lib/memory_versions.js";
 import {
 	countSemanticAtomProjections,
 	countSourceEpisodes,
@@ -372,7 +372,8 @@ export async function regenerateNodeSummaryFenced(env, userId, nodeId, { summary
 		 SET summary = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1
 		 WHERE id = ? AND user_id = ?
 		   AND deleted_at IS NULL AND archived_at IS NULL AND suppressed_at IS NULL
-		   AND COALESCE(revision, 1) = ?`,
+		   AND COALESCE(revision, 1) = ?
+		   ${userAuthoredSummaryFence("nodes").sql}`,
 	).bind(summary, sourcesJson, Date.now(), nodeId, userId, expected).run();
 	const changes = result.meta?.changes ?? 0;
 	return changes > 0 ? { applied: true, stale: false } : { applied: false, stale: true };

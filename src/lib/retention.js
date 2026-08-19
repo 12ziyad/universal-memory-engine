@@ -11,6 +11,7 @@ import {
 import { newId } from "./ids.js";
 import { fallbackSummary, refreshMemoryProfile } from "../pipeline/pass2.js";
 import { manualPageVectorNamespace } from "../pipeline/manual_search_profiles.js";
+import { userAuthoredSummaryFence } from "./memory_versions.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_DAYS = 1;
@@ -1233,7 +1234,8 @@ async function settleDerivedWork(env, work = [], lifecycle = {}) {
 					// computed before an explicit edit must lose, not overwrite it.
 					`UPDATE nodes SET summary = ?, summary_sources_json = ?, updated_at = ?,
 						revision = COALESCE(revision, 1) + 1
-					  WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?`,
+					  WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?
+					  ${userAuthoredSummaryFence("nodes").sql}`,
 				).bind(
 					fallbackSummary(node, slices, events),
 					JSON.stringify([...slices.map((row) => row.id), ...events.map((row) => row.id)].slice(0, 40)),

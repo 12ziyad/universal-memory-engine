@@ -13,7 +13,7 @@ import { clusterForMemory } from "./clusters.js";
 import { responseText } from "./llm.js";
 import { runAi } from "../lib/ai_meter.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
-import { applyFencedUpdate } from "../lib/memory_versions.js";
+import { applyFencedUpdate, userAuthoredSummaryFence } from "../lib/memory_versions.js";
 
 // Planner-written bookkeeping events ("updated: was X → now Y"). They belong in
 // the node's timeline, never in its summary.
@@ -266,7 +266,9 @@ export async function runPass2(env, config, userId, affectedNodeIds, opts = {}) 
 				const statement = env.DB.prepare(
 					// Revision-fenced: pass 2 computed this from rows it read earlier,
 					// so an explicit edit committed since must win.
-					"UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1 WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?",
+					`UPDATE nodes SET summary = ?, cluster = ?, summary_sources_json = ?, updated_at = ?, revision = COALESCE(revision, 1) + 1
+					  WHERE id = ? AND user_id = ? AND COALESCE(revision, 1) = ?
+					  ${userAuthoredSummaryFence("nodes").sql}`,
 				).bind(summary, cluster, sources, Date.now(), nodeId, userId, observedRevision);
 				let applied = false;
 				if (opts.managedProjectId) {

@@ -663,6 +663,38 @@ export async function applyMemoryChange(env, ctx, {
 }
 
 /**
+ * SQL predicate: the row's CURRENT summary is text a user typed.
+ *
+ * A revision CAS stops a STALE writer, but it cannot stop a FRESH one — a pass
+ * that recomputes from newly committed facts is not stale, so it would happily
+ * replace a correction the user made moments earlier. For a feature whose whole
+ * promise is safe updates, silently reverting someone's own wording is not
+ * acceptable, so automatic summary regeneration defers while the stored text is
+ * the user's.
+ *
+ * Matching on the TEXT (rather than on a revision number) makes this
+ * order-independent: unrelated revision bumps from state changes or alias
+ * writes cannot accidentally release the pin, and the moment the user rolls
+ * back to machine-written text — or the text legitimately changes — automatic
+ * regeneration resumes on its own. No extra column, no migration, no deadlock.
+ *
+ * `table` is the aliased table name in the enclosing UPDATE.
+ */
+export function userAuthoredSummaryFence(table = "nodes", { column = "summary", kind = "node" } = {}) {
+	return {
+		sql: `AND NOT EXISTS (
+			SELECT 1 FROM memory_revisions mr
+			 WHERE mr.user_id = ${table}.user_id
+			   AND mr.object_kind = '${kind}'
+			   AND mr.object_id = ${table}.id
+			   AND mr.action IN ('update', 'rollback')
+			   AND json_extract(mr.snapshot_json, '$.${column}') IS NOT NULL
+			   AND json_extract(mr.snapshot_json, '$.${column}') = ${table}.${column}
+		)`,
+	};
+}
+
+/**
  * Run one revision-fenced UPDATE and report whether it actually applied.
  *
  * Every automatic semantic writer goes through this. A CAS that matched no row
