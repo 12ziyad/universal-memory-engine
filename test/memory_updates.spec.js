@@ -538,3 +538,76 @@ describe("projections", () => {
 		expect(snapshotFor("node", row)).toEqual({ category: "tool", label: "L", summary: "S" });
 	});
 });
+
+describe("adversarial edges", () => {
+	it("Unicode content normalizes to NFC; a visually identical resubmission is a no-op", async () => {
+		const userId = uid();
+		const decomposed = "Café corner"; // e + combining acute
+		const precomposed = "Café corner";
+		const nodeId = await seedNode(userId, { label: decomposed });
+		const res = await patchMemory(userId, nodeId, { label: precomposed, idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		const again = await patchMemory(userId, nodeId, { label: decomposed, idempotencyKey: idem() }, { ifMatch: `"r${body.revision}"` });
+		expect(again.status).toBe(200);
+		expect((await again.json()).noop).toBe(true);
+		const row = await env.DB.prepare("SELECT label FROM nodes WHERE id = ?").bind(nodeId).first();
+		expect(row.label).toBe(precomposed);
+	});
+
+	it("control characters are stripped and blank content is refused", async () => {
+		const userId = uid();
+		const nodeId = await seedNode(userId);
+		const ctrl = await patchMemory(userId, nodeId, { label: "bad\u0007label", idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		expect(ctrl.status).toBe(200);
+		const row = await env.DB.prepare("SELECT label FROM nodes WHERE id = ?").bind(nodeId).first();
+		expect(row.label).toBe("badlabel");
+		const blank = await patchMemory(userId, nodeId, { label: "   ", idempotencyKey: idem() }, { ifMatch: '"r2"' });
+		expect(blank.status).toBe(400);
+	});
+
+	it("a foreign object's history revision can never be restored onto another object", async () => {
+		const userId = uid();
+		const nodeA = await seedNode(userId, { label: "Object A" });
+		const nodeB = await seedNode(userId, { label: "Object B" });
+		await patchMemory(userId, nodeB, { label: "Object B v2", idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		await patchMemory(userId, nodeA, { label: "Object A v2", idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		// A has no recorded revision 5 — B's rows must never satisfy A's rollback.
+		const rb = await rollbackMemory(userId, nodeA, { toRevision: 5, idempotencyKey: idem() }, { ifMatch: '"r2"' });
+		expect(rb.status).toBe(404);
+		// A same-numbered revision restores A's OWN snapshot, never B's.
+		const rbOwn = await rollbackMemory(userId, nodeA, { toRevision: 1, idempotencyKey: idem() }, { ifMatch: '"r2"' });
+		expect(rbOwn.status).toBe(200);
+		const row = await env.DB.prepare("SELECT label FROM nodes WHERE id = ?").bind(nodeA).first();
+		expect(row.label).toBe("Object A");
+	});
+
+	it("list, get, and the search profile serve the corrected value immediately after the update settles", async () => {
+		const userId = uid();
+		const nodeId = await seedNode(userId, { label: "Old project name", summary: "Old project name — legacy summary." });
+		const res = await patchMemory(userId, nodeId, { label: "Phoenix initiative", summary: "Phoenix initiative — renamed this week.", idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		expect(res.status).toBe(200);
+		const list = await request(`/v1/memories?userId=${userId}&q=Phoenix`);
+		const listBody = await list.json();
+		expect(JSON.stringify(listBody)).toContain("Phoenix initiative");
+		expect(JSON.stringify(listBody)).not.toContain("Old project name");
+		const one = await request(`/v1/memories/${nodeId}?userId=${userId}`);
+		const oneBody = await one.json();
+		expect(oneBody.memory.label).toBe("Phoenix initiative");
+		expect(oneBody.memory.revision).toBe(2);
+		// The FTS profile (recall's sparse leg) carries the new label and has
+		// dropped the old one, so search cannot resurrect the stale name.
+		const profile = await env.DB.prepare(
+			"SELECT identity_text, semantic_text FROM manual_search_profiles WHERE user_id = ? AND object_kind = 'node' AND object_id = ?",
+		).bind(userId, nodeId).first();
+		expect(profile.identity_text).toContain("Phoenix initiative");
+		expect(`${profile.identity_text} ${profile.semantic_text}`).not.toContain("Old project name");
+	});
+
+	it("an oversized page body is refused at the door", async () => {
+		const userId = uid();
+		const pageId = await seedPage(userId);
+		const res = await patchMemory(userId, pageId, { full_markdown: "x".repeat(30_000), idempotencyKey: idem() }, { ifMatch: '"r1"' });
+		expect(res.status).toBe(400);
+	});
+});

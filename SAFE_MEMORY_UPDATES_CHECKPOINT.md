@@ -77,13 +77,27 @@ REST (above); MCP tools update_memory/memory_history/rollback_memory (11 tools t
 ## Progress log
 
 - [x] Phase 0 audit + mutation census + architecture freeze
-- [ ] Baseline suite result: (pending — brj63woil)
-- [ ] 0047 migration + checksums + schema census
-- [ ] lib/memory_versions.js core + unit tests
-- [ ] Writer bumps (write/pass2/mcp_engine/pages/cleanup/retention)
-- [ ] Routes + MCP + flag
-- [ ] Census/purge/delete/retention/erasure integration
-- [ ] SDKs + n8n + UI + docs
-- [ ] Adversarial suite
-- [ ] Stage A deploy + soak; Stage B deploy
-- [ ] Canary (18 proofs) + cleanup + final report
+- [x] Baseline full suite: 147 files / 1,907 tests green (pre-change)
+- [x] 0047 migration + checksums registered + schema census green (6)
+- [x] lib/memory_versions.js core (fence-guarded CAS batch, lazy baseline, rollback-as-forward, idempotency claims, projection convergence + sweep)
+- [x] Writer bumps ×12 (write.js ×6 incl. manual page CAS lane, pass2 ×2, mcp_engine, pages, cleanup, retention)
+- [x] Erasure integration: single-object delete (incl. node cascade), delete-all, bulk residue tables, retention auxiliary deletes, PURGE_SPACE_TABLES ×3
+- [x] REST doors (PATCH/history/rollback; If-Match 428/412/wildcard-reject; content-free audit w/ new allowlisted keys) behind SAFE_MEMORY_UPDATES
+- [x] MCP tools ×3, conditionally advertised by effective scopes; server-side flag in workspace counts
+- [x] JS SDK 0.3.0, Python SDK 0.4.0 (sync+async), n8n 0.2.0 (3 ops + contract tests 44 green)
+- [x] Memories UI: Edit dialog (draft-preserving 412 conflict + load-latest rebase), History tab + restore, revision/editable on workspace details
+- [x] Docs: REST rows, MCP page (eleven tools), SDK method tables; docs contract tests updated + green
+- [x] Adversarial suites: memory_updates.spec.js (30) + memory_updates_rbac.spec.js (5) — CAS races, same-key storms, replay-after-advance, foreign-revision refusal, Unicode NFC, control-char strip, oversize refusal, recall/list/FTS freshness, RBAC/tenancy/revocation/archived-project, MCP advertisement + round trip, erasure residue = zero
+- [x] Unit config suite: 35 files, 602 passed + 1 intentional skip; migration gates green
+- [x] wrangler.jsonc SAFE_MEMORY_UPDATES="track" (Stage A ready)
+- [ ] Full Workers suite on final tree (bcmggz13f — in flight)
+- [ ] Stage A: Time Travel bookmark `000014ad-00000000-000050cc-e5ff90136c248269915f7e70d59d1855` captured (account b6009ce8…2942, D1 uml-memory 3202df08-e568-4e53-a8cd-a85630db50f8, pending = exactly 0047) → wrangler migrate 0047 → deploy (flag "track") → soak probe
+- [ ] Stage B: flag "on" → deploy → publish itsuki(js) 0.3.0, itsuki(py) 0.4.0, n8n-nodes-itsuki 0.2.0 (registry proof + clean install)
+- [ ] Canary (18 proofs) + lifecycle cleanup + final report + backlog item 2
+
+### Deliberate classifications (frozen)
+
+- Automatic writers participate via revision bumps; they do not append per-change history rows. Accumulated drift is captured as ONE labeled `system` snapshot when explicit history next needs the chain; pre-history drift becomes the captured baseline. Nothing invents r1 content, authors, or timestamps.
+- Operational-only (no bump): reinforcement counts, last_seen, heat, cluster assignment, enrich_status, receipt links, summary_sources_json provenance.
+- Vector ordering protocol: per-node stable vector id + recompute-from-current-head with post-upsert head recheck (bounded ×3) + cron sweep from truth; recall treats vectors as pointers (returnMetadata none) and loads content from D1, so a stale embedding can only mis-rank, never surface stale content. Vectorize reversed-completion is therefore convergent by construction; exercised in tests at the protocol level (USE_VECTORS off in the pool; the guarded upsert path is identical code).
+- History read authorization: project.memory.read (viewer+) — a role that could read the value when current may read it as history. Update/rollback: project.memory.write. Deletion of history rides the object's delete permission.

@@ -43,6 +43,9 @@ const { context } = await memory.search("What am I learning?");
 | `packetStatus(id)` | `GET /v1/packets/:id/status` | Read one accepted write's current state. |
 | `jobs()` | `GET /v1/jobs` | List accepted writes, optionally filtered by status. |
 | `waitFor(id)` | packet status polling | Wait for `enriched`, `failed`, or compatibility state `completed`. |
+| `update(id, fields, { expectedRevision })` | `PATCH /v1/memories/:id` | Correct editable fields; a stale revision is refused with the fresh one — never overwritten. |
+| `history(id)` | `GET /v1/memories/:id/history` | Bounded immutable revision history, newest first. |
+| `rollback(id, toRevision, { expectedRevision })` | `POST /v1/memories/:id/rollback` | Restore an old revision as a NEW forward revision. |
 | `delete(id)` | `DELETE /v1/memories/:id` | Delete one node, page, slice, or candidate. |
 | `deleteBySource()` | `DELETE /v1/memories` | Dry-run or confirm a bulk source/time-window cleanup. |
 | `graph()`, `status()`, `receipts()`, `usage()` | read endpoints | Inspect the current memory space. |

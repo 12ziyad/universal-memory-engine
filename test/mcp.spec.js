@@ -341,7 +341,7 @@ describe("/mcp Streamable HTTP handler", () => {
 		});
 	});
 
-	it("lists exactly the eight memory-door tools", async () => {
+	it("lists exactly the eleven memory-door tools (safe updates enabled)", async () => {
 		const res = await mcp(token, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(res.status).toBe(200);
 		const body = await mcpJson(res);
@@ -350,9 +350,12 @@ describe("/mcp Streamable HTTP handler", () => {
 			"delete_memory",
 			"get_memory",
 			"list_memories",
+			"memory_history",
 			"recall_memory",
+			"rollback_memory",
 			"save_conversation",
 			"save_memory",
+			"update_memory",
 			"whoami",
 		]);
 	});

@@ -151,7 +151,13 @@
 		// the wallet backstop, since Workers AI has no hard spend cap. Values
 		// chosen from the B1 production measurement (see ai_budget.js).
 		"AI_MONTHLY_WRITES": "1000",
-		"AI_DAILY_NEURON_CEILING": "750000"
+		"AI_DAILY_NEURON_CEILING": "750000",
+		// Safe memory updates staged rollout. "track": schema + revision
+		// tracking live, public update/history/rollback doors disabled
+		// (Stage A). "on": doors enabled (Stage B). Stage B's rollback target
+		// is this same tree with "track" — the version trackers keep running
+		// under rollback, so no unversioned-mutation window can open.
+		"SAFE_MEMORY_UPDATES": "track"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

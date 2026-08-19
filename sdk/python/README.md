@@ -42,6 +42,9 @@ arbitrary cleartext host.
 | `packet_status(id)` | `GET /v1/packets/:id/status` | One job snapshot |
 | `jobs()` | `GET /v1/jobs` | Accepted-write ledger |
 | `wait_for(id)` | packet status polling | Terminal job snapshot |
+| `update(id, fields, expected_revision=...)` | `PATCH /v1/memories/:id` | Correct editable fields; stale revisions refused, never overwritten |
+| `history(id)` | `GET /v1/memories/:id/history` | Bounded immutable revision history |
+| `rollback(id, to_revision, expected_revision=...)` | `POST /v1/memories/:id/rollback` | Restore an old revision as a new forward revision |
 | `delete(id)` | `DELETE /v1/memories/:id` | One-memory deletion |
 | `delete_by_source(...)` | `DELETE /v1/memories` | Dry-run or confirmed bulk deletion |
 
