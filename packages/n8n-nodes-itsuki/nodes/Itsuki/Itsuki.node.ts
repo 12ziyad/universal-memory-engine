@@ -40,9 +40,12 @@ export class Itsuki implements INodeType {
 					{ name: 'Delete Memory', value: 'delete', description: 'Delete one memory by ID (destructive)', action: 'Delete a memory' },
 					{ name: 'Get Memory', value: 'get', description: 'Fetch one memory by ID', action: 'Get a memory' },
 					{ name: 'List Memories', value: 'list', description: 'List stored memories (one page, or return all)', action: 'List memories' },
+					{ name: 'Memory History', value: 'history', description: 'Read one memory\'s bounded revision history', action: 'Read memory history' },
 					{ name: 'Recall Memory', value: 'recall', description: 'Semantic recall: prompt-ready context plus structured items', action: 'Recall memories' },
+					{ name: 'Rollback Memory', value: 'rollbackMemory', description: 'Restore an earlier revision as a new forward revision', action: 'Roll back a memory' },
 					{ name: 'Save Conversation', value: 'saveConversation', description: 'Store a batch of chat messages for extraction', action: 'Save a conversation' },
 					{ name: 'Save Memory', value: 'saveMemory', description: 'Store one durable fact', action: 'Save a memory' },
+					{ name: 'Update Memory', value: 'updateMemory', description: 'Correct one memory with optimistic concurrency', action: 'Update a memory' },
 					{ name: 'Wait for Packet', value: 'waitForPacket', description: 'Poll a save receipt until extraction settles', action: 'Wait for a packet' },
 					{ name: 'Who Am I', value: 'whoami', description: 'Connection health, identity, and plan usage — never memory content', action: 'Check the connection' },
 				],
@@ -165,8 +168,66 @@ export class Itsuki implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				displayOptions: { show: { operation: ['get', 'delete'] } },
+				displayOptions: { show: { operation: ['get', 'delete', 'updateMemory', 'history', 'rollbackMemory'] } },
 				description: 'A prefixed memory ID (node_…, page_…, slice_…, or candidate ID)',
+			},
+
+			// --------------------------------- updateMemory / rollbackMemory
+			{
+				displayName: 'Expected Revision',
+				name: 'expectedRevision',
+				type: 'number',
+				default: 1,
+				required: true,
+				typeOptions: { minValue: 1 },
+				displayOptions: { show: { operation: ['updateMemory', 'rollbackMemory'] } },
+				description: 'The revision you read (Get Memory / Memory History). A stale value is refused with the fresh revision — nothing is overwritten blind.',
+			},
+			{
+				displayName: 'Fields (JSON)',
+				name: 'updateFields',
+				type: 'json',
+				default: '{}',
+				required: true,
+				displayOptions: { show: { operation: ['updateMemory'] } },
+				description: 'The editable fields to change. Node: label, category, summary. Page: title, short_summary, full_markdown. Detail (slice): text, kind. Event: text, importance, happened_at. Unknown fields are refused by name.',
+			},
+			{
+				displayName: 'Restore Revision',
+				name: 'toRevision',
+				type: 'number',
+				default: 1,
+				required: true,
+				typeOptions: { minValue: 1 },
+				displayOptions: { show: { operation: ['rollbackMemory'] } },
+				description: 'The historical revision to restore. Creates a NEW forward revision — history is never rewound or deleted.',
+			},
+			{
+				displayName: 'Reason',
+				name: 'updateReason',
+				type: 'string',
+				default: '',
+				displayOptions: { show: { operation: ['updateMemory', 'rollbackMemory'] } },
+				description: 'Optional short correction reason, kept in the revision history',
+			},
+
+			// ------------------------------------------------- history
+			{
+				displayName: 'Limit',
+				name: 'historyLimit',
+				type: 'number',
+				default: 20,
+				typeOptions: { minValue: 1, maxValue: 50 },
+				displayOptions: { show: { operation: ['history'] } },
+				description: 'Max number of results to return',
+			},
+			{
+				displayName: 'Cursor',
+				name: 'historyCursor',
+				type: 'string',
+				default: '',
+				displayOptions: { show: { operation: ['history'] } },
+				description: 'Opaque cursor from a previous page\'s next_cursor',
 			},
 			{
 				displayName: 'This permanently deletes the memory and its satellites (search index, vectors, graph edges). It cannot be undone.',
@@ -498,6 +559,67 @@ export class Itsuki implements INodeType {
 						// A 404 surfaces as an error — never silently reported as deleted.
 						out = await itsukiApiRequest.call(this, {
 							method: 'DELETE', path: `/v1/memories/${encodeURIComponent(memoryId)}`, qs,
+						});
+						break;
+					}
+
+					case 'updateMemory': {
+						const memoryId = String(this.getNodeParameter('memoryId', i)).trim();
+						if (!memoryId) throw new NodeOperationError(this.getNode(), 'Memory ID is empty.', { itemIndex: i });
+						const expectedRevision = Number(this.getNodeParameter('expectedRevision', i));
+						const rawFields = this.getNodeParameter('updateFields', i);
+						let fields: IDataObject;
+						try {
+							fields = typeof rawFields === 'string' ? JSON.parse(rawFields) : (rawFields as IDataObject);
+						} catch {
+							throw new NodeOperationError(this.getNode(), 'Fields must be valid JSON.', { itemIndex: i });
+						}
+						if (!fields || typeof fields !== 'object' || Array.isArray(fields) || !Object.keys(fields).length) {
+							throw new NodeOperationError(this.getNode(), 'Fields must be a JSON object with at least one editable field.', { itemIndex: i });
+						}
+						const body: IDataObject = { ...fields, expectedRevision };
+						const reason = String(this.getNodeParameter('updateReason', i, '')).trim();
+						if (reason) body.reason = reason;
+						if (userId) body.userId = userId;
+						body.idempotencyKey = additional.idempotencyKey
+							? String(additional.idempotencyKey)
+							: `n8n-update-${crypto.randomUUID()}`;
+						out = await itsukiApiRequest.call(this, {
+							method: 'PATCH', path: `/v1/memories/${encodeURIComponent(memoryId)}`, body, idempotent: true,
+						});
+						break;
+					}
+
+					case 'history': {
+						const memoryId = String(this.getNodeParameter('memoryId', i)).trim();
+						if (!memoryId) throw new NodeOperationError(this.getNode(), 'Memory ID is empty.', { itemIndex: i });
+						const qs: IDataObject = {};
+						if (userId) qs.userId = userId;
+						const limit = Number(this.getNodeParameter('historyLimit', i, 20));
+						if (limit) qs.limit = limit;
+						const cursor = String(this.getNodeParameter('historyCursor', i, '')).trim();
+						if (cursor) qs.cursor = cursor;
+						out = await itsukiApiRequest.call(this, {
+							method: 'GET', path: `/v1/memories/${encodeURIComponent(memoryId)}/history`, qs,
+						});
+						break;
+					}
+
+					case 'rollbackMemory': {
+						const memoryId = String(this.getNodeParameter('memoryId', i)).trim();
+						if (!memoryId) throw new NodeOperationError(this.getNode(), 'Memory ID is empty.', { itemIndex: i });
+						const body: IDataObject = {
+							toRevision: Number(this.getNodeParameter('toRevision', i)),
+							expectedRevision: Number(this.getNodeParameter('expectedRevision', i)),
+						};
+						const reason = String(this.getNodeParameter('updateReason', i, '')).trim();
+						if (reason) body.reason = reason;
+						if (userId) body.userId = userId;
+						body.idempotencyKey = additional.idempotencyKey
+							? String(additional.idempotencyKey)
+							: `n8n-rollback-${crypto.randomUUID()}`;
+						out = await itsukiApiRequest.call(this, {
+							method: 'POST', path: `/v1/memories/${encodeURIComponent(memoryId)}/rollback`, body, idempotent: true,
 						});
 						break;
 					}

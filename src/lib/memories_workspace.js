@@ -551,7 +551,7 @@ export async function getWorkspaceMemory(env, userId, id) {
 	if (kind === "node") {
 		const row = await env.DB.prepare(
 			`SELECT id, label, category, state, summary, cluster, project_id, project_category_id,
-				archived_at, created_at, updated_at
+				archived_at, created_at, updated_at, COALESCE(revision, 1) AS revision
 			 FROM nodes WHERE id = ? AND user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL`,
 		).bind(id, userId).first();
 		if (!row) return null;
@@ -578,6 +578,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 				id: row.id,
 				kind: "node",
 				semantic_type: "Entity",
+				revision: Number(row.revision ?? 1),
+				editable: row.archived_at ? false : true,
 				text: row.label ?? "",
 				summary: row.summary ?? null,
 				category: row.category ?? null,
@@ -601,7 +603,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 		const row = await env.DB.prepare(
 			`SELECT id, title, topic_filter, short_summary, evidence_json, source_packet_id,
 				source_conversation_id, project_id, project_category_id, archived_at,
-				created_at, updated_at, full_markdown IS NOT NULL AS has_markdown
+				created_at, updated_at, full_markdown IS NOT NULL AS has_markdown,
+				COALESCE(revision, 1) AS revision
 			 FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL AND suppressed_at IS NULL`,
 		).bind(id, userId).first();
 		if (!row) return null;
@@ -614,6 +617,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 				id: row.id,
 				kind: "page",
 				semantic_type: "Page",
+				revision: Number(row.revision ?? 1),
+				editable: row.archived_at ? false : true,
 				text: row.title ?? "",
 				summary: row.short_summary ?? null,
 				category: row.topic_filter ?? null,
@@ -637,7 +642,7 @@ export async function getWorkspaceMemory(env, userId, id) {
 	if (kind === "slice") {
 		const row = await env.DB.prepare(
 			`SELECT id, node_id, text, kind, is_current, source_snippet IS NOT NULL AS has_snippet,
-				valid_from, valid_to, project_id, created_at, last_seen_at
+				valid_from, valid_to, project_id, created_at, last_seen_at, COALESCE(revision, 1) AS revision
 			 FROM slices WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 		).bind(id, userId).first();
 		if (!row) return null;
@@ -651,6 +656,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 				id: row.id,
 				kind: "slice",
 				semantic_type: SLICE_KIND_LABELS[row.kind] ?? "Detail",
+				revision: Number(row.revision ?? 1),
+				editable: Number(row.is_current) === 1,
 				slice_kind: row.kind ?? null,
 				text: row.text ?? "",
 				node: row.node_id ? { id: row.node_id, label: labels.get(row.node_id) ?? null } : null,
@@ -670,7 +677,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 
 	const row = await env.DB.prepare(
 		`SELECT id, node_id, action, text, importance, happened_at, happened_at_source, valid_at, invalid_at,
-			event_time_precision, source_snippet IS NOT NULL AS has_snippet, project_id, created_at
+			event_time_precision, source_snippet IS NOT NULL AS has_snippet, project_id, created_at,
+			COALESCE(revision, 1) AS revision
 		 FROM events WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
 	).bind(id, userId).first();
 	if (!row) return null;
@@ -684,6 +692,8 @@ export async function getWorkspaceMemory(env, userId, id) {
 			id: row.id,
 			kind: "event",
 			semantic_type: "Event",
+			revision: Number(row.revision ?? 1),
+			editable: true,
 			event_action: row.action ?? null,
 			text: row.text ?? "",
 			node: row.node_id ? { id: row.node_id, label: labels.get(row.node_id) ?? null } : null,

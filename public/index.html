@@ -1864,6 +1864,20 @@
 	.mw-doc .mw-doc-body { font-size: 13px; line-height: 1.66; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 	.mw-body-note { margin: 0 0 11px; font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
 	.mw-inline-note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); }
+	/* Safe memory updates: edit dialog + conflict presentation. */
+	.mw-edit-fields { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+	.mw-edit-fields label { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+	.mw-edit-fields input, .mw-edit-fields textarea, .mw-edit-fields select {
+		width: 100%; box-sizing: border-box; background: var(--panel2); color: var(--ink);
+		border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px;
+		font: inherit; font-size: 12.5px; }
+	.mw-edit-fields textarea { resize: vertical; min-height: 54px; }
+	.mw-edit-conflict { margin-top: 10px; padding: 9px 11px; border: 1px solid var(--amber, #b58900);
+		border-radius: 9px; background: color-mix(in oklab, var(--amber, #b58900) 8%, var(--panel2)); font-size: 12px; }
+	.mw-edit-conflict p { margin: 0 0 6px; }
+	.mw-edit-freshvals { margin: 6px 0; font-size: 11.5px; }
+	.mw-edit-freshvals dt { color: var(--muted); margin-top: 4px; }
+	.mw-edit-freshvals dd { margin: 1px 0 0; word-break: break-word; }
 
 	.mw-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 65; animation: mwFade .18s ease-out; }
 	.mw-modal-back { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-start; justify-content: center;
@@ -2540,6 +2554,7 @@
 
 <div id="toast"></div>
 <div id="keyModal" class="modal-backdrop" hidden></div>
+<div id="mwEditModal" class="modal-backdrop" hidden></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
 <div id="projectModal" class="modal-backdrop" hidden></div>
 <div id="inviteModal" class="modal-backdrop" hidden></div>
@@ -5196,6 +5211,7 @@ function mwDefaults() {
 		counts: null, facets: null,
 		sel: null, detail: null, detailLoading: false, detailError: "",
 		tab: "", sat: {},
+		updatesEnabled: false, history: null, historyLoading: false, historyError: "",
 		drawerOpen: false, saveOpen: false, saveBusy: false,
 		openMenu: "", listRequestId: 0, detailRequestId: 0, epoch: null, loaded: false,
 		density: (typeof localStorage !== "undefined" && localStorage.getItem(MW_DENSITY_KEY)) === "comfortable" ? "comfortable" : "compact",
@@ -5299,6 +5315,7 @@ async function mwFetchCounts() {
 		]);
 		if (epoch !== S.projectEpoch || S.view !== "memory") return;
 		MW.counts = counts.counts;
+		MW.updatesEnabled = counts.safe_updates === true;
 		MW.facets = facets;
 		mwRenderHead();
 		mwRenderToolbar();
@@ -6154,6 +6171,7 @@ function mwTabsFor(detail) {
 		if (detail.evidence_count > 0) tabs.push({ id: "evidence", label: "Evidence", count: detail.evidence_count });
 		if (detail.timeline_count > 0) tabs.push({ id: "timeline", label: "Timeline", count: detail.timeline_count });
 		if (detail.connections_count > 0) tabs.push({ id: "connections", label: "Connections", count: detail.connections_count });
+		if (MW.updatesEnabled && detail.revision != null) tabs.push({ id: "history", label: "History" });
 		tabs.push({ id: "advanced", label: "Advanced" });
 		return tabs;
 	}
@@ -6207,6 +6225,8 @@ function mwRenderInsp() {
 		title = detail.text;
 		metaBits = [detail.semantic_type, detail.source?.title, `Updated ${mwRel(detail.updated_at)}`].filter(Boolean);
 		actions = [
+			MW.updatesEnabled && detail.editable && mwCanWrite()
+				? { id: "edit", label: "Edit", icon: MW_ICONS.edit ?? "M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17z" } : null,
 			detail.source ? { id: "opensrc", label: "Open source", icon: MW_ICONS.open } : null,
 			{ id: "copy", label: "Copy text", icon: MW_ICONS.copy },
 			detail.kind === "node" ? { id: "graph", label: "Open in Graph", icon: MW_ICONS.graph } : null,
@@ -6311,6 +6331,7 @@ function mwRenderInsp() {
 
 function mwInspAction(action, detail) {
 	MW.openMenu = "";
+	if (action === "edit") return mwOpenEdit(detail);
 	if (action === "copy") return void copyText(detail.text ?? detail.title ?? "", "Text copied");
 	if (action === "copyid") return void copyText(detail.id, "ID copied");
 	if (action === "opensrc" && detail.source) return mwOpenSource(detail.source.id);
@@ -6324,6 +6345,327 @@ function mwInspAction(action, detail) {
 function mwFieldRows(pairs) {
 	return pairs.filter(([, value]) => value !== null && value !== undefined && value !== "")
 		.map(([key, value, mono]) => `<dt>${esc(key)}</dt><dd${mono ? ` class="mw-mono"` : ""}>${esc(String(value))}</dd>`).join("");
+}
+
+/* ---- safe memory updates: edit dialog + history tab ----------------------
+   The dialog is draft-first: a 412 conflict NEVER discards the draft — it
+   shows that a newer revision exists, offers Load latest (which rebases the
+   precondition and shows the fresh server values), and leaves every keystroke
+   in place. Rollback restores an old snapshot as a NEW forward revision. */
+
+const MW_EDIT_KIND_FIELDS = Object.freeze({
+	node: [
+		{ name: "label", label: "Label", kind: "text", required: true, max: 200 },
+		{ name: "category", label: "Category", kind: "select",
+			options: ["person", "family", "relationship", "project", "system", "tool", "skill", "habit", "health", "organization", "place", "goal", "preference", "identity", "possession", "interest", "event", "other"] },
+		{ name: "summary", label: "Summary", kind: "textarea", max: 4000 },
+	],
+	page: [
+		{ name: "title", label: "Title", kind: "text", required: true, max: 200 },
+		{ name: "short_summary", label: "Short summary", kind: "textarea", max: 4000 },
+		{ name: "full_markdown", label: "Content (Markdown)", kind: "textarea", rows: 10, max: 20000 },
+	],
+	slice: [
+		{ name: "text", label: "Detail text", kind: "textarea", required: true, max: 4000 },
+		{ name: "kind", label: "Type", kind: "select",
+			options: ["feature_detail", "technical_detail", "progress", "blocker", "fix", "decision", "preference", "other"] },
+	],
+	event: [
+		{ name: "text", label: "Event text", kind: "textarea", required: true, max: 4000 },
+		{ name: "importance", label: "Importance", kind: "select", options: ["ordinary", "important", "life_significant"] },
+		{ name: "happened_at", label: "Happened on", kind: "datetime" },
+	],
+});
+
+const MWEDIT = { open: false, id: null, kind: null, base: null, initial: {}, draft: {}, reason: "", busy: false, error: "", conflict: null, fresh: null, needsFull: false };
+
+async function mwOpenEdit(detail) {
+	if (!requireProjectCapability("project.memory.write", "Your role cannot edit memories in this project.")) return;
+	if (typeof rememberModalOpener === "function") rememberModalOpener("mwEditModal");
+	MWEDIT.open = true;
+	MWEDIT.id = detail.id;
+	MWEDIT.kind = detail.kind;
+	MWEDIT.base = detail.revision;
+	MWEDIT.busy = false; MWEDIT.error = ""; MWEDIT.conflict = null; MWEDIT.fresh = null; MWEDIT.reason = "";
+	MWEDIT.initial = mwEditSeed(detail);
+	// Pages need the full markdown, which the workspace detail omits — fetch
+	// the inventory read (it carries full content + the same revision/ETag).
+	MWEDIT.needsFull = detail.kind === "page";
+	MWEDIT.draft = { ...MWEDIT.initial };
+	renderMwEditModal();
+	if (MWEDIT.needsFull) {
+		try {
+			const full = await api(`/v1/memories/${encodeURIComponent(detail.id)}`);
+			if (!MWEDIT.open || MWEDIT.id !== detail.id) return;
+			MWEDIT.initial.full_markdown = full.memory?.full_markdown ?? "";
+			MWEDIT.draft.full_markdown = MWEDIT.initial.full_markdown;
+			MWEDIT.base = Number(full.memory?.revision ?? MWEDIT.base);
+			MWEDIT.needsFull = false;
+			renderMwEditModal();
+		} catch (error) {
+			if (!MWEDIT.open) return;
+			MWEDIT.needsFull = false;
+			MWEDIT.error = error?.message || "Could not load the page content.";
+			renderMwEditModal();
+		}
+	}
+}
+
+function mwEditSeed(detail) {
+	if (detail.kind === "node") return { label: detail.text ?? "", category: detail.category ?? "other", summary: detail.summary ?? "" };
+	if (detail.kind === "page") return { title: detail.text ?? "", short_summary: detail.summary ?? "", full_markdown: "" };
+	if (detail.kind === "slice") return { text: detail.text ?? "", kind: detail.slice_kind ?? "other" };
+	return { text: detail.text ?? "", importance: detail.importance ?? "ordinary", happened_at: detail.happened_at ?? Date.now() };
+}
+
+function mwEditDirtyFields() {
+	const out = {};
+	for (const field of MW_EDIT_KIND_FIELDS[MWEDIT.kind] ?? []) {
+		const draft = MWEDIT.draft[field.name];
+		const initial = MWEDIT.initial[field.name];
+		if (field.kind === "datetime") {
+			if (Number(draft) !== Number(initial)) out[field.name] = Number(draft);
+		} else if (String(draft ?? "") !== String(initial ?? "")) {
+			out[field.name] = field.kind === "textarea" || field.kind === "text" ? String(draft ?? "") : draft;
+		}
+	}
+	return out;
+}
+
+function closeMwEditModal({ force = false } = {}) {
+	if (MWEDIT.busy && !force) { toast("Wait for the save to finish.", true); return; }
+	const dirty = Object.keys(mwEditDirtyFields()).length > 0;
+	if (dirty && !force && !confirm("Discard your unsaved edit?")) return;
+	MWEDIT.open = false;
+	renderMwEditModal();
+	if (typeof restoreModalOpener === "function") restoreModalOpener("mwEditModal", "mwInsp");
+}
+
+function mwEditLocalDatetime(ms) {
+	const value = Number(ms);
+	if (!Number.isFinite(value)) return "";
+	const date = new Date(value);
+	const pad = (x) => String(x).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function renderMwEditModal() {
+	const host = $("#mwEditModal");
+	if (!host) return;
+	host.hidden = !MWEDIT.open;
+	if (!MWEDIT.open) { host.innerHTML = ""; return; }
+	const fields = MW_EDIT_KIND_FIELDS[MWEDIT.kind] ?? [];
+	const kindLabel = { node: "memory", page: "page", slice: "detail", event: "event" }[MWEDIT.kind] ?? "memory";
+	const conflictBox = MWEDIT.conflict ? `
+		<div class="mw-edit-conflict" role="alert">
+			<p><strong>This ${esc(kindLabel)} changed while you were editing.</strong> Your draft is untouched. Review the newer revision (r${esc(String(MWEDIT.conflict.current_revision ?? "?"))}) before saving over it.</p>
+			${MWEDIT.fresh ? `<dl class="mw-edit-freshvals">${fields.map((field) => {
+				const freshValue = MWEDIT.fresh[field.name];
+				return freshValue == null || String(freshValue) === String(MWEDIT.draft[field.name] ?? "") ? "" :
+					`<dt>${esc(field.label)} (latest)</dt><dd>${esc(String(field.kind === "datetime" ? new Date(Number(freshValue)).toLocaleString() : freshValue)).slice(0, 400)}</dd>`;
+			}).join("")}</dl>
+			<p class="mw-inline-note">Saving now will replace the latest revision with your draft (it stays in history).</p>`
+		: `<button type="button" class="mw-btn" id="mwEditReload">Load latest for review</button>`}
+		</div>` : "";
+	host.innerHTML = `
+		<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mwEditTitle" style="max-width:560px">
+			<h3 id="mwEditTitle">Edit ${esc(kindLabel)}</h3>
+			<p class="help">You are editing revision r${esc(String(MWEDIT.base ?? 1))}. The previous content is kept as history — nothing is overwritten silently.</p>
+			${MWEDIT.needsFull ? `<p class="mw-inline-note" role="status">Loading full content…</p>` : ""}
+			<div class="mw-edit-fields">
+				${fields.map((field) => {
+					const value = MWEDIT.draft[field.name];
+					const fid = `mwEditField_${field.name}`;
+					if (field.kind === "select") {
+						return `<label for="${fid}">${esc(field.label)}</label>
+							<select id="${fid}" data-mw-editfield="${field.name}">
+								${field.options.map((option) => `<option value="${esc(option)}" ${option === value ? "selected" : ""}>${esc(option.replace(/_/g, " "))}</option>`).join("")}
+							</select>`;
+					}
+					if (field.kind === "datetime") {
+						return `<label for="${fid}">${esc(field.label)}</label>
+							<input id="${fid}" type="datetime-local" data-mw-editfield="${field.name}" value="${esc(mwEditLocalDatetime(value))}" />`;
+					}
+					if (field.kind === "textarea") {
+						return `<label for="${fid}">${esc(field.label)}</label>
+							<textarea id="${fid}" rows="${field.rows ?? 3}" maxlength="${field.max}" data-mw-editfield="${field.name}">${esc(String(value ?? ""))}</textarea>`;
+					}
+					return `<label for="${fid}">${esc(field.label)}</label>
+						<input id="${fid}" type="text" maxlength="${field.max}" ${field.required ? "required" : ""} data-mw-editfield="${field.name}" value="${esc(String(value ?? ""))}" />`;
+				}).join("")}
+				<label for="mwEditReason">Reason (optional, kept in history)</label>
+				<input id="mwEditReason" type="text" maxlength="500" value="${esc(MWEDIT.reason)}" placeholder="e.g. corrected after the meeting" />
+			</div>
+			${conflictBox}
+			${MWEDIT.error ? `<p class="mw-inline-note" role="alert" style="color:var(--red)">${esc(MWEDIT.error)}</p>` : ""}
+			<div class="modal-actions">
+				<button type="button" class="mw-btn" id="mwEditCancel" ${MWEDIT.busy ? "disabled" : ""}>Cancel</button>
+				<button type="button" class="btn primary" id="mwEditSave" ${MWEDIT.busy || MWEDIT.needsFull ? "disabled" : ""}>${MWEDIT.busy ? "Saving…" : MWEDIT.conflict ? "Save over latest" : "Save revision"}</button>
+			</div>
+		</div>`;
+	host.querySelectorAll("[data-mw-editfield]").forEach((input) => {
+		input.oninput = () => {
+			const name = input.dataset.mwEditfield;
+			MWEDIT.draft[name] = input.type === "datetime-local" ? (input.value ? new Date(input.value).getTime() : MWEDIT.initial[name]) : input.value;
+			if (MWEDIT.error) MWEDIT.error = "";
+		};
+	});
+	const reasonInput = $("#mwEditReason");
+	if (reasonInput) reasonInput.oninput = () => { MWEDIT.reason = reasonInput.value; };
+	$("#mwEditCancel")?.addEventListener("click", () => closeMwEditModal());
+	$("#mwEditSave")?.addEventListener("click", () => mwEditSave());
+	$("#mwEditReload")?.addEventListener("click", () => mwEditLoadLatest());
+	host.onclick = (event) => { if (event.target === host) closeMwEditModal(); };
+	host.querySelector("input, textarea, select")?.focus();
+}
+
+async function mwEditLoadLatest() {
+	try {
+		const found = await api(`/v1/memories/workspace/memory/${encodeURIComponent(MWEDIT.id)}`);
+		const detail = found.memory;
+		MWEDIT.fresh = mwEditSeed(detail);
+		if (detail.kind === "page") {
+			const full = await api(`/v1/memories/${encodeURIComponent(MWEDIT.id)}`);
+			MWEDIT.fresh.full_markdown = full.memory?.full_markdown ?? "";
+		}
+		MWEDIT.base = detail.revision;
+		MWEDIT.initial = { ...MWEDIT.fresh };
+		MWEDIT.conflict = { ...MWEDIT.conflict, current_revision: detail.revision };
+		renderMwEditModal();
+	} catch (error) {
+		MWEDIT.error = error?.message || "Could not load the latest revision.";
+		renderMwEditModal();
+	}
+}
+
+async function mwEditSave() {
+	const changed = mwEditDirtyFields();
+	if (!Object.keys(changed).length) { closeMwEditModal({ force: true }); return void toast("Nothing changed."); }
+	MWEDIT.busy = true; MWEDIT.error = "";
+	renderMwEditModal();
+	try {
+		const result = await api(`/v1/memories/${encodeURIComponent(MWEDIT.id)}`, {
+			method: "PATCH",
+			body: JSON.stringify({
+				...changed,
+				expectedRevision: MWEDIT.base,
+				...(MWEDIT.reason.trim() ? { reason: MWEDIT.reason.trim() } : {}),
+				idempotencyKey: `ui-edit-${crypto.randomUUID()}`,
+			}),
+		});
+		MWEDIT.busy = false;
+		closeMwEditModal({ force: true });
+		toast(`Saved as revision r${result.revision}. The previous content is in History.`);
+		MW.history = null;
+		mwSelect(MW.sel);
+		mwFetchList({ reset: true });
+	} catch (error) {
+		MWEDIT.busy = false;
+		if (error?.status === 412) {
+			MWEDIT.conflict = { current_revision: error.body?.current_revision ?? null };
+			MWEDIT.fresh = null;
+		} else {
+			MWEDIT.error = error?.message || "The update failed.";
+		}
+		renderMwEditModal();
+	}
+}
+
+async function mwLoadHistory({ more = false } = {}) {
+	if (MW.historyLoading) return;
+	MW.historyLoading = true; MW.historyError = "";
+	const sel = MW.sel;
+	try {
+		const cursor = more && MW.history?.next_cursor ? `&cursor=${encodeURIComponent(MW.history.next_cursor)}` : "";
+		const result = await api(`/v1/memories/${encodeURIComponent(sel)}/history?limit=20${cursor}`);
+		if (MW.sel !== sel) return;
+		if (more && MW.history) {
+			result.revisions = [...MW.history.revisions, ...result.revisions];
+		}
+		MW.history = result;
+	} catch (error) {
+		if (error?.projectChanged) return;
+		MW.historyError = error?.message || "History is not available.";
+	} finally {
+		MW.historyLoading = false;
+		if (MW.sel === sel && MW.tab === "history") mwRenderInsp();
+	}
+}
+
+function mwHistoryPanel(detail) {
+	const history = MW.history;
+	if ((!history || history.id !== detail.id) && !MW.historyLoading && !MW.historyError) {
+		MW.history = null;
+		queueMicrotask(() => mwLoadHistory());
+		return `<p class="mw-inline-note" role="status">Loading history…</p>`;
+	}
+	if (MW.historyLoading && !history) return `<p class="mw-inline-note" role="status">Loading history…</p>`;
+	if (MW.historyError) return `<p class="mw-inline-note" role="alert" style="color:var(--red)">${esc(MW.historyError)}</p>`;
+	if (!history) return `<p class="mw-inline-note" role="status">Loading history…</p>`;
+	const pendingProjections = Object.entries(history.projections ?? {}).filter(([, p]) => p.status !== "ready");
+	const canRestore = MW.updatesEnabled && detail.editable && mwCanWrite();
+	const primaryField = { node: "label", page: "title", slice: "text", event: "text" }[detail.kind] ?? "text";
+	const rows = (history.revisions ?? []).map((revision) => {
+		const isCurrent = revision.revision === history.current_revision;
+		const preview = revision.snapshot?.[primaryField] ?? revision.snapshot?.summary ?? "";
+		const actionLabel = revision.action === "baseline" ? "captured baseline"
+			: revision.action === "system" ? "automatic change (captured)"
+				: revision.action === "rollback" ? `rollback to r${revision.rollback_of}` : "edit";
+		return `
+		<div class="mw-sat-item">
+			<span class="mw-sat-n mw-mono">r${esc(String(revision.revision))}</span>
+			<div class="mw-sat-b">
+				<p class="mw-sat-h">${esc(actionLabel)}${isCurrent ? " · current" : ""} · ${esc(revision.actor)}</p>
+				<p class="mw-sat-t">${esc(clampMwText(String(preview ?? ""), 220))}</p>
+				${revision.reason ? `<p class="mw-sat-f">Reason: ${esc(revision.reason)}</p>` : ""}
+				<p class="mw-sat-f">${esc(mwRel(revision.created_at))}</p>
+			</div>
+			${!isCurrent && canRestore ? `<button type="button" class="mw-btn" data-mw-restorerev="${esc(String(revision.revision))}" aria-label="Restore revision ${esc(String(revision.revision))} as a new revision">Restore</button>` : ""}
+		</div>`;
+	}).join("");
+	queueMicrotask(() => {
+		document.querySelectorAll("[data-mw-restorerev]").forEach((btn) => {
+			btn.onclick = () => mwRestoreRevision(detail, Number(btn.dataset.mwRestorerev));
+		});
+		document.querySelector("[data-mw-histmore]")?.addEventListener("click", () => mwLoadHistory({ more: true }));
+	});
+	return `<div class="mw-sat" aria-label="Revision history">
+		${pendingProjections.length ? `<p class="mw-inline-note" role="status">Search/recall projections are still catching up (${esc(pendingProjections.map(([name]) => name).join(", "))}). Content is already saved.</p>` : ""}
+		${rows || `<p class="mw-inline-note">No recorded revisions yet — history starts with the first edit.</p>`}
+		${history.next_cursor ? `<div style="display:flex;justify-content:center;margin-top:4px"><button type="button" class="mw-btn" data-mw-histmore ${MW.historyLoading ? "disabled" : ""}>Load older</button></div>` : ""}
+	</div>`;
+}
+
+function clampMwText(text, cap) {
+	return text.length > cap ? `${text.slice(0, cap - 1)}…` : text;
+}
+
+async function mwRestoreRevision(detail, toRevision) {
+	if (!requireProjectCapability("project.memory.write", "Your role cannot edit memories in this project.")) return;
+	const head = MW.history?.current_revision ?? detail.revision;
+	if (!confirm(`Restore revision r${toRevision}? The current content stays in history as r${head}, and the restored content becomes a new revision.`)) return;
+	try {
+		const result = await api(`/v1/memories/${encodeURIComponent(detail.id)}/rollback`, {
+			method: "POST",
+			body: JSON.stringify({
+				toRevision,
+				expectedRevision: head,
+				idempotencyKey: `ui-rollback-${crypto.randomUUID()}`,
+			}),
+		});
+		toast(`Restored r${toRevision} as new revision r${result.revision}.`);
+		MW.history = null;
+		mwSelect(MW.sel);
+		mwFetchList({ reset: true });
+	} catch (error) {
+		if (error?.status === 412) {
+			toast("The memory changed just now — reload History and retry.", true);
+			MW.history = null;
+			mwLoadHistory();
+		} else {
+			toast(error?.message || "Restore failed.", true);
+		}
+	}
 }
 
 function mwSatList(tab, { numbered = true, openAttr = null, openLabel = "" } = {}) {
@@ -6353,6 +6695,7 @@ function mwPrepSat(tab, mapItem) {
 
 function mwInspPanel(detail, tab) {
 	if (MW.view === "suggestions") return mwSuggestionPanel(detail);
+	if (MW.view === "memories" && tab === "history") return mwHistoryPanel(detail);
 	if (MW.view === "memories") {
 		if (tab === "overview") {
 			const fields = mwFieldRows([

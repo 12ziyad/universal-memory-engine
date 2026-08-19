@@ -989,6 +989,85 @@ class _ClientCore:
         return self._request_plan("DELETE", "/v1/memories", params=params, user_id=user_id)
 
     # --------------------------------------------------- lifecycle plans
+    def _plan_update(
+        self,
+        memory_id: str,
+        fields: Dict[str, Any],
+        *,
+        expected_revision: int,
+        reason: Optional[str],
+        idempotency_key: Optional[str],
+        user_id: Optional[str],
+    ) -> _Plan:
+        memory_id = _validate_identifier(memory_id, "memory_id")
+        if not isinstance(fields, dict) or not fields:
+            raise _argument_error("fields must be a dict with at least one editable field")
+        if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 1:
+            raise _argument_error("expected_revision must be a positive integer")
+        if reason is not None and not isinstance(reason, str):
+            raise _argument_error("reason must be a string")
+        body: Dict[str, Any] = {
+            **fields,
+            "expectedRevision": expected_revision,
+            "idempotencyKey": idempotency_key or self.new_idempotency_key(),
+        }
+        if reason is not None:
+            body["reason"] = reason
+        return self._request_plan(
+            "PATCH",
+            f"/v1/memories/{quote(memory_id, safe='')}",
+            body,
+            user_id=user_id,
+        )
+
+    def _plan_history(
+        self,
+        memory_id: str,
+        *,
+        cursor: Optional[str],
+        limit: Optional[int],
+        user_id: Optional[str],
+    ) -> _Plan:
+        memory_id = _validate_identifier(memory_id, "memory_id")
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 1):
+            raise _argument_error("limit must be a positive integer")
+        return self._request_plan(
+            "GET",
+            f"/v1/memories/{quote(memory_id, safe='')}/history",
+            params={"cursor": cursor, "limit": limit},
+            user_id=user_id,
+        )
+
+    def _plan_rollback(
+        self,
+        memory_id: str,
+        to_revision: int,
+        *,
+        expected_revision: int,
+        reason: Optional[str],
+        idempotency_key: Optional[str],
+        user_id: Optional[str],
+    ) -> _Plan:
+        memory_id = _validate_identifier(memory_id, "memory_id")
+        for name, value in (("to_revision", to_revision), ("expected_revision", expected_revision)):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise _argument_error(f"{name} must be a positive integer")
+        if reason is not None and not isinstance(reason, str):
+            raise _argument_error("reason must be a string")
+        body: Dict[str, Any] = {
+            "toRevision": to_revision,
+            "expectedRevision": expected_revision,
+            "idempotencyKey": idempotency_key or self.new_idempotency_key(),
+        }
+        if reason is not None:
+            body["reason"] = reason
+        return self._request_plan(
+            "POST",
+            f"/v1/memories/{quote(memory_id, safe='')}/rollback",
+            body,
+            user_id=user_id,
+        )
+
     def _plan_packet_status(self, source_packet_id: str, *, user_id: Optional[str]) -> _Plan:
         source_packet_id = _validate_identifier(source_packet_id, "source_packet_id")
         return self._packet_status_plan(source_packet_id, user_id=user_id)
@@ -1412,6 +1491,57 @@ class MemoryClient(_ClientCore):
         """Delete one memory object (node_/page_/slice_/candidate_ id)."""
         return cast(DeleteResult, self._drive(self._plan_delete(memory_id, user_id=user_id)))
 
+    def update(
+        self,
+        memory_id: str,
+        fields: Dict[str, Any],
+        *,
+        expected_revision: int,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Correct one memory deterministically.
+
+        ``expected_revision`` must be the revision you read; a stale value is
+        refused with the fresh revision — nothing is ever overwritten blind.
+        """
+        return cast(Dict[str, Any], self._drive(self._plan_update(
+            memory_id, fields,
+            expected_revision=expected_revision, reason=reason,
+            idempotency_key=idempotency_key, user_id=user_id,
+        )))
+
+    def history(
+        self,
+        memory_id: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """One memory's bounded revision history, newest first."""
+        return cast(Dict[str, Any], self._drive(self._plan_history(
+            memory_id, cursor=cursor, limit=limit, user_id=user_id,
+        )))
+
+    def rollback(
+        self,
+        memory_id: str,
+        to_revision: int,
+        *,
+        expected_revision: int,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Restore a historical revision as a NEW forward revision."""
+        return cast(Dict[str, Any], self._drive(self._plan_rollback(
+            memory_id, to_revision,
+            expected_revision=expected_revision, reason=reason,
+            idempotency_key=idempotency_key, user_id=user_id,
+        )))
+
     def delete_by_source(
         self,
         source: Optional[str] = None,
@@ -1691,6 +1821,53 @@ class AsyncMemoryClient(_ClientCore):
         return cast(DeleteResult, await self._adrive(
             self._plan_delete(memory_id, user_id=user_id)
         ))
+
+    async def update(
+        self,
+        memory_id: str,
+        fields: Dict[str, Any],
+        *,
+        expected_revision: int,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Correct one memory deterministically (see MemoryClient.update)."""
+        return cast(Dict[str, Any], await self._adrive(self._plan_update(
+            memory_id, fields,
+            expected_revision=expected_revision, reason=reason,
+            idempotency_key=idempotency_key, user_id=user_id,
+        )))
+
+    async def history(
+        self,
+        memory_id: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """One memory's bounded revision history, newest first."""
+        return cast(Dict[str, Any], await self._adrive(self._plan_history(
+            memory_id, cursor=cursor, limit=limit, user_id=user_id,
+        )))
+
+    async def rollback(
+        self,
+        memory_id: str,
+        to_revision: int,
+        *,
+        expected_revision: int,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        user_id: Optional[str] = _USER_ID_DEFAULT,
+    ) -> Dict[str, Any]:
+        """Restore a historical revision as a NEW forward revision."""
+        return cast(Dict[str, Any], await self._adrive(self._plan_rollback(
+            memory_id, to_revision,
+            expected_revision=expected_revision, reason=reason,
+            idempotency_key=idempotency_key, user_id=user_id,
+        )))
 
     async def delete_by_source(
         self,

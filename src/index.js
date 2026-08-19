@@ -4825,7 +4825,16 @@ async function handleMemoriesWorkspaceRoutes(request, env, url) {
 	const noStore = { "cache-control": "private, no-store" };
 	const fail = (options) => json({ error: options.error, message: options.message }, 400, noStore);
 
-	if (rest === "counts") return json({ ok: true, counts: await workspaceCounts(env, userId) }, 200, noStore);
+	if (rest === "counts") {
+		const { safeUpdatesEnabled } = await import("./lib/memory_versions.js");
+		return json({
+			ok: true,
+			counts: await workspaceCounts(env, userId),
+			// The Memories UI shows Edit/History only when the doors are live, so
+			// a Stage-A (track-only) deployment never renders dead affordances.
+			safe_updates: safeUpdatesEnabled(env),
+		}, 200, noStore);
+	}
 	if (rest === "facets") return json({ ok: true, ...(await workspaceFacets(env, userId)) }, 200, noStore);
 
 	if (rest === "inventory") {

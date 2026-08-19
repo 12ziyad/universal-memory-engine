@@ -894,7 +894,10 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>GET /v1/graph</code></td><td>The full laid-out memory graph (nodes, details, events, edges, clusters).</td></tr>
 <tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
 <tr><td><code>GET /v1/memories</code></td><td>Read-only inventory, newest first: <code>kind</code> (all | node | page), <code>limit</code> (1–200), keyset <code>cursor</code>, <code>q</code> substring filter.</td></tr>
-<tr><td><code>GET /v1/memories/&lt;id&gt;</code></td><td>One object by id — a memory with its history and events, a page with its markdown.</td></tr>
+<tr><td><code>GET /v1/memories/&lt;id&gt;</code></td><td>One object by id — a memory with its history and events, a page with its markdown. Serves the object's <code>revision</code> and a strong ETag (<code>"r3"</code>) for safe updates.</td></tr>
+<tr><td><code>PATCH /v1/memories/&lt;id&gt;</code></td><td>Deterministic correction of editable fields (node label/category/summary · page title/short_summary/full_markdown · detail text/kind · event text/importance/happened_at). Requires <code>If-Match: "r&lt;revision&gt;"</code> or body <code>expectedRevision</code> plus an <code>idempotencyKey</code>; missing precondition → 428, stale → 412 with <code>current_revision</code>, wildcard refused. Previous content is retained as an immutable revision.</td></tr>
+<tr><td><code>GET /v1/memories/&lt;id&gt;/history</code></td><td>Bounded keyset-paginated revision history (baselines, captured automatic changes, edits, rollbacks) with snapshots and projection convergence state.</td></tr>
+<tr><td><code>POST /v1/memories/&lt;id&gt;/rollback</code></td><td>Restore an earlier revision's content as a NEW forward revision (<code>toRevision</code> + current <code>expectedRevision</code> + <code>idempotencyKey</code>). History is never rewound; erased revisions cannot be restored.</td></tr>
 <tr><td><code>GET /v1/usage?range=30d</code></td><td>Activity rollups: saves/recalls per day, by source, totals. Ranges 1d/7d/30d/all.</td></tr>
 <tr><td><code>GET /v1/receipts?limit=50</code></td><td>Latest save/recall receipts.</td></tr>
 <tr><td><code>GET /v1/export</code></td><td>Complete JSON export of the memory space resolved by the current credential and request. It does not aggregate sibling SDK sub-tenant spaces in the project.</td></tr>
@@ -978,6 +981,14 @@ PAGES["/api/mcp"] = { title: "MCP tools", html: `
 <p>Safe by default: without <code>confirm: true</code> it only previews what would be deleted (counts and sample labels). Only an explicit <code>confirm: true</code> destroys, matching the REST bulk-delete contract.</p>
 <h3>whoami</h3>
 <p>Reports the connection's identity and health: memory space, scopes, bound project, whether deletion is allowed, and live counts. The verify step of every install guide is "ask for <code>whoami</code>".</p>
+<h2>Safe updates</h2>
+<p>Deterministic correction with immutable history. These tools are advertised only when the connection's effective scopes permit them — a read-only key never sees the write tools.</p>
+<h3>update_memory</h3>
+<p>Correct one memory's editable fields. Input: <code>id</code>, <code>fields</code> (node: label/category/summary · page: title/short_summary/full_markdown · detail: text/kind · event: text/importance/happened_at), required <code>expectedRevision</code> (the revision you read) and <code>idempotencyKey</code>, optional <code>reason</code>. A stale revision is refused with the fresh revision — never overwritten. The previous content is retained as history.</p>
+<h3>memory_history</h3>
+<p>One memory's bounded revision history, newest first: baselines, captured automatic changes, edits, and rollbacks, each with its snapshot, actor class, optional reason, and content hash. Paginated by <code>cursor</code>, max 50 per page.</p>
+<h3>rollback_memory</h3>
+<p>Restore the content of an earlier revision as a <em>new forward revision</em>. Input: <code>id</code>, <code>toRevision</code>, current <code>expectedRevision</code>, <code>idempotencyKey</code>. History is never rewound or deleted; a revision removed by deletion or retention cannot be restored.</p>
 <h2>Design guarantees</h2>
 <ul>
 <li>Itsuki's write responses distinguish locally queued work, server acceptance, and a backend receipt; asynchronous enrichment has separate packet status.</li>
@@ -1017,6 +1028,7 @@ alice = MemoryClient(api_key="YOUR_API_KEY", user_id="alice")`)}
 <tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
 <tr><td><code>turn(messages)</code> · <code>ingest(messages, flush=True)</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
 <tr><td><code>packet_status(id)</code> · <code>jobs()</code> · <code>wait_for(id)</code></td><td>GET /v1/packets/:id/status · /v1/jobs</td></tr>
+<tr><td><code>update(id, fields, expected_revision=...)</code> · <code>history(id)</code> · <code>rollback(id, to_revision, expected_revision=...)</code></td><td>Safe updates: PATCH /v1/memories/:id · GET …/history · POST …/rollback (stale revisions refused, never overwritten)</td></tr>
 <tr><td><code>delete(id)</code> · <code>delete_by_source(...)</code></td><td>DELETE /v1/memories/*</td></tr>
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>export_all()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>get_rules()</code> · <code>set_rules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
@@ -1054,6 +1066,7 @@ const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "al
 <tr><td><code>search(query)</code> (alias <code>recall</code>)</td><td>POST /v1/recall</td></tr>
 <tr><td><code>turn(messages)</code> · <code>ingest(messages, { flush: true })</code></td><td>POST /v1/turn · /v1/ingest</td></tr>
 <tr><td><code>packetStatus(id)</code> · <code>jobs()</code> · <code>waitFor(id)</code></td><td>GET /v1/packets/:id/status · /v1/jobs</td></tr>
+<tr><td><code>update(id, fields, { expectedRevision })</code> · <code>history(id)</code> · <code>rollback(id, toRevision, { expectedRevision })</code></td><td>Safe updates: PATCH /v1/memories/:id · GET …/history · POST …/rollback (stale revisions refused, never overwritten)</td></tr>
 <tr><td><code>delete(id)</code> · <code>deleteBySource(...)</code></td><td>DELETE /v1/memories/*</td></tr>
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>exportAll()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>getRules()</code> · <code>setRules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>

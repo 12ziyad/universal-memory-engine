@@ -70,3 +70,32 @@ describe('credential contract', () => {
 		expect(base?.default).toBe('https://itsuki.app');
 	});
 });
+
+describe('safe memory update operations', () => {
+	const operations = (find('operation')?.options ?? []) as Array<{ value: string }>;
+	const values = operations.map((option) => option.value);
+
+	it('registers update, history, and rollback operations', () => {
+		expect(values).toContain('updateMemory');
+		expect(values).toContain('history');
+		expect(values).toContain('rollbackMemory');
+	});
+
+	it('requires an exact expected revision on update and rollback — no blind overwrite field', () => {
+		const expected = find('expectedRevision');
+		expect(expected?.required).toBe(true);
+		expect(expected?.displayOptions?.show?.operation).toEqual(['updateMemory', 'rollbackMemory']);
+		// No wildcard/force escape hatch exists anywhere on the node.
+		expect(props.some((p) => /force|overwrite/i.test(p.name))).toBe(false);
+	});
+
+	it('shares the memory ID parameter across get/delete/update/history/rollback', () => {
+		expect(find('memoryId')?.displayOptions?.show?.operation).toEqual(
+			['get', 'delete', 'updateMemory', 'history', 'rollbackMemory'],
+		);
+	});
+
+	it('bounds history pagination', () => {
+		expect(find('historyLimit')?.typeOptions?.maxValue).toBe(50);
+	});
+});

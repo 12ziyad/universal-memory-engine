@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-itsuki",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Itsuki memory for n8n workflows and AI Agents: save durable facts, recall them in any later run, and hand memory to an AI Agent as a tool.",
 	"license": "Apache-2.0",
 	"homepage": "https://itsuki.app",

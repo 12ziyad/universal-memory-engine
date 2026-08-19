@@ -367,6 +367,10 @@ export class MemoryClient {
 	setRules(rules: MemoryRules, options?: ScopeOptions): Promise<{ ok: boolean; rules: MemoryRules } & APIResponse>;
 	exportAll(options?: ScopeOptions): Promise<APIResponse>;
 
+	update(memoryId: string, fields: UpdateFields, options: UpdateOptions): Promise<UpdateResult>;
+	history(memoryId: string, options?: HistoryOptions): Promise<HistoryResult>;
+	rollback(memoryId: string, toRevision: number, options: UpdateOptions): Promise<UpdateResult>;
+
 	delete(memoryId: string, options?: ScopeOptions): Promise<DeleteResult>;
 	deleteBySource(options?: DeleteBySourceOptions): Promise<DeleteResult>;
 	packetStatus(sourcePacketId: string, options?: ScopeOptions): Promise<PacketStatusResult>;
@@ -375,6 +379,67 @@ export class MemoryClient {
 
 	static newIdempotencyKey(): string;
 	newIdempotencyKey(): string;
+}
+
+export interface UpdateFields {
+	label?: string;
+	category?: string;
+	summary?: string | null;
+	title?: string;
+	short_summary?: string | null;
+	full_markdown?: string | null;
+	text?: string;
+	kind?: string;
+	importance?: string;
+	happened_at?: number;
+}
+
+export interface UpdateOptions extends ScopeOptions {
+	/** The revision you read; a stale value is refused, never overwritten. */
+	expectedRevision: number;
+	reason?: string;
+	idempotencyKey?: string;
+}
+
+export interface HistoryOptions extends ScopeOptions {
+	cursor?: string;
+	limit?: number;
+}
+
+export interface UpdateResult extends APIResponse {
+	ok: boolean;
+	id: string;
+	kind: string;
+	action: string;
+	revision: number;
+	previous_revision?: number;
+	rolled_back_to?: number;
+	noop?: boolean;
+	replayed?: boolean;
+	projections?: Record<string, string>;
+}
+
+export interface MemoryRevision {
+	revision: number;
+	parent_revision: number | null;
+	action: "baseline" | "system" | "update" | "rollback";
+	snapshot: Record<string, unknown>;
+	content_hash: string;
+	actor: string;
+	rollback_of?: number;
+	reason?: string;
+	created_at: number;
+	captured?: boolean;
+}
+
+export interface HistoryResult extends APIResponse {
+	ok: boolean;
+	id: string;
+	kind: string;
+	current_revision: number;
+	revisions: MemoryRevision[];
+	projections: Record<string, { status: string; applied_revision: number | null }>;
+	next_cursor: string | null;
 }
 
 export const Memory: typeof MemoryClient;

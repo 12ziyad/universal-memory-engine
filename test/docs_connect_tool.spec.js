@@ -143,14 +143,18 @@ describe("page contracts", () => {
 		expect(script).toContain("Pi has no MCP support");
 	});
 
-	it("the MCP reference documents all eight tools", () => {
+	it("the MCP reference documents all eleven tools", () => {
 		for (const tool of [
 			"save_memory", "save_conversation", "recall_memory",
 			"list_memories", "get_memory", "delete_memory", "delete_all_memories", "whoami",
+			"update_memory", "memory_history", "rollback_memory",
 		]) {
 			expect(script).toContain(`<h3>${tool}</h3>`);
 		}
 		expect(script).not.toContain("The three tools");
+		// The update tools document the precondition contract, not blind writes.
+		expect(script).toContain("expectedRevision");
+		expect(script).toContain("new forward revision");
 	});
 
 	it("the REST reference lists the read-only inventory routes", () => {

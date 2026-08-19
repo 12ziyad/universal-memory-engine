@@ -264,6 +264,70 @@ export class MemoryClient {
 	}
 
 	/**
+	 * Correct one memory deterministically. Optimistic concurrency is
+	 * mandatory: pass the `revision` you read (from get/list/history) as
+	 * `expectedRevision`; a stale value is refused with the fresh revision and
+	 * nothing is overwritten. An idempotency key is generated when omitted.
+	 * Editable fields depend on kind: node label/category/summary; page
+	 * title/short_summary/full_markdown; slice text/kind; event
+	 * text/importance/happened_at.
+	 */
+	update(memoryId, fields, opts = {}) {
+		const { expectedRevision, reason, idempotencyKey, userId } = asOptions(
+			opts,
+			"update options",
+			["expectedRevision", "reason", "idempotencyKey", "userId"],
+		);
+		requireIdentifier(memoryId, "memoryId");
+		if (!fields || typeof fields !== "object" || Array.isArray(fields) || !Object.keys(fields).length) {
+			throw invalidArgument("fields must be an object with at least one editable field");
+		}
+		requireFiniteNumber(expectedRevision, "expectedRevision", { min: 1, integer: true });
+		if (reason != null && typeof reason !== "string") throw invalidArgument("reason must be a string");
+		return this.#request("PATCH", `/v1/memories/${encodeURIComponent(memoryId)}`, this.#withUserId({
+			...fields,
+			expectedRevision,
+			...(reason != null ? { reason } : {}),
+			idempotencyKey: idempotencyKey ?? MemoryClient.newIdempotencyKey(),
+			userId,
+		}));
+	}
+
+	/** One memory's bounded revision history, newest first. */
+	history(memoryId, opts = {}) {
+		const { cursor, limit, userId } = asOptions(opts, "history options", ["cursor", "limit", "userId"]);
+		requireIdentifier(memoryId, "memoryId");
+		if (limit != null) requireFiniteNumber(limit, "limit", { min: 1, integer: true });
+		return this.#get(`/v1/memories/${encodeURIComponent(memoryId)}/history`, {
+			userId,
+			query: { cursor, limit },
+		});
+	}
+
+	/**
+	 * Restore a historical revision as a NEW forward revision. History is
+	 * never rewound; `expectedRevision` must be the CURRENT head.
+	 */
+	rollback(memoryId, toRevision, opts = {}) {
+		const { expectedRevision, reason, idempotencyKey, userId } = asOptions(
+			opts,
+			"rollback options",
+			["expectedRevision", "reason", "idempotencyKey", "userId"],
+		);
+		requireIdentifier(memoryId, "memoryId");
+		requireFiniteNumber(toRevision, "toRevision", { min: 1, integer: true });
+		requireFiniteNumber(expectedRevision, "expectedRevision", { min: 1, integer: true });
+		if (reason != null && typeof reason !== "string") throw invalidArgument("reason must be a string");
+		return this.#request("POST", `/v1/memories/${encodeURIComponent(memoryId)}/rollback`, this.#withUserId({
+			toRevision,
+			expectedRevision,
+			...(reason != null ? { reason } : {}),
+			idempotencyKey: idempotencyKey ?? MemoryClient.newIdempotencyKey(),
+			userId,
+		}));
+	}
+
+	/**
 	 * Bulk delete by source lane and/or time window. Safe by default: without
 	 * `confirm: true`, the server returns only what would be deleted.
 	 */
