@@ -23,7 +23,7 @@ Finish the active Hermes, Google ADK, OpenCode, and Antigravity implementation/p
 - Prove page/memory idempotency, tenant isolation, lifecycle fencing, linked deletion, retry behavior, and zero page flooding.
 - If lossless large-document storage is required, design it as a separate document/import capability; current Notes are derived pages, not an unlimited file store.
 
-### 2. Safe memory updates — ✅ SHIPPED (2026-08-19, PRODUCTION GO with two npm-publication holds)
+### 2. Safe memory updates — ✅ COMPLETE (2026-08-20, PRODUCTION GO, all packages published)
 
 Explicit update + bounded immutable history + rollback-as-forward-revision live
 for node/page/slice/event behind exact optimistic concurrency (If-Match /
@@ -65,13 +65,19 @@ own versions. Authoritative evidence:
 SAFE_MEMORY_UPDATES_CORRECTIVE_REPORT.md — the original
 SAFE_MEMORY_UPDATES_REPORT.md is superseded and partly retracted.
 
-Held (owner action): npm publications of `itsuki@0.3.0` and
-`n8n-nodes-itsuki@0.2.0` fail at ENEEDAUTH after all gates pass — configure
-npm Trusted Publishing (or a granular NPM_TOKEN) for both packages, then
-re-dispatch publish-js-sdk.yml and publish-n8n-node.yml. Registry state
-re-confirmed 2026-08-19: npm still serves itsuki@0.2.1 and
-n8n-nodes-itsuki@0.1.0. No live surface advertises the unpublished versions.
-A real-host n8n run of the three new operations follows the npm release.
+**npm publications RELEASED 2026-08-20.** The owner configured npm Trusted
+Publishing; both workflows were re-dispatched unchanged from `6f859dd` with
+`dry_run=false` and succeeded. npm now serves `itsuki@0.3.0` and
+`n8n-nodes-itsuki@0.2.0`, each with SLSA provenance naming this repository, the
+exact workflow, and commit `6f859dd`. No NPM_TOKEN exists or was used — both
+authenticated by OIDC. Verified by clean install from the registry in fresh
+projects: signatures + attestations verified, SDK exports all six methods with
+working validation, n8n artifact ships the production node and routes
+updateMemory/history/rollbackMemory correctly. Downloaded bytes, registry
+integrity and the signed provenance subject all agree.
+
+Remaining for item 6 (n8n Cloud): a real n8n host run of the three new
+operations. Everything proven so far is execute-level and artifact-level.
 
 ### 3. Get Started and integration-catalog redesign — ✅ ABSORBED (2026-08-19, Get Started certification campaign)
 

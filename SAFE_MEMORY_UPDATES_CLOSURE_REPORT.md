@@ -5,8 +5,9 @@ three blockers it did not close.
 
 ## Verdict
 
-**GO for the platform** (Worker, D1, REST, MCP, dashboard, Python SDK).
-**HOLD on two npm publications** — externally blocked, verified this session.
+**GO — complete.** Platform (Worker, D1, REST, MCP, dashboard) and every
+package. The two npm publications that were held are **PUBLISHED** as of
+2026-08-20; see "npm publication — CLOSED" below.
 
 Every blocker was reproduced with a deterministic failing test on the current
 baseline before any code changed, fixed, and re-proved in production against
@@ -171,8 +172,8 @@ from previous campaigns were shredded.
 | Artifact | State |
 |---|---|
 | `itsuki` (PyPI) 0.4.1 | **PUBLISHED**, unchanged — correct, not republished |
-| `itsuki` (npm) 0.3.0 | **HOLD — BLOCKED.** Reaches the publish step, fails `ENEEDAUTH`. Registry still serves 0.2.1 |
-| `n8n-nodes-itsuki` (npm) 0.2.0 | **HOLD — BLOCKED.** Same, verified this session. Registry still serves 0.1.0 |
+| `itsuki` (npm) 0.3.0 | **PUBLISHED** 2026-08-20 with provenance |
+| `n8n-nodes-itsuki` (npm) 0.2.0 | **PUBLISHED** 2026-08-20 with provenance |
 
 The previous report's npm HOLD was asserted from a run that had died on a
 version gate **before** reaching auth. Both were re-dispatched from the
@@ -194,8 +195,80 @@ No live surface advertises either unpublished version.
 
 ## Remaining risks
 
-1. **npm publications — external.** Configure npm Trusted Publishing for both packages, then re-dispatch `publish-js-sdk.yml` and `publish-n8n-node.yml` unchanged. Owner action; not something this campaign can complete.
+1. ~~npm publications — external.~~ **CLOSED 2026-08-20.** The owner configured npm Trusted Publishing; both workflows were re-dispatched unchanged from `6f859dd` and published successfully. No `NPM_TOKEN` exists in the repository, so both publications authenticated purely by OIDC.
 2. **Real n8n host run** of the three operations follows the npm release. Currently execute-level tested only.
 3. **Vectorize reordering is SIM.** Delayed, duplicated and reordered completion are proven against a controllable double. Live convergence was observed in production (`submitted → ready` at the correct revision), but deliberately reordering real Vectorize mutations was not forced.
 4. **Dashboard browser canary** was not re-run against this build; UI behaviour is covered by 11 deterministic tests. TEST, not PROD.
 5. **History storage remains unbounded** until object deletion — stated and measured via `total_revisions`, deliberately not pruned so nothing offered as rollbackable disappears.
+
+## npm publication — CLOSED 2026-08-20
+
+Trusted Publishing was configured by the owner. Both workflows were
+re-dispatched **unchanged** from `6f859dd` with `dry_run=false`. No package
+name or version was altered, no `NPM_TOKEN` was created or used (the repository
+holds no secrets at all, so `NODE_AUTH_TOKEN` resolved empty and npm fell back
+to OIDC), and no local `npm publish` was run.
+
+| | JS SDK | n8n node |
+|---|---|---|
+| Run | [32317529604](https://github.com/12ziyad/universal-memory-engine/actions/runs/32317529604) | [32317531665](https://github.com/12ziyad/universal-memory-engine/actions/runs/32317531665) |
+| Result | success | success |
+| Publish step | ran (ubuntu leg only; the Windows leg is gate-only by design) | ran |
+| Registry | `itsuki` 0.2.1 → **0.3.0** | `n8n-nodes-itsuki` 0.1.0 → **0.2.0** |
+| Versions on npm | 0.1.0, 0.1.1, 0.2.0, 0.2.1, 0.3.0 | 0.1.0, 0.2.0 |
+
+Exactly one new version per package — no partial or duplicate publication.
+
+### Provenance
+
+Both carry an npm publish attestation **and** a `https://slsa.dev/provenance/v1`
+attestation naming `https://github.com/12ziyad/universal-memory-engine`, the
+exact workflow path, and the built commit `6f859dda63cf3e2a778a18e3935d3a60106d6083`,
+built by `https://github.com/actions/runner/github-hosted`.
+
+Chain of custody was verified rather than assumed: for each package the
+**downloaded tarball's sha512 == the registry's `dist.integrity` == the signed
+provenance subject digest**, and the sha1 matches `dist.shasum`. The signature
+therefore covers exactly the bytes npm serves.
+
+### Clean-install verification (fresh temporary projects, from the registry)
+
+**`itsuki@0.3.0`** — installs with **zero dependencies**; `npm audit signatures`
+reports a verified registry signature and a verified attestation. Installed
+`package.json` version and the runtime `VERSION` export agree at 0.3.0. All
+three documented methods (`updateMemory`, `memoryHistory`, `rollbackMemory`) and
+all three retained aliases (`update`, `history`, `rollback`) are present as
+functions and declared in the shipped `index.d.ts`. They are real
+implementations, not stubs: argument validation rejects `expectedRevision: 0`
+and `toRevision: -1` offline, before any network call. The `exports` map
+correctly refuses subpath access.
+
+**`n8n-nodes-itsuki@0.2.0`** — installs cleanly (94 packages, all with verified
+registry signatures). Both paths the n8n manifest declares exist in the
+artifact: `dist/nodes/Itsuki/Itsuki.node.js` and
+`dist/credentials/ItsukiApi.credentials.js`. The packed-artifact smoke test
+passes against the installed bytes: the node class loads and constructs,
+declares `itsukiApi` credentials, implements `execute()`, ships no postinstall
+hook, contains no credential-shaped strings, and masks `apiKey`. All three
+safe-update operations are exposed — `updateMemory`, `history`,
+`rollbackMemory`.
+
+An execute-level probe drove the **published** node through a stub n8n context
+with an intercepted HTTP layer, proving the operations route rather than merely
+appearing in a menu:
+
+| Operation | Routed to |
+|---|---|
+| `updateMemory` | `PATCH /v1/memories/{id}` |
+| `history` | `GET /v1/memories/{id}/history` |
+| `rollbackMemory` | `POST /v1/memories/{id}/rollback` |
+
+The credential never appears in a URL on any of the three.
+
+Two probe defects were mine, not the packages': the first read
+`itsuki/package.json` through the `exports` map (correctly refused), and the
+second asserted the SDK's alias names against the n8n node's operation values.
+Both were corrected against the source contract and re-run.
+
+Still outstanding: a **real n8n host run** of the three operations. Everything
+above is execute-level and artifact-level, not a live n8n instance.
