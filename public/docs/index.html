@@ -303,7 +303,7 @@ ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORI
 <table>
 <tr><th>Tool</th><th>What it does</th></tr>
 <tr><td><code>save_memory</code></td><td>Saves one explicit durable fact, returns a receipt</td></tr>
-<tr><td><code>save_conversation</code></td><td>Captures scoped facts (or a whole-chat notes page) from several turns</td></tr>
+<tr><td><code>save_conversation</code></td><td>Creates or advances the conversation's Conversation page and extracts facts from several turns</td></tr>
 <tr><td><code>recall_memory</code></td><td>Returns a compact context block of what's already known</td></tr>
 </table>
 <p>Then just tell it: <i>"save that decision to ${PRODUCT.name.toLowerCase()}"</i> or <i>"check ${PRODUCT.name.toLowerCase()} for context about this project"</i>.</p>
@@ -892,7 +892,7 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>POST /v1/ingest</code></td><td>Bounded message ingestion with optional <code>flush: true</code> to force digestion.</td></tr>
 <tr><td><code>GET /v1/ingest/limits</code></td><td>Authoritative machine-readable limits, character unit, request encoding, and ordered-delivery schema.</td></tr>
 <tr><td><code>GET /v1/graph</code></td><td>The full laid-out memory graph (nodes, details, events, edges, clusters).</td></tr>
-<tr><td><code>GET /v1/status</code></td><td>Counts: memories, notes, details, events, pending suggestions.</td></tr>
+<tr><td><code>GET /v1/status</code></td><td>Counts: memories, conversation pages, details, events, pending suggestions.</td></tr>
 <tr><td><code>GET /v1/memories</code></td><td>Read-only inventory, newest first: <code>kind</code> (all | node | page), <code>limit</code> (1–200), keyset <code>cursor</code>, <code>q</code> substring filter.</td></tr>
 <tr><td><code>GET /v1/memories/&lt;id&gt;</code></td><td>One object by id — a memory with its history and events, a page with its markdown. Serves the object's <code>revision</code> and a revision ETag (<code>"r3"</code>; may surface as <code>W/"r3"</code> through content encoding — <code>If-Match</code> accepts both) for safe updates.</td></tr>
 <tr><td><code>PATCH /v1/memories/&lt;id&gt;</code></td><td>Deterministic correction of editable fields (node label/category/summary · page title/short_summary/full_markdown · detail text/kind · event text/importance/happened_at). Requires <code>If-Match: "r&lt;revision&gt;"</code> or body <code>expectedRevision</code> plus an <code>idempotencyKey</code>; missing precondition → 428, stale → 412 with <code>current_revision</code>, wildcard refused. Previous content is retained as an immutable revision.</td></tr>
@@ -966,7 +966,7 @@ PAGES["/api/mcp"] = { title: "MCP tools", html: `
 <h3>save_memory</h3>
 <p>Saves exactly one explicitly submitted durable fact. Input: <code>content</code> (required, the user's words), optional <code>recentContext</code> for resolving references like "it". Returns a final receipt — <i>Saved: 1 memory (Kotlin)…</i> — only after the write completes.</p>
 <h3>save_conversation</h3>
-<p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Attribution rules require user adoption or supported request/outcome evidence; unsupported assistant prose is not treated as a user fact.</p>
+<p>Captures several chat turns at once. Input: <code>messages[]</code> (oldest first), optional <code>scope</code> (<code>full</code> | <code>lastN</code> | <code>topic</code> | <code>summary</code>) and <code>contentScope.subject</code> for strict subject filtering. Attribution rules require user adoption or supported request/outcome evidence; unsupported assistant prose is not treated as a user fact. A stable <code>conversationId</code> converges re-sends of the same conversation onto one Conversation page, advanced as a forward revision; without it each explicit save makes its own page.</p>
 <h3>recall_memory</h3>
 <p>Input: <code>query</code>, optional <code>memoryScope</code> project metadata, and optional <code>recallScope</code> (<code>global</code> | <code>project_only</code> | <code>project_then_global</code>). The tool's text result IS the recalled context — the model can use it directly. Structured details ride along for clients that read them.</p>
 <h2>Management</h2>
@@ -1087,8 +1087,8 @@ PAGES["/concepts/memory"] = { title: "How memory works", html: `
 </ol>
 <h2>Suggestions</h2>
 <p>Weak or unclear signals don't enter the graph directly — they wait in <b>Memories → Suggestions</b> for you to keep or drop. Your memory stays yours to curate.</p>
-<h2>Notes</h2>
-<p>Whole-conversation captures become organized <b>notes</b> pages — condensed and searchable, without polluting the fact graph.</p>
+<h2>Conversation pages</h2>
+<p>Whole-conversation captures become <b>Conversation pages</b> — one page per conversation, advanced by later explicit saves, condensed and searchable, without polluting the fact graph.</p>
 ` };
 
 PAGES["/concepts/receipts"] = { title: "Receipts & rules", html: `

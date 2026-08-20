@@ -118,7 +118,7 @@ function jsonList(value) {
 	}
 }
 
-function planFromExtractionRun(row) {
+export function planFromExtractionRun(row) {
 	const updated = jsonList(row.updated_objects_json);
 	const reinforced = jsonList(row.reinforced_objects_json);
 	return {

@@ -83,6 +83,47 @@ route remains as the documented fallback.
 
 ---
 
+## Hosted service — 2026-08-21
+
+### Added
+
+- **Conversation Pages.** A conversation now has ONE page. Pass a stable
+  `conversationId` (or `threadId`) to `save_conversation` (MCP) or
+  `POST /v1/save` with `mode: "conversation"` (the JS/Python SDKs'
+  `addConversation`/`add_conversation`, the n8n Save Conversation node), and
+  every later explicit save of that conversation ADVANCES the same page as a
+  forward revision instead of creating a duplicate. Within one account and
+  project, at most one live page owns a given conversation — enforced by a
+  database uniqueness rule, not by best-effort matching, so concurrent saves of
+  the same conversation converge rather than fork. Omit the id and each
+  explicit save keeps its own page, exactly as before; exact retries still
+  replay safely either way.
+- **The REST conversation door builds pages too.** Previously only the MCP
+  door produced a page; SDK and n8n conversation saves produced graph memories
+  alone. Both doors now behave the same way.
+- **Each page lists the saves behind it.** Every accepted batch is linked to
+  its page, so a page can state truthfully which conversations, packets, and
+  extracted memories it came from — and deleting one source rebuilds the page
+  from the sources that survive rather than deleting a page that still has
+  independent support.
+
+### Changed
+
+- **One name: Conversation pages.** The dashboard, docs, and receipts used
+  "Notes", "notes page", "memory page", and "capture pages" for the same
+  object. All of it is now "Conversation page(s)".
+- **"Never build pages" now means it.** With capture set to Graph only, an
+  explicit conversation save extracts facts and relationships but writes no
+  Conversation page, and the receipt says so.
+- **Your edits survive an advance.** If you have edited a page's text, a later
+  save of that conversation adds its memories and leaves your wording alone
+  instead of regenerating over it.
+- The deprecated whole-chat digest lane is retired from the public API.
+  `scope: "summary"` is now an ordinary conversation save (engine extraction
+  plus a Conversation page) rather than a flat generated digest page.
+
+---
+
 ## Hosted service — 2026-08-14
 
 ### Added

@@ -157,7 +157,14 @@
 		// (Stage A). "on": doors enabled (Stage B). Stage B's rollback target
 		// is this same tree with "track" — the version trackers keep running
 		// under rollback, so no unversioned-mutation window can open.
-		"SAFE_MEMORY_UPDATES": "on"
+		"SAFE_MEMORY_UPDATES": "on",
+		// Conversation Pages staged rollout. "track": schema + per-page source
+		// links live, behavior unchanged (one page per accepted MCP batch, no
+		// REST pages, no identity convergence). "on": deterministic
+		// conversation identity — one live page per (account, project,
+		// conversation), REST /v1/save mode:"conversation" creates/advances
+		// pages, graph_only suppresses them. Rollback is the flag flip.
+		"CONVERSATION_PAGES": "on"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

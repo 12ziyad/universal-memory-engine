@@ -35,6 +35,10 @@ export default defineConfig({
 			"test/session_end_delivery.spec.js",
 			"test/session_start_delivery.spec.js",
 			"test/dashboard.spec.js",
+			// Source-policy guard over the shipped docs + dashboard HTML: the
+			// Conversation page vocabulary. Pure string assertions, no Workers pool
+			// needed (it also runs there — same dual wiring as dashboard.spec.js).
+			"test/conversation_pages_naming.spec.js",
 			"test/eval_extraction.spec.js",
 			"test/hulls.spec.js",
 			"test/temporal_holdout.spec.js",

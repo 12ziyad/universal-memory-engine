@@ -103,7 +103,7 @@ function pageLine(entry) {
 	const points = (page.key_points ?? []).map(clean).filter(Boolean).slice(0, 3);
 	const tail = [clean(page.short_summary), points.length ? `Key points: ${points.join("; ")}` : ""]
 		.filter(Boolean).join(" ");
-	return `Memory page: ${clean(page.title)}${tail ? ` - ${tail}` : ""}`;
+	return `Conversation page: ${clean(page.title)}${tail ? ` - ${tail}` : ""}`;
 }
 
 function nodePrefix(entry) {

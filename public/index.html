@@ -2324,7 +2324,7 @@
 				<div class="flow-num">3</div>
 				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="17" r="2.4"/><circle cx="18.5" cy="17.5" r="2.4"/><path d="M8 7.2 15.7 8m-8.9 8.2L7 8.3m4.3 9.6 4.8-.3"/></svg></div>
 				<h3>You can see it</h3>
-				<p>Open the dashboard to inspect the graph, timelines, organized pages, receipts, and asynchronous job status.</p>
+				<p>Open the dashboard to inspect the graph, timelines, conversation pages, receipts, and asynchronous job status.</p>
 			</div>
 			<div class="flow-step">
 				<div class="flow-num">4</div>
@@ -5195,7 +5195,7 @@ const MW_VIEWS = ["memories", "sources", "suggestions"];
 const MW_SORTS = [["updated_desc", "Newest first"], ["updated_asc", "Oldest first"], ["az", "A to Z"]];
 const MW_SRC_SORTS = [["updated_desc", "Newest first"], ["updated_asc", "Oldest first"]];
 const MW_WINDOWS = [["any", "Any time"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]];
-const MW_KIND_LABELS = { node: "Entity", page: "Page", slice: "Detail", event: "Event" };
+const MW_KIND_LABELS = { node: "Entity", page: "Conversation page", slice: "Detail", event: "Event" };
 const MW_LIFECYCLES = [["active", "Active"], ["superseded", "Superseded"], ["archived", "Archived"]];
 const MW_SRC_STATES = [["processing", "Processing"], ["processed", "Processed"], ["failed", "Failed"], ["recorded", "Recorded"]];
 const MW_SUG_STATUSES = [["pending", "Pending"], ["reviewed", "Reviewed"]];
@@ -6455,7 +6455,7 @@ function renderMwEditModal() {
 	host.hidden = !MWEDIT.open;
 	if (!MWEDIT.open) { host.innerHTML = ""; return; }
 	const fields = MW_EDIT_KIND_FIELDS[MWEDIT.kind] ?? [];
-	const kindLabel = { node: "memory", page: "page", slice: "detail", event: "event" }[MWEDIT.kind] ?? "memory";
+	const kindLabel = { node: "memory", page: "conversation page", slice: "detail", event: "event" }[MWEDIT.kind] ?? "memory";
 	const conflictBox = MWEDIT.conflict ? `
 		<div class="mw-edit-conflict" role="alert">
 			<p><strong>This ${esc(kindLabel)} changed while you were editing.</strong> Your draft is untouched. Review the newer revision (r${esc(String(MWEDIT.conflict.current_revision ?? "?"))}) before saving over it.</p>
@@ -11947,7 +11947,7 @@ function renderRulesSummary(rules) {
 	if ((rules.includes || []).length) parts.push(`${rules.includes.length} include term${rules.includes.length === 1 ? "" : "s"}`);
 	if ((rules.excludes || []).length) parts.push(`${rules.excludes.length} exclude term${rules.excludes.length === 1 ? "" : "s"}`);
 	if ((rules.customCategories || []).length) parts.push(`${rules.customCategories.length} custom categor${rules.customCategories.length === 1 ? "y" : "ies"}`);
-	if (rules.captureDefault === "graph_only") parts.push("capture pages off");
+	if (rules.captureDefault === "graph_only") parts.push("conversation pages off");
 	if (rules.autoCollect === false) parts.push("auto-collect off");
 	box.textContent = parts.length ? `Active: ${parts.join(" · ")}.` : "No custom rules yet — everything durable is collected.";
 }
@@ -11975,10 +11975,10 @@ function viewRules(v) {
 			<div class="help">One per line as name: description (description optional).</div>
 			<textarea id="rule-categories" style="min-height:70px" oninput="rulesStatusClear()" placeholder="study_progress: exam and unit completion&#10;startup_ideas"></textarea></div>
 		<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;align-items:center">
-			<label>Whole-chat capture pages
+			<label>Conversation pages
 				<select id="rule-capture" style="margin-left:8px">
-					<option value="auto">Allowed (default)</option>
-					<option value="graph_only">Never build pages</option>
+					<option value="auto">Auto — build Conversation pages (default)</option>
+					<option value="graph_only">Graph only — never build Conversation pages</option>
 				</select></label>
 			<label><input type="checkbox" id="rule-autocollect" checked style="margin-right:6px" />Auto-collect on /v1/turn</label>
 			<label>How much to keep
@@ -12056,7 +12056,7 @@ const LEGAL_PAGES = {
 			<p>Welcome to Itsuki. These Terms of Service ("Terms") are a binding agreement between you and the operator of Itsuki ("Itsuki", "we", "us") governing your use of the Itsuki hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
 			<h2>1. What the Service is</h2>
-			<p>Itsuki is a personal memory layer. Tools and applications you connect can save durable context to your account and recall it later. Memory is stored as a structured graph (nodes, details, events, connections), organized pages, and receipts, all controlled from your dashboard. The Service is currently offered in free early access.</p>
+			<p>Itsuki is a personal memory layer. Tools and applications you connect can save durable context to your account and recall it later. Memory is stored as a structured graph (nodes, details, events, connections), conversation pages, and receipts, all controlled from your dashboard. The Service is currently offered in free early access.</p>
 
 			<h2>2. Eligibility</h2>
 			<p>You must be at least 13 years old (or the minimum age of digital consent in your country, if higher) and able to form a binding contract to use the Service. If you use the Service on behalf of an organization, you represent that you are authorized to bind that organization to these Terms.</p>
@@ -13835,10 +13835,10 @@ function setProjectExtraction() {
 					<option value="dense"${draft.captureDensity === "dense" ? " selected" : ""}>Dense — keep every durable detail</option>
 				</select>
 				<div class="set-hint">Dense lowers the gate floor and asks the extractor to enumerate. It captures more, and more of what it captures is marginal.</div></div>
-			<div class="set-field"><label for="setCaptureDefault">Capture pages</label>
+			<div class="set-field"><label for="setCaptureDefault">Conversation pages</label>
 				<select id="setCaptureDefault" onchange="setExtractionField('captureDefault',this.value)"${editable ? "" : " disabled"}>
-					<option value="auto"${draft.captureDefault === "auto" ? " selected" : ""}>Auto — allow whole-conversation pages</option>
-					<option value="graph_only"${draft.captureDefault === "graph_only" ? " selected" : ""}>Graph only — never build capture pages</option>
+					<option value="auto"${draft.captureDefault === "auto" ? " selected" : ""}>Auto — build Conversation pages</option>
+					<option value="graph_only"${draft.captureDefault === "graph_only" ? " selected" : ""}>Graph only — never build Conversation pages</option>
 				</select></div>
 			<div class="set-field"><label><input type="checkbox" style="width:auto;margin-right:8px"
 				${draft.autoCollect ? "checked" : ""} onchange="setExtractionField('autoCollect',this.checked)"${editable ? "" : " disabled"} />
@@ -15894,7 +15894,7 @@ function graphPage(p, sortedIndex, total) {
 		visualKind: "page",
 		hullRadius: Math.max(52, size),
 		label: `PAGE\n${p.title}`,
-		title: `${esc(p.title)} (memory page)${projectCategory ? ` · project category: ${esc(projectCategory)}` : ""}`,
+		title: `${esc(p.title)} (conversation page)${projectCategory ? ` · project category: ${esc(projectCategory)}` : ""}`,
 		shape: "box",
 		size,
 		borderWidth: selected ? 4 : 2,
@@ -16743,7 +16743,7 @@ function viewCards(v) {
 			<div class="cat">${esc(p.cluster_label || p.topic_filter || "manual_collect")} ${projectCategoryBadge(p)}</div>
 			${p.short_summary ? `<div class="summary">${esc(p.short_summary)}</div>` : ""}
 			<div class="counts">
-				<span class="chip">memory page</span>
+				<span class="chip">conversation page</span>
 				<span class="chip">${p.updated_at?ago(p.updated_at):""}</span>
 			</div>`;
 		card.onclick = () => select(p.id, "page");
@@ -17090,7 +17090,7 @@ function renderPageDetail(p) {
 			<button class="ghost mini dev-only" onclick="deleteSelected('page','${p.id}')">Delete</button>`
 				: `<span class="help" role="note">Only a project admin can archive or delete memory.</span>`}
 		</div>
-		<div class="sub">memory page · ${esc(p.source_mode || "manual_collect")} · <span class="badge state-active">${esc(p.health_state || "active")}</span> ${projectCategoryBadge(p)}</div>
+		<div class="sub">conversation page · ${esc(p.source_mode || "manual_collect")} · <span class="badge state-active">${esc(p.health_state || "active")}</span> ${projectCategoryBadge(p)}</div>
 		${p.short_summary ? `<div class="help" style="font-style:italic">${esc(p.short_summary)}</div>` : ""}
 		<div class="d-sec">Page</div>
 		<div class="page-md">${esc(p.full_markdown || "")}</div>

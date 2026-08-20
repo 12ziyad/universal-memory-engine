@@ -34,6 +34,10 @@
 // an independent tenant-scoped DELETE.
 export const PURGE_SPACE_TABLES = [
 	"memory_pages",
+	// Conversation Pages (0050): id-only links from a page to each advance's
+	// accepted packet. A link that outlives the objects it names is a record,
+	// so it purges with the space.
+	"conversation_page_sources",
 	"nodes",
 	"slices",
 	"events",

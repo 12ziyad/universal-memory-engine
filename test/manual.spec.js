@@ -210,7 +210,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		});
 		expect(body.fired).toBe(true);
 		expect(body.receipt.page_action).toBe("created");
-		expect(body.summary).toContain("memory page");
+		expect(body.summary).toContain("conversation page");
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
 		expect(p[0].title).toBe("Itsuki Architecture Decisions");
@@ -367,7 +367,7 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		const remembered = await recall(userId, "fuel economy purchase research");
 		expect(remembered.status).toBe(200);
 		expect(remembered.body.pages).toHaveLength(1);
-		expect(remembered.body.context).toContain("Memory page:");
+		expect(remembered.body.context).toContain("Conversation page:");
 		expect(remembered.body.context).toContain("Vehicle fuel economy matters");
 	});
 
@@ -390,12 +390,16 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 		expect(r.body.receipts.length).toBeGreaterThan(0);
 	});
 
-	it("summary scope saves user-scoped research instead of generic world facts", async () => {
+	it("summary scope is an ordinary conversation save: engine extraction plus one Conversation Page", async () => {
+		// Campaign A retired the public digest lane. scope:"summary" no longer
+		// selects a flat digest page — it is a normal conversation save on the
+		// engine + Conversation Page path.
 		const userId = "m-summary-research";
 		const { body } = await save({
 			userId,
 			mode: "conversation",
 			scope: "summary",
+			conversationId: "m-summary-research-conv",
 			messages: [
 				{
 					role: "user",
@@ -403,15 +407,26 @@ describe("Path A2 - save_conversation (manual_collect memory pages)", () => {
 						"I researched GTA 6 PC availability, PS5 purchase options in India, EMI safety, and whether a loan is a bad idea.",
 				},
 			],
+			_test: {
+				llmResponse: {
+					objects: [
+						{ kind: "node", label: "PS5", category: "interest", confidence: 0.9 },
+						{ kind: "slice", on: "PS5", text: "Researched PS5 purchase options in India and EMI safety", kind_detail: "other", confidence: 0.9 },
+					],
+					notes: "",
+				},
+				edgeResponse: { edges: [] },
+				reflexionResponse: { entities: [], facts: [], edges: [] },
+			},
 		});
 
 		expect(body.fired).toBe(true);
-		expect(body.summary).toContain("memory page");
+		expect(body.conversation_page?.id).toMatch(/^page_/);
 		const p = await pages(userId);
 		expect(p).toHaveLength(1);
-		expect(p[0].title).toBe("GTA 6 / PS5 Research");
-		expect(p[0].full_markdown).toContain("EMI safety");
-		expect(await nodes(userId)).toHaveLength(0);
+		expect(p[0].source_mode).toBe("conversation_collect");
+		expect(p[0].conversation_key).toBe("m-summary-research-conv");
+		expect((await nodes(userId)).length).toBeGreaterThan(0);
 	});
 
 	it("topic filter saves car details and skips bike details", async () => {

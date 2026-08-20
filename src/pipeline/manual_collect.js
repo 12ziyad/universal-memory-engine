@@ -161,7 +161,7 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 				const suppression = suppressedBy(suppressions, "memory_page", page.canonical_title)
 					?? (page.topic_filter ? suppressedBy(suppressions, "memory_page", page.topic_filter) : null);
 				if (suppression) {
-					const receipt = emptyReceipt("suppressed", "this deleted memory page remains suppressed", {
+					const receipt = emptyReceipt("suppressed", "this deleted conversation page remains suppressed", {
 						source: "save_conversation",
 						source_mode: "manual_collect",
 						...source,
@@ -173,7 +173,7 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 					receipt.page_action = "suppressed";
 					receipt.suppressed = true;
 					receipt.skippedReasons = { suppressed_blocked: 1 };
-					const summary = `Skipped suppressed memory page:\n${page.title ?? "Memory page"}`;
+					const summary = `Skipped suppressed conversation page:\n${page.title ?? "Conversation page"}`;
 					await storeReceipt(env, userId, "save_conversation", receipt, summary, { strict: true });
 					return manualCollectReplay(sourcePacket, {
 						row: { id: receipt.id, summary },

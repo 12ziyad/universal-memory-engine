@@ -230,7 +230,7 @@ function buildEvidence(lines, messages, receiptId, sourcePacket) {
 }
 
 function markdownFor({ title, overview, keyPoints, decisions, technical, nextSteps, related, evidence }) {
-	const parts = [`# ${title}`, "", "## Overview", overview || "Collected memory page."];
+	const parts = [`# ${title}`, "", "## Overview", overview || "Collected conversation page."];
 	const add = (heading, lines) => {
 		if (!lines?.length) return;
 		parts.push("", `## ${heading}`, ...lines.map((line) => `- ${line}`));
@@ -446,7 +446,7 @@ export function mergePageDraft(existing, draft, { preferDraftTitle = false, corr
 		.slice(0, 16);
 	const evidence = dedupeEvidence([...safeJsonArray(existing?.evidence_json), ...(draft.evidence ?? [])], 12);
 	const title = preferDraftTitle ? (draft.title || existing.title) : (existing.title || draft.title);
-	const overview = keyPoints.slice(0, 3).join(" ") || draft.short_summary || existing.short_summary || "Collected memory page.";
+	const overview = keyPoints.slice(0, 3).join(" ") || draft.short_summary || existing.short_summary || "Collected conversation page.";
 	const sections = {
 		overview,
 		keyPoints,
@@ -533,20 +533,20 @@ function pageReceipt({ action, page, runId, received, digested, relatedCount, sk
 		relatedConceptsKeptInPage: relatedCount,
 		created_at: Date.now(),
 	};
-	if (duplicate) receipt.reason = "duplicate memory page already exists";
+	if (duplicate) receipt.reason = "duplicate conversation page already exists";
 	return receipt;
 }
 
 function pageSummary(action, page, receipt) {
 	if (action === "duplicate") {
-		return `Skipped duplicate memory page:\n${page.title}\nReceipt: ${receipt.extraction_run_id}`;
+		return `Skipped duplicate conversation page:\n${page.title}\nReceipt: ${receipt.extraction_run_id}`;
 	}
 	const verb =
 		action === "create"
-			? "Created one memory page"
+			? "Created one conversation page"
 			: action === "reinforce"
-				? "Reinforced one memory page"
-				: "Updated one memory page";
+				? "Reinforced one conversation page"
+				: "Updated one conversation page";
 	const related = receipt.relatedConceptsKeptInPage ?? 0;
 	const skipped = related
 		? `\n\nSkipped graph node creation for ${related} related concept(s) because this was manual_collect mode.`
@@ -592,7 +592,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 			status: "suppressed",
 			skippedObjects: receipt.actions.skippedObjects,
 		});
-		const summary = `Skipped suppressed memory page:\n${draft.title}\nReceipt: ${runId}`;
+		const summary = `Skipped suppressed conversation page:\n${draft.title}\nReceipt: ${runId}`;
 		await storeReceipt(env, userId, "save_conversation", receipt, summary);
 		return { fired: false, processing: false, summary, receipt };
 	}
@@ -863,6 +863,19 @@ export async function suppressPageKey(env, userId, page, reason = "deleted") {
 		project_id: page.project_id ?? null,
 		project_name: page.project_name ?? null,
 	});
+	if (page.conversation_key) {
+		// A deleted Conversation Page must not silently re-materialize when the
+		// same conversation is saved again — its identity is suppressed too.
+		await addSuppression(env, userId, {
+			kind: "conversation_page",
+			label: page.title,
+			canonical_key: page.conversation_key,
+			reason,
+			source_object_id: page.id,
+			project_id: page.project_id ?? null,
+			project_name: page.project_name ?? null,
+		});
+	}
 	if (page.topic_filter) {
 		await addSuppression(env, userId, {
 			kind: "memory_page",

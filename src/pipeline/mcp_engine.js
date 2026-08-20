@@ -36,14 +36,31 @@ import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scop
 import {
 	activeJobDepth,
 	claimMemoryJob,
+	getActiveSuppressions,
 	MEMORY_JOB_ACTIVE_LIMIT,
 	storeReceipt,
 	updateMemoryJob,
 } from "../lib/db.js";
+import {
+	appendAdvanceSection,
+	advanceHeading,
+	CONVERSATION_ADVANCE_LIMIT,
+	conversationKeyFrom,
+	conversationMessageCount,
+	conversationPagesMode,
+	countConversationPageSources,
+	isUniqueConstraintError,
+	linkConversationPageSource,
+	newConversationPageId,
+	pageFollowJobKey,
+	resolveConversationPage,
+	stageConversationAdvance,
+} from "./conversation_pages.js";
+import { suppressedBy } from "./pages.js";
 import { reportServerError } from "../lib/report.js";
 import { resolveAdmissionRules } from "./admission.js";
 import { narrowManagedMemoryRules, rulesAllowText } from "./rules.js";
-import { runExtraction } from "./extract.js";
+import { planFromExtractionRun, runExtraction } from "./extract.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { messagesContainMemoryOptOut, storeOptOutReceipt } from "./opt_out.js";
 import { scrubMessages } from "./scrub.js";
@@ -53,11 +70,14 @@ import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
 import { settleStagedText } from "./staged_text.js";
 import { runAi } from "../lib/ai_meter.js";
-import { applyFencedUpdate } from "../lib/memory_versions.js";
+import { applyFencedUpdate, userAuthoredSummaryFence } from "../lib/memory_versions.js";
 import { responseText, extractJson } from "./llm.js";
 
 const SOURCE = "save_conversation";
 const SOURCE_MODE = "mcp_save";
+// REST /v1/save mode:"conversation" pages carry the door's own source mode so
+// packet identity can never migrate between doors.
+const REST_SOURCE_MODE = "conversation_collect";
 const JOB_TYPE = "mcp_enrich";
 const TERMINAL_JOB_STATES = new Set(["enriched", "failed", "completed"]);
 // A failed extract is a verdict about one processing attempt, not the content
@@ -262,7 +282,7 @@ export async function reconcileTitle(env, config, { entityLabels = [], factLines
 					messages: [
 						{
 							role: "system",
-							content: "You title a personal memory page. Given saved facts, reply with EXACTLY one JSON object {\"title\": \"...\"}: 3 to 7 plain words naming the main subject and what changed. No filler words like Notes, Memory, Summary, Session, Update. No trailing punctuation.",
+							content: "You title a personal conversation page. Given saved facts, reply with EXACTLY one JSON object {\"title\": \"...\"}: 3 to 7 plain words naming the main subject and what changed. No filler words like Notes, Memory, Summary, Session, Update. No trailing punctuation.",
 						},
 						{
 							role: "user",
@@ -336,13 +356,16 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 	pageId,
 	title,
 	jobId,
+	pageAdvance = false,
+	pageSkipReason = null,
 	receiptId: existingReceiptId = null,
+	sourceMode = SOURCE_MODE,
 }) {
 	const source = sourceMeta(sourcePacket);
 	const receiptId = existingReceiptId ?? `receipt_mcp_stage_${jobId}`;
 	const receipt = emptyReceipt("staged", "captured — extracting facts and relationships in the background", {
 		source: SOURCE,
-		source_mode: SOURCE_MODE,
+		source_mode: sourceMode,
 		...sourceMeta(sourcePacket),
 		received,
 	});
@@ -351,10 +374,16 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 	receipt.status = "staged";
 	receipt.staged_facts = stagedFacts;
 	receipt.page_id = pageId;
-	receipt.page_title = title;
+	receipt.page_title = pageId ? title : null;
+	receipt.page_advance = Boolean(pageId && pageAdvance);
+	if (pageSkipReason) receipt.page_skipped = pageSkipReason;
 	receipt.job_id = jobId;
 	receipt.id = receiptId;
-	const summary = `Staged ✓ "${title}" — ${stagedFacts} message(s) captured. Facts and relationships are being extracted now (~1 min); this save is final only when its page shows enriched.`;
+	const summary = !pageId
+		? `Staged ✓ — ${stagedFacts} message(s) captured. Facts and relationships are being extracted now (~1 min); no Conversation Page is kept for this save (${pageSkipReason ?? "pages off"}).`
+		: pageAdvance
+			? `Staged ✓ "${title}" — ${stagedFacts} message(s) captured, advancing this conversation's page. This save is final only when the page shows enriched.`
+			: `Staged ✓ "${title}" — ${stagedFacts} message(s) captured. Facts and relationships are being extracted now (~1 min); this save is final only when its page shows enriched.`;
 	const saved = receipt.saved ?? {};
 	const statement = env.DB.prepare(
 		`INSERT INTO receipts
@@ -408,24 +437,28 @@ async function storeStagedReceipt(env, userId, sourcePacket, {
 	return { receipt: persisted, summary: stored.summary ?? summary, receiptId };
 }
 
-async function insertProvisionalPage(env, userId, { pageId, title, userLines, derivedLines, sourcePacket, receiptId, now }) {
+async function insertProvisionalPage(env, userId, {
+	pageId, title, userLines, derivedLines, sourcePacket, receiptId, now,
+	conversationKey = null, sourceMode = SOURCE_MODE,
+}) {
 	const meta = sourceMeta(sourcePacket);
 	const statement = env.DB.prepare(
 		`INSERT INTO memory_pages
 			(id, user_id, node_kind, source_mode, title, canonical_title, short_summary, full_markdown,
-			 source_conversation_id, source_packet_id, input_hash, idempotency_key, scope_json, receipt_id,
+			 source_conversation_id, conversation_key, source_packet_id, input_hash, idempotency_key, scope_json, receipt_id,
 			 created_at, updated_at, last_seen_at, heat_score, confidence, enrich_status, project_id, project_name)
-		 VALUES (?, ?, 'memory_page', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0.6, 'staged', ?, ?)
+		 VALUES (?, ?, 'memory_page', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0.6, 'staged', ?, ?)
 		 ON CONFLICT(id) DO NOTHING`,
 	).bind(
 		pageId,
 		userId,
-		SOURCE_MODE,
+		sourceMode,
 		title,
 		canonicalTitle(title),
 		clampLine(userLines[0] ?? title, 200),
 		stagedMarkdown(title, userLines, derivedLines),
 		sourcePacket?.conversation_id ?? null,
+		conversationKey,
 		sourcePacket?.id ?? null,
 		sourcePacket?.content_hash ?? null,
 		sourcePacket?.idempotency_key ?? null,
@@ -449,13 +482,17 @@ async function insertProvisionalPage(env, userId, { pageId, title, userLines, de
 		await statement.run();
 	}
 	const stored = await env.DB.prepare(
-		"SELECT id, user_id, source_packet_id, input_hash FROM memory_pages WHERE id = ? LIMIT 1",
+		"SELECT id, user_id, source_packet_id, input_hash, conversation_key FROM memory_pages WHERE id = ? LIMIT 1",
 	).bind(pageId).first();
+	// A repair replay may find the page already advanced by a LATER batch of
+	// the same conversation — same page identity, newer packet pointers. That
+	// is convergence working, not an ownership inconsistency.
+	const sameConversation = Boolean(conversationKey && stored?.conversation_key === conversationKey);
 	if (
 		!stored
 		|| stored.user_id !== userId
-		|| stored.source_packet_id !== sourcePacket?.id
-		|| stored.input_hash !== sourcePacket?.content_hash
+		|| (!sameConversation && stored.source_packet_id !== sourcePacket?.id)
+		|| (!sameConversation && stored.input_hash !== sourcePacket?.content_hash)
 	) {
 		throw new Error("MCP provisional page ownership is inconsistent");
 	}
@@ -623,6 +660,71 @@ async function replayIgnoredMcpResult(env, userId, normalized, sourcePacket) {
 		sourcePacket,
 		extra: { duplicate: true, job_status: "completed" },
 	});
+}
+
+/**
+ * Deterministic Conversation Page identity for one explicit batch, resolved
+ * before the job claim so repairs and replays pin the same page.
+ *
+ * Returns { page, conversationKey, skipReason }:
+ *   - page set        → this batch ADVANCES an existing live page
+ *   - page null + key → this batch CREATES the page owning the key
+ *   - skipReason set  → no page is written for this batch (rule off,
+ *     suppressed conversation, archived page, or advance limit); graph
+ *     extraction still runs and the receipt says why.
+ *
+ * Everything here is gated on CONVERSATION_PAGES="on" — in "track" the lane
+ * behaves exactly as before (one page per accepted batch, no identity).
+ */
+async function resolveConversationPageIdentity(env, userId, { rules, conversationId, threadId, projectId = null }) {
+	if (conversationPagesMode(env) !== "on") return { page: null, conversationKey: null, skipReason: null };
+	if (rules?.captureDefault === "graph_only") {
+		return { page: null, conversationKey: null, skipReason: "pages_off_by_rule" };
+	}
+	const conversationKey = conversationKeyFrom({ conversationId, threadId });
+	if (!conversationKey) return { page: null, conversationKey: null, skipReason: null };
+	const suppressions = await getActiveSuppressions(env, userId, { projectId });
+	if (suppressedBy(suppressions, "conversation_page", conversationKey)) {
+		return { page: null, conversationKey, skipReason: "conversation_page_suppressed" };
+	}
+	const page = await resolveConversationPage(env, userId, { projectId, conversationKey });
+	if (page && (page.archived_at || page.suppressed_at)) {
+		return {
+			page: null,
+			conversationKey,
+			skipReason: page.archived_at ? "conversation_page_archived" : "conversation_page_suppressed",
+		};
+	}
+	if (page) {
+		const links = await countConversationPageSources(env, userId, page.id);
+		if (links >= CONVERSATION_ADVANCE_LIMIT) {
+			return { page: null, conversationKey, skipReason: "conversation_page_advance_limit" };
+		}
+	}
+	return { page, conversationKey, skipReason: null };
+}
+
+/**
+ * Mark an existing Conversation Page as processing a new advance, retrying a
+ * lost revision CAS against a fresh read. Never reports success it did not
+ * have: a page that vanished, got archived, or keeps moving returns
+ * applied:false with the reason, and the caller downgrades to a pageless
+ * save instead of forking or lying.
+ */
+async function advanceStagingWithRetry(env, userId, { pageId, sourcePacket, projectId = null }) {
+	for (let attempt = 0; attempt < 4; attempt++) {
+		const fresh = await env.DB.prepare(
+			`SELECT id, revision, archived_at, suppressed_at FROM memory_pages
+			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL LIMIT 1`,
+		).bind(pageId, userId, projectId).first();
+		if (!fresh) return { applied: false, reason: "conversation_page_deleted" };
+		if (fresh.archived_at || fresh.suppressed_at) {
+			return { applied: false, reason: fresh.archived_at ? "conversation_page_archived" : "conversation_page_suppressed" };
+		}
+		const staged = await stageConversationAdvance(env, userId, { page: fresh, sourcePacket, projectId });
+		if (staged.applied) return { applied: true };
+	}
+	return { applied: false, reason: "conversation_page_contended" };
 }
 
 /**
@@ -806,8 +908,8 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 
 	const now = Date.now();
 	// The user's memory rules apply to PAGE CONTENT here (an excluded topic
-	// must never appear on a notes page); graph enforcement stays in the
-	// engine's gates, where each refusal is named on the receipt.
+	// must never appear on a Conversation Page); graph enforcement stays in
+	// the engine's gates, where each refusal is named on the receipt.
 	// The MCP door only ever serves the key owner's root identity (handleMcp),
 	// so a self-load here IS the account's rules — the admission boundary makes
 	// that explicit.
@@ -821,8 +923,21 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			.slice(0, 40)
 		: [];
 	const lastTs = normalized.messages.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0) || now;
-	const proposedTitle = provisionalTitle(userLines, lastTs);
-	const proposedPageId = newId("page");
+
+	// Conversation Pages: deterministic identity on the explicit doors.
+	// "graph_only" is the user saying "never build pages" — it now means
+	// exactly that: graph extraction runs, no Conversation Page is written.
+	const identity = await resolveConversationPageIdentity(env, userId, {
+		rules,
+		conversationId: input.conversationId,
+		threadId: input.threadId,
+		projectId: project.project_id,
+	});
+	const pageless = Boolean(identity.skipReason);
+	const advance = Boolean(identity.page);
+
+	const proposedTitle = advance ? identity.page.title : provisionalTitle(userLines, lastTs);
+	const proposedPageId = pageless ? null : (advance ? identity.page.id : newConversationPageId());
 	const proposedJobId = newId("job");
 	const proposedReceiptId = `receipt_mcp_stage_${proposedJobId}`;
 	let jobClaim = existing
@@ -840,6 +955,10 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 				title: proposedTitle,
 				stagedReceiptId: proposedReceiptId,
 				sourceContentHash: sourcePacket?.content_hash ?? null,
+				conversationKey: identity.conversationKey,
+				pageAdvance: advance,
+				pageless,
+				pageSkipReason: identity.skipReason,
 				...project,
 			},
 		});
@@ -882,15 +1001,22 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			title: proposedTitle,
 			stagedReceiptId: proposedReceiptId,
 			sourceContentHash: sourcePacket?.content_hash ?? null,
+			conversationKey: identity.conversationKey,
+			pageAdvance: advance,
+			pageless,
+			pageSkipReason: identity.skipReason,
 			...project,
 		}
 		: existing?.payload ?? {};
 	if (ownerPayload.sourceContentHash && ownerPayload.sourceContentHash !== sourcePacket?.content_hash) {
 		return idempotencyConflictResult(normalized, sourcePacket?.id ?? null);
 	}
-	const pageId = ownerPayload.pageId;
+	let pageId = ownerPayload.pageless ? null : ownerPayload.pageId;
+	let pageAdvance = Boolean(ownerPayload.pageAdvance);
 	const title = ownerPayload.title;
-	if (!pageId || !title) throw new Error("MCP memory job is missing its repair metadata");
+	if (!ownerPayload.pageless && (!pageId || !title)) {
+		throw new Error("MCP memory job is missing its repair metadata");
+	}
 	maybeInjectMcpFault(env, input, "after_job_claim");
 
 	const { receipt, summary, receiptId } = await storeStagedReceipt(env, userId, sourcePacket, {
@@ -899,9 +1025,70 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 		pageId,
 		title,
 		jobId,
+		pageAdvance,
+		pageSkipReason: ownerPayload.pageless ? (ownerPayload.pageSkipReason ?? "pages_off_by_rule") : null,
 		receiptId: existing?.job.receipt_id ?? ownerPayload.stagedReceiptId ?? `receipt_mcp_stage_${jobId}`,
 	});
-	await insertProvisionalPage(env, userId, { pageId, title, userLines, derivedLines, sourcePacket, receiptId, now });
+	if (pageId && pageAdvance) {
+		const staged = await advanceStagingWithRetry(env, userId, {
+			pageId,
+			sourcePacket,
+			projectId: project.project_id,
+		});
+		if (!staged.applied) {
+			// The page vanished or kept moving under this save. The memories
+			// still land; the page half is skipped and the job says so.
+			pageId = null;
+			pageAdvance = false;
+			await updateMemoryJob(env, userId, jobId, {
+				payload: { ...ownerPayload, pageId: null, pageAdvance: false, pageless: true, pageSkipReason: staged.reason ?? "conversation_page_moved" },
+			});
+		}
+	} else if (pageId) {
+		try {
+			await insertProvisionalPage(env, userId, {
+				pageId,
+				title,
+				userLines,
+				derivedLines,
+				sourcePacket,
+				receiptId,
+				now,
+				conversationKey: ownerPayload.conversationKey ?? null,
+			});
+		} catch (error) {
+			if (!isUniqueConstraintError(error)) throw error;
+			// Concurrent create for the same conversation: the unique identity
+			// index chose a winner. Advance the winner instead of duplicating.
+			const winner = ownerPayload.conversationKey
+				? await resolveConversationPage(env, userId, {
+					projectId: project.project_id,
+					conversationKey: ownerPayload.conversationKey,
+				})
+				: null;
+			if (winner && !winner.archived_at && !winner.suppressed_at) {
+				pageId = winner.id;
+				pageAdvance = true;
+				await updateMemoryJob(env, userId, jobId, {
+					payload: { ...ownerPayload, pageId, pageAdvance: true },
+				});
+				await advanceStagingWithRetry(env, userId, {
+					pageId,
+					sourcePacket,
+					projectId: project.project_id,
+				});
+			} else {
+				pageId = null;
+				pageAdvance = false;
+				await updateMemoryJob(env, userId, jobId, {
+					payload: { ...ownerPayload, pageId: null, pageAdvance: false, pageless: true, pageSkipReason: "conversation_page_unavailable" },
+				});
+			}
+		}
+	}
+	if (pageId && sourcePacket?.id) {
+		await linkConversationPageSource(env, userId, { pageId, sourcePacketId: sourcePacket.id });
+	}
 	if (receiptId) await updateMemoryJob(env, userId, jobId, { receiptId });
 
 	// 8.2 read-your-writes: every durable line is findable the moment this
@@ -924,6 +1111,8 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	const job = {
 		jobId,
 		pageId,
+		pageAdvance,
+		conversationKey: ownerPayload.conversationKey ?? null,
 		title,
 		receiptId,
 		captureMode: capture,
@@ -988,20 +1177,521 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	});
 }
 
+/**
+ * Finalize one ADVANCE of an existing Conversation Page: append this batch's
+ * facts as a bounded "## Update — date" section, fenced so it can never
+ * rewrite a user's own wording (the advance then keeps their text and says
+ * so) and CAS-retried against genuine contention. A page deleted while the
+ * advance processed stays deleted — the memories stand on their own.
+ */
+async function finalizeConversationAdvance(env, userId, job, { project, factLines, edgeLines, derivedLines, receipt }) {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const fresh = await env.DB.prepare(
+			`SELECT id, title, full_markdown, revision, deleted_at FROM memory_pages
+			 WHERE id = ? AND user_id = ? AND project_id IS ? LIMIT 1`,
+		).bind(job.pageId, userId, project.project_id).first();
+		if (!fresh || fresh.deleted_at) return { done: true, pageDeleted: true };
+		const expected = Number(fresh.revision) >= 1 ? Number(fresh.revision) : 1;
+		const sectionLines = [advanceHeading(dateLabel(job.lastTs ?? Date.now()))];
+		if (factLines.length) sectionLines.push("", ...factLines.map((line) => `- ${line}`));
+		if (edgeLines.length) sectionLines.push("", "### Relationships", ...edgeLines.map((line) => `- ${line}`));
+		if (derivedLines.length) {
+			sectionLines.push("", "### Conversation notes (assistant, derived)", ...derivedLines.map((line) => `- ${clampLine(line)}`));
+		}
+		const { markdown } = appendAdvanceSection(fresh.full_markdown, sectionLines.join("\n"));
+		const messageCount = await conversationMessageCount(env, userId, job.pageId);
+		const fence = userAuthoredSummaryFence("memory_pages", { column: "full_markdown", kind: "page" });
+		const write = await applyFencedUpdate(env.DB.prepare(
+			`UPDATE memory_pages SET
+				full_markdown = ?, enrich_status = 'enriched',
+				extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+				message_count = ?,
+				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
+			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+			   AND COALESCE(revision, 1) = ?
+			   ${fence.sql}`,
+		).bind(
+			markdown,
+			receipt?.extraction_run_id ?? null,
+			receipt?.id ?? null,
+			messageCount,
+			Date.now(),
+			Date.now(),
+			job.pageId,
+			userId,
+			project.project_id,
+			expected,
+		), { label: "conversation page advance finalize" });
+		if (write.applied) return { done: true };
+		const after = await env.DB.prepare(
+			"SELECT revision, deleted_at FROM memory_pages WHERE id = ? AND user_id = ? AND project_id IS ? LIMIT 1",
+		).bind(job.pageId, userId, project.project_id).first().catch(() => null);
+		if (!after || after.deleted_at) return { done: true, pageDeleted: true };
+		if (Number(after.revision ?? 1) === expected) {
+			// Unchanged revision + no write: the user-authored fence held. The
+			// stored markdown is the user's wording — record the advance's state
+			// without touching their text.
+			const statusOnly = await applyFencedUpdate(env.DB.prepare(
+				`UPDATE memory_pages SET enrich_status = 'enriched',
+					extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+					updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+				   AND COALESCE(revision, 1) = ?`,
+			).bind(
+				receipt?.extraction_run_id ?? null,
+				receipt?.id ?? null,
+				Date.now(),
+				Date.now(),
+				job.pageId,
+				userId,
+				project.project_id,
+				expected,
+			), { label: "conversation page advance state" });
+			if (statusOnly.applied) return { done: true, keptUserText: true };
+		}
+		// Revision moved under us: genuine contention — loop re-reads.
+	}
+	return { retry: true, reason: "conversation page contended during advance finalize" };
+}
+
+/**
+ * Finalize a freshly CREATED page from durable extraction manifests (the
+ * REST follower path): replace the provisional body, fenced against user
+ * authorship and revision movement.
+ */
+async function finalizeConversationCreate(env, config, userId, job, { project, factLines, edgeLines, entityLabels, runId, receiptId }) {
+	const title = await reconcileTitle(env, config, {
+		entityLabels,
+		factLines: [...factLines, ...edgeLines],
+		fallbackTs: job.lastTs ?? Date.now(),
+		titleResponse: job.testOverrides?.titleResponse,
+	});
+	const markdown = enrichedMarkdown(title, {
+		factLines,
+		edgeLines,
+		derivedLines: [],
+		savedAt: job.lastTs ?? Date.now(),
+	});
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const fresh = await env.DB.prepare(
+			"SELECT revision, deleted_at FROM memory_pages WHERE id = ? AND user_id = ? AND project_id IS ? LIMIT 1",
+		).bind(job.pageId, userId, project.project_id).first();
+		if (!fresh || fresh.deleted_at) return { done: true, pageDeleted: true };
+		const expected = Number(fresh.revision) >= 1 ? Number(fresh.revision) : 1;
+		const messageCount = await conversationMessageCount(env, userId, job.pageId);
+		const markdownFence = userAuthoredSummaryFence("memory_pages", { column: "full_markdown", kind: "page" });
+		const titleFence = userAuthoredSummaryFence("memory_pages", { column: "title", kind: "page" });
+		const write = await applyFencedUpdate(env.DB.prepare(
+			`UPDATE memory_pages SET
+				title = ?, canonical_title = ?, short_summary = ?, full_markdown = ?,
+				enrich_status = 'enriched', extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+				message_count = ?,
+				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
+			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+			   AND COALESCE(revision, 1) = ?
+			   ${markdownFence.sql}
+			   ${titleFence.sql}`,
+		).bind(
+			title,
+			canonicalTitle(title),
+			clampLine(factLines[0] ?? title, 200),
+			markdown,
+			runId ?? null,
+			receiptId ?? null,
+			messageCount,
+			Date.now(),
+			Date.now(),
+			job.pageId,
+			userId,
+			project.project_id,
+			expected,
+		), { label: "conversation page create finalize" });
+		if (write.applied) return { done: true, title };
+		const after = await env.DB.prepare(
+			"SELECT revision, deleted_at FROM memory_pages WHERE id = ? AND user_id = ? AND project_id IS ? LIMIT 1",
+		).bind(job.pageId, userId, project.project_id).first().catch(() => null);
+		if (!after || after.deleted_at) return { done: true, pageDeleted: true };
+		if (Number(after.revision ?? 1) === expected) {
+			const statusOnly = await applyFencedUpdate(env.DB.prepare(
+				`UPDATE memory_pages SET enrich_status = 'enriched',
+					extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+					updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
+				   AND COALESCE(revision, 1) = ?`,
+			).bind(runId ?? null, receiptId ?? null, Date.now(), Date.now(), job.pageId, userId, project.project_id, expected), { label: "conversation page create state" });
+			if (statusOnly.applied) return { done: true, keptUserText: true };
+		}
+	}
+	return { retry: true, reason: "conversation page contended during create finalize" };
+}
+
+function pageFollowPayload(job, project, extra = {}) {
+	return {
+		lane: "page_follow",
+		pageId: job.pageId ?? null,
+		pageAdvance: Boolean(job.pageAdvance),
+		conversationKey: job.conversationKey ?? null,
+		sourcePacketId: job.sourcePacketId ?? null,
+		...project,
+		...extra,
+	};
+}
+
+const ACTIVE_JOB_STATES = new Set(["awaiting_source", "queued", "staged", "processing"]);
+
+/**
+ * REST-lane page follower: waits for the ingest lane's durable extraction
+ * verdict for this batch's packet, then finalizes the staged Conversation
+ * Page from the run's manifests. Never re-runs extraction, never charges the
+ * model again, and treats "extraction still running" as patient waiting, not
+ * failure.
+ */
+async function followConversationPage(env, userId, job, defer = null) {
+	const config = getConfig(env);
+	const project = projectPayload(job.sourceMeta);
+	const deadline = Number(job.deadlineAt ?? 0) || (Date.now() + 15 * 60_000);
+	const extract = await env.DB.prepare(
+		`SELECT id, status FROM memory_jobs
+		 WHERE user_id = ? AND source_packet_id = ? AND type != ?
+		 ORDER BY created_at LIMIT 1`,
+	).bind(userId, job.sourcePacketId, JOB_TYPE).first();
+
+	if (!extract || ACTIVE_JOB_STATES.has(extract.status)) {
+		if (Date.now() > deadline) {
+			try {
+				await markMcpEnrichmentFailed(env, userId, job, "the batch's extraction did not settle in time; the Conversation Page update was abandoned", defer);
+				return { done: true, failed: true };
+			} catch (error) {
+				return { retry: true, terminalPending: true, reason: "page follow deadline", error: String(error?.message ?? error) };
+			}
+		}
+		// Waiting, not failing: a bounded sleep instead of a 250ms re-poll for
+		// the whole extraction. The deadline above is what ends the wait.
+		return {
+			retry: true,
+			inProgress: true,
+			retryAfterMs: 3_000,
+			reason: "waiting for the batch's extraction verdict",
+		};
+	}
+
+	if (extract.status === "failed" || /cancel/i.test(String(extract.status))) {
+		if (job.pageAdvance && job.pageId) {
+			// The advance's batch failed; the page's prior enriched content
+			// stands. Restore its state and record the failed advance on the job.
+			await env.DB.prepare(
+				`UPDATE memory_pages SET enrich_status = 'enriched', updated_at = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL AND enrich_status = 'staged'`,
+			).bind(Date.now(), job.pageId, userId, project.project_id).run();
+			await updateMemoryJob(env, userId, job.jobId, {
+				status: "enriched",
+				payload: pageFollowPayload(job, project, { page_advance_failed_extraction: extract.status }),
+				completedAt: Date.now(),
+			});
+			return { done: true };
+		}
+		try {
+			await markMcpEnrichmentFailed(env, userId, job, `the batch's extraction ended ${extract.status}; the staged Conversation Page was marked failed`, defer);
+			return { done: true, failed: true };
+		} catch (error) {
+			return { retry: true, terminalPending: true, reason: "page follow failure bookkeeping", error: String(error?.message ?? error) };
+		}
+	}
+
+	// Terminal success: rebuild the outcome from the durable run manifest —
+	// exactly what the engine kept, no model reruns.
+	const run = await env.DB.prepare(
+		"SELECT * FROM extraction_runs WHERE user_id = ? AND source_packet_id = ? ORDER BY created_at DESC LIMIT 1",
+	).bind(userId, job.sourcePacketId).first();
+	const plan = run ? planFromExtractionRun(run) : {};
+	const factLines = factLinesFromPlan(plan);
+	const edgeLines = edgeLinesFromPlan(plan);
+	const runReceipt = { extraction_run_id: run?.id ?? null, id: run?.receipt_id ?? null };
+
+	if (!factLines.length && !edgeLines.length) {
+		if (job.pageId && !job.pageAdvance) {
+			await env.DB.prepare(
+				"UPDATE memory_pages SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ?",
+			).bind(Date.now(), Date.now(), job.pageId, userId, project.project_id).run();
+		} else if (job.pageId && job.pageAdvance) {
+			await env.DB.prepare(
+				`UPDATE memory_pages SET enrich_status = 'enriched', updated_at = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL AND enrich_status = 'staged'`,
+			).bind(Date.now(), job.pageId, userId, project.project_id).run();
+		}
+		await updateMemoryJob(env, userId, job.jobId, {
+			status: "enriched",
+			payload: pageFollowPayload(job, project, job.pageAdvance ? { page_advance_empty: true } : { page_deleted: true }),
+			completedAt: Date.now(),
+		});
+		return { done: true };
+	}
+
+	const outcome = job.pageAdvance
+		? await finalizeConversationAdvance(env, userId, job, {
+			project,
+			factLines,
+			edgeLines,
+			derivedLines: [],
+			receipt: runReceipt,
+		})
+		: await finalizeConversationCreate(env, config, userId, job, {
+			project,
+			factLines,
+			edgeLines,
+			entityLabels: [...new Set((plan.newNodes ?? []).map((n) => n?.label).filter(Boolean))],
+			runId: run?.id ?? null,
+			receiptId: run?.receipt_id ?? null,
+		});
+	if (outcome.retry) return outcome;
+	await updateMemoryJob(env, userId, job.jobId, {
+		status: "enriched",
+		payload: pageFollowPayload(job, project, {
+			...(outcome.title ? { title: outcome.title } : {}),
+			...(outcome.keptUserText ? { page_text_kept_user_authored: true } : {}),
+			...(outcome.pageDeleted ? { page_deleted_during_processing: true } : {}),
+		}),
+		completedAt: Date.now(),
+	});
+	return { done: true };
+}
+
+/**
+ * REST door hook (Campaign A): after /v1/save mode:"conversation" has been
+ * ACCEPTED by the ingest engine, create or advance this conversation's page
+ * and enqueue a follower that finalizes it from the extraction verdict. The
+ * accepted save never fails because of the page half — a page problem is
+ * reported on the response and the job row instead.
+ */
+export async function stageRestConversationPage(env, ctx, doorUserId, input = {}, saveResult = {}) {
+	if (conversationPagesMode(env) !== "on") return null;
+	const sourcePacket = saveResult?.sourcePacket;
+	if (!sourcePacket?.id) return null;
+	if (saveResult.idempotencyConflict || saveResult.cancelled || saveResult.backpressure) return null;
+	// Pages live in the packet's memory space: for scoped writes the resolved
+	// memory user (the packet's owner), not the authenticating account.
+	const userId = sourcePacket.user_id ?? doorUserId;
+	const projectScope = normalizeProjectScope(sourceMeta(sourcePacket));
+	const projectId = projectScope.projectId;
+
+	if (saveResult.duplicate) {
+		// A terminal replay: the original acceptance owns the page work.
+		const conversationKey = conversationKeyFrom({ conversationId: input.conversationId, threadId: input.threadId });
+		if (!conversationKey) return null;
+		const page = await resolveConversationPage(env, userId, { projectId, conversationKey });
+		return page
+			? { id: page.id, status: page.enrich_status ?? "enriched", advance: false, replayed: true }
+			: null;
+	}
+
+	// Rules belong to the authenticating ACCOUNT (SRV-04): prefer the door's
+	// resolved rules object; self-load only under the door identity.
+	const rules = input.overrides?.rules ?? await resolveAdmissionRules(env, doorUserId);
+	const identity = await resolveConversationPageIdentity(env, userId, {
+		rules,
+		conversationId: input.conversationId,
+		threadId: input.threadId,
+		projectId,
+	});
+	if (identity.skipReason) return { skipped: identity.skipReason };
+
+	const scrubbed = scrubMessages(Array.isArray(input.messages) ? input.messages : []).messages;
+	const durable = durableUserMessages(scrubbed).filter((m) => rulesAllowText(rules, m.content));
+	if (!durable.length) return { skipped: "nothing_durable" };
+	const userLines = durable.map((m) => m.content);
+	const lastTs = scrubbed.reduce((max, m) => (Number(m.ts) > max ? Number(m.ts) : max), 0) || Date.now();
+
+	let pageAdvance = Boolean(identity.page);
+	let pageId = pageAdvance ? identity.page.id : newConversationPageId();
+	const title = pageAdvance ? identity.page.title : provisionalTitle(userLines, lastTs);
+	const now = Date.now();
+	const basePayload = {
+		lane: "page_follow",
+		pageId,
+		title,
+		pageAdvance,
+		conversationKey: identity.conversationKey,
+		sourcePacketId: sourcePacket.id,
+		sourceContentHash: sourcePacket.content_hash ?? null,
+		deadlineAt: now + 15 * 60_000,
+		project_id: projectScope.projectId,
+		project_name: projectScope.projectName,
+	};
+	const claim = await claimMemoryJob(env, userId, {
+		accountUserId: sourceMeta(sourcePacket).account_user_id,
+		managedProjectId: sourceMeta(sourcePacket).managed_project_id,
+		id: newId("job"),
+		type: JOB_TYPE,
+		status: "staged",
+		idempotencyKey: pageFollowJobKey(sourcePacket.id),
+		sourcePacketId: sourcePacket.id,
+		payload: basePayload,
+	});
+	if (claim.capacityExceeded) return { skipped: "queue_full" };
+	if (!claim.claimed) {
+		const owner = await findExistingJob(env, userId, pageFollowJobKey(sourcePacket.id));
+		return owner?.payload?.pageId
+			? { id: owner.payload.pageId, status: owner.page?.enrich_status ?? "staged", advance: Boolean(owner.payload.pageAdvance), replayed: true }
+			: null;
+	}
+	const jobId = claim.id;
+
+	if (pageAdvance) {
+		const staged = await advanceStagingWithRetry(env, userId, { pageId, sourcePacket, projectId });
+		if (!staged.applied) {
+			await updateMemoryJob(env, userId, jobId, {
+				status: "enriched",
+				payload: { ...basePayload, pageId: null, pageAdvance: false, pageless: true, pageSkipReason: staged.reason },
+				completedAt: Date.now(),
+			});
+			return { skipped: staged.reason };
+		}
+	} else {
+		try {
+			await insertProvisionalPage(env, userId, {
+				pageId,
+				title,
+				userLines,
+				derivedLines: [],
+				sourcePacket,
+				receiptId: saveResult.receipt_id ?? saveResult.receipt?.id ?? null,
+				now,
+				conversationKey: identity.conversationKey,
+				sourceMode: REST_SOURCE_MODE,
+			});
+		} catch (error) {
+			if (!isUniqueConstraintError(error)) throw error;
+			const winner = identity.conversationKey
+				? await resolveConversationPage(env, userId, { projectId, conversationKey: identity.conversationKey })
+				: null;
+			if (winner && !winner.archived_at && !winner.suppressed_at) {
+				pageId = winner.id;
+				pageAdvance = true;
+				await updateMemoryJob(env, userId, jobId, {
+					payload: { ...basePayload, pageId, pageAdvance: true, title: winner.title },
+				});
+				await advanceStagingWithRetry(env, userId, { pageId, sourcePacket, projectId });
+			} else {
+				await updateMemoryJob(env, userId, jobId, {
+					status: "enriched",
+					payload: { ...basePayload, pageId: null, pageAdvance: false, pageless: true, pageSkipReason: "conversation_page_unavailable" },
+					completedAt: Date.now(),
+				});
+				return { skipped: "conversation_page_unavailable" };
+			}
+		}
+	}
+	await linkConversationPageSource(env, userId, { pageId, sourcePacketId: sourcePacket.id });
+
+	const testOverrides = {};
+	if (input.overrides?.titleResponse !== undefined) testOverrides.titleResponse = input.overrides.titleResponse;
+	const doJob = {
+		jobId,
+		lane: "page_follow",
+		pageId,
+		pageAdvance,
+		conversationKey: identity.conversationKey,
+		title,
+		sourcePacketId: sourcePacket.id,
+		deadlineAt: now + 15 * 60_000,
+		lastTs,
+		sourceMeta: { ...sourceMeta(sourcePacket) },
+		testOverrides: Object.keys(testOverrides).length ? testOverrides : null,
+	};
+	const stub = env.USER_MEMORY.get(env.USER_MEMORY.idFromName(userId));
+	await stub.enqueueMcpJobOnce(userId, doJob, {
+		handoffId: jobId,
+		contentHash: sourcePacket.content_hash,
+	});
+	return { id: pageId, status: "staged", advance: pageAdvance };
+}
+
+/**
+ * Rebuild one Conversation Page's derived body from its SURVIVING linked
+ * sources' durable run manifests (source-scoped deletion). Deletion outranks
+ * the user-authored fence here: stored wording may quote the deleted source,
+ * so the body is replaced, and the caller erases the page's revision history
+ * for the same reason. Returns { rebuilt } or a reason the caller acts on
+ * ("no_sources" / "no_surviving_content" → the page has no independent
+ * support left and should be deleted outright).
+ */
+export async function rebuildConversationPageFromSources(env, userId, pageId) {
+	const page = await env.DB.prepare(
+		"SELECT id, title, project_id FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1",
+	).bind(pageId, userId).first();
+	if (!page) return { rebuilt: false, reason: "gone" };
+	const { results: links } = await env.DB.prepare(
+		"SELECT source_packet_id FROM conversation_page_sources WHERE user_id = ? AND page_id = ? ORDER BY seq",
+	).bind(userId, pageId).all();
+	if (!links?.length) return { rebuilt: false, reason: "no_sources" };
+	const sections = [];
+	let firstFact = null;
+	for (const link of links) {
+		const run = await env.DB.prepare(
+			"SELECT * FROM extraction_runs WHERE user_id = ? AND source_packet_id = ? ORDER BY created_at DESC LIMIT 1",
+		).bind(userId, link.source_packet_id).first();
+		const plan = run ? planFromExtractionRun(run) : {};
+		const factLines = factLinesFromPlan(plan);
+		const edgeLines = edgeLinesFromPlan(plan);
+		if (!factLines.length && !edgeLines.length) continue;
+		if (firstFact === null) firstFact = factLines[0] ?? null;
+		if (sections.length === 0) {
+			sections.push(enrichedMarkdown(page.title, {
+				factLines,
+				edgeLines,
+				derivedLines: [],
+				savedAt: run?.created_at ?? Date.now(),
+			}));
+		} else {
+			const lines = [advanceHeading(dateLabel(run?.created_at ?? Date.now()))];
+			if (factLines.length) lines.push("", ...factLines.map((line) => `- ${line}`));
+			if (edgeLines.length) lines.push("", "### Relationships", ...edgeLines.map((line) => `- ${line}`));
+			sections.push(lines.join("\n"));
+		}
+	}
+	if (!sections.length) return { rebuilt: false, reason: "no_surviving_content" };
+	let markdown = sections[0];
+	for (const section of sections.slice(1)) markdown = appendAdvanceSection(markdown, section).markdown;
+	const messageCount = await conversationMessageCount(env, userId, pageId);
+	await env.DB.prepare(
+		`UPDATE memory_pages SET full_markdown = ?, short_summary = ?, message_count = ?,
+			updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
+		 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL`,
+	).bind(
+		markdown,
+		clampLine(firstFact ?? page.title, 200),
+		messageCount,
+		Date.now(),
+		Date.now(),
+		pageId,
+		userId,
+		page.project_id ?? null,
+	).run();
+	return { rebuilt: true };
+}
+
 export async function markMcpEnrichmentFailed(env, userId, job, reason, defer = null) {
 	const project = projectPayload(job.sourceMeta);
 	const receipt = emptyReceipt("enrich_failed", "background processing hit a problem — it has been reported", {
 		source: SOURCE, source_mode: SOURCE_MODE, ...(job.sourceMeta ?? {}),
 	});
 	receipt.id = `receipt_mcp_failed_${job.jobId}`;
-	receipt.page_id = job.pageId;
+	receipt.page_id = job.pageId ?? null;
 	receipt.status = "failed";
-	const summary = "This save could not finish processing. The staged page is kept, nothing was lost, and the problem has been reported automatically.";
+	const summary = !job.pageId
+		? "This save could not finish processing. Nothing was lost, and the problem has been reported automatically."
+		: job.pageAdvance
+			? "This save could not finish processing. The Conversation Page keeps its last enriched content, nothing was lost, and the problem has been reported automatically."
+			: "This save could not finish processing. The staged page is kept, nothing was lost, and the problem has been reported automatically.";
 	await updateMemoryJob(env, userId, job.jobId, {
 		status: "failed",
 		receiptId: receipt.id,
 		error: String(reason ?? "unknown").slice(0, 400),
 		payload: {
+			// A follower's terminal payload keeps its lane marker: the job stays
+			// identifiable as page bookkeeping, and announceMcpTerminal keeps its
+			// promise never to re-announce a batch the ingest lane already owns.
+			...(job.lane ? { lane: job.lane } : {}),
 			pageId: job.pageId,
 			title: job.title ?? null,
 			reason: String(reason ?? "unknown").slice(0, 400),
@@ -1020,9 +1710,18 @@ export async function markMcpEnrichmentFailed(env, userId, job, reason, defer = 
 	// stable receipt id makes the subsequent repair idempotent.
 	await storeReceipt(env, userId, SOURCE, receipt, summary, { strict: true });
 	try {
-		await env.DB.prepare(
-			"UPDATE memory_pages SET enrich_status = 'failed', updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL",
-		).bind(Date.now(), job.pageId, userId, project.project_id).run();
+		if (job.pageId && job.pageAdvance) {
+			// A failed ADVANCE leaves the page's prior enriched content standing;
+			// the job row and receipt carry the failure.
+			await env.DB.prepare(
+				`UPDATE memory_pages SET enrich_status = 'enriched', updated_at = ?
+				 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL AND enrich_status = 'staged'`,
+			).bind(Date.now(), job.pageId, userId, project.project_id).run();
+		} else if (job.pageId) {
+			await env.DB.prepare(
+				"UPDATE memory_pages SET enrich_status = 'failed', updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL",
+			).bind(Date.now(), job.pageId, userId, project.project_id).run();
+		}
 	} catch (error) {
 		console.warn("mcp enrich failure side effects failed:", error?.message ?? error);
 	}
@@ -1046,6 +1745,9 @@ export async function announceMcpTerminal(env, userId, job, defer = null) {
 	}
 	let payload = {};
 	try { payload = JSON.parse(row.payload_json ?? "{}") ?? {}; } catch {}
+	// Page followers are internal bookkeeping for a batch the ingest lane
+	// already announced — emitting here would double-fire webhook events.
+	if (payload.lane === "page_follow") return;
 	const project = projectPayload(payload);
 	let receipt = null;
 	if (row.receipt_id) {
@@ -1091,13 +1793,18 @@ export async function announceMcpTerminal(env, userId, job, defer = null) {
  * (the DO retries with backoff, bounded by attempts).
  */
 export async function enrichMcpConversation(env, userId, job, defer = null) {
+	// REST-lane page followers ride the same queue machinery but never run
+	// extraction themselves — they wait on the ingest lane's durable verdict
+	// and finalize the Conversation Page from it.
+	if (job.lane === "page_follow") return followConversationPage(env, userId, job, defer);
 	const config = getConfig(env);
 	const project = projectPayload(job.sourceMeta);
 	// The revision this enrichment starts from. Model work takes seconds, and an
 	// explicit user edit can land in that window; the final page write is fenced
 	// on this value so a stale enrichment loses instead of overwriting the
 	// correction. NULL (a pre-versioning row) keeps the historical behaviour.
-	if (job.observedRevision === undefined && job.pageId) {
+	// Advances skip this: their finalize reads fresh and CASes at write time.
+	if (job.observedRevision === undefined && job.pageId && !job.pageAdvance) {
 		const observed = await env.DB.prepare(
 			"SELECT COALESCE(revision, 1) AS revision FROM memory_pages WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		).bind(job.pageId, userId).first().catch(() => null);
@@ -1182,17 +1889,29 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		const wroteSomething = result.outcome === "wrote";
 
 		if (!wroteSomething && factLines.length === 0) {
-			// The engine looked and found nothing durable. The staged page must
-			// not linger as junk — remove it and say so on the job.
-			await env.DB.prepare(
-				"UPDATE memory_pages SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ?",
-			).bind(Date.now(), Date.now(), job.pageId, userId, project.project_id).run();
+			// The engine looked and found nothing durable.
+			if (job.pageId && !job.pageAdvance) {
+				// A freshly staged page must not linger as junk — remove it and
+				// say so on the job.
+				await env.DB.prepare(
+					"UPDATE memory_pages SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND project_id IS ?",
+				).bind(Date.now(), Date.now(), job.pageId, userId, project.project_id).run();
+			} else if (job.pageId && job.pageAdvance) {
+				// An advance that added nothing keeps the page's prior enriched
+				// content; only the processing state is restored.
+				await env.DB.prepare(
+					`UPDATE memory_pages SET enrich_status = 'enriched', updated_at = ?
+					 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL AND enrich_status = 'staged'`,
+				).bind(Date.now(), job.pageId, userId, project.project_id).run();
+			}
 			await updateMemoryJob(env, userId, job.jobId, {
 				status: "enriched",
 				receiptId: receipt?.id ?? null,
 				payload: {
-					pageId: job.pageId,
-					page_deleted: true,
+					pageId: job.pageId ?? null,
+					...(job.pageId && !job.pageAdvance ? { page_deleted: true } : {}),
+					...(job.pageId && job.pageAdvance ? { page_advance_empty: true } : {}),
+					...(job.pageId ? {} : { pageless: true }),
 					reason: "no durable content survived extraction",
 					...project,
 				},
@@ -1205,6 +1924,26 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		const entityLabels = [
 			...new Set([...(plan.newNodes ?? []).map((n) => n.label)].filter(Boolean)),
 		];
+		const savedCounts = {
+			nodes: receipt?.saved?.nodes ?? 0,
+			edges: receipt?.saved?.edges ?? 0,
+			slices: receipt?.saved?.slices ?? 0,
+			events: receipt?.saved?.events ?? 0,
+		};
+
+		// Pageless save (rules off / suppressed / archived / advance limit):
+		// the graph write above is the whole outcome.
+		if (!job.pageId) {
+			await updateMemoryJob(env, userId, job.jobId, {
+				status: "enriched",
+				receiptId: receipt?.id ?? null,
+				payload: { pageId: null, pageless: true, ...savedCounts, ...project },
+				completedAt: Date.now(),
+			});
+			await settleStagedText(env, userId, [job.jobId]);
+			return { done: true };
+		}
+
 		const title = await reconcileTitle(env, config, {
 			entityLabels,
 			factLines: [...factLines, ...edgeLines],
@@ -1216,12 +1955,40 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		const derivedLines = job.captureMode
 			? (job.derivedLines ?? []).filter((line) => rulesAllowText(rules, line))
 			: [];
+
+		if (job.pageAdvance) {
+			const advanced = await finalizeConversationAdvance(env, userId, job, {
+				project,
+				factLines,
+				edgeLines,
+				derivedLines,
+				receipt,
+			});
+			if (advanced.retry) return advanced;
+			await updateMemoryJob(env, userId, job.jobId, {
+				status: "enriched",
+				receiptId: receipt?.id ?? null,
+				payload: {
+					pageId: job.pageId,
+					pageAdvance: true,
+					...(advanced.keptUserText ? { page_text_kept_user_authored: true } : {}),
+					...(advanced.pageDeleted ? { page_deleted_during_processing: true } : {}),
+					...savedCounts,
+					...project,
+				},
+				completedAt: Date.now(),
+			});
+			await settleStagedText(env, userId, [job.jobId]);
+			return { done: true };
+		}
+
 		const markdown = enrichedMarkdown(title, {
 			factLines,
 			edgeLines,
 			derivedLines,
 			savedAt: job.lastTs ?? Date.now(),
 		});
+		const messageCount = await conversationMessageCount(env, userId, job.pageId);
 		const enrichStatement = env.DB.prepare(
 			// Enrichment ran against the page revision the job observed. If an
 			// explicit edit landed since, this write must lose: zero changed rows
@@ -1229,6 +1996,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			`UPDATE memory_pages SET
 				title = ?, canonical_title = ?, short_summary = ?, full_markdown = ?,
 				enrich_status = 'enriched', extraction_run_id = ?, receipt_id = COALESCE(?, receipt_id),
+				message_count = ?,
 				updated_at = ?, last_seen_at = ?, revision = COALESCE(revision, 1) + 1
 			 WHERE id = ? AND user_id = ? AND project_id IS ? AND deleted_at IS NULL
 			   AND COALESCE(revision, 1) = ?`,
@@ -1239,6 +2007,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			markdown,
 			receipt?.extraction_run_id ?? null,
 			receipt?.id ?? null,
+			messageCount,
 			Date.now(),
 			Date.now(),
 			job.pageId,
@@ -1250,9 +2019,26 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		);
 		const enrichWrite = await applyFencedUpdate(enrichStatement, { label: "mcp page enrichment" });
 		if (!enrichWrite.applied) {
-			// The page moved under this enrichment (an explicit edit, a delete, or a
-			// project fence). Marking the job enriched here would claim work that
-			// never landed, so fail closed and let the job be re-driven.
+			// Distinguish WHY the page moved. A newer advance of the same
+			// conversation staged on top of this create — convergence working —
+			// is retryable: re-drive against the fresh revision, and the
+			// advance's own finalize appends after ours. Anything else (an
+			// explicit user edit, a delete, a project fence) keeps the historic
+			// fail-closed behaviour.
+			const fresh = await env.DB.prepare(
+				`SELECT revision, enrich_status, input_hash, deleted_at FROM memory_pages
+				 WHERE id = ? AND user_id = ? AND project_id IS ? LIMIT 1`,
+			).bind(job.pageId, userId, project.project_id).first().catch(() => null);
+			const advancedOnTop = Boolean(
+				fresh
+				&& !fresh.deleted_at
+				&& fresh.enrich_status === "staged"
+				&& fresh.input_hash !== (job.sourceMeta?.source_content_hash ?? null)
+				&& Number(fresh.revision ?? 1) !== Number(job.observedRevision),
+			);
+			if (advancedOnTop) {
+				return { retry: true, reason: "conversation page advanced during enrichment" };
+			}
 			const stale = new Error("page revision changed during enrichment");
 			stale.code = "ENRICH_STALE_REVISION";
 			throw stale;
@@ -1263,10 +2049,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			payload: {
 				pageId: job.pageId,
 				title,
-				nodes: receipt?.saved?.nodes ?? 0,
-				edges: receipt?.saved?.edges ?? 0,
-				slices: receipt?.saved?.slices ?? 0,
-				events: receipt?.saved?.events ?? 0,
+				...savedCounts,
 				...project,
 			},
 			completedAt: Date.now(),

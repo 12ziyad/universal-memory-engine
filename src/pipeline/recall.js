@@ -562,7 +562,7 @@ export function buildContext(entries, plan = recallGate("memory"), staged = [], 
 			const tail = [p.short_summary, points.length ? `Key points: ${points.join("; ")}` : ""]
 				.filter(Boolean)
 				.join(" ");
-			lines.push(`Memory page: ${p.title}${tail ? ` - ${tail}` : ""}`);
+			lines.push(`Conversation page: ${p.title}${tail ? ` - ${tail}` : ""}`);
 			pageCount++;
 		}
 	}

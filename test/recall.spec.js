@@ -149,7 +149,7 @@ describe("/v1/recall - memory pages", () => {
 			title: "Itsuki Run 3.2 Memory Pages and Graph UX",
 			source_mode: "manual_collect",
 		});
-		expect(body.context).toContain("Memory page: Itsuki Run 3.2 Memory Pages and Graph UX");
+		expect(body.context).toContain("Conversation page: Itsuki Run 3.2 Memory Pages and Graph UX");
 		expect(body.context).toContain("Memory pages stay as pages");
 		expect(body.context).not.toContain("# Itsuki");
 	});

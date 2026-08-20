@@ -500,6 +500,16 @@ const TARGETS = Object.freeze({
 		ordinaryTarget("events", "events"),
 		ordinaryTarget("edges", "edges"),
 		ordinaryTarget("candidates", "candidates"),
+		// Conversation Page source links go first, while the pages they name are
+		// still here — same reasoning as memory_source_links above.
+		customTarget("conversation_page_sources", "conversation_page_sources", "page_id", (limit) => ({
+			sql: `SELECT l.page_id AS id, l.user_id AS memory_user_id
+			        FROM conversation_page_sources l
+			        JOIN memory_pages p ON p.id = l.page_id AND p.user_id = l.user_id
+			       WHERE ${userScope("l")} AND p.created_at IS NOT NULL AND p.created_at <= ?
+			       ORDER BY p.created_at ASC, l.page_id ASC LIMIT ?`,
+			binds: (scope, cutoffAt) => [...scopeBinds(scope), cutoffAt, limit],
+		})),
 		ordinaryTarget("memory_pages", "memory_pages", { vectorKind: "page" }),
 		customTarget("nodes", "nodes", "id", (limit) => ({
 			sql: `SELECT t.id AS id, t.user_id AS memory_user_id

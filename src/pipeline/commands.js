@@ -1,7 +1,9 @@
 import { getConfig } from "../config.js";
 import { linkIngestMemoryJobReceipt, storeReceipt } from "../lib/db.js";
+import { reportServerError } from "../lib/report.js";
 import { ingestMessages } from "./ingest.js";
 import { saveConversation, saveMemory } from "./manual.js";
+import { stageRestConversationPage } from "./mcp_engine.js";
 import { recall, RecallLimitError, RecallScopeError, validateRecallLimit, validateRecallScope } from "./recall.js";
 import { memoryV3Enabled } from "../lib/memory_v3.js";
 import { emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
@@ -292,13 +294,13 @@ function applyConversationScope(messages, { scope, n, topic }) {
 }
 
 export async function runConversationCollectCommand(env, ctx, userId, input = {}) {
-	// Legacy digest-page lane — deprecated alias. Reachable through its test
-	// hook and through scope:"summary" (a page-producing feature by
-	// definition; the engine path has no flat-page concept to map it onto).
+	// Legacy digest-page lane — retired from the public surface. It survives
+	// ONLY behind its explicit test hook (digestResponse); scope:"summary" is
+	// an ordinary conversation save on the engine + Conversation Page path.
 	const managedProjectId = input.memoryScope?.managedProjectId
 		?? input.memoryScope?.managed_project_id
 		?? null;
-	if ((input.digestResponse !== undefined || input.scope === "summary") && !managedProjectId) {
+	if (input.digestResponse !== undefined && !managedProjectId) {
 		console.log("manual_collect (deprecated): legacy digest-page lane used");
 		const res = await saveConversation(env, ctx, userId, input.messages ?? [], {
 			scope: input.scope,
@@ -317,7 +319,7 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 			received: (input.messages ?? []).length,
 		}));
 	}
-	if (managedProjectId && (input.digestResponse !== undefined || input.scope === "summary")) {
+	if (managedProjectId && input.digestResponse !== undefined) {
 		console.log("manual_collect (deprecated): managed project routed through guarded conversation engine");
 	}
 
@@ -340,7 +342,32 @@ export async function runConversationCollectCommand(env, ctx, userId, input = {}
 		overrides: { manual: true, ...(input.overrides ?? {}) },
 	});
 	if (result.backpressure) return result;
-	return { ...result, command_mode: "conversation_collect", mode: "conversation_collect" };
+	const final = { ...result, command_mode: "conversation_collect", mode: "conversation_collect" };
+	// Campaign A: an explicit conversation save also creates or advances this
+	// conversation's page (CONVERSATION_PAGES="on"). The accepted save never
+	// fails because of the page half — a page problem is recorded truthfully
+	// on the response and reported, not swallowed.
+	try {
+		// The shaped command result carries only source_packet_id (the full
+		// packet never leaves the server shape) — reload the row for the page
+		// half. The id came from this request's own acceptance, so it is ours.
+		const sourcePacket = final.source_packet_id
+			? await env.DB.prepare("SELECT * FROM source_packets WHERE id = ? LIMIT 1")
+				.bind(final.source_packet_id).first()
+			: null;
+		const page = await stageRestConversationPage(env, ctx, userId, { ...input, messages }, {
+			...final,
+			sourcePacket,
+			duplicate: Boolean(final.duplicate ?? (final.receipt?.outcome === "duplicate") ?? false),
+		});
+		if (page) final.conversation_page = page;
+	} catch (error) {
+		final.conversation_page = { error: "conversation_page_staging_failed" };
+		await reportServerError(env, "conversation_page_stage", error, userId, {
+			reportId: `err_convpage_${final?.source_packet_id ?? "unknown"}`,
+		}).catch(() => {});
+	}
+	return final;
 }
 
 export async function runObserveMessagesCommand(env, ctx, userId, messages, input = {}) {

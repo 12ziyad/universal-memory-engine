@@ -23,6 +23,7 @@ import {
 	deleteSourceEpisodes,
 } from "./episodes.js";
 import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
+import { rebuildConversationPageFromSources } from "./mcp_engine.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "./source.js";
 
 function parseJsonArray(value) {
@@ -461,6 +462,9 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 			advanceManualPageWriteEpoch(env, userId, now),
 			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, id),
+			// Conversation Page source links die with the page — a link that
+			// outlives the object it names is a record.
+			env.DB.prepare("DELETE FROM conversation_page_sources WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("UPDATE memory_pages SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
 				.bind(now, suppress ? now : null, id, userId),
 			// Single-object permanent deletion erases revision history too —
@@ -791,6 +795,7 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		"semantic_atom_capture_runs",
 		"staged_memories",
 		"memory_source_links",
+		"conversation_page_sources",
 		"webhook_deliveries",
 		"webhooks",
 		"playground_messages",
@@ -1006,6 +1011,7 @@ export async function deleteAllMemories(env, userId, confirm, { auditIntent = nu
 		// Provenance links carry no text, but a link that outlives the objects it
 		// names is a record that the account once held a memory from that source.
 		"memory_source_links",
+		"conversation_page_sources",
 	];
 	const counts = {};
 	for (const table of tables) {
@@ -1383,6 +1389,9 @@ export async function bulkDeleteBySource(env, userId, {
 	}
 
 	let ids;
+	// Conversation Pages that keep out-of-scope sources are rebuilt, not
+	// deleted (a derived artifact with independent support survives).
+	const partialPages = new Map();
 	if (erasure) {
 		ids = await enumerateLiveScope(env, userId);
 		const { results: sampleRows } = await env.DB.prepare(
@@ -1424,6 +1433,31 @@ export async function bulkDeleteBySource(env, userId, {
 				if (id) manifestIds.candidates.add(id);
 			}
 		}
+		// Conversation Pages are created at the DOOR, not by the run, so no
+		// manifest names them. Attribute them through their source links: a
+		// page ALL of whose linked packets are in scope dies with the scope;
+		// one that keeps out-of-scope sources is rebuilt from the survivors.
+		const scopedPacketIds = new Set((runs ?? []).map((run) => run.source_packet_id).filter(Boolean));
+		if (scopedPacketIds.size) {
+			const packetList = [...scopedPacketIds];
+			const linkedPageIds = new Set();
+			for (let offset = 0; offset < packetList.length; offset += 90) {
+				const chunk = packetList.slice(offset, offset + 90);
+				const { results: linkRows } = await env.DB.prepare(
+					`SELECT DISTINCT page_id FROM conversation_page_sources
+					 WHERE user_id = ? AND source_packet_id IN (${chunk.map(() => "?").join(", ")})`,
+				).bind(userId, ...chunk).all();
+				for (const row of linkRows ?? []) if (row.page_id) linkedPageIds.add(row.page_id);
+			}
+			for (const pageId of linkedPageIds) {
+				const { results: allLinks } = await env.DB.prepare(
+					"SELECT source_packet_id FROM conversation_page_sources WHERE user_id = ? AND page_id = ?",
+				).bind(userId, pageId).all();
+				const surviving = (allLinks ?? []).filter((row) => !scopedPacketIds.has(row.source_packet_id));
+				if (surviving.length === 0) manifestIds.pages.add(pageId);
+				else partialPages.set(pageId, packetList);
+			}
+		}
 		// Only what is still LIVE counts — the preview must describe reality,
 		// and the destructive pass must converge on repeats.
 		ids = {};
@@ -1441,6 +1475,7 @@ export async function bulkDeleteBySource(env, userId, {
 		// this delete would consume.
 		runs: (runs ?? []).filter((run) => run.status !== "deleted" && run.status !== "cancelled_by_delete").length,
 		...idCounts(ids),
+		...(partialPages.size ? { pages_rewritten: partialPages.size } : {}),
 	};
 
 	// Accepted work still processing is named honestly either way. For a
@@ -1649,6 +1684,30 @@ export async function bulkDeleteBySource(env, userId, {
 	};
 
 	const sweptIds = await sweep(ids);
+	// Scoped curation: pages that keep out-of-scope sources lose the scoped
+	// links and are rebuilt from what survives. Their revision history is
+	// erased with the deleted content — old snapshots may quote it, and
+	// history must never become an undeletable shadow copy.
+	for (const [pageId, packetIds] of partialPages) {
+		if (ids.pages?.has?.(pageId)) continue;
+		for (let offset = 0; offset < packetIds.length; offset += 90) {
+			const chunk = packetIds.slice(offset, offset + 90);
+			await env.DB.prepare(
+				`DELETE FROM conversation_page_sources
+				 WHERE user_id = ? AND page_id = ? AND source_packet_id IN (${chunk.map(() => "?").join(", ")})`,
+			).bind(userId, pageId, ...chunk).run();
+		}
+		const rebuilt = await rebuildConversationPageFromSources(env, userId, pageId);
+		if (rebuilt.rebuilt) {
+			await env.DB.batch(versionResidueStatements(env, userId, [pageId]));
+			await deleteManualSearchObjects(env, config, userId, { pageIds: [pageId] });
+			await refreshManualSearchProfiles(env, config, userId, { pageIds: [pageId] });
+		} else if (rebuilt.reason === "no_surviving_content" || rebuilt.reason === "no_sources") {
+			await deleteObject(env, userId, { kind: "page", id: pageId, suppress: false });
+			deletedTotals.pages += 1;
+			sweptIds.push(pageId);
+		}
+	}
 	let convergencePasses = 1;
 	if (erasure) {
 		// Converge: anything that slipped in between enumeration and sweep is

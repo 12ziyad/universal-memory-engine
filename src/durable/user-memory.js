@@ -2052,6 +2052,16 @@ export class UserMemory extends DurableObject {
 		}
 		if (res?.retry) {
 			if (res.inProgress) {
+				// A waiter (e.g. a Conversation Page follower waiting on another
+				// lane's extraction verdict) may name how long it is worth
+				// sleeping. Without it the entry keeps runAfter=0 and the
+				// guaranteed wake re-polls every 250ms for the whole wait.
+				// Attempts are deliberately NOT incremented: waiting is not
+				// failing, and the waiter carries its own deadline.
+				const waitMs = Number(res.retryAfterMs ?? 0);
+				if (waitMs > 0) {
+					await this.ctx.storage.put(key, { ...entry, runAfter: Date.now() + waitMs });
+				}
 				return {
 					kind: "mcp",
 					jobId: entry.job.jobId,

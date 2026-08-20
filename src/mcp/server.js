@@ -60,7 +60,7 @@ const SAVE_MEMORY_DESC =
 	"Save a single durable fact about the user. Call this whenever the user states a preference, decision, personal detail, relationship, date, or anything worth remembering in future conversations — including when they say \"remember that…\". Send one clear fact per call, in the user's own words.";
 
 const SAVE_CONVERSATION_DESC =
-	"Save the important parts of the current conversation to long-term memory. Call this when the discussion has produced durable new information — decisions, plans, facts, preferences — that should persist. Send the relevant turns verbatim; do not pre-summarize. The memory service will extract the facts and relationships itself.";
+	"Save the important parts of the current conversation to long-term memory. Call this when the discussion has produced durable new information — decisions, plans, facts, preferences — that should persist. Send the relevant turns verbatim; do not pre-summarize. The memory service extracts the facts and relationships itself and keeps one Conversation page per conversation: pass a stable conversationId and later saves of the same conversation advance that page instead of creating duplicates.";
 
 const RECALL_MEMORY_DESC =
 	"Search the user's saved memories. Call this at the START of a conversation, and whenever the user references anything personal, past, or context-dependent.";
@@ -268,7 +268,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 				.array(messageSchema)
 				.min(1)
 				.describe("Recent chat messages, oldest first. Include assistant turns for context; only user facts are saved."),
-			conversationId: z.string().optional().describe("Stable id for this chat, used to de-duplicate re-sends."),
+			conversationId: z.string().optional().describe("Stable id for this chat. Re-sends de-duplicate against it, and all saves of the same conversation converge onto ONE Conversation page (later batches advance it as a forward revision)."),
 			threadId: z.string().optional().describe("Optional host/client thread id for source tracking."),
 			sourceId: z.string().optional().describe("Optional caller source id for idempotency/source tracking."),
 			idempotencyKey: z.string().optional().describe("Optional idempotency key for safe retries."),
@@ -467,7 +467,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		"list_memories",
 		"Browse this user's stored memories, newest first. Use for \"what do you remember\", audits, and cleanup — for meaning-based lookup use recall_memory instead. Returns ids that get_memory and delete_memory accept.",
 		{
-			kind: z.enum(["all", "node", "page"]).optional().describe("all (default): atomic facts and memory pages; node: facts only; page: pages only."),
+			kind: z.enum(["all", "node", "page"]).optional().describe("all (default): atomic facts and conversation pages; node: facts only; page: pages only."),
 			limit: z.number().optional().describe("Items per page, 1-200. Default 50."),
 			cursor: z.string().optional().describe("Opaque cursor from a previous call's next_cursor."),
 			q: z.string().optional().describe("Optional substring filter on labels and summaries. Not semantic search."),

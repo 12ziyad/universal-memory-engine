@@ -14,14 +14,41 @@ Finish the active Hermes, Google ADK, OpenCode, and Antigravity implementation/p
 
 ## Deferred product work
 
-### 1. Normalize Notes / Conversation Pages
+### 1. Conversation Pages — ✅ COMPLETE (2026-08-21, PRODUCTION GO)
 
-- Keep automatic agent and framework capture writing structured memories without creating a page after every turn.
-- Keep `save_memory` for one concise, durable fact.
-- Make an explicit conversation-page option consistent across MCP, REST, SDKs, n8n, and the dashboard.
-- Decide whether the UI name should be **Conversation pages** or **Memory pages** instead of the ambiguous **Notes**.
-- Prove page/memory idempotency, tenant isolation, lifecycle fencing, linked deletion, retry behavior, and zero page flooding.
-- If lossless large-document storage is required, design it as a separate document/import capability; current Notes are derived pages, not an unlimited file store.
+The name is frozen as **Conversation pages** ("Notes", "notes page", "memory
+page", "capture pages", "organized pages" are gone from docs and dashboard).
+
+A conversation now has ONE page: a stable `conversationId`/`threadId` converges
+every explicit save onto a single live page per (account, project,
+conversation) — enforced by a partial unique index, not by similarity matching
+— and later batches advance it as a forward revision through the existing
+safe-update machinery, never reverting user-authored wording. The REST
+conversation door (SDKs, n8n) now builds pages too, via a follower job that
+finalizes from the ingest lane's durable extraction verdict with no second
+model call. Automatic capture and `save_memory` still create zero pages, and
+`captureDefault: "graph_only"` now genuinely suppresses page creation.
+
+Migration 0050 (additive; 0 legacy rows given an invented identity),
+`conversation_page_sources` registered in lifecycle census / retention /
+erasure, source-scoped deletion rebuilds a page that keeps independent support
+instead of deleting it, and deletion suppresses the conversation identity.
+
+Three defects were found and fixed in-campaign: a TOCTOU race on the link
+insert, a 250 ms re-poll loop in the page follower, and a dropped lane marker
+that would have double-announced a failed follower's webhook.
+
+Full suite 2021 + 616 green. Stage A `track` (`b2e07090`) canary 23/23 proved
+no behaviour change; Stage B `on` (`784cc865`) canary 25/25 proved convergence
+on live doors. Time Travel bookmark
+`000016ae-00000000-000050cd-50b55a83fefd1b71918303373e4ef046`. Zero residue
+verified by direct D1 scan. Evidence: CONVERSATION_PAGES_REPORT.md.
+
+Residual (unchanged from prior campaigns): two empty disposable canary account
+shells remain because no self-serve account-erasure route exists.
+
+Lossless large-document storage remains item 10 — Conversation pages are
+derived pages, not a file store.
 
 ### 2. Safe memory updates — ✅ COMPLETE (2026-08-20, PRODUCTION GO, all packages published)
 
