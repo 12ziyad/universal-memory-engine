@@ -48,5 +48,6 @@
  "0047_memory_revisions.sql": "b63232562a8281a4eb63ee787c9829736afeeb4a25e421a0825ed57ec707f728",
  "0048_memory_revision_scope.sql": "c398439ea79f94bdb163c52b9f768cf1dc585dd9b7de03ef0e1de63aea18b437",
  "0049_vector_artifact_ledger.sql": "a8841c6deccdda6cd4e5a96c164c928a37a1efbcae188f64713c5dd1fd86e979",
- "0050_conversation_pages.sql": "5ea3ae125dbed4e09c663871c3da70e79a0d101f1f7a97207192018920d034ea"
+ "0050_conversation_pages.sql": "5ea3ae125dbed4e09c663871c3da70e79a0d101f1f7a97207192018920d034ea",
+ "0051_mcp_oauth.sql": "f322ff9e5d0717fcd257a8a95d75984fbbb69d81519a709abc2f52a1518dc405"
 }

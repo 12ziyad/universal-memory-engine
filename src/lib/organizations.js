@@ -20,6 +20,7 @@
 import { newId } from "./ids.js";
 import { sha256Hex } from "../auth.js";
 import { managedMutationGuardStatement } from "./managed_projects.js";
+import { grantRevocationStatements } from "./oauth.js";
 import {
 	auditedMutationResult,
 	auditInvariantStatement,
@@ -1179,6 +1180,28 @@ export async function removeOrganizationMember(env, orgId, targetUserId, expecte
 			         )) = ?
 			    )`,
 		).bind(revokedAt, targetUserId, orgId),
+		// Same reach for OAuth grants: every grant this user holds on a project
+		// belonging to this organization dies with the membership, in the same
+		// batch, so remove-and-re-add cannot revive an old authorization.
+		env.DB.prepare(
+			`UPDATE oauth_grants SET revoked_at = ?, revoked_reason = 'org_membership_removed'
+			  WHERE user_id = ? AND revoked_at IS NULL
+			    AND (project_id IS NULL OR project_id IN (
+			      SELECT p.id FROM managed_projects p
+			       WHERE p.status = 'active'
+			         AND COALESCE(p.organization_id, (
+			           SELECT o.id FROM organizations o
+			            WHERE o.owner_user_id = p.owner_user_id
+			              AND o.is_default = 1 AND o.status = 'active'
+			            LIMIT 1
+			         )) = ?
+			    ))`,
+		).bind(revokedAt, targetUserId, orgId),
+		env.DB.prepare(
+			`UPDATE oauth_tokens SET revoked_at = ?
+			  WHERE user_id = ? AND revoked_at IS NULL
+			    AND grant_id IN (SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NOT NULL)`,
+		).bind(revokedAt, targetUserId, targetUserId),
 	];
 	let results;
 	try {
@@ -1422,6 +1445,13 @@ export async function removeProjectMember(env, projectId, targetUserId, expected
 			`UPDATE connection_tokens SET status = 'revoked', revoked_at = ?
 			  WHERE user_id = ? AND project_id = ? AND revoked_at IS NULL`,
 		).bind(Date.now(), targetUserId, projectId),
+		// An OAuth grant is a credential for this project too: losing project
+		// membership must not leave a live MCP authorization behind.
+		...grantRevocationStatements(env, {
+			userId: targetUserId,
+			projectId,
+			reason: "project_membership_removed",
+		}),
 	];
 	let results;
 	try {

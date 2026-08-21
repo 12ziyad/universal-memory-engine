@@ -22,7 +22,7 @@ import {
 	normalizeDeliveryMetadata,
 	validateIngestBody,
 } from "./lib/ingest_contract.mjs";
-import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
+import { MEMORY_DELETE_SCOPE, MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "./lib/scopes.js";
 import { memoryV3Enabled, memoryV3Status } from "./lib/memory_v3.js";
 import { normalizeProjectScope, ProjectScopeError } from "./lib/project_scope.js";
 import {
@@ -231,6 +231,14 @@ import {
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
+import { handleOAuthRoutes } from "./lib/oauth_routes.js";
+import {
+	ACCESS_TOKEN_PREFIX,
+	bearerChallenge,
+	issuerFor,
+	oauthMode,
+	resolveAccessToken,
+} from "./lib/oauth.js";
 import { allowRate, managedActorRateKey, RATE_BUCKETS } from "./lib/rate.js";
 import { LIMITS_SCHEMA, RATE_LIMITS_DOC } from "./lib/limits_contract.mjs";
 import { aiBudget, aiLimitsDocument, checkAiBudget, countWritesThisMonth, derivedNeurons, startOfNextUtcMonth } from "./lib/ai_budget.js";
@@ -4105,6 +4113,12 @@ async function handleRequestInner(request, env, ctx, url) {
 		// MCP door for supported clients. Prefer Bearer auth on /mcp; generated
 		// connector links and legacy clients may carry identity in the path token.
 		// This bypasses the x-api-key gate and authenticates the token itself.
+		// OAuth 2.1 for the MCP server: discovery metadata, authorization,
+		// consent, token, revocation, registration. Returns null for anything
+		// that is not an OAuth path, so the rest of the table is untouched.
+		const oauthResponse = await handleOAuthRoutes(request, env, ctx, url);
+		if (oauthResponse) return oauthResponse;
+
 		if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
 			return handleMcp(request, env, ctx, url);
 		}
@@ -4294,10 +4308,41 @@ function bearerFromRequest(request) {
  * 401 with a reason. MCP clients surface the body when a connection fails, and
  * "unauthorized" on its own has cost people an afternoon of guessing.
  */
-function unauthorizedMcp(message) {
+function unauthorizedMcp(message, { env = null, request = null, error = "invalid_token" } = {}) {
+	// RFC 9728 / MCP authorization: the challenge must point at the protected
+	// resource metadata so a client can discover where to authorize. Claude and
+	// other MCP clients rely on this header (and fall back to probing the
+	// well-known paths) — without it, OAuth is undiscoverable.
+	const challenge = env && request
+		? bearerChallenge(issuerFor(env, request), { error, description: message })
+		: 'Bearer realm="itsuki", error="invalid_token"';
 	return json({ error: "unauthorized mcp token", message }, 401, {
-		"www-authenticate": 'Bearer realm="itsuki", error="invalid_token"',
+		"www-authenticate": challenge,
 	});
+}
+
+/**
+ * Effective scopes for an OAuth-authorized MCP connection.
+ *
+ * The intersection of what the user consented to and what their CURRENT role
+ * allows. A role downgrade therefore narrows an existing grant on the very
+ * next request, without anyone revoking a token.
+ *
+ * Unlike the legacy connection-token path, delete requires the explicit
+ * `memory:delete` grant scope in addition to the live delete capability.
+ */
+function oauthEffectiveScopes(grantScopes, membership) {
+	const granted = new Set(grantScopes ?? []);
+	const scopes = [];
+	if (can("project.memory.read", membership) && (granted.has(MEMORY_READ_SCOPE) || granted.has(MEMORY_WRITE_SCOPE))) {
+		scopes.push(MEMORY_READ_SCOPE);
+	}
+	if (can("project.memory.write", membership) && granted.has(MEMORY_WRITE_SCOPE)) {
+		scopes.push(MEMORY_WRITE_SCOPE);
+	}
+	const allowDelete = can("project.memory.delete", membership) && granted.has(MEMORY_DELETE_SCOPE);
+	if (allowDelete) scopes.push(MEMORY_DELETE_SCOPE);
+	return { scopes, allowDelete };
 }
 
 async function serveProjectBoundMcp(request, env, ctx, url, auth) {
@@ -4351,6 +4396,87 @@ async function serveProjectBoundMcp(request, env, ctx, url, auth) {
 			managedPolicy: true,
 			memoryScope: {
 				authType: auth.type,
+				memoryUserId: managed.memoryOwnerUserId,
+				ownerUserId: managed.memoryOwnerUserId,
+				accountUserId: managed.accountUserId,
+				managedProjectId: managed.project.id,
+				managedProjectName: managed.project.name,
+				externalUserId: managed.accountUserId,
+			},
+		});
+	} catch (error) {
+		return managedProjectFailure(error);
+	}
+}
+
+/**
+ * Serve MCP for an OAuth-authorized caller.
+ *
+ * The grant alone is never sufficient: effective authorization is the
+ * intersection of the consented scopes, the token's validity, the account and
+ * project the grant is bound to, and the role that account holds RIGHT NOW.
+ * The same intersection is re-proved inside the committing D1 batch through
+ * the `oauth` credential fence, so a revocation between preflight and commit
+ * aborts the mutation rather than landing it.
+ */
+async function serveOAuthMcp(request, env, ctx, url, bearer) {
+	if (oauthMode(env) !== "on") {
+		return unauthorizedMcp("OAuth authorization is not enabled on this server.", { env, request });
+	}
+	const resolved = await resolveAccessToken(env, bearer);
+	if (!resolved) {
+		return unauthorizedMcp(
+			"That access token is expired, revoked, or not valid. Re-authorize your connection.",
+			{ env, request },
+		);
+	}
+	try {
+		// An OAuth grant carries its own project binding; it is authoritative and
+		// is never taken from the request.
+		const auth = {
+			type: "oauth",
+			userId: resolved.userId,
+			token: { id: resolved.tokenId, projectId: resolved.projectId, scopes: resolved.scopes },
+			oauth: resolved,
+		};
+		const managed = await resolveManagedProject(env, request, auth);
+		const membership = await resolveMembership(env, {
+			userId: resolved.userId,
+			project: managed.project,
+		});
+		const { scopes, allowDelete } = oauthEffectiveScopes(resolved.scopes, membership);
+		if (!scopes.includes(MEMORY_READ_SCOPE)) {
+			// Either the grant never carried read, or the role that carried it is
+			// gone. Both are "this connection may no longer do anything here".
+			return json({
+				error: "forbidden",
+				code: "insufficient_scope",
+				message: "This connection is no longer authorized for this project.",
+			}, 403, {
+				"www-authenticate": bearerChallenge(issuerFor(env, request), {
+					error: "insufficient_scope",
+					description: "The grant or the role behind it no longer permits access.",
+					scopes: [MEMORY_READ_SCOPE],
+				}),
+			});
+		}
+		const accountRules = await getMemoryRules(env, managed.memoryOwnerUserId, { failClosed: true });
+		const effectiveRules = narrowManagedMemoryRules(accountRules, null);
+		effectiveRules.projectCategories = await activeCategoryRules(env, {
+			projectId: managed.project.id,
+			memoryOwnerUserId: managed.memoryOwnerUserId,
+			legacy: accountRules.customCategories ?? [],
+		});
+		return serveMcp(request, env, ctx, url, managed.memoryOwnerUserId, {
+			scopes,
+			allowDelete,
+			rateContext: { auth, managedProject: managed.project, accountUserId: managed.accountUserId },
+			rules: effectiveRules,
+			credentialRules: null,
+			projectCategories: effectiveRules.projectCategories,
+			managedPolicy: true,
+			memoryScope: {
+				authType: "oauth",
 				memoryUserId: managed.memoryOwnerUserId,
 				ownerUserId: managed.memoryOwnerUserId,
 				accountUserId: managed.accountUserId,
@@ -4428,10 +4554,16 @@ async function handleMcp(request, env, ctx, url) {
 	// in their own protected configuration (Claude uses sensitive userConfig).
 	const bearer = bearerFromRequest(request);
 	if (!pathToken && bearer) {
+		// OAuth access tokens are distinguishable by prefix, so the legacy
+		// lookup is never disturbed by the new one and vice versa.
+		if (bearer.startsWith(ACCESS_TOKEN_PREFIX)) {
+			return serveOAuthMcp(request, env, ctx, url, bearer);
+		}
 		const auth = await resolveConnectionToken(env, bearer, { allowedTypes: ["api", "mcp"] });
 		if (!auth) {
 			return unauthorizedMcp(
 				"That key is revoked or not valid. Create one at https://itsuki.app under API keys, then configure it in your client (Claude plugin users: use /plugin).",
+				{ env, request },
 			);
 		}
 		return serveProjectBoundMcp(request, env, ctx, url, auth);
@@ -4442,7 +4574,8 @@ async function handleMcp(request, env, ctx, url) {
 		return unauthorizedMcp(
 			pathToken || bearer
 				? "That credential is not valid for MCP."
-				: "No credential. Send Authorization: Bearer <your API key> to /mcp, or connect an MCP link URL.",
+				: "No credential. Authorize with OAuth, send Authorization: Bearer <your API key> to /mcp, or connect an MCP link URL.",
+			{ env, request, error: pathToken || bearer ? "invalid_token" : "invalid_request" },
 		);
 	}
 

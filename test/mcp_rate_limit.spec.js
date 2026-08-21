@@ -221,8 +221,15 @@ describe("MCP tool rate limiting", () => {
 		const seen = [];
 		env.SAVE_LIMITER = refusingLimiter(seen);
 
+		// A read-only connection is not offered save_memory at all, so the call
+		// is refused before any handler runs. Either refusal shape is correct;
+		// what this test protects is that a refusal never spends limiter budget
+		// (otherwise an unauthorized caller could exhaust a legitimate one's).
 		const body = await mcpJson(await mcpCall(readOnly, 11, "save_memory", { content: "nope" }));
-		expect(body.result.structuredContent.code).toBe("insufficient_scope");
+		const refused = Boolean(body.error)
+			|| body.result?.isError === true
+			|| body.result?.structuredContent?.ok === false;
+		expect(refused, JSON.stringify(body).slice(0, 200)).toBe(true);
 		expect(seen).toHaveLength(0); // forbidden before the limiter runs
 	});
 });

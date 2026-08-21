@@ -153,6 +153,16 @@ describe("/mcp auth gate", () => {
 			source: "recall",
 		});
 
+		// A read-only connection is not OFFERED the write tools — the model
+		// should never propose a save that can only be refused.
+		const listed = await mcp(token, { jsonrpc: "2.0", id: 22, method: "tools/list", params: {} });
+		const names = ((await mcpJson(listed)).result?.tools ?? []).map((tool) => tool.name);
+		expect(names).toContain("recall_memory");
+		expect(names).not.toContain("save_memory");
+		expect(names).not.toContain("save_conversation");
+
+		// ...and calling one anyway is still refused. Advertisement is
+		// usability; this is the security boundary.
 		const save = await mcp(token, {
 			jsonrpc: "2.0",
 			id: 21,
@@ -161,18 +171,11 @@ describe("/mcp auth gate", () => {
 		});
 		expect(save.status).toBe(200);
 		const saveBody = await mcpJson(save);
-		expect(saveBody.result.structuredContent).toMatchObject({
-			ok: false,
-			command_mode: "direct_save",
-			source: "save_memory",
-			error: "forbidden",
-			code: "insufficient_scope",
-			required_scope: "memory:write",
-		});
-		expect(saveBody.result.content).toHaveLength(1);
-		expect(saveBody.result.content[0].text).toBe("Forbidden: token lacks required scope.");
-		expect(saveBody.result.content[0].text).not.toContain("structuredContent");
-		expect(saveBody.result.content[0].text).not.toContain("receipt_id");
+		const refused = Boolean(saveBody.error)
+			|| saveBody.result?.isError === true
+			|| saveBody.result?.structuredContent?.ok === false;
+		expect(refused, JSON.stringify(saveBody).slice(0, 300)).toBe(true);
+		expect(JSON.stringify(saveBody)).not.toMatch(/"receipt_id":\s*"/);
 	});
 });
 
@@ -202,6 +205,13 @@ describe("/mcp header door", () => {
 
 	it("carries the key's scopes through the header door", async () => {
 		const token = await apiToken("mcp-header-scope", { scopes: ["memory:read"] });
+		// The scopes reach the server: a read-only key is offered no write tool
+		// through the header door either.
+		const listed = await mcpBearer(token, { jsonrpc: "2.0", id: 33, method: "tools/list", params: {} });
+		const names = ((await mcpJson(listed)).result?.tools ?? []).map((tool) => tool.name);
+		expect(names).toContain("recall_memory");
+		expect(names).not.toContain("save_memory");
+
 		const res = await mcpBearer(token, {
 			jsonrpc: "2.0",
 			id: 31,
@@ -209,12 +219,11 @@ describe("/mcp header door", () => {
 			params: { name: "save_memory", arguments: { content: "I took up bouldering." } },
 		});
 		expect(res.status).toBe(200);
-		expect((await mcpJson(res)).result.structuredContent).toMatchObject({
-			ok: false,
-			error: "forbidden",
-			code: "insufficient_scope",
-			required_scope: "memory:write",
-		});
+		const body = await mcpJson(res);
+		const refused = Boolean(body.error)
+			|| body.result?.isError === true
+			|| body.result?.structuredContent?.ok === false;
+		expect(refused, JSON.stringify(body).slice(0, 300)).toBe(true);
 	});
 
 	it("rejects a key that is not real, and says why", async () => {
@@ -789,7 +798,7 @@ describe("MCP management tools", () => {
 		expect(still.count).toBe(1);
 	});
 
-	it("management reads honor read scope; deletes demand write scope", async () => {
+	it("a read-only connection is neither offered nor able to use the destructive tools", async () => {
 		const account = await signupAccount("mcp-inv-scope");
 		const created = await jsonRequest(
 			"/auth/tokens",
@@ -805,15 +814,26 @@ describe("MCP management tools", () => {
 		});
 		expect((await mcpJson(listRes)).result.structuredContent).toMatchObject({ ok: true, command_mode: "list" });
 
+		// Advertisement: a connection that cannot delete is never shown a
+		// delete tool, so the model cannot even propose one.
+		const toolsRes = await mcp(readToken, { jsonrpc: "2.0", id: 302, method: "tools/list", params: {} });
+		const names = ((await mcpJson(toolsRes)).result?.tools ?? []).map((tool) => tool.name);
+		expect(names).toContain("list_memories");
+		expect(names).not.toContain("delete_memory");
+		expect(names).not.toContain("delete_all_memories");
+
+		// Enforcement, which is the part that actually matters: calling the
+		// unadvertised tool anyway fails. Hiding is usability, not security.
 		const delRes = await mcp(readToken, {
-			jsonrpc: "2.0", id: 302, method: "tools/call",
+			jsonrpc: "2.0", id: 303, method: "tools/call",
 			params: { name: "delete_memory", arguments: { id: "node_whatever" } },
 		});
-		expect((await mcpJson(delRes)).result.structuredContent).toMatchObject({
-			ok: false,
-			error: "forbidden",
-			code: "insufficient_scope",
-			required_scope: "memory:write",
-		});
+		const delBody = await mcpJson(delRes);
+		const refused = Boolean(delBody.error)
+			|| delBody.result?.isError === true
+			|| delBody.result?.structuredContent?.ok === false;
+		expect(refused, `delete_memory must be refused for a read-only connection: ${JSON.stringify(delBody).slice(0, 300)}`).toBe(true);
+		// Whatever shape the refusal takes, nothing was deleted.
+		expect(JSON.stringify(delBody)).not.toMatch(/"deleted":\s*true/);
 	});
 });

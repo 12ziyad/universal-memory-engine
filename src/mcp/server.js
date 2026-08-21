@@ -22,7 +22,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
+import { MEMORY_DELETE_SCOPE, MEMORY_READ_SCOPE, MEMORY_WRITE_SCOPE, tokenAllowsScope } from "../lib/scopes.js";
 import { allowRate, managedActorRateKey } from "../lib/rate.js";
 import { checkAiBudget } from "../lib/ai_budget.js";
 import { normalizeProjectScope, ProjectScopeError } from "../lib/project_scope.js";
@@ -30,8 +30,9 @@ import { runDirectSaveCommand, runRecallCommand } from "../pipeline/commands.js"
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
 import { getMemory, listMemories, memoryCounts, parseInventoryListOptions } from "../lib/memory_inventory.js";
 import {
-	applyMemoryChange, listMemoryHistory, safeUpdatesEnabled, versionErrorResponse,
+	applyMemoryChange, credentialFenceStatement, listMemoryHistory, safeUpdatesEnabled, versionErrorResponse,
 } from "../lib/memory_versions.js";
+import { capabilityGuardStatement } from "../lib/organizations.js";
 import { bulkDeleteBySource, deleteObject, storeDeletionTombstone } from "../pipeline/cleanup.js";
 import { cleanClientSource } from "../pipeline/source.js";
 import { tokens } from "../lib/text.js";
@@ -215,6 +216,24 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		},
 	);
 
+	// Safe memory updates — registered only when the deployment has the doors
+	// enabled AND this connection's scopes permit the operation, so a
+	// read-only connection is never shown a tool it cannot call.
+	const updatesOn = safeUpdatesEnabled(env);
+	const connectionCanWrite = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_WRITE_SCOPE);
+	const connectionCanRead = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_READ_SCOPE);
+	// A connection may see the destructive tools when the door left deletion
+	// enabled AND its credential carries the scope its own kind requires.
+	const connectionCanDelete = authz?.allowDelete !== false
+		&& (!authz?.scopes || tokenAllowsScope(
+			authz.scopes,
+			authz?.rateContext?.auth?.type === "oauth" ? MEMORY_DELETE_SCOPE : MEMORY_WRITE_SCOPE,
+		));
+	// Write tools are advertised only to a connection that can actually use
+	// them. A read-only credential seeing save_memory means the model proposes
+	// saves that can only ever be refused; worse, it reads as a capability the
+	// connection does not have. Per-call ensureScope below stays the authority.
+	if (connectionCanWrite) {
 	server.tool(
 		"save_memory",
 		SAVE_MEMORY_DESC,
@@ -314,6 +333,8 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		},
 	);
 
+	}
+
 	server.tool(
 		"recall_memory",
 		RECALL_MEMORY_DESC,
@@ -358,6 +379,50 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		structuredContent: payload,
 		content: [{ type: "text", text }],
 	});
+
+	/**
+	 * The scope a destructive tool must prove.
+	 *
+	 * OAuth connections are held to the strict model: deleting requires the
+	 * explicitly consented `memory:delete`. Legacy connection tokens keep their
+	 * historical contract (write scope plus the live delete capability),
+	 * because retroactively demanding a scope they were never issued would
+	 * break every existing integration's delete tools. `allowDelete` — which
+	 * already carries the capability check for both — is what actually gates
+	 * the operation, and it is computed per request at the door.
+	 */
+	const deleteScopeFor = () => (authz?.rateContext?.auth?.type === "oauth"
+		? MEMORY_DELETE_SCOPE
+		: MEMORY_WRITE_SCOPE);
+
+	/**
+	 * Fences a destructive commit must satisfy, evaluated inside the deleting
+	 * D1 batch: the credential is still live and still carries the delete
+	 * scope, and the account still holds project.memory.delete. Returns [] for
+	 * the legacy operator door, which has no actor to prove — unchanged
+	 * behaviour for that path.
+	 */
+	const deleteCommitGuards = () => {
+		const auth = authz?.rateContext?.auth;
+		if (!auth?.userId) return [];
+		const projectId = authz?.memoryScope?.managedProjectId ?? null;
+		const orgId = authz?.rateContext?.managedProject?.effective_organization_id
+			?? authz?.rateContext?.managedProject?.organization_id ?? null;
+		const guards = [];
+		const credential = mcpCredential(deleteScopeFor());
+		const credentialGuard = credential ? credentialFenceStatement(env, { credential, actorUserId: auth.userId }) : null;
+		if (credentialGuard) guards.push(credentialGuard);
+		if (orgId && projectId) {
+			guards.push(capabilityGuardStatement(env, {
+				actorUserId: auth.userId,
+				orgId,
+				projectId,
+				capability: "project.memory.delete",
+				now: Date.now(),
+			}));
+		}
+		return guards.filter(Boolean);
+	};
 
 	// Managed projects grant deletion as its own capability
 	// (project.memory.delete). serveProjectBoundMcp resolves it per request;
@@ -547,12 +612,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		},
 	);
 
-	// Safe memory updates — registered only when the deployment has the doors
-	// enabled AND this connection's scopes permit the operation, so a
-	// read-only connection is never shown a tool it cannot call.
-	const updatesOn = safeUpdatesEnabled(env);
-	const connectionCanWrite = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_WRITE_SCOPE);
-	const connectionCanRead = !authz?.scopes || tokenAllowsScope(authz.scopes, MEMORY_READ_SCOPE);
+
 	const versionFailure = (mode, source, error) => {
 		const mapped = versionErrorResponse(error);
 		if (!mapped) throw error;
@@ -562,8 +622,38 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			...(mapped.body.current_revision ? { current_revision: mapped.body.current_revision } : {}),
 		});
 	};
-	const mcpActor = (capability = "project.memory.write") => ({
-		actorClass: authz?.rateContext?.auth?.type === "token" ? "token" : "user",
+	/**
+	 * The commit-time identity. `requiredScope` is what the FENCE proves, so a
+	 * destructive operation must name the delete scope: proving write would let
+	 * a token whose delete scope was revoked mid-request still erase.
+	 */
+	const mcpCredential = (requiredScope) => {
+		const auth = authz?.rateContext?.auth;
+		if (auth?.type === "oauth" && auth?.oauth?.tokenId) {
+			return {
+				kind: "oauth",
+				id: auth.oauth.tokenId,
+				requiredScope,
+				projectId: authz?.memoryScope?.managedProjectId ?? null,
+			};
+		}
+		if (auth?.type === "token" && auth?.token?.id) {
+			return {
+				kind: "token",
+				id: auth.token.id,
+				// Legacy connection tokens are held to their historical contract:
+				// write scope plus the live delete capability. Fencing them on a
+				// memory:delete scope they were never issued would break every
+				// existing integration's delete tools.
+				requiredScope: requiredScope === MEMORY_DELETE_SCOPE ? MEMORY_WRITE_SCOPE : requiredScope,
+				projectId: authz?.memoryScope?.managedProjectId ?? null,
+			};
+		}
+		if (auth?.session?.id) return { kind: "session", id: auth.session.id };
+		return null;
+	};
+	const mcpActor = (capability = "project.memory.write", requiredScope = MEMORY_WRITE_SCOPE) => ({
+		actorClass: ["token", "oauth"].includes(authz?.rateContext?.auth?.type) ? "token" : "user",
 		actorRef: authz?.rateContext?.auth?.token?.id ?? userId,
 		project: authz?.memoryScope?.managedProjectId ? { id: authz.memoryScope.managedProjectId } : null,
 		// The MCP door resolved permissions during preflight; this identity makes
@@ -578,16 +668,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 					?? authz?.rateContext?.managedProject?.organization_id ?? null,
 				// Same commit-time credential proof as REST: an MCP connection whose
 				// key is revoked mid-request must not land a write.
-				credential: authz?.rateContext?.auth?.type === "token" && authz?.rateContext?.auth?.token?.id
-					? {
-						kind: "token",
-						id: authz.rateContext.auth.token.id,
-						requiredScope: MEMORY_WRITE_SCOPE,
-						projectId: authz?.memoryScope?.managedProjectId ?? null,
-					}
-					: authz?.rateContext?.auth?.session?.id
-						? { kind: "session", id: authz.rateContext.auth.session.id }
-						: null,
+				credential: mcpCredential(requiredScope),
 			}
 			: null,
 	});
@@ -682,6 +763,12 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 		);
 	}
 
+	// Destructive tools are not ADVERTISED to a connection that cannot use them,
+	// so a read-only or write-only client never sees a delete tool it would only
+	// be refused. Advertisement is a usability measure; `ensureScope` +
+	// `deleteForbidden` inside each handler remain the authority, and the
+	// commit-time fence is what actually protects the data.
+	if (connectionCanDelete) {
 	server.tool(
 		"delete_memory",
 		"Permanently delete ONE stored memory by id. Only call when the user explicitly asks to forget or remove something specific — confirm which memory first via list_memories or get_memory.",
@@ -689,7 +776,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			id: z.string().trim().min(1).describe("The exact id to delete (node_, page_, slice_, or candidate id)."),
 		},
 		async ({ id }) => {
-			const forbidden = ensureScope(authz, "delete", "delete_memory", MEMORY_WRITE_SCOPE);
+			const forbidden = ensureScope(authz, "delete", "delete_memory", deleteScopeFor());
 			if (forbidden) return forbidden;
 			const notAllowed = deleteForbidden("delete", "delete_memory");
 			if (notAllowed) return notAllowed;
@@ -725,7 +812,16 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 					summary: `No live memory with id ${id}.`,
 				});
 			}
-			const result = await deleteObject(env, userId, { kind, id, suppress: true });
+			// Commit-time authorization: the credential and the delete capability are
+				// re-proved inside the deleting batch, so a token revoked (or a role
+				// downgraded) between this preflight and the commit aborts the
+				// deletion rather than erasing memory the caller may no longer touch.
+				const result = await deleteObject(env, userId, {
+					kind,
+					id,
+					suppress: true,
+					guards: deleteCommitGuards(),
+				});
 			await storeDeletionTombstone(env, userId, {
 				kind,
 				ids: [id],
@@ -746,7 +842,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			source: z.string().optional().describe("Optional: restrict to memories created by one source/tool instead of everything."),
 		},
 		async ({ confirm, source }) => {
-			const forbidden = ensureScope(authz, "delete_all", "delete_all_memories", MEMORY_WRITE_SCOPE);
+			const forbidden = ensureScope(authz, "delete_all", "delete_all_memories", deleteScopeFor());
 			if (forbidden) return forbidden;
 			const notAllowed = deleteForbidden("delete_all", "delete_all_memories");
 			if (notAllowed) return notAllowed;
@@ -777,6 +873,7 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 			return managementResult(payload, text);
 		},
 	);
+	}
 
 	server.tool(
 		"whoami",

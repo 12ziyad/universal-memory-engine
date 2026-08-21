@@ -913,7 +913,14 @@ describe("Stage 3 HTTP role enforcement", () => {
 		const deniedMcpContent = "Viewer MCP write must fail";
 		const deniedSave = await mcpCall(token, "save_memory", { content: deniedMcpContent });
 		expect(deniedSave.status).toBe(200);
-		expect(await deniedSave.text()).toContain("insufficient_scope");
+		// A downgraded role narrows the connection on the next request: the
+		// write tools stop being offered, and calling one anyway still fails.
+		// Either refusal shape is correct — what matters is the write below.
+		const deniedText = await deniedSave.text();
+		expect(
+			/insufficient_scope|"isError":true|not found/.test(deniedText),
+			deniedText.slice(0, 200),
+		).toBe(true);
 		const deniedWrites = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM source_episodes WHERE user_id = ? AND text IN (?, ?)",
 		).bind(memoryOwnerUserId, deniedHttpContent, deniedMcpContent).first();

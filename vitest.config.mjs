@@ -68,6 +68,16 @@ export default defineConfig(async () => {
 				"test/session_start_delivery.spec.js",
 			],
 			setupFiles: ["./test/apply-migrations.js"],
+			// Vitest's 5s default is a poor fit for this suite: every test drives a
+			// real Worker, Durable Object and D1 through many round-trips, the pool
+			// runs strictly serially (--no-file-parallelism), and per-file migration
+			// setup dominates. Under a full run the RBAC integration tests take
+			// 5-10s each and were failing the default while passing in isolation —
+			// a clock verdict, not a correctness one. This raises only the wall-clock
+			// allowance; no assertion is relaxed. A genuine hang still fails, just
+			// 30s later.
+			testTimeout: 30_000,
+			hookTimeout: 30_000,
 		},
 	};
 });

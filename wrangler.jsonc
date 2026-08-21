@@ -20,7 +20,10 @@
 		// itsuki.app. Everything else (fonts, /assets/*) is served straight from
 		// the edge as before. /v1/* and /mcp/* are never redirected — not every
 		// client follows redirects, so both hosts serve them natively.
-		"run_worker_first": ["/", "/docs", "/docs/*"]
+		// /.well-known/* and /oauth/* are Worker-owned: OAuth discovery and the
+		// consent flow must never be shadowed by a static file that happens to
+		// share the path.
+		"run_worker_first": ["/", "/docs", "/docs/*", "/.well-known/*", "/oauth/*"]
 	},
 	"observability": {
 		"enabled": true
@@ -164,7 +167,13 @@
 		// conversation identity — one live page per (account, project,
 		// conversation), REST /v1/save mode:"conversation" creates/advances
 		// pages, graph_only suppresses them. Rollback is the flag flip.
-		"CONVERSATION_PAGES": "on"
+		"CONVERSATION_PAGES": "on",
+		// MCP OAuth 2.1 staged rollout. "track": the schema and code are
+		// deployed but every /oauth/* and OAuth metadata path answers 404 and
+		// no grant can be issued — an authorization server that cannot finish
+		// the flow must not be discoverable. "on": the full flow. Rollback is
+		// the flag flip; the previous Worker version is the hard rollback.
+		"MCP_OAUTH": "on"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

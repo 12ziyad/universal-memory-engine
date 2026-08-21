@@ -1024,6 +1024,19 @@ async function advanceDestructive(env, run, project, checkpoint, inventory) {
 				  WHERE project_id = ?`,
 			).bind(now, run.project_id),
 			env.DB.prepare("DELETE FROM connection_tokens WHERE project_id = ?").bind(run.project_id),
+			// OAuth authorizations for this project: revoked then removed, in the
+			// same batch and for the same reason as connection tokens — the
+			// revoke is the observable state for anything reading mid-batch.
+			env.DB.prepare(
+				"UPDATE oauth_grants SET revoked_at = COALESCE(revoked_at, ?), revoked_reason = COALESCE(revoked_reason, 'project_deleted') WHERE project_id = ?",
+			).bind(now, run.project_id),
+			env.DB.prepare(
+				"UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE grant_id IN (SELECT id FROM oauth_grants WHERE project_id = ?)",
+			).bind(now, run.project_id),
+			env.DB.prepare("DELETE FROM oauth_tokens WHERE grant_id IN (SELECT id FROM oauth_grants WHERE project_id = ?)").bind(run.project_id),
+			env.DB.prepare("DELETE FROM oauth_authorization_codes WHERE grant_id IN (SELECT id FROM oauth_grants WHERE project_id = ?)").bind(run.project_id),
+			env.DB.prepare("DELETE FROM oauth_consent_requests WHERE project_id = ?").bind(run.project_id),
+			env.DB.prepare("DELETE FROM oauth_grants WHERE project_id = ?").bind(run.project_id),
 			env.DB.prepare("DELETE FROM project_members WHERE project_id = ?").bind(run.project_id),
 			env.DB.prepare(
 				`UPDATE organization_invitations SET project_id = NULL, project_role = NULL

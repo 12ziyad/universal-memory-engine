@@ -24,6 +24,7 @@ import {
 } from "./episodes.js";
 import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
 import { rebuildConversationPageFromSources } from "./mcp_engine.js";
+import { grantRevocationStatements } from "../lib/oauth.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "./source.js";
 
 function parseJsonArray(value) {
@@ -454,11 +455,20 @@ export async function storeDeletionTombstone(env, userId, {
 	return receipt;
 }
 
-export async function deleteObject(env, userId, { kind, id, suppress = true }) {
+/**
+ * `guards` are fence statements (capability, credential, lifecycle) that must
+ * hold at COMMIT time. They ride in the same D1 batch as the deletion, so a
+ * role downgrade or a revoked credential between preflight and commit aborts
+ * the whole delete instead of letting it land. Callers that have no
+ * authenticated actor pass none, exactly as before.
+ */
+export async function deleteObject(env, userId, { kind, id, suppress = true, guards = [] }) {
 	const now = Date.now();
+	const fences = (guards ?? []).filter(Boolean);
 	if (kind === "page" || kind === "memory_page") {
 		if (suppress) await suppressPage(env, userId, id, "delete_selected");
 		await env.DB.batch([
+			...fences,
 			advanceManualPageWriteEpoch(env, userId, now),
 			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
 			env.DB.prepare("DELETE FROM manual_page_versions WHERE user_id = ? AND page_id = ?").bind(userId, id),
@@ -485,6 +495,7 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		).bind(userId, id, userId, id).all();
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
 		await env.DB.batch([
+			...fences,
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
 			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
 				.bind(userId, id, id),
@@ -535,6 +546,7 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		if (!row) return { deleted: false, kind: "slice", id, reason: "not_found" };
 		const nodeId = row.node_id ?? null;
 		await env.DB.batch([
+			...fences,
 			// The same fact-identity cleanup the bulk path does for slices, so the
 			// canonical key is freed and re-saving that fact later counts as new.
 			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND object_id = ?").bind(userId, id),
@@ -550,9 +562,10 @@ export async function deleteObject(env, userId, { kind, id, suppress = true }) {
 		return { deleted: true, kind: "slice", id, node_id: nodeId };
 	}
 	if (kind === "candidate") {
-		await env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
-			.bind(now, suppress ? now : null, id, userId)
-			.run();
+		const statement = env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
+			.bind(now, suppress ? now : null, id, userId);
+		if (fences.length) await env.DB.batch([...fences, statement]);
+		else await statement.run();
 		return { deleted: true, kind: "candidate", id };
 	}
 	return { deleted: false, reason: "unsupported kind" };
@@ -649,6 +662,10 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 			 SET status = 'revoked', revoked_at = COALESCE(revoked_at, ?)
 			 WHERE user_id = ? AND (status != 'revoked' OR revoked_at IS NULL)`,
 		).bind(quiescedAt, userId),
+		// Every OAuth authorization dies with the account, in the same quiesce
+		// batch as sessions and connection tokens. Erasure that left a live MCP
+		// grant behind would be erasure in name only.
+		...grantRevocationStatements(env, { userId, now: quiescedAt, reason: "account_erased" }),
 		env.DB.prepare(
 			`UPDATE managed_projects
 			 SET status = 'archived', archived_at = COALESCE(archived_at, ?), updated_at = ?
@@ -849,6 +866,14 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		env.DB.prepare("DELETE FROM playground_threads WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM connection_tokens WHERE user_id = ?").bind(userId),
+		// OAuth credentials are torn down with the rest of the account's
+		// credentials. Children first: a token or code outliving its grant
+		// would be an unreachable but real credential record.
+		env.DB.prepare("DELETE FROM oauth_tokens WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM oauth_authorization_codes WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM oauth_consent_requests WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM oauth_grants WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM oauth_clients WHERE created_by_user_id = ?").bind(userId),
 		env.DB.prepare(
 			"DELETE FROM login_events WHERE user_id = ? OR email_normalized = ?",
 		).bind(userId, user.email_normalized),

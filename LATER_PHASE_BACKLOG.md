@@ -155,11 +155,43 @@ Narrow residual follow-ups:
 - Keep `chatdev-itsuki` unpublished until its host/API contract is current and independently verified.
 - Re-audit upstream support, attribution, lifecycle capture, retries, isolation, packaging, and clean installation before deciding to publish or retire it.
 
-### 8. MCP OAuth / PKCE and scoped consent
+### 8. MCP OAuth / PKCE and scoped consent — ✅ COMPLETE (2026-08-21, PRODUCTION GO)
 
-- Add standards-based user authorization, PKCE where applicable, consent, refresh/revocation, account switching, and per-connection scopes.
-- Advertise only tools permitted by the active connection; preserve existing bearer/path-token support only as explicitly documented compatibility paths.
-- Test cross-tenant access, revoked sessions, destructive-tool consent, auditability, and secret leakage.
+Itsuki's remote MCP server is an OAuth 2.1 protected resource with its own
+authorization server: RFC 9728/8414 discovery, authorization code + mandatory
+PKCE S256, RFC 7591 dynamic client registration, RFC 7009 revocation, RFC 9207
+issuer identification, refresh rotation with reuse detection, and a consent
+screen that names the account and project and re-verifies the signed-in
+identity immediately before committing the grant. Separate from — and not
+disturbing — the Google OAuth used to sign in to the dashboard.
+
+New `memory:delete` scope: write no longer implies delete for OAuth
+credentials, and a connection is advertised only the tools it can use.
+Existing connection tokens keep their historical contract as a documented
+compatibility path, so no live integration broke or gained reach.
+
+State lives in D1 (migration 0051), not KV, so revocation is provable inside
+the same batch that writes memory: `credentialGuardStatement` gained kind
+`oauth`, and grants are revoked wherever connection tokens are (member
+removal, project delete, account erasure).
+
+Six defects found and fixed in-campaign, including an OAuth project-escape via
+request header, deletion having no commit-time credential fence at all, and a
+pre-existing preflight/fence scope disagreement. The production canary caught a
+seventh — read-only connections still being offered write tools.
+
+Full suite 2081 + 616 green. Stage A `track` (`f108d85a`) canary 3/3 proved
+OAuth was undiscoverable; Stage B `on` (shipped `40724a34`) canary 41/41 on
+live doors. Time Travel bookmark
+`000016c9-00000000-000050ce-7808f1835fa50dd0f532169dc845e503`. Zero live
+grants/tokens residue verified by direct D1 scan. Evidence:
+MCP_OAUTH_REPORT.md.
+
+Open follow-ups (documented, not blockers): no third-party MCP client has been
+driven end to end by a human, so every such client is **unverified**; consent
+binds to the account's default project (no in-consent chooser yet); no
+dashboard UI to review/revoke connections; `delete_all_memories` is fenced at
+its start rather than through its whole convergent run.
 
 ### 9. Memory-quality and benchmark campaign
 

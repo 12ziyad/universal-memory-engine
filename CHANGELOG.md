@@ -83,7 +83,37 @@ route remains as the documented fallback.
 
 ---
 
-## Hosted service — 2026-08-21
+## Hosted service — 2026-08-21 (MCP OAuth)
+
+### Added
+
+- **Sign in to connect, instead of pasting a key.** Itsuki's MCP server now
+  supports OAuth 2.1 with PKCE. A compatible MCP client discovers the
+  authorization server, sends you to Itsuki to sign in, and shows a consent
+  screen naming the client, your account, and the project it will reach —
+  with permanent deletion called out separately. Approve, and the client
+  connects; deny, and nothing is created.
+- **Permissions you choose, not one all-or-nothing key.** Connections can be
+  read-only, read-and-write, or read-write-and-delete. **Deleting now requires
+  its own permission**: a connection that can write can no longer erase.
+  A connection is only shown the tools it is allowed to use.
+- **Revoke and re-authorize at any time.** Refresh credentials rotate on every
+  use, a replayed one revokes the whole authorization, and revoking takes
+  effect immediately — including mid-request, so an operation already in
+  flight cannot land after you revoke it. Losing project access, a project
+  being deleted, or erasing your account all revoke connections too.
+
+### Unchanged
+
+- **Existing API keys and MCP links keep working exactly as before**, with
+  their current permissions. They are a documented compatibility path;
+  nothing about them was narrowed or broadened.
+- Dashboard sign-in (including Continue with Google) is a separate system and
+  is untouched.
+
+---
+
+## Hosted service — 2026-08-21 (Conversation Pages)
 
 ### Added
 

@@ -24,6 +24,7 @@
 import { CATEGORIES, IMPORTANCE, SLICE_KINDS, getConfig } from "../config.js";
 import { refreshManualSearchProfiles } from "../pipeline/manual_search_profiles.js";
 import { capabilityGuardStatement } from "./organizations.js";
+import { scopeLiteralsSatisfying } from "./scopes.js";
 import { embed } from "./embeddings.js";
 import { isHeadVectorId, parseVectorId, upsertNodeVector, vectorIdFor } from "./vectorize.js";
 
@@ -723,6 +724,18 @@ export async function applyFencedUpdate(statement, { label = "semantic write" } 
  */
 function credentialGuardStatement(env, { credential, actorUserId, now = Date.now() }) {
 	if (!credential?.kind) return null;
+	// The scope literals that satisfy this operation, derived from the SAME
+	// function the request-time check uses. Comparing stored strings in SQL
+	// cannot express the layered rules (write implies read, 'memory:*'), and
+	// hard-coding "= ? OR = '*'" here meant a 'memory:*' credential passed
+	// preflight and then tripped this fence.
+	const scopeLiterals = scopeLiteralsSatisfying(credential.requiredScope ?? null);
+	const scopeClause = scopeLiterals.length
+		? `AND EXISTS (
+			   SELECT 1 FROM json_each(COALESCE(%TABLE%.scopes_json, '[]'))
+			    WHERE json_each.value IN (${scopeLiterals.map(() => "?").join(", ")})
+			 )`
+		: "";
 	if (credential.kind === "token") {
 		if (!credential.id) return null;
 		return env.DB.prepare(
@@ -737,16 +750,44 @@ function credentialGuardStatement(env, { credential, actorUserId, now = Date.now
 			      -- status are its lifecycle. Sessions below do carry expires_at.
 			      -- The credential must still be bound to the project being written.
 			      AND (? IS NULL OR t.project_id IS NULL OR t.project_id = ?)
-			      -- ...and must still carry the scope this operation requires.
-			      AND (? IS NULL OR EXISTS (
-			        SELECT 1 FROM json_each(COALESCE(t.scopes_json, '[]'))
-			         WHERE json_each.value = ? OR json_each.value = '*'
-			      ))
+			      ${scopeClause.replace(/%TABLE%/g, "t")}
 			 )`,
 		).bind(
 			credential.id, actorUserId,
 			credential.projectId ?? null, credential.projectId ?? null,
-			credential.requiredScope ?? null, credential.requiredScope ?? null,
+			...scopeLiterals,
+		);
+	}
+	if (credential.kind === "oauth") {
+		// An OAuth access token is only as live as its grant. Both rows are
+		// re-proved here: token unrevoked and unexpired, grant unrevoked, the
+		// grant still carrying the required scope, still bound to this project,
+		// and the account still active and not erasure-tombstoned.
+		if (!credential.id) return null;
+		return env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+			   SELECT 1 FROM oauth_tokens tok
+			    JOIN oauth_grants g ON g.id = tok.grant_id
+			    JOIN users u ON u.id = tok.user_id
+			    WHERE tok.id = ?
+			      AND tok.user_id = ?
+			      AND tok.kind = 'access'
+			      AND tok.revoked_at IS NULL
+			      AND tok.expires_at > ?
+			      AND g.revoked_at IS NULL
+			      AND g.user_id = tok.user_id
+			      AND (? IS NULL OR g.project_id IS ?)
+			      AND u.status = 'active'
+			      AND NOT EXISTS (
+			        SELECT 1 FROM account_erasure_tombstones t WHERE t.user_id = u.id
+			      )
+			      ${scopeClause.replace(/%TABLE%/g, "g")}
+			 )`,
+		).bind(
+			credential.id, actorUserId, now,
+			credential.projectId ?? null, credential.projectId ?? null,
+			...scopeLiterals,
 		);
 	}
 	if (credential.kind === "session") {
@@ -765,10 +806,35 @@ function credentialGuardStatement(env, { credential, actorUserId, now = Date.now
 	return null;
 }
 
-/** Re-evaluate the credential as a read, to explain a fence abort truthfully. */
+/**
+ * The credential fence as a reusable statement, for mutation paths outside
+ * this module (the MCP deletion door) that must prove the same thing inside
+ * their own committing batch.
+ */
+export function credentialFenceStatement(env, { credential, actorUserId, now = Date.now() }) {
+	return credentialGuardStatement(env, { credential, actorUserId, now });
+}
+
+/**
+ * Re-evaluate the credential as a read, to explain a fence abort truthfully.
+ *
+ * This must mirror `credentialGuardStatement` kind for kind. A kind it does not
+ * know would fall through to some other table's lookup, find nothing, and
+ * report a perfectly live credential as invalid — telling a client to
+ * re-authorize when the real cause was a concurrent project-state change. Scope
+ * acceptance therefore comes from `scopeLiteralsSatisfying`, the same function
+ * the SQL fence builds its IN list from.
+ */
 async function credentialStillValid(env, { credential, actorUserId }) {
 	const statement = credentialGuardStatement(env, { credential, actorUserId });
 	if (!statement) return true;
+	const literals = scopeLiteralsSatisfying(credential.requiredScope ?? null);
+	const carriesScope = (scopesJson) => {
+		if (!literals.length) return true;
+		let scopes = [];
+		try { scopes = JSON.parse(scopesJson ?? "[]"); } catch { scopes = []; }
+		return scopes.some((scope) => literals.includes(scope));
+	};
 	try {
 		if (credential.kind === "token") {
 			const row = await env.DB.prepare(
@@ -778,12 +844,25 @@ async function credentialStillValid(env, { credential, actorUserId }) {
 			if (!row) return false;
 			if (row.status !== "active" || row.revoked_at != null) return false;
 			if (credential.projectId && row.project_id != null && row.project_id !== credential.projectId) return false;
-			if (credential.requiredScope) {
-				let scopes = [];
-				try { scopes = JSON.parse(row.scopes_json ?? "[]"); } catch { scopes = []; }
-				if (!scopes.includes(credential.requiredScope) && !scopes.includes("*")) return false;
-			}
-			return true;
+			return carriesScope(row.scopes_json);
+		}
+		if (credential.kind === "oauth") {
+			const row = await env.DB.prepare(
+				`SELECT tok.revoked_at AS token_revoked_at, tok.expires_at,
+					g.revoked_at AS grant_revoked_at, g.project_id, g.scopes_json,
+					u.status AS user_status,
+					(SELECT 1 FROM account_erasure_tombstones t WHERE t.user_id = tok.user_id) AS erased
+				   FROM oauth_tokens tok
+				   JOIN oauth_grants g ON g.id = tok.grant_id
+				   JOIN users u ON u.id = tok.user_id
+				  WHERE tok.id = ? AND tok.user_id = ? AND tok.kind = 'access' LIMIT 1`,
+			).bind(credential.id, actorUserId).first();
+			if (!row) return false;
+			if (row.token_revoked_at != null || row.grant_revoked_at != null) return false;
+			if (Number(row.expires_at) <= Date.now()) return false;
+			if (row.user_status !== "active" || row.erased) return false;
+			if (credential.projectId && row.project_id !== credential.projectId) return false;
+			return carriesScope(row.scopes_json);
 		}
 		const row = await env.DB.prepare(
 			"SELECT revoked_at, expires_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1",

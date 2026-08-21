@@ -44,6 +44,15 @@ function base64Url(bytes) {
 	return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/**
+ * One high-entropy URL-safe secret, generated the same way every other
+ * credential in this file is. Exported so the OAuth lane mints codes and
+ * tokens with the identical primitive rather than a second implementation.
+ */
+export function randomSecret(byteLength = 32) {
+	return base64Url(randomBytes(byteLength));
+}
+
 function fromBase64Url(value) {
 	const padded = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "=");
 	const raw = atob(padded);

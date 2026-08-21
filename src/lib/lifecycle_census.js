@@ -152,6 +152,41 @@ export const CENSUS = {
 		archive: "retain",
 		why: "the shell row (status='archived', lifecycle_state='deleted', description nulled) permanently reserves id + memory_owner identity against reuse",
 	},
+	// MCP OAuth (0051). Grants and their tokens are project-scoped credentials:
+	// a purge preserves usable credentials exactly as it does for
+	// connection_tokens, and project delete revokes and removes them.
+	oauth_grants: {
+		kind: "project",
+		purge: "retain",
+		projectDelete: "delete",
+		archive: "retain",
+		why: "purge preserves usable project authorizations; delete revokes and removes them",
+	},
+	oauth_tokens: {
+		kind: "project",
+		purge: "retain",
+		projectDelete: "delete",
+		archive: "retain",
+		why: "hash-only credentials belonging to a grant; removed with the grant",
+	},
+	oauth_authorization_codes: {
+		kind: "project",
+		purge: "retain",
+		projectDelete: "delete",
+		archive: "retain",
+		why: "single-use, minutes-long; removed with the project's grants",
+	},
+	oauth_consent_requests: {
+		kind: "project",
+		purge: "retain",
+		projectDelete: "delete",
+		archive: "retain",
+		why: "short-lived pre-consent state; holds no memory content",
+	},
+	oauth_clients: {
+		kind: "account",
+		why: "registered client metadata, not project or memory data; expires on its own DCR TTL",
+	},
 	project_lifecycle_runs: { kind: "project", purge: "retain", projectDelete: "retain", archive: "retain", why: "content-free lifecycle evidence" },
 	project_lifecycle_confirmations: { kind: "project", purge: "retain", projectDelete: "retain", archive: "retain", why: "token hashes only; rows expire" },
 	project_tombstones: { kind: "project", purge: "retain", projectDelete: "retain", archive: "retain", why: "the permanent content-free deletion record" },

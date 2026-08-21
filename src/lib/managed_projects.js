@@ -707,11 +707,19 @@ async function resolvedManagedProject(env, result) {
 export async function resolveManagedProject(env, request, auth) {
 	if (!auth || auth.type === "legacy") return null;
 	const requestedId = projectIdFromHeader(request);
-	const explicitTokenProjectId = auth.type === "token" ? auth.token?.projectId : null;
+	// An OAuth grant carries its own project binding, exactly like a
+	// project-bound connection token: the consent screen named that project and
+	// the user approved THAT. A caller-supplied project header must never move
+	// an OAuth connection to a project the user never authorized.
+	const credentialBoundProjectId = ["token", "oauth"].includes(auth.type)
+		? auth.token?.projectId ?? null
+		: null;
+	const explicitTokenProjectId = credentialBoundProjectId;
 	// A key minted before migration 0038 has NULL project_id. It is permanently
 	// bound to the deterministic default project; NULL must never mean
-	// "caller may choose any project".
-	if (auth.type === "token" && !explicitTokenProjectId) {
+	// "caller may choose any project". An OAuth grant on the default project
+	// stores NULL for the same reason and is bound the same way.
+	if (["token", "oauth"].includes(auth.type) && !explicitTokenProjectId) {
 		const defaultProject = await ensureDefaultManagedProject(env, auth.userId);
 		if (requestedId && requestedId !== defaultProject.id) {
 			throw new ManagedProjectError(
