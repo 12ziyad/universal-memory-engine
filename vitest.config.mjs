@@ -60,6 +60,12 @@ export default defineConfig(async () => {
 				"test/migrations_append_only.spec.js",
 				// Parses migrations/*.sql from disk; unit config only.
 				"test/schema_census.spec.js",
+				// Walks src/ from disk (provider architecture census); unit config only.
+				"test/ai_architecture_gate.spec.js",
+				// Walks the tree from disk (credential-shape ban); unit config only.
+				"test/ai_credential_scan.spec.js",
+				// Injectable-fetch adapter unit tests; unit config only.
+				"test/google_adapter.spec.js",
 				"test/project_identity.spec.js",
 				"test/sdk_js.spec.js",
 				"test/temporal_holdout.spec.js",

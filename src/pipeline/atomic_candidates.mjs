@@ -9,6 +9,7 @@
  */
 
 import { runAi } from "../lib/ai_meter.js";
+import { currentPin, pinnedRoute } from "../ai/pin.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import {
@@ -221,11 +222,17 @@ async function claimRun(env, {
 }) {
 	const id = await captureRunId(userId, sourcePacketId, chunkKey);
 	const now = Date.now();
+	// The claim records the provider/model HALF-PIN this run will execute with.
+	// Historically `model` was recorded but the invocation used the constant —
+	// so a deploy changing the constant silently re-interpreted an interrupted
+	// chunk. proposeAtomic now takes the ROW's model, closing that gap; the
+	// pin (when routing is on) supplies both halves at claim time.
+	const pinned = pinnedRoute(currentPin(), "extract_atomic");
 	const insertStatement = env.DB.prepare(
 		`INSERT INTO semantic_atom_capture_runs
 		 (id, user_id, project_id, project_name, source_packet_id, extraction_run_id,
-		  chunk_key, status, model, schema_version, accepted_at, attempts, created_at, updated_at)
-		 SELECT ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, 1, ?, ?
+		  chunk_key, status, model, schema_version, provider, accepted_at, attempts, created_at, updated_at)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 1, ?, ?
 		 WHERE NOT EXISTS (
 			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?
 		 )
@@ -238,8 +245,9 @@ async function claimRun(env, {
 		sourcePacketId,
 		extractionRunId,
 		chunkKey,
-		ATOMIC_CAPTURE_MODEL,
+		pinned?.model ?? ATOMIC_CAPTURE_MODEL,
 		ATOMIC_CAPTURE_SCHEMA,
+		pinned?.provider ?? null,
 		acceptedAt,
 		now,
 		now,
@@ -405,7 +413,7 @@ function parsedModelValue(value) {
 	return parseAtomicCaptureText(typeof value === "string" ? value : responseText(value));
 }
 
-async function proposeAtomic(env, packet, rules, override, context) {
+async function proposeAtomic(env, packet, rules, override, context, model = ATOMIC_CAPTURE_MODEL) {
 	let response;
 	let truncated = false;
 	try {
@@ -413,7 +421,7 @@ async function proposeAtomic(env, packet, rules, override, context) {
 			response = typeof override === "function" ? await override(context) : override;
 		} else {
 			if (!env.AI) return { ok: false, outcome: "no_ai_binding", parsed: null, truncated: false };
-			response = await runAi(env, ATOMIC_CAPTURE_MODEL, {
+			response = await runAi(env, model, {
 				messages: buildAtomicCaptureMessages(packet, { rules }),
 				temperature: 0,
 				max_tokens: ATOMIC_CAPTURE_MAX_TOKENS,
@@ -437,7 +445,7 @@ async function proposeAtomic(env, packet, rules, override, context) {
 		console.warn(JSON.stringify({
 			event: "atomic_capture_failed",
 			outcome,
-			model: ATOMIC_CAPTURE_MODEL,
+			model,
 			error_name: String(error?.name ?? "Error").slice(0, 80),
 			error_code: error?.code == null ? null : String(error.code).slice(0, 80),
 		}));
@@ -758,6 +766,8 @@ async function captureChunk(env, options, plannedChunk) {
 	}
 
 	const packet = buildPacket(plannedChunk.messages, options.recent ?? []);
+	// Replay the ROW's recorded model — on a reclaim this is the model the
+	// interrupted attempt was claimed with, never the constant-of-the-day.
 	const proposed = await proposeAtomic(
 		env,
 		packet,
@@ -769,6 +779,7 @@ async function captureChunk(env, options, plannedChunk) {
 			chunkKey: plannedChunk.key,
 			chunkIndex: plannedChunk.index,
 		},
+		claim.row.model ?? ATOMIC_CAPTURE_MODEL,
 	);
 	if (!proposed.ok) {
 		return failRun(env, options.userId, claim.row.id, proposed.outcome,

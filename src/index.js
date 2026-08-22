@@ -11,7 +11,7 @@ import { createMcpHandler } from "agents/mcp";
 
 import { CATEGORIES, getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
-import { runAi } from "./lib/ai_meter.js";
+import { runAi, withFlushedAiMeter } from "./lib/ai_meter.js";
 import { previewMemoryRules } from "./lib/rules_preview.js";
 import { getUserReceipts } from "./lib/db.js";
 import {
@@ -1088,6 +1088,12 @@ const routes = {
 		service: "memory-engine",
 		version: "0.1.0",
 		memory_v3: memoryV3Status(env),
+		// Modes only, mirroring memoryV3Status's no-private-data rule.
+		ai_routing: {
+			mode: String(env?.AI_ROUTING ?? "off"),
+			kill: String(env?.AI_ROUTING_KILL ?? "") === "1",
+			google_credentials: env?.GCP_SERVICE_ACCOUNT ? "present" : "absent",
+		},
 	}),
 	"GET /v1/ingest/limits": () => json({
 		ok: true,
@@ -2607,6 +2613,65 @@ const routes = {
 		return json({ ok: true });
 	},
 
+	/**
+	 * Provider-routing control plane. Session-only + admin-role, exactly like
+	 * the other admin doors: bearer tokens and x-api-key cannot reach routing
+	 * policy. Every change is CAS-guarded and audited; the emergency action can
+	 * only ever reduce non-default provider usage.
+	 */
+	"GET /v1/admin/ai-routing": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const { routingOverview } = await import("./ai/admin.js");
+		return json({ ok: true, ...(await routingOverview(env)) });
+	},
+
+	"POST /v1/admin/ai-routing": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const parsed = await readSmallJsonObject(request, "/v1/admin/ai-routing");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const { applyPolicyChange } = await import("./ai/admin.js");
+		const result = await applyPolicyChange(env, {
+			lane: String(body.lane ?? ""),
+			patch: body.patch && typeof body.patch === "object" ? body.patch : {},
+			actorUserId: auth.user.id,
+			expectedVersion: body.expected_version ?? null,
+			note: body.note == null ? null : String(body.note).slice(0, 200),
+		});
+		if (result.error) return json(result, result.error === "version_conflict" ? 409 : 400);
+		return json({ ok: true, version: result.version });
+	},
+
+	"POST /v1/admin/ai-routing/emergency-disable": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const { emergencyDisable } = await import("./ai/admin.js");
+		return json(await emergencyDisable(env, { actorUserId: auth.user.id }));
+	},
+
+	/** One tiny metered live call proving Google auth + API enablement. Admin
+	 * fingers only; never reachable from user traffic. */
+	"POST /v1/admin/ai-routing/health-check": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		if (!env.GCP_SERVICE_ACCOUNT || !env.GCP_PROJECT_ID) {
+			return json({ ok: true, google_vertex: { ok: false, error_class: "no_credentials" } });
+		}
+		const { resolveProvider } = await import("./ai/registry.js");
+		try {
+			const provider = await resolveProvider("google-vertex");
+			return json({ ok: true, google_vertex: await provider.health(env) });
+		} catch (error) {
+			return json({ ok: true, google_vertex: { ok: false, error_class: "provider_unloadable" } });
+		}
+	},
+
 	"GET /v1/admin/users": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
@@ -3320,7 +3385,8 @@ const routes = {
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
 		const rules = await getMemoryRules(env, context.memoryOwnerUserId);
-		return json(await playgroundPreviewExtract(env, body.message, { rules }));
+		return json(await withFlushedAiMeter(env, "playground_preview", { userId: context.memoryOwnerUserId }, () =>
+			playgroundPreviewExtract(env, body.message, { rules })));
 	},
 
 	"POST /v1/playground/thread": async (request, env) => {
@@ -4026,6 +4092,19 @@ export default {
 			await sweepPendingProjections(env, { limit: 25 });
 		})().catch((error) => {
 			console.warn("memory projection sweep failed:", error?.message ?? error);
+		}));
+		// Provider-adapter duties: shadow outbox (reconcile missing sampled jobs,
+		// drain due ones, cap retention) and expired spend-reservation reaping.
+		// All bounded, all observational — none of these can touch a user path.
+		ctx.waitUntil((async () => {
+			const { drainShadowJobs, purgeExpiredShadowJobs, reconcileShadowJobs } = await import("./ai/shadow.js");
+			const { reapExpiredReservations } = await import("./ai/provider_budget.js");
+			await reconcileShadowJobs(env, { limit: 25 });
+			await drainShadowJobs(env, { limit: 5 });
+			await purgeExpiredShadowJobs(env, { limit: 500 });
+			await reapExpiredReservations(env, { limit: 25 });
+		})().catch((error) => {
+			console.warn("ai provider sweep failed:", error?.message ?? error);
 		}));
 	},
 

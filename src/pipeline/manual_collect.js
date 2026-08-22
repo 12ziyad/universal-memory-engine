@@ -10,6 +10,7 @@ import {
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
 import { normalizeLabel } from "../lib/text.js";
 import { digestConversation } from "./digest.js";
+import { withFlushedAiMeter } from "../lib/ai_meter.js";
 import { emptyReceipt, formatReceipt } from "./receipt.js";
 import { filterDigestByTopic, parseCollectIntent, saveMemoryPage, suppressedBy } from "./pages.js";
 import { normalizeSourcePacket, sourceMeta, storeSourcePacket } from "./source.js";
@@ -227,7 +228,8 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 	const received = normalized.messages.length;
 	const intent = parseCollectIntent(normalized.messages, opts);
 
-	const { digest, keptLines } = await digestConversation(env, config, normalized.messages, opts);
+	const { digest, keptLines } = await withFlushedAiMeter(env, "digest", { userId, scopeId: source.source_packet_id }, () =>
+		digestConversation(env, config, normalized.messages, opts));
 	const filteredDigest = filterDigestByTopic(digest, intent);
 	const filteredLines = filteredDigest ? filteredDigest.split("\n").filter((line) => line.trim()).length : 0;
 

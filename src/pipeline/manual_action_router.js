@@ -8,7 +8,7 @@
  */
 
 import { extractJson, responseText } from "./llm.js";
-import { runAi } from "../lib/ai_meter.js";
+import { runAi, withFlushedAiMeter } from "../lib/ai_meter.js";
 import {
 	normalizeManualConversationMessages,
 	normalizeManualConversationScope,
@@ -441,7 +441,7 @@ async function callRouterModel(options, payload) {
 		? Math.max(64, Math.min(configuredMaxTokens, 384))
 		: 256;
 	try {
-		const response = await runAi(
+		const response = await withFlushedAiMeter(env, "manual_router", { userId: options.userId ?? null }, () => runAi(
 			env,
 			model,
 			{
@@ -453,7 +453,8 @@ async function callRouterModel(options, payload) {
 				max_tokens: maxTokens,
 			},
 			config?.llm?.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
-		);
+			{ task: "manual_router", capability: "generate_structured" },
+		));
 		return normalizeLlmDecision(responseText(response));
 	} catch {
 		return null;

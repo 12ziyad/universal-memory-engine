@@ -173,7 +173,17 @@
 		// no grant can be issued — an authorization server that cannot finish
 		// the flow must not be discoverable. "on": the full flow. Rollback is
 		// the flag flip; the previous Worker version is the hard rollback.
-		"MCP_OAUTH": "on"
+		"MCP_OAUTH": "on",
+		// AI provider routing master gate. "off" (default): the policy engine
+		// is never consulted — zero D1 reads, dispatch hardwired to Workers AI,
+		// provably byte-identical to the pre-layer behavior (golden-forwarding
+		// spec). "track": policy read + recorded, execution still Workers AI.
+		// "on": per-lane policy (ai_routing_policies) takes effect. Emergency
+		// levers, fastest first: admin emergency-disable (D1, ≤60s, no deploy)
+		// → AI_ROUTING_KILL="1" (deploy) → previous Worker version. The Google
+		// adapter additionally requires the GCP_SERVICE_ACCOUNT secret and
+		// GCP_PROJECT_ID var to exist at all.
+		"AI_ROUTING": "off"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

@@ -12694,6 +12694,9 @@ function renderAdminBody() {
 			<div class="kv">Visit counting: <b>first-party, aggregate only</b></div>
 		</div>
 	</div>
+	<div class="box" style="margin-top:14px" id="admin-ai-routing"><h3>AI providers</h3>
+		<div class="help">Loading provider routing…</div>
+	</div>
 	<div class="box" style="margin-top:14px"><h3>Recent failures</h3>
 		${(stats.recent_failures || []).map((row) => `<div class="action-box" style="margin-bottom:8px">
 			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
@@ -12717,6 +12720,46 @@ function renderAdminBody() {
 			<div class="help" style="margin-top:4px;font-family:var(--font-mono);font-size:12px">${esc(String(row.message || "").slice(0, 300))}</div>
 		</div>`).join("") || `<div class="help">No reported errors — clean.</div>`}
 	</div>`;
+	renderAiRoutingCard();
+}
+
+/**
+ * The provider-routing card (admin · health). Read-only summary plus the one
+ * button that matters: emergency disable, which can only ever REDUCE non-
+ * default provider usage and propagates within a minute, no deploy.
+ */
+async function renderAiRoutingCard() {
+	const box = document.getElementById("admin-ai-routing");
+	if (!box) return;
+	try {
+		const r = await fetch("/v1/admin/ai-routing", { credentials: "same-origin" });
+		if (!r.ok) throw new Error(`HTTP ${r.status}`);
+		const d = await r.json();
+		const active = (d.lanes || []).filter((l) => l.policy && l.policy.mode !== "cloudflare_only");
+		const shadow = d.shadow_24h || {};
+		const shadowTotal = Object.values(shadow).reduce((a, b) => a + Number(b || 0), 0);
+		const health = (d.provider_health || []).map((h) => `<div class="kv">${esc(h.provider)}: <b>${esc(h.state)}</b>${h.reason ? ` <span class="help">· ${esc(h.reason)}</span>` : ""}</div>`).join("");
+		box.innerHTML = `<h3>AI providers ${d.master_gate?.ai_routing === "on" ? "· routing ON" : `· ${esc(d.master_gate?.ai_routing ?? "off")}`}</h3>
+			<div class="kv">Master gate: <b>${esc(d.master_gate?.ai_routing ?? "off")}</b>${d.master_gate?.kill ? " · <b>KILL SET</b>" : ""}${d.global_disabled ? " · <b>globally disabled</b>" : ""}</div>
+			<div class="kv">Google credentials: <b>${esc(d.credentials?.google_vertex ?? "absent")}</b>${d.credentials?.gcp_project ? ` <span class="help">· ${esc(d.credentials.gcp_project)}</span>` : ""}</div>
+			${health || `<div class="kv">Provider health: <b>no non-default calls yet</b></div>`}
+			<div class="kv">Non-default lanes: ${active.length
+				? active.map((l) => `<b>${esc(l.lane)}</b> → ${esc(l.policy.mode)}${l.policy.shadow_provider ? ` (${esc(l.policy.shadow_provider)}${l.policy.shadow_sample_pct != null ? ` @ ${l.policy.shadow_sample_pct}%` : ""})` : ""}`).join(" · ")
+				: "<b>none — everything on Workers AI</b>"}</div>
+			<div class="kv">Shadow jobs (24h): <b>${shadowTotal}</b>${shadowTotal ? ` <span class="help">· ${Object.entries(shadow).map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</span>` : ""}</div>
+			<div class="kv">Today (Google): ${(d.today || []).filter((t) => t.provider === "google-vertex").map((t) => `${esc(t.unit_class)} <b>${t.used_units}</b> used / ${t.reserved_units} reserved`).join(" · ") || "<b>0</b>"}</div>
+			${(d.audit_tail || []).length ? `<div class="help" style="margin-top:6px">Last change: ${esc(d.audit_tail[0].capability)} by ${esc(d.audit_tail[0].actor_user_id)} · ${ago(d.audit_tail[0].changed_at)}</div>` : ""}
+			<div style="margin-top:10px"><button class="btn danger" onclick="aiEmergencyDisable()">Emergency disable non-default providers</button></div>`;
+	} catch (error) {
+		box.innerHTML = `<h3>AI providers</h3><div class="help">Routing status unavailable (${esc(String(error?.message ?? error))}).</div>`;
+	}
+}
+
+async function aiEmergencyDisable() {
+	if (!confirm("Force every AI lane back to Workers AI and disable Google? This propagates within a minute and can only be re-enabled from the routing API.")) return;
+	const r = await fetch("/v1/admin/ai-routing/emergency-disable", { method: "POST", credentials: "same-origin" });
+	alert(r.ok ? "Done — cloudflare-only within one cache TTL (≤60s)." : `Failed: HTTP ${r.status}`);
+	renderAiRoutingCard();
 }
 
 const POLICY_CONTENT = {

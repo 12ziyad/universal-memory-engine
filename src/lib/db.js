@@ -250,15 +250,22 @@ export async function claimExtractionRun(env, userId, data = {}) {
 		idempotencyKey: data.idempotency_key ?? data.idempotencyKey ?? null,
 		scopeJson: data.scope_json ?? data.scopeJson ?? null,
 	};
+	// Provider pin (migration 0053): resolved ONCE by the caller at claim time,
+	// stored here, replayed on every re-claim. NULL = legacy behavior.
+	const pin = {
+		provider: data.provider ?? null,
+		model: data.model ?? null,
+		pinJson: data.pin_json ?? data.pinJson ?? null,
+	};
 	const insertStatement = env.DB.prepare(
 		`INSERT INTO extraction_runs
 			(id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 			 created_pages_json, created_nodes_json, created_slices_json, created_events_json,
 			 created_edges_json, created_candidates_json, updated_objects_json, reinforced_objects_json,
 			 skipped_objects_json, error, created_at, updated_at, source_packet_id, idempotency_key,
-			 scope_json, job_id)
+			 scope_json, job_id, provider, model, pin_json)
 		 VALUES (?, ?, ?, ?, ?, NULL, 'running', '[]', '[]', '[]', '[]', '[]', '[]', '[]', '[]',
-			 '[]', NULL, ?, ?, ?, ?, ?, NULL)
+			 '[]', NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 		 ON CONFLICT(id) DO NOTHING
 		 RETURNING id`,
 	)
@@ -273,6 +280,9 @@ export async function claimExtractionRun(env, userId, data = {}) {
 			owner.sourcePacketId,
 			owner.idempotencyKey,
 			owner.scopeJson,
+			pin.provider,
+			pin.model,
+			pin.pinJson,
 		);
 	const lifecycle = durableLifecycleScope(data, data);
 	let inserted;
@@ -300,6 +310,17 @@ export async function claimExtractionRun(env, userId, data = {}) {
 		|| (row.scope_json ?? null) !== owner.scopeJson
 	) {
 		throw new Error("extraction-run id is already bound to different work");
+	}
+	// Row-wins pin replay: the STORED pin is authoritative for execution — a
+	// re-claim that raced a policy flip resolves a fresh pin, loses to the row,
+	// and must execute the recorded one. The throw is reserved for a caller
+	// EXPLICITLY forcing a pin that contradicts a stored, different, non-NULL
+	// pin (a code bug, never an operational event): routine callers pass
+	// pinResolvedFresh so a routine policy change can never dead-letter a run.
+	const rowPin = row.pin_json ?? null;
+	const callerPin = pin.pinJson ?? null;
+	if (rowPin !== null && callerPin !== null && rowPin !== callerPin && !data.pinResolvedFresh) {
+		throw new Error("extraction-run id is already bound to a different provider pin");
 	}
 	return { claimed: Boolean(inserted?.id), id, row };
 }

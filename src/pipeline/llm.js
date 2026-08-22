@@ -325,7 +325,7 @@ export function normalize(parsed, { strict = false, dedupe = false } = {}) {
 	};
 }
 
-function responseRefused(res) {
+export function responseRefused(res) {
 	if (!res || typeof res !== "object") return false;
 	if (res.refusal) return true;
 	for (const choice of res.choices ?? []) {

@@ -85,6 +85,7 @@ async function llmDigest(env, config, userLines, assistantLines, rules = null) {
 				max_tokens: config.llm.digestMaxTokens,
 			},
 			config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
+			{ task: "digest", capability: "generate_text" },
 		);
 		return responseText(res).trim();
 	} catch (err) {

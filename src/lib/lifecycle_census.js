@@ -69,6 +69,9 @@ export const PURGE_SPACE_TABLES = [
 	"extraction_runs",
 	"memory_jobs",
 	"ai_calls",
+	// Shadow-extraction outbox (0054): content-minimized, but user-scoped and
+	// derived from user activity — it purges with the space.
+	"ai_shadow_jobs",
 	"error_reports",
 	// Safe memory updates (0047): revision history is customer content and the
 	// idempotency ledger stores bounded result payloads — both purge with the
@@ -208,6 +211,15 @@ export const CENSUS = {
 	visit_uniques: { kind: "global" },
 	ai_daily_totals: { kind: "global", why: "account-day aggregate counters; content-free billing evidence" },
 	fence_guard: { kind: "mechanism" },
+
+	// ——— provider routing / spend control (0053) — all content-free ————————
+	ai_routing_policies: { kind: "global", why: "per-capability provider policy; operational config, never user content" },
+	ai_routing_policy_audit: { kind: "global", why: "who changed provider policy when; actor ids only, no memory content" },
+	ai_provider_overrides: { kind: "global", why: "emergency provider kill rows; operational" },
+	ai_provider_health: { kind: "global", why: "circuit-breaker convergence; provider-level state only" },
+	ai_provider_daily_totals: { kind: "global", why: "provider-day unit counters; content-free billing evidence" },
+	ai_provider_monthly_costs: { kind: "global", why: "provider-month cost_micros counters; content-free billing evidence" },
+	ai_provider_reservations: { kind: "global", why: "reserve/settle spend ledger; ids and unit counts only, reaped on expiry" },
 };
 
 /**

@@ -21,7 +21,7 @@ import { responseText } from "./llm.js";
 import { runObserveMessagesCommand, runRecallCommand } from "./commands.js";
 import { getMemoryRules, rulesRejection } from "./rules.js";
 import { normalizeThreadSettings, threadRefusal, threadRulesFrom } from "./playground_settings.js";
-import { runAi } from "../lib/ai_meter.js";
+import { runAi, tagAiMeter, withFlushedAiMeter } from "../lib/ai_meter.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -345,7 +345,7 @@ export async function playgroundPreviewExtract(env, text, { rules = null } = {})
 			],
 			temperature: 0.2,
 			max_tokens: 300,
-		}, undefined, { task: "playground_preview" });
+		}, undefined, { task: "playground_preview", capability: "generate_structured" });
 		const parsed = parsePreviewLines(responseText(res));
 		return {
 			ok: true,
@@ -368,7 +368,7 @@ async function chatReply(env, messages) {
 			messages,
 			temperature: Number(env.CHAT_TEMPERATURE ?? 0.4),
 			max_tokens: Number(env.CHAT_MAX_TOKENS ?? 512),
-		}, undefined, { task: "playground_chat" });
+		}, undefined, { task: "playground_chat", capability: "chat" });
 		const text = String(responseText(res) ?? "").trim();
 		return text || REPLY_FALLBACK;
 	} catch (error) {
@@ -383,6 +383,16 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 		accountUserId: input.accountUserId ?? input.account_user_id ?? null,
 		managedProjectId: input.managedProjectId ?? input.managed_project_id ?? null,
 	};
+	// The turn's own model calls (the chat reply) are accounted under the
+	// published `playground_chat` quota scope — the scope GET /v1/limits has
+	// always listed but which never actually recorded rows before migration
+	// 0052 landed. One scope_id per turn (the user message id, tagged once it
+	// exists); flush is best-effort on every exit and an empty meter is free.
+	return withFlushedAiMeter(env, "playground_chat", { userId, lifecycle }, () =>
+		playgroundTurnInner(env, ctx, userId, input, lifecycle));
+}
+
+async function playgroundTurnInner(env, ctx, userId, input, lifecycle) {
 	const memoryScope = lifecycle.managedProjectId ? {
 		memoryUserId: userId,
 		ownerUserId: userId,
@@ -413,6 +423,9 @@ export async function playgroundTurn(env, ctx, userId, input = {}) {
 
 	const history = await getThreadMessages(env, userId, thread.id);
 	const userMessage = await storeMessage(env, userId, thread.id, "user", message, null, lifecycle);
+	// One turn = one countable write: COUNT(DISTINCT scope_id) ignores NULLs,
+	// so the quota only sees this turn once the meter carries the message id.
+	tagAiMeter(userMessage.id);
 	// Direct-test seam only (functions cannot cross the JSON HTTP boundary): it
 	// deterministically models erasure after the user message but before recall,
 	// chat and the late assistant write finish.

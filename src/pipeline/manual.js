@@ -11,6 +11,7 @@
 import { getConfig } from "../config.js";
 import { ingestMessages, stableMsgId } from "./ingest.js";
 import { digestConversation } from "./digest.js";
+import { withFlushedAiMeter } from "../lib/ai_meter.js";
 import { buildReceipt, emptyReceipt, formatReceipt, replaySummary } from "./receipt.js";
 import { writeApproved } from "./write.js";
 import { storeReceipt, getUserNodes } from "../lib/db.js";
@@ -263,7 +264,8 @@ async function saveConversationGraphLegacy(env, ctx, userId, messages, opts = {}
 	const received = (messages ?? []).length;
 	const prefix = `Received ${received} message(s). `;
 
-	const { digest, keptLines } = await digestConversation(env, config, messages ?? [], opts);
+	const { digest, keptLines } = await withFlushedAiMeter(env, "digest", { userId }, () =>
+		digestConversation(env, config, messages ?? [], opts));
 
 	if (!digest || !digest.trim()) {
 		// Nothing durable survived the digest — store a clear "0" receipt anyway.

@@ -53,6 +53,7 @@ import { rulesAllowText } from "./rules.js";
 import { normalizeLabel } from "../lib/text.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import { flushAiMeter, tagAiMeter, withAiMeter } from "../lib/ai_meter.js";
+import { parsePin, resolveWritePin, serializePin, setCurrentPin, withAiPin } from "../ai/pin.js";
 import {
 	atomicCaptureSummaryForExtractionRun,
 	captureAtomicCandidates,
@@ -597,7 +598,10 @@ function runListsFromPlan(plan) {
  * inside it is swallowed rather than allowed to fail a save.
  */
 export async function runExtraction(env, userId, chunk, recent, overrides = {}, execution = {}) {
-	return withAiMeter("save", async (meter) => {
+	// The pin scope opens with the meter and is populated at claim time: once
+	// the run row exists, its STORED pin governs every model call this save
+	// makes. With AI_ROUTING off the box stays null and dispatch is hardwired.
+	return withAiPin(null, () => withAiMeter("save", async (meter) => {
 		let result;
 		try {
 			result = await runExtractionInner(env, userId, chunk, recent, overrides, meter, execution);
@@ -652,7 +656,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}, 
 			console.warn("ai meter rollup failed:", error?.message ?? error);
 		}
 		return result;
-	});
+	}));
 }
 
 async function runExtractionInner(env, userId, chunk, recent, overrides = {}, meter = null, execution = {}) {
@@ -695,7 +699,24 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	};
 	let extractionRunId;
 	if (execution.runId) {
-		const claim = await claimExtractionRun(env, userId, { id: execution.runId, ...runOwner });
+		// Provider pin: resolved ONCE, here, at the moment inference is about to
+		// be spent — inside the same D1 write that is already the inference
+		// fence. The claim inserts the fresh pin; the ROW's pin is authoritative
+		// for execution (row-wins replay), so a retry that raced a policy flip
+		// cannot commit a second interpretation. With AI_ROUTING off the pin is
+		// NULL and everything below behaves exactly as before the layer existed.
+		const freshPin = await resolveWritePin(env, {
+			accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+			runKey: execution.runId,
+		});
+		const claim = await claimExtractionRun(env, userId, {
+			id: execution.runId,
+			...runOwner,
+			provider: freshPin?.routes?.extract?.provider ?? null,
+			model: freshPin?.routes?.extract?.model ?? null,
+			pin_json: serializePin(freshPin),
+			pinResolvedFresh: true,
+		});
 		extractionRunId = claim.id;
 		if (!claim.claimed) {
 			return extractionRunResult(env, userId, claim.row, chunk, {
@@ -703,6 +724,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 				extraction_run_id: extractionRunId,
 			});
 		}
+		setCurrentPin(parsePin(claim.row?.pin_json) ?? freshPin ?? null);
 	} else {
 		extractionRunId = await createExtractionRun(env, userId, runOwner);
 	}

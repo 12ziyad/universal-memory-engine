@@ -24,6 +24,7 @@ import { newId } from "./ids.js";
 import { utcDayKey } from "./ai_budget.js";
 import { managedMutationGuardStatement } from "./managed_projects.js";
 import { guardModelInput } from "./model_input.js";
+import { dispatchAi } from "../ai/dispatch.js";
 
 const meterStore = new AsyncLocalStorage();
 
@@ -61,6 +62,37 @@ export function tagAiMeter(scopeId) {
 }
 
 /**
+ * One-shot metered scope for lanes that are not part of a save or recall:
+ * digest, title pass, manual router, playground. Wraps `fn` in a fresh meter
+ * and flushes it on the way out, so a single-call lane gets accounted without
+ * threading meter lifecycle through its caller. Flush is best-effort and never
+ * throws; an empty meter flushes to nothing.
+ */
+export async function withFlushedAiMeter(env, scope, { userId = null, scopeId = null, lifecycle = {} } = {}, fn) {
+	return withAiMeter(scope, async (meter) => {
+		if (scopeId) meter.scopeId = scopeId;
+		try {
+			return await fn(meter);
+		} finally {
+			await flushAiMeter(env, userId, meter, lifecycle);
+		}
+	});
+}
+
+/**
+ * Coarse, content-free failure class for the accounting row. Provider adapters
+ * may pre-classify by setting `error.aiErrorClass`; anything else falls back to
+ * a shape sniff that never touches the message beyond known marker words.
+ */
+function errorClassOf(error) {
+	if (typeof error?.aiErrorClass === "string" && error.aiErrorClass) return error.aiErrorClass;
+	if (error?.code === "model_input_boundary") return "input_boundary";
+	const marker = `${error?.name ?? ""} ${error?.code ?? ""} ${error?.message ?? ""}`.toLowerCase();
+	if (marker.includes("abort") || marker.includes("timeout") || marker.includes("timed out")) return "timeout";
+	return "error";
+}
+
+/**
  * Pull token counts out of a Workers AI response.
  *
  * Different model families report differently — OpenAI-shaped models use
@@ -93,14 +125,21 @@ export function readUsage(res) {
 /**
  * THE call site. Enforces the shared chat-context boundary, then records cost.
  *
- * `options` is forwarded only when defined, so a model that rejects a third
- * argument behaves exactly as it did before this wrapper existed.
+ * Since the provider layer landed, the model invocation itself lives behind
+ * dispatchAi (src/ai/dispatch.js): with AI_ROUTING off — the default — that is
+ * a zero-I/O pass-through to the Workers AI provider whose invoke is byte-for-
+ * byte the call that used to live here, options-arity branch included. The
+ * golden-forwarding spec holds that equivalence to the pre-refactor fixtures.
  */
 export async function runAi(env, model, inputs, options, meta = {}) {
 	const startedAt = Date.now();
+	// Dispatch stamps routing provenance (provider/capability) onto meta for
+	// the record below; copy so a caller's own object is never mutated.
+	meta = { ...meta };
 	let res;
 	let ok = 1;
 	let inputBoundary = null;
+	let lastError = null;
 	try {
 		const guarded = guardModelInput(inputs, { model });
 		inputs = guarded.inputs;
@@ -108,12 +147,11 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 		if (inputBoundary?.bounded) {
 			logInputBoundary("ai_input_bounded", model, meta.task, inputBoundary);
 		}
-		res = options === undefined
-			? await env.AI.run(model, inputs)
-			: await env.AI.run(model, inputs, options);
+		res = await dispatchAi(env, { model, inputs, options, meta });
 		return res;
 	} catch (error) {
 		ok = 0;
+		lastError = error;
 		if (!inputBoundary && error?.code === "model_input_boundary") {
 			inputBoundary = error.metadata ?? null;
 			logInputBoundary("ai_input_blocked", model, meta.task, inputBoundary);
@@ -136,6 +174,15 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 					ok,
 					raw_usage: usage.raw,
 					input_boundary: inputBoundary?.bounded || inputBoundary?.error ? inputBoundary : null,
+					// Multi-provider accounting (migration 0052). All optional and
+					// NULL for legacy callers: NULL provider reads as workers-ai,
+					// NULL call_role reads as primary.
+					provider: meta.provider ?? null,
+					capability: meta.capability ?? null,
+					model_version: meta.modelVersion ?? null,
+					error_class: ok ? null : errorClassOf(lastError),
+					retry_count: Number.isFinite(meta.retryCount) ? meta.retryCount : null,
+					call_role: meta.callRole ?? null,
 				});
 			}
 		} catch (meterError) {
@@ -175,8 +222,9 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 		const statements = calls.map((call) => env.DB.prepare(
 			`INSERT INTO ai_calls (id, user_id, scope, scope_id, model, task, input_tokens,
 				output_tokens, total_tokens, neurons, duration_ms, ok, raw_usage_json, created_at,
-				account_user_id, managed_project_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				account_user_id, managed_project_id, provider, capability, model_version,
+				error_class, retry_count, call_role)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		).bind(
 			newId("aicall"),
 			userId ?? null,
@@ -199,6 +247,12 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 			// their own budget. Legacy operator-door rows stay null.
 			accountUserId,
 			managedProjectId,
+			call.provider ?? null,
+			call.capability ?? null,
+			call.model_version ?? null,
+			call.error_class ?? null,
+			call.retry_count ?? null,
+			call.call_role ?? null,
 		));
 		// One upsert per flush keeps the circuit breaker's read a single-row
 		// primary-key lookup. Only binding-reported neurons land here; the

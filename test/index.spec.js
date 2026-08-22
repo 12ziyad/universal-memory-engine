@@ -37,6 +37,15 @@ describe("GET /health", () => {
 				episodeFallback: { mode: "off", allowlistCount: 0 },
 				adaptiveContext: { mode: "off", allowlistCount: 0 },
 			},
+			// Provider routing master gate: modes only, same no-private-data rule.
+			// The test env sets no AI_ROUTING/GCP vars, so this is also the
+			// standing proof that /health never claims Google exists when it
+			// does not.
+			ai_routing: {
+				mode: "off",
+				kill: false,
+				google_credentials: "absent",
+			},
 		});
 	});
 });

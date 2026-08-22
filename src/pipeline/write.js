@@ -17,6 +17,8 @@ import {
 	retentionProjectForMemoryOwner,
 } from "../lib/retention.js";
 import { upsertNodeVector } from "../lib/vectorize.js";
+import { currentPin } from "../ai/pin.js";
+import { shadowEnqueueStatement, shadowJobId } from "../ai/shadow.js";
 
 export async function writeApproved(env, config, userId, plan = {}, options = {}) {
 	const stmts = [];
@@ -57,6 +59,23 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	// erasure landing in the read→write window refuses the commit atomically.
 	// It was originally nested under extractionRunId, which made the fence
 	// unreachable for every non-extraction writer.
+	// Shadow-extraction enqueue rides THE SAME atomic batch as the commit: a
+	// settled shadow-sampled run and its outbox job are one transaction, so
+	// there is no window where the primary is durable but the sample is lost.
+	// (Non-batch settlement paths are covered by reconcileShadowJobs.) The
+	// sampling decision was made once, at claim time, into the pin.
+	if (options.extractionRunId) {
+		const pinShadow = currentPin()?.shadow;
+		if (pinShadow?.sampled && typeof pinShadow.provider === "string") {
+			stmts.push(shadowEnqueueStatement(env, {
+				id: await shadowJobId(options.extractionRunId),
+				userId,
+				accountUserId: options.accountUserId ?? null,
+				primaryRunId: options.extractionRunId,
+				shadow: pinShadow,
+			}));
+		}
+	}
 	const acceptedAt = Number(options.acceptedAt);
 	if (Number.isFinite(acceptedAt) && acceptedAt > 0) {
 		stmts.push(env.DB.prepare(

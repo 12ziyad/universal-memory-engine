@@ -69,7 +69,7 @@ import { classifyMessage } from "./trigger.js";
 import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
 import { settleStagedText } from "./staged_text.js";
-import { runAi } from "../lib/ai_meter.js";
+import { runAi, withFlushedAiMeter } from "../lib/ai_meter.js";
 import { applyFencedUpdate, userAuthoredSummaryFence } from "../lib/memory_versions.js";
 import { responseText, extractJson } from "./llm.js";
 
@@ -266,7 +266,7 @@ function enrichedMarkdown(title, { factLines, edgeLines, derivedLines, savedAt }
  * saved. Anything invalid falls back to the deterministic entity+date form —
  * fragment concatenation has no code path here.
  */
-export async function reconcileTitle(env, config, { entityLabels = [], factLines = [], fallbackTs = Date.now(), titleResponse }) {
+export async function reconcileTitle(env, config, { entityLabels = [], factLines = [], fallbackTs = Date.now(), titleResponse, userId = null }) {
 	const fallbackEntity = entityLabels[0] ?? topEntityFromLines(factLines);
 	const fallback = `${(fallbackEntity ?? "Conversation").slice(0, 60)} — ${dateLabel(fallbackTs)}`;
 	let parsed = null;
@@ -275,7 +275,7 @@ export async function reconcileTitle(env, config, { entityLabels = [], factLines
 	} else {
 		if (!env.AI || !factLines.length) return fallback;
 		try {
-			const res = await runAi(
+			const res = await withFlushedAiMeter(env, "title", { userId }, () => runAi(
 				env,
 				config.llm.summaryModel,
 				{
@@ -293,8 +293,8 @@ export async function reconcileTitle(env, config, { entityLabels = [], factLines
 					max_tokens: config.llm.summaryMaxTokens,
 				},
 				config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
-				{ task: "mcp_title" },
-			);
+				{ task: "mcp_title", capability: "generate_structured" },
+			));
 			parsed = extractJson(responseText(res));
 		} catch (error) {
 			console.warn("mcp title pass failed:", error?.message ?? error);
@@ -1265,6 +1265,7 @@ async function finalizeConversationCreate(env, config, userId, job, { project, f
 		factLines: [...factLines, ...edgeLines],
 		fallbackTs: job.lastTs ?? Date.now(),
 		titleResponse: job.testOverrides?.titleResponse,
+		userId,
 	});
 	const markdown = enrichedMarkdown(title, {
 		factLines,
@@ -1949,6 +1950,7 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			factLines: [...factLines, ...edgeLines],
 			fallbackTs: job.lastTs ?? Date.now(),
 			titleResponse: job.testOverrides?.titleResponse,
+			userId,
 		});
 		// Rules re-checked at finalize: they may have changed since staging, and
 		// an excluded topic must never survive onto the final page.
