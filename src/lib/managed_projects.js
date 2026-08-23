@@ -581,6 +581,8 @@ export function managedMutationGuardStatement(env, {
 	accountUserId = null,
 	projectId = null,
 	access = "write",
+	allowErasedAccounting = false,
+	memoryUserId = null,
 } = {}) {
 	const now = Date.now();
 	if (!new Set(["read", "write"]).has(access)) {
@@ -596,9 +598,17 @@ export function managedMutationGuardStatement(env, {
 	if (!accountUserId && !projectId) {
 		throw new ManagedProjectError("missing_write_guard", "A managed write guard requires an account or project.", 500);
 	}
+	if (allowErasedAccounting && memoryUserId !== null
+		&& (typeof memoryUserId !== "string" || !memoryUserId || memoryUserId.length > 256)) {
+		throw new ManagedProjectError("invalid_memory_space", "A valid memory space is required for erased accounting.", 400);
+	}
 	return env.DB.prepare(
 		`INSERT INTO fence_guard (violation)
-		 SELECT 1 WHERE
+		 SELECT 1 WHERE NOT (
+		   ? = 1 AND EXISTS (
+		     SELECT 1 FROM account_erasure_tombstones WHERE user_id = ? OR user_id = ?
+		   )
+		 ) AND (
 		   (? IS NOT NULL AND (
 		     EXISTS (SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?)
 		     OR NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND status = 'active')
@@ -679,8 +689,10 @@ export function managedMutationGuardStatement(env, {
 		            )
 		          )
 		        END
-		   ))`,
+		   ))
+		 )`,
 	).bind(
+		allowErasedAccounting ? 1 : 0, accountUserId, memoryUserId,
 		accountUserId, accountUserId, accountUserId,
 		projectId, projectId,
 		accountUserId,

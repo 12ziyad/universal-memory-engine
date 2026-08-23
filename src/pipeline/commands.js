@@ -723,6 +723,7 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 	// does this cost", and it runs a different (much smaller) set of calls.
 	let metered;
 	try {
+		const recallSourceMeta = sourceMeta(sourcePacket);
 		metered = await withAiMeter("recall", async (meter) => {
 			tagAiMeter(sourcePacket?.id ?? null);
 			const value = await recall(env, getConfig(env), userId, query, {
@@ -739,11 +740,16 @@ export async function runRecallCommand(env, userId, query, input = {}) {
 			return {
 				result: value,
 				aiTotals: await flushAiMeter(env, userId, meter, {
-					accountUserId: sourceMeta(sourcePacket).account_user_id,
-					managedProjectId: sourceMeta(sourcePacket).managed_project_id,
+					accountUserId: recallSourceMeta.account_user_id,
+					managedProjectId: recallSourceMeta.managed_project_id,
 					managedAccess: "read",
 				}),
 			};
+		}, {
+			memoryUserId: userId,
+			accountUserId: recallSourceMeta.account_user_id,
+			managedProjectId: recallSourceMeta.managed_project_id,
+			acceptedAt: Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? startedAt),
 		});
 	} catch (error) {
 		if (error instanceof RecallScopeError || error?.name === "RecallScopeError") {

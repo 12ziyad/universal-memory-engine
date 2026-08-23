@@ -12,13 +12,23 @@ export default defineConfig(async () => {
 	return {
 		plugins: [
 			cloudflareTest({
-				wrangler: { configPath: "./wrangler.test.jsonc" },
+				// Keep this config in test/: Wrangler discovers .dev.vars beside the
+				// config file, so a root config would silently import developer/API/GCP
+				// credentials before Miniflare starts. The pool config is deterministic.
+				wrangler: { configPath: "./test/wrangler.pool.jsonc" },
 				miniflare: {
 					// Disable the external-service paths (Workers AI / Vectorize) so the
 					// suite is deterministic and offline. The LLM is stubbed per-test via
 					// the request `_test.llmResponse` hook; trigger/gates/write/checkpoint
 					// all run as the real code under test.
 					bindings: {
+						// Test-only overrides win even if the host process carries
+						// same-named production secrets. GCP bindings stay absent.
+						API_KEY: "itsuki_test_only_not_a_secret",
+						GOOGLE_CLIENT_ID: "test-client-id.apps.googleusercontent.com",
+						GOOGLE_CLIENT_SECRET: "test-client-secret-not-a-secret",
+						AI_ROUTING: "off",
+						EVAL_MODE: "off",
 						TEST_MIGRATIONS: migrations,
 						USE_VECTORS: "false",
 						ENABLE_PASS2: "true",
@@ -60,6 +70,7 @@ export default defineConfig(async () => {
 				"test/migrations_append_only.spec.js",
 				// Parses migrations/*.sql from disk; unit config only.
 				"test/schema_census.spec.js",
+				"test/ai_migration_upgrade_unit.spec.js",
 				// Walks src/ from disk (provider architecture census); unit config only.
 				"test/ai_architecture_gate.spec.js",
 				// Walks the tree from disk (credential-shape ban); unit config only.

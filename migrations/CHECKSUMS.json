@@ -52,5 +52,7 @@
  "0051_mcp_oauth.sql": "f322ff9e5d0717fcd257a8a95d75984fbbb69d81519a709abc2f52a1518dc405",
  "0052_ai_provider_accounting.sql": "d933fcc4807aa96a95ae80061561c88676e13b90f29474a5e94c714ae064e532",
  "0053_ai_routing_and_pins.sql": "cab458c1aa288ca184e0ac54644984f6b881d1f1e34bcf9927081bc0c1fcc674",
- "0054_ai_shadow_jobs.sql": "825a1d39c3aec6a380cba958f0cdecd68346bc9fa764fca87dab88173550cb61"
+ "0054_ai_shadow_jobs.sql": "825a1d39c3aec6a380cba958f0cdecd68346bc9fa764fca87dab88173550cb61",
+ "0055_ai_provider_reservation_hardening.sql": "f49bd94d3833315718dc381c0f72d63ace24a92cd144fac26e566602153920f8",
+ "0056_ai_shadow_hardening.sql": "846b9f9b72772b3c0609d9628e23c914243c6dac516141dfa5124e2a7b451ae1"
 }

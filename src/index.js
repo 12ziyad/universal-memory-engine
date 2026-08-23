@@ -2642,7 +2642,8 @@ const routes = {
 			expectedVersion: body.expected_version ?? null,
 			note: body.note == null ? null : String(body.note).slice(0, 200),
 		});
-		if (result.error) return json(result, result.error === "version_conflict" ? 409 : 400);
+		if (result.error) return json(result,
+			result.error === "version_conflict" || result.error === "account_erased" ? 409 : 400);
 		return json({ ok: true, version: result.version });
 	},
 
@@ -2651,7 +2652,8 @@ const routes = {
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
 		const { emergencyDisable } = await import("./ai/admin.js");
-		return json(await emergencyDisable(env, { actorUserId: auth.user.id }));
+		const result = await emergencyDisable(env, { actorUserId: auth.user.id });
+		return result.error ? json(result, 409) : json(result);
 	},
 
 	/** One tiny metered live call proving Google auth + API enablement. Admin
@@ -2663,13 +2665,61 @@ const routes = {
 		if (!env.GCP_SERVICE_ACCOUNT || !env.GCP_PROJECT_ID) {
 			return json({ ok: true, google_vertex: { ok: false, error_class: "no_credentials" } });
 		}
-		const { resolveProvider } = await import("./ai/registry.js");
-		try {
-			const provider = await resolveProvider("google-vertex");
-			return json({ ok: true, google_vertex: await provider.health(env) });
-		} catch (error) {
-			return json({ ok: true, google_vertex: { ok: false, error_class: "provider_unloadable" } });
+		const key = String(request.headers.get("Idempotency-Key") ?? "").trim();
+		if (key.length < 8 || key.length > 128 || /[\u0000-\u001f\u007f]/.test(key)) {
+			return json({ error: "invalid_idempotency_key" }, 400);
 		}
+		const { providerOperationId } = await import("./lib/ai_meter.js");
+		const { runProviderHealthCheck } = await import("./ai/health.js");
+		const reservationId = await providerOperationId({
+			scope: "admin_provider_health",
+			scopeId: `${auth.user.id}:${key}`,
+			task: "provider_health",
+			ordinal: 0,
+		});
+		// A health probe is deliberately one-shot per caller-supplied operation
+		// key. Its diagnostic result is not durable application state, so silently
+		// replaying or re-invoking it would either lie about the current provider
+		// or spend twice. Make every replay state explicit to the administrator.
+		const existing = await env.DB.prepare(
+			"SELECT status FROM ai_provider_reservations WHERE id = ?",
+		).bind(reservationId).first();
+		if (existing) {
+			return json({
+				error: "health_probe_key_already_used",
+				google_vertex: {
+					ok: false,
+					error_class: "duplicate_probe",
+					reservation_status: existing.status,
+				},
+			}, 409);
+		}
+		const googleVertex = await runProviderHealthCheck(env, "google-vertex", {
+			reservationId,
+			userId: auth.user.id,
+		});
+		// Close the concurrent-replay race: two requests can both pass the read
+		// above, but only one can own the D1 reservation. The loser is still a
+		// duplicate operation, not a provider-health failure.
+		if (googleVertex.error_class === "operation_refused") {
+			const raced = await env.DB.prepare(
+				"SELECT status FROM ai_provider_reservations WHERE id = ?",
+			).bind(reservationId).first();
+			if (raced) {
+				return json({
+					error: "health_probe_key_already_used",
+					google_vertex: {
+						ok: false,
+						error_class: "duplicate_probe",
+						reservation_status: raced.status,
+					},
+				}, 409);
+			}
+		}
+		return json({
+			ok: true,
+			google_vertex: googleVertex,
+		});
 	},
 
 	"GET /v1/admin/users": async (request, env) => {
@@ -4097,15 +4147,32 @@ export default {
 		// drain due ones, cap retention) and expired spend-reservation reaping.
 		// All bounded, all observational — none of these can touch a user path.
 		ctx.waitUntil((async () => {
-			const { drainShadowJobs, purgeExpiredShadowJobs, reconcileShadowJobs } = await import("./ai/shadow.js");
-			const { reapExpiredReservations } = await import("./ai/provider_budget.js");
-			await reconcileShadowJobs(env, { limit: 25 });
-			await drainShadowJobs(env, { limit: 5 });
-			await purgeExpiredShadowJobs(env, { limit: 500 });
-			await reapExpiredReservations(env, { limit: 25 });
-		})().catch((error) => {
-			console.warn("ai provider sweep failed:", error?.message ?? error);
-		}));
+			const duties = [
+				["shadow reconciliation", async () => {
+					const { reconcileShadowJobs } = await import("./ai/shadow.js");
+					await reconcileShadowJobs(env, { limit: 25 });
+				}],
+				["shadow drain", async () => {
+					const { drainShadowJobs } = await import("./ai/shadow.js");
+					await drainShadowJobs(env, { limit: 5 });
+				}],
+				["shadow retention", async () => {
+					const { purgeExpiredShadowJobs } = await import("./ai/shadow.js");
+					await purgeExpiredShadowJobs(env, { limit: 500 });
+				}],
+				["provider reservation reaper", async () => {
+					const { reapExpiredReservations } = await import("./ai/provider_budget.js");
+					await reapExpiredReservations(env, { limit: 25 });
+				}],
+			];
+			for (const [label, duty] of duties) {
+				try {
+					await duty();
+				} catch (error) {
+					console.warn(`ai provider ${label} failed:`, error?.message ?? error);
+				}
+			}
+		})());
 	},
 
 	async fetch(request, env, ctx) {

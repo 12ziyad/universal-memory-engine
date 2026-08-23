@@ -69,7 +69,7 @@ import { classifyMessage } from "./trigger.js";
 import { canonicalTitle, isBadTitle, titleCaseWords } from "./title.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "./webhooks.js";
 import { settleStagedText } from "./staged_text.js";
-import { runAi, withFlushedAiMeter } from "../lib/ai_meter.js";
+import { providerOperationId, runAi, withFlushedAiMeter } from "../lib/ai_meter.js";
 import { applyFencedUpdate, userAuthoredSummaryFence } from "../lib/memory_versions.js";
 import { responseText, extractJson } from "./llm.js";
 
@@ -266,16 +266,50 @@ function enrichedMarkdown(title, { factLines, edgeLines, derivedLines, savedAt }
  * saved. Anything invalid falls back to the deterministic entity+date form —
  * fragment concatenation has no code path here.
  */
-export async function reconcileTitle(env, config, { entityLabels = [], factLines = [], fallbackTs = Date.now(), titleResponse, userId = null }) {
+/** Content-free durable scope for one page title produced from one run. */
+export function mcpTitleOperationScopeId(extractionRunId, jobId, pageId = null) {
+	if (!extractionRunId || !jobId) return null;
+	return JSON.stringify([
+		"mcp_title_v1",
+		String(extractionRunId),
+		String(jobId),
+		pageId == null ? null : String(pageId),
+	]);
+}
+
+/** Stable provider identity for one durable MCP title reconciliation. */
+export async function mcpTitleReservationId(userId, operationScopeId) {
+	if (!userId || !operationScopeId) return null;
+	return providerOperationId({
+		scope: "mcp_title",
+		scopeId: JSON.stringify([String(userId), String(operationScopeId)]),
+		task: "mcp_title",
+		ordinal: 0,
+	});
+}
+
+export async function reconcileTitle(env, config, {
+	entityLabels = [],
+	factLines = [],
+	fallbackTs = Date.now(),
+	titleResponse,
+	userId = null,
+	operationScopeId = null,
+}) {
 	const fallbackEntity = entityLabels[0] ?? topEntityFromLines(factLines);
 	const fallback = `${(fallbackEntity ?? "Conversation").slice(0, 60)} — ${dateLabel(fallbackTs)}`;
 	let parsed = null;
 	if (titleResponse !== undefined && titleResponse !== null) {
 		parsed = typeof titleResponse === "string" ? extractJson(titleResponse) ?? { title: titleResponse } : titleResponse;
 	} else {
+		// Durable MCP jobs carry an explicit provider-operation identity. The
+		// exported helper also keeps its pre-provider-layer behavior when called
+		// without that identity: mcp_title is structurally Cloudflare-only, so
+		// this path cannot create billable Google replay ambiguity.
 		if (!env.AI || !factLines.length) return fallback;
 		try {
-			const res = await withFlushedAiMeter(env, "title", { userId }, () => runAi(
+			const reservationId = await mcpTitleReservationId(userId, operationScopeId);
+			const res = await withFlushedAiMeter(env, "title", { userId, scopeId: operationScopeId }, () => runAi(
 				env,
 				config.llm.summaryModel,
 				{
@@ -293,7 +327,11 @@ export async function reconcileTitle(env, config, { entityLabels = [], factLines
 					max_tokens: config.llm.summaryMaxTokens,
 				},
 				config.llm.gatewayId ? { gateway: { id: config.llm.gatewayId } } : undefined,
-				{ task: "mcp_title", capability: "generate_structured" },
+				{
+					task: "mcp_title",
+					capability: "generate_structured",
+					...(reservationId ? { reservationId } : {}),
+				},
 			));
 			parsed = extractJson(responseText(res));
 		} catch (error) {
@@ -1266,6 +1304,7 @@ async function finalizeConversationCreate(env, config, userId, job, { project, f
 		fallbackTs: job.lastTs ?? Date.now(),
 		titleResponse: job.testOverrides?.titleResponse,
 		userId,
+		operationScopeId: mcpTitleOperationScopeId(runId, job.jobId, job.pageId),
 	});
 	const markdown = enrichedMarkdown(title, {
 		factLines,
@@ -1843,20 +1882,23 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		// never collide with the failed generation's ledger records.
 		const generation = Number(job.repairGeneration ?? 0);
 		const runKey = generation > 0 ? `${job.jobId}#g${generation}` : job.jobId;
+		const extractionRunId = await mcpExtractionRunId(userId, runKey, attempt);
 		const result = await runExtraction(
 			env,
 			userId,
 			job.userMessages ?? [],
 			job.contextMessages ?? [],
 			overrides,
-			{ runId: await mcpExtractionRunId(userId, runKey, attempt) },
+			{ runId: extractionRunId },
 		);
 
 		if (result.outcome === "in_progress") {
 			return { retry: true, inProgress: true, reason: "extraction already in progress" };
 		}
-		if (result.outcome === "interrupted_unknown") {
-			const reason = "extraction was interrupted after inference began; the model was not called again";
+		if (["interrupted_unknown", "provider_terminal"].includes(result.outcome)) {
+			const reason = result.outcome === "provider_terminal"
+				? "provider refused a safe retry; the model was not called again"
+				: "extraction was interrupted after inference began; the model was not called again";
 			try {
 				await markMcpEnrichmentFailed(env, userId, job, reason, defer);
 				return { done: true, failed: true };
@@ -1945,13 +1987,6 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			return { done: true };
 		}
 
-		const title = await reconcileTitle(env, config, {
-			entityLabels,
-			factLines: [...factLines, ...edgeLines],
-			fallbackTs: job.lastTs ?? Date.now(),
-			titleResponse: job.testOverrides?.titleResponse,
-			userId,
-		});
 		// Rules re-checked at finalize: they may have changed since staging, and
 		// an excluded topic must never survive onto the final page.
 		const derivedLines = job.captureMode
@@ -1983,6 +2018,19 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			await settleStagedText(env, userId, [job.jobId]);
 			return { done: true };
 		}
+
+		const title = await reconcileTitle(env, config, {
+			entityLabels,
+			factLines: [...factLines, ...edgeLines],
+			fallbackTs: job.lastTs ?? Date.now(),
+			titleResponse: job.testOverrides?.titleResponse,
+			userId,
+			operationScopeId: mcpTitleOperationScopeId(
+				receipt?.extraction_run_id ?? extractionRunId,
+				job.jobId,
+				job.pageId,
+			),
+		});
 
 		const markdown = enrichedMarkdown(title, {
 			factLines,

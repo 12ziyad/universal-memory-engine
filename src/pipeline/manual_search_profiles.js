@@ -1,5 +1,10 @@
 import { hashText } from "./source.js";
-import { runAi } from "../lib/ai_meter.js";
+import {
+	currentMeter,
+	providerOperationId,
+	runAi,
+	withFlushedAiMeter,
+} from "../lib/ai_meter.js";
 
 const MAX_PROFILE_PART = 8000;
 
@@ -311,7 +316,32 @@ async function deleteProfileVector(env, profile) {
 	await env.VECTORIZE.deleteByIds([id]);
 }
 
-async function embedAndUpsertProfile(env, config, userId, profile) {
+/**
+ * Stable identity for a profile embedding produced by one durable projection.
+ * The originating projection scope (not profile text/hash) distinguishes a
+ * slice/event update that refreshes its owning node from any other update.
+ */
+export async function manualSearchProfileReservationId({
+	operationScopeId,
+	userId,
+	objectKind,
+	objectId,
+}) {
+	if (!operationScopeId || !userId || !objectKind || !objectId) return null;
+	return providerOperationId({
+		scope: "manual_search_profile",
+		scopeId: JSON.stringify([
+			String(operationScopeId),
+			String(userId),
+			String(objectKind),
+			String(objectId),
+		]),
+		task: "embed_profile",
+		ordinal: 0,
+	});
+}
+
+async function embedAndUpsertProfile(env, config, userId, profile, { operationScopeId = null } = {}) {
 	if (!config.useVectors) return { status: "skipped", reason: "vectors_disabled" };
 	if (!env.AI) return { status: "skipped", reason: "ai_binding_missing" };
 	if (!env.VECTORIZE) return { status: "skipped", reason: "vectorize_binding_missing" };
@@ -320,7 +350,29 @@ async function embedAndUpsertProfile(env, config, userId, profile) {
 		profile.semantic_text,
 		profile.context_text,
 	], MAX_PROFILE_PART);
-	const response = await runAi(env, config.embedModel, { text: [vectorText] }, undefined, { task: "embed_profile" });
+	const reservationId = await manualSearchProfileReservationId({
+		operationScopeId,
+		userId,
+		objectKind: profile.object_kind,
+		objectId: profile.object_id,
+	});
+	const invoke = () => runAi(env, config.embedModel, { text: [vectorText] }, undefined, {
+		task: "embed_profile",
+		...(reservationId ? { reservationId } : {}),
+	});
+	// Projection refreshes normally inherit their save/retention meter. A
+	// standalone refresh still needs a server-owned lifecycle scope before it
+	// may use Google; otherwise the stable explicit reservation id could bypass
+	// account/project/erasure fencing.
+	const response = currentMeter() || !reservationId
+		? await invoke()
+		: await withFlushedAiMeter(env, "manual_search_profile", {
+			userId,
+			scopeId: reservationId,
+			lifecycle: {
+				acceptedAt: Number(profile.snapshot_observed_at ?? profile.source_updated_at ?? Date.now()),
+			},
+		}, invoke);
 	const values = response?.data?.[0];
 	if (!Array.isArray(values) || values.length === 0) throw new Error("embedding response did not contain a vector");
 	const latest = await activeStoredProfile(env, userId, profile.object_kind, profile.object_id);
@@ -357,7 +409,11 @@ async function embedAndUpsertProfile(env, config, userId, profile) {
  * Best-effort derived refresh for the MCP manual lane. Canonical D1 graph writes
  * must already be committed before this function is called.
  */
-export async function refreshManualSearchProfiles(env, config, userId, { nodeIds = [], pageIds = [] } = {}) {
+export async function refreshManualSearchProfiles(env, config, userId, {
+	nodeIds = [],
+	pageIds = [],
+	operationScopeId = null,
+} = {}) {
 	const wantedNodes = unique(nodeIds).slice(0, 100);
 	const wantedPages = unique(pageIds).slice(0, 100);
 	const warnings = [];
@@ -417,7 +473,13 @@ export async function refreshManualSearchProfiles(env, config, userId, { nodeIds
 			const stored = await activeStoredProfile(env, userId, profile.object_kind, profile.object_id);
 			if (!stored) continue;
 			refreshed.push({ object_kind: profile.object_kind, object_id: profile.object_id });
-			const status = await embedAndUpsertProfile(env, config, userId, { ...profile, ...stored });
+			const status = await embedAndUpsertProfile(
+				env,
+				config,
+				userId,
+				{ ...profile, ...stored },
+				{ operationScopeId },
+			);
 			if (status.status === "refreshed") vectorRefreshed.push({ object_kind: profile.object_kind, object_id: profile.object_id });
 		} catch (error) {
 			warnings.push(failure("vector_profile", profile, error));

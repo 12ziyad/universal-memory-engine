@@ -4,10 +4,13 @@ import { runAi } from "./ai_meter.js";
  * call fails (e.g. local dev without --remote, or tests with vectors disabled),
  * it returns null and the caller degrades gracefully.
  */
-export async function embed(env, config, text) {
+export async function embed(env, config, text, { reservationId = null } = {}) {
 	if (!config.useVectors || !env.AI) return null;
 	try {
-		const res = await runAi(env, config.embedModel, { text: [text] }, undefined, { task: "embed" });
+		const res = await runAi(env, config.embedModel, { text: [text] }, undefined, {
+			task: "embed",
+			...(reservationId ? { reservationId } : {}),
+		});
 		const vec = res?.data?.[0];
 		return Array.isArray(vec) ? vec : null;
 	} catch (err) {

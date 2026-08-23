@@ -1,11 +1,16 @@
+import { googleModelCard } from "../../rate_cards.js";
+
 /**
  * Pinned Google model ids and per-lane transport budgets.
  *
  * GA ids are stable snapshots on Vertex; dated -preview ids are the moving
- * ones. Never a -latest alias. VERIFY the exact current ids against the Vertex
- * model catalog before enabling any live traffic — this table is the single
- * place they change, and the pin machinery owns WHEN a change may take effect
- * (a claimed run replays its recorded model regardless of edits here).
+ * ones. Never a -latest alias. VERIFY the exact current ids, region support,
+ * request parameters, retirement dates, and prices before enabling live
+ * traffic. The 2.5 generation models below retire on 2026-10-20, so the live
+ * activation gate is intentionally HOLD until a separately tested 3.x model
+ * migration is selected. This table is the single place ids change, and the
+ * pin machinery owns WHEN a change may take effect (a claimed run replays its
+ * recorded model regardless of edits here).
  */
 
 export const GOOGLE_DEFAULT_MODELS = Object.freeze({
@@ -49,6 +54,16 @@ export const GOOGLE_TIMEOUTS_MS = Object.freeze({
 
 export const GOOGLE_MAX_TIMEOUT_MS = 60_000;
 
+const GCP_PROJECT_ID_RE = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+const GCP_REGION_RE = /^[a-z]{2,20}(?:-[a-z0-9]{1,20}){1,3}[0-9]$/;
+
+function configurationError(status) {
+	throw Object.assign(new Error(`google provider ${status}`), {
+		aiErrorClass: "provider_misconfigured",
+		googleStatus: status,
+	});
+}
+
 /** Gemini 2.5 flash/flash-lite: thinking off for deterministic JSON lanes —
  * the structural analog of engine_v2's /no_think prompt hack. Pro cannot fully
  * disable thinking, one reason it is not a default here. */
@@ -57,7 +72,9 @@ export function thinkingBudgetFor(model) {
 }
 
 export function googleRegion(env) {
-	return String(env?.GCP_REGION ?? "us-central1");
+	const region = String(env?.GCP_REGION ?? "us-central1");
+	if (!GCP_REGION_RE.test(region)) configurationError("invalid_region");
+	return region;
 }
 
 export function googleProject(env) {
@@ -68,27 +85,77 @@ export function googleProject(env) {
 			googleStatus: "no_project",
 		});
 	}
-	return String(project);
+	const normalized = String(project);
+	if (!GCP_PROJECT_ID_RE.test(normalized)) configurationError("invalid_project");
+	return normalized;
+}
+
+/** Validate the complete authority before a bearer token is minted or attached.
+ * The adapter has exactly two Google API authorities; user info, ports, HTTP,
+ * and lookalike subdomains are never legal. */
+export function assertGoogleApiUrl(env, value) {
+	let parsed;
+	try {
+		parsed = new URL(value);
+	} catch {
+		configurationError("invalid_endpoint");
+	}
+	const region = googleRegion(env);
+	const allowedHosts = new Set([
+		`${region}-aiplatform.googleapis.com`,
+		"discoveryengine.googleapis.com",
+	]);
+	if (parsed.protocol !== "https:"
+		|| parsed.port !== ""
+		|| parsed.username !== ""
+		|| parsed.password !== ""
+		|| !allowedHosts.has(parsed.hostname)) {
+		configurationError("invalid_endpoint");
+	}
+	return parsed.toString();
 }
 
 export function generateContentUrl(env, model) {
 	const region = googleRegion(env);
 	const project = googleProject(env);
-	return `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/google/models/${model}:generateContent`;
+	return assertGoogleApiUrl(env, `https://${region}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(region)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`);
 }
 
 export function predictUrl(env, model) {
 	const region = googleRegion(env);
 	const project = googleProject(env);
-	return `https://${region}-aiplatform.googleapis.com/v1/projects/${project}/locations/${region}/publishers/google/models/${model}:predict`;
+	return assertGoogleApiUrl(env, `https://${region}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/${encodeURIComponent(region)}/publishers/google/models/${encodeURIComponent(model)}:predict`);
 }
 
 export function rankUrl(env) {
 	const project = googleProject(env);
-	return `https://discoveryengine.googleapis.com/v1/projects/${project}/locations/global/rankingConfigs/default_ranking_config:rank`;
+	return assertGoogleApiUrl(env, `https://discoveryengine.googleapis.com/v1/projects/${encodeURIComponent(project)}/locations/global/rankingConfigs/default_ranking_config:rank`);
 }
 
-/** Is this id one of ours (vs a Workers AI @cf/ id the caller sent)? */
+/** Is this an exact immutable Google id with an audited local rate card? */
 export function isGoogleModelId(model) {
-	return typeof model === "string" && !model.startsWith("@cf/") && model.length > 0;
+	return typeof model === "string"
+		&& /^[a-z][a-z0-9.-]{0,127}$/.test(model)
+		&& !model.endsWith("-latest")
+		&& googleModelCard(model) != null;
+}
+
+function unitClassForCapability(capability) {
+	if (capability === "embed_documents" || capability === "embed_query") return "embed_tokens";
+	if (capability === "rerank") return "rank_units";
+	return "gen_tokens";
+}
+
+/** Validate both transport identity and billing identity before admission. */
+export function assertGoogleModelForCapability(model, capability) {
+	if (typeof model !== "string" || !/^[a-z][a-z0-9.-]{0,127}$/.test(model)) {
+		configurationError("invalid_model");
+	}
+	if (model.endsWith("-latest")) configurationError("moving_model_alias");
+	const card = googleModelCard(model);
+	if (!card) configurationError("unpriced_model");
+	if (card.unitClass !== unitClassForCapability(capability)) {
+		configurationError("model_capability_mismatch");
+	}
+	return model;
 }

@@ -99,4 +99,17 @@ describe("lifecycle schema census", () => {
 		expect(CENSUS.source_packets.purge).toBe("minimize");
 		expect(CENSUS.project_tombstones.projectDelete).toBe("retain");
 	});
+
+	it("retains provider control state but explicitly scrubs account provenance", () => {
+		for (const table of ["ai_routing_policies", "ai_routing_policy_audit", "ai_provider_overrides"]) {
+			expect(CENSUS[table]).toMatchObject({ kind: "global", accountErase: "scrub" });
+		}
+		expect(CENSUS.ai_provider_health).not.toHaveProperty("accountErase");
+		expect(CENSUS.ai_provider_reservations).toMatchObject({
+			kind: "global",
+			purge: "scrub",
+			projectDelete: "scrub",
+			accountErase: "scrub",
+		});
+	});
 });

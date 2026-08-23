@@ -2790,21 +2790,40 @@ async function readBoundedResponseText(response, controller, maxBytes = 64 * 102
 		return Buffer.byteLength(text, "utf8") <= maxBytes ? text : null;
 	}
 	const reader = response.body.getReader();
+	let onAbort;
+	const aborted = new Promise((_, rejectPromise) => {
+		onAbort = () => {
+			const reason = controller.signal.reason instanceof Error
+				? controller.signal.reason
+				: Object.assign(new Error("request aborted"), { name: "AbortError", code: "aborted" });
+			// A custom fetch implementation can return a body that is not wired to
+			// the supplied AbortSignal. Explicitly cancel the locked reader so a
+			// header-only response cannot leave a pending read behind after timeout.
+			void reader.cancel(reason).catch(() => {});
+			rejectPromise(reason);
+		};
+		if (controller.signal.aborted) onAbort();
+		else controller.signal.addEventListener("abort", onAbort, { once: true });
+	});
 	const chunks = [];
 	let bytes = 0;
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		const chunk = Buffer.from(value);
-		bytes += chunk.length;
-		if (bytes > maxBytes) {
-			controller.abort();
-			void reader.cancel().catch(() => {});
-			return null;
+	try {
+		for (;;) {
+			const { done, value } = await Promise.race([reader.read(), aborted]);
+			if (done) break;
+			const chunk = Buffer.from(value);
+			bytes += chunk.length;
+			if (bytes > maxBytes) {
+				controller.abort();
+				void reader.cancel().catch(() => {});
+				return null;
+			}
+			chunks.push(chunk);
 		}
-		chunks.push(chunk);
+		return Buffer.concat(chunks, bytes).toString("utf8");
+	} finally {
+		controller.signal.removeEventListener("abort", onAbort);
 	}
-	return Buffer.concat(chunks, bytes).toString("utf8");
 }
 
 async function boundedFetch(fetchFn, url, init, timeoutMs) {
@@ -2812,8 +2831,9 @@ async function boundedFetch(fetchFn, url, init, timeoutMs) {
 	let timer;
 	const timeout = new Promise((_, rejectPromise) => {
 		timer = setTimeout(() => {
-			controller.abort();
-			rejectPromise(Object.assign(new Error("request timeout"), { name: "TimeoutError", code: "timeout" }));
+			const error = Object.assign(new Error("request timeout"), { name: "TimeoutError", code: "timeout" });
+			controller.abort(error);
+			rejectPromise(error);
 		}, timeoutMs);
 	});
 	try {

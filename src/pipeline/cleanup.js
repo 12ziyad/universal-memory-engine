@@ -26,6 +26,53 @@ import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
 import { rebuildConversationPageFromSources } from "./mcp_engine.js";
 import { grantRevocationStatements } from "../lib/oauth.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "./source.js";
+import {
+	assertNoActiveProviderInvocation,
+	scrubProviderReservationLifecycle,
+} from "../ai/provider_budget.js";
+
+function shadowInvocationInFlightError() {
+	const error = new Error("A bounded shadow provider invocation is still in flight; retry deletion after its lease drains.");
+	error.name = "LifecycleFenceError";
+	error.code = "shadow_invocation_in_flight";
+	error.status = 503;
+	error.retryable = true;
+	return error;
+}
+
+async function assertNoActiveShadowInvocation(env, {
+	userId = null,
+	accountUserId = null,
+	acceptedThrough = null,
+	now = Date.now(),
+} = {}) {
+	const clauses = [];
+	const bindings = [];
+	if (userId) {
+		clauses.push("user_id = ?");
+		bindings.push(userId);
+	}
+	if (accountUserId) {
+		clauses.push("account_user_id = ?");
+		bindings.push(accountUserId);
+	}
+	if (!clauses.length) return;
+	let accepted = "";
+	if (acceptedThrough !== null && acceptedThrough !== undefined
+		&& Number.isFinite(Number(acceptedThrough))) {
+		accepted = " AND created_at <= ?";
+		bindings.push(Number(acceptedThrough));
+	}
+	bindings.push(now);
+	const active = await env.DB.prepare(
+		`SELECT 1 AS active FROM ai_shadow_jobs
+		 WHERE (${clauses.join(" OR ")})${accepted}
+		   AND status = 'invoking'
+		   AND (lease_until IS NULL OR lease_until > ?)
+		 LIMIT 1`,
+	).bind(...bindings).first();
+	if (active) throw shadowInvocationInFlightError();
+}
 
 function parseJsonArray(value) {
 	try {
@@ -608,6 +655,201 @@ export async function archiveObject(env, userId, { kind, id }) {
 	return { archived: false, reason: "unsupported kind" };
 }
 
+const DELETED_PROVIDER_ACTOR = "deleted_user";
+
+/**
+ * Provider routing is global operational state, so account erasure must not
+ * delete or reset it. It does, however, contain bounded account provenance:
+ * rollout allowlists, NOT NULL updater ids, audit actors/snapshots/notes, and
+ * emergency-override attribution. These statements run in the SAME D1 batch
+ * that installs the account tombstone. Consequently, a provider-control write
+ * either commits before the tombstone and is scrubbed here, or observes the
+ * tombstone at its own commit fence and changes no rows.
+ */
+function providerControlQuiesceStatements(env, { userId, emailNormalized, now }) {
+	const emailNeedle = String(emailNormalized ?? "").trim().toLowerCase() || "\u0000no-email\u0000";
+	return [
+		env.DB.prepare(
+			`UPDATE ai_routing_policies
+			    SET allowlist_json = CASE
+			          WHEN allowlist_json IS NULL THEN NULL
+			          WHEN instr(allowlist_json, ?) = 0
+			           AND instr(lower(allowlist_json), ?) = 0
+			          THEN allowlist_json
+			          WHEN json_valid(allowlist_json)
+			           AND json_type(allowlist_json) = 'array'
+			          THEN (
+			            SELECT json_group_array(member.value)
+			              FROM json_each(ai_routing_policies.allowlist_json) member
+			             WHERE instr(CAST(member.value AS TEXT), ?) = 0
+			               AND instr(lower(CAST(member.value AS TEXT)), ?) = 0
+			          )
+			          ELSE '[]'
+			        END,
+			        updated_by = CASE
+			          WHEN updated_by = ? OR lower(updated_by) = ?
+			          THEN ? ELSE updated_by END,
+			        version = version + 1,
+			        updated_at = ?,
+			        mutation_id = NULL
+			  WHERE updated_by = ? OR lower(updated_by) = ?
+			     OR (allowlist_json IS NOT NULL AND (
+			       instr(allowlist_json, ?) > 0
+			       OR instr(lower(allowlist_json), ?) > 0
+			     ))`,
+		).bind(
+			userId, emailNeedle, userId, emailNeedle,
+			userId, emailNeedle, DELETED_PROVIDER_ACTOR,
+			now, userId, emailNeedle, userId, emailNeedle,
+		),
+		env.DB.prepare(
+			`UPDATE ai_provider_overrides
+			    SET actor_user_id = CASE
+			          WHEN actor_user_id = ? OR lower(actor_user_id) = ?
+			          THEN NULL ELSE actor_user_id END,
+			        reason = CASE
+			          WHEN actor_user_id = ? OR lower(actor_user_id) = ?
+			            OR instr(COALESCE(reason, ''), ?) > 0
+			            OR instr(lower(COALESCE(reason, '')), ?) > 0
+			          THEN NULL ELSE reason END,
+			        updated_at = ?
+			  WHERE actor_user_id = ? OR lower(actor_user_id) = ?
+			     OR instr(COALESCE(reason, ''), ?) > 0
+			     OR instr(lower(COALESCE(reason, '')), ?) > 0`,
+		).bind(
+			userId, emailNeedle,
+			userId, emailNeedle, userId, emailNeedle,
+			now,
+			userId, emailNeedle, userId, emailNeedle,
+		),
+	];
+}
+
+function containsErasedIdentifier(value, identifiers) {
+	const text = String(value ?? "");
+	return identifiers.some(({ value: identifier, insensitive }) => insensitive
+		? text.toLowerCase().includes(identifier.toLowerCase())
+		: text.includes(identifier));
+}
+
+function redactIdentifierString(value, identifiers) {
+	let redacted = String(value);
+	for (const { value: identifier, insensitive } of identifiers) {
+		if (!identifier) continue;
+		if (!insensitive) {
+			redacted = redacted.split(identifier).join(DELETED_PROVIDER_ACTOR);
+			continue;
+		}
+		const needle = identifier.toLowerCase();
+		let offset = 0;
+		while (true) {
+			const index = redacted.toLowerCase().indexOf(needle, offset);
+			if (index < 0) break;
+			redacted = `${redacted.slice(0, index)}${DELETED_PROVIDER_ACTOR}${redacted.slice(index + identifier.length)}`;
+			offset = index + DELETED_PROVIDER_ACTOR.length;
+		}
+	}
+	return redacted;
+}
+
+function redactAuditValue(value, identifiers) {
+	if (typeof value === "string") {
+		// Older snapshots nested allowlist_json as a serialized JSON string.
+		// Parse that layer when possible so redaction remains structural rather
+		// than relying on a blind replacement over the outer document.
+		if (/^\s*[\[{]/.test(value)) {
+			try {
+				return JSON.stringify(redactAuditValue(JSON.parse(value), identifiers));
+			} catch {
+				// It is ordinary text beginning with a bracket; redact below.
+			}
+		}
+		return redactIdentifierString(value, identifiers);
+	}
+	if (Array.isArray(value)) return value.map((item) => redactAuditValue(item, identifiers));
+	if (value && typeof value === "object") {
+		const redacted = {};
+		for (const [key, child] of Object.entries(value)) {
+			redacted[redactIdentifierString(key, identifiers)] = redactAuditValue(child, identifiers);
+		}
+		return redacted;
+	}
+	return value;
+}
+
+function redactAuditSnapshot(raw, identifiers) {
+	if (raw == null) return null;
+	try {
+		return JSON.stringify(redactAuditValue(JSON.parse(raw), identifiers));
+	} catch {
+		// A malformed historical snapshot is not useful policy evidence. If it
+		// carries erased provenance, null it rather than preserving opaque bytes.
+		return containsErasedIdentifier(raw, identifiers) ? null : raw;
+	}
+}
+
+async function scrubProviderControlAudit(env, { userId, emailNormalized }) {
+	const identifiers = [{ value: userId, insensitive: false }];
+	if (emailNormalized) identifiers.push({ value: String(emailNormalized), insensitive: true });
+	const { results: rows } = await env.DB.prepare(
+		"SELECT id, actor_user_id, old_json, new_json, note FROM ai_routing_policy_audit",
+	).all();
+	const updates = [];
+	for (const row of rows ?? []) {
+		const actorErased = containsErasedIdentifier(row.actor_user_id, identifiers);
+		const oldJson = redactAuditSnapshot(row.old_json, identifiers);
+		const newJson = redactAuditSnapshot(row.new_json, identifiers);
+		const note = actorErased || containsErasedIdentifier(row.note, identifiers) ? null : row.note;
+		const actorUserId = actorErased ? DELETED_PROVIDER_ACTOR : row.actor_user_id;
+		if (actorUserId === row.actor_user_id && oldJson === row.old_json
+			&& newJson === row.new_json && note === row.note) continue;
+		updates.push(env.DB.prepare(
+			`UPDATE ai_routing_policy_audit
+			    SET actor_user_id = ?, old_json = ?, new_json = ?, note = ?
+			  WHERE id = ?`,
+		).bind(actorUserId, oldJson, newJson, note, row.id));
+	}
+	// Bound each D1 transaction to a modest statement count. The tombstone is
+	// already durable, so retries are safe if a later chunk fails.
+	for (let offset = 0; offset < updates.length; offset += 50) {
+		await env.DB.batch(updates.slice(offset, offset + 50));
+	}
+}
+
+async function assertNoProviderControlIdentityResidue(env, { userId, emailNormalized }) {
+	const emailNeedle = String(emailNormalized ?? "").trim().toLowerCase() || "\u0000no-email\u0000";
+	const row = await env.DB.prepare(
+		`SELECT (
+		   SELECT COUNT(*) FROM ai_routing_policies
+		    WHERE updated_by = ? OR lower(updated_by) = ?
+		       OR instr(COALESCE(allowlist_json, ''), ?) > 0
+		       OR instr(lower(COALESCE(allowlist_json, '')), ?) > 0
+		 ) + (
+		   SELECT COUNT(*) FROM ai_routing_policy_audit
+		    WHERE actor_user_id = ? OR lower(actor_user_id) = ?
+		       OR instr(COALESCE(old_json, ''), ?) > 0
+		       OR instr(lower(COALESCE(old_json, '')), ?) > 0
+		       OR instr(COALESCE(new_json, ''), ?) > 0
+		       OR instr(lower(COALESCE(new_json, '')), ?) > 0
+		       OR instr(COALESCE(note, ''), ?) > 0
+		       OR instr(lower(COALESCE(note, '')), ?) > 0
+		 ) + (
+		   SELECT COUNT(*) FROM ai_provider_overrides
+		    WHERE actor_user_id = ? OR lower(actor_user_id) = ?
+		       OR instr(COALESCE(reason, ''), ?) > 0
+		       OR instr(lower(COALESCE(reason, '')), ?) > 0
+		 ) AS n`,
+	).bind(
+		userId, emailNeedle, userId, emailNeedle,
+		userId, emailNeedle,
+		userId, emailNeedle, userId, emailNeedle, userId, emailNeedle,
+		userId, emailNeedle, userId, emailNeedle,
+	).first();
+	if (Number(row?.n ?? 0) !== 0) {
+		throw new Error("account teardown left provider-control identity residue");
+	}
+}
+
 /**
  * Full account teardown for the admin console and account-deletion requests:
  * all memory rows (via deleteAllMemories), then auth rows, then the user row.
@@ -651,6 +893,70 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 			`INSERT INTO account_erasure_tombstones (user_id, erased_at) VALUES (?, ?)
 			 ON CONFLICT(user_id) DO UPDATE SET erased_at = MIN(account_erasure_tombstones.erased_at, excluded.erased_at)`,
 		).bind(userId, quiescedAt),
+		...providerControlQuiesceStatements(env, {
+			userId,
+			emailNormalized: user.email_normalized,
+			now: quiescedAt,
+		}),
+		// Reconciliation is intentionally able to recreate a missed outbox row
+		// from a terminal primary run. Before shared-project provenance is
+		// anonymized below, reserve those sampled runs with terminal markers in
+		// this same quiesce transaction. The primary-run unique index makes this
+		// idempotent and permanently prevents post-erasure resurrection.
+		env.DB.prepare(
+			`INSERT OR IGNORE INTO ai_shadow_jobs
+			 (id, user_id, account_user_id, primary_run_id, provider, model, prompt_version,
+			  status, attempts, lease_until, created_at, updated_at, terminal_at)
+			 SELECT 'shadow_cancelled_' || er.id, er.user_id, NULL, er.id,
+			        json_extract(er.pin_json, '$.shadow.provider'),
+			        CASE WHEN json_type(er.pin_json, '$.shadow.model') = 'text'
+			             THEN json_extract(er.pin_json, '$.shadow.model') ELSE NULL END,
+			        NULL, 'cancelled_erased', 0, NULL, er.created_at, ?, ?
+			   FROM extraction_runs er
+			  WHERE er.status IN ('wrote', 'skipped', 'failed')
+			    AND CASE WHEN json_valid(er.pin_json) THEN CASE
+			      WHEN json_extract(er.pin_json, '$.shadow.sampled') = 1
+			       AND json_type(er.pin_json, '$.shadow.provider') = 'text'
+			      THEN 1 ELSE 0 END ELSE 0 END = 1
+			    AND CASE WHEN json_valid(er.scope_json)
+			      THEN COALESCE(
+			        json_extract(er.scope_json, '$.account_user_id'),
+			        json_extract(er.scope_json, '$.accountUserId')
+			      ) ELSE NULL END = ?`,
+		).bind(quiescedAt, quiescedAt, userId),
+		// Existing rows may belong to a surviving shared project. Preserve their
+		// content-free metrics, but erase this account's stable actor id and revoke
+		// every live claim so a stale worker cannot write it back.
+		env.DB.prepare(
+			`UPDATE ai_shadow_jobs
+			 SET account_user_id = CASE
+			       WHEN status = 'invoking' AND (lease_until IS NULL OR lease_until > ?)
+			       THEN account_user_id ELSE NULL END,
+			     status = CASE
+			       WHEN status IN ('pending', 'running')
+			         OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+			       THEN 'cancelled_erased' ELSE status END,
+			     claim_token = CASE
+			       WHEN status IN ('pending', 'running')
+			         OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+			       THEN NULL ELSE claim_token END,
+			     lease_until = CASE
+			       WHEN status IN ('pending', 'running')
+			         OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+			       THEN NULL ELSE lease_until END,
+			     error_class = CASE
+			       WHEN status IN ('pending', 'running')
+			         OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+			       THEN 'account_erased' ELSE error_class END,
+			     terminal_at = CASE WHEN status IN ('pending', 'running')
+			                        OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+			                        THEN COALESCE(terminal_at, ?) ELSE terminal_at END,
+			     updated_at = ?
+			 WHERE account_user_id = ? OR user_id = ?`,
+		).bind(
+			quiescedAt, quiescedAt, quiescedAt, quiescedAt, quiescedAt, quiescedAt,
+			quiescedAt, quiescedAt, userId, userId,
+		),
 		env.DB.prepare(
 			"UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ?",
 		).bind(quiescedAt, userId),
@@ -691,6 +997,35 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 			],
 		});
 	} else await env.DB.batch(quiesceStatements);
+	// Historical audit JSON can contain identifiers at arbitrary nesting depth,
+	// including a serialized allowlist inside the snapshot. The tombstone above
+	// now blocks fresh actor writes, so this structural scrub is race-closed and
+	// retry-safe even though it may span several bounded D1 batches.
+	await scrubProviderControlAudit(env, {
+		userId,
+		emailNormalized: user.email_normalized,
+	});
+	await assertNoProviderControlIdentityResidue(env, {
+		userId,
+		emailNormalized: user.email_normalized,
+	});
+	// The tombstone and producer fences are durable now. An invocation that
+	// linearized before them may finish, but confirmed erasure cannot overtake
+	// that external disclosure. The caller retries; the bounded invocation then
+	// settles (or its lease expires) and the same idempotent teardown continues.
+	await assertNoActiveShadowInvocation(env, {
+		userId,
+		accountUserId: userId,
+		now: quiescedAt,
+	});
+	await assertNoActiveProviderInvocation(env, {
+		memoryUserId: userId,
+		accountUserId: userId,
+	});
+	await scrubProviderReservationLifecycle(env, {
+		memoryUserId: userId,
+		accountUserId: userId,
+	});
 	const ownedOrgIds = (ownedOrganizations ?? []).map((row) => row.id);
 	const { results: ownedProjects } = await env.DB.prepare(
 		`SELECT p.id FROM managed_projects p
@@ -820,6 +1155,7 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		"memory_exports",
 		"memory_rules",
 		"ai_calls",
+		"ai_shadow_jobs",
 		"receipts",
 		"extraction_runs",
 		"memory_jobs",
@@ -862,6 +1198,10 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 			`UPDATE extraction_runs SET scope_json = json_remove(scope_json, '$.account_user_id')
 			  WHERE json_valid(scope_json) AND json_extract(scope_json, '$.account_user_id') = ?`,
 		).bind(userId),
+		// A departing member's usage rows belong to the surviving foreign memory
+		// root/project. Preserve those content-free metrics, but sever the stable
+		// account attribution just as the source/run provenance above is severed.
+		env.DB.prepare("UPDATE ai_calls SET account_user_id = NULL WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM playground_messages WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM playground_threads WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
@@ -881,6 +1221,23 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 			"DELETE FROM error_reports WHERE user_id = ?",
 		).bind(memoryId)),
 	]);
+	// Do not prove convergence from account_user_id alone. Older/in-flight
+	// meters can already have anonymized that column while still carrying an
+	// owned memory-space or managed-project locator. json_each keeps this check
+	// bounded to three parameters even for accounts with many SDK subtenants.
+	const usageIdentityResidue = await env.DB.prepare(
+		`SELECT COUNT(*) AS n FROM ai_calls
+		  WHERE account_user_id = ?
+		     OR user_id IN (SELECT value FROM json_each(?))
+		     OR managed_project_id IN (SELECT value FROM json_each(?))`,
+	).bind(
+		userId,
+		JSON.stringify([...memoryIds]),
+		JSON.stringify(ownedProjectIds),
+	).first("n");
+	if (Number(usageIdentityResidue ?? 0) !== 0) {
+		throw new Error("account teardown left owned usage identity residue");
+	}
 
 	// Remove this account from organizations it does not own, including every
 	// email-bearing invitation addressed to it. Delete its outbox copy first:
@@ -1532,18 +1889,50 @@ export async function bulkDeleteBySource(env, userId, {
 	let cancelledRuns = 0;
 	let cancelledSourceJobs = 0;
 	let cancelledAtomicRuns = 0;
+	let cancelledShadowJobs = 0;
 	let sourcePacketsMinimized = 0;
 	if (erasure) {
-		// The deletion barrier FIRST, before any row is touched: from this
-		// instant, no extraction whose work was accepted earlier can commit —
-		// the fence inside the writer's atomic batch refuses it (SRV-08).
-		await env.DB.prepare(
-			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
-			 VALUES (?, ?, ?, ?)
-			 ON CONFLICT(user_id) DO UPDATE SET
-				barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at),
-				by = excluded.by`,
-		).bind(userId, now, now, by ?? null).run();
+		// Barrier installation and revocation of work that has NOT entered an
+		// external call are one D1 transaction. This is the other side of the
+		// shadow worker's running→invoking admission CAS: exactly one wins first.
+		// An expired invoking lease is bounded crash residue and can be retired;
+		// a live invoking owner is deliberately left intact and checked below.
+		const [, cancelledShadow] = await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+				 VALUES (?, ?, ?, ?)
+				 ON CONFLICT(user_id) DO UPDATE SET
+					barrier_at = MAX(deletion_barriers.barrier_at, excluded.barrier_at),
+					by = excluded.by`,
+			).bind(userId, now, now, by ?? null),
+			env.DB.prepare(
+				`UPDATE ai_shadow_jobs
+				 SET status = 'cancelled_erased', claim_token = NULL, lease_until = NULL,
+				     error_class = 'memory_erased', terminal_at = COALESCE(terminal_at, ?), updated_at = ?
+				 WHERE user_id = ? AND created_at <= ?
+				   AND (
+				     status IN ('pending', 'running')
+				     OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+				   )`,
+			).bind(now, now, userId, now, now),
+		]);
+		cancelledShadowJobs = Number(cancelledShadow?.meta?.changes ?? 0);
+		// If call admission won the serialization race, the barrier remains armed
+		// but no source/content row is touched and this erase does not claim
+		// success. Retry after the provider call settles or its bounded lease ends.
+		await assertNoActiveShadowInvocation(env, {
+			userId,
+			acceptedThrough: now,
+			now,
+		});
+		await assertNoActiveProviderInvocation(env, {
+			memoryUserId: userId,
+			acceptedThrough: now,
+		});
+		await scrubProviderReservationLifecycle(env, {
+			memoryUserId: userId,
+			acceptedThrough: now,
+		});
 		// Source packets remain as the minimal idempotency/replay fence that keeps
 		// an erased terminal write from receiving an acceptance-shaped 200. They
 		// must not remain a shadow archive: remove every plaintext preview and
@@ -1807,6 +2196,7 @@ export async function bulkDeleteBySource(env, userId, {
 			cancelled_runs: cancelledRuns,
 			cancelled_source_jobs: cancelledSourceJobs,
 			cancelled_atomic_runs: cancelledAtomicRuns,
+			cancelled_shadow_jobs: cancelledShadowJobs,
 			source_packets_minimized: sourcePacketsMinimized,
 		} : {}),
 		pending_jobs: pendingJobs,

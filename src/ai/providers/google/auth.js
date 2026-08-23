@@ -15,6 +15,7 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const REFRESH_MARGIN_MS = 5 * 60_000;
 const EXCHANGE_TIMEOUT_MS = 10_000;
+const MAX_PRIVATE_KEY_ID_CHARS = 256;
 
 let cache = { token: null, expiresAtMs: 0 };
 let inflight = null;
@@ -37,7 +38,18 @@ function parseServiceAccount(env) {
 	if (!raw) throw authError("no_credentials", 0);
 	try {
 		const parsed = JSON.parse(raw);
-		if (!parsed.client_email || !parsed.private_key) throw new Error("incomplete");
+		const privateKeyId = parsed.private_key_id;
+		if (
+			!parsed.client_email
+			|| !parsed.private_key
+			|| typeof privateKeyId !== "string"
+			|| privateKeyId.trim().length === 0
+			|| privateKeyId.length > MAX_PRIVATE_KEY_ID_CHARS
+		) throw new Error("incomplete");
+		// A service-account document is credential material, not transport
+		// configuration. Never let a poisoned token_uri choose where the signed
+		// assertion is sent or what audience it names.
+		if (parsed.token_uri != null && parsed.token_uri !== TOKEN_URL) throw new Error("token_uri");
 		return parsed;
 	} catch {
 		throw authError("invalid_credentials", 0);
@@ -70,7 +82,7 @@ function b64url(bytes) {
 
 async function importKey(sa) {
 	// Re-import when the secret rotates (fingerprint = key id, never material).
-	const fp = sa.private_key_id ?? sa.client_email;
+	const fp = sa.private_key_id;
 	if (cryptoKey && keyFingerprint === fp) return cryptoKey;
 	cryptoKey = await crypto.subtle.importKey(
 		"pkcs8",
@@ -87,7 +99,7 @@ async function mintToken(env, fetchImpl, now) {
 	const sa = parseServiceAccount(env);
 	const key = await importKey(sa);
 	const iat = Math.floor(now / 1000) - 30; // 30s backdate absorbs clock skew
-	const claims = { iss: sa.client_email, scope: SCOPE, aud: sa.token_uri ?? TOKEN_URL, iat, exp: iat + 3600 };
+	const claims = { iss: sa.client_email, scope: SCOPE, aud: TOKEN_URL, iat, exp: iat + 3600 };
 	const encoder = new TextEncoder();
 	const unsigned = `${b64url(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT", kid: sa.private_key_id })))}.${b64url(encoder.encode(JSON.stringify(claims)))}`;
 	const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(unsigned));
@@ -97,7 +109,7 @@ async function mintToken(env, fetchImpl, now) {
 	const timer = setTimeout(() => controller.abort(), EXCHANGE_TIMEOUT_MS);
 	let res;
 	try {
-		res = await fetchImpl(sa.token_uri ?? TOKEN_URL, {
+		res = await fetchImpl(TOKEN_URL, {
 			method: "POST",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: `grant_type=${encodeURIComponent("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${assertion}`,

@@ -20,12 +20,12 @@
 
 import { KNOWN_PROVIDER_IDS } from "./registry.js";
 import { capabilityOf, SPACE_BOUND_CAPABILITIES, WRITE_CAPABILITIES } from "./capabilities.js";
+import { concreteProviderModel } from "./model_identity.js";
+import { googleModelCard } from "./rate_cards.js";
 
 export const ROUTING_MODES = Object.freeze([
 	"cloudflare_only",
 	"google_only",
-	"cf_primary_google_fallback",
-	"google_primary_cf_fallback",
 	"shadow",
 	"canary",
 ]);
@@ -33,6 +33,20 @@ export const ROUTING_MODES = Object.freeze([
 const GLOBAL_ROW = "__global__";
 const POLICY_TTL_MS = 30_000;
 const POLICY_STALE_GRACE_MS = 30_000;
+
+// Interactive/ad-hoc calls below do not own a client-stable logical-operation
+// record (playground_chat creates a new message id for every HTTP attempt).
+// Until they gain one, admitting a billable non-default provider would make a
+// client retry capable of spending twice. Keep the normal task names for
+// observability, but make non-default routing unrepresentable at both the
+// policy write door and policy read path.
+export const CLOUDFLARE_ONLY_LANES = Object.freeze(new Set([
+	"manual_router",
+	"mcp_title",
+	"rules_category_preview",
+	"playground_preview",
+	"playground_chat",
+]));
 
 let policyCache = { at: 0, snapshot: null };
 
@@ -50,23 +64,75 @@ export function routingMode(env) {
  * Which modes a capability may legally be set to. Enforced at the admin door
  * AND re-checked at read time: an illegal stored mode resolves cloudflare-only.
  *
- *  - Write capabilities never get fallback modes: cross-provider fallback on a
- *    write risks committing a second interpretation. Rerouting writes happens
- *    only at claim time (admission_reroute), never mid-run.
- *  - Space-bound capabilities (embeddings) may only be cloudflare_only or
- *    shadow: a provider whose semantic space differs from the live index must
- *    be unreachable by any automatic decision. google_only becomes legal only
- *    with the embedding-migration campaign's own flag set (not this table).
+ *  - Cross-provider fallback is not a supported runtime mode. It is absent
+ *    from ROUTING_MODES for every lane, and a historical row carrying one of
+ *    the retired mode strings fails closed at the read boundary. Rerouting
+ *    writes happens only at claim time (admission_reroute), never mid-run.
+ *  - Space-bound capabilities (embeddings) are cloudflare_only here. The
+ *    current shadow outbox exists only for extraction, so advertising an
+ *    embedding shadow would be an operator-visible no-op. A future embedding
+ *    migration/experiment needs its own non-committing comparison pipeline
+ *    and flag before any Google embedding route becomes representable.
  */
 export function legalModesFor(lane) {
 	// Policy rows are keyed by LANE (the task string: extract, edges, digest,
 	// rerank, playground_chat, ...) so extraction and the title pass can route
 	// independently; the LEGALITY of a mode comes from the lane's contract
 	// capability (generate_structured, embed_documents, ...).
+	if (CLOUDFLARE_ONLY_LANES.has(lane)) return ["cloudflare_only"];
 	const contract = capabilityOf({ task: lane }) ?? lane;
-	if (SPACE_BOUND_CAPABILITIES.has(contract)) return ["cloudflare_only", "shadow"];
+	if (SPACE_BOUND_CAPABILITIES.has(contract)) return ["cloudflare_only"];
 	if (WRITE_CAPABILITIES.has(contract)) return ["cloudflare_only", "google_only", "shadow", "canary"];
 	return [...ROUTING_MODES];
+}
+
+/** Model columns that are active Google routes for this policy mode. Keep this
+ * in the policy module so the write door and read-side defense use exactly the
+ * same topology. Retired fallback modes are deliberately absent: they are not
+ * canonicalized into something that could later look executable. */
+export function googleModelFieldsForPolicy(policy) {
+	const fields = new Set();
+	switch (String(policy?.mode ?? "")) {
+		case "google_only":
+		case "canary":
+			fields.add("primary_model");
+			break;
+		case "shadow":
+			if (policy?.shadow_provider === "google-vertex") fields.add("shadow_model");
+			break;
+		default:
+			break;
+	}
+	return [...fields];
+}
+
+const GOOGLE_ALLOWLIST_PROBLEM = "Google routes require an explicit non-empty account allowlist";
+
+/** Parse the persisted rollout boundary. Missing, empty, malformed, and
+ * non-string members all fail closed: a Google route is never an implicit
+ * all-account policy. Runtime identity still comes from server-owned meter
+ * lifecycle state, never request metadata. */
+function explicitAccountAllowlist(value) {
+	if (typeof value !== "string" || value === "") return null;
+	try {
+		const list = JSON.parse(value);
+		if (!Array.isArray(list) || list.length === 0) return null;
+		if (list.some((member) => typeof member !== "string" || member.trim() === "")) return null;
+		return list;
+	} catch {
+		return null;
+	}
+}
+
+/** Canonicalize every active Google route through the adapter's own model
+ * resolver before a policy is persisted. This is async because Google remains
+ * a lazy registry entry and is still never imported directly here. */
+export async function canonicalizePolicyModels(lane, policy) {
+	const canonical = { ...policy };
+	for (const field of googleModelFieldsForPolicy(canonical)) {
+		canonical[field] = await concreteProviderModel("google-vertex", lane, canonical[field] ?? null);
+	}
+	return canonical;
 }
 
 export function validatePolicyWrite(capability, policy) {
@@ -78,6 +144,23 @@ export function validatePolicyWrite(capability, policy) {
 	for (const key of ["primary_provider", "fallback_provider", "shadow_provider"]) {
 		const value = policy?.[key];
 		if (value != null && !KNOWN_PROVIDER_IDS.includes(value)) problems.push(`${key} ${value} is not a known provider`);
+	}
+	const googleModelFields = googleModelFieldsForPolicy(policy);
+	if (googleModelFields.length > 0 && !explicitAccountAllowlist(policy?.allowlist_json)) {
+		problems.push(GOOGLE_ALLOWLIST_PROBLEM);
+	}
+	for (const field of googleModelFields) {
+		if (typeof policy?.[field] !== "string" || !policy[field]) {
+			problems.push(`${field} must be a concrete Google model`);
+			continue;
+		}
+		const contract = capabilityOf({ task: capability }) ?? capability;
+		const expectedUnitClass = SPACE_BOUND_CAPABILITIES.has(contract)
+			? "embed_tokens"
+			: contract === "rerank" ? "rank_units" : "gen_tokens";
+		const card = googleModelCard(policy[field]);
+		if (!card) problems.push(`${field} must name an exact immutable rate-carded Google model`);
+		else if (card.unitClass !== expectedUnitClass) problems.push(`${field} is not valid for ${capability}`);
 	}
 	const pct = (name, value) => {
 		if (value == null) return;
@@ -126,15 +209,9 @@ async function stickyBucket(capability, accountUserId) {
 }
 
 function allowlisted(row, accountUserId) {
-	if (row.allowlist_json == null || row.allowlist_json === "") return true;
-	try {
-		const list = JSON.parse(row.allowlist_json);
-		if (!Array.isArray(list)) return false;
-		// Exact, whole-string, case-sensitive account-id match — the repo rule.
-		return accountUserId != null && list.includes(accountUserId);
-	} catch {
-		return false;
-	}
+	const list = explicitAccountAllowlist(row?.allowlist_json);
+	// Exact, whole-string, case-sensitive account-id match — the repo rule.
+	return list != null && accountUserId != null && list.includes(accountUserId);
 }
 
 /**
@@ -154,6 +231,16 @@ export async function resolveRoute(env, capability, { accountUserId = null } = {
 	if (!row || Number(row.disabled) === 1) return CLOUDFLARE_ROUTE;
 	if (!ROUTING_MODES.includes(row.mode) || !legalModesFor(capability).includes(row.mode)) {
 		return { ...CLOUDFLARE_ROUTE, source: "illegal_mode" };
+	}
+	const policyProblems = validatePolicyWrite(capability, row);
+	if (policyProblems.length) return { ...CLOUDFLARE_ROUTE, source: "invalid_policy" };
+	try {
+		const canonical = await canonicalizePolicyModels(capability, row);
+		if (googleModelFieldsForPolicy(row).some((field) => canonical[field] !== row[field])) {
+			return { ...CLOUDFLARE_ROUTE, source: "invalid_policy" };
+		}
+	} catch {
+		return { ...CLOUDFLARE_ROUTE, source: "invalid_policy" };
 	}
 
 	const provider = (id) => (id && KNOWN_PROVIDER_IDS.includes(id) && !snap.disabledProviders.has(id) ? id : null);
@@ -198,15 +285,6 @@ export async function resolveRoute(env, capability, { accountUserId = null } = {
 			return target
 				? { provider: target, model: row.primary_model ?? null, mode: row.mode, source: "policy", version: row.version ?? null, shadow: null, fallback: null }
 				: route("workers-ai");
-		}
-		case "cf_primary_google_fallback":
-			return route("workers-ai", { fallback: provider("google-vertex") ? { provider: "google-vertex", model: row.fallback_model ?? null } : null });
-		case "google_primary_cf_fallback": {
-			if (!allowlisted(row, accountUserId)) return route("workers-ai", { source: "not_allowlisted" });
-			const target = provider("google-vertex");
-			return target
-				? { provider: target, model: row.primary_model ?? null, mode: row.mode, source: "policy", version: row.version ?? null, shadow: null, fallback: { provider: "workers-ai", model: row.fallback_model ?? null } }
-				: route("workers-ai", { source: "provider_disabled" });
 		}
 		default:
 			return CLOUDFLARE_ROUTE;

@@ -11,8 +11,11 @@ import {
 } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import worker from "../src/index.js";
+import { buildPin, withAiPin } from "../src/ai/pin.js";
+import { resolveProvider } from "../src/ai/registry.js";
 import { createMemoryJob, settleMemoryJobs } from "../src/lib/db.js";
 import { saveConversation } from "../src/pipeline/manual_collect.js";
+import { parseCollectIntent, saveMemoryPage } from "../src/pipeline/pages.js";
 import { markMcpEnrichmentFailed, stageMcpConversation } from "../src/pipeline/mcp_engine.js";
 import {
 	hashText,
@@ -951,6 +954,114 @@ describe("legacy manual-collect idempotency", () => {
 		expect(artifacts.runs).toHaveLength(1);
 		expect(artifacts.receipts).toHaveLength(1);
 		expect(artifacts.jobs).toHaveLength(1);
+	});
+
+	it("never starts or persists a Google digest accepted at a deletion barrier", async () => {
+		const userId = `manual-delete-admission-${crypto.randomUUID()}`;
+		const idempotencyKey = `manual-delete-admission-key-${crypto.randomUUID()}`;
+		const conversationId = `manual-delete-admission-conversation-${crypto.randomUUID()}`;
+		const messages = messagesFor();
+		const normalized = await normalizeSourcePacket(userId, {
+			type: "message_batch",
+			sourceMode: "manual_collect",
+			messages,
+			conversationId,
+			idempotencyKey,
+		});
+		const accepted = await storeSourcePacket(env, normalized.packet);
+		const acceptedAt = Number(accepted.received_at ?? accepted.created_at);
+		expect(acceptedAt).toBeGreaterThan(0);
+		const barrierAt = acceptedAt;
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, 'stage4-manual-admission-race')
+			 ON CONFLICT(user_id) DO UPDATE SET barrier_at=excluded.barrier_at, created_at=excluded.created_at`,
+		).bind(userId, barrierAt, barrierAt).run();
+		// Force the legacy Date.now() substitution to land after the barrier. The
+		// durable source acceptance remains before it, which is the race under test.
+		while (Date.now() <= barrierAt) {
+			await new Promise((resolve) => setTimeout(resolve, 2));
+		}
+
+		const googleEnv = Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
+			AI: { run: async () => { throw new Error("unexpected Workers AI invocation"); } },
+			AI_ROUTING: "on",
+			GCP_SERVICE_ACCOUNT: "{}",
+			GCP_PROJECT_ID: "manual-admission-spec",
+			GOOGLE_DAILY_GEN_TOKENS: "10000000",
+			GOOGLE_MONTHLY_COST_MICROS: "1000000000",
+		});
+		const provider = await resolveProvider("google-vertex");
+		const originalInvoke = provider.invoke;
+		let providerInvocations = 0;
+		provider.invoke = async () => {
+			providerInvocations += 1;
+			return {
+				response: "Manual Atlas uses a project-qualified cache key.",
+				usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 },
+			};
+		};
+		const pin = buildPin({
+			routes: { digest: { provider: "google-vertex", model: "gemini-2.5-flash" } },
+		});
+
+		try {
+			const result = await withAiPin(pin, () => saveConversation(googleEnv, null, userId, messages, {
+				conversationId,
+				idempotencyKey,
+			}));
+			expect(result).toMatchObject({ cancelled: true, processing: false });
+			expect(providerInvocations).toBe(0);
+			const reservation = await env.DB.prepare(
+				`SELECT status, memory_user_id, accepted_at FROM ai_provider_reservations
+				 WHERE memory_user_id = ? AND scope = 'digest' ORDER BY created_at DESC LIMIT 1`,
+			).bind(userId).first();
+			expect(reservation).toMatchObject({
+				status: "released",
+				memory_user_id: userId,
+				accepted_at: acceptedAt,
+			});
+		} finally {
+			provider.invoke = originalInvoke;
+		}
+	});
+
+	it("fences a manual page commit at the exact deletion millisecond", async () => {
+		const userId = `manual-page-delete-tie-${crypto.randomUUID()}`;
+		const idempotencyKey = `manual-page-delete-tie-key-${crypto.randomUUID()}`;
+		const conversationId = `manual-page-delete-tie-conversation-${crypto.randomUUID()}`;
+		const messages = messagesFor();
+		const normalized = await normalizeSourcePacket(userId, {
+			type: "message_batch",
+			sourceMode: "manual_collect",
+			messages,
+			conversationId,
+			idempotencyKey,
+		});
+		const sourcePacket = await storeSourcePacket(env, normalized.packet);
+		const acceptedAt = Number(sourcePacket.received_at ?? sourcePacket.created_at);
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, 'stage4-manual-page-tie')
+			 ON CONFLICT(user_id) DO UPDATE SET barrier_at=excluded.barrier_at, created_at=excluded.created_at`,
+		).bind(userId, acceptedAt, acceptedAt).run();
+
+		const result = await saveMemoryPage(env, userId, {
+			digest: "Manual Atlas uses a project-qualified cache key.",
+			messages: normalized.messages,
+			intent: parseCollectIntent(normalized.messages, {}),
+			received: 1,
+			keptLines: 1,
+			conversationId,
+			sourcePacket,
+		});
+		expect(result).toMatchObject({ cancelled: true, processing: false });
+		expect(await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM memory_pages WHERE user_id = ?",
+		).bind(userId).first()).toEqual({ n: 0 });
+		expect(await env.DB.prepare(
+			"SELECT status FROM extraction_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+		).bind(userId).first()).toEqual({ status: "cancelled_by_delete" });
 	});
 
 	it("serializes concurrent exact calls so the loser creates no second run, page, job, or receipt", async () => {

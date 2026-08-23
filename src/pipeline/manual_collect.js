@@ -227,8 +227,21 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 	};
 	const received = normalized.messages.length;
 	const intent = parseCollectIntent(normalized.messages, opts);
+	const digestAcceptedAt = Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? NaN);
 
-	const { digest, keptLines } = await withFlushedAiMeter(env, "digest", { userId, scopeId: source.source_packet_id }, () =>
+	const { digest, keptLines } = await withFlushedAiMeter(env, "digest", {
+		userId,
+		scopeId: source.source_packet_id,
+		// Provider admission must inherit the durable source acceptance boundary.
+		// Substituting meter-creation time would let content accepted before a
+		// deletion barrier appear new when its digest starts later.
+		lifecycle: {
+			memoryUserId: userId,
+			accountUserId: sourcePacket?.account_user_id ?? null,
+			managedProjectId: sourcePacket?.managed_project_id ?? null,
+			acceptedAt: digestAcceptedAt,
+		},
+	}, () =>
 		digestConversation(env, config, normalized.messages, opts));
 	const filteredDigest = filterDigestByTopic(digest, intent);
 	const filteredLines = filteredDigest ? filteredDigest.split("\n").filter((line) => line.trim()).length : 0;
@@ -237,12 +250,11 @@ export async function saveConversation(env, ctx, userId, rawMessages, opts = {})
 	// it ran is invisible to any check made before it. Re-check here so a
 	// superseded save cancels (job failed, nothing durable, no rescue) instead
 	// of finalizing bookkeeping and content past the user's deletion.
-	const digestAcceptedAt = Number(sourcePacket?.received_at ?? sourcePacket?.created_at ?? NaN);
 	if (Number.isFinite(digestAcceptedAt) && digestAcceptedAt > 0) {
 		const barrier = await env.DB.prepare(
 			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
 		).bind(userId).first();
-		if (barrier && Number(barrier.barrier_at) > digestAcceptedAt) {
+		if (barrier && Number(barrier.barrier_at) >= digestAcceptedAt) {
 			const receipt = emptyReceipt(
 				"cancelled_by_delete",
 				"a confirmed delete erased this scope while the save was processing; the save was cancelled",

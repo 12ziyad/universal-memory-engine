@@ -622,7 +622,7 @@ export async function saveMemoryPage(env, userId, { digest, messages, intent, re
 		const batched = await env.DB.batch([
 			env.DB.prepare(
 				`INSERT INTO fence_guard (violation)
-				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
+				 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ?)`,
 			).bind(userId, pageAcceptedAt),
 			statement,
 		]);

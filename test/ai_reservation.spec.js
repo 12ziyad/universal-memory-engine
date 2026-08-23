@@ -12,18 +12,47 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	providerAdmission,
+	providerAdmission as providerAdmissionRaw,
+	markReservationInvoking,
 	reapExpiredReservations,
 	releaseReservation,
-	reserveSpend,
+	reserveSpend as reserveSpendRaw,
 	resetProviderBudgetForTests,
 	settleReservation,
 } from "../src/ai/provider_budget.js";
 
 const GEN_INPUTS = { messages: [{ role: "user", content: "hello there" }], max_tokens: 100 };
+const TEST_ACCEPTED_AT = 1_800_000_000_000;
+
+function testLifecycle(reservationId, acceptedAt = TEST_ACCEPTED_AT) {
+	return {
+		memoryUserId: "provider-test-memory",
+		acceptedAt,
+		scope: "provider_test",
+		scopeId: reservationId,
+	};
+}
+
+function reserveSpend(testEnv, input) {
+	return reserveSpendRaw(testEnv, {
+		...input,
+		lifecycle: input.lifecycle ?? testLifecycle(input.reservationId, input.now ?? TEST_ACCEPTED_AT),
+	});
+}
+
+function providerAdmission(testEnv, provider, capability, call = {}, now = Date.now()) {
+	const reservationId = call.meta?.reservationId;
+	return providerAdmissionRaw(testEnv, provider, capability, {
+		...call,
+		...(provider === "google-vertex" && reservationId && !call.lifecycle
+			? { lifecycle: testLifecycle(reservationId, now) }
+			: {}),
+	}, now);
+}
 
 function budgetEnv(overrides = {}) {
 	return Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
+		GCP_PROJECT_ID: "test-project",
 		GOOGLE_DAILY_GEN_TOKENS: "50000",
 		GOOGLE_DAILY_EMBED_TOKENS: "50000",
 		GOOGLE_DAILY_RANK_UNITS: "500",
@@ -50,8 +79,9 @@ describe("fenced reserve", () => {
 
 		// Retry of the SAME operation: row exists, fresh attempt token loses,
 		// totals must not move again.
-		const retry = await reserveSpend(budgetEnv(), { capability: "generate_structured", inputs: GEN_INPUTS, reservationId: rid });
-		expect(retry).not.toBe(null);
+		await expect(reserveSpend(budgetEnv(), {
+			capability: "generate_structured", inputs: GEN_INPUTS, reservationId: rid,
+		})).rejects.toMatchObject({ code: "operation_in_progress" });
 		const again = await totals("gen_tokens");
 		expect(Number(again.reserved_units)).toBe(Number(after.reserved_units));
 	});
@@ -94,13 +124,14 @@ describe("settle / release / reap", () => {
 			capability: "generate_structured", inputs: GEN_INPUTS, reservationId: crypto.randomUUID(),
 		});
 		const reservedBefore = Number((await totals("gen_tokens")).reserved_units);
-		await settleReservation(env, reservation, { actualUnits: 42, actualCostMicros: 10 });
+		expect((await markReservationInvoking(env, reservation)).applied).toBe(true);
+		await settleReservation(env, reservation, { actualUnits: 42, inputTokens: 20, outputTokens: 22 });
 		const after = await totals("gen_tokens");
 		expect(Number(after.reserved_units)).toBe(reservedBefore - reservation.estimatedUnits);
 		expect(Number(after.used_units)).toBeGreaterThanOrEqual(42);
 
 		// Idempotent: a second settle no-ops on the CAS.
-		await settleReservation(env, reservation, { actualUnits: 42, actualCostMicros: 10 });
+		await settleReservation(env, reservation, { actualUnits: 42, inputTokens: 20, outputTokens: 22 });
 		const again = await totals("gen_tokens");
 		expect(Number(again.used_units)).toBe(Number(after.used_units));
 		expect(Number(again.reserved_units)).toBe(Number(after.reserved_units));
@@ -133,7 +164,16 @@ describe("admission", () => {
 			"INSERT INTO ai_provider_overrides (provider, disabled, updated_at) VALUES ('google-vertex', 1, ?) ON CONFLICT(provider) DO UPDATE SET disabled=1",
 		).bind(Date.now()).run();
 		resetProviderBudgetForTests();
-		const refused = await providerAdmission(budgetEnv({ GCP_SERVICE_ACCOUNT: "{}" }), "google-vertex", "generate_structured", { inputs: GEN_INPUTS });
+		const refused = await providerAdmission(
+			budgetEnv({ GCP_SERVICE_ACCOUNT: "{}" }),
+			"google-vertex",
+			"generate_structured",
+			{
+				model: "gemini-2.5-flash",
+				inputs: GEN_INPUTS,
+				meta: { reservationId: crypto.randomUUID() },
+			},
+		);
 		expect(refused.allowed).toBe(false);
 		expect(refused.reason).toBe("disabled");
 		await env.DB.prepare("DELETE FROM ai_provider_overrides WHERE provider='google-vertex'").run();

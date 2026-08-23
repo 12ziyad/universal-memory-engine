@@ -12,6 +12,10 @@ import { newId } from "./ids.js";
 import { fallbackSummary, refreshMemoryProfile } from "../pipeline/pass2.js";
 import { manualPageVectorNamespace } from "../pipeline/manual_search_profiles.js";
 import { userAuthoredSummaryFence } from "./memory_versions.js";
+import {
+	assertNoActiveProviderInvocation,
+	scrubProviderReservationLifecycle,
+} from "../ai/provider_budget.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_DAYS = 1;
@@ -545,8 +549,35 @@ const TARGETS = Object.freeze({
 			  OR COALESCE(t.created_edges_json, '[]') != '[]' OR COALESCE(t.created_candidates_json, '[]') != '[]'
 			  OR COALESCE(t.updated_objects_json, '[]') != '[]' OR COALESCE(t.reinforced_objects_json, '[]') != '[]'
 			  OR COALESCE(t.skipped_objects_json, '[]') != '[]'
+			) AND (
+			  CASE WHEN json_valid(t.pin_json) THEN CASE
+			    WHEN json_extract(t.pin_json, '$.shadow.sampled') = 1
+			     AND json_type(t.pin_json, '$.shadow.provider') = 'text'
+			    THEN 1 ELSE 0 END ELSE 0 END = 0
+			  OR NOT EXISTS (
+			    SELECT 1 FROM ai_shadow_jobs sj
+			     WHERE sj.primary_run_id = t.id
+			  )
+			  OR EXISTS (
+			    SELECT 1 FROM ai_shadow_jobs sj
+			     WHERE sj.primary_run_id = t.id AND sj.terminal_at IS NOT NULL
+			       AND sj.status IN (
+			         'done', 'failed', 'cancelled_erased', 'cancelled_removed',
+			         'cancelled_lifecycle', 'dead_letter'
+			       )
+			  )
 			)`,
 			action: "scrub_extraction_run",
+		}),
+		// Terminal shadow observations follow the project's own operational
+		// retention policy. Age them from completion, never acceptance; live jobs
+		// are not retention-eligible regardless of how old their source run is.
+		ordinaryTarget("ai_shadow_jobs", "ai_shadow_jobs", {
+			ageColumn: "terminal_at",
+			where: `t.status IN (
+			  'done', 'failed', 'cancelled_erased', 'cancelled_removed',
+			  'cancelled_lifecycle', 'dead_letter'
+			)`,
 		}),
 		ordinaryTarget("staged_memories", "staged_memories", { where: "t.settled_at IS NOT NULL" }),
 		ordinaryTarget("receipts", "receipts", {
@@ -1358,16 +1389,61 @@ function targetMutationStatements(env, target, scope, rows, now) {
 		).bind(now, ...ids, ...scopeBinds(scope))];
 	}
 	if (target.action === "scrub_extraction_run") {
-		return [env.DB.prepare(
+		// A sampled run can be older than the reconciliation lookback while its
+		// outbox row is missing (for example, data created before the outbox was
+		// introduced). Materialize a content-free terminal marker in the same D1
+		// transaction that removes the pin. This makes retention convergent without
+		// allowing a later reconciliation pass to resurrect provider work.
+		const shadowRemovalMarkers = rows.map((row) => env.DB.prepare(
+			`INSERT OR IGNORE INTO ai_shadow_jobs
+			 (id, user_id, account_user_id, primary_run_id, provider, model,
+			  prompt_version, status, attempts, lease_until, error_class,
+			  created_at, updated_at, terminal_at)
+			 SELECT ?, er.user_id, NULL, er.id,
+			        json_extract(er.pin_json, '$.shadow.provider'),
+			        CASE WHEN json_type(er.pin_json, '$.shadow.model') = 'text'
+			             THEN json_extract(er.pin_json, '$.shadow.model') ELSE NULL END,
+			        NULL, 'cancelled_removed', 0, NULL, 'retention_expired',
+			        er.created_at, ?, ?
+			   FROM extraction_runs er
+			  WHERE er.id = ? AND ${userScope("er")}
+			    AND json_valid(er.pin_json)
+			    AND json_extract(er.pin_json, '$.shadow.sampled') = 1
+			    AND json_type(er.pin_json, '$.shadow.provider') = 'text'
+			    AND NOT EXISTS (
+			      SELECT 1 FROM ai_shadow_jobs sj WHERE sj.primary_run_id = er.id
+			    )`,
+		).bind(newId("shadow_retention"), now, now, row.id, ...scopeBinds(scope)));
+		return [
+			...shadowRemovalMarkers,
+			env.DB.prepare(
 			`UPDATE extraction_runs SET
 			   topic_filter = NULL, error = NULL, scope_json = '{}',
+			   pin_json = CASE WHEN json_valid(pin_json)
+			                   THEN json_remove(pin_json, '$.shadow') ELSE NULL END,
 			   created_pages_json = '[]', created_nodes_json = '[]', created_slices_json = '[]',
 			   created_events_json = '[]', created_edges_json = '[]', created_candidates_json = '[]',
 			   updated_objects_json = '[]', reinforced_objects_json = '[]', skipped_objects_json = '[]',
 			   updated_at = ?
 			 WHERE id IN (${marks}) AND ${userScope("extraction_runs")}
-			   AND (status IS NULL OR status NOT IN ('running', 'committing'))`,
-		).bind(now, ...ids, ...scopeBinds(scope))];
+			   AND (status IS NULL OR status NOT IN ('running', 'committing'))
+			   AND (
+			     CASE WHEN json_valid(pin_json) THEN CASE
+			       WHEN json_extract(pin_json, '$.shadow.sampled') = 1
+			        AND json_type(pin_json, '$.shadow.provider') = 'text'
+			       THEN 1 ELSE 0 END ELSE 0 END = 0
+			     OR EXISTS (
+			       SELECT 1 FROM ai_shadow_jobs sj
+			        WHERE sj.primary_run_id = extraction_runs.id
+			          AND sj.terminal_at IS NOT NULL
+			          AND sj.status IN (
+			            'done', 'failed', 'cancelled_erased', 'cancelled_removed',
+			            'cancelled_lifecycle', 'dead_letter'
+			          )
+			     )
+			   )`,
+		).bind(now, ...ids, ...scopeBinds(scope)),
+		];
 	}
 	if (target.action === "scrub_receipt") {
 		return [env.DB.prepare(
@@ -1568,6 +1644,17 @@ export async function processRetentionRun(env, input = {}) {
 	}
 
 	try {
+		// Retention has installed its durable cutoff fence before this point.
+		// If an invocation won admission before that fence, preserve every byte
+		// until it has settled; a retry will resume from the same checkpoint.
+		await assertNoActiveProviderInvocation(env, {
+			managedProjectId: run.project_id,
+			acceptedThrough: Number(run.cutoff_at),
+		});
+		await scrubProviderReservationLifecycle(env, {
+			managedProjectId: run.project_id,
+			acceptedThrough: Number(run.cutoff_at),
+		});
 		const project = await env.DB.prepare(
 			"SELECT organization_id FROM managed_projects WHERE id = ? LIMIT 1",
 		).bind(run.project_id).first();
@@ -1652,7 +1739,9 @@ export async function processRetentionRun(env, input = {}) {
 		}
 		const retry = await transitionRunWithAudit(env, run, "retry", {
 			now,
-			errorCode: "retention_batch_failed",
+			errorCode: error?.code === "provider_invocation_in_flight"
+				? "provider_invocation_in_flight"
+				: "retention_batch_failed",
 		});
 		console.warn("retention batch failed:", error?.message ?? error);
 		return { ...publicRun(retry), deleted_this_batch: 0 };

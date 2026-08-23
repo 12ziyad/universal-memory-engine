@@ -7,6 +7,11 @@ export default defineConfig({
 		environment: "node",
 		env: process.platform === "win32" ? {
 			ITSUKI_SYSTEM_POWERSHELL: `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+			// npm is often launched from PowerShell 7, whose PSModulePath contains
+			// edition-specific modules that Windows PowerShell 5 cannot import. The
+			// host integration tests intentionally use the system shell, so let that
+			// shell rebuild its own default module path instead of inheriting pwsh's.
+			PSModulePath: "",
 		} : {},
 		// Windows integration specs launch the real ACL verifier. Bounding file
 		// concurrency keeps those host-budget tests representative instead of
@@ -16,6 +21,7 @@ export default defineConfig({
 			"test/ai_architecture_gate.spec.js",
 			"test/ai_credential_scan.spec.js",
 			"test/ai_golden_forwarding.spec.js",
+			"test/ai_migration_upgrade_unit.spec.js",
 			"test/google_adapter.spec.js",
 			"test/codex_doctor.spec.js",
 			"test/codex_hook_manifest.spec.js",

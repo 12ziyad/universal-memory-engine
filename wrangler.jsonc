@@ -174,15 +174,17 @@
 		// the flow must not be discoverable. "on": the full flow. Rollback is
 		// the flag flip; the previous Worker version is the hard rollback.
 		"MCP_OAUTH": "on",
-		// AI provider routing master gate. "off" (default): the policy engine
-		// is never consulted — zero D1 reads, dispatch hardwired to Workers AI,
-		// provably byte-identical to the pre-layer behavior (golden-forwarding
-		// spec). "track": policy read + recorded, execution still Workers AI.
-		// "on": per-lane policy (ai_routing_policies) takes effect. Emergency
-		// levers, fastest first: admin emergency-disable (D1, ≤60s, no deploy)
-		// → AI_ROUTING_KILL="1" (deploy) → previous Worker version. The Google
-		// adapter additionally requires the GCP_SERVICE_ACCOUNT secret and
-		// GCP_PROJECT_ID var to exist at all.
+		// AI provider routing master gate. "off" (default): ordinary UNPINNED
+		// work never consults policy — zero routing D1 reads and Workers AI only.
+		// It deliberately does not rewrite an already-durable provider pin or
+		// suppress an explicit admin health probe. "track": policy read + recorded,
+		// execution still Workers AI. "on": per-lane policy takes effect, but every
+		// Google route still requires a syntactically valid, non-empty account
+		// allowlist and exact server-owned account membership. Emergency levers:
+		// admin emergency-disable stops new policy admission (D1, ≤60s); only
+		// AI_ROUTING_KILL="1" hard-stops non-default admission for pins and health
+		// probes too. The previous Worker version is the final code rollback. Google
+		// also requires the GCP_SERVICE_ACCOUNT secret and GCP_PROJECT_ID var.
 		"AI_ROUTING": "off"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in

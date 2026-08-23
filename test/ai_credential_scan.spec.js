@@ -33,6 +33,28 @@ async function walk(dir, out) {
 }
 
 describe("credential scan", () => {
+	it("quarantines the Workers test pool from developer and Google credentials", async () => {
+		const config = JSON.parse(await readFile(`${root}test/wrangler.pool.jsonc`, "utf8"));
+		const poolSource = await readFile(`${root}vitest.config.mjs`, "utf8");
+		const testDirectoryEntries = await readdir(`${root}test`);
+		expect(config.secrets).toEqual({ required: [] });
+		expect(config.vars).toMatchObject({
+			AI_ROUTING: "off",
+			AI_ROUTING_KILL: "0",
+		});
+		for (const binding of [
+			"API_KEY",
+			"GOOGLE_CLIENT_ID",
+			"GOOGLE_CLIENT_SECRET",
+			"GCP_SERVICE_ACCOUNT",
+			"GCP_PROJECT_ID",
+		]) expect(config.vars).not.toHaveProperty(binding);
+		expect(poolSource).toContain('configPath: "./test/wrangler.pool.jsonc"');
+		expect(poolSource).toContain('API_KEY: "itsuki_test_only_not_a_secret"');
+		expect(poolSource).toContain('GOOGLE_CLIENT_SECRET: "test-client-secret-not-a-secret"');
+		expect(testDirectoryEntries.filter((name) => /^\.(?:dev\.vars|env)(?:\.|$)/.test(name))).toEqual([]);
+	});
+
 	it("no private-key block exists anywhere in the tree", async () => {
 		const files = [];
 		for (const dir of SCAN_DIRS) await walk(dir, files);

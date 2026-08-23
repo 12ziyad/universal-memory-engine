@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 
 import worker from "../src";
 import { bulkDeleteBySource } from "../src/pipeline/cleanup.js";
+import { runExtraction } from "../src/pipeline/extract.js";
 
 const headers = { "x-api-key": env.API_KEY, "content-type": "application/json" };
 
@@ -103,6 +104,56 @@ async function acceptSave(userId, tag, { key } = {}) {
 }
 
 describe("SRV-08: erasure vs in-flight extraction", () => {
+	it("fences an equal-millisecond erasure before primary inference", async () => {
+		const userId = `srv08-equal-preflight-${crypto.randomUUID()}`;
+		const acceptedAt = Date.now() - 10_000;
+		await env.DB.prepare(
+			"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv08-equal-preflight')",
+		).bind(userId, acceptedAt, acceptedAt).run();
+		let invocations = 0;
+
+		const result = await runExtraction(env, userId, [
+			{ id: "m-equal-preflight", role: "user", content: "The equal-time beacon uses Consul." },
+		], [], {
+			meta: { accepted_at: acceptedAt },
+			llmResponse: async () => {
+				invocations += 1;
+				return extractionFor("equal-time");
+			},
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+
+		expect(invocations, "covered work reached primary inference").toBe(0);
+		expect(result.outcome).toBe("cancelled_by_delete");
+		expect((await liveCounts(userId)).total).toBe(0);
+	});
+
+	it("fences an equal-millisecond erasure after primary inference on the no-write path", async () => {
+		const userId = `srv08-equal-postmodel-${crypto.randomUUID()}`;
+		const acceptedAt = Date.now() - 10_000;
+		let invocations = 0;
+
+		const result = await runExtraction(env, userId, [
+			{ id: "m-equal-postmodel", role: "user", content: "A deliberately non-durable equal-time note." },
+		], [], {
+			meta: { accepted_at: acceptedAt },
+			llmResponse: async () => {
+				invocations += 1;
+				await env.DB.prepare(
+					"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv08-equal-postmodel')",
+				).bind(userId, acceptedAt, acceptedAt).run();
+				return { objects: [], notes: "" };
+			},
+			edgeResponse: { edges: [] },
+			reflexionResponse: { entities: [], facts: [], edges: [] },
+		});
+
+		expect(invocations).toBe(1);
+		expect(result.outcome).toBe("cancelled_by_delete");
+		expect((await liveCounts(userId)).total).toBe(0);
+	});
+
 	it("A/B/D/E/F/G: a delete during the model call leaves nothing live, and the preview never lies", async () => {
 		const userId = `srv08-race-${crypto.randomUUID()}`;
 		const tag = "raceway";
@@ -344,6 +395,31 @@ describe("SRV-08: erasure vs in-flight extraction", () => {
 		).rejects.toThrow(/fence_guard|violation IS NULL/i);
 		const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM nodes WHERE user_id = ?").bind(userId).first();
 		expect(Number(row?.n ?? -1), "the fenced interactive write must leave no rows").toBe(0);
+	});
+
+	it("SRV-09 mechanism: an interactive write accepted in the deletion millisecond is refused atomically", async () => {
+		const { writeApproved } = await import("../src/pipeline/write.js");
+		const { getConfig } = await import("../src/config.js");
+		const userId = `srv09-equal-fence-${crypto.randomUUID()}`;
+		const acceptedAt = Date.now();
+		await env.DB.prepare(
+			"INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by) VALUES (?, ?, ?, 'srv09-equal-test')",
+		).bind(userId, acceptedAt, acceptedAt).run();
+
+		const nodeId = `node_${crypto.randomUUID()}`;
+		const plan = {
+			newNodes: [{
+				id: nodeId, user_id: userId, label: "Equal-time candidate", canonical_label: "equal-time candidate",
+				category: "other", role: null, state: "active", summary: null,
+				created_at: acceptedAt, updated_at: acceptedAt, last_seen_at: acceptedAt,
+				mention_count: 1, session_count: 1, heat_score: 1, cluster: null,
+			}],
+			affectedNodeIds: new Set([nodeId]),
+		};
+		await expect(
+			writeApproved(env, getConfig(env), userId, plan, { acceptedAt }),
+		).rejects.toThrow(/fence_guard|violation IS NULL/i);
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?").bind(nodeId).first()).toBeNull();
 	});
 
 	it("SRV-09: a promotion that read its candidate before the erasure cannot resurrect it", async () => {

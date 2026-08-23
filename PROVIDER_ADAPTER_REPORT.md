@@ -1,5 +1,13 @@
 # Provider-Adapter Campaign — Delivery Report
 
+> **SUPERSEDED (2026-08-22):** This historical delivery note describes the
+> first dark adapter build and contains stale deployment, migration, model, and
+> test-count statements. It is not an activation or production-readiness
+> authority. Use `GOOGLE_PROVIDER_HARDENING_REPORT.md` and
+> `GOOGLE_PROVIDER_RUNBOOK.md` for the current audited status. Live Google
+> routing remains **HOLD** until the runbook's controlled IAM/model/quota/
+> billing drill is completed.
+
 **Date:** 2026-08-22 · **Scope:** Phases 0A, 0B, 1, 2 of the approved rev-3 architecture plan — built in one pass, deployed dark behind `AI_ROUTING="off"`.
 
 Google Vertex AI now exists as a fully detachable provider beside Cloudflare Workers AI. **Nothing routes to it.** No Google credentials exist, no GCP project exists, and production behavior is provably unchanged except one documented accounting fix. Turning Google on is a config decision (secret + var + policy row) — never a build.
@@ -17,7 +25,7 @@ Google Vertex AI now exists as a fully detachable provider beside Cloudflare Wor
 - `src/ai/`: dispatch, registry, policy, pin, capabilities. `runAi` keeps its exact signature; `env.AI.run` now exists in exactly ONE file ([cloudflare.js](src/ai/providers/cloudflare.js)), byte-for-byte the two lines that lived in ai_meter.js, options-arity branch included.
 - **Proof, not claim:** `test/ai_golden_forwarding.spec.js` replays one flow through every input shape and structured-output mechanism against fixtures captured BEFORE the refactor ([ai_forwarding_golden.json](eval/fixtures/ai_forwarding_golden.json)) — the binding receives identical bytes, both lanes green.
 - **Deterministic pins** (migration **0053**): `extraction_runs.provider/model/pin_json` + `semantic_atom_capture_runs.provider`. Policy is resolved once at claim time inside the existing inference fence ([db.js](src/lib/db.js) `claimExtractionRun`); every re-claim executes the ROW's pin (row-wins); the throw is reserved for a forced contradiction. **A run id never changes provider.** The atomic lane's pre-existing gap — model recorded but the constant invoked — is closed: reclaims replay the row's model.
-- **Routing policy**: lane-keyed D1 table + audit, read through a 30s isolate cache with stale grace; any read failure resolves cloudflare-only. Master gate `AI_ROUTING` var (off/track/on, default **off** — zero D1 reads) + `AI_ROUTING_KILL`. Legality matrix enforced at the admin door AND at read time: write lanes can never have fallback modes; embedding lanes can never reach a foreign space.
+- **Routing policy**: lane-keyed D1 table + audit, read through a 30s isolate cache with stale grace; any read failure resolves cloudflare-only. Master gate `AI_ROUTING` var (off/track/on, default **off** — zero D1 reads) + `AI_ROUTING_KILL`. The routing vocabulary is `cloudflare_only`, `google_only`, `shadow`, and `canary`, with a lane-specific legality matrix. Cross-provider fallback modes are not implemented, are rejected for every lane at the admin door, and historical rows using their retired values resolve Cloudflare-only at read time. Their strings remain only in the removal census so old rows cannot hide Google dependencies. Embedding lanes are Cloudflare-only: the current comparison outbox exists only for extraction, so the API does not falsely advertise a metadata-only embedding shadow mode.
 - **Architecture census** ([ai_call_census.js](src/lib/ai_call_census.js) + gate spec): binding invocation only in the CF provider; Google AI hostnames only under `src/ai/providers/google/`; providers imported only via the registry; the direct-`runAi`-importer set pinned.
 
 ### Phase 1 — Google adapter + hard cost control (dead code without credentials)

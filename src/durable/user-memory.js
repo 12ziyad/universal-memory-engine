@@ -2586,7 +2586,9 @@ export class UserMemory extends DurableObject {
 		}
 		return {
 			kind: "extract",
-			outcome: terminal.action === "failed" ? "failed" : terminal.outcome,
+			outcome: terminal.action === "failed"
+				? (["interrupted_unknown", "provider_terminal"].includes(terminal.outcome) ? terminal.outcome : "failed")
+				: terminal.outcome,
 			receipt: result?.receipt ?? null,
 			summary: result?.summary ?? null,
 			jobIds: this.#extractJobIds(entry),
@@ -2742,8 +2744,10 @@ export class UserMemory extends DurableObject {
 			// metadata; Stage 5 snapshots context per job rather than rewriting it here.
 		}
 
-		if (result.outcome === "interrupted_unknown") {
-			const error = String(result.error ?? "inference outcome is unknown after an interrupted attempt").slice(0, 400);
+		if (["interrupted_unknown", "provider_terminal"].includes(result.outcome)) {
+			const error = String(result.error ?? (result.outcome === "provider_terminal"
+				? "provider refused a safe retry"
+				: "inference outcome is unknown after an interrupted attempt")).slice(0, 400);
 			const pending = await this.#persistExtractSettlement(userId, key, entry, result, {
 				action: "failed",
 				processedIds,

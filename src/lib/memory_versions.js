@@ -23,6 +23,7 @@
 
 import { CATEGORIES, IMPORTANCE, SLICE_KINDS, getConfig } from "../config.js";
 import { refreshManualSearchProfiles } from "../pipeline/manual_search_profiles.js";
+import { providerOperationId } from "./ai_meter.js";
 import { capabilityGuardStatement } from "./organizations.js";
 import { scopeLiteralsSatisfying } from "./scopes.js";
 import { embed } from "./embeddings.js";
@@ -52,6 +53,28 @@ const HISTORY_LIMIT_DEFAULT = 20;
 const HISTORY_LIMIT_MAX = 50;
 const RESULT_JSON_CAP = 4_000;
 const PROJECTION_RETRY_MAX = 3;
+
+/** Content-free durable scope for one projection of one canonical revision. */
+export function memoryProjectionOperationScopeId(userId, kind, id, revision, projection) {
+	return JSON.stringify([
+		"memory_projection_v1",
+		String(userId ?? ""),
+		String(kind ?? ""),
+		String(id ?? ""),
+		Math.max(1, Math.floor(Number(revision) || 1)),
+		String(projection ?? ""),
+	]);
+}
+
+/** Stable reservation identity for the node-vector inference in that scope. */
+export async function memoryVectorReservationId(userId, kind, id, revision) {
+	return providerOperationId({
+		scope: "memory_vector_projection",
+		scopeId: memoryProjectionOperationScopeId(userId, kind, id, revision, "vector"),
+		task: "embed",
+		ordinal: 0,
+	});
+}
 
 /** Editable fields per kind — the frozen support matrix. */
 export const EDITABLE_FIELDS = Object.freeze({
@@ -1020,7 +1043,11 @@ export async function runProjections(env, userId, kind, id, { attempts = PROJECT
 		const nodeIds = kind === "node" ? [id] : (kind === "slice" || kind === "event") && head.node_id ? [head.node_id] : [];
 		const pageIds = kind === "page" ? [id] : [];
 		try {
-			const refreshed = await refreshManualSearchProfiles(env, config, userId, { nodeIds, pageIds });
+			const refreshed = await refreshManualSearchProfiles(env, config, userId, {
+				nodeIds,
+				pageIds,
+				operationScopeId: memoryProjectionOperationScopeId(userId, kind, id, revision, "search"),
+			});
 			if (refreshed?.warnings?.length) throw new Error(refreshed.warnings[0]);
 			await markProjectionApplied(env, userId, id, "search", { appliedRevision: revision, status: "ready" });
 		} catch (error) {
@@ -1032,7 +1059,8 @@ export async function runProjections(env, userId, kind, id, { attempts = PROJECT
 		if (kind === "node") {
 			try {
 				const embedText = [head.label, head.summary].filter(Boolean).join(" — ").slice(0, 2_000);
-				const values = await embed(env, config, embedText);
+				const reservationId = await memoryVectorReservationId(userId, kind, id, revision);
+				const values = await embed(env, config, embedText, { reservationId });
 				const vectorId = vectorIdFor(id, revision);
 				const submitted = await upsertNodeVector(env, config, {
 					userId, vectorId, nodeId: id, revision, values,

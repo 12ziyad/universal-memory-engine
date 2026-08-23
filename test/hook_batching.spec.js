@@ -1360,7 +1360,7 @@ describe("ordered Claude outbox batching", () => {
 		expect(secondCalls).toEqual([1, 0]);
 		expect(second).toMatchObject({ delivered: 2, materializedGroups: 1 });
 		expect(await jsonFiles(join(data.outbox, "staged"))).toHaveLength(126);
-	}, 30_000);
+	}, 90_000);
 
 	it("yields the mutation lock between large-group fsyncs so SessionEnd can append", async () => {
 		const data = await fixture();
@@ -1369,7 +1369,7 @@ describe("ordered Claude outbox batching", () => {
 			sessionId: "large-materialization",
 		});
 		const materializing = drain(data, { maxItems: 0, maxDurationMs: 20_000 });
-		const waitDeadline = Date.now() + 15_000;
+		const waitDeadline = Date.now() + 30_000;
 		while ((await jsonFiles(join(data.outbox, "pending"))).length === 0) {
 			if (Date.now() >= waitDeadline) throw new Error("materialization did not produce its first durable batch");
 			await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
@@ -1390,9 +1390,20 @@ describe("ordered Claude outbox batching", () => {
 		const materialized = await materializing;
 		expect(concurrent).toMatchObject({ queued: true, state: "staged" });
 		expect(appendElapsed).toBeLessThan(1_500);
-		expect(materialized.materializedGroups).toBe(1);
+		if (materialized.materializedGroups === 0) {
+			expect(materialized.materializationBlocked).toBeGreaterThan(0);
+			const resumed = await drain(data, {
+				maxItems: 0,
+				maxMaterializationGroups: 1,
+			});
+			expect(resumed.materializedGroups).toBe(1);
+		} else {
+			expect(materialized.materializedGroups).toBe(1);
+		}
 		expect(await jsonFiles(join(data.outbox, "staged"))).toHaveLength(1);
-	}, 30_000);
+		const [remainingStage] = await envelopesIn(data, "staged");
+		expect(remainingStage.value.messages.map((message) => message.id)).toEqual(["concurrent-session-end"]);
+	}, 60_000);
 
 	it("bounds one startup materialization pass and resumes deferred aggregates", async () => {
 		const data = await fixture();

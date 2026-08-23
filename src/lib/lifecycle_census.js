@@ -23,6 +23,10 @@
  *   shadow    — FTS shadow content removed by the base table's delete/triggers.
  *   scrub     — project grant/linkage cleared without deleting the row.
  *
+ * accountErase:
+ *   scrub     — global operational state survives, but erased account
+ *               identifiers/provenance are structurally anonymized.
+ *
  * Archive retains everything by definition; in-flight jobs are cancelled by
  * the archive run, never deleted.
  */
@@ -212,14 +216,33 @@ export const CENSUS = {
 	ai_daily_totals: { kind: "global", why: "account-day aggregate counters; content-free billing evidence" },
 	fence_guard: { kind: "mechanism" },
 
-	// ——— provider routing / spend control (0053) — all content-free ————————
-	ai_routing_policies: { kind: "global", why: "per-capability provider policy; operational config, never user content" },
-	ai_routing_policy_audit: { kind: "global", why: "who changed provider policy when; actor ids only, no memory content" },
-	ai_provider_overrides: { kind: "global", why: "emergency provider kill rows; operational" },
+	// ——— provider routing / spend control (0053) — global, with bounded
+	// account provenance explicitly scrubbed during complete account erasure.
+	ai_routing_policies: {
+		kind: "global",
+		accountErase: "scrub",
+		why: "retain global policy/kill state; remove erased rollout members and sentinel the NOT NULL updater",
+	},
+	ai_routing_policy_audit: {
+		kind: "global",
+		accountErase: "scrub",
+		why: "retain operational history after structurally redacting erased actors, snapshots, and actor-authored notes",
+	},
+	ai_provider_overrides: {
+		kind: "global",
+		accountErase: "scrub",
+		why: "retain provider disabled state while clearing erased actor attribution and free-text reason",
+	},
 	ai_provider_health: { kind: "global", why: "circuit-breaker convergence; provider-level state only" },
 	ai_provider_daily_totals: { kind: "global", why: "provider-day unit counters; content-free billing evidence" },
 	ai_provider_monthly_costs: { kind: "global", why: "provider-month cost_micros counters; content-free billing evidence" },
-	ai_provider_reservations: { kind: "global", why: "reserve/settle spend ledger; ids and unit counts only, reaped on expiry" },
+	ai_provider_reservations: {
+		kind: "global",
+		purge: "scrub",
+		projectDelete: "scrub",
+		accountErase: "scrub",
+		why: "retain monetary/model evidence; lifecycle fences wait for invoking rows, then erase tenant ids, run ids, project ids and acceptance time",
+	},
 };
 
 /**

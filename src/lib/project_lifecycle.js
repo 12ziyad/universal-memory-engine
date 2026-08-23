@@ -32,6 +32,10 @@ import { writeAudit } from "./audit.js";
 import { capabilityGuardStatement, can, resolveMembership } from "./organizations.js";
 import { discoverProjectMemorySpaces } from "./retention.js";
 import { bulkDeleteBySource } from "../pipeline/cleanup.js";
+import {
+	assertNoActiveProviderInvocation,
+	scrubProviderReservationLifecycle,
+} from "../ai/provider_budget.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "../pipeline/source.js";
 import { PURGE_SPACE_TABLES, residualSpaceCounts, residualTotal } from "./lifecycle_census.js";
 
@@ -505,6 +509,7 @@ function isTerminal(run) {
 async function cancelSpaceWork(env, memoryUserId, reason) {
 	const now = Date.now();
 	const label = `${reason}: a project lifecycle operation fenced this work`;
+	const shadowStatus = reason === "cancelled_by_archive" ? "cancelled_lifecycle" : "cancelled_erased";
 	const jobs = await env.DB.prepare(
 		`UPDATE memory_jobs
 		 SET status = 'failed', error = ?, completed_at = ?, updated_at = ?
@@ -521,7 +526,21 @@ async function cancelSpaceWork(env, memoryUserId, reason) {
 	await env.DB.prepare(
 		"UPDATE staged_memories SET settled_at = ? WHERE user_id = ? AND settled_at IS NULL",
 	).bind(now, memoryUserId).run();
-	return Number(jobs?.meta?.changes ?? 0);
+	// Work that has not entered an external call is revoked immediately. An
+	// `invoking` owner is the durable admission fence: leave a live lease intact
+	// so the destructive erase step must wait/fail instead of confirming while
+	// an already-admitted disclosure is active. Expired invocation leases are
+	// bounded crash residue and can be retired safely.
+	const shadow = await env.DB.prepare(
+		`UPDATE ai_shadow_jobs
+		 SET status = ?, claim_token = NULL, lease_until = NULL,
+		     error_class = ?, terminal_at = COALESCE(terminal_at, ?), updated_at = ?
+		 WHERE user_id = ? AND (
+		   status IN ('pending', 'running')
+		   OR (status = 'invoking' AND lease_until IS NOT NULL AND lease_until <= ?)
+		 )`,
+	).bind(shadowStatus, reason, now, now, memoryUserId, now).run();
+	return Number(jobs?.meta?.changes ?? 0) + Number(shadow?.meta?.changes ?? 0);
 }
 
 async function resetSpaceCoordinator(env, memoryUserId) {
@@ -811,6 +830,12 @@ async function advanceArchive(env, run, project, checkpoint) {
 		});
 	}
 	if (run.phase === "cancel_work") {
+		// The project fence is already durable. Do not cancel jobs, reset a
+		// coordinator, or otherwise mutate content while a provider call that
+		// was admitted before that fence may still start or be in flight.
+		await assertNoActiveProviderInvocation(env, {
+			managedProjectId: run.project_id,
+		});
 		const index = Number(checkpoint.space_index ?? 0);
 		if (index >= checkpoint.spaces.length) {
 			return saveRun(env, run, { status: "verifying", phase: "verify", checkpoint, attempts: Number(run.attempts) + 1 });
@@ -915,6 +940,15 @@ async function advanceDestructive(env, run, project, checkpoint, inventory) {
 	}
 
 	if (run.phase === "spaces") {
+		// Check project-wide, including reservations admitted for a project that
+		// currently has no registered memory space.  An empty inventory must not
+		// turn into an invocation-fence bypass.
+		await assertNoActiveProviderInvocation(env, {
+			managedProjectId: run.project_id,
+		});
+		await scrubProviderReservationLifecycle(env, {
+			managedProjectId: run.project_id,
+		});
 		const index = Number(checkpoint.space_index ?? 0);
 		if (index >= checkpoint.spaces.length) {
 			return saveRun(env, run, { status: "verifying", phase: "verify", checkpoint, attempts: Number(run.attempts) + 1 });

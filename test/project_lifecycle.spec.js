@@ -32,6 +32,11 @@ import {
 } from "../src/pipeline/source.js";
 import { writeApproved } from "../src/pipeline/write.js";
 import { getConfig } from "../src/config.js";
+import {
+	markReservationInvoking,
+	releaseReservation,
+	reserveSpend,
+} from "../src/ai/provider_budget.js";
 
 const ctx = { waitUntil() {} };
 
@@ -86,7 +91,7 @@ async function makeWorld({ label = "lc", subtenants = 2, member = false } = {}) 
 }
 
 /** Seed content-bearing rows into one memory space through real code paths. */
-async function seedSpace(world, spaceId, { jobs = true } = {}) {
+async function seedSpace(world, spaceId, { jobs = true, shadow = false } = {}) {
 	const now = Date.now();
 	const normalized = await normalizeSourcePacket(spaceId, {
 		type: "message_batch",
@@ -125,6 +130,7 @@ async function seedSpace(world, spaceId, { jobs = true } = {}) {
 		).bind(`pgt_${crypto.randomUUID().slice(0, 8)}`, spaceId, world.ownerUserId, world.projectId, now, now),
 	]);
 	let jobId = null;
+	let shadowJobId = null;
 	if (jobs) {
 		// Bind the job to the packet's own content-derived key, exactly as the
 		// real ingest door does â€” replay semantics depend on this correlation.
@@ -137,10 +143,29 @@ async function seedSpace(world, spaceId, { jobs = true } = {}) {
 		});
 		jobId = claim.id;
 	}
+	if (shadow) {
+		shadowJobId = `shadow_${crypto.randomUUID().replaceAll("-", "")}`;
+		await env.DB.prepare(
+			`INSERT INTO ai_shadow_jobs
+			 (id, user_id, account_user_id, primary_run_id, provider, model, status,
+			  attempts, claim_token, lease_until, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, 'google-vertex', 'gemini-2.5-flash', 'running',
+			  1, ?, ?, ?, ?)`,
+		).bind(
+			shadowJobId,
+			spaceId,
+			world.ownerUserId,
+			`primary_${crypto.randomUUID().replaceAll("-", "")}`,
+			`claim_${crypto.randomUUID().replaceAll("-", "")}`,
+			now + 60_000,
+			now,
+			now,
+		).run();
+	}
 	await storeReceipt(env, spaceId, "ingest", {
 		outcome: "accepted", savedTotal: 0, received: 1, source_packet_id: packet.id,
 	}, "accepted for test");
-	return { packetId: packet.id, nodeId, jobId, idempotencyKey: packet.idempotency_key };
+	return { packetId: packet.id, nodeId, jobId, shadowJobId, idempotencyKey: packet.idempotency_key };
 }
 
 async function driveToTerminal(runId, { maxLoops = 200 } = {}) {
@@ -161,12 +186,38 @@ async function projectRow(projectId) {
 	return env.DB.prepare("SELECT * FROM managed_projects WHERE id = ?").bind(projectId).first();
 }
 
+async function admittedPrimaryInvocation(world, label) {
+	const now = Date.now();
+	const reservationId = `primary_${label}_${crypto.randomUUID().replaceAll("-", "")}`;
+	const reservation = await reserveSpend(Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
+		GOOGLE_DAILY_GEN_TOKENS: "10000000",
+		GOOGLE_MONTHLY_COST_MICROS: "1000000000",
+	}), {
+		provider: "google-vertex",
+		model: "gemini-2.5-flash",
+		capability: "generate_structured",
+		inputs: { messages: [{ role: "user", content: `private ${label}` }], max_tokens: 20 },
+		reservationId,
+		now,
+		lifecycle: {
+			memoryUserId: world.spaces[0],
+			accountUserId: world.ownerUserId,
+			managedProjectId: world.projectId,
+			acceptedAt: now,
+			scope: "provider_test",
+			scopeId: reservationId,
+		},
+	});
+	expect((await markReservationInvoking(env, reservation, { now })).applied).toBe(true);
+	return { now, reservation, reservationId };
+}
+
 describe("memory purge: root plus SDK subtenants converge to zero and reopen", () => {
 	it("purges every registered space, keeps the shell, and accepts fresh-epoch writes", async () => {
 		const world = await makeWorld({ subtenants: 3 });
 		const bystander = await makeWorld({ label: "iso", subtenants: 1 });
 		const seeded = [];
-		for (const space of world.spaces) seeded.push(await seedSpace(world, space));
+		for (const space of world.spaces) seeded.push(await seedSpace(world, space, { shadow: true }));
 		const bystanderSeed = await seedSpace(bystander, bystander.spaces[1]);
 		// One pre-purge write through the DIRECT save lane, so its replay can
 		// prove the lane reports the erased fence honestly (not "nothing durable").
@@ -254,6 +305,58 @@ describe("memory purge: root plus SDK subtenants converge to zero and reopen", (
 		}
 	});
 
+	it("memory purge remains retryable and preserves content while a shadow invocation lease is live", async () => {
+		const world = await makeWorld({ label: "shadowfence", subtenants: 0 });
+		const seeded = await seedSpace(world, world.spaces[0], { jobs: false });
+		const now = Date.now();
+		const shadowId = `shadow_${crypto.randomUUID().replaceAll("-", "")}`;
+		await env.DB.prepare(
+			`INSERT INTO ai_shadow_jobs
+			 (id, user_id, account_user_id, primary_run_id, provider, model, status,
+			  attempts, claim_token, lease_until, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, 'google-vertex', 'gemini-2.5-flash', 'invoking',
+			  1, 'admitted-project-call', ?, ?, ?)`,
+		).bind(
+			shadowId, world.spaces[0], world.ownerUserId,
+			`primary_${crypto.randomUUID().replaceAll("-", "")}`,
+			now + 60_000, now, now,
+		).run();
+		const preview = await previewLifecycleAction(env, {
+			actorUserId: world.ownerUserId,
+			sessionRef: "shadow-fence",
+			projectId: world.projectId,
+			action: "memory_purge",
+		});
+		const started = await executeLifecycleAction(env, {}, {
+			actorUserId: world.ownerUserId,
+			sessionRef: "shadow-fence",
+			projectId: world.projectId,
+			action: "memory_purge",
+			token: preview.confirmation.token,
+			idempotencyKey: `shadow-fence-${world.suffix}`,
+			confirmName: world.name,
+		});
+		let stalled = started.run;
+		for (let i = 0; i < 10 && stalled?.status !== "failed_retryable"; i += 1) {
+			stalled = await driveLifecycleRun(env, { runId: started.run.id, budgetMs: 5000 });
+		}
+		expect(stalled).toMatchObject({
+			status: "failed_retryable",
+			error_code: "shadow_invocation_in_flight",
+		});
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toEqual({ id: seeded.nodeId });
+		expect(await env.DB.prepare("SELECT status, claim_token FROM ai_shadow_jobs WHERE id = ?")
+			.bind(shadowId).first()).toEqual({ status: "invoking", claim_token: "admitted-project-call" });
+
+		await env.DB.prepare("UPDATE ai_shadow_jobs SET lease_until = ? WHERE id = ?")
+			.bind(now - 1, shadowId).run();
+		const done = await driveToTerminal(started.run.id);
+		expect(done.status).toBe("completed");
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toBeNull();
+	});
+
 	it("same-key replay returns the same run; a different key conflicts with a stable 409", async () => {
 		const world = await makeWorld({ subtenants: 1 });
 		await seedSpace(world, world.spaces[0]);
@@ -327,7 +430,7 @@ describe("memory purge: root plus SDK subtenants converge to zero and reopen", (
 describe("archive and restore", () => {
 	it("archive cancels in-flight work, fences writes, preserves memory; restore re-enables fresh work only", async () => {
 		const world = await makeWorld({ subtenants: 1 });
-		const seeded = await seedSpace(world, world.spaces[1], { jobs: true });
+		const seeded = await seedSpace(world, world.spaces[1], { jobs: true, shadow: true });
 
 		const { run } = await executeLifecycleAction(env, {}, {
 			actorUserId: world.ownerUserId, sessionRef: "s", projectId: world.projectId,
@@ -345,6 +448,15 @@ describe("archive and restore", () => {
 		const job = await env.DB.prepare("SELECT status, error FROM memory_jobs WHERE id = ?").bind(seeded.jobId).first();
 		expect(job.status).toBe("failed");
 		expect(job.error).toMatch(/^cancelled_by_archive:/);
+		const shadow = await env.DB.prepare(
+			"SELECT status, claim_token, lease_until, terminal_at FROM ai_shadow_jobs WHERE id = ?",
+		).bind(seeded.shadowJobId).first();
+		expect(shadow).toMatchObject({
+			status: "cancelled_lifecycle",
+			claim_token: null,
+			lease_until: null,
+		});
+		expect(Number(shadow.terminal_at)).toBeGreaterThan(0);
 
 		// The archived shell is restorable and listed.
 		const restorable = await listRestorableProjects(env, world.ownerUserId);
@@ -396,12 +508,47 @@ describe("archive and restore", () => {
 			action: "archive", idempotencyKey: `defarch-${world.suffix}`,
 		})).rejects.toMatchObject({ code: "default_project_protected" });
 	});
+
+	it("archive waits retryably for an admitted primary invocation without deleting memory", async () => {
+		const world = await makeWorld({ label: "primaryarchive", subtenants: 0 });
+		const seeded = await seedSpace(world, world.spaces[0], { jobs: false });
+		const admitted = await admittedPrimaryInvocation(world, "archive");
+		const started = await executeLifecycleAction(env, {}, {
+			actorUserId: world.ownerUserId,
+			sessionRef: "primary-archive",
+			projectId: world.projectId,
+			action: "archive",
+			idempotencyKey: `primary-archive-${world.suffix}`,
+		});
+		let stalled = started.run;
+		for (let i = 0; i < 10 && stalled?.status !== "failed_retryable"; i += 1) {
+			stalled = await driveLifecycleRun(env, { runId: started.run.id, budgetMs: 5000 });
+		}
+		expect(stalled).toMatchObject({
+			status: "failed_retryable",
+			error_code: "provider_invocation_in_flight",
+		});
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toEqual({ id: seeded.nodeId });
+
+		await releaseReservation(env, admitted.reservation, admitted.now + 1);
+		const done = await driveToTerminal(started.run.id);
+		expect(done.status).toBe("completed");
+		expect(await projectRow(world.projectId)).toMatchObject({ status: "archived", lifecycle_state: "archived" });
+		// Archive preserves both the memory and the terminal billing provenance;
+		// destructive actions scrub it only after their no-active proof.
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toEqual({ id: seeded.nodeId });
+		expect(await env.DB.prepare(
+			"SELECT managed_project_id FROM ai_provider_reservations WHERE id = ?",
+		).bind(admitted.reservationId).first()).toEqual({ managed_project_id: world.projectId });
+	});
 });
 
 describe("permanent project deletion", () => {
 	it("converges the purge, tears down the control plane, and leaves only content-free evidence", async () => {
 		const world = await makeWorld({ subtenants: 2, member: true });
-		for (const space of world.spaces) await seedSpace(world, space);
+		for (const space of world.spaces) await seedSpace(world, space, { shadow: true });
 		const now = Date.now();
 		await env.DB.batch([
 			env.DB.prepare(
@@ -461,6 +608,53 @@ describe("permanent project deletion", () => {
 		})).rejects.toMatchObject({ code: "project_deleted", status: 410 });
 		const status = await lifecycleStatus(env, { actorUserId: world.ownerUserId, projectId: world.projectId });
 		expect(status.project.deleted).toBe(true);
+	});
+
+	it("project deletion retains content while a primary invocation is live, then scrubs terminal provenance", async () => {
+		const world = await makeWorld({ label: "primarydelete", subtenants: 0 });
+		const seeded = await seedSpace(world, world.spaces[0], { jobs: false });
+		const admitted = await admittedPrimaryInvocation(world, "delete");
+		const preview = await previewLifecycleAction(env, {
+			actorUserId: world.ownerUserId,
+			sessionRef: "primary-delete",
+			projectId: world.projectId,
+			action: "project_delete",
+		});
+		const started = await executeLifecycleAction(env, {}, {
+			actorUserId: world.ownerUserId,
+			sessionRef: "primary-delete",
+			projectId: world.projectId,
+			action: "project_delete",
+			token: preview.confirmation.token,
+			idempotencyKey: `primary-delete-${world.suffix}`,
+			confirmName: world.name,
+		});
+		let stalled = started.run;
+		for (let i = 0; i < 10 && stalled?.status !== "failed_retryable"; i += 1) {
+			stalled = await driveLifecycleRun(env, { runId: started.run.id, budgetMs: 5000 });
+		}
+		expect(stalled).toMatchObject({
+			status: "failed_retryable",
+			error_code: "provider_invocation_in_flight",
+		});
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toEqual({ id: seeded.nodeId });
+
+		await releaseReservation(env, admitted.reservation, admitted.now + 1);
+		const done = await driveToTerminal(started.run.id);
+		expect(done.status).toBe("completed");
+		expect(await env.DB.prepare("SELECT id FROM nodes WHERE id = ?")
+			.bind(seeded.nodeId).first()).toBeNull();
+		expect(await env.DB.prepare(
+			`SELECT memory_user_id, account_user_id, managed_project_id, accepted_at, scope_id
+			   FROM ai_provider_reservations WHERE id = ?`,
+		).bind(admitted.reservationId).first()).toEqual({
+			memory_user_id: null,
+			account_user_id: null,
+			managed_project_id: null,
+			accepted_at: null,
+			scope_id: null,
+		});
 	});
 });
 

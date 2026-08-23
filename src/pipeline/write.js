@@ -39,7 +39,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	// included. Two conditions arm it:
 	//   1. the extraction run is no longer 'committing' — a confirmed erasure
 	//      cancelled it between the guarded transition and this batch;
-	//   2. a deletion barrier postdates this work's ACCEPTANCE — retries and
+	//   2. a deletion barrier covers this work's ACCEPTANCE — retries and
 	//      replays mint fresh runs, but acceptance time travels with the
 	//      packet, so nothing accepted before an erasure can commit after it.
 	// The guards precede every graph statement; the committing→wrote update at
@@ -80,7 +80,7 @@ export async function writeApproved(env, config, userId, plan = {}, options = {}
 	if (Number.isFinite(acceptedAt) && acceptedAt > 0) {
 		stmts.push(env.DB.prepare(
 			`INSERT INTO fence_guard (violation)
-			 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?)`,
+			 SELECT 1 WHERE EXISTS (SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ?)`,
 		).bind(userId, acceptedAt));
 		if (retentionProjectId && options.memoryOwnerUserId) {
 			stmts.push(

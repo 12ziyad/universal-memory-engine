@@ -415,6 +415,7 @@ async function callModel(env, config, packet, shortlist, {
 	rules = null,
 	profile = null,
 	extractionV3 = false,
+	providerReservationId = null,
 } = {}) {
 	if (!env.AI) return { objects: [], notes: "no_ai_binding", _ok: false, _outcome: "no_ai_binding" };
 	// The user's own rules, as guidance. The digest and manual lanes already did
@@ -449,7 +450,10 @@ async function callModel(env, config, packet, shortlist, {
 				...(config.llm.jsonMode ? { response_format: { type: "json_object" } } : {}),
 			},
 			options,
-			{ task: "extract" },
+			{
+				task: "extract",
+				...(providerReservationId ? { reservationId: providerReservationId } : {}),
+			},
 		);
 		const raw = responseText(res);
 		const truncated = responseTruncated(res);
@@ -481,7 +485,15 @@ async function callModel(env, config, packet, shortlist, {
 		}
 		return normalized;
 	} catch (err) {
-		const outcome = failureKind(err);
+		const admissionReason = typeof err?.admissionReason === "string" ? err.admissionReason : null;
+		const pendingOperation = ["operation_in_progress", "invoke_claim_unavailable"].includes(admissionReason);
+		const ambiguousOperation = err?.providerOutcome === "ambiguous_charged"
+			|| ["operation_ambiguous", "operation_already_settled", "operation_state_unknown"].includes(admissionReason);
+		const terminalProvider = !pendingOperation && !ambiguousOperation && err?.retryable === false;
+		const outcome = pendingOperation
+			? "in_progress"
+			: ambiguousOperation ? "interrupted_unknown"
+				: terminalProvider ? "provider_terminal" : failureKind(err);
 		console.warn(JSON.stringify({
 			event: "llm_extraction_failed",
 			outcome,
@@ -489,7 +501,16 @@ async function callModel(env, config, packet, shortlist, {
 			error_name: String(err?.name ?? "Error").slice(0, 80),
 			error_code: err?.code == null ? null : String(err.code).slice(0, 80),
 		}));
-		return { objects: [], notes: outcome, _ok: false, _outcome: outcome };
+		return {
+			objects: [],
+			notes: outcome,
+			_ok: false,
+			_outcome: outcome,
+			...((pendingOperation || ambiguousOperation || terminalProvider) ? { _terminal: !pendingOperation } : {}),
+			...(pendingOperation && Number.isFinite(Number(err?.retryAfterMs))
+				? { _retry_after_ms: Math.max(0, Number(err.retryAfterMs)) }
+				: {}),
+		};
 	}
 }
 
@@ -511,5 +532,6 @@ export async function proposeMemory(env, config, { packet, shortlist }, override
 		rules: overrides?.rules ?? null,
 		profile: overrides?.profile ?? null,
 		extractionV3: overrides?.extractionV3 === true,
+		providerReservationId: overrides?.providerReservationId ?? null,
 	});
 }

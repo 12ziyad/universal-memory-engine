@@ -34,6 +34,7 @@ export const PROVIDER_IMPORT_ALLOWED_PREFIXES = Object.freeze([
 /** Files allowed to import runAi directly. Shrinks as call sites migrate to
  * typed capability entry points; every entry names the lane it serves. */
 export const RUN_AI_IMPORTERS = Object.freeze([
+	"src/ai/health.js", // explicit admin probe, pinned + metered like production
 	"src/index.js", // EVAL_MODE /eval/llm pass-through
 	"src/pipeline/llm.js",
 	"src/pipeline/engine_v2.js",

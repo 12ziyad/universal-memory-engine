@@ -21,48 +21,150 @@ const SAFETY_OFF = [
 	{ category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
 ];
 
-/**
- * JSON-Schema → Vertex responseSchema (OpenAPI 3.0 subset).
- *  - type ["string","null"]  → { type: "string", nullable: true }
- *  - additionalProperties    → stripped (local validation is the trust boundary)
- *  - $ref / anyOf / oneOf / allOf / patternProperties → HARD FAIL, typed: a
- *    future schema author must find out, never get a silently-dropped keyword.
- */
+/** Input keywords whose semantics this adapter can preserve exactly in the
+ * documented Vertex responseSchema subset. `additionalProperties` is accepted
+ * only as a local-validation constraint and deliberately omitted on the wire.
+ * Everything else fails closed; Google otherwise ignores unsupported fields. */
+export const GOOGLE_RESPONSE_SCHEMA_KEYWORDS = Object.freeze([
+	"type",
+	"nullable",
+	"properties",
+	"required",
+	"items",
+	"anyOf",
+	"enum",
+	"format",
+	"description",
+	"propertyOrdering",
+	"minimum",
+	"maximum",
+	"minItems",
+	"maxItems",
+	"additionalProperties",
+]);
+
+const SCHEMA_KEYWORDS = new Set(GOOGLE_RESPONSE_SCHEMA_KEYWORDS);
+const SCHEMA_TYPES = new Set(["string", "number", "integer", "boolean", "array", "object"]);
+const SCHEMA_FORMATS = new Set(["date", "date-time", "duration", "time"]);
+
+function schemaError(message) {
+	return Object.assign(new Error(message), { aiErrorClass: "schema_untranslatable" });
+}
+
+function plainObject(value) {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringList(value, keyword) {
+	if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+		throw schemaError(`schema keyword ${keyword} must be an array of strings`);
+	}
+	if (new Set(value).size !== value.length) throw schemaError(`schema keyword ${keyword} contains duplicates`);
+	return [...value];
+}
+
+/** JSON-Schema → Vertex responseSchema (the explicitly supported subset). */
 export function translateJsonSchema(schema) {
-	if (schema == null || typeof schema !== "object") return schema;
-	if (Array.isArray(schema)) return schema.map(translateJsonSchema);
-	for (const forbidden of ["$ref", "anyOf", "oneOf", "allOf", "patternProperties"]) {
-		if (forbidden in schema) {
-			// Special case: the anyOf-null idiom `{anyOf:[{type:X},{type:"null"}]}`
-			// translates cleanly to nullable X.
-			if (forbidden === "anyOf" && Array.isArray(schema.anyOf) && schema.anyOf.length === 2) {
-				const nullArm = schema.anyOf.find((a) => a?.type === "null");
-				const realArm = schema.anyOf.find((a) => a?.type !== "null");
-				if (nullArm && realArm) return { ...translateJsonSchema(realArm), nullable: true };
-			}
-			throw Object.assign(new Error(`schema keyword ${forbidden} is not translatable to Vertex responseSchema`), {
-				aiErrorClass: "schema_untranslatable",
-			});
+	if (!plainObject(schema)) throw schemaError("schema must be an object");
+	for (const key of Object.keys(schema)) {
+		if (!SCHEMA_KEYWORDS.has(key)) throw schemaError(`schema keyword ${key} is not translatable to Vertex responseSchema`);
+	}
+
+	// JSON Schema's nullable union idiom maps to Vertex's explicit nullable.
+	// Preserve sibling constraints as well as the real arm instead of silently
+	// discarding them.
+	if (Array.isArray(schema.anyOf) && schema.anyOf.length === 2) {
+		const nullArm = schema.anyOf.find((arm) => plainObject(arm) && arm.type === "null" && Object.keys(arm).length === 1);
+		const realArm = schema.anyOf.find((arm) => arm !== nullArm);
+		if (nullArm && plainObject(realArm)) {
+			const siblings = { ...schema };
+			delete siblings.anyOf;
+			return { ...translateJsonSchema(realArm), ...translateJsonSchema(siblings), nullable: true };
 		}
 	}
+
 	const out = {};
 	for (const [key, value] of Object.entries(schema)) {
-		if (key === "additionalProperties") continue;
-		if (key === "type" && Array.isArray(value)) {
-			const nonNull = value.filter((t) => t !== "null");
-			out.type = nonNull[0] ?? "string";
-			if (value.includes("null")) out.nullable = true;
+		if (key === "additionalProperties") {
+			if (typeof value !== "boolean") throw schemaError("schema keyword additionalProperties must be boolean");
 			continue;
 		}
-		if (key === "properties" && value && typeof value === "object") {
-			out.properties = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, translateJsonSchema(v)]));
+		if (key === "type") {
+			if (Array.isArray(value)) {
+				const unique = [...new Set(value)];
+				const nonNull = unique.filter((entry) => entry !== "null");
+				if (unique.length !== 2 || nonNull.length !== 1 || !unique.includes("null") || !SCHEMA_TYPES.has(nonNull[0])) {
+					throw schemaError("schema type arrays must contain one supported type plus null");
+				}
+				out.type = nonNull[0];
+				out.nullable = true;
+				continue;
+			}
+			if (!SCHEMA_TYPES.has(value)) throw schemaError(`schema type ${String(value)} is unsupported`);
+			out.type = value;
+			continue;
+		}
+		if (key === "nullable") {
+			if (typeof value !== "boolean") throw schemaError("schema keyword nullable must be boolean");
+			out.nullable = value;
+			continue;
+		}
+		if (key === "properties") {
+			if (!plainObject(value)) throw schemaError("schema keyword properties must be an object");
+			out.properties = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, translateJsonSchema(child)]));
 			continue;
 		}
 		if (key === "items") {
 			out.items = translateJsonSchema(value);
 			continue;
 		}
-		out[key] = value;
+		if (key === "anyOf") {
+			if (!Array.isArray(value) || value.length === 0) throw schemaError("schema keyword anyOf must be a non-empty array");
+			out.anyOf = value.map(translateJsonSchema);
+			continue;
+		}
+		if (key === "enum") {
+			const values = stringList(value, key);
+			if (values.length === 0) throw schemaError("schema keyword enum must not be empty");
+			out.enum = values;
+			continue;
+		}
+		if (key === "format") {
+			if (!SCHEMA_FORMATS.has(value)) throw schemaError(`schema format ${String(value)} is unsupported`);
+			out.format = value;
+			continue;
+		}
+		if (key === "description") {
+			if (typeof value !== "string") throw schemaError("schema keyword description must be a string");
+			out.description = value;
+			continue;
+		}
+		if (key === "required" || key === "propertyOrdering") {
+			out[key] = stringList(value, key);
+			continue;
+		}
+		if (key === "minimum" || key === "maximum") {
+			if (!Number.isFinite(value)) throw schemaError(`schema keyword ${key} must be finite`);
+			out[key] = value;
+			continue;
+		}
+		if (key === "minItems" || key === "maxItems") {
+			if (!Number.isInteger(value) || value < 0) throw schemaError(`schema keyword ${key} must be a non-negative integer`);
+			out[key] = value;
+		}
+	}
+
+	if (out.minimum != null && out.maximum != null && out.minimum > out.maximum) {
+		throw schemaError("schema minimum must not exceed maximum");
+	}
+	if (out.minItems != null && out.maxItems != null && out.minItems > out.maxItems) {
+		throw schemaError("schema minItems must not exceed maxItems");
+	}
+	for (const keyword of ["required", "propertyOrdering"]) {
+		if (out[keyword] && out.properties) {
+			const unknown = out[keyword].find((name) => !(name in out.properties));
+			if (unknown) throw schemaError(`schema keyword ${keyword} references unknown property ${unknown}`);
+		}
 	}
 	return out;
 }
@@ -142,10 +244,9 @@ export function buildEmbed({ text, intent = "document" }, { outputDimensionality
 	};
 }
 
-/** :predict response → { data:[vec], usage } with dim assert + L2 normalize.
- * MRL-truncated gemini-embedding vectors are NOT unit-normalized; cosine
- * against an unnormalized vector silently mis-ranks, so normalization here is
- * mandatory, not cosmetic. */
+/** :predict response → { data:[vec], usage } with dim assert + defensive L2
+ * normalization. Google documents Gemini embeddings as normalized, but the
+ * local canonicalization keeps the stored vector invariant explicit. */
 export function parseEmbed(json, { expectedDim = 768 } = {}) {
 	const prediction = json?.predictions?.[0] ?? null;
 	const values = prediction?.embeddings?.values ?? prediction?.embeddings?.[0]?.values ?? null;
@@ -157,12 +258,33 @@ export function parseEmbed(json, { expectedDim = 768 } = {}) {
 			aiErrorClass: "embedding_dim_mismatch",
 		});
 	}
+	if (values.some((value) => !Number.isFinite(value))) {
+		throw Object.assign(new Error("embedding response contains a non-finite value"), {
+			aiErrorClass: "provider_bad_response",
+		});
+	}
 	let norm = 0;
 	for (const v of values) norm += v * v;
-	norm = Math.sqrt(norm) || 1;
+	norm = Math.sqrt(norm);
+	if (!Number.isFinite(norm) || norm === 0) {
+		throw Object.assign(new Error("embedding response has zero magnitude"), {
+			aiErrorClass: "provider_bad_response",
+		});
+	}
 	const normalized = values.map((v) => v / norm);
-	const tokens = Number(prediction?.embeddings?.statistics?.token_count ?? 0) || 0;
-	return { data: [normalized], usage: { prompt_tokens: tokens, completion_tokens: 0, total_tokens: tokens } };
+	const statistics = prediction?.embeddings?.statistics ?? {};
+	const tokens = Number(statistics.token_count ?? 0) || 0;
+	const truncated = statistics.truncated === true;
+	return {
+		data: [normalized],
+		truncated,
+		usage: {
+			prompt_tokens: tokens,
+			completion_tokens: 0,
+			total_tokens: tokens,
+			embedding_truncated: truncated,
+		},
+	};
 }
 
 /** Repo rerank input → Discovery Engine :rank body. Ids are input indexes —

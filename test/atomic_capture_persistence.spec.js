@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
 
+import { buildPin, withAiPin } from "../src/ai/pin.js";
+import { resetProviderBudgetForTests } from "../src/ai/provider_budget.js";
+import { resolveProvider } from "../src/ai/registry.js";
+import { ensureProviderOperationIdentity, withAiMeter } from "../src/lib/ai_meter.js";
 import { runExtraction } from "../src/pipeline/extract.js";
 import { deleteSourceEpisodes, writeSourceEpisodes } from "../src/pipeline/episodes.js";
 import {
 	ATOMIC_CAPTURE_MODEL,
+	atomicCaptureProviderOperationId,
 	atomicCaptureSummaryForExtractionRun,
 	captureAtomicCandidates,
 	countSemanticAtomCandidates,
+	hasRecoverableAtomicCaptureInterruption,
 } from "../src/pipeline/atomic_candidates.mjs";
 
 const EMPTY_GRAPH = { objects: [], notes: "control graph writes nothing" };
@@ -84,6 +90,45 @@ async function extract(f, atomicLlmResponse, extra = {}) {
 		},
 		...rest,
 	});
+}
+
+function googleAtomicEnv(base) {
+	return Object.assign(Object.create(Object.getPrototypeOf(base)), base, {
+		AI: { run: async () => { throw new Error("unexpected Workers AI invocation"); } },
+		GCP_SERVICE_ACCOUNT: "{}",
+		GCP_PROJECT_ID: "atomic-spec-project",
+		GOOGLE_DAILY_GEN_TOKENS: "10000000",
+		GOOGLE_MONTHLY_COST_MICROS: "1000000000",
+	});
+}
+
+async function captureWithAtomicPin(f, testEnv, {
+	schedulerCalls = 0,
+	extractionRunId = crypto.randomUUID(),
+	route = { provider: "google-vertex", model: "gemini-2.5-flash" },
+} = {}) {
+	const pin = buildPin({
+		routes: { extract_atomic: route },
+	});
+	return withAiPin(pin, () => withAiMeter("save", async (meter) => {
+		meter.scopeId = `scheduler-${crypto.randomUUID()}`;
+		// Simulate unrelated inference lanes moving before atomic capture. These
+		// consume the parent meter ordinal but must not alter atomic authorization.
+		for (let i = 0; i < schedulerCalls; i += 1) {
+			await ensureProviderOperationIdentity({ task: `scheduler-noise-${i}` });
+		}
+		return captureAtomicCandidates(testEnv, {
+			userId: f.userId,
+			messages: [f.message],
+			recent: [],
+			rules: RULES,
+			projectId: f.projectId,
+			projectName: "Project A",
+			sourcePacketId: f.sourcePacketId,
+			extractionRunId,
+			acceptedAt: f.message.ts,
+		});
+	}));
 }
 
 describe("E4 atomic candidate persistence", () => {
@@ -271,6 +316,188 @@ describe("E4 atomic candidate persistence", () => {
 		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(1);
 	});
 
+	it("pins provider authorization to the durable capture attempt and never re-invokes an unknowable prior outcome", async () => {
+		resetProviderBudgetForTests();
+		const f = await fixture("provider-attempt-unknown");
+		const testEnv = googleAtomicEnv(f.testEnv);
+		const provider = await resolveProvider("google-vertex");
+		const originalInvoke = provider.invoke;
+		const reservationIds = [];
+		provider.invoke = async (_providerEnv, call) => {
+			reservationIds.push(call.meta.reservationId);
+			// The provider completed and was settled, but application parsing lost
+			// the response. This models a crash/response-loss ambiguity after billing.
+			const response = { usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 } };
+			Object.defineProperty(response, "atoms", {
+				get() { throw new Error("response lost after provider completion"); },
+			});
+			return response;
+		};
+
+		try {
+			const first = await captureWithAtomicPin(f, testEnv, { schedulerCalls: 3 });
+			expect(first).toMatchObject({ outcome: "transport_error", complete: false, stored: 0 });
+			const run = await env.DB.prepare(
+				"SELECT id, attempts, status, error_code FROM semantic_atom_capture_runs WHERE user_id = ?",
+			).bind(f.userId).first();
+			expect(run).toMatchObject({ attempts: 1, status: "failed", error_code: "transport_error" });
+			expect(reservationIds).toEqual([atomicCaptureProviderOperationId(run.id, 1)]);
+			expect(await env.DB.prepare(
+				"SELECT status FROM ai_provider_reservations WHERE id = ?",
+			).bind(reservationIds[0]).first()).toEqual({ status: "settled" });
+
+			// Recreate the only durable state a dead isolate can leave, including a
+			// legacy/malformed half-pin. The exact provider reservation still proves
+			// that this was not a Workers-AI call. Settled is not proof of an unbilled
+			// call, so a fresh meter and different call order must not mint attempt 2.
+			await env.DB.prepare(
+				`UPDATE semantic_atom_capture_runs
+				 SET status = 'running', provider = NULL, error_code = NULL, updated_at = 1, completed_at = NULL
+				 WHERE id = ?`,
+			).bind(run.id).run();
+			expect(await hasRecoverableAtomicCaptureInterruption(
+				testEnv,
+				f.userId,
+				f.sourcePacketId,
+				{ projectId: f.projectId },
+			)).toBe(false);
+			const replay = await captureWithAtomicPin(f, testEnv, { schedulerCalls: 0 });
+			expect(replay).toMatchObject({ outcome: "interrupted_unknown", complete: false, stored: 0, replayed: true });
+			expect(reservationIds).toHaveLength(1);
+			expect(Number((await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM ai_provider_reservations WHERE provider = 'google-vertex' AND id LIKE 'airesv_atom:v1:%'",
+			).first()).n)).toBe(1);
+			expect(await env.DB.prepare(
+				"SELECT attempts, status, error_code FROM semantic_atom_capture_runs WHERE id = ?",
+			).bind(run.id).first()).toEqual({ attempts: 1, status: "failed", error_code: "interrupted_unknown" });
+		} finally {
+			provider.invoke = originalInvoke;
+		}
+	});
+
+	it("reclaims under the provider and model stored by the atomic run, not a changed ambient pin", async () => {
+		resetProviderBudgetForTests();
+		const f = await fixture("provider-pin-flip");
+		const testEnv = googleAtomicEnv(f.testEnv);
+		const provider = await resolveProvider("google-vertex");
+		const originalInvoke = provider.invoke;
+		const calls = [];
+		provider.invoke = async (_providerEnv, call) => {
+			calls.push({ provider: "google-vertex", model: call.model, reservationId: call.meta.reservationId });
+			if (calls.length === 1) {
+				throw Object.assign(new Error("explicit unbilled provider response"), {
+					status: 503,
+					retryable: false,
+					aiErrorClass: "provider_unavailable",
+				});
+			}
+			return {
+				atoms: [atom()],
+				usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 },
+			};
+		};
+
+		try {
+			const first = await captureWithAtomicPin(f, testEnv);
+			expect(first).toMatchObject({ outcome: "transport_error", complete: false });
+			const run = await env.DB.prepare(
+				"SELECT id, provider, model, attempts FROM semantic_atom_capture_runs WHERE user_id = ?",
+			).bind(f.userId).first();
+			expect(run).toMatchObject({ provider: "google-vertex", model: "gemini-2.5-flash", attempts: 1 });
+
+			// A newer parent extraction/policy pin points at Workers AI. Reclaim must
+			// ignore it and execute the exact provider/model claimed by this atom run.
+			const replay = await captureWithAtomicPin(f, testEnv, {
+				route: { provider: "workers-ai", model: null },
+			});
+			expect(replay).toMatchObject({ outcome: "completed", complete: true, stored: 1 });
+			expect(calls).toEqual([
+				{
+					provider: "google-vertex",
+					model: "gemini-2.5-flash",
+					reservationId: atomicCaptureProviderOperationId(run.id, 1),
+				},
+				{
+					provider: "google-vertex",
+					model: "gemini-2.5-flash",
+					reservationId: atomicCaptureProviderOperationId(run.id, 2),
+				},
+			]);
+		} finally {
+			provider.invoke = originalInvoke;
+		}
+	});
+
+	it("mints a new persisted attempt only after the prior provider reservation is proven released", async () => {
+		resetProviderBudgetForTests();
+		const f = await fixture("provider-attempt-released");
+		const testEnv = googleAtomicEnv(f.testEnv);
+		const provider = await resolveProvider("google-vertex");
+		const originalInvoke = provider.invoke;
+		const reservationIds = [];
+		let releaseRetryProvider;
+		let signalRetryProviderStarted;
+		const retryProviderStarted = new Promise((resolve) => { signalRetryProviderStarted = resolve; });
+		const retryProviderRelease = new Promise((resolve) => { releaseRetryProvider = resolve; });
+		provider.invoke = async (_providerEnv, call) => {
+			reservationIds.push(call.meta.reservationId);
+			if (reservationIds.length === 1) {
+				throw Object.assign(new Error("explicit unbilled provider response"), {
+					status: 503,
+					retryable: false,
+					aiErrorClass: "provider_unavailable",
+				});
+			}
+			signalRetryProviderStarted();
+			await retryProviderRelease;
+			return {
+				atoms: [atom()],
+				usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 },
+			};
+		};
+
+		try {
+			const first = await captureWithAtomicPin(f, testEnv, { schedulerCalls: 2 });
+			expect(first).toMatchObject({ outcome: "transport_error", complete: false, stored: 0 });
+			const run = await env.DB.prepare(
+				"SELECT id, attempts FROM semantic_atom_capture_runs WHERE user_id = ?",
+			).bind(f.userId).first();
+			expect(reservationIds).toEqual([atomicCaptureProviderOperationId(run.id, 1)]);
+			expect(await env.DB.prepare(
+				"SELECT status FROM ai_provider_reservations WHERE id = ?",
+			).bind(reservationIds[0]).first()).toEqual({ status: "released" });
+			expect(await hasRecoverableAtomicCaptureInterruption(
+				testEnv,
+				f.userId,
+				f.sourcePacketId,
+				{ projectId: f.projectId },
+			)).toBe(true);
+
+			// The reservation ledger, not a timeout guess, authorizes the next
+			// persisted attempt. Two concurrent reclaimers use different scheduler
+			// orders; the fenced run claim permits exactly one attempt-2 invocation.
+			const replayPromise = captureWithAtomicPin(f, testEnv, { schedulerCalls: 0 });
+			await retryProviderStarted;
+			const concurrentReplay = await captureWithAtomicPin(f, testEnv, { schedulerCalls: 5 });
+			expect(concurrentReplay).toMatchObject({ outcome: "in_progress", complete: false, replayed: true });
+			releaseRetryProvider();
+			const replay = await replayPromise;
+			expect(replay).toMatchObject({ outcome: "completed", complete: true, stored: 1 });
+			expect(reservationIds).toEqual([
+				atomicCaptureProviderOperationId(run.id, 1),
+				atomicCaptureProviderOperationId(run.id, 2),
+			]);
+			expect(await env.DB.prepare(
+				"SELECT attempts, status FROM semantic_atom_capture_runs WHERE id = ?",
+			).bind(run.id).first()).toEqual({ attempts: 2, status: "completed" });
+			expect((await env.DB.prepare(
+				"SELECT status FROM ai_provider_reservations WHERE id = ?",
+			).bind(reservationIds[1]).first()).status).toBe("settled");
+		} finally {
+			provider.invoke = originalInvoke;
+		}
+	});
+
 	it("deduplicates the same source atom when a later rescue reshapes the chunk", async () => {
 		const f = await fixture("rechunk");
 		await extract(f, { atoms: [atom()] });
@@ -410,6 +637,25 @@ describe("E4 atomic candidate persistence", () => {
 		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(0);
 	});
 
+	it("a post-inference erasure fence at the exact accepted millisecond cancels the candidate commit", async () => {
+		const f = await fixture("race-equal-millisecond");
+		const response = async () => {
+			await env.DB.prepare(
+				`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+				 VALUES (?, ?, ?, 'test')
+				 ON CONFLICT(user_id) DO UPDATE SET barrier_at = excluded.barrier_at`,
+			).bind(f.userId, f.message.ts, f.message.ts).run();
+			return { atoms: [atom()] };
+		};
+		const result = await extract(f, response);
+		expect(result.receipt).toMatchObject({
+			atomic_capture_outcome: "cancelled_by_delete",
+			atomic_capture_complete: false,
+			atomic_capture_stored: 0,
+		});
+		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(0);
+	});
+
 	it("does not create a late capture-run residue when erasure wins before the atomic claim", async () => {
 		const f = await fixture("barrier-before-claim");
 		await env.DB.prepare(
@@ -417,6 +663,39 @@ describe("E4 atomic candidate persistence", () => {
 			 VALUES (?, ?, ?, 'test')
 			 ON CONFLICT(user_id) DO UPDATE SET barrier_at = excluded.barrier_at`,
 		).bind(f.userId, f.message.ts + 1, f.message.ts + 1).run();
+		let modelCalls = 0;
+		const result = await captureAtomicCandidates(f.testEnv, {
+			userId: f.userId,
+			messages: [f.message],
+			recent: [],
+			rules: RULES,
+			projectId: f.projectId,
+			projectName: "Project A",
+			sourcePacketId: f.sourcePacketId,
+			extractionRunId: `run-${crypto.randomUUID()}`,
+			acceptedAt: f.message.ts,
+			override: () => {
+				modelCalls += 1;
+				return { atoms: [atom()] };
+			},
+		});
+
+		expect(result).toMatchObject({ outcome: "cancelled_by_delete", complete: false, stored: 0 });
+		expect(modelCalls).toBe(0);
+		expect(await countSemanticAtomCandidates(env, f.userId)).toBe(0);
+		const runs = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM semantic_atom_capture_runs WHERE user_id = ?",
+		).bind(f.userId).first();
+		expect(Number(runs.n)).toBe(0);
+	});
+
+	it("does not claim or call the model when erasure shares the accepted millisecond", async () => {
+		const f = await fixture("barrier-equal-before-claim");
+		await env.DB.prepare(
+			`INSERT INTO deletion_barriers (user_id, barrier_at, created_at, by)
+			 VALUES (?, ?, ?, 'test')
+			 ON CONFLICT(user_id) DO UPDATE SET barrier_at = excluded.barrier_at`,
+		).bind(f.userId, f.message.ts, f.message.ts).run();
 		let modelCalls = 0;
 		const result = await captureAtomicCandidates(f.testEnv, {
 			userId: f.userId,

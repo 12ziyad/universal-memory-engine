@@ -24,7 +24,7 @@ import { newId } from "./ids.js";
 import { utcDayKey } from "./ai_budget.js";
 import { managedMutationGuardStatement } from "./managed_projects.js";
 import { guardModelInput } from "./model_input.js";
-import { dispatchAi } from "../ai/dispatch.js";
+import { dispatchAi, providerUsageForAccounting } from "../ai/dispatch.js";
 
 const meterStore = new AsyncLocalStorage();
 
@@ -50,15 +50,121 @@ export function currentMeter() {
  * Run `fn` with a fresh meter attached. Returns whatever `fn` returns; the
  * meter is reachable during it via currentMeter() and is flushed by the caller.
  */
-export function withAiMeter(scope, fn) {
-	const meter = { scope, scopeId: null, calls: [], startedAt: Date.now() };
+function lifecycleId(value) {
+	if (typeof value !== "string") return null;
+	const cleaned = value.trim();
+	if (!cleaned || cleaned.length > 256 || /[\u0000-\u001f\u007f]/.test(cleaned)) return null;
+	return cleaned;
+}
+
+function lifecycleTime(value) {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+}
+
+function normalizedMeterLifecycle(input = {}) {
+	return {
+		memoryUserId: lifecycleId(input.memoryUserId ?? input.memory_user_id),
+		accountUserId: lifecycleId(input.accountUserId ?? input.account_user_id),
+		managedProjectId: lifecycleId(input.managedProjectId ?? input.managed_project_id),
+		acceptedAt: lifecycleTime(input.acceptedAt ?? input.accepted_at),
+		// This is deliberately not a generic "skip lifecycle" switch.  The only
+		// allowed exemption is checked again against the provider_health scope at
+		// admission and carries a fixed, synthetic prompt rather than user text.
+		providerHealthSynthetic: input.providerHealthSynthetic === true,
+	};
+}
+
+export function withAiMeter(scope, fn, lifecycle = {}) {
+	const meter = {
+		scope,
+		scopeId: null,
+		lifecycle: normalizedMeterLifecycle(lifecycle),
+		calls: [],
+		startedAt: Date.now(),
+		// Calls are ordered independently inside each task/lane. Adding an
+		// unrelated conditional lane must not change a later lane's durable
+		// provider identity; repeated calls within one lane still receive 0,1,2…
+		// without hashing prompts or storing content.
+		providerOperationOrdinals: new Map(),
+	};
 	return meterStore.run(meter, () => fn(meter));
 }
 
 /** Tag the in-flight meter with the run it belongs to, once that id exists. */
-export function tagAiMeter(scopeId) {
+export function tagAiMeter(scopeId, lifecycle = null) {
 	const meter = currentMeter();
 	if (meter && scopeId) meter.scopeId = scopeId;
+	if (meter && lifecycle && typeof lifecycle === "object") {
+		const next = normalizedMeterLifecycle({ ...(meter.lifecycle ?? {}), ...lifecycle });
+		meter.lifecycle = next;
+	}
+}
+
+/**
+ * Server-owned lifecycle provenance handed to provider admission.  runAi
+ * computes this from AsyncLocalStorage after overwriting any caller metadata,
+ * so an SDK request cannot mint its own erasure/project exemption.
+ */
+function providerLifecycleFromMeter(meter) {
+	if (!meter) return null;
+	const lifecycle = normalizedMeterLifecycle(meter.lifecycle ?? {});
+	const scope = lifecycleId(meter.scope);
+	const scopeId = lifecycleId(meter.scopeId);
+	const healthExempt = lifecycle.providerHealthSynthetic === true && scope === "provider_health";
+	return {
+		memoryUserId: healthExempt ? null : lifecycle.memoryUserId,
+		accountUserId: healthExempt ? null : lifecycle.accountUserId,
+		managedProjectId: healthExempt ? null : lifecycle.managedProjectId,
+		acceptedAt: healthExempt ? null : lifecycle.acceptedAt,
+		scope,
+		scopeId,
+		lifecycleExempt: healthExempt,
+	};
+}
+
+/**
+ * Content-free, deterministic identity for one provider operation.
+ *
+ * Do not include the model or request body: changing either while replaying
+ * the same durable operation must surface as a reservation conflict, not mint
+ * a second spend authorization. The provider ledger accepts this opaque id
+ * and owns all retry/invocation state beneath it.
+ */
+export async function providerOperationId({ scope, scopeId, task = null, ordinal = 0 }) {
+	const encoded = new TextEncoder().encode(JSON.stringify([
+		String(scope ?? ""),
+		String(scopeId ?? ""),
+		String(task ?? ""),
+		Math.max(0, Math.floor(Number(ordinal) || 0)),
+	]));
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoded));
+	return `airesv_${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Attach a stable reservation id when the current meter has a durable id. */
+export async function ensureProviderOperationIdentity(meta = {}) {
+	const meter = currentMeter();
+	if (!meter?.scopeId) return meta;
+	// A caller-owned durable id is outside the automatic lane sequence. A
+	// conditional explicit operation must not shift later implicit identities.
+	if (meta.reservationId != null) return meta;
+	const task = String(meta.task ?? "");
+	const ordinals = meter.providerOperationOrdinals instanceof Map
+		? meter.providerOperationOrdinals
+		: new Map();
+	meter.providerOperationOrdinals = ordinals;
+	const ordinal = Math.max(0, Math.floor(Number(ordinals.get(task)) || 0));
+	ordinals.set(task, ordinal + 1);
+	return {
+		...meta,
+		reservationId: await providerOperationId({
+			scope: meter.scope,
+			scopeId: meter.scopeId,
+			task,
+			ordinal,
+		}),
+	};
 }
 
 /**
@@ -76,6 +182,10 @@ export async function withFlushedAiMeter(env, scope, { userId = null, scopeId = 
 		} finally {
 			await flushAiMeter(env, userId, meter, lifecycle);
 		}
+	}, {
+		...lifecycle,
+		memoryUserId: lifecycle.memoryUserId ?? lifecycle.memory_user_id ?? userId,
+		acceptedAt: lifecycle.acceptedAt ?? lifecycle.accepted_at ?? Date.now(),
 	});
 }
 
@@ -85,6 +195,7 @@ export async function withFlushedAiMeter(env, scope, { userId = null, scopeId = 
  * a shape sniff that never touches the message beyond known marker words.
  */
 function errorClassOf(error) {
+	if (typeof error?.aiMeterErrorClass === "string" && error.aiMeterErrorClass) return error.aiMeterErrorClass;
 	if (typeof error?.aiErrorClass === "string" && error.aiErrorClass) return error.aiErrorClass;
 	if (error?.code === "model_input_boundary") return "input_boundary";
 	const marker = `${error?.name ?? ""} ${error?.code ?? ""} ${error?.message ?? ""}`.toLowerCase();
@@ -147,7 +258,16 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 		if (inputBoundary?.bounded) {
 			logInputBoundary("ai_input_bounded", model, meta.task, inputBoundary);
 		}
-		res = await dispatchAi(env, { model, inputs, options, meta });
+		meta = await ensureProviderOperationIdentity(meta);
+		// Lifecycle admission is not request metadata.  It is a separate internal
+		// argument derived from the active meter immediately before dispatch.
+		res = await dispatchAi(env, {
+			model,
+			inputs,
+			options,
+			meta,
+			lifecycle: providerLifecycleFromMeter(currentMeter()),
+		});
 		return res;
 	} catch (error) {
 		ok = 0;
@@ -162,9 +282,22 @@ export async function runAi(env, model, inputs, options, meta = {}) {
 		try {
 			const meter = currentMeter();
 			if (meter) {
-				const usage = ok ? readUsage(res) : { input: null, output: null, total: null, neurons: null, raw: null };
-				meter.calls.push({
-					model: String(model ?? "unknown"),
+					let usage = ok ? readUsage(res) : { input: null, output: null, total: null, neurons: null, raw: null };
+					// Google bills generated thoughts/tool use even when those tokens are
+					// absent from candidatesTokenCount. Reuse the exact normalization that
+					// settles the provider reservation, while leaving legacy Workers usage
+					// byte-for-byte on readUsage's historical path.
+					if (ok && meta.invokedProvider === "google-vertex" && usage.raw) {
+						const providerUsage = providerUsageForAccounting(meta.capability, inputs, res);
+						usage = {
+							...usage,
+							input: providerUsage.inputTokens,
+							output: providerUsage.outputTokens,
+							total: providerUsage.actualUnits,
+						};
+					}
+					meter.calls.push({
+						model: String(meta.invokedModel ?? model ?? "unknown"),
 					task: meta.task ?? null,
 					input_tokens: usage.input,
 					output_tokens: usage.output,
@@ -219,13 +352,35 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 		const accountUserId = lifecycle.accountUserId ?? lifecycle.account_user_id ?? null;
 		const managedProjectId = lifecycle.managedProjectId ?? lifecycle.managed_project_id ?? null;
 		const managedAccess = lifecycle.managedAccess ?? lifecycle.managed_access ?? "write";
+		// Account erasure can linearize after a provider invocation but before this
+		// best-effort flush. Resolve the account and its selected memory subtenant
+		// together inside the INSERT transaction: a flush that wins first is deleted
+		// by teardown; a tombstone that wins first strips every tenant locator while
+		// retaining only content-free call/accounting evidence. This is especially
+		// important for default-project SDK subjects where userId != accountUserId.
 		const statements = calls.map((call) => env.DB.prepare(
-			`INSERT INTO ai_calls (id, user_id, scope, scope_id, model, task, input_tokens,
+			`WITH erasure_state(erased) AS (
+				SELECT CASE WHEN EXISTS (
+					SELECT 1 FROM account_erasure_tombstones
+					WHERE user_id = ? OR user_id = ?
+				) THEN 1 ELSE 0 END
+			)
+			 INSERT INTO ai_calls (id, user_id, scope, scope_id, model, task, input_tokens,
 				output_tokens, total_tokens, neurons, duration_ms, ok, raw_usage_json, created_at,
 				account_user_id, managed_project_id, provider, capability, model_version,
 				error_class, retry_count, call_role)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 SELECT ?,
+				CASE WHEN erased = 1 THEN NULL ELSE ? END,
+				CASE WHEN erased = 1 THEN NULL ELSE ? END,
+				CASE WHEN erased = 1 THEN NULL ELSE ? END,
+				?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+				CASE WHEN erased = 1 THEN NULL ELSE ? END,
+				CASE WHEN erased = 1 THEN NULL ELSE ? END,
+				?, ?, ?, ?, ?, ?
+			 FROM erasure_state`,
 		).bind(
+			accountUserId,
+			userId ?? null,
 			newId("aicall"),
 			userId ?? null,
 			meter.scope ?? null,
@@ -280,13 +435,19 @@ export async function flushAiMeter(env, userId, meter, lifecycle = {}) {
 			measured.length,
 			now,
 		));
-		// Legacy API tenants are arbitrary memory ids rather than user accounts;
-		// only managed-project work participates in account-erasure fencing.
+		// Managed work additionally retains its project authorization fence. Legacy
+		// API tenants are arbitrary memory ids, while account-shaped identities on
+		// every lane are independently anonymized by the tombstone-aware INSERT.
 		await env.DB.batch(managedProjectId
 			? [managedMutationGuardStatement(env, {
 				accountUserId,
 				projectId: managedProjectId,
 				access: managedAccess,
+				// This batch writes only accounting. If erasure already won, the
+				// adjacent INSERT strips every tenant locator; rejecting it on the
+				// old project capability would lose provider spend truth.
+				allowErasedAccounting: true,
+				memoryUserId: userId ?? null,
 			}), ...statements]
 			: statements);
 	} catch (error) {

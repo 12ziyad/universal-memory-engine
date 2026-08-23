@@ -266,13 +266,16 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 	if (current.status === "failed") {
 		const storedError = String(current.error ?? "extraction failed");
 		const interrupted = storedError.startsWith("inference_outcome_unknown:");
+		const providerTerminal = storedError.startsWith("provider_terminal:");
 		const outcome = interrupted
 			? "interrupted_unknown"
-			: storedError.startsWith("db_write_failed:") ? "db_write_failed" : "llm_failed";
+			: providerTerminal ? "provider_terminal"
+				: storedError.startsWith("db_write_failed:") ? "db_write_failed" : "llm_failed";
 		const receipt = emptyReceipt(
 			outcome,
 			interrupted
 				? "processing was interrupted after inference began; the model was not called again"
+				: providerTerminal ? "the provider refused a safe retry; the model was not called again"
 				: outcome === "db_write_failed" ? "a storage error interrupted the save" : "the extractor returned nothing readable",
 			recoveredMeta,
 		);
@@ -338,6 +341,7 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 	const maxCalls = Number.isFinite(limits.maxCalls) ? limits.maxCalls : Infinity;
 	const failFast = Number.isFinite(limits.failFast) ? limits.failFast : 3;
 	const stats = { calls: 0, failures: 0, aborted: null, outcomes: {}, duplicates: 0, invalidObjects: 0 };
+	let terminal = null;
 
 	if (chunk.length > maxCalls) {
 		console.warn(`split rescue refused user=${userId}: ${chunk.length} messages > ceiling ${maxCalls}`);
@@ -361,17 +365,27 @@ async function proposeSplit(env, config, userId, chunk, recent, overrides, limit
 			stats.invalidObjects += Number(single._invalid_objects ?? 0);
 			if (!single._ok) {
 				console.warn(`llm split rescue failed user=${userId} outcome=${outcome}`);
+				if (single._terminal || outcome === "in_progress") return { terminal: single };
 				return null;
 			}
-			return single;
+			return { value: single };
 		}));
-		for (const single of parts) {
-			if (!single) {
+		for (const part of parts) {
+			if (part?.terminal) {
+				terminal ??= part.terminal;
+				continue;
+			}
+			if (!part) {
 				stats.failures += 1;
 				continue;
 			}
+			const single = part.value;
 			objects.push(...(single.objects ?? []));
 			if (single.notes) notes.push(single.notes);
+		}
+		if (terminal) {
+			stats.aborted = terminal._outcome ?? "provider_terminal";
+			return { split: null, stats, terminal };
 		}
 		if (stats.failures >= failFast) {
 			stats.aborted = "fail_fast";
@@ -512,9 +526,10 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 		// The manual path splits deliberately (it is not rescuing a failed
 		// parse), so the ceiling does not apply — but fail-fast still does: a
 		// systematically unparseable conversation is abandoned, not walked.
-		const { split, stats } = await proposeSplit(env, config, userId, chunk, recent, overrides, {
+		const { split, stats, terminal } = await proposeSplit(env, config, userId, chunk, recent, overrides, {
 			failFast: limits.failFast,
 		});
+		if (terminal) return { proposal: terminal, rescued: false, rescueStats: stats };
 		if (split) return { proposal: split, rescued: true, rescueStats: stats };
 		return {
 			proposal: {
@@ -530,12 +545,13 @@ async function proposeWithSplitRescue(env, config, userId, chunk, recent, packet
 	}
 
 	const proposal = await proposeMemory(env, config, { packet, shortlist }, overrides);
-	if (proposal._ok || chunk.length <= 1) {
+	if (proposal._ok || proposal._terminal || proposal._outcome === "in_progress" || chunk.length <= 1) {
 		return { proposal, rescued: false, rescueStats: null };
 	}
 
 	console.warn(`llm primary parse failed user=${userId}; retrying ${chunk.length} message(s) individually`);
-	const { split, stats } = await proposeSplit(env, config, userId, chunk, recent, overrides, limits);
+	const { split, stats, terminal } = await proposeSplit(env, config, userId, chunk, recent, overrides, limits);
+	if (terminal) return { proposal: terminal, rescued: false, rescueStats: stats };
 	if (split) return { proposal: split, rescued: true, rescueStats: stats };
 	return {
 		proposal: stats.failures > 0 && overrides?.extractionV3 === true
@@ -656,6 +672,10 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}, 
 			console.warn("ai meter rollup failed:", error?.message ?? error);
 		}
 		return result;
+	}, {
+		memoryUserId: userId,
+		accountUserId: overrides.meta?.account_user_id ?? overrides.meta?.accountUserId ?? null,
+		managedProjectId: overrides.meta?.managed_project_id ?? overrides.meta?.managedProjectId ?? null,
 	}));
 }
 
@@ -729,8 +749,6 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		extractionRunId = await createExtractionRun(env, userId, runOwner);
 	}
 	meta.extraction_run_id = extractionRunId;
-	// Attribute every model call in this run to it, now that the id exists.
-	tagAiMeter(extractionRunId);
 
 	// SRV-08 pre-flight: if a confirmed erasure's barrier already covers this
 	// work's ACCEPTANCE, cancel now — before spending a model call. Acceptance
@@ -738,11 +756,21 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	// fresh queue entries, but never a fresh packet), with the queue entry's
 	// acceptance time as fallback for packet-less lanes.
 	const acceptedAt = await workAcceptedAt(env, userId, runOwner.sourcePacketId, meta);
+	// Attribute every primary/atomic/embed/rerank child to the durable run and
+	// the work's original acceptance point. This context is consumed again at
+	// reserved→invoking, after plaintext preparation, so this preflight can
+	// never be the only privacy fence.
+	tagAiMeter(extractionRunId, {
+		memoryUserId: userId,
+		accountUserId: meta.account_user_id ?? meta.accountUserId ?? null,
+		managedProjectId: meta.managed_project_id ?? meta.managedProjectId ?? null,
+		acceptedAt,
+	});
 	if (acceptedAt != null) {
 		const barrier = await env.DB.prepare(
 			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
 		).bind(userId).first();
-		if (barrier && Number(barrier.barrier_at) > acceptedAt) {
+		if (barrier && Number(barrier.barrier_at) >= acceptedAt) {
 			await updateExtractionRun(env, userId, extractionRunId, {
 				status: "cancelled_by_delete",
 				error: "cancelled_by_delete: a confirmed delete erased this scope after this save was accepted",
@@ -916,11 +944,25 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 	}
 	if (!proposal._ok) {
 		console.warn(`extraction llm_failed user=${userId} notes=${proposal.notes}`);
+		if (proposal._outcome === "in_progress") {
+			return {
+				outcome: "in_progress",
+				retryAfterMs: Number.isFinite(Number(proposal._retry_after_ms)) ? Number(proposal._retry_after_ms) : null,
+			};
+		}
+		const terminalOutcome = ["interrupted_unknown", "provider_terminal"].includes(proposal._outcome)
+			? proposal._outcome
+			: null;
+		const failedError = terminalOutcome === "interrupted_unknown"
+			? "inference_outcome_unknown: provider response could not be safely replayed"
+			: terminalOutcome === "provider_terminal"
+				? "provider_terminal: provider refused a safe immediate retry"
+				: "llm_failed: the extractor returned nothing readable";
 		// Guarded like the other finalizations: never stomp a concurrent
 		// erasure's cancelled_by_delete back to a retryable `failed`.
 		const failed = await updateExtractionRun(env, userId, extractionRunId, {
 			status: "failed",
-			error: "llm_failed: the extractor returned nothing readable",
+			error: failedError,
 			expectStatus: "running",
 		});
 		if (Number(failed?.changes ?? 0) !== 1) {
@@ -937,9 +979,19 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 				return { outcome: row.status, error: row.status, receipt };
 			}
 		}
+		const outcome = terminalOutcome ?? "llm_failed";
 		return {
-			outcome: "llm_failed",
-			receipt: emptyReceipt("llm_failed", "the extractor returned nothing I could read", { ...meta, latency_ms: elapsed() }),
+			outcome,
+			error: failedError,
+			receipt: emptyReceipt(
+				outcome,
+				outcome === "interrupted_unknown"
+					? "the provider outcome is unknown; the model was not called again"
+					: outcome === "provider_terminal"
+						? "the provider refused a safe retry; the model was not called again"
+						: "the extractor returned nothing I could read",
+				{ ...meta, latency_ms: elapsed() },
+			),
 		};
 	}
 
@@ -1131,7 +1183,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 			const barrier = await env.DB.prepare(
 				"SELECT barrier_at FROM deletion_barriers WHERE user_id = ?",
 			).bind(userId).first();
-			if (barrier && Number(barrier.barrier_at) > acceptedAt) {
+			if (barrier && Number(barrier.barrier_at) >= acceptedAt) {
 				console.warn(`extraction cancelled_by_delete post-model (no-write) user=${userId}`);
 				await updateExtractionRun(env, userId, extractionRunId, {
 					status: "cancelled_by_delete",

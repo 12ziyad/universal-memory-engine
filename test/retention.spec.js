@@ -23,6 +23,11 @@ import {
 	normalizeSourcePacket,
 	storeSourcePacket,
 } from "../src/pipeline/source.js";
+import {
+	markReservationInvoking,
+	releaseReservation,
+	reserveSpend,
+} from "../src/ai/provider_budget.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const ALLOW_ALL_RULES = { customInstructions: "", includes: [], excludes: [] };
@@ -234,6 +239,71 @@ describe("enterprise retention", () => {
 		expect(await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM source_episodes_fts WHERE source_episodes_fts MATCH ?",
 		).bind(token).first()).toMatchObject({ n: 0 });
+	});
+
+	it("retention waits before deletion for an admitted primary invocation and then scrubs its provenance", async () => {
+		const now = Date.now();
+		const oldAt = now - 60 * DAY;
+		const project = await makeProject("primary-provider-fence");
+		const episodeId = await insertEpisode(project.memoryOwnerUserId, {
+			createdAt: oldAt,
+			text: "retention must preserve this until provider settlement",
+		});
+		const reservationId = `retention_primary_${crypto.randomUUID().replaceAll("-", "")}`;
+		const reservation = await reserveSpend(Object.assign(Object.create(Object.getPrototypeOf(env)), env, {
+			GOOGLE_DAILY_GEN_TOKENS: "10000000",
+			GOOGLE_MONTHLY_COST_MICROS: "1000000000",
+		}), {
+			provider: "google-vertex",
+			model: "gemini-2.5-flash",
+			capability: "generate_structured",
+			inputs: { messages: [{ role: "user", content: "private retention input" }], max_tokens: 20 },
+			reservationId,
+			now,
+			lifecycle: {
+				memoryUserId: project.memoryOwnerUserId,
+				accountUserId: project.ownerUserId,
+				managedProjectId: project.projectId,
+				acceptedAt: oldAt,
+				scope: "provider_test",
+				scopeId: reservationId,
+			},
+		});
+		expect((await markReservationInvoking(env, reservation, { now })).applied).toBe(true);
+
+		const activated = await activate(project, "source_episodes", 30, now);
+		const stalled = await processRetentionRun(env, {
+			runId: activated.run.id,
+			now: now + 1,
+			batchSize: 50,
+		});
+		expect(stalled).toMatchObject({
+			status: "retry",
+			error_code: "provider_invocation_in_flight",
+			deleted_this_batch: 0,
+		});
+		expect(await env.DB.prepare("SELECT text FROM source_episodes WHERE id = ?")
+			.bind(episodeId).first()).toEqual({ text: "retention must preserve this until provider settlement" });
+
+		await releaseReservation(env, reservation, now + 2);
+		const completed = await processRetentionRun(env, {
+			runId: activated.run.id,
+			now: now + 3,
+			batchSize: 50,
+		});
+		expect(completed.status).toBe("completed");
+		expect(await env.DB.prepare("SELECT id FROM source_episodes WHERE id = ?")
+			.bind(episodeId).first()).toBeNull();
+		expect(await env.DB.prepare(
+			`SELECT memory_user_id, account_user_id, managed_project_id, accepted_at, scope_id
+			   FROM ai_provider_reservations WHERE id = ?`,
+		).bind(reservationId).first()).toEqual({
+			memory_user_id: null,
+			account_user_id: null,
+			managed_project_id: null,
+			accepted_at: null,
+			scope_id: null,
+		});
 	});
 
 	it("keeps a shared capture run while it still owns a newer candidate", async () => {
@@ -564,7 +634,7 @@ describe("enterprise retention", () => {
 		).bind(token).first()).toMatchObject({ n: 0 });
 	});
 
-	it("scrubs operational content but preserves immutable replay tombstones", async () => {
+	it("scrubs operational content, converges sampled runs beyond the shadow lookback, and preserves replay tombstones", async () => {
 		const now = Date.now();
 		const oldAt = now - 60 * DAY;
 		const project = await makeProject("operational-tombstone");
@@ -586,7 +656,15 @@ describe("enterprise retention", () => {
 		const stored = await storeSourcePacket(env, normalized.packet, { immutableIdempotency: true });
 		const receiptId = `receipt_${crypto.randomUUID()}`;
 		const extractionId = `extract_${crypto.randomUUID()}`;
+		const missingShadowExtractionId = `extract_${crypto.randomUUID()}`;
+		const terminalShadowId = `shadow_${crypto.randomUUID()}`;
+		const pendingShadowId = `shadow_${crypto.randomUUID()}`;
 		const jobId = `job_${crypto.randomUUID()}`;
+		const shadowPin = JSON.stringify({
+			v: 1,
+			routes: {},
+			shadow: { provider: "google-vertex", model: "gemini-2.5-flash", sampled: true },
+		});
 		const scopeJson = JSON.stringify({
 			managed_project_id: project.projectId,
 			owner_user_id: project.memoryOwnerUserId,
@@ -613,9 +691,9 @@ describe("enterprise retention", () => {
 				`INSERT INTO extraction_runs
 				 (id, user_id, tool_name, source_mode, topic_filter, receipt_id, status,
 				  created_nodes_json, error, created_at, updated_at, source_packet_id,
-				  idempotency_key, scope_json, job_id)
+				  idempotency_key, scope_json, job_id, pin_json)
 				 VALUES (?, ?, 'ingest', 'auto', 'private topic', ?, 'completed', ?,
-				  'private extraction error', ?, ?, ?, ?, ?, ?)`,
+				  'private extraction error', ?, ?, ?, ?, ?, ?, ?)`,
 			).bind(
 				extractionId,
 				userId,
@@ -627,7 +705,39 @@ describe("enterprise retention", () => {
 				normalized.packet.idempotency_key,
 				scopeJson,
 				jobId,
+				shadowPin,
 			),
+			env.DB.prepare(
+				`INSERT INTO extraction_runs
+				 (id, user_id, tool_name, source_mode, topic_filter, status,
+				  created_pages_json, created_nodes_json, created_slices_json, created_events_json,
+				  created_edges_json, created_candidates_json, updated_objects_json,
+				  reinforced_objects_json, skipped_objects_json, error, created_at, updated_at,
+				  source_packet_id, scope_json, pin_json)
+				 VALUES (?, ?, 'ingest', 'auto', 'unresolved shadow topic', 'wrote',
+				  '[]', '["unresolved-node"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]',
+				  'unresolved shadow detail', ?, ?, ?, ?, ?)`,
+			).bind(
+				missingShadowExtractionId,
+				userId,
+				oldAt,
+				oldAt,
+				stored.id,
+				scopeJson,
+				shadowPin,
+			),
+			env.DB.prepare(
+				`INSERT INTO ai_shadow_jobs
+				 (id, user_id, primary_run_id, provider, model, status, attempts,
+				  created_at, updated_at, terminal_at)
+				 VALUES (?, ?, ?, 'google-vertex', 'gemini-2.5-flash', 'done', 1, ?, ?, ?)`,
+			).bind(terminalShadowId, userId, extractionId, oldAt, oldAt, oldAt),
+			env.DB.prepare(
+				`INSERT INTO ai_shadow_jobs
+				 (id, user_id, primary_run_id, provider, model, status, attempts,
+				  created_at, updated_at)
+				 VALUES (?, ?, ?, 'google-vertex', 'gemini-2.5-flash', 'pending', 0, ?, ?)`,
+			).bind(pendingShadowId, userId, `unresolved_${crypto.randomUUID()}`, oldAt, oldAt),
 			env.DB.prepare(
 				`INSERT INTO memory_jobs
 				 (id, user_id, type, status, idempotency_key, source_packet_id,
@@ -666,14 +776,47 @@ describe("enterprise retention", () => {
 		});
 		expect(await env.DB.prepare("SELECT payload_json, error FROM memory_jobs WHERE id = ?")
 			.bind(jobId).first()).toEqual({ payload_json: "{}", error: null });
-		expect(await env.DB.prepare(
-			"SELECT topic_filter, error, scope_json, created_nodes_json FROM extraction_runs WHERE id = ?",
-		).bind(extractionId).first()).toEqual({
+		const scrubbedRun = await env.DB.prepare(
+			"SELECT topic_filter, error, scope_json, created_nodes_json, pin_json FROM extraction_runs WHERE id = ?",
+		).bind(extractionId).first();
+		expect(scrubbedRun).toMatchObject({
 			topic_filter: null,
 			error: null,
 			scope_json: "{}",
 			created_nodes_json: "[]",
 		});
+		expect(JSON.parse(scrubbedRun.pin_json).shadow).toBeUndefined();
+		// The terminal observation ages from terminal_at and is removed only
+		// after its primary run is safely de-shadowed. Live work is never purged.
+		expect(await env.DB.prepare("SELECT id FROM ai_shadow_jobs WHERE id = ?")
+			.bind(terminalShadowId).first()).toBeNull();
+		expect(await env.DB.prepare("SELECT status FROM ai_shadow_jobs WHERE id = ?")
+			.bind(pendingShadowId).first()).toEqual({ status: "pending" });
+		// This run is 60 days old — outside shadow reconciliation's 30-day
+		// lookback. Retention must still converge it by atomically writing a
+		// content-free terminal marker before removing the provider pin.
+		const convergedRun = await env.DB.prepare(
+			"SELECT topic_filter, scope_json, created_nodes_json, pin_json FROM extraction_runs WHERE id = ?",
+		).bind(missingShadowExtractionId).first();
+		expect(convergedRun).toMatchObject({
+			topic_filter: null,
+			scope_json: "{}",
+			created_nodes_json: "[]",
+		});
+		expect(JSON.parse(convergedRun.pin_json).shadow).toBeUndefined();
+		const retentionMarker = await env.DB.prepare(
+			`SELECT status, provider, model, account_user_id, error_class, created_at, terminal_at
+			   FROM ai_shadow_jobs WHERE primary_run_id = ?`,
+		).bind(missingShadowExtractionId).first();
+		expect(retentionMarker).toMatchObject({
+			status: "cancelled_removed",
+			provider: "google-vertex",
+			model: "gemini-2.5-flash",
+			account_user_id: null,
+			error_class: "retention_expired",
+			created_at: oldAt,
+		});
+		expect(Number(retentionMarker.terminal_at)).toBeGreaterThan(oldAt + 30 * DAY);
 		expect(await env.DB.prepare("SELECT summary, detail, scope_json FROM receipts WHERE id = ?")
 			.bind(receiptId).first()).toEqual({ summary: null, detail: "{}", scope_json: "{}" });
 

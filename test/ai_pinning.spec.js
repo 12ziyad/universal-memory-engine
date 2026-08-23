@@ -71,15 +71,16 @@ describe("end-to-end: policy → pin → atomic shadow enqueue", () => {
 		const userId = `pinshadow-${crypto.randomUUID()}`;
 		const runId = `run_extract_${crypto.randomUUID().replaceAll("-", "")}`;
 		await env.DB.prepare(
-			`INSERT INTO ai_routing_policies (capability, mode, shadow_provider, shadow_model, shadow_sample_pct, updated_at, updated_by)
-			 VALUES ('extract', 'shadow', 'google-vertex', 'gemini-2.5-flash', 100, ?, 'spec')`,
-		).bind(Date.now()).run();
+			`INSERT INTO ai_routing_policies (capability, mode, shadow_provider, shadow_model, shadow_sample_pct, allowlist_json, updated_at, updated_by)
+			 VALUES ('extract', 'shadow', 'google-vertex', 'gemini-2.5-flash', 100, ?, ?, 'spec')`,
+		).bind(JSON.stringify([userId]), Date.now()).run();
 		const routedEnv = Object.assign(Object.create(Object.getPrototypeOf(env)), env, { AI_ROUTING: "on" });
 
 		const result = await runExtraction(routedEnv, userId, [
 			{ role: "user", content: "I adopted a cat named Miso last week." },
 		], [], {
 			llmResponse: { objects: [{ kind: "node", label: "Miso", category: "pet", summary: "Cat adopted last week." }] },
+			meta: { account_user_id: userId },
 		}, { runId });
 
 		expect(result.outcome).toBe("wrote");

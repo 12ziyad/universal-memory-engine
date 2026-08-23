@@ -6,14 +6,217 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, expect, it } from "vitest";
 import worker from "../src";
 import { formatReceipt } from "../src/pipeline/receipt.js";
+import { providerOperationId } from "../src/lib/ai_meter.js";
+import { deleteAccountCompletely } from "../src/pipeline/cleanup.js";
 
-async function request(path, init = {}) {
+async function request(path, init = {}, runtimeEnv = env) {
 	const req = new Request(`http://example.com${path}`, init);
 	const ctx = createExecutionContext();
-	const res = await worker.fetch(req, env, ctx);
+	const res = await worker.fetch(req, runtimeEnv, ctx);
 	await waitOnExecutionContext(ctx);
 	return res;
 }
+
+describe("provider health check", () => {
+	it("stays dark without Google credentials and does not require an operation key", async () => {
+		const admin = await signupAccount("health-dark");
+		await makeAdmin(admin.user.id);
+		const res = await request("/v1/admin/ai-routing/health-check", {
+			method: "POST",
+			headers: { cookie: admin.cookie },
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({
+			ok: true,
+			google_vertex: { ok: false, error_class: "no_credentials" },
+		});
+	});
+
+	it("requires a bounded stable operation key before a credentialed live probe", async () => {
+		const admin = await signupAccount("health-key");
+		await makeAdmin(admin.user.id);
+		const credentialed = {
+			...env,
+			GCP_PROJECT_ID: "test-project",
+			GCP_SERVICE_ACCOUNT: "{}",
+		};
+		for (const key of [null, "short", "        ", "x".repeat(129)]) {
+			const headers = { cookie: admin.cookie };
+			if (key != null) headers["Idempotency-Key"] = key;
+			const res = await request("/v1/admin/ai-routing/health-check", {
+				method: "POST",
+				headers,
+			}, credentialed);
+			expect(res.status).toBe(400);
+			expect(await res.json()).toEqual({ error: "invalid_idempotency_key" });
+		}
+		const reservations = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM ai_provider_reservations",
+		).first("n");
+		expect(Number(reservations)).toBe(0);
+	});
+
+	it("routes a valid probe through reservation and ai-call accounting before local credential refusal", async () => {
+		const admin = await signupAccount("health-accounted");
+		await makeAdmin(admin.user.id);
+		const key = `health-${crypto.randomUUID()}`;
+		const reservationId = await providerOperationId({
+			scope: "admin_provider_health",
+			scopeId: `${admin.user.id}:${key}`,
+			task: "provider_health",
+			ordinal: 0,
+		});
+		const res = await request("/v1/admin/ai-routing/health-check", {
+			method: "POST",
+			headers: { cookie: admin.cookie, "Idempotency-Key": key },
+		}, {
+			...env,
+			GCP_PROJECT_ID: "test-project",
+			GCP_SERVICE_ACCOUNT: "{}",
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({
+			ok: true,
+			google_vertex: { ok: false, error_class: "provider_misconfigured" },
+		});
+		const reservation = await env.DB.prepare(
+			"SELECT provider, status FROM ai_provider_reservations WHERE id = ?",
+		).bind(reservationId).first();
+		expect(reservation).toMatchObject({ provider: "google-vertex", status: "released" });
+		const call = await env.DB.prepare(
+			`SELECT provider, scope, scope_id, task, ok, error_class FROM ai_calls
+			 WHERE user_id = ? AND scope_id = ? ORDER BY created_at DESC LIMIT 1`,
+		).bind(admin.user.id, reservationId).first();
+		expect(call).toMatchObject({
+			provider: "google-vertex",
+			scope: "provider_health",
+			scope_id: reservationId,
+			task: "provider_health",
+			ok: 0,
+			error_class: "provider_misconfigured",
+		});
+
+		const replay = await request("/v1/admin/ai-routing/health-check", {
+			method: "POST",
+			headers: { cookie: admin.cookie, "Idempotency-Key": key },
+		}, {
+			...env,
+			GCP_PROJECT_ID: "test-project",
+			GCP_SERVICE_ACCOUNT: "{}",
+		});
+		expect(replay.status).toBe(409);
+		expect(await replay.json()).toEqual({
+			error: "health_probe_key_already_used",
+			google_vertex: {
+				ok: false,
+				error_class: "duplicate_probe",
+				reservation_status: "released",
+			},
+		});
+		const afterReplay = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM ai_calls
+			 WHERE user_id = ? AND scope_id = ? AND task = 'provider_health'`,
+		).bind(admin.user.id, reservationId).first("n");
+		expect(Number(afterReplay)).toBe(1);
+	});
+
+	it("does not resurrect an erased admin identity when an admitted health meter flushes late", async () => {
+		const admin = await signupAccount("health-erasure-race");
+		await makeAdmin(admin.user.id);
+		const key = `health-race-${crypto.randomUUID()}`;
+		const reservationId = await providerOperationId({
+			scope: "admin_provider_health",
+			scopeId: `${admin.user.id}:${key}`,
+			task: "provider_health",
+			ordinal: 0,
+		});
+		const dailyCallsBefore = Number(await env.DB.prepare(
+			"SELECT COALESCE(SUM(calls), 0) AS n FROM ai_daily_totals",
+		).first("n"));
+		let releaseFlush;
+		let markFlushReady;
+		const flushReady = new Promise((resolve) => { markFlushReady = resolve; });
+		const flushReleased = new Promise((resolve) => { releaseFlush = resolve; });
+		const aiCallStatements = new WeakSet();
+		const wrapStatement = (statement, tracksAiCall) => {
+			const wrapped = new Proxy(statement, {
+				get(prepared, property) {
+					if (property === "bind") {
+						return (...args) => wrapStatement(prepared.bind(...args), tracksAiCall);
+					}
+					const value = Reflect.get(prepared, property);
+					return typeof value === "function" ? value.bind(prepared) : value;
+				},
+			});
+			if (tracksAiCall) aiCallStatements.add(wrapped);
+			return wrapped;
+		};
+		const DB = new Proxy(env.DB, {
+			get(db, property) {
+				if (property === "prepare") return (sql) => wrapStatement(
+					db.prepare(sql),
+					String(sql).includes("INSERT INTO ai_calls"),
+				);
+				if (property === "batch") return async (statements) => {
+					if (statements.some((statement) => aiCallStatements.has(statement))) {
+						markFlushReady();
+						await flushReleased;
+					}
+					return db.batch(statements);
+				};
+				const value = Reflect.get(db, property);
+				return typeof value === "function" ? value.bind(db) : value;
+			},
+		});
+		const racedEnv = {
+			...env,
+			DB,
+			GCP_PROJECT_ID: "test-project",
+			GCP_SERVICE_ACCOUNT: "{}",
+		};
+
+		const inFlight = request("/v1/admin/ai-routing/health-check", {
+			method: "POST",
+			headers: { cookie: admin.cookie, "Idempotency-Key": key },
+		}, racedEnv);
+		await flushReady;
+		expect((await deleteAccountCompletely(env, admin.user.id)).deleted).toBe(true);
+		releaseFlush();
+		const response = await inFlight;
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			ok: true,
+			google_vertex: { ok: false, error_class: "provider_misconfigured" },
+		});
+
+		const resurrected = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM ai_calls WHERE user_id = ? OR account_user_id = ?",
+		).bind(admin.user.id, admin.user.id).first("n");
+		expect(Number(resurrected)).toBe(0);
+		const accounted = await env.DB.prepare(
+			`SELECT * FROM ai_calls
+			  WHERE provider = 'google-vertex' AND task = 'provider_health'
+			    AND user_id IS NULL AND account_user_id IS NULL
+			    AND scope IS NULL AND scope_id IS NULL
+			  ORDER BY created_at DESC, id DESC LIMIT 1`,
+		).first();
+		expect(accounted).toMatchObject({
+			user_id: null,
+			account_user_id: null,
+			scope: null,
+			scope_id: null,
+			managed_project_id: null,
+			task: "provider_health",
+		});
+		const serialized = JSON.stringify(accounted);
+		expect(serialized).not.toContain(admin.user.id);
+		expect(serialized.toLowerCase()).not.toContain(admin.email.toLowerCase());
+		const dailyCallsAfter = Number(await env.DB.prepare(
+			"SELECT COALESCE(SUM(calls), 0) AS n FROM ai_daily_totals",
+		).first("n"));
+		expect(dailyCallsAfter - dailyCallsBefore).toBe(1);
+	});
+});
 
 function jsonInit(body, cookie) {
 	return {

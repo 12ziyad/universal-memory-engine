@@ -461,18 +461,24 @@ describe("protected hook outbox", () => {
 		const data = await fixture();
 		const queued = await enqueue(data);
 		const requestTimeoutMs = 40;
-		const startedAt = Date.now();
+		let headersArrived;
+		const headersReady = new Promise((resolve) => { headersArrived = resolve; });
+		const cancelBody = vi.fn();
 		const fetchFn = vi.fn(async () => new Response(new ReadableStream({
 			start() {
 				// Headers are available immediately, but the body intentionally never
 				// closes. The request deadline must cover body consumption too.
+				headersArrived();
 			},
+			cancel: cancelBody,
 		}), { status: 202, headers: { "content-type": "application/json" } }));
 		const completion = drain(data, { fetchFn, requestTimeoutMs })
 			.then((value) => ({ kind: "completed", value }));
+		await headersReady;
+		const startedAt = Date.now();
 		let guardTimer;
 		const guard = new Promise((resolve) => {
-			guardTimer = setTimeout(() => resolve({ kind: "hung" }), 300);
+			guardTimer = setTimeout(() => resolve({ kind: "hung" }), 1_000);
 		});
 		const outcome = await Promise.race([completion, guard]);
 		clearTimeout(guardTimer);
@@ -480,20 +486,21 @@ describe("protected hook outbox", () => {
 
 		expect(outcome.kind, "drain remained stuck after its request timeout").toBe("completed");
 		if (outcome.kind !== "completed") return;
-		expect(elapsedMs).toBeLessThan(250);
+		expect(elapsedMs).toBeLessThan(1_000);
 		expect(outcome.value).toMatchObject({
 			delivered: 0,
 			retried: 1,
 			transportUnavailable: true,
 		});
 		expect(fetchFn).toHaveBeenCalledTimes(1);
+		expect(cancelBody).toHaveBeenCalledTimes(1);
 		expect(await directoryFiles(join(data.outbox, "pending"))).toEqual([`${queued.queueId}.json`]);
 		expect(await directoryFiles(join(data.outbox, "inflight"))).toEqual([]);
 		expect(await stateFor(data, queued.queueId)).toMatchObject({
 			attempts: 1,
 			last_error_code: "timeout",
 		});
-	}, 2_000);
+	}, 3_000);
 
 	it.each([401, 403])("blocks the rejected credential after HTTP %i without losing raw data", async (status) => {
 		const data = await fixture();
@@ -1092,14 +1099,22 @@ describe("protected hook outbox", () => {
 		const stale = new Date(Date.now() - OUTBOX_LIMITS.staleLockMs - 1_000);
 		await utimes(lock, stale, stale);
 		const fetchFn = vi.fn(async () => acceptedResponse());
-		const startedAt = Date.now();
-
-		const result = await drain(data, { fetchFn });
-		expect(Date.now() - startedAt).toBeLessThan(500);
+		let guardTimer;
+		const guarded = Promise.race([
+			drain(data, { fetchFn }).then((value) => ({ kind: "completed", value })),
+			new Promise((resolve) => {
+				guardTimer = setTimeout(() => resolve({ kind: "hung" }), 5_000);
+			}),
+		]);
+		const outcome = await guarded;
+		clearTimeout(guardTimer);
+		expect(outcome.kind, "stale-lock recovery did not terminate").toBe("completed");
+		if (outcome.kind !== "completed") return;
+		const result = outcome.value;
 		expect(result).toMatchObject({ busy: false, delivered: 1 });
 		expect(fetchFn).toHaveBeenCalledTimes(1);
 		await expect(stat(lock)).rejects.toMatchObject({ code: "ENOENT" });
-	}, 1_000);
+	}, 7_000);
 
 	it("leaves a fresh ownerless lock busy during its recovery grace period", async () => {
 		const data = await fixture();

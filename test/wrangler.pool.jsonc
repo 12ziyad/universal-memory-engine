@@ -1,7 +1,7 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
+	"$schema": "../node_modules/wrangler/config-schema.json",
 	"name": "uml-test",
-	"main": "src/index.js",
+	"main": "../src/index.js",
 	"compatibility_date": "2026-06-23",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"secrets": { "required": [] },
@@ -10,7 +10,7 @@
 			"binding": "DB",
 			"database_name": "uml-memory-test",
 			"database_id": "00000000-0000-0000-0000-000000000000",
-			"migrations_dir": "migrations"
+			"migrations_dir": "../migrations"
 		}
 	],
 	"durable_objects": {

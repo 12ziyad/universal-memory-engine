@@ -21,6 +21,8 @@ import {
 	provisionalTitle,
 	topEntityFromLines,
 	reconcileTitle,
+	mcpTitleOperationScopeId,
+	mcpTitleReservationId,
 	durableUserMessages,
 } from "../src/pipeline/mcp_engine.js";
 import { runDirectSaveCommand } from "../src/pipeline/commands.js";
@@ -552,6 +554,31 @@ describe("trust attribution", () => {
 });
 
 describe("titles", () => {
+	it("keys title inference to the durable extraction run", async () => {
+		const scope = mcpTitleOperationScopeId("run_title_1", "job_title_1", "page_title_1");
+		const first = await mcpTitleReservationId("title-user", scope);
+		expect(first).toMatch(/^airesv_[0-9a-f]{64}$/);
+		expect(await mcpTitleReservationId("title-user", scope)).toBe(first);
+		expect(await mcpTitleReservationId("title-user", mcpTitleOperationScopeId("run_title_2", "job_title_1", "page_title_1"))).not.toBe(first);
+		expect(await mcpTitleReservationId("title-user", mcpTitleOperationScopeId("run_title_1", "job_title_2", "page_title_1"))).not.toBe(first);
+		expect(await mcpTitleReservationId("other-user", scope)).not.toBe(first);
+	});
+
+	it("preserves the Cloudflare-only helper call when no durable title scope exists", async () => {
+		let calls = 0;
+		const config = getConfig(env);
+		const title = await reconcileTitle({ AI: { async run() {
+			calls += 1;
+			return { response: '{"title":"Halcyon Firmware Role"}' };
+		} } }, config, {
+			entityLabels: ["Halcyon Robotics"],
+			factLines: ["Works as a firmware engineer at Halcyon Robotics"],
+			fallbackTs: T0,
+		});
+		expect(title).toBe("Halcyon Firmware Role");
+		expect(calls).toBe(1);
+	});
+
 	it("never assembles a title from fragments: an ungrounded title pass falls back to entity + date", async () => {
 		const config = getConfig(env);
 		const title = await reconcileTitle(env, config, {

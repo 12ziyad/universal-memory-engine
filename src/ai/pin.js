@@ -16,6 +16,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { concreteProviderRoute } from "./model_identity.js";
 import { resolveRoute, routingMode } from "./policy.js";
 
 // The store holds a mutable BOX rather than the pin itself: a save enters the
@@ -68,7 +69,8 @@ export async function resolveWritePin(env, { accountUserId = null, runKey = null
 	let admission = null;
 	let interesting = false;
 	for (const lane of WRITE_PIN_LANES) {
-		const route = await resolveRoute(env, lane, { accountUserId });
+		const resolved = await resolveRoute(env, lane, { accountUserId });
+		const route = await concreteProviderRoute(lane, resolved);
 		routes[lane] = { provider: route.provider, model: route.model ?? null };
 		if (route.provider !== "workers-ai" || route.model != null) interesting = true;
 		if (route.source === "not_allowlisted" || route.source === "provider_disabled") {
@@ -76,7 +78,7 @@ export async function resolveWritePin(env, { accountUserId = null, runKey = null
 		}
 		if (lane === "extract" && route.shadow) {
 			const sampled = await sampledForShadow(runKey, route.shadow.samplePct);
-			shadow = { ...route.shadow, sampled };
+			shadow = { ...(await concreteProviderRoute(lane, route.shadow)), sampled };
 			interesting = true;
 		}
 	}
@@ -85,10 +87,11 @@ export async function resolveWritePin(env, { accountUserId = null, runKey = null
 }
 
 /**
- * Build a pin envelope. `routes` maps capability → { provider, model|null }
- * (null model = that provider's configured default at execution time — the
- * model strings the config held at claim are captured for the write lanes so
- * a config change cannot re-interpret a retry).
+ * Build a pin envelope. `routes` maps capability → { provider, model|null }.
+ * Non-default routes crossing a durable boundary are canonicalized by
+ * resolveWritePin before this envelope is built; a NULL non-default model is
+ * therefore a malformed legacy pin and dispatch refuses it rather than
+ * consulting a newer provider default.
  */
 export function buildPin({ routes = {}, promptVersion = null, schemaVersion = null, tuningRef = null, policyVersion = null, admission = null, shadow = null, pinnedAt = Date.now() } = {}) {
 	return {

@@ -8,8 +8,8 @@
  * read-path participation.
  */
 
-import { runAi } from "../lib/ai_meter.js";
-import { currentPin, pinnedRoute } from "../ai/pin.js";
+import { runAi, withFlushedAiMeter } from "../lib/ai_meter.js";
+import { buildPin, currentPin, pinnedRoute, withAiPin } from "../ai/pin.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { normalizeProjectScope } from "../lib/project_scope.js";
 import {
@@ -92,6 +92,21 @@ async function captureRunId(userId, sourcePacketId, chunkKey) {
 		source_packet_id: sourcePacketId,
 		chunk_key: chunkKey,
 	}))}`;
+}
+
+/**
+ * Durable identity for exactly one provider attempt of one atomic-capture run.
+ *
+ * Atomic capture executes inside the parent extraction meter, whose ordinal is
+ * intentionally shared by every model call in that extraction. Scheduler or
+ * feature-order changes can therefore move the ordinal without changing this
+ * logical operation. The capture ledger already owns the correct durable
+ * identity: its content-free run id plus its persisted, fenced attempt number.
+ */
+export function atomicCaptureProviderOperationId(runId, attempt) {
+	const durableRunId = typeof runId === "string" ? runId.trim() : "";
+	if (!durableRunId) throw new TypeError("atomic provider operation requires a capture run id");
+	return `airesv_atom:v1:${durableRunId}:attempt:${Math.max(1, integer(attempt))}`;
 }
 
 function terminalRunResult(row, { replayed = false } = {}) {
@@ -234,7 +249,7 @@ async function claimRun(env, {
 		  chunk_key, status, model, schema_version, provider, accepted_at, attempts, created_at, updated_at)
 		 SELECT ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 1, ?, ?
 		 WHERE NOT EXISTS (
-			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?
+			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ?
 		 )
 		 ON CONFLICT(user_id, source_packet_id, chunk_key) DO NOTHING`,
 	).bind(
@@ -301,7 +316,7 @@ async function claimRun(env, {
 	// also covers a claim that cleanup removed between INSERT and SELECT.
 	if (!row) {
 		const barrier = await env.DB.prepare(
-			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at > ? LIMIT 1",
+			"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ? LIMIT 1",
 		).bind(userId, acceptedAt).first();
 		if (barrier) return { claimed: false, row: null, cancelledByDelete: true };
 		throw new Error("atomic capture run claim disappeared");
@@ -319,12 +334,16 @@ async function claimRun(env, {
 	}
 	// A dead Worker may leave an inference outcome unknowable. Once the same
 	// durable TTL used by extraction recovery has elapsed, an exact packet replay
-	// may reclaim only that interrupted chunk. The monotonically increasing
-	// attempt number is a write fence: a late superseded invocation can no longer
-	// publish candidates or overwrite this attempt's terminal marker.
+	// may reclaim only that interrupted chunk. A non-default provider gets a new
+	// attempt ONLY when its prior durable reservation says `released` (provider
+	// evidence that it was not billed). Settled, invoking, ambiguous, and missing
+	// reservation states are all fail-closed: none may mint another authorization.
+	// The monotonically increasing attempt number is also a write fence: a late
+	// superseded invocation cannot publish candidates or overwrite this attempt's
+	// terminal marker.
 	if (
 		row.status === "failed"
-		&& row.error_code === "interrupted_unknown"
+		&& ["interrupted_unknown", "transport_error", "timeout"].includes(row.error_code)
 		&& integer(row.attempts) < ATOMIC_CAPTURE_MAX_ATTEMPTS
 	) {
 		const reclaimed = await env.DB.prepare(
@@ -335,11 +354,32 @@ async function claimRun(env, {
 				temporal_phrase_count = 0, temporal_resolved_count = 0,
 				temporal_unresolved_count = 0, temporal_anchor_missing_count = 0,
 				rejected_reasons_json = NULL, error_code = NULL, updated_at = ?, completed_at = NULL
-			 WHERE id = ? AND user_id = ? AND status = 'failed'
-			   AND error_code = 'interrupted_unknown' AND attempts = ?
+			 WHERE id = ? AND user_id = ? AND status = 'failed' AND attempts = ?
 			   AND NOT EXISTS (
 				SELECT 1 FROM semantic_atom_candidates c
 				 WHERE c.user_id = ? AND c.capture_run_id = semantic_atom_capture_runs.id
+			   )
+			   AND (
+				(
+					COALESCE(provider, 'workers-ai') = 'workers-ai'
+					AND error_code = 'interrupted_unknown'
+					AND NOT EXISTS (
+						SELECT 1 FROM ai_provider_reservations p
+						 WHERE p.id = 'airesv_atom:v1:' || semantic_atom_capture_runs.id
+							|| ':attempt:' || semantic_atom_capture_runs.attempts
+					)
+				)
+				OR (
+					COALESCE(provider, 'workers-ai') <> 'workers-ai'
+					AND error_code IN ('interrupted_unknown', 'transport_error', 'timeout')
+					AND EXISTS (
+						SELECT 1 FROM ai_provider_reservations p
+						 WHERE p.id = 'airesv_atom:v1:' || semantic_atom_capture_runs.id
+							|| ':attempt:' || semantic_atom_capture_runs.attempts
+						   AND p.provider = semantic_atom_capture_runs.provider
+						   AND p.status = 'released'
+					)
+				)
 			   )
 			 RETURNING *`,
 		).bind(
@@ -386,8 +426,30 @@ export async function hasRecoverableAtomicCaptureInterruption(
 			 WHERE c.user_id = r.user_id AND c.capture_run_id = r.id
 		   )
 		   AND (
-			(r.status = 'running' AND r.updated_at <= ?)
-			OR (r.status = 'failed' AND r.error_code = 'interrupted_unknown')
+			(
+				COALESCE(r.provider, 'workers-ai') = 'workers-ai'
+				AND (
+					(r.status = 'running' AND r.updated_at <= ?)
+					OR (r.status = 'failed' AND r.error_code = 'interrupted_unknown')
+				)
+				AND NOT EXISTS (
+					SELECT 1 FROM ai_provider_reservations p
+					 WHERE p.id = 'airesv_atom:v1:' || r.id || ':attempt:' || r.attempts
+				)
+			)
+			OR (
+				COALESCE(r.provider, 'workers-ai') <> 'workers-ai'
+				AND (
+					(r.status = 'running' AND r.updated_at <= ?)
+					OR (r.status = 'failed' AND r.error_code IN ('interrupted_unknown', 'transport_error', 'timeout'))
+				)
+				AND EXISTS (
+					SELECT 1 FROM ai_provider_reservations p
+					 WHERE p.id = 'airesv_atom:v1:' || r.id || ':attempt:' || r.attempts
+					   AND p.provider = r.provider
+					   AND p.status = 'released'
+				)
+			)
 		   )
 		 LIMIT 1`,
 	).bind(
@@ -395,6 +457,7 @@ export async function hasRecoverableAtomicCaptureInterruption(
 		sourcePacketId,
 		projectId,
 		ATOMIC_CAPTURE_MAX_ATTEMPTS,
+		Number(now) - ATOMIC_CAPTURE_RUN_TTL_MS,
 		Number(now) - ATOMIC_CAPTURE_RUN_TTL_MS,
 	).first();
 	return Number(row?.recoverable ?? 0) === 1;
@@ -413,7 +476,7 @@ function parsedModelValue(value) {
 	return parseAtomicCaptureText(typeof value === "string" ? value : responseText(value));
 }
 
-async function proposeAtomic(env, packet, rules, override, context, model = ATOMIC_CAPTURE_MODEL) {
+async function proposeAtomic(env, packet, rules, override, context, model = ATOMIC_CAPTURE_MODEL, reservationId = null) {
 	let response;
 	let truncated = false;
 	try {
@@ -429,7 +492,7 @@ async function proposeAtomic(env, packet, rules, override, context, model = ATOM
 				// guided_json. Local validation remains mandatory because provider
 				// schema guidance is not a trust boundary.
 				guided_json: ATOMIC_CAPTURE_JSON_SCHEMA,
-			}, undefined, { task: "extract_atomic" });
+			}, undefined, { task: "extract_atomic", reservationId });
 			truncated = responseTruncated(response);
 		}
 		const parsed = parsedModelValue(response);
@@ -479,7 +542,7 @@ async function persistChunk(env, {
 	statements.push(env.DB.prepare(
 		`INSERT INTO fence_guard (violation)
 		 SELECT 1 WHERE EXISTS (
-			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at > ?
+			SELECT 1 FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ?
 		 )`,
 	).bind(userId, acceptedAt));
 	if (managedProjectId && memoryOwnerUserId) {
@@ -664,7 +727,7 @@ async function persistChunk(env, {
 		const message = String(error?.message ?? error);
 		if (/fence_guard/i.test(message)) {
 			const barrier = await env.DB.prepare(
-				"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at > ? LIMIT 1",
+				"SELECT barrier_at FROM deletion_barriers WHERE user_id = ? AND barrier_at >= ? LIMIT 1",
 			).bind(userId, acceptedAt).first();
 			const retentionFence = !barrier && managedProjectId
 				? await env.DB.prepare(
@@ -768,7 +831,32 @@ async function captureChunk(env, options, plannedChunk) {
 	const packet = buildPacket(plannedChunk.messages, options.recent ?? []);
 	// Replay the ROW's recorded model — on a reclaim this is the model the
 	// interrupted attempt was claimed with, never the constant-of-the-day.
-	const proposed = await proposeAtomic(
+	// Reservation identity is explicit rather than inherited from the parent
+	// extraction meter's mutable call ordinal.
+	const reservationId = atomicCaptureProviderOperationId(claim.row.id, claim.row.attempts);
+	// The parent extraction may be replaying under a newer policy pin. Execute
+	// this child operation under its OWN durable half-pin so ambient policy can
+	// never switch a claimed run's provider or model. Pre-pin rows used NULL to
+	// mean the legacy Workers-AI provider.
+	const runProvider = typeof claim.row.provider === "string" && claim.row.provider.trim()
+		? claim.row.provider.trim()
+		: "workers-ai";
+	const runModel = typeof claim.row.model === "string" && claim.row.model.trim()
+		? claim.row.model.trim()
+		: null;
+	const runPin = buildPin({
+		routes: { extract_atomic: { provider: runProvider, model: runModel } },
+	});
+	const proposed = await withFlushedAiMeter(env, "atomic_capture", {
+		userId: options.userId,
+		scopeId: claim.row.id,
+		lifecycle: {
+			memoryUserId: options.userId,
+			accountUserId: options.accountUserId ?? null,
+			managedProjectId: options.managedProjectId ?? null,
+			acceptedAt: options.acceptedAt,
+		},
+	}, () => withAiPin(runPin, () => proposeAtomic(
 		env,
 		packet,
 		options.rules,
@@ -779,8 +867,9 @@ async function captureChunk(env, options, plannedChunk) {
 			chunkKey: plannedChunk.key,
 			chunkIndex: plannedChunk.index,
 		},
-		claim.row.model ?? ATOMIC_CAPTURE_MODEL,
-	);
+		runModel ?? ATOMIC_CAPTURE_MODEL,
+		reservationId,
+	)));
 	if (!proposed.ok) {
 		return failRun(env, options.userId, claim.row.id, proposed.outcome,
 			{ truncated: proposed.truncated }, claim.row.attempts);
