@@ -105,7 +105,7 @@ html { scroll-behavior: smooth; }
 #landing.lp-shell .positioning-copy a { display: inline-flex; gap: 28px; margin-top: 34px; padding-bottom: 6px; border-bottom: 1px solid var(--ink); font-size: 12px; font-weight: 600; }
 
 #landing.lp-shell .lifecycle-section { padding: 120px 5.6vw 130px; border-bottom: 1px solid var(--hairline); }
-#landing.lp-shell .section-heading { display: grid; grid-template-columns: .65fr 1.75fr 1fr; align-items: end; margin-bottom: 64px; }
+#landing.lp-shell .section-heading { display: grid; min-height: 0; grid-template-columns: .65fr 1.75fr 1fr; flex-wrap: nowrap; gap: 0; align-items: end; margin-bottom: 64px; padding: 0; border-bottom: 0; background: transparent; color: inherit; }
 #landing.lp-shell .section-heading h2 { font-size: clamp(50px,5.5vw,86px); line-height: .93; }
 #landing.lp-shell .section-heading > p { max-width: 210px; margin: 0 0 8px auto; color: var(--ink-soft); font-size: 14px; }
 #landing.lp-shell .lifecycle-instrument { display: grid; grid-template-columns: minmax(220px,1fr) minmax(0,3.2fr); min-height: 590px; border: 1px solid var(--ink); background: var(--porcelain); }

@@ -78,7 +78,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=2");
 		for (const forbidden of [
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",
