@@ -494,24 +494,33 @@ describe("connection tokens", () => {
 
 describe("product shell routes", () => {
 	it("public landing page is present in the static shell", () => {
-		expect(html).toContain("Universal Memory Layer");
-		expect(html).toContain("One memory service. Multiple ways to connect.");
-		expect(html).toContain("supported tools and your own apps a private, structured memory API");
-		expect(html).toContain("Itsuki turns context submitted through its supported save, conversation, ingest, and MCP interfaces into structured memory objects");
-		expect(html).toContain("Chat history is not memory.");
-		expect(html).toContain("Memory is structured meaning.");
-		expect(html).toContain("Backend is the authority, not the LLM.");
-		expect(html).toContain("When Itsuki is connected through an MCP-capable AI client");
-		expect(html).toContain("Privacy Policy");
-		expect(html).toContain("Terms of Service");
-		expect(html).toContain("Open source &middot; Apache 2.0");
-		expect(html).toContain("User memory belongs to the account that created it.");
-		expect(html).toContain("you can revoke them from Connect");
-		expect(html).toContain("Avoid sensitive or regulated data");
+		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
+		expect(html).toContain('id="landing" class="public-shell lp-shell"');
+		expect(html).toContain("Structured memory infrastructure");
+		expect(html).toContain("Memory with a");
+		expect(html).toContain("record</em> of why.");
+		expect(html).toContain("イツキ");
+		expect(html).toContain("Source-backed");
+		expect(html).toContain("Provider-portable");
+		expect(html).toContain("Not more context.");
+		expect(html).toContain("Four operations. One inspectable chain.");
+		expect(html).toContain('data-landing-step="0"');
+		expect(html).toContain('data-landing-sdk="node"');
+		expect(html).toContain("landingSelectStep");
+		expect(html).toContain("landingSelectSdk");
+		expect(html).toContain("showAuth('login', event)");
+		expect(html).toContain("showAuth('signup', event)");
+		expect(html).toContain('href="/privacy"');
+		expect(html).toContain('href="/terms"');
+		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
+		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
+		expect(html).toContain("/assets/landing-editorial-v1.css");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");
-		expect(html).toContain("ejziyad@gmail.com");
+		expect(publicLanding).not.toContain("ejziyad@gmail.com");
+		// The signed-in and auth shells retain the stable compatibility path,
+		// whose binary is now the official Memory Bonsai mark.
 		expect(html).toContain("/assets/uml-icon.png");
 		// Brand hygiene, tightened for the domain move: the old brand appears
 		// NOWHERE in the page — not even as a contact address.

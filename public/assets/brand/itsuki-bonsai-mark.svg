@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Itsuki Memory Bonsai</title>
+  <desc id="desc">An open history ring surrounds a rooted tree whose canopy is a seven-node knowledge graph.</desc>
+  <g fill="none" stroke="#15130F" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M106.1 29.4A52 52 0 1 0 106.1 90.6" stroke-width="4"/>
+    <path d="M37 45L61 29L84 40L93 62L80 77L62 57L37 45M62 57L84 40M62 57L40 69M80 77L93 62" stroke-width="3"/>
+    <path d="M64 101C61 91 59 75 62 57" stroke-width="8"/>
+    <path d="M61.5 74C54 71 48 69 40 69M61.5 75C68 73 74 75 80 77" stroke-width="5.5"/>
+    <path d="M64 99C57 99 51 102 38 104M64 99C64 104 64 108 64 111M64 99C72 99 78 103 91 104" stroke-width="6"/>
+  </g>
+  <g fill="#15130F">
+    <circle cx="37" cy="45" r="4.5"/>
+    <circle cx="61" cy="29" r="4.5"/>
+    <circle cx="62" cy="57" r="4.5"/>
+    <circle cx="93" cy="62" r="4.5"/>
+    <circle cx="80" cy="77" r="4.5"/>
+  </g>
+  <circle cx="84" cy="40" r="7" fill="#C84F2A"/>
+  <circle cx="40" cy="69" r="4" fill="#AE8741"/>
+</svg>
