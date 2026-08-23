@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Itsuki — structured memory for AI applications</title>
-<meta name="description" content="Itsuki turns conversations and documents into structured, source-backed memory with history and control built in." />
+<title>Itsuki — the memory layer that keeps AI in context</title>
+<meta name="description" content="Turn conversations, documents, and events into structured memory that applications, assistants, agents, and workflows can use across sessions and tools." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Itsuki — structured memory for AI applications" />
-<meta property="og:description" content="Structured, source-backed memory with history and control built in." />
+<meta property="og:title" content="Itsuki — the memory layer that keeps AI in context" />
+<meta property="og:description" content="Structured memory for applications, assistants, agents, and workflows—across sessions and tools." />
 <meta property="og:url" content="https://itsuki.app/" />
 <link rel="canonical" href="https://itsuki.app/" />
 <link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg?v=1" type="image/svg+xml" />
@@ -192,8 +192,8 @@
 	:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 	/* ---- product shell ---- */
-	body.public-mode header, body.public-mode main, body.public-mode #banner,
-	body.auth-mode header, body.auth-mode main, body.auth-mode #banner { display: none; }
+	body.public-mode > header, body.public-mode > main#main, body.public-mode > #banner,
+	body.auth-mode > header, body.auth-mode > main#main, body.auth-mode > #banner { display: none; }
 	body.app-mode #landing, body.app-mode #authView,
 	body.public-mode #authView, body.auth-mode #landing { display: none; }
 	body:not(.public-mode):not(.auth-mode):not(.app-mode) #landing,
@@ -2279,12 +2279,13 @@
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
 </style>
-<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=2" />
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=3" />
 <link rel="stylesheet" href="/assets/app-editorial-v1.css?v=2" />
 </head>
 <body>
 <div id="landing" class="public-shell lp-shell">
 	<div class="site-shell">
+		<a class="skip-link" href="#landingContent">Skip to content</a>
 		<header class="topbar">
 			<a class="wordmark" href="/" onclick="showPublic(event)" aria-label="Itsuki home">
 				<img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" />
@@ -2301,98 +2302,141 @@
 				<a class="nav-cta" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">↗</span></a>
 			</div>
 		</header>
+		<main id="landingContent" tabindex="-1">
 
 		<section class="hero" id="top">
 			<div class="hero-copy">
 				<p class="eyebrow"><span>01</span> Structured memory infrastructure</p>
-				<div class="hero-japanese" aria-label="Itsuki, written in Japanese">
-					<span lang="ja">イツキ</span>
-					<small aria-hidden="true">ITSUKI / STRUCTURED MEMORY</small>
-				</div>
-				<h1>Memory with a<br /><em>record</em> of why.</h1>
-				<p class="hero-deck">Itsuki turns conversations and documents into structured memory with sources, history, and control built in.</p>
+				<div class="hero-japanese" aria-label="Itsuki, written in Japanese"><span lang="ja">イツキ</span><small>ITSUKI / MEMORY THAT CARRIES FORWARD</small></div>
+				<h1>The memory layer<br />that keeps <em>AI in context.</em></h1>
+				<p class="hero-deck">Itsuki turns conversations, documents, and events into structured memory that applications, assistants, agents, and workflows can use across sessions and tools.</p>
 				<div class="hero-actions">
 					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
-					<a class="secondary-action" href="/docs/">Read the architecture</a>
+					<a class="secondary-action" href="/docs/">Read the docs</a>
 				</div>
 				<div class="fact-row" aria-label="Core capabilities">
-					<span><b>01</b>Source-backed</span>
-					<span><b>02</b>Versioned</span>
+					<span><b>01</b>Structured</span>
+					<span><b>02</b>Cross-session</span>
 					<span><b>03</b>Scope-aware</span>
 					<span><b>04</b>Provider-portable</span>
 				</div>
 			</div>
+			<figure class="hero-system" role="img" aria-labelledby="heroSystemCaption">
+				<figcaption class="sr-only" id="heroSystemCaption">Conversations, documents, and events become durable, scoped context for applications, assistants, agents, and workflows.</figcaption>
+				<div class="system-caption"><span>LIVE MEMORY FLOW</span><b>Input becomes usable context</b></div>
+				<div class="system-inputs">
+					<span>Conversation</span><span>Document</span><span>Event</span>
+				</div>
+				<div class="system-rail" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="system-core">
+					<small>ITSUKI MEMORY LAYER</small>
+					<strong>Durable, scoped<br />context</strong>
+					<div><span>Entity</span><span>Fact</span><span>Event</span><span>Relation</span></div>
+				</div>
+				<div class="system-rail output" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="system-outputs"><span>Applications</span><span>Assistants</span><span>Agents</span><span>Workflows</span></div>
+				<div class="system-status"><span><i></i>Source linked</span><span><i></i>Scope verified</span><span><i></i>Current</span></div>
+			</figure>
 		</section>
 
-		<section class="hero-ledger" id="product" aria-label="Memory lifecycle preview">
-			<p class="ledger-label">A memory, resolved</p>
-			<div class="ledger-entry old-entry"><span class="ledger-state">Previous</span><p>Pricing review happens in September.</p><time>Rev. 03 · Aug 12</time></div>
-			<div class="ledger-arrow" aria-hidden="true">→</div>
-			<div class="ledger-entry current-entry"><span class="ledger-state">Current</span><p>Pricing review moves to October.</p><time>Rev. 04 · Aug 19</time></div>
-			<div class="ledger-proof"><span class="proof-dot" aria-hidden="true"></span>Source linked · conflict resolved · rollback available</div>
+		<section class="surface-band" id="product" aria-label="Built for every AI surface">
+			<div class="surface-band-title"><span>02</span><strong>Built for every AI surface</strong></div>
+			<article><span>Applications</span><p>Personalized product experiences with context that persists.</p></article>
+			<article><span>Assistants</span><p>Conversations that continue without starting over.</p></article>
+			<article><span>Agents</span><p>Durable knowledge for planning, tools, and decisions.</p></article>
+			<article><span>Workflows</span><p>Memory that moves across automations and systems.</p></article>
 		</section>
 
 		<section class="positioning-spread">
-			<div class="section-kicker"><span>02</span> The memory system</div>
-			<h2>Not more context.<br /><em>Better memory.</em></h2>
+			<div class="section-kicker"><span>03</span> The memory system</div>
+			<h2>Context that survives<br /><em>the next prompt.</em></h2>
 			<div class="positioning-copy">
-				<p>Itsuki does not replay a transcript and call it memory. It stores entities, durable facts, events, relationships, conversation pages, candidates, and the receipts that explain what happened.</p>
+				<p>Save once, recall where it matters, and keep the current truth available across sessions and tools. Itsuki structures what matters instead of replaying an entire transcript.</p>
 				<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Inspect the open architecture <span aria-hidden="true">↗</span></a>
 			</div>
 		</section>
 
 		<section class="lifecycle-section" id="workflow">
 			<header class="section-heading">
-				<div class="section-kicker"><span>03</span> One continuous record</div>
-				<h2>From raw evidence to<br />memory your agent can use.</h2>
-				<p>Four operations. One inspectable chain.</p>
+				<div class="section-kicker"><span>04</span> How it works</div>
+				<h2>From raw input to<br />context every surface can use.</h2>
+				<p>Four moves. One living memory.</p>
 			</header>
 			<div class="lifecycle-instrument">
 				<div class="step-selector" role="tablist" aria-label="Memory lifecycle">
-					<button type="button" role="tab" aria-selected="true" class="active" data-landing-step="0" onclick="landingSelectStep(0)"><span>01</span><b>Capture</b><i aria-hidden="true">●</i></button>
-					<button type="button" role="tab" aria-selected="false" data-landing-step="1" onclick="landingSelectStep(1)"><span>02</span><b>Resolve</b><i aria-hidden="true">○</i></button>
-					<button type="button" role="tab" aria-selected="false" data-landing-step="2" onclick="landingSelectStep(2)"><span>03</span><b>Retrieve</b><i aria-hidden="true">○</i></button>
-					<button type="button" role="tab" aria-selected="false" data-landing-step="3" onclick="landingSelectStep(3)"><span>04</span><b>Govern</b><i aria-hidden="true">○</i></button>
+					<button type="button" id="landingStepTab0" role="tab" aria-selected="true" aria-controls="landingStepPanel" tabindex="0" class="active" data-landing-step="0" onclick="landingSelectStep(0)"><span>01</span><b>Capture</b><i aria-hidden="true">●</i></button>
+					<button type="button" id="landingStepTab1" role="tab" aria-selected="false" aria-controls="landingStepPanel" tabindex="-1" data-landing-step="1" onclick="landingSelectStep(1)"><span>02</span><b>Structure</b><i aria-hidden="true">○</i></button>
+					<button type="button" id="landingStepTab2" role="tab" aria-selected="false" aria-controls="landingStepPanel" tabindex="-1" data-landing-step="2" onclick="landingSelectStep(2)"><span>03</span><b>Recall</b><i aria-hidden="true">○</i></button>
+					<button type="button" id="landingStepTab3" role="tab" aria-selected="false" aria-controls="landingStepPanel" tabindex="-1" data-landing-step="3" onclick="landingSelectStep(3)"><span>04</span><b>Update</b><i aria-hidden="true">○</i></button>
 				</div>
-				<article class="step-canvas" role="tabpanel" id="landingStepPanel">
+				<article class="step-canvas" role="tabpanel" id="landingStepPanel" aria-labelledby="landingStepTab0">
 					<div class="canvas-copy">
 						<span class="canvas-index" id="landingStepIndex">01 / Capture</span>
-						<h3 id="landingStepTitle">Keep the source, not just the sentence.</h3>
-						<p id="landingStepCopy">A conversation or document becomes a durable source packet before the model proposes any memory.</p>
+						<h3 id="landingStepTitle">Bring in the moments worth remembering.</h3>
+						<p id="landingStepCopy">Conversations, documents, and events enter through one consistent memory API.</p>
 					</div>
 					<div class="memory-transaction">
-						<div class="transaction-source"><span>Input</span><p id="landingStepInput">“The pricing review moved from September to October.”</p><small id="landingStepMeta">Conversation · 09:42:18 UTC</small></div>
+						<div class="transaction-source"><span>Input</span><p id="landingStepInput">“The pricing review moved from September to October.”</p><small id="landingStepMeta">Conversation · Document · Event</small></div>
 						<div class="transaction-path" aria-hidden="true"><i></i><b>verified</b><i></i></div>
-						<div class="transaction-output"><span>Result</span><p id="landingStepOutput">Source packet accepted · evidence preserved</p><small>Receipt ready</small></div>
+						<div class="transaction-output"><span>Result</span><p id="landingStepOutput">Input accepted · ready to structure</p><small>Scope attached</small></div>
 					</div>
 				</article>
 			</div>
 		</section>
 
-		<section class="folio-section" aria-label="Itsuki capabilities">
-			<div class="folio-heading"><div class="section-kicker"><span>04</span> Product folios</div><h2>Memory is a system,<br />not a text box.</h2></div>
+		<section class="folio-section" id="use-cases" aria-label="Itsuki use cases">
+			<div class="folio-heading"><div class="section-kicker"><span>05</span> One memory layer</div><h2>Memory across<br />the entire stack.</h2></div>
 			<div class="folio-grid">
-				<article><span>01 / Structure</span><h3>Know what kind of thing you remembered.</h3><p>Entities, facts, events, relationships, pages, and candidates remain distinct and queryable.</p><b>Typed memory objects</b></article>
-				<article><span>02 / Evidence</span><h3>Keep the source attached to the claim.</h3><p>Every save can return a receipt explaining what was written, updated, or refused.</p><b>Source-backed decisions</b></article>
-				<article><span>03 / Evolution</span><h3>Correct memory without erasing its past.</h3><p>New evidence can supersede prior facts while timeline history remains inspectable.</p><b>Forward revisions</b></article>
-				<article><span>04 / Control</span><h3>Let the model propose. Keep the backend in charge.</h3><p>Rules and deterministic gates decide what enters durable memory.</p><b>Governed writes</b></article>
+				<article><span>01 / Applications</span><h3>Make every product interaction feel continuous.</h3><p>Build personalization, support, and adaptive experiences from durable user context.</p><b>Product memory</b></article>
+				<article><span>02 / Assistants</span><h3>Continue the conversation without starting over.</h3><p>Carry preferences, decisions, and important history across sessions and channels.</p><b>Conversational continuity</b></article>
+				<article><span>03 / Agents</span><h3>Give planning and tools a reliable working context.</h3><p>Recall the right facts and relationships without flooding the prompt with history.</p><b>Agent context</b></article>
+				<article><span>04 / Workflows</span><h3>Let automation learn from what happened before.</h3><p>Share structured memory across queues, jobs, n8n workflows, and backend services.</p><b>Operational memory</b></article>
+			</div>
+		</section>
+
+		<section class="product-proof-section" aria-label="Itsuki product preview">
+			<header class="proof-heading">
+				<div class="section-kicker"><span>06</span> Product visibility</div>
+				<h2>See what your AI<br />remembers.</h2>
+				<p>Review memory, inspect its source, and understand how it connects—without reading raw logs.</p>
+			</header>
+			<div class="product-frame">
+				<div class="product-frame-bar"><span><i></i><i></i><i></i></span><strong>Memory inspector</strong><small>EXAMPLE WORKSPACE</small></div>
+				<div class="product-list">
+					<span class="product-label">MEMORIES</span>
+					<article class="product-memory active"><b>Pricing review moves to October.</b><small>Fact · Updated today</small></article>
+					<article class="product-memory"><b>Team prefers async project updates.</b><small>Preference · Updated 2d ago</small></article>
+					<article class="product-memory"><b>Support escalations follow the incident runbook.</b><small>Procedure · Updated 5d ago</small></article>
+				</div>
+				<div class="product-detail">
+					<div class="detail-state"><span>Current</span><small>REVISION 04</small></div>
+					<h3>Pricing review moves to October.</h3>
+					<p>The current memory is available within the selected organization, project, and user scope.</p>
+					<dl><div><dt>Type</dt><dd>Fact</dd></div><div><dt>Scope</dt><dd>Project</dd></div><div><dt>Source</dt><dd>Planning conversation</dd></div><div><dt>State</dt><dd>Active</dd></div></dl>
+				</div>
+				<div class="product-connections" aria-label="Example memory connections">
+					<span class="product-label">CONNECTIONS</span>
+					<div class="connection-map"><i class="c-line one"></i><i class="c-line two"></i><b class="c-node center">Review</b><b class="c-node top">October</b><b class="c-node left">Pricing</b><b class="c-node right">Planning</b></div>
+					<p>Structured relationships keep recall precise.</p>
+				</div>
 			</div>
 		</section>
 
 		<section class="developer-section" id="developers">
 			<div class="developer-copy">
-				<div class="section-kicker light"><span>05</span> Developer surface</div>
-				<h2>One memory.<br />Every way in.</h2>
-				<p>MCP, REST, Node, Python, n8n, the dashboard, and app connectors meet the same account- and scope-aware backend.</p>
+				<div class="section-kicker light"><span>07</span> Developer surface</div>
+				<h2>Connect once.<br />Use everywhere.</h2>
+				<p>Start with the interface you already use. MCP, REST, Node, Python, n8n, and the dashboard all meet the same scoped memory backend.</p>
 				<div class="surface-list" aria-label="Supported product surfaces"><span>MCP</span><span>REST</span><span>Node</span><span>Python</span><span>n8n</span><span>Dashboard</span></div>
 			</div>
 			<div class="code-window">
 				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
-					<button type="button" role="tab" aria-selected="true" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
-					<button type="button" role="tab" aria-selected="false" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
-					<button type="button" role="tab" aria-selected="false" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
+					<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
+					<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
 				</div></div>
-				<pre id="landingCodeSample"><code>npm install itsuki
+				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-node"><code>npm install itsuki
 
 import { MemoryClient } from "itsuki";
 
@@ -2402,33 +2446,34 @@ const memory = new MemoryClient({
 
 await memory.add("The pricing review moved to October.");
 const { context } = await memory.search("When is the review?");</code></pre>
-				<div class="code-foot"><span>Server-side only</span><a href="/docs/">Complete setup ↗</a></div>
+				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="copy" onclick="copyLandingCode(this)">Copy code</button><a href="/docs/">Complete setup ↗</a></div>
 			</div>
 		</section>
 
 		<section class="control-section" id="control">
-			<header class="section-heading control-heading"><div class="section-kicker"><span>06</span> Operational control</div><h2>Your agents remember.<br />Your team stays in control.</h2></header>
+			<header class="section-heading control-heading"><div class="section-kicker"><span>08</span> Enterprise control</div><h2>Power for builders.<br />Control for teams.</h2></header>
 			<div class="control-spread">
-				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>The model proposes. Itsuki verifies. Your memory stays inspectable.</p><small>The Itsuki principle</small></div>
+				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>Move fast without turning memory into a black box.</p><small>The Itsuki principle</small></div>
 				<dl>
-					<div><dt>Revision history</dt><dd>Every correction becomes a new forward revision.</dd></div>
-					<div><dt>Scoped identity</dt><dd>Account, project, and end-user boundaries remain explicit.</dd></div>
-					<div><dt>Receipts</dt><dd>See what was saved, changed, or refused.</dd></div>
-					<div><dt>Lifecycle</dt><dd>Inspect, export, roll back, archive, and delete.</dd></div>
+					<div><dt>Policy-controlled writes</dt><dd>Deterministic rules decide what becomes durable memory.</dd></div>
+					<div><dt>Scoped identity</dt><dd>Organization, project, and end-user boundaries remain explicit.</dd></div>
+					<div><dt>Evidence and history</dt><dd>Inspect sources, revisions, outcomes, and audit activity.</dd></div>
+					<div><dt>Portable operations</dt><dd>Export, roll back, archive, delete, and switch AI providers.</dd></div>
 				</dl>
 			</div>
 		</section>
 
 		<section class="closing-section">
 			<div class="closing-seal" aria-hidden="true"><span></span><span></span><i></i></div>
-			<div><span class="closing-label">07 / Begin</span><h2>Give your agent a memory<br />with a paper trail.</h2></div>
+			<div><span class="closing-label">09 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2></div>
 			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="mailto:hello@itsuki.app">Talk to Itsuki</a></div>
 		</section>
+		</main>
 
 		<footer class="footer">
 			<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
-			<p>Structured memory for AI applications and coding agents.</p>
-			<div><a href="/docs/">Docs</a><a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a><a href="/privacy" onclick="showLegal('privacy', event)">Privacy</a><a href="/terms" onclick="showLegal('terms', event)">Terms</a></div>
+			<p>Structured memory for applications, assistants, agents, and workflows.</p>
+			<div><a href="/docs/">Docs</a><a href="#control">Security</a><a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a><a href="mailto:hello@itsuki.app">Support</a><a href="/privacy" onclick="showLegal('privacy', event)">Privacy</a><a href="/terms" onclick="showLegal('terms', event)">Terms</a></div>
 		</footer>
 	</div>
 </div>
@@ -3539,35 +3584,35 @@ function showAuth(mode = "login", event) {
 const LANDING_STEPS = [
 	{
 		index: "01 / Capture",
-		title: "Keep the source, not just the sentence.",
-		copy: "A conversation or document becomes a durable source packet before the model proposes any memory.",
+		title: "Bring in the moments worth remembering.",
+		copy: "Conversations, documents, and events enter through one consistent memory API.",
 		input: "“The pricing review moved from September to October.”",
-		output: "Source packet accepted · evidence preserved",
-		meta: "Conversation · 09:42:18 UTC",
+		output: "Input accepted · ready to structure",
+		meta: "Conversation · Document · Event",
 	},
 	{
-		index: "02 / Resolve",
-		title: "Let new evidence change the record safely.",
-		copy: "Itsuki compares the proposal with current memory, records the conflict, and creates a forward revision.",
-		input: "Previous: Pricing review happens in September.",
-		output: "Revision 04 supersedes Revision 03",
-		meta: "Conflict resolved · history retained",
+		index: "02 / Structure",
+		title: "Turn raw input into useful memory.",
+		copy: "Itsuki identifies facts, preferences, entities, events, and relationships while keeping the original source connected.",
+		input: "Proposal: review date · October",
+		output: "Fact created · source connected",
+		meta: "Typed · deduplicated · scoped",
 	},
 	{
-		index: "03 / Retrieve",
-		title: "Return the current truth with its context.",
-		copy: "Recall is scoped to the right user and project, then returns prompt-ready context and structured results.",
+		index: "03 / Recall",
+		title: "Return the right context when it matters.",
+		copy: "Recall stays within the right organization, project, and user boundary, then returns prompt-ready context.",
 		input: "Query: “When is the pricing review?”",
 		output: "The pricing review is scheduled for October.",
-		meta: "Current memory · source linked",
+		meta: "Relevant · current · source linked",
 	},
 	{
-		index: "04 / Govern",
-		title: "Inspect, correct, export, or remove it.",
-		copy: "Receipts, immutable revision history, rollback, lifecycle controls, and deletion keep memory operable.",
-		input: "Expected revision: 04",
-		output: "Update accepted · Revision 05 created",
-		meta: "No silent overwrite",
+		index: "04 / Update",
+		title: "Let memory evolve without losing control.",
+		copy: "New evidence can update the current record while version history, lifecycle controls, and deletion stay available.",
+		input: "New evidence: review moved to November.",
+		output: "Current memory updated · history retained",
+		meta: "Conflict-safe · reversible",
 	},
 ];
 
@@ -3600,6 +3645,15 @@ const LANDING_CODE_SAMPLES = {
 		'  -H "Content-Type: application/json" \\',
 		'  -d \'{"content":"The pricing review moved to October."}\'',
 	].join("\n"),
+	mcp: [
+		'{',
+		'  "mcpServers": {',
+		'    "itsuki": {',
+		'      "url": "PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI"',
+		'    }',
+		'  }',
+		'}',
+	].join("\n"),
 };
 
 function landingSelectStep(index) {
@@ -3609,6 +3663,7 @@ function landingSelectStep(index) {
 		const active = buttonIndex === index;
 		button.classList.toggle("active", active);
 		button.setAttribute("aria-selected", String(active));
+		button.tabIndex = active ? 0 : -1;
 		const indicator = button.querySelector("i");
 		if (indicator) indicator.textContent = active ? "●" : "○";
 	});
@@ -3626,6 +3681,7 @@ function landingSelectStep(index) {
 	});
 	const panel = document.getElementById("landingStepPanel");
 	if (panel) {
+		panel.setAttribute("aria-labelledby", `landingStepTab${index}`);
 		panel.style.animation = "none";
 		void panel.offsetHeight;
 		panel.style.animation = "";
@@ -3639,9 +3695,52 @@ function landingSelectSdk(name) {
 		const active = button.dataset.landingSdk === name;
 		button.classList.toggle("active", active);
 		button.setAttribute("aria-selected", String(active));
+		button.tabIndex = active ? 0 : -1;
 	});
 	const code = document.querySelector("#landingCodeSample code");
 	if (code) code.textContent = sample;
+	const panel = document.getElementById("landingCodeSample");
+	if (panel) panel.setAttribute("aria-labelledby", `landingSdkTab-${name}`);
+	const action = document.getElementById("landingCodeAction");
+	if (action) {
+		action.dataset.action = name === "mcp" ? "create-mcp" : "copy";
+		action.textContent = name === "mcp" ? "Create MCP link" : "Copy code";
+	}
+}
+
+function landingTabKeydown(event, selector, activate) {
+	if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+	const tabs = [...document.querySelectorAll(selector)];
+	if (!tabs.length) return;
+	event.preventDefault();
+	const current = Math.max(0, tabs.indexOf(document.activeElement));
+	const next = event.key === "Home" ? 0
+		: event.key === "End" ? tabs.length - 1
+		: (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+	activate(tabs[next], next);
+	tabs[next].focus();
+}
+
+document.querySelector(".step-selector")?.addEventListener("keydown", (event) => {
+	landingTabKeydown(event, "[data-landing-step]", (_button, index) => landingSelectStep(index));
+});
+document.querySelector(".sdk-tabs")?.addEventListener("keydown", (event) => {
+	landingTabKeydown(event, "[data-landing-sdk]", (button) => landingSelectSdk(button.dataset.landingSdk));
+});
+
+async function copyLandingCode(button) {
+	if (button?.dataset.action === "create-mcp") {
+		location.href = "/app#install";
+		return;
+	}
+	const code = document.querySelector("#landingCodeSample code")?.textContent || "";
+	if (!code) return;
+	const copied = await copyText(code, null);
+	if (!copied) return;
+	if (!button) return;
+	const label = button.textContent;
+	button.textContent = "Copied";
+	setTimeout(() => { if (button.isConnected) button.textContent = label; }, 1600);
 }
 
 async function refreshMe() {

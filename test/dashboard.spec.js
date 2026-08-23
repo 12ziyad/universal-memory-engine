@@ -50,28 +50,46 @@ describe("dashboard script", () => {
 	});
 
 	it("renders the public Itsuki platform landing shell", () => {
+		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
 		expect(html).toContain("Structured memory infrastructure");
-		expect(html).toContain("Memory with a");
-		expect(html).toContain("record</em> of why.");
+		expect(html).toContain("The memory layer");
+		expect(html).toContain("that keeps <em>AI in context.</em>");
+		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
-		expect(html).toContain("Source-backed");
+		expect(html).toContain("Cross-session");
+		expect(html).toContain("Scope-aware");
 		expect(html).toContain("Provider-portable");
-		expect(html).toContain("Not more context.");
-		expect(html).toContain("Better memory.");
-		expect(html).toContain("Four operations. One inspectable chain.");
+		expect(html).toContain("Built for every AI surface");
+		for (const surface of ["Applications", "Assistants", "Agents", "Workflows"]) {
+			expect(publicLanding).toContain(surface);
+		}
+		expect(html).toContain("Context that survives");
+		expect(html).toContain("the next prompt.");
+		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');
 		expect(html).toContain("landingSelectStep");
-		expect(html).toContain("Memory is a system,");
-		expect(html).toContain("Every way in.");
+		expect(html).toContain("Memory across");
+		expect(html).toContain("the entire stack.");
+		expect(html).toContain("See what your AI");
+		expect(html).toContain("EXAMPLE WORKSPACE");
 		expect(html).toContain('data-landing-sdk="node"');
+		expect(html).toContain('data-landing-sdk="mcp"');
 		expect(html).toContain("npm install itsuki");
 		expect(html).toContain("pip install itsuki");
+		expect(html).toContain("PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI");
+		expect(html).toContain('id="landingCodeAction" data-action="copy"');
+		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
+		expect(html).toContain('location.href = "/app#install"');
 		expect(html).toContain("landingSelectSdk");
-		expect(html).toContain("The model proposes. Itsuki verifies.");
-		expect(html).toContain("Revision history");
+		expect(html).toContain("Connect once.");
+		expect(html).toContain("Use everywhere.");
+		expect(html).toContain("Power for builders.");
+		expect(html).toContain("Control for teams.");
+		expect(html).toContain("Evidence and history");
 		expect(html).toContain("Scoped identity");
-		expect(html).toContain("Give your agent a memory");
+		expect(html).toContain("Give every AI surface");
+		expect(html).toContain("memory that carries forward.");
 		expect(html).toContain("showAuth('signup', event)");
 		expect(html).toContain("showAuth('login', event)");
 		expect(html).toContain("/docs/");
@@ -80,7 +98,9 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=2");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=3");
+		expect(publicLanding).not.toMatch(/paper trail/i);
+		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
 		for (const forbidden of [
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",

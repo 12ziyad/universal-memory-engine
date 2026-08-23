@@ -22,7 +22,7 @@ describe("app appearance themes", () => {
 	});
 
 	it("loads the product editorial layer after the landing theme", () => {
-		const landingHref = "/assets/landing-editorial-v1.css?v=2";
+		const landingHref = "/assets/landing-editorial-v1.css?v=3";
 		const productHref = "/assets/app-editorial-v1.css?v=2";
 		expect(html).toContain(`<link rel="stylesheet" href="${productHref}" />`);
 		expect(html.indexOf(productHref)).toBeGreaterThan(html.indexOf(landingHref));
