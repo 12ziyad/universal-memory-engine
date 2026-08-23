@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Itsuki — the memory layer that keeps AI in context</title>
-<meta name="description" content="Turn conversations, documents, and events into structured memory that applications, assistants, agents, and workflows can use across sessions and tools." />
+<title>Itsuki — not more context, better memory</title>
+<meta name="description" content="Itsuki turns conversations, documents, and events into structured memory — source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Itsuki — the memory layer that keeps AI in context" />
-<meta property="og:description" content="Structured memory for applications, assistants, agents, and workflows—across sessions and tools." />
+<meta property="og:title" content="Itsuki — not more context, better memory" />
+<meta property="og:description" content="Structured memory for applications, assistants, agents, and workflows — source-linked, versioned, and reversible." />
 <meta property="og:url" content="https://itsuki.app/" />
 <link rel="canonical" href="https://itsuki.app/" />
 <link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg?v=1" type="image/svg+xml" />
@@ -14305,7 +14305,7 @@ function setProjectGeneral() {
 					</div>
 				</div>
 			</details>
-			${SET.data.membership?.project_role ? `<div class="set-leave">
+			${SET.data.membership?.project_role && SET.data.membership.org_role !== "owner" ? `<div class="set-leave">
 				<button class="ghost" onclick="leaveCurrentProject()"${SET.busy ? " disabled" : ""}>Leave project</button>
 				<span class="set-hint">Removes your seat and revokes your keys and connections for this project. The project and its memories are not deleted.</span>
 			</div>` : ""}
