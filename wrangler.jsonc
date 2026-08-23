@@ -122,8 +122,9 @@
 		"PUBLIC_ORIGIN": "https://itsuki.app",
 		"INVITE_EMAIL_FROM": "invites@notify.itsuki.app",
 		"RULES_PREVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
-		// OAuth client id is public by design; the secret lives in a Worker secret.
+		// OAuth client ids are public by design; secrets live in Worker secrets.
 		"GOOGLE_CLIENT_ID": "422154363135-ssr4h8vpegdg54h5219bcldphe5s87q9.apps.googleusercontent.com",
+		"GITHUB_CLIENT_ID": "Ov23liYMcaD6aJZSkWgc",
 		// Memory V3 public beta. The owner explicitly authorized the validated V3
 		// architecture for every account while expected traffic is still 5–10 early
 		// users. The resolver remains account-bound and the previous Worker version
