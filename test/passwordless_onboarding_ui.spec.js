@@ -51,8 +51,10 @@ describe("passwordless authentication UI", () => {
 	it("uses the passwordless route contract and keeps invitation handoff tab-scoped", () => {
 		expect(fnSource("startGoogle")).toContain('location.href = "/auth/google/start"');
 		expect(fnSource("startGithub")).toContain('location.href = "/auth/github"');
-		expect(fnSource("submitAuth")).toContain('fetch("/auth/email/start"');
-		expect(fnSource("submitAuthCode")).toContain('fetch("/auth/email/verify"');
+		// Bounded fetches: a hung auth request must resolve into a retryable
+		// error, never a button stuck on "Sending…".
+		expect(fnSource("submitAuth")).toContain('fetchWithTimeout("/auth/email/start"');
+		expect(fnSource("submitAuthCode")).toContain('fetchWithTimeout("/auth/email/verify"');
 		const invitation = fnSource("stashPendingInvitation");
 		expect(invitation).toContain('sessionStorage.setItem("itsuki_pending_invite"');
 		expect(invitation).not.toContain("localStorage.setItem");

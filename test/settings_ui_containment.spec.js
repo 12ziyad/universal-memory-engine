@@ -1344,9 +1344,12 @@ describe("Stage 3 enterprise Settings UI", () => {
 		expect(html).toContain("Thirty days after an invitation becomes accepted, revoked, or expired");
 		expect(html).toContain("provider message identifier");
 		const render = fnSource("setProjectExtraction");
-		expect(render).toContain('row.kept ? "Allow" : `Deny:');
+		// Truthful wording: rule passage and storage-worthiness are separate
+		// judgments and the pills must never conflate them.
+		expect(render).toContain('row.kept ? "Allowed by rules" : `Blocked by policy:');
+		expect(render).toContain("setAssessmentCopy(row)");
 		expect(render).toContain("setPreviewCategoryCopy(row)");
-		expect(render).toContain("one bounded model call proposes a governed filing category");
+		expect(render).toContain('"Allowed by rules" alone never means a line will be stored.');
 		expect(render).toContain("never creates a memory, source packet, receipt, usage record, or graph item");
 		expect(render).toContain("SET.previewBusy");
 		expect(render).toContain("SET.previewActiveCategoryCount");

@@ -267,10 +267,12 @@ describe("a turn", () => {
 				{ kept: true, project_category: { id: category.id }, project_category_reason: "model_proposed" },
 			],
 		});
-		expect(calls).toHaveLength(1);
+		// Two bounded calls now: the category proposal and the durability
+		// assessment. Denied text must stay out of both payloads.
+		expect(calls).toHaveLength(2);
 		const providerPayload = JSON.parse(calls[0].messages[1].content);
 		expect(providerPayload.samples).toEqual([{ index: 1, text: "Acme renewal is planned for October" }]);
-		expect(JSON.stringify(providerPayload)).not.toContain("salary");
+		for (const call of calls) expect(JSON.stringify(call)).not.toContain("salary");
 		expect(await counts()).toEqual(before);
 
 		const denied = await request("/v1/settings/rules/preview", post({
@@ -280,7 +282,7 @@ describe("a turn", () => {
 			SAVE_LIMITER: { limit: async () => ({ success: false }) },
 		});
 		expect(denied.status).toBe(429);
-		expect(calls).toHaveLength(1);
+		expect(calls).toHaveLength(2);
 		expect(await counts()).toEqual(before);
 	});
 
