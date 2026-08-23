@@ -48,51 +48,37 @@ describe("dashboard script", () => {
 	});
 
 	it("renders the public Itsuki platform landing shell", () => {
-		expect((html.match(/<section class="landing-section/g) || []).length).toBeGreaterThanOrEqual(8);
-		expect(html).toContain("Universal Memory Layer");
-		expect(html).toContain("One memory service. Multiple ways to connect.");
-		expect(html).toContain("supported tools and your own apps a private, structured memory API");
-		expect(html).toContain("Itsuki turns context submitted through its supported save, conversation, ingest, and MCP interfaces into structured memory objects");
-		expect(html).toContain("Start free");
-		expect(html).toContain("See how it works");
-		expect(html).toContain("Works with API, SDK, dashboard, and MCP-linked clients.");
-		// Hero product footage replaces the old CSS mock graph.
-		expect(html).toContain("/assets/uml-reel.mp4");
-		expect(html).toContain("hero-video");
-		// How-it-works flow, written for a first-time visitor.
-		expect(html).toContain("Four steps. Simple enough to explain to anyone.");
-		expect(html).toContain("Itsuki organizes it");
-		expect(html).toContain("Connect supported tools");
-		// Connect terminal with per-client tabs; URLs are built from
-		// location.origin at runtime so no deploy domain leaks into the shell.
-		expect(html).toContain("Choose an interface and follow its setup.");
-		expect(html).toContain("data-connect");
-		expect(html).toContain("YOUR_PRIVATE_TOKEN");
-		expect(html).toContain("connectSnippets");
-		expect(html).toContain("Chat history is not memory.");
-		expect(html).toContain("Memory is structured meaning.");
-		expect(html).toContain("Backend is the authority, not the LLM.");
-		expect(html).toContain("A graph that can update, not just append.");
-		expect(html).toContain("A memory you can see");
-		expect(html).toContain("Supersession with history");
-		expect(html).toContain("Receipts for every save");
-		expect(html).toContain("Your rules");
-		expect(html).toContain("When Itsuki is connected through an MCP-capable AI client");
-		expect(html).toContain("The client or host model decides when to call them.");
-		expect(html).toContain("If you need guaranteed per-turn API invocation");
-		expect(html).toContain("Itsuki does not sell user data");
-		expect(html).toContain("or use user memory for unrelated purposes");
-		expect(html).toContain("User memory belongs to the account that created it.");
-		expect(html).toContain("private links or tokens you create");
-		expect(html).toContain("you can revoke them from Connect");
-		expect(html).toContain("Token secrets and full MCP URLs are shown only once");
-		expect(html).toContain("Free early access");
-		expect(html).toContain("Privacy Policy");
-		expect(html).toContain("Terms of Service");
-		expect(html).toContain("Support");
+		expect(html).toContain('id="landing" class="public-shell lp-shell"');
+		expect(html).toContain("Structured memory infrastructure");
+		expect(html).toContain("Memory with a");
+		expect(html).toContain("record</em> of why.");
+		expect(html).toContain("イツキ");
+		expect(html).toContain("Source-backed");
+		expect(html).toContain("Provider-portable");
+		expect(html).toContain("Not more context.");
+		expect(html).toContain("Better memory.");
+		expect(html).toContain("Four operations. One inspectable chain.");
+		expect(html).toContain('data-landing-step="0"');
+		expect(html).toContain("landingSelectStep");
+		expect(html).toContain("Memory is a system,");
+		expect(html).toContain("Every way in.");
+		expect(html).toContain('data-landing-sdk="node"');
+		expect(html).toContain("npm install itsuki");
+		expect(html).toContain("pip install itsuki");
+		expect(html).toContain("landingSelectSdk");
+		expect(html).toContain("The model proposes. Itsuki verifies.");
+		expect(html).toContain("Revision history");
+		expect(html).toContain("Scoped identity");
+		expect(html).toContain("Give your agent a memory");
+		expect(html).toContain("showAuth('signup', event)");
+		expect(html).toContain("showAuth('login', event)");
+		expect(html).toContain("/docs/");
+		expect(html).toContain("/privacy");
+		expect(html).toContain("/terms");
 		expect(html).toContain("hello@itsuki.app");
-		expect(html).toContain("ejziyad@gmail.com");
-		expect(html).toContain("/assets/uml-icon.png");
+		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
+		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
+		expect(html).toContain("/assets/landing-editorial-v1.css");
 		for (const forbidden of [
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",
@@ -288,7 +274,7 @@ describe("dashboard script", () => {
 
 	it("describes export and erasure at their real resolved-space boundary", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		expect(html).toContain("Export a resolved memory space as JSON");
+		expect(html).toContain("A JSON copy of the memory space resolved by this project and session");
 		expect(script).toContain("does not aggregate sibling SDK subtenant spaces");
 		expect(script).toContain("does not combine sibling SDK subtenant spaces");
 		expect(script).toContain("function exportEntityLabel(row)");

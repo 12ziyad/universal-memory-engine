@@ -4,8 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Itsuki — structured memory for AI applications</title>
-<link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
-<link rel="apple-touch-icon" href="/assets/uml-icon.png?v=2" />
+<meta name="description" content="Itsuki turns conversations and documents into structured, source-backed memory with history and control built in." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Itsuki — structured memory for AI applications" />
+<meta property="og:description" content="Structured, source-backed memory with history and control built in." />
+<meta property="og:url" content="https://itsuki.app/" />
+<link rel="canonical" href="https://itsuki.app/" />
+<link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg?v=1" type="image/svg+xml" />
+<link rel="icon" href="/assets/brand/itsuki-bonsai-favicon-32.png?v=1" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="/assets/brand/itsuki-bonsai-apple-180.png?v=1" />
 <link rel="preload" as="font" type="font/woff2" href="/assets/fustat-latin-variable.woff2" crossorigin />
 <script src="/assets/theme-bootstrap.js"></script>
 <!-- Self-hosted (v9.1.9, MIT). A CDN copy would send every visitor's IP to a
@@ -195,10 +202,10 @@
 	body.dev-mode .dev-only { display: inline-flex !important; }
 	body.dev-mode input.dev-only { display: inline-block !important; }
 	.brand-lockup { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; min-width: 0; }
-	.brand-lockup img { width: 42px; height: 42px; flex: 0 0 auto; filter: drop-shadow(0 0 18px rgba(80,216,255,.5)); }
+	.brand-lockup img { width: 42px; height: 42px; flex: 0 0 auto; object-fit: contain; filter: none; }
 	.brand-lockup b { font-size: 18px; letter-spacing: .08em; }
 	.brand-lockup span { display: block; color: var(--muted); font-size: 11px; letter-spacing: .03em; margin-top: -3px; }
-	.logo-mark { width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 0 14px rgba(80,216,255,.42)); }
+	.logo-mark { width: 34px; height: 34px; object-fit: contain; filter: none; }
 	.public-shell { min-height: 100%; background:
 		linear-gradient(180deg, rgba(3,8,14,.96) 0%, rgba(4,18,24,.98) 48%, #03070d 100%),
 		linear-gradient(90deg, rgba(88,166,255,.08), rgba(63,185,80,.05) 42%, rgba(210,153,34,.06));
@@ -2260,231 +2267,157 @@
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
 </style>
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=1" />
 </head>
 <body>
-<div id="landing" class="public-shell">
-	<nav class="public-nav">
-		<a class="brand-lockup" href="/" onclick="showPublic(event)">
-			<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
-			<span><b>Itsuki</b><span>Personal memory layer</span></span>
-		</a>
-		<div class="nav-right">
-			<div class="nav-links" aria-label="Public navigation">
-				<a href="#how-it-works">How it works</a>
-				<a href="#connect">Connect</a>
-				<a href="#structured-memory">Memory</a>
-				<a href="#privacy-policy">Privacy</a>
-				<a href="#support">Support</a>
-			</div>
+<div id="landing" class="public-shell lp-shell">
+	<div class="site-shell">
+		<header class="topbar">
+			<a class="wordmark" href="/" onclick="showPublic(event)" aria-label="Itsuki home">
+				<img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" />
+				<span>itsuki</span>
+			</a>
+			<nav class="primary-nav" aria-label="Primary navigation">
+				<a href="#product">Product</a>
+				<a href="#workflow">How it works</a>
+				<a href="#developers">Developers</a>
+				<a href="#control">Security</a>
+			</nav>
 			<div class="nav-actions">
-				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">Login</a>
-				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Sign up</a>
+				<a class="text-link" href="/login" onclick="showAuth('login', event)">Sign in</a>
+				<a class="nav-cta" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">↗</span></a>
 			</div>
-		</div>
-	</nav>
-	<section class="landing-section hero reveal">
-		<div class="hero-copy">
-			<div class="product-kicker"><img src="/assets/uml-icon.png?v=2" alt="" /> Universal Memory Layer</div>
-			<h1>One memory service. Multiple ways to connect.</h1>
-			<p>Itsuki gives supported tools and your own apps a private, structured memory API that you can inspect, edit, and export.</p>
-			<div class="hero-actions">
-				<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
-				<a class="cta-secondary" href="#how-it-works">See how it works</a>
-			</div>
-			<div class="trust-line">Free early access &middot; Open source &middot; You own your memory &middot; Works with API, SDK, dashboard, and MCP-linked clients.</div>
-		</div>
-		<div class="hero-video">
-			<div class="video-frame">
-				<video id="heroReel" muted loop playsinline webkit-playsinline preload="none"
-					poster="/assets/uml-reel-poster.svg" aria-label="Itsuki memory graph in motion">
-					<source src="/assets/uml-reel.mp4" type="video/mp4" />
-				</video>
-			</div>
-			<div class="video-caption">Your memory, as a living graph — real product footage.</div>
-		</div>
-	</section>
+		</header>
 
-	<section class="landing-section reveal" id="how-it-works">
-		<div class="section-kicker">How it works</div>
-		<h2 class="section-title">Four steps. Simple enough to explain to anyone.</h2>
-		<div class="how-flow">
-			<div class="flow-step">
-				<div class="flow-num">1</div>
-				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-				<h3>You talk</h3>
-				<p>Tell your AI: <i>"save this to itsuki — I finished Unit 3."</i> Or let your app send it automatically.</p>
-			</div>
-			<div class="flow-step">
-				<div class="flow-num">2</div>
-				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2M5.6 18.4l2.2-2.2m8.4-8.4 2.2-2.2"/><circle cx="12" cy="12" r="3.2"/></svg></div>
-				<h3>Itsuki organizes it</h3>
-				<p>AI proposes durable facts. Backend gates verify evidence and either write structured memory or report why a proposal was skipped.</p>
-			</div>
-			<div class="flow-step">
-				<div class="flow-num">3</div>
-				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="8" r="2.4"/><circle cx="9" cy="17" r="2.4"/><circle cx="18.5" cy="17.5" r="2.4"/><path d="M8 7.2 15.7 8m-8.9 8.2L7 8.3m4.3 9.6 4.8-.3"/></svg></div>
-				<h3>You can see it</h3>
-				<p>Open the dashboard to inspect the graph, timelines, conversation pages, receipts, and asynchronous job status.</p>
-			</div>
-			<div class="flow-step">
-				<div class="flow-num">4</div>
-				<div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.2-2.6 5.5-.9.9-1.4 1.6-1.4 2.5v1H9v-1c0-.9-.5-1.6-1.4-2.5C6.2 13.2 5 11.4 5 9a7 7 0 0 1 7-7z"/><path d="M9 21h6"/></svg></div>
-				<h3>Connect supported tools</h3>
-				<p>MCP clients and your own agents can address the same account-scoped service. Each host still decides when to call its tools.</p>
-			</div>
-		</div>
-	</section>
-
-	<section class="landing-section reveal" id="connect">
-		<div class="section-kicker">Supported connections</div>
-		<h2 class="section-title">Choose an interface and follow its setup.</h2>
-		<p class="public-note">Sign up, create your private memory link in the Connect tab, then paste it into any MCP-capable client — or call the API from your own app.</p>
-		<div class="connect-setup-note"><b>Set up on a computer, not your phone.</b> Neither Claude nor ChatGPT lets you add a connector from their mobile apps — do it once in a computer browser and it syncs to your phone automatically.</div>
-		<div class="connect-terminal">
-			<div class="terminal-tabs" role="tablist">
-				<button class="term-tab active" onclick="connectTab(this,'claude')">Claude</button>
-				<button class="term-tab" onclick="connectTab(this,'chatgpt')">ChatGPT</button>
-				<button class="term-tab" onclick="connectTab(this,'claude-code')">Claude Code</button>
-				<button class="term-tab" onclick="connectTab(this,'cursor')">Cursor</button>
-				<button class="term-tab" onclick="connectTab(this,'api')">Your app</button>
-			</div>
-			<div class="terminal-body">
-				<div class="terminal-chrome"><span></span><span></span><span></span><em>itsuki &middot; connect</em></div>
-				<div class="term-pane active" data-pane="claude">
-					<div class="term-step"><b>1</b><span>Sign up free &rarr; open <i>Connect</i> &rarr; <i>Create MCP link</i></span></div>
-					<div class="term-step"><b>2</b><span>On a computer, open Claude &rarr; <i>Customize</i> &rarr; <i>Connectors</i> &rarr; <i>+</i> &rarr; <i>Add custom connector</i></span></div>
-					<div class="term-step"><b>3</b><span>Name it <i>itsuki</i>, paste your private link, click Add:</span></div>
-					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
-					<div class="term-step"><b>4</b><span>In a chat, tap the <b>+</b> (bottom-left) &rarr; <i>Connectors</i> &rarr; switch on <i>itsuki</i></span></div>
-					<div class="term-note">Remote custom connectors are currently in beta on all Claude plans; Free is limited to one, and organization plans require an owner to add it. Then explicitly ask Claude to use the Itsuki tool.</div>
+		<section class="hero" id="top">
+			<div class="hero-copy">
+				<p class="eyebrow"><span>01</span> Structured memory infrastructure</p>
+				<div class="hero-japanese" aria-label="Itsuki, written in Japanese">
+					<span lang="ja">イツキ</span>
+					<small aria-hidden="true">ITSUKI / STRUCTURED MEMORY</small>
 				</div>
-				<div class="term-pane" data-pane="chatgpt">
-					<div class="term-step"><b>1</b><span>On ChatGPT web, a Business or Enterprise/Edu workspace admin enables Developer mode under <i>Apps</i> and starts a custom MCP app.</span></div>
-					<div class="term-step"><b>2</b><span>Name the app <i>itsuki</i>, review its write tools and permissions, and use this URL:</span></div>
-					<div class="term-code"><code data-connect="mcp-url"></code><button class="copy-btn" data-copy-key="mcp-url">Copy</button></div>
-					<div class="term-step"><b>3</b><span>Publish or approve it for the workspace, then enable it in a new web chat. ChatGPT may ask for confirmation before a save.</span></div>
-					<div class="term-note">Full MCP write actions currently require Business or Enterprise/Edu on the web. Pro custom apps are read/fetch only.</div>
+				<h1>Memory with a<br /><em>record</em> of why.</h1>
+				<p class="hero-deck">Itsuki turns conversations and documents into structured memory with sources, history, and control built in.</p>
+				<div class="hero-actions">
+					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
+					<a class="secondary-action" href="/docs/">Read the architecture</a>
 				</div>
-				<div class="term-pane" data-pane="claude-code">
-					<div class="term-step"><b>1</b><span>Create your MCP link in the Connect tab, then run:</span></div>
-					<div class="term-code"><code data-connect="claude-code"></code><button class="copy-btn" data-copy-key="claude-code">Copy</button></div>
-					<div class="term-note">Claude Code gets all eight memory tools — <i>save_memory</i>, <i>save_conversation</i>, <i>recall_memory</i>, plus browse, inspect, guarded delete, and <i>whoami</i>.</div>
-				</div>
-				<div class="term-pane" data-pane="cursor">
-					<div class="term-step"><b>1</b><span>Add Itsuki to your MCP config (<i>.cursor/mcp.json</i>):</span></div>
-					<div class="term-code"><code data-connect="cursor"></code><button class="copy-btn" data-copy-key="cursor">Copy</button></div>
-					<div class="term-note">Uses a standard Streamable HTTP MCP configuration; tool discovery and invocation still depend on the host.</div>
-				</div>
-				<div class="term-pane" data-pane="api">
-					<div class="term-step"><b>1</b><span>One call: recall relevant memory <i>and</i> auto-save the turn:</span></div>
-					<div class="term-code"><code data-connect="api"></code><button class="copy-btn" data-copy-key="api">Copy</button></div>
-					<div class="term-note">Plus <i>/v1/save</i>, <i>/v1/recall</i>, <i>/v1/graph</i>, <i>/v1/rules</i>, and <i>/v1/export</i> under the selected account and scope.</div>
+				<div class="fact-row" aria-label="Core capabilities">
+					<span><b>01</b>Source-backed</span>
+					<span><b>02</b>Versioned</span>
+					<span><b>03</b>Scope-aware</span>
+					<span><b>04</b>Provider-portable</span>
 				</div>
 			</div>
-		</div>
-		<div class="product-card contact-card" style="margin-top:16px" id="api-sdk-mcp">
-			<h3>Honest MCP note</h3>
-			<p>When Itsuki is connected through an MCP-capable AI client, Itsuki provides memory tools. The client or host model decides when to call them. If you need guaranteed per-turn API invocation, call Itsuki from your own app or agent runtime and inspect the resulting receipt and packet status.</p>
-		</div>
-	</section>
+		</section>
 
-	<section class="landing-section reveal" id="structured-memory">
-		<div class="section-kicker">Why a graph</div>
-		<h2 class="section-title">Structured memory, not transcript replay.</h2>
-		<p class="public-note">Itsuki turns context submitted through its supported save, conversation, ingest, and MCP interfaces into structured memory objects — entities, facts, events, relationships, pages, and receipts.</p>
-		<div class="how-grid" style="margin-top:18px">
-			<div class="product-card"><h3>Chat history is not memory.</h3><p>Messages are source material. Itsuki keeps the durable meaning that should survive beyond a single exchange.</p></div>
-			<div class="product-card"><h3>Memory is structured meaning.</h3><p>Itsuki stores verified entities, facts, events, relationships, rollups, and receipts so systems can reason over them later.</p></div>
-			<div class="product-card"><h3>Backend is the authority, not the LLM.</h3><p>The LLM proposes; Itsuki verifies; Itsuki writes. Recall and extraction stay separate.</p></div>
-		</div>
-	</section>
+		<section class="hero-ledger" id="product" aria-label="Memory lifecycle preview">
+			<p class="ledger-label">A memory, resolved</p>
+			<div class="ledger-entry old-entry"><span class="ledger-state">Previous</span><p>Pricing review happens in September.</p><time>Rev. 03 · Aug 12</time></div>
+			<div class="ledger-arrow" aria-hidden="true">→</div>
+			<div class="ledger-entry current-entry"><span class="ledger-state">Current</span><p>Pricing review moves to October.</p><time>Rev. 04 · Aug 19</time></div>
+			<div class="ledger-proof"><span class="proof-dot" aria-hidden="true"></span>Source linked · conflict resolved · rollback available</div>
+		</section>
 
-	<section class="landing-section reveal" id="living-graph">
-		<div class="section-kicker">What makes it different</div>
-		<h2 class="section-title">A graph that can update, not just append.</h2>
-		<p class="public-note">New evidence can create, update, promote, invalidate, or supersede memory. Itsuki is not an append-only chat log.</p>
-		<div class="feature-grid">
-			<div class="feature-card">
-				<div class="feature-icon" style="--fc:#84e9ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"/><circle cx="18" cy="5" r="2.2"/><circle cx="7" cy="18" r="2.2"/><circle cx="17.5" cy="17" r="2.2"/><circle cx="12" cy="11.5" r="2.6"/><path d="m7.4 7.4 2.7 2.4m4.3-.5 2.2-2.1m-6.2 6 -1.7 2.6m5.5-2.4 2.3 2.2"/></svg></div>
-				<h3>A memory you can see</h3>
-				<p>Your facts live in a visual graph with clusters you can open, search, drag, and edit — not a hidden blob.</p>
+		<section class="positioning-spread">
+			<div class="section-kicker"><span>02</span> The memory system</div>
+			<h2>Not more context.<br /><em>Better memory.</em></h2>
+			<div class="positioning-copy">
+				<p>Itsuki does not replay a transcript and call it memory. It stores entities, durable facts, events, relationships, conversation pages, candidates, and the receipts that explain what happened.</p>
+				<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Inspect the open architecture <span aria-hidden="true">↗</span></a>
 			</div>
-			<div class="feature-card">
-				<div class="feature-icon" style="--fc:#3fb950"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg></div>
-				<h3>Supersession with history</h3>
-				<p>When new evidence is classified as an update to the same fact, the prior value can be superseded and retained as timeline history.</p>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon" style="--fc:#f2cc60"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22z"/><path d="M9.5 8h5M9.5 12h5"/></svg></div>
-				<h3>Receipts for every save</h3>
-				<p>Write responses include a receipt describing what was saved, updated, or refused; asynchronous work also exposes packet and job status.</p>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon" style="--fc:#bc8cff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5.5v5.7c0 4.6 3.2 8.6 8 9.8 4.8-1.2 8-5.2 8-9.8V5.5z"/><path d="M8.5 11.5h7M8.5 15h4"/></svg></div>
-				<h3>Your rules</h3>
-				<p>Decide what gets collected and what must never be saved — plain-language rules the backend actually enforces.</p>
-			</div>
-		</div>
-	</section>
+		</section>
 
-	<section class="landing-section reveal" id="inputs">
-		<div class="section-kicker">One graph, supported inputs</div>
-		<h2 class="section-title">Chat is one input. Not the whole product.</h2>
-		<p class="public-note">Applications can submit chat, document, tool-result, event, and workflow-state context through Itsuki's supported APIs and connectors.</p>
-		<div class="input-chip-grid" style="margin-top:18px">
-			<span>Chat turns</span><span>Manual saves</span><span>Documents</span><span>Tool outputs</span><span>App events</span>
-			<span>Support tickets</span><span>Meeting notes</span><span>Project rules</span><span>Workflow state</span><span>API events</span>
-		</div>
-	</section>
-
-	<section class="landing-section reveal" id="privacy-policy">
-		<div class="section-kicker">Private by default</div>
-		<h2 class="section-title">Your memory stays under your control.</h2>
-		<p class="public-note">No ads. No trackers. No selling data. No training on your memory. Export a resolved memory space as JSON; project-wide deletion waits for verified lifecycle cleanup.</p>
-		<div class="policy-grid" style="margin-top:18px">
-			<div class="product-card">
-				<h3>Privacy Policy</h3>
-				<p>Itsuki does not sell user data or use user memory for unrelated purposes. User memory belongs to the account that created it. Connected tools are third-party services and access Itsuki only through private links or tokens you create.</p>
-				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/privacy" onclick="showLegal('privacy', event)">Read the full policy</a></div>
+		<section class="lifecycle-section" id="workflow">
+			<header class="section-heading">
+				<div class="section-kicker"><span>03</span> One continuous record</div>
+				<h2>From raw evidence to<br />memory your agent can use.</h2>
+				<p>Four operations. One inspectable chain.</p>
+			</header>
+			<div class="lifecycle-instrument">
+				<div class="step-selector" role="tablist" aria-label="Memory lifecycle">
+					<button type="button" role="tab" aria-selected="true" class="active" data-landing-step="0" onclick="landingSelectStep(0)"><span>01</span><b>Capture</b><i aria-hidden="true">●</i></button>
+					<button type="button" role="tab" aria-selected="false" data-landing-step="1" onclick="landingSelectStep(1)"><span>02</span><b>Resolve</b><i aria-hidden="true">○</i></button>
+					<button type="button" role="tab" aria-selected="false" data-landing-step="2" onclick="landingSelectStep(2)"><span>03</span><b>Retrieve</b><i aria-hidden="true">○</i></button>
+					<button type="button" role="tab" aria-selected="false" data-landing-step="3" onclick="landingSelectStep(3)"><span>04</span><b>Govern</b><i aria-hidden="true">○</i></button>
+				</div>
+				<article class="step-canvas" role="tabpanel" id="landingStepPanel">
+					<div class="canvas-copy">
+						<span class="canvas-index" id="landingStepIndex">01 / Capture</span>
+						<h3 id="landingStepTitle">Keep the source, not just the sentence.</h3>
+						<p id="landingStepCopy">A conversation or document becomes a durable source packet before the model proposes any memory.</p>
+					</div>
+					<div class="memory-transaction">
+						<div class="transaction-source"><span>Input</span><p id="landingStepInput">“The pricing review moved from September to October.”</p><small id="landingStepMeta">Conversation · 09:42:18 UTC</small></div>
+						<div class="transaction-path" aria-hidden="true"><i></i><b>verified</b><i></i></div>
+						<div class="transaction-output"><span>Result</span><p id="landingStepOutput">Source packet accepted · evidence preserved</p><small>Receipt ready</small></div>
+					</div>
+				</article>
 			</div>
-			<div class="product-card" id="terms">
-				<h3>Terms of Service</h3>
-				<p>Itsuki is an early product and may change. Use it responsibly. You are responsible for tokens and private links, and you can revoke them from Connect. Avoid sensitive or regulated data unless Itsuki is appropriate for that use.</p>
-				<div class="section-actions" style="margin-top:10px"><a class="cta-secondary" href="/terms" onclick="showLegal('terms', event)">Read the full terms</a></div>
+		</section>
+
+		<section class="folio-section" aria-label="Itsuki capabilities">
+			<div class="folio-heading"><div class="section-kicker"><span>04</span> Product folios</div><h2>Memory is a system,<br />not a text box.</h2></div>
+			<div class="folio-grid">
+				<article><span>01 / Structure</span><h3>Know what kind of thing you remembered.</h3><p>Entities, facts, events, relationships, pages, and candidates remain distinct and queryable.</p><b>Typed memory objects</b></article>
+				<article><span>02 / Evidence</span><h3>Keep the source attached to the claim.</h3><p>Every save can return a receipt explaining what was written, updated, or refused.</p><b>Source-backed decisions</b></article>
+				<article><span>03 / Evolution</span><h3>Correct memory without erasing its past.</h3><p>New evidence can supersede prior facts while timeline history remains inspectable.</p><b>Forward revisions</b></article>
+				<article><span>04 / Control</span><h3>Let the model propose. Keep the backend in charge.</h3><p>Rules and deterministic gates decide what enters durable memory.</p><b>Governed writes</b></article>
 			</div>
-		</div>
-	</section>
+		</section>
 
-	<section class="landing-section reveal final-cta-band" id="final-cta">
-		<h2 class="section-title">Build structured memory into the tools where work continues.</h2>
-		<p class="public-note">Free early access — founding users keep the Pro tier free when paid plans launch.</p>
-		<div class="hero-actions" style="justify-content:center">
-			<a class="cta-primary" href="/signup" onclick="showAuth('signup', event)">Start free</a>
-			<a class="cta-secondary" href="#connect">Connect a tool</a>
-		</div>
-	</section>
+		<section class="developer-section" id="developers">
+			<div class="developer-copy">
+				<div class="section-kicker light"><span>05</span> Developer surface</div>
+				<h2>One memory.<br />Every way in.</h2>
+				<p>MCP, REST, Node, Python, n8n, the dashboard, and app connectors meet the same account- and scope-aware backend.</p>
+				<div class="surface-list" aria-label="Supported product surfaces"><span>MCP</span><span>REST</span><span>Node</span><span>Python</span><span>n8n</span><span>Dashboard</span></div>
+			</div>
+			<div class="code-window">
+				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
+					<button type="button" role="tab" aria-selected="true" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
+					<button type="button" role="tab" aria-selected="false" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
+					<button type="button" role="tab" aria-selected="false" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+				</div></div>
+				<pre id="landingCodeSample"><code>npm install itsuki
 
-	<section class="landing-section reveal" id="support">
-		<h2 class="section-title">Support</h2>
-		<p class="public-note">Need help connecting Itsuki or shaping an integration?</p>
-		<div class="contact-grid" style="margin-top:18px">
-			<div class="product-card contact-card"><h3>Contact support</h3><p><a href="mailto:hello@itsuki.app">hello@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p></div>
-			<div class="product-card"><h3>Open source</h3><p>Itsuki's engine is open source under Apache 2.0 — read the code, open issues, or star the repo on <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>.</p></div>
-		</div>
-	</section>
-	<footer class="site-footer">
-		<a class="brand-lockup" href="/" onclick="showPublic(event)">
-			<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
-			<span><b>Itsuki</b><span>Personal memory layer</span></span>
-		</a>
-		<div class="footer-links">
-			<a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>
-			<a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a>
-			<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">Open source &middot; Apache 2.0</a>
-			<a href="mailto:hello@itsuki.app">hello@itsuki.app</a>
-			<span>&copy; 2026 Itsuki</span>
-		</div>
-	</footer>
+import { MemoryClient } from "itsuki";
+
+const memory = new MemoryClient({
+  apiKey: process.env.ITSUKI_API_KEY,
+});
+
+await memory.add("The pricing review moved to October.");
+const { context } = await memory.search("When is the review?");</code></pre>
+				<div class="code-foot"><span>Server-side only</span><a href="/docs/">Complete setup ↗</a></div>
+			</div>
+		</section>
+
+		<section class="control-section" id="control">
+			<header class="section-heading control-heading"><div class="section-kicker"><span>06</span> Operational control</div><h2>Your agents remember.<br />Your team stays in control.</h2></header>
+			<div class="control-spread">
+				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>The model proposes. Itsuki verifies. Your memory stays inspectable.</p><small>The Itsuki principle</small></div>
+				<dl>
+					<div><dt>Revision history</dt><dd>Every correction becomes a new forward revision.</dd></div>
+					<div><dt>Scoped identity</dt><dd>Account, project, and end-user boundaries remain explicit.</dd></div>
+					<div><dt>Receipts</dt><dd>See what was saved, changed, or refused.</dd></div>
+					<div><dt>Lifecycle</dt><dd>Inspect, export, roll back, archive, and delete.</dd></div>
+				</dl>
+			</div>
+		</section>
+
+		<section class="closing-section">
+			<div class="closing-seal" aria-hidden="true"><span></span><span></span><i></i></div>
+			<div><span class="closing-label">07 / Begin</span><h2>Give your agent a memory<br />with a paper trail.</h2></div>
+			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="mailto:hello@itsuki.app">Talk to Itsuki</a></div>
+		</section>
+
+		<footer class="footer">
+			<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
+			<p>Structured memory for AI applications and coding agents.</p>
+			<div><a href="/docs/">Docs</a><a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a><a href="/privacy" onclick="showLegal('privacy', event)">Privacy</a><a href="/terms" onclick="showLegal('terms', event)">Terms</a></div>
+		</footer>
+	</div>
 </div>
 
 <div id="authView" class="auth-shell"></div>
@@ -3459,6 +3392,114 @@ function showAuth(mode = "login", event) {
 	pushUrl(mode === "signup" ? "/signup" : "/login", { preserveInvite: true });
 	renderAuth(mode);
 	setMode(mode);
+}
+
+const LANDING_STEPS = [
+	{
+		index: "01 / Capture",
+		title: "Keep the source, not just the sentence.",
+		copy: "A conversation or document becomes a durable source packet before the model proposes any memory.",
+		input: "“The pricing review moved from September to October.”",
+		output: "Source packet accepted · evidence preserved",
+		meta: "Conversation · 09:42:18 UTC",
+	},
+	{
+		index: "02 / Resolve",
+		title: "Let new evidence change the record safely.",
+		copy: "Itsuki compares the proposal with current memory, records the conflict, and creates a forward revision.",
+		input: "Previous: Pricing review happens in September.",
+		output: "Revision 04 supersedes Revision 03",
+		meta: "Conflict resolved · history retained",
+	},
+	{
+		index: "03 / Retrieve",
+		title: "Return the current truth with its context.",
+		copy: "Recall is scoped to the right user and project, then returns prompt-ready context and structured results.",
+		input: "Query: “When is the pricing review?”",
+		output: "The pricing review is scheduled for October.",
+		meta: "Current memory · source linked",
+	},
+	{
+		index: "04 / Govern",
+		title: "Inspect, correct, export, or remove it.",
+		copy: "Receipts, immutable revision history, rollback, lifecycle controls, and deletion keep memory operable.",
+		input: "Expected revision: 04",
+		output: "Update accepted · Revision 05 created",
+		meta: "No silent overwrite",
+	},
+];
+
+const LANDING_CODE_SAMPLES = {
+	node: [
+		"npm install itsuki",
+		"",
+		'import { MemoryClient } from "itsuki";',
+		"",
+		"const memory = new MemoryClient({",
+		"  apiKey: process.env.ITSUKI_API_KEY,",
+		"});",
+		"",
+		'await memory.add("The pricing review moved to October.");',
+		'const { context } = await memory.search("When is the review?");',
+	].join("\n"),
+	python: [
+		"pip install itsuki",
+		"",
+		"import os",
+		"from itsuki import MemoryClient",
+		"",
+		'memory = MemoryClient(api_key=os.environ["ITSUKI_API_KEY"])',
+		'memory.add("The pricing review moved to October.")',
+		'context = memory.search("When is the review?")["context"]',
+	].join("\n"),
+	rest: [
+		"curl https://itsuki.app/v1/save \\",
+		'  -H "Authorization: Bearer $ITSUKI_API_KEY" \\',
+		'  -H "Content-Type: application/json" \\',
+		'  -d \'{"content":"The pricing review moved to October."}\'',
+	].join("\n"),
+};
+
+function landingSelectStep(index) {
+	const step = LANDING_STEPS[index];
+	if (!step) return;
+	document.querySelectorAll("[data-landing-step]").forEach((button, buttonIndex) => {
+		const active = buttonIndex === index;
+		button.classList.toggle("active", active);
+		button.setAttribute("aria-selected", String(active));
+		const indicator = button.querySelector("i");
+		if (indicator) indicator.textContent = active ? "●" : "○";
+	});
+	const values = {
+		landingStepIndex: step.index,
+		landingStepTitle: step.title,
+		landingStepCopy: step.copy,
+		landingStepInput: step.input,
+		landingStepOutput: step.output,
+		landingStepMeta: step.meta,
+	};
+	Object.entries(values).forEach(([id, value]) => {
+		const node = document.getElementById(id);
+		if (node) node.textContent = value;
+	});
+	const panel = document.getElementById("landingStepPanel");
+	if (panel) {
+		panel.style.animation = "none";
+		void panel.offsetHeight;
+		panel.style.animation = "";
+	}
+}
+
+function landingSelectSdk(name) {
+	const sample = LANDING_CODE_SAMPLES[name];
+	if (!sample) return;
+	document.querySelectorAll("[data-landing-sdk]").forEach((button) => {
+		const active = button.dataset.landingSdk === name;
+		button.classList.toggle("active", active);
+		button.setAttribute("aria-selected", String(active));
+	});
+	const code = document.querySelector("#landingCodeSample code");
+	if (code) code.textContent = sample;
 }
 
 async function refreshMe() {

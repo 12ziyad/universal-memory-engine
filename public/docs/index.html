@@ -4,7 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Itsuki Docs</title>
-<link rel="icon" href="/assets/uml-icon.png?v=2" type="image/png" />
+<link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="/assets/brand/itsuki-bonsai-favicon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="/assets/brand/itsuki-bonsai-apple-180.png" />
 <style>
 	/* Same self-hosted faces the app uses, same three subsets. The docs sat on
 	   the system stack, so the product and the documentation for it were set in
@@ -56,7 +58,7 @@
 		padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--border); }
 	.topbar .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px;
 		color: var(--text); text-decoration: none; }
-	.topbar .brand img { width: 24px; height: 24px; border-radius: 6px; }
+	.topbar .brand img { display: block; width: 28px; height: 28px; flex: 0 0 28px; }
 	.topbar .brand span { color: var(--faint); font-weight: 500; }
 	.topbar input { flex: 1; max-width: 420px; padding: 8px 12px; border: 1px solid var(--border2);
 		border-radius: 8px; font-size: 14px; outline: none; background: var(--bg); }
@@ -119,7 +121,7 @@
 <body>
 <div class="topbar">
 	<button class="menu-btn" onclick="document.body.classList.toggle('nav-open')">☰</button>
-	<a class="brand" href="#/"><img src="/assets/uml-icon.png?v=2" alt="" /> Itsuki <span>Docs</span></a>
+	<a class="brand" href="#/"><img src="/assets/brand/itsuki-bonsai-mark.svg" alt="" /> Itsuki <span>Docs</span></a>
 	<div class="searchbox">
 		<input id="search" placeholder="Search the docs…" autocomplete="off" />
 		<div class="search-results" id="searchResults"></div>

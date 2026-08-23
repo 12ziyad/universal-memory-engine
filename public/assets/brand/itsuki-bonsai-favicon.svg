@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title">
+  <title id="title">Itsuki</title>
+  <g fill="none" stroke="#15130F" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25.3 8.6A12 12 0 1 0 25.3 23.4" stroke-width="1.8"/>
+    <path d="M16 26V15M16 16L10 10M16 16L22 10" stroke-width="2.6"/>
+    <path d="M16 25L12 27M16 25L20 27" stroke-width="2.2"/>
+  </g>
+  <circle cx="16" cy="7" r="2.2" fill="#15130F"/>
+  <circle cx="22" cy="10" r="3" fill="#C84F2A"/>
+  <circle cx="10" cy="10" r="2" fill="#AE8741"/>
+</svg>
