@@ -130,7 +130,9 @@ function assessmentSchema() {
 							index: { type: "integer", minimum: 0, maximum: RULE_PREVIEW_MAX_SAMPLES - 1 },
 							durable: { type: "boolean" },
 							confidence: { type: "string", enum: ["high", "low"] },
-							reason: { type: "string", maxLength: 80 },
+							// Bounded in code at mapping time; a schema maxLength would
+						// widen the provider-portable keyword set for no gain.
+						reason: { type: "string" },
 						},
 						required: ["index", "durable", "confidence", "reason"],
 					},

@@ -70,9 +70,11 @@
 		// silences the "may incur usage charges in local dev" warning).
 		"remote": true
 	},
-	// Transactional invitations only. The binding is restricted to Itsuki's
-	// dedicated sending identity so application code cannot become an open
-	// relay. Local tests omit this binding and use a deterministic fake.
+	// Transactional mail only: member invitations and passwordless sign-in
+	// codes, both rendered by src/lib/email_template.js. The binding is
+	// restricted to Itsuki's dedicated sending identity so application code
+	// cannot become an open relay. Local tests omit this binding and use a
+	// deterministic fake.
 	"send_email": [
 		{
 			"name": "EMAIL",

@@ -504,6 +504,9 @@ describe("schema translation", () => {
 			"atomic:ATOMIC_CAPTURE_JSON_SCHEMA",
 			"engine_v2:EDGE_SCHEMA",
 			"engine_v2:REFLEXION_SCHEMA",
+			// Two inline response_format schemas in rules_preview.js: the filing
+			// category proposal and the durability assessment.
+			"rules:schema.json_schema",
 			"rules:schema.json_schema",
 		]);
 		expect([...keywords].sort()).toEqual([
