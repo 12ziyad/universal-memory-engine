@@ -2268,6 +2268,7 @@
 	}
 </style>
 <link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=2" />
+<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=1" />
 </head>
 <body>
 <div id="landing" class="public-shell lp-shell">
@@ -2451,7 +2452,7 @@ const { context } = await memory.search("When is the review?");</code></pre>
 <main id="main">
 	<aside id="rail">
 		<a class="rail-brand" href="/app" onclick="setView('overview'); return false;">
-			<img class="logo-mark" src="/assets/uml-icon.png?v=2" alt="" /> <span>Itsuki</span>
+			<img class="logo-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /> <span>Itsuki</span>
 		</a>
 		<nav class="tabs" id="tabs">
 			<div class="rail-label">Setup</div>
@@ -2485,7 +2486,7 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	<div class="detail" id="detail"></div>
 </main>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="keyModal" class="modal-backdrop" hidden></div>
 <div id="mwEditModal" class="modal-backdrop" hidden></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
@@ -3550,7 +3551,7 @@ function renderAuth(mode = "login") {
 	view.innerHTML = `
 		<form class="auth-card" id="authForm">
 			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+				<img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki logo" />
 				<span><b>Itsuki</b><span>Personal memory layer</span></span>
 			</a>
 			<h2>${hasInvitation ? (isSignup ? "Create an account to review your invitation" : "Log in to review your invitation") : (isSignup ? "Create your Itsuki account" : "Log in to Itsuki")}</h2>
@@ -3590,7 +3591,7 @@ function showForgotPassword(event) {
 	view.innerHTML = `
 		<div class="auth-card">
 			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/uml-icon.png?v=2" alt="Itsuki logo" />
+				<img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki logo" />
 				<span><b>Itsuki</b><span>Personal memory layer</span></span>
 			</a>
 			<h2>Forgot your password?</h2>

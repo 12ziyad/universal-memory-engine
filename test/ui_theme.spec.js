@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+// A side-effect import makes a missing product theme fail module collection.
+// The Workers pool stubs CSS exports, so direct stylesheet policy assertions
+// live in ui_theme_css.unit.js under the Node-only test config.
+import "../public/assets/app-editorial-v1.css";
 import html from "../public/index.html?raw";
 import themeBootstrap from "../public/assets/theme-bootstrap.js?raw";
 
@@ -17,9 +21,17 @@ describe("app appearance themes", () => {
 		expect(() => new Function(themeBootstrap)).not.toThrow();
 	});
 
-	it("defines separate semantic light and dark palettes for the signed-in app", () => {
+	it("loads the product editorial layer after the landing theme", () => {
+		const landingHref = "/assets/landing-editorial-v1.css?v=2";
+		const productHref = "/assets/app-editorial-v1.css?v=1";
+		expect(html).toContain(`<link rel="stylesheet" href="${productHref}" />`);
+		expect(html.indexOf(productHref)).toBeGreaterThan(html.indexOf(landingHref));
+	});
+
+	it("keeps semantic light and dark scopes wired for app and auth", () => {
 		expect(css).toContain("body.app-mode {");
 		expect(css).toContain('html[data-theme="dark"] body.app-mode');
+		expect(appScript).toContain('mode === "login" || mode === "signup" ? "auth-mode" : "public-mode"');
 		for (const variable of [
 			"--bg", "--panel", "--panel2", "--panel3", "--border", "--border2",
 			"--text", "--muted", "--faint", "--accent", "--on-accent", "--shadow-sm",
@@ -45,8 +57,11 @@ describe("app appearance themes", () => {
 		expect(appScript).toContain("Appearance");
 	});
 
-	it("keeps motion optional and gives keyboard focus a visible ring", () => {
+	it("keeps motion optional, keyboard focus visible, and primary control contracts stable", () => {
 		expect(css).toContain(":focus-visible");
 		expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+		for (const productControl of ["mw-btn-primary", "btn primary", "install-btn", "auth-actions", "google-btn"]) {
+			expect(html).toContain(productControl);
+		}
 	});
 });

@@ -7,6 +7,7 @@
 <link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg" type="image/svg+xml" />
 <link rel="icon" href="/assets/brand/itsuki-bonsai-favicon-32.png" sizes="32x32" type="image/png" />
 <link rel="apple-touch-icon" href="/assets/brand/itsuki-bonsai-apple-180.png" />
+<script src="/assets/theme-bootstrap.js"></script>
 <style>
 	/* Same self-hosted faces the app uses, same three subsets. The docs sat on
 	   the system stack, so the product and the documentation for it were set in
@@ -41,29 +42,59 @@
 		font-display: swap;
 	}
 	:root {
-		--bg: #f7f8fa; --panel: #ffffff; --panel2: #f2f4f7;
-		--border: #e4e7ec; --border2: #d0d5dd;
-		--text: #101828; --muted: #5a6472; --faint: #98a2b3; --accent: #4f46b8;
-		--green: #12b76a; --amber: #dc6803; --red: #d92d20;
+		color-scheme: light;
+		--bg: #f2ebdd; --panel: #fbf8f1; --panel2: #eae0cf;
+		--border: #d5c9b6; --border2: #b8aa94;
+		--text: #15130f; --body-text: #3f392f; --muted: #514b42; --faint: #756e63; --accent: #a83f22;
+		--clay: #c84f2a; --on-clay: #ffffff; --green: #19734d; --amber: #98621a; --red: #b53b31;
+		--code-bg: #0c0b09; --code-text: #f1dfc8; --code-control: rgba(251,248,241,.1);
+		--focus-ring: rgba(200,79,42,.34); --shadow: rgba(50,39,25,.12); --press-shadow: #15130f;
 		--font-ui: "Fustat", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 		--font-mono: "Geist Mono", ui-monospace, "JetBrains Mono", Consolas, monospace;
+	}
+	html[data-theme="dark"] {
+		color-scheme: dark;
+		--bg: #100f0c; --panel: #181612; --panel2: #211e19;
+		--border: #373228; --border2: #554c3e;
+		--text: #fbf8f1; --body-text: #ded4c4; --muted: #c8bca8; --faint: #a99f8f; --accent: #e38362;
+		--clay: #d96642; --on-clay: #140f0c; --green: #66c99a; --amber: #d0a65e; --red: #ef8b7d;
+		--code-bg: #090806; --code-text: #f1dfc8; --code-control: rgba(251,248,241,.1);
+		--focus-ring: rgba(227,131,98,.42); --shadow: rgba(0,0,0,.34); --press-shadow: #e38362;
 	}
 	* { box-sizing: border-box; }
 	html, body { height: 100%; }
 	body { margin: 0; font: 15px/1.65 var(--font-ui);
-		background: var(--bg); color: var(--text); }
+		background: linear-gradient(90deg, transparent calc(50% - .5px), color-mix(in srgb, var(--text) 6%, transparent) 50%, transparent calc(50% + .5px)), var(--bg); color: var(--text); }
 	button, input, select, textarea { font-family: var(--font-ui); }
 	a { color: var(--accent); }
+	::selection { background: color-mix(in srgb, var(--clay) 22%, var(--panel)); color: var(--text); }
+	:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 	.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px;
-		padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--border); }
+		padding: 12px 22px; background: color-mix(in srgb, var(--panel) 92%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
 	.topbar .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px;
 		color: var(--text); text-decoration: none; }
 	.topbar .brand img { display: block; width: 28px; height: 28px; flex: 0 0 28px; }
+	.topbar .brand img.brand-inverse { display: none; }
+	html[data-theme="dark"] .topbar .brand img.brand-default { display: none; }
+	html[data-theme="dark"] .topbar .brand img.brand-inverse { display: block; }
 	.topbar .brand span { color: var(--faint); font-weight: 500; }
 	.topbar input { flex: 1; max-width: 420px; padding: 8px 12px; border: 1px solid var(--border2);
-		border-radius: 8px; font-size: 14px; outline: none; background: var(--bg); }
-	.topbar input:focus { border-color: var(--accent); }
-	.topbar .app-link { margin-left: auto; font-size: 14px; font-weight: 600; text-decoration: none; }
+		border-radius: 8px; font-size: 14px; outline: none; background: var(--bg); color: var(--text); }
+	.topbar input::placeholder { color: var(--faint); }
+	.topbar input:focus { border-color: var(--clay); box-shadow: 0 0 0 3px var(--focus-ring); }
+	.topbar .app-link { position: relative; z-index: 0; margin-left: auto; color: var(--on-clay); font-size: 14px; font-weight: 600; text-decoration: none;
+		transition: transform .15s ease; }
+	.topbar .app-link::before { position: absolute; z-index: -1; inset: -5px -9px; content: ""; border: 1px solid var(--text);
+		border-radius: 2px; background: var(--clay); box-shadow: 3px 3px 0 var(--press-shadow); transition: background .15s ease, box-shadow .15s ease, transform .15s ease; }
+	.topbar .app-link:hover::before { background: var(--accent); }
+	.topbar .app-link:active { transform: translate(3px, 3px); }
+	.topbar .app-link:active::before { box-shadow: 0 0 0 var(--press-shadow); }
+	.theme-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 30; background: var(--panel); border: 1px solid var(--border2); border-radius: 8px;
+		font-size: 12px; padding: 6px 10px; cursor: pointer; color: var(--text); transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+	.theme-toggle:hover { background: var(--panel2); border-color: var(--clay); }
+	.theme-toggle:active { transform: translateY(2px); }
+	.theme-toggle .theme-icon { color: var(--clay); }
+	.theme-toggle .theme-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 	.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); max-width: 1220px; margin: 0 auto; }
 	nav.side { padding: 22px 14px 60px; border-right: 1px solid var(--border); }
 	nav.side .sec { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
@@ -72,33 +103,36 @@
 	nav.side a { display: block; padding: 7px 10px; border-radius: 8px; color: var(--muted);
 		text-decoration: none; font-size: 14px; }
 	nav.side a:hover { color: var(--text); background: var(--panel2); }
-	nav.side a.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); font-weight: 600; }
+	nav.side a.active { color: var(--accent); background: color-mix(in srgb, var(--clay) 11%, transparent); font-weight: 600;
+		box-shadow: inset 2px 0 0 var(--clay); }
 	main { padding: 30px 40px 100px; min-width: 0; }
 	main h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.01em; }
 	main .lede { color: var(--muted); font-size: 16px; margin: 0 0 26px; }
 	main h2 { font-size: 20px; margin: 34px 0 10px; }
 	main h3 { font-size: 16px; margin: 24px 0 8px; }
-	main p, main li { color: #2a3342; }
+	main p, main li { color: var(--body-text); }
+	main b, main strong { color: var(--text); }
 	main code { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px;
 		padding: 1px 6px; font-family: var(--font-mono); font-size: 13px; }
-	main pre { position: relative; margin: 14px 0; padding: 16px; background: #0d1117; color: #dbe7ee;
+	main pre { position: relative; margin: 14px 0; padding: 16px; background: var(--code-bg); color: var(--code-text);
 		border-radius: 12px; overflow-x: auto; font-family: var(--font-mono);
-		font-size: 13px; line-height: 1.6; }
+		font-size: 13px; line-height: 1.6; box-shadow: 6px 6px 0 var(--clay); }
 	main pre code { background: none; border: 0; padding: 0; color: inherit; font-size: inherit; }
 	.copy { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600;
-		background: rgba(255,255,255,.1); color: #dbe7ee; border: 1px solid rgba(255,255,255,.2);
-		border-radius: 7px; cursor: pointer; }
-	.copy:hover { background: rgba(255,255,255,.18); }
-	table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; }
+		background: var(--code-control); color: var(--code-text); border: 1px solid rgba(251,248,241,.2);
+		border-radius: 7px; cursor: pointer; transition: transform .15s ease, background .15s ease; }
+	.copy:hover { background: rgba(251,248,241,.18); }
+	.copy:active { transform: translateY(2px); }
+	table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; background: color-mix(in srgb, var(--panel) 72%, transparent); }
 	th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
-		color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+		color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel2) 72%, transparent); }
 	td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 	.note { border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); border-radius: 10px;
-		background: color-mix(in srgb, var(--amber) 6%, transparent); padding: 12px 14px; margin: 14px 0; font-size: 14px; }
+		background: color-mix(in srgb, var(--amber) 8%, var(--panel)); padding: 12px 14px; margin: 14px 0; font-size: 14px; }
 	.searchbox { position: relative; flex: 1; max-width: 420px; }
 	.searchbox input { width: 100%; }
 	.search-results { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--panel);
-		border: 1px solid var(--border2); border-radius: 10px; box-shadow: 0 8px 30px rgba(16,24,40,.12);
+		border: 1px solid var(--border2); border-radius: 10px; box-shadow: 0 8px 30px var(--shadow);
 		max-height: 320px; overflow-y: auto; display: none; }
 	.search-results.open { display: block; }
 	.search-results a { display: block; padding: 10px 14px; text-decoration: none; color: var(--text);
@@ -106,28 +140,34 @@
 	.search-results a:last-child { border-bottom: 0; }
 	.search-results a:hover { background: var(--panel2); }
 	.search-results a small { display: block; color: var(--faint); }
-	.menu-btn { display: none; background: transparent; border: 1px solid var(--border2); border-radius: 8px;
+	.menu-btn { display: none; background: var(--panel); border: 1px solid var(--border2); border-radius: 8px;
 		font-size: 15px; padding: 6px 10px; cursor: pointer; color: var(--text); }
 	@media (max-width: 860px) {
 		.layout { grid-template-columns: minmax(0, 1fr); }
 		nav.side { position: fixed; inset: 53px auto 0 0; width: 260px; background: var(--panel); z-index: 20;
 			transform: translateX(-100%); transition: transform .18s ease; overflow-y: auto; }
-		body.nav-open nav.side { transform: none; box-shadow: 0 0 40px rgba(16,24,40,.18); }
+		body.nav-open nav.side { transform: none; box-shadow: 0 0 40px var(--shadow); }
 		.menu-btn { display: inline-block; }
 		main { padding: 22px 18px 80px; }
+		.theme-toggle { box-shadow: 0 8px 30px var(--shadow); }
+		.theme-toggle .theme-label { display: none; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		*, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 	}
 </style>
 </head>
 <body>
 <div class="topbar">
 	<button class="menu-btn" onclick="document.body.classList.toggle('nav-open')">☰</button>
-	<a class="brand" href="#/"><img src="/assets/brand/itsuki-bonsai-mark.svg" alt="" /> Itsuki <span>Docs</span></a>
+	<a class="brand" href="#/"><img class="brand-default" src="/assets/brand/itsuki-bonsai-mark.svg" alt="" /><img class="brand-inverse" src="/assets/brand/itsuki-bonsai-mark-inverse.svg" alt="" /> Itsuki <span>Docs</span></a>
 	<div class="searchbox">
 		<input id="search" placeholder="Search the docs…" autocomplete="off" />
 		<div class="search-results" id="searchResults"></div>
 	</div>
 	<a class="app-link" href="/app" target="_blank" rel="noopener">Open Itsuki →</a>
 </div>
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="System appearance. Click to change theme."><span class="theme-icon" id="themeIcon" aria-hidden="true">◐</span> <span class="theme-label" id="themeLabel">System</span></button>
 <div class="layout">
 	<nav class="side" id="sideNav"></nav>
 	<main id="page"></main>
@@ -136,6 +176,61 @@
 <script>
 const PRODUCT = { name: "Itsuki", pkg: "itsuki", tokenPrefix: "itsuki_live_" };
 const ORIGIN = location.origin;
+
+/* --------------------------------------------------------------- theme */
+const THEME_KEY = "itsuki_theme";
+const THEME_ORDER = ["system", "light", "dark"];
+const THEME_META = {
+	system: { label: "System", icon: "◐" },
+	light: { label: "Light", icon: "☀" },
+	dark: { label: "Dark", icon: "☾" },
+};
+const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+
+function docsThemePreference() {
+	const fromPage = document.documentElement.dataset.themePreference;
+	if (THEME_ORDER.includes(fromPage)) return fromPage;
+	try {
+		const stored = localStorage.getItem(THEME_KEY);
+		if (THEME_ORDER.includes(stored)) return stored;
+	} catch {}
+	return "system";
+}
+
+function resolvedDocsTheme(preference) {
+	return preference === "system" ? (themeMedia.matches ? "dark" : "light") : preference;
+}
+
+function syncDocsThemeControl(preference) {
+	const meta = THEME_META[preference];
+	const control = document.getElementById("themeToggle");
+	document.getElementById("themeIcon").textContent = meta.icon;
+	document.getElementById("themeLabel").textContent = meta.label;
+	control.setAttribute("aria-label", `${meta.label} appearance. Click to change theme.`);
+	control.title = `Appearance: ${meta.label}`;
+}
+
+function applyDocsTheme(preference, persist = false) {
+	const safePreference = THEME_ORDER.includes(preference) ? preference : "system";
+	document.documentElement.dataset.themePreference = safePreference;
+	document.documentElement.dataset.theme = resolvedDocsTheme(safePreference);
+	syncDocsThemeControl(safePreference);
+	if (persist) {
+		try { localStorage.setItem(THEME_KEY, safePreference); } catch {}
+	}
+}
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+	const current = docsThemePreference();
+	applyDocsTheme(THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length], true);
+});
+themeMedia.addEventListener("change", () => {
+	if (docsThemePreference() === "system") applyDocsTheme("system");
+});
+window.addEventListener("storage", (event) => {
+	if (event.key === THEME_KEY) applyDocsTheme(THEME_ORDER.includes(event.newValue) ? event.newValue : "system");
+});
+applyDocsTheme(docsThemePreference());
 
 /* ---------------------------------------------------------------- nav */
 const NAV = [

@@ -1,0 +1,575 @@
+/* Itsuki product editorial theme v1
+ * Presentation-only overrides for the signed-in product, authentication, and
+ * legal overlay. Layout, routes, application state, and component behaviour
+ * remain owned by public/index.html.
+ */
+
+/* -------------------------------------------------------------------------
+   Semantic product palettes
+   ---------------------------------------------------------------------- */
+body.app-mode,
+body.auth-mode,
+body.legal-mode {
+	--bg: #f2ebdd;
+	--panel: #fbf8f1;
+	--panel2: #eee3d2;
+	--panel3: #f7f0e5;
+	--input-bg: #fffaf2;
+	--border: #d5c9b6;
+	--border2: #958772;
+	--text: #15130f;
+	--muted: #514b42;
+	--faint: #716657;
+	--accent: #b64221;
+	--accent-hover: #9f3517;
+	--on-accent: #fffaf2;
+	--focus-ring: #7b2e17;
+	--green: #176b47;
+	--amber: #8a5817;
+	--red: #a72e27;
+	--purple: #7357a6;
+	--success-bg: #e7f4ea;
+	--warning-bg: #f8ecd2;
+	--danger-bg: #fae7e2;
+	--success-border: #75a88a;
+	--warning-border: #bd8a3c;
+	--danger-border: #c87268;
+	--overlay: rgba(28, 22, 15, .56);
+	--shadow-sm: 0 1px 0 rgba(30, 24, 17, .08), 0 4px 12px rgba(45, 34, 20, .07);
+	--shadow-md: 0 14px 38px rgba(45, 34, 20, .13);
+	--shadow-lg: 0 28px 80px rgba(45, 34, 20, .2);
+	--editorial-press-shadow: #15130f;
+	--editorial-grid: rgba(21, 19, 15, .045);
+	--mw-selbg: rgba(182, 66, 33, .065);
+	color-scheme: light;
+}
+
+html[data-theme="dark"] body.app-mode,
+html[data-theme="dark"] body.auth-mode,
+html[data-theme="dark"] body.legal-mode {
+	--bg: #11100d;
+	--panel: #181612;
+	--panel2: #211e19;
+	--panel3: #29251f;
+	--input-bg: #1d1a16;
+	--border: #383229;
+	--border2: #746957;
+	--text: #fbf8f1;
+	--muted: #c8bca8;
+	--faint: #9a907f;
+	--accent: #e38362;
+	--accent-hover: #ef9677;
+	--on-accent: #18120e;
+	--focus-ring: #f1a488;
+	--green: #70c99d;
+	--amber: #d5a85d;
+	--red: #ef9185;
+	--purple: #b39ad6;
+	--success-bg: #14271d;
+	--warning-bg: #302511;
+	--danger-bg: #321a17;
+	--success-border: #357458;
+	--warning-border: #8d692c;
+	--danger-border: #9e4e47;
+	--overlay: rgba(0, 0, 0, .76);
+	--shadow-sm: 0 1px 0 rgba(255, 248, 235, .04), 0 5px 16px rgba(0, 0, 0, .3);
+	--shadow-md: 0 16px 42px rgba(0, 0, 0, .42);
+	--shadow-lg: 0 30px 86px rgba(0, 0, 0, .58);
+	--editorial-press-shadow: #e38362;
+	--editorial-grid: rgba(251, 248, 241, .035);
+	--mw-selbg: rgba(227, 131, 98, .085);
+	color-scheme: dark;
+}
+
+/* -------------------------------------------------------------------------
+   Product shell and surfaces. These rules deliberately do not alter geometry.
+   ---------------------------------------------------------------------- */
+body.app-mode {
+	background-color: var(--bg);
+	background-image:
+		linear-gradient(var(--editorial-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--editorial-grid) 1px, transparent 1px);
+	background-size: 48px 48px;
+}
+
+body.app-mode #appHeader,
+body.app-mode #rail,
+body.app-mode .detail {
+	background: color-mix(in srgb, var(--panel) 97%, transparent);
+}
+
+body.app-mode #appHeader {
+	border-bottom-color: var(--border);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+body.app-mode #rail {
+	border-right-color: var(--border);
+}
+
+body.app-mode .rail-brand {
+	color: var(--text);
+}
+
+body.app-mode .rail-label {
+	color: var(--faint);
+	font-family: var(--font-mono);
+}
+
+body.app-mode .tab:hover {
+	background: var(--panel2);
+	color: var(--text);
+}
+
+body.app-mode .tab.active {
+	background: color-mix(in srgb, var(--accent) 11%, var(--panel));
+	box-shadow: inset 3px 0 0 var(--accent);
+	color: var(--accent);
+}
+
+body.app-mode .tab-badge {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+
+body.app-mode .box,
+body.app-mode .action-box,
+body.app-mode .overview-card,
+body.app-mode .overview-kpi,
+body.app-mode .pg-col,
+body.app-mode .mw-list,
+body.app-mode .mw-insp,
+body.app-mode .set-card,
+body.app-mode .project-modal,
+body.app-mode .policy-modal,
+body.app-mode .key-modal {
+	border-color: var(--border);
+	box-shadow: var(--shadow-sm);
+}
+
+body.app-mode .project-menu,
+body.app-mode .mw-menu,
+body.app-mode .pg-menu,
+body.app-mode .overview-tooltip,
+body.app-mode .overview-bucket-drawer,
+body.app-mode .overview-jobs-dialog,
+body.app-mode .modal-backdrop > * {
+	box-shadow: var(--shadow-md);
+}
+
+body.app-mode .project-switcher-button,
+body.app-mode .theme-quick,
+body.app-mode .overview-control,
+body.app-mode .overview-ranges,
+body.app-mode .pg-chip-btn,
+body.app-mode .pg-view-btn,
+body.app-mode .pg-icon-btn,
+body.app-mode .mw-btn:not(.mw-btn-primary) {
+	background: var(--panel);
+	border-color: var(--border);
+	color: var(--muted);
+}
+
+body.app-mode .project-switcher-button:hover:not(:disabled),
+body.app-mode .theme-quick:hover:not(:disabled),
+body.app-mode .overview-control:hover:not(:disabled),
+body.app-mode .pg-chip-btn:hover:not(:disabled),
+body.app-mode .pg-view-btn:hover:not(:disabled),
+body.app-mode .pg-icon-btn:hover:not(:disabled),
+body.app-mode .mw-btn:not(.mw-btn-primary):hover:not(:disabled) {
+	background: var(--panel2);
+	border-color: var(--border2);
+	color: var(--text);
+	filter: none;
+}
+
+body.app-mode .overview-kpi:hover,
+body.app-mode .mw-row:hover,
+body.app-mode tr.click:hover td {
+	background: color-mix(in srgb, var(--panel2) 78%, var(--panel));
+}
+
+body.app-mode .badge,
+body.app-mode .stat,
+body.app-mode kbd {
+	background: var(--panel2);
+	border-color: var(--border);
+}
+
+body.app-mode .toast {
+	background: var(--panel);
+	border-color: var(--border2);
+	box-shadow: var(--shadow-md);
+}
+
+/* The memory graph is intentionally an instrument panel in both themes. */
+body.app-mode #graphWrap {
+	--panel: #171510;
+	--panel2: #211e18;
+	--panel3: #29251e;
+	--input-bg: #1c1914;
+	--border: #39332a;
+	--border2: #756a58;
+	--text: #fbf8f1;
+	--muted: #c8bca8;
+	--faint: #9a907f;
+	--accent: #e38362;
+	--on-accent: #18120e;
+	background:
+		radial-gradient(circle at 50% 44%, rgba(227, 131, 98, .12), transparent 35%),
+		linear-gradient(180deg, #171510 0%, #0f0e0b 100%);
+	border: 1px solid #39332a;
+}
+
+body.app-mode #graphWrap::before {
+	background-image:
+		linear-gradient(rgba(251, 248, 241, .035) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(251, 248, 241, .035) 1px, transparent 1px);
+}
+
+body.app-mode #graphWrap::after {
+	background: radial-gradient(circle at 50% 45%, rgba(227, 131, 98, .12), transparent 35%);
+}
+
+/* -------------------------------------------------------------------------
+   Form controls. Native choice, range, upload, and colour controls are left
+   native and therefore keep their hit targets and platform affordances.
+   ---------------------------------------------------------------------- */
+body.app-mode input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]),
+body.app-mode select,
+body.app-mode textarea,
+body.auth-mode input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]),
+body.auth-mode select,
+body.auth-mode textarea {
+	background: var(--input-bg);
+	border-color: var(--border2);
+	color: var(--text);
+}
+
+body.app-mode input::placeholder,
+body.app-mode textarea::placeholder,
+body.auth-mode input::placeholder,
+body.auth-mode textarea::placeholder {
+	color: var(--faint);
+	opacity: 1;
+}
+
+body.app-mode input:focus,
+body.app-mode select:focus,
+body.app-mode textarea:focus,
+body.auth-mode input:focus,
+body.auth-mode select:focus,
+body.auth-mode textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 19%, transparent);
+}
+
+body.app-mode :where(a, button, input, select, textarea, [tabindex]):focus-visible,
+body.auth-mode :where(a, button, input, select, textarea, [tabindex]):focus-visible,
+#legalView.legal-shell :where(a, button, [tabindex]):focus-visible {
+	outline: 3px solid var(--focus-ring);
+	outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------------
+   Explicit primary controls. No generic button is promoted to a CTA.
+   ---------------------------------------------------------------------- */
+body.app-mode .mw-btn-primary,
+body.app-mode .btn.primary,
+body.app-mode .install-btn,
+body.auth-mode .auth-actions button[type="submit"] {
+	background: var(--accent);
+	border: 1px solid var(--editorial-press-shadow);
+	color: var(--on-accent);
+	box-shadow: 4px 4px 0 var(--editorial-press-shadow);
+	filter: none;
+	transform: translate(0, 0);
+	transition: background-color .15s ease, border-color .15s ease, color .15s ease,
+		box-shadow .15s ease, transform .15s ease, opacity .15s ease;
+}
+
+body.app-mode .mw-btn-primary:hover:not(:disabled),
+body.app-mode .btn.primary:hover:not(:disabled),
+body.app-mode .install-btn:hover:not([aria-disabled="true"]),
+body.auth-mode .auth-actions button:hover:not(:disabled) {
+	background: var(--accent-hover);
+	border-color: var(--editorial-press-shadow);
+	box-shadow: 2px 2px 0 var(--editorial-press-shadow);
+	color: var(--on-accent);
+	filter: none;
+	transform: translate(2px, 2px);
+}
+
+body.app-mode .mw-btn-primary:active:not(:disabled),
+body.app-mode .btn.primary:active:not(:disabled),
+body.app-mode .install-btn:active:not([aria-disabled="true"]),
+body.auth-mode .auth-actions button:active:not(:disabled) {
+	box-shadow: 0 0 0 var(--editorial-press-shadow);
+	transform: translate(4px, 4px);
+}
+
+body.app-mode .install-btn[aria-disabled="true"] {
+	box-shadow: none;
+	cursor: not-allowed;
+	filter: none;
+	opacity: .48;
+	transform: none;
+}
+
+body.app-mode button:disabled,
+body.app-mode button:disabled:hover,
+body.app-mode button:disabled:active,
+body.auth-mode button:disabled,
+body.auth-mode button:disabled:hover,
+body.auth-mode button:disabled:active {
+	background: var(--panel2);
+	border-color: var(--border);
+	box-shadow: none;
+	color: var(--faint);
+	cursor: not-allowed;
+	filter: none;
+	opacity: .58;
+	transform: none;
+}
+
+/* Setup steps, segmented controls, and ordinary navigation stay neutral. */
+body.app-mode .setup-step-button,
+body.app-mode .term-tab,
+body.app-mode .overview-range,
+body.app-mode .overview-mode,
+body.app-mode .mw-seg,
+body.app-mode .set-nav button,
+body.app-mode .pg-menu button {
+	box-shadow: none;
+	transform: none;
+}
+
+/* Destructive semantics always outrank primary and neutral families. */
+body.app-mode button.danger,
+body.app-mode button.ghost.danger,
+body.app-mode .mw-danger,
+body.app-mode .set-danger button,
+#legalView.legal-shell button.danger {
+	background: var(--danger-bg);
+	border-color: var(--danger-border);
+	box-shadow: none;
+	color: var(--red);
+	filter: none;
+	transform: none;
+}
+
+body.app-mode button.danger:hover:not(:disabled),
+body.app-mode button.ghost.danger:hover:not(:disabled),
+body.app-mode .mw-danger:hover:not(:disabled),
+body.app-mode .set-danger button:hover:not(:disabled),
+#legalView.legal-shell button.danger:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--red) 12%, var(--danger-bg));
+	border-color: var(--red);
+	box-shadow: none;
+	color: var(--red);
+	filter: none;
+	transform: none;
+}
+
+/* -------------------------------------------------------------------------
+   Authentication
+   ---------------------------------------------------------------------- */
+body.auth-mode {
+	overflow: hidden auto;
+	background: var(--bg);
+	color: var(--text);
+}
+
+body.auth-mode .auth-shell {
+	min-height: 100dvh;
+	background:
+		radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 34%),
+		linear-gradient(var(--editorial-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--editorial-grid) 1px, transparent 1px),
+		var(--bg);
+	background-size: auto, 48px 48px, 48px 48px, auto;
+}
+
+body.auth-mode .auth-card {
+	background: var(--panel);
+	border-color: var(--border2);
+	box-shadow: 8px 8px 0 color-mix(in srgb, var(--editorial-press-shadow) 88%, transparent), var(--shadow-lg);
+	color: var(--text);
+}
+
+body.auth-mode .auth-card h2,
+body.auth-mode .brand-lockup,
+body.auth-mode .form-row label {
+	color: var(--text);
+}
+
+body.auth-mode .auth-card p,
+body.auth-mode .brand-lockup span,
+body.auth-mode .help,
+body.auth-mode .auth-agree,
+body.auth-mode .auth-divider {
+	color: var(--muted);
+}
+
+body.auth-mode .auth-divider::before,
+body.auth-mode .auth-divider::after {
+	background: var(--border);
+}
+
+body.auth-mode .google-btn {
+	background: #ffffff;
+	border-color: #b8aa94;
+	box-shadow: 0 2px 0 rgba(21, 19, 15, .16);
+	color: #1f1d19;
+	filter: none;
+	transform: none;
+	transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease,
+		transform .15s ease, opacity .15s ease;
+}
+
+body.auth-mode .google-btn:hover:not(:disabled) {
+	background: #f7f2e8;
+	border-color: #8f816d;
+	box-shadow: 0 1px 0 rgba(21, 19, 15, .16);
+	filter: none;
+	transform: translateY(1px);
+}
+
+body.auth-mode .google-btn:active:not(:disabled) {
+	box-shadow: none;
+	transform: translateY(2px);
+}
+
+body.auth-mode .auth-actions .cta-secondary {
+	background: var(--panel);
+	border-color: var(--border2);
+	color: var(--text);
+	box-shadow: none;
+}
+
+body.auth-mode .auth-actions .cta-secondary:hover {
+	background: var(--panel2);
+	border-color: var(--accent);
+	color: var(--text);
+}
+
+body.auth-mode a.forgot-link {
+	color: var(--accent);
+	text-decoration-color: color-mix(in srgb, var(--accent) 48%, transparent);
+	text-underline-offset: 3px;
+}
+
+body.auth-mode a.forgot-link:hover {
+	color: var(--accent-hover);
+	text-decoration: underline;
+}
+
+body.auth-mode .auth-agree a,
+body.auth-mode .help a {
+	color: var(--accent);
+}
+
+body.auth-mode .auth-error {
+	background: var(--danger-bg);
+	border-color: var(--danger-border);
+	color: var(--red);
+}
+
+/* The official mark uses an inverse asset, not a CSS brightness approximation. */
+html[data-theme="dark"] body.app-mode .logo-mark,
+html[data-theme="dark"] body.auth-mode .brand-lockup img {
+	content: url("/assets/brand/itsuki-bonsai-mark-inverse.svg?v=1");
+}
+
+/* -------------------------------------------------------------------------
+   Terms and privacy overlay. It has no body mode of its own at runtime, so it
+   carries a self-contained palette and then follows the resolved HTML theme.
+   ---------------------------------------------------------------------- */
+#legalView.legal-shell {
+	--bg: #f2ebdd;
+	--panel: #fbf8f1;
+	--panel2: #eee3d2;
+	--input-bg: #fffaf2;
+	--border: #d5c9b6;
+	--border2: #958772;
+	--text: #15130f;
+	--muted: #514b42;
+	--accent: #b64221;
+	--accent-hover: #9f3517;
+	--on-accent: #fffaf2;
+	--focus-ring: #7b2e17;
+	background: color-mix(in srgb, var(--bg) 96%, transparent);
+	color: var(--text);
+	color-scheme: light;
+}
+
+html[data-theme="dark"] #legalView.legal-shell {
+	--bg: #11100d;
+	--panel: #181612;
+	--panel2: #211e19;
+	--input-bg: #1d1a16;
+	--border: #383229;
+	--border2: #746957;
+	--text: #fbf8f1;
+	--muted: #c8bca8;
+	--accent: #e38362;
+	--accent-hover: #ef9677;
+	--on-accent: #18120e;
+	--focus-ring: #f1a488;
+	background: rgba(17, 16, 13, .97);
+	color-scheme: dark;
+}
+
+#legalView.legal-shell .legal-doc {
+	background: var(--panel);
+	border-color: var(--border);
+	box-shadow: var(--shadow-lg, 0 28px 80px rgba(0, 0, 0, .25));
+	color: var(--text);
+}
+
+#legalView.legal-shell .legal-doc p,
+#legalView.legal-shell .legal-doc li,
+#legalView.legal-shell .legal-meta {
+	color: var(--muted);
+}
+
+#legalView.legal-shell .legal-doc h2,
+#legalView.legal-shell .legal-doc a {
+	color: var(--accent);
+}
+
+#legalView.legal-shell .legal-close {
+	background: var(--panel2);
+	border: 1px solid var(--border2);
+	box-shadow: none;
+	color: var(--text);
+}
+
+#legalView.legal-shell .legal-close:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--accent) 9%, var(--panel2));
+	border-color: var(--accent);
+	color: var(--text);
+	filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	body.app-mode *,
+	body.app-mode *::before,
+	body.app-mode *::after,
+	body.auth-mode *,
+	body.auth-mode *::before,
+	body.auth-mode *::after,
+	#legalView.legal-shell *,
+	#legalView.legal-shell *::before,
+	#legalView.legal-shell *::after {
+		animation: none !important;
+		scroll-behavior: auto !important;
+		transition: none !important;
+	}
+
+	body.app-mode :where(button, a, .overview-kpi, .mw-row),
+	body.auth-mode :where(button, a),
+	#legalView.legal-shell :where(button, a) {
+		transform: none !important;
+	}
+}

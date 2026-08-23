@@ -519,12 +519,23 @@ describe("product shell routes", () => {
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");
 		expect(publicLanding).not.toContain("ejziyad@gmail.com");
-		// The signed-in and auth shells retain the stable compatibility path,
-		// whose binary is now the official Memory Bonsai mark.
-		expect(html).toContain("/assets/uml-icon.png");
 		// Brand hygiene, tightened for the domain move: the old brand appears
 		// NOWHERE in the page — not even as a contact address.
 		expect(html).not.toMatch(/gpmai/i);
+	});
+
+	it("uses the official Memory Bonsai mark in auth and the signed-in rail", () => {
+		const renderAuthStart = html.indexOf("function renderAuth(");
+		const submitAuthStart = html.indexOf("async function submitAuth(", renderAuthStart);
+		const authTemplates = html.slice(renderAuthStart, submitAuthStart);
+
+		expect(renderAuthStart).toBeGreaterThan(-1);
+		expect(submitAuthStart).toBeGreaterThan(renderAuthStart);
+		expect(authTemplates.match(/\/assets\/brand\/itsuki-bonsai-mark\.svg\?v=1/g)?.length ?? 0)
+			.toBeGreaterThanOrEqual(2);
+		expect(authTemplates).not.toContain("/assets/uml-icon.png");
+		expect(html).toContain('<img class="logo-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /> <span>Itsuki</span>');
+		expect(html).not.toContain("/assets/uml-icon.png");
 	});
 
 	it("/app redirects unauthenticated visitors to login", async () => {
