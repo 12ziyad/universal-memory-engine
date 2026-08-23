@@ -47,6 +47,10 @@ None added by this campaign. Remote D1 already carries 0052–0057 (verified `No
 - Verified journeys (production): landing cold-cache render, footer link integrity, login boot with all three doors, email-start 202 (one self-purging canary challenge to an example.com blackhole address), OAuth start redirects, docs, health, mobile-width overflow check.
 - Verified journeys (local wrangler dev, real Worker/D1/AI semantics): the full new-user path — email code → branded OTP → live countdown → atomic onboarding → named first key with copy-gated Proceed → app shell → profile menu → neutral dark → settings layout → conditional audit filters → truthful preview with real model calls → responsive sweep.
 
+## Remaining external blocker
+
+`git push origin codex/prod-google-plus-unified-theme` (5 commits) could not complete: GitHub's regional endpoint (20.207.73.82/.83) refused TCP 443 from this network for the whole close-out window while all other connectivity (including Cloudflare) worked — a GitHub/ISP regional outage, verified via DNS + TCP probes across 11 spaced attempts. Everything is committed locally; rerun the push when GitHub is reachable again. Production deployment was unaffected.
+
 ## Known limits stated honestly
 
 - Production new-user E2E (receiving a real email) cannot be exercised without an inbox; it was verified end-to-end against wrangler dev with the real Worker/D1 semantics and real Workers AI, plus production surface checks (landing, health, login render, email-start 202 contract, OAuth start redirects).
