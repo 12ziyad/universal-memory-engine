@@ -1629,8 +1629,10 @@
 	/* ---- top bar ---- */
 	header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
 		min-height: 58px; padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--border); }
-	h1 { font-size: 20px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; white-space: nowrap; letter-spacing: -.01em; }
-	h1 .brain { font-size: 18px; }
+	/* Header page title only. An unscoped h1 rule once leaked nowrap into the
+	   auth panel's display headline and clipped it mid-word at every width. */
+	#pageTitle { font-size: 20px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 7px; white-space: nowrap; letter-spacing: -.01em; }
+	#pageTitle .brain { font-size: 18px; }
 	input, select { background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
 		padding: 6px 9px; border-radius: 7px; font-size: 13px; outline: none; }
 	input:focus, select:focus { border-color: var(--accent); }
@@ -2305,8 +2307,8 @@
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
 </style>
-<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=4" />
-<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=3" />
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=5" />
+<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=4" />
 </head>
 <body>
 <div id="landing" class="public-shell lp-shell">
@@ -2340,40 +2342,50 @@
 					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
 					<a class="secondary-action" href="/docs/">Read the docs</a>
 				</div>
-				<div class="fact-row" aria-label="Core capabilities">
-					<span><b>01</b>Structured</span>
-					<span><b>02</b>Cross-session</span>
-					<span><b>03</b>Scope-aware</span>
-					<span><b>04</b>Provider-portable</span>
-				</div>
 			</div>
-			<figure class="hero-system" role="img" aria-labelledby="heroSystemCaption">
+			<figure class="hero-system hero-flow" role="img" aria-labelledby="heroSystemCaption">
 				<figcaption class="sr-only" id="heroSystemCaption">Conversations, documents, and events become durable, scoped context for applications, assistants, agents, and workflows.</figcaption>
-				<div class="system-caption"><span>LIVE MEMORY FLOW</span><b>Input becomes usable context</b></div>
-				<div class="system-inputs">
-					<span>Conversation</span><span>Document</span><span>Event</span>
-				</div>
-				<div class="system-rail" aria-hidden="true"><i></i><i></i><i></i></div>
-				<div class="system-core">
+				<div class="flow-in" aria-hidden="true"><span>Conversation</span><span>Document</span><span>Event</span></div>
+				<div class="flow-rail in" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="flow-core" aria-hidden="true">
+					<img src="/assets/brand/itsuki-bonsai-mark-inverse.svg?v=1" alt="" />
 					<small>ITSUKI MEMORY LAYER</small>
-					<strong>Durable, scoped<br />context</strong>
-					<div><span>Entity</span><span>Fact</span><span>Event</span><span>Relation</span></div>
 				</div>
-				<div class="system-rail output" aria-hidden="true"><i></i><i></i><i></i></div>
-				<div class="system-outputs"><span>Applications</span><span>Assistants</span><span>Agents</span><span>Workflows</span></div>
-				<div class="system-status"><span><i></i>Source linked</span><span><i></i>Scope verified</span><span><i></i>Current</span></div>
+				<div class="flow-rail out" aria-hidden="true"><i></i><i></i><i></i></div>
+				<div class="flow-out" aria-hidden="true"><span>Applications</span><span>Assistants</span><span>Agents</span><span>Workflows</span></div>
+				<div class="flow-status" aria-hidden="true"><span>Source linked</span><span>Scope verified</span><span>Current</span></div>
 			</figure>
 		</section>
 
-		<section class="surface-band" id="product" aria-label="Built for every AI surface">
-			<div class="surface-band-title"><span>02</span><strong>Built for every AI surface</strong></div>
-			<article><span>Applications</span><p>Personalized product experiences with context that persists.</p></article>
-			<article><span>Assistants</span><p>Conversations that continue without starting over.</p></article>
-			<article><span>Agents</span><p>Durable knowledge for planning, tools, and decisions.</p></article>
-			<article><span>Workflows</span><p>Memory that moves across automations and systems.</p></article>
+		<section class="developer-section reveal" id="developers">
+			<div class="developer-copy">
+				<div class="section-kicker light"><span>02</span> Developer surface</div>
+				<h2>Connect once.<br />Use everywhere.</h2>
+				<p>Start with the interface you already use. MCP, REST, Node, Python, n8n, and the dashboard all meet the same scoped memory backend.</p>
+				<div class="surface-list" aria-label="Supported product surfaces"><span>MCP</span><span>REST</span><span>Node</span><span>Python</span><span>n8n</span><span>Dashboard</span></div>
+			</div>
+			<div class="code-window">
+				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
+					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
+					<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
+					<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
+				</div></div>
+				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-node"><code>npm install itsuki
+
+import { MemoryClient } from "itsuki";
+
+const memory = new MemoryClient({
+  apiKey: process.env.ITSUKI_API_KEY,
+});
+
+await memory.add("The pricing review moved to October.");
+const { context } = await memory.search("When is the review?");</code></pre>
+				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="copy" onclick="copyLandingCode(this)">Copy code</button><a href="/docs/">Complete setup ↗</a></div>
+			</div>
 		</section>
 
-		<section class="positioning-spread">
+		<section class="positioning-spread reveal">
 			<div class="section-kicker"><span>03</span> The memory system</div>
 			<h2>Context that survives<br /><em>the next prompt.</em></h2>
 			<div class="positioning-copy">
@@ -2382,7 +2394,7 @@
 			</div>
 		</section>
 
-		<section class="lifecycle-section" id="workflow">
+		<section class="lifecycle-section reveal" id="workflow">
 			<header class="section-heading">
 				<div class="section-kicker"><span>04</span> How it works</div>
 				<h2>From raw input to<br />context every surface can use.</h2>
@@ -2410,7 +2422,7 @@
 			</div>
 		</section>
 
-		<section class="folio-section" id="use-cases" aria-label="Itsuki use cases">
+		<section class="folio-section reveal" id="use-cases" aria-label="Itsuki use cases">
 			<div class="folio-heading"><div class="section-kicker"><span>05</span> One memory layer</div><h2>Memory across<br />the entire stack.</h2></div>
 			<div class="folio-grid">
 				<article><span>01 / Applications</span><h3>Make every product interaction feel continuous.</h3><p>Build personalization, support, and adaptive experiences from durable user context.</p><b>Product memory</b></article>
@@ -2420,7 +2432,7 @@
 			</div>
 		</section>
 
-		<section class="product-proof-section" aria-label="Itsuki product preview">
+		<section class="product-proof-section reveal" id="product" aria-label="Itsuki product preview">
 			<header class="proof-heading">
 				<div class="section-kicker"><span>06</span> Product visibility</div>
 				<h2>See what your AI<br />remembers.</h2>
@@ -2448,36 +2460,8 @@
 			</div>
 		</section>
 
-		<section class="developer-section" id="developers">
-			<div class="developer-copy">
-				<div class="section-kicker light"><span>07</span> Developer surface</div>
-				<h2>Connect once.<br />Use everywhere.</h2>
-				<p>Start with the interface you already use. MCP, REST, Node, Python, n8n, and the dashboard all meet the same scoped memory backend.</p>
-				<div class="surface-list" aria-label="Supported product surfaces"><span>MCP</span><span>REST</span><span>Node</span><span>Python</span><span>n8n</span><span>Dashboard</span></div>
-			</div>
-			<div class="code-window">
-				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
-					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
-					<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
-					<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
-					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
-				</div></div>
-				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-node"><code>npm install itsuki
-
-import { MemoryClient } from "itsuki";
-
-const memory = new MemoryClient({
-  apiKey: process.env.ITSUKI_API_KEY,
-});
-
-await memory.add("The pricing review moved to October.");
-const { context } = await memory.search("When is the review?");</code></pre>
-				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="copy" onclick="copyLandingCode(this)">Copy code</button><a href="/docs/">Complete setup ↗</a></div>
-			</div>
-		</section>
-
-		<section class="control-section" id="control">
-			<header class="section-heading control-heading"><div class="section-kicker"><span>08</span> Enterprise control</div><h2>Power for builders.<br />Control for teams.</h2></header>
+		<section class="control-section reveal" id="control">
+			<header class="section-heading control-heading"><div class="section-kicker"><span>07</span> Enterprise control</div><h2>Power for builders.<br />Control for teams.</h2></header>
 			<div class="control-spread">
 				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>Move fast without turning memory into a black box.</p><small>The Itsuki principle</small></div>
 				<dl>
@@ -2489,9 +2473,9 @@ const { context } = await memory.search("When is the review?");</code></pre>
 			</div>
 		</section>
 
-		<section class="closing-section">
+		<section class="closing-section reveal">
 			<div class="closing-seal" aria-hidden="true"><span></span><span></span><i></i></div>
-			<div><span class="closing-label">09 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2><p class="closing-support">Connect a tool, save one conversation, and recall it in the next one.</p></div>
+			<div><span class="closing-label">08 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2><p class="closing-support">Connect a tool, save one conversation, and recall it in the next one.</p></div>
 			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="/docs/">Read the docs</a></div>
 		</section>
 		</main>
@@ -4586,6 +4570,10 @@ function initReveal() {
 		items.forEach((item) => item.classList.add("visible"));
 		return;
 	}
+	// Progressive enhancement: the hidden pre-reveal state only exists once
+	// the observer is armed, so content can never be stranded invisible when
+	// script fails or never runs.
+	document.documentElement.classList.add("reveal-armed");
 	if (revealObserver) revealObserver.disconnect();
 	revealObserver = new IntersectionObserver((entries) => {
 		for (const entry of entries) {

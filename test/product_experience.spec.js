@@ -31,7 +31,7 @@ describe("landing hero and narrative", () => {
 	it("keeps the closing section a full CTA: sentence, support line, primary and docs actions", () => {
 		expect(html).toContain('class="closing-support"');
 		expect(html).toContain("Connect a tool, save one conversation, and recall it in the next one.");
-		const closing = html.slice(html.indexOf('class="closing-section"'), html.indexOf("</footer>"));
+		const closing = html.slice(html.indexOf('class="closing-section'), html.indexOf("</footer>"));
 		expect(closing).toContain("Start building");
 		expect(closing).toContain('href="/docs/"');
 	});

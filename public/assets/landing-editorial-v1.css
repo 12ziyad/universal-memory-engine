@@ -543,60 +543,80 @@ html { scroll-behavior: smooth; }
 #landing.lp-shell .hero-system::after {
   position: absolute; inset: 28px; content: ''; border: 1px solid rgb(251 248 241 / 13%); pointer-events: none;
 }
-#landing.lp-shell .system-caption, #landing.lp-shell .system-status {
-  position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  font: 400 9px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+/* Hero flow — deliberately sparse. Typography, two thin animated rails, and
+   the actual Memory Bonsai mark at the centre. The boxed diagram this
+   replaced crowded twenty bordered elements into the panel. */
+#landing.lp-shell .hero-flow {
+  grid-template-rows: auto minmax(56px, 74px) auto minmax(56px, 74px) auto auto;
+  gap: 26px; align-content: center; justify-items: center;
 }
-#landing.lp-shell .system-caption { margin-bottom: 17px; color: #a99f8f; }
-#landing.lp-shell .system-caption span { color: #ee8c6a; }
-#landing.lp-shell .system-caption b { color: #d8cebf; font-weight: 400; letter-spacing: .04em; text-transform: none; }
-#landing.lp-shell .system-inputs, #landing.lp-shell .system-outputs { position: relative; z-index: 1; display: grid; gap: 9px; }
-#landing.lp-shell .system-inputs { grid-template-columns: repeat(3,1fr); }
-#landing.lp-shell .system-outputs { grid-template-columns: repeat(2,1fr); }
-#landing.lp-shell .system-inputs span, #landing.lp-shell .system-outputs span {
-  display: grid; min-height: 46px; place-items: center; border: 1px solid #514b42; background: rgb(12 11 9 / 72%);
-  color: #d8cebf; font: 400 9px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase;
+#landing.lp-shell .flow-in, #landing.lp-shell .flow-out {
+  position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 10px 34px; color: #bfb4a2; font: 400 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
 }
-#landing.lp-shell .system-outputs span { min-height: 52px; border-color: #756c60; color: var(--porcelain); }
-#landing.lp-shell .system-rail { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3,1fr); }
-#landing.lp-shell .system-rail::before, #landing.lp-shell .system-rail::after {
-  position: absolute; left: 16.666%; right: 16.666%; height: 1px; content: ''; background: #665f55;
+#landing.lp-shell .flow-out { color: var(--porcelain); }
+#landing.lp-shell .flow-rail {
+  position: relative; z-index: 1; display: flex; width: min(58%, 300px); justify-content: space-between;
+  align-self: stretch;
 }
-#landing.lp-shell .system-rail::before { top: 50%; }
-#landing.lp-shell .system-rail i { position: relative; display: block; }
-#landing.lp-shell .system-rail i::before {
-  position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; content: ''; background: #665f55;
+#landing.lp-shell .flow-rail i { position: relative; display: block; width: 1px; background: rgb(251 248 241 / 22%); }
+#landing.lp-shell .flow-rail i::after {
+  position: absolute; left: -2px; top: 0; width: 5px; height: 5px; content: ''; border-radius: 50%;
+  background: #ee8c6a; opacity: 0;
 }
-#landing.lp-shell .system-rail i::after {
-  position: absolute; bottom: -2px; left: calc(50% - 3px); width: 7px; height: 7px; content: ''; border-radius: 50%; background: var(--clay);
+#landing.lp-shell .flow-core { position: relative; z-index: 1; display: grid; justify-items: center; gap: 16px; }
+#landing.lp-shell .flow-core img { width: clamp(88px, 8.6vw, 128px); height: auto; filter: drop-shadow(0 0 26px rgb(200 79 42 / 34%)); }
+#landing.lp-shell .flow-core small { color: #ee8c6a; font: 400 10px/1 var(--mono); letter-spacing: .2em; }
+#landing.lp-shell .flow-status {
+  position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 26px;
+  margin-top: 8px; color: #a99f8f; font: 400 9px/1.4 var(--mono); letter-spacing: .08em;
 }
-#landing.lp-shell .system-rail.output i::after { top: -2px; bottom: auto; background: var(--brass); }
-#landing.lp-shell .system-core {
-  position: relative; z-index: 2; justify-self: center; width: min(100%,390px); padding: 28px 30px 26px;
-  border: 1px solid #e38362; background: var(--clay); color: white; box-shadow: 10px 10px 0 #080706;
+#landing.lp-shell .flow-status span { display: inline-flex; align-items: center; gap: 7px; }
+#landing.lp-shell .flow-status span::before {
+  width: 6px; height: 6px; content: ''; border-radius: 50%; background: #66c89b;
+  box-shadow: 0 0 0 4px rgb(102 200 155 / 11%);
 }
-#landing.lp-shell .system-core small { font: 400 9px/1 var(--mono); letter-spacing: .13em; }
-#landing.lp-shell .system-core strong { display: block; margin: 16px 0 22px; font: 400 clamp(42px,4vw,62px)/.84 var(--display); letter-spacing: -.045em; }
-#landing.lp-shell .system-core > div { display: flex; flex-wrap: wrap; gap: 6px; }
-#landing.lp-shell .system-core > div span {
-  padding: 7px 9px; border: 1px solid rgb(255 255 255 / 50%); font: 400 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
-}
-#landing.lp-shell .system-status { margin-top: 17px; justify-content: flex-start; flex-wrap: wrap; color: #bfb4a2; letter-spacing: .05em; text-transform: none; }
-#landing.lp-shell .system-status span { display: inline-flex; align-items: center; gap: 7px; }
-#landing.lp-shell .system-status i { width: 6px; height: 6px; border-radius: 50%; background: #66c89b; box-shadow: 0 0 0 4px rgb(102 200 155 / 11%); }
 
-#landing.lp-shell .surface-band {
-  display: grid; min-height: 170px; grid-template-columns: minmax(210px,1.05fr) repeat(4,minmax(180px,1fr));
-  border-bottom: 1px solid var(--ink); background: var(--ink); color: var(--porcelain);
+/* Scroll reveals and ambient motion. Everything lives behind the user's
+   reduced-motion preference; without it the page is simply static. */
+#landing.lp-shell .reveal { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: no-preference) {
+  html:has(body.public-mode) { scroll-behavior: smooth; }
+  html.reveal-armed #landing.lp-shell .reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s ease; }
+  html.reveal-armed #landing.lp-shell .reveal.visible { opacity: 1; transform: none; }
+  #landing.lp-shell .hero-copy > * { animation: heroRise .7s ease both; }
+  #landing.lp-shell .hero-copy > :nth-child(2) { animation-delay: .08s; }
+  #landing.lp-shell .hero-copy > :nth-child(3) { animation-delay: .16s; }
+  #landing.lp-shell .hero-copy > :nth-child(4) { animation-delay: .24s; }
+  #landing.lp-shell .hero-copy > :nth-child(5) { animation-delay: .32s; }
+  #landing.lp-shell .hero-flow { animation: heroFade 1s ease both .25s; }
+  #landing.lp-shell .flow-rail i::after { animation: railPulse 2.6s cubic-bezier(.4, 0, .6, 1) infinite; }
+  #landing.lp-shell .flow-rail i:nth-child(2)::after { animation-delay: .45s; }
+  #landing.lp-shell .flow-rail i:nth-child(3)::after { animation-delay: .9s; }
+  #landing.lp-shell .flow-rail.out i::after { animation-delay: 1.3s; background: var(--brass); }
+  #landing.lp-shell .flow-rail.out i:nth-child(2)::after { animation-delay: 1.75s; }
+  #landing.lp-shell .flow-rail.out i:nth-child(3)::after { animation-delay: 2.2s; }
+  #landing.lp-shell .flow-core img { animation: coreBreathe 5.2s ease-in-out infinite; }
+  #landing.lp-shell .flow-status span::before { animation: tickGlow 2.6s ease-in-out infinite; }
+  #landing.lp-shell .flow-status span:nth-child(2)::before { animation-delay: .85s; }
+  #landing.lp-shell .flow-status span:nth-child(3)::before { animation-delay: 1.7s; }
 }
-#landing.lp-shell .surface-band > * { padding: 28px clamp(22px,2.2vw,38px); border-right: 1px solid rgb(251 248 241 / 15%); }
-#landing.lp-shell .surface-band > *:last-child { border-right: 0; }
-#landing.lp-shell .surface-band-title { display: flex; flex-direction: column; justify-content: space-between; gap: 22px; }
-#landing.lp-shell .surface-band-title span { color: #ee8c6a; font: 400 10px/1 var(--mono); letter-spacing: .11em; }
-#landing.lp-shell .surface-band-title strong { max-width: 190px; font: 400 28px/.96 var(--display); }
-#landing.lp-shell .surface-band article { display: flex; flex-direction: column; justify-content: space-between; gap: 25px; }
-#landing.lp-shell .surface-band article span { color: #f2a284; font: 400 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-#landing.lp-shell .surface-band article p { margin: 0; color: #c6bbab; font-size: 12px; line-height: 1.65; }
+@keyframes heroRise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+@keyframes heroFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes railPulse {
+  0% { top: 0; opacity: 0; }
+  12% { opacity: 1; }
+  78% { opacity: 1; }
+  100% { top: calc(100% - 5px); opacity: 0; }
+}
+@keyframes coreBreathe {
+  0%, 100% { filter: drop-shadow(0 0 22px rgb(200 79 42 / 26%)); transform: scale(1); }
+  50% { filter: drop-shadow(0 0 34px rgb(200 79 42 / 44%)); transform: scale(1.025); }
+}
+@keyframes tickGlow {
+  0%, 100% { box-shadow: 0 0 0 4px rgb(102 200 155 / 11%); }
+  50% { box-shadow: 0 0 0 6px rgb(102 200 155 / 22%); }
+}
 
 #landing.lp-shell .product-proof-section { padding: 110px 5.6vw 126px; border-bottom: 1px solid var(--hairline); background: var(--paper); }
 #landing.lp-shell .proof-heading {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 // A side-effect import makes a missing product theme fail module collection.
 // The Workers pool stubs CSS exports, so direct stylesheet policy assertions
 // live in ui_theme_css.unit.js under the Node-only test config.
@@ -22,8 +22,8 @@ describe("app appearance themes", () => {
 	});
 
 	it("loads the product editorial layer after the landing theme", () => {
-		const landingHref = "/assets/landing-editorial-v1.css?v=4";
-		const productHref = "/assets/app-editorial-v1.css?v=3";
+		const landingHref = "/assets/landing-editorial-v1.css?v=5";
+		const productHref = "/assets/app-editorial-v1.css?v=4";
 		expect(html).toContain(`<link rel="stylesheet" href="${productHref}" />`);
 		expect(html.indexOf(productHref)).toBeGreaterThan(html.indexOf(landingHref));
 	});

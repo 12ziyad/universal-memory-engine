@@ -1,4 +1,4 @@
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+﻿import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import worker from "../src";
 import html from "../public/index.html?raw";
@@ -501,10 +501,12 @@ describe("product shell routes", () => {
 		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
-		expect(html).toContain("Cross-session");
-		expect(html).toContain("Scope-aware");
-		expect(html).toContain("Provider-portable");
-		expect(html).toContain("Built for every AI surface");
+		// The decongested hero: brand mark at the flow core, status wedge line,
+		// and the developer surface promoted to section 02 right after it.
+		expect(html).toContain('class="hero-system hero-flow"');
+		expect(html).toContain("ITSUKI MEMORY LAYER");
+		expect(html).toContain("Source linked");
+		expect(html).toContain('<span>02</span> Developer surface');
 		expect(html).toContain("Context that survives");
 		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');
@@ -525,7 +527,7 @@ describe("product shell routes", () => {
 		expect(html).toContain('href="/terms"');
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=4");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=5");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");

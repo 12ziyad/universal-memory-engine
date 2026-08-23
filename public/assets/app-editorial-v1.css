@@ -410,6 +410,18 @@ body.auth-mode .auth-shell {
 	background-size: auto, 48px 48px, 48px 48px, auto;
 }
 
+/* The legacy inline .auth-shell centers a shrink-wrapped card; the editorial
+   layout needs the full viewport, or every percentage width inside collapses
+   to content size (a 240px sign-in card on a 1920px screen). */
+body.auth-mode .auth-shell {
+	display: block;
+	/* Chrome applies box-alignment justify-items to block containers too, so
+	   the legacy place-items: center must be reset or children shrink-wrap. */
+	place-items: stretch;
+	padding: 0;
+	background: var(--bg);
+}
+
 body.auth-mode .auth-layout {
 	min-height: 100dvh;
 	display: grid;
@@ -433,16 +445,20 @@ body.auth-mode .auth-editorial-panel {
 	color: #fffaf2;
 }
 
+/* A quiet ensō, fully inside the panel — the old half-cropped giant circle
+   with halo rings read as a rendering mistake rather than a mark. */
 body.auth-mode .auth-editorial-panel::after {
 	content: "";
 	position: absolute;
-	right: -16%;
-	bottom: 12%;
-	width: min(42vw, 520px);
+	right: clamp(24px, 4vw, 56px);
+	bottom: clamp(20px, 6vh, 64px);
+	width: min(17vw, 210px);
 	aspect-ratio: 1;
-	border: 1px solid rgba(255, 250, 242, .18);
+	border: 1.5px solid rgba(255, 250, 242, .22);
 	border-radius: 50%;
-	box-shadow: 0 0 0 70px rgba(255, 250, 242, .035), 0 0 0 140px rgba(255, 250, 242, .025);
+	box-shadow: inset 0 0 0 10px rgba(255, 250, 242, .04);
+	mask-image: conic-gradient(from 205deg, transparent 0 26deg, #000 40deg 360deg);
+	-webkit-mask-image: conic-gradient(from 205deg, transparent 0 26deg, #000 40deg 360deg);
 	pointer-events: none;
 }
 
@@ -548,6 +564,11 @@ body.auth-mode .auth-proof-grid b {
 body.auth-mode .auth-entry-panel {
 	display: grid;
 	min-width: 0;
+	/* The card's width lives on the TRACK: a percentage inside an auto track
+	   is indefinite and collapses to shrink-to-fit (a 240px sign-in card). */
+	grid-template-columns: min(560px, 100%);
+	justify-content: center;
+	align-content: center;
 	place-items: center;
 	padding: clamp(28px, 5vw, 88px);
 	background:
@@ -558,7 +579,7 @@ body.auth-mode .auth-entry-panel {
 }
 
 body.auth-mode .auth-card {
-	width: min(560px, 100%);
+	width: 100%;
 	padding: clamp(28px, 4vw, 52px);
 	background: color-mix(in srgb, var(--panel) 96%, transparent);
 	border-color: var(--border2);

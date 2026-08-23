@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import html from "../public/index.html?raw";
 import docsHtml from "../public/docs/index.html?raw";
 
@@ -57,10 +57,13 @@ describe("dashboard script", () => {
 		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
-		expect(html).toContain("Cross-session");
-		expect(html).toContain("Scope-aware");
-		expect(html).toContain("Provider-portable");
-		expect(html).toContain("Built for every AI surface");
+		// Section order is part of the product story: the code surface sits at
+		// 02, immediately after the hero, and the old redundant surface band
+		// is gone for good.
+		expect(html).toContain('class="hero-system hero-flow"');
+		expect(html.indexOf('<span>02</span> Developer surface')).toBeGreaterThan(-1);
+		expect(html.indexOf('<span>02</span> Developer surface')).toBeLessThan(html.indexOf('<span>03</span> The memory system'));
+		expect(html).not.toContain("Built for every AI surface");
 		for (const surface of ["Applications", "Assistants", "Agents", "Workflows"]) {
 			expect(publicLanding).toContain(surface);
 		}
@@ -98,7 +101,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=4");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=5");
 		expect(publicLanding).not.toMatch(/paper trail/i);
 		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
 		for (const forbidden of [
