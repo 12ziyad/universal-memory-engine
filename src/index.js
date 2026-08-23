@@ -43,6 +43,8 @@ import {
 	createOrganization,
 	ensureDefaultOrganization,
 	getOrganization,
+	leaveOrganization,
+	leaveProject,
 	listOrganizations,
 	listOrganizationMembers,
 	listProjectMembers,
@@ -1041,6 +1043,27 @@ async function sessionOrganization(env, context) {
 	return ensureDefaultOrganization(env, context.project?.owner_user_id ?? context.auth.userId);
 }
 
+/**
+ * The scope refresh a leave response carries. Leaving is the one mutation that
+ * can invalidate the caller's CURRENT selection, so the response hands back
+ * everything the account can still reach plus a concrete fallback — the same
+ * own-default-first ordering every selector uses — and the client recovers an
+ * authorized scope without a second round trip of probing.
+ */
+async function postLeaveScope(env, userId) {
+	const organizations = await listOrganizations(env, userId);
+	const projects = await listManagedProjects(env, userId);
+	const fallback = projects[0] ?? null;
+	return {
+		organizations,
+		projects,
+		scope: {
+			organization_id: fallback?.effective_organization_id ?? organizations[0]?.id ?? null,
+			project_id: fallback?.id ?? null,
+		},
+	};
+}
+
 function waitUntilFrom(ctx) {
 	return typeof ctx?.waitUntil === "function" ? (promise) => ctx.waitUntil(promise) : null;
 }
@@ -1663,7 +1686,10 @@ const routes = {
 	/**
 	 * Dry run: what would these rules do to this text? Runs the real admission
 	 * filter, writes nothing. This is what lets the Settings page show a
-	 * truthful "kept / not kept" instead of a promise.
+	 * truthful "kept / not kept" instead of a promise. Kept rows also carry a
+	 * no-write extraction-worthiness assessment (durable / not_durable /
+	 * uncertain) mirroring the real pipeline's SAVE criteria, so "passed the
+	 * rules" is never presented as "will be stored".
 	 */
 	"POST /v1/settings/rules/preview": async (request, env) => {
 		const context = await requireSessionProject(request, env, "project.rules.edit");
@@ -2201,6 +2227,89 @@ const routes = {
 			);
 			if (!mutation.created) throw new OrgError("already_project_member", "That person already has a project role.", 409);
 			return json({ ok: true, member: mutation.member }, 201);
+		} catch (error) { return orgFailure(error); }
+	},
+
+	/**
+	 * Self-service exit from the selected project's seat. Deliberately behind NO
+	 * capability: the whole point is that a viewer — who can manage nothing —
+	 * can still take themselves out. Session-only; the project resolving for
+	 * the caller is what proves the seat being left is their own. Sessions are
+	 * deliberately not revoked — authorization is re-derived on every request,
+	 * exactly as it is for admin removal.
+	 */
+	"POST /v1/settings/members/leave": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`))) return tooManyFor("save");
+		try {
+			const mutation = await runContextAuditedMutation(
+				request, env, ctx, context, null,
+				{ action: "project.member.left", targetType: "member", targetId: context.auth.userId },
+				(intent) => leaveProject(env, {
+					userId: context.auth.userId,
+					projectId: context.project.id,
+				}, { auditIntent: intent }),
+				(result) => ({
+					outcome: result.left ? "ok" : "noop",
+					reason: result.left ? null : "already_left",
+					metadata: result.left
+						? auditDiff({ project_role: result.previous_role }, { project_role: null })
+						: null,
+				}),
+			);
+			return json({
+				ok: true,
+				left: mutation.left,
+				already_left: mutation.already_left,
+				...(await postLeaveScope(env, context.auth.userId)),
+			});
+		} catch (error) { return orgFailure(error); }
+	},
+
+	"POST /v1/settings/org-members/leave": async (request, env, ctx) => {
+		const context = await requireSessionProject(request, env);
+		if (context.response) return context.response;
+		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`))) return tooManyFor("save");
+		try {
+			const sessionOrg = await sessionOrganization(env, context);
+			const parsed = await readSmallJsonObject(request, "/v1/settings/org-members/leave", 4 * 1024);
+			if (parsed.response) return parsed.response;
+			const body = parsed.body;
+			const unknown = Object.keys(body).filter((key) => key !== "orgId");
+			if (unknown.length) throw new OrgError("unknown_member_field", `Unknown member field: ${unknown[0]}.`);
+			const orgId = body.orgId === undefined || body.orgId === null ? sessionOrg.id : String(body.orgId);
+			// An explicit orgId may name any organization the caller holds a seat
+			// in — leaving org B while scoped to a project of org A is legitimate.
+			// What it may NOT do is point the audit trail at an organization the
+			// caller has no relationship with.
+			if (orgId !== sessionOrg.id) {
+				const seat = await env.DB.prepare(
+					"SELECT 1 FROM organization_members WHERE org_id = ? AND user_id = ? LIMIT 1",
+				).bind(orgId, context.auth.userId).first();
+				if (!seat) throw new OrgError("not_a_member", "You are not a member of that organization.", 409);
+			}
+			const mutation = await runContextAuditedMutation(
+				request, env, ctx, context, null,
+				{ orgId, projectId: null, action: "org.member.left", targetType: "member", targetId: context.auth.userId },
+				(intent) => leaveOrganization(env, {
+					userId: context.auth.userId,
+					orgId,
+				}, { auditIntent: intent }),
+				(result) => ({
+					outcome: result.left ? "ok" : "noop",
+					reason: result.left ? null : "already_left",
+					metadata: result.left
+						? auditDiff({ org_role: result.previous_role }, { org_role: null })
+						: null,
+				}),
+			);
+			return json({
+				ok: true,
+				left: mutation.left,
+				already_left: mutation.already_left,
+				...(await postLeaveScope(env, context.auth.userId)),
+			});
 		} catch (error) { return orgFailure(error); }
 	},
 
@@ -4985,6 +5094,10 @@ async function handleSettingsMemberRoutes(request, env, ctx, url) {
 	const [group, rawId, sub] = rest.split("/").map((part) => (part ? decodeURIComponent(part) : part));
 	if (!["members", "org-members", "invitations", "categories"].includes(group) || !rawId) return null;
 	if (group === "invitations" && ["accept", "describe"].includes(rawId)) return null;
+	// "leave" is the self-service verb route, not a member id. It must fall
+	// through to the exact-match table: the capability gates below protect
+	// OTHER people's seats, and would 403 the viewers the leave door is for.
+	if (["members", "org-members"].includes(group) && rawId === "leave") return null;
 
 	const context = await requireSessionProject(request, env);
 	if (context.response) return context.response;

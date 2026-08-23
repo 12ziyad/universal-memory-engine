@@ -379,7 +379,7 @@
 	.check-group .check-row { max-width: none; }
 	.auth-error { display: none; color: #ffb4ad; border: 1px solid rgba(248,81,73,.4); background: rgba(58,29,27,.6); padding: 9px 11px; border-radius: 8px; margin: 10px 0; }
 	.app-user { display: flex; gap: 8px; align-items: center; color: var(--muted); }
-	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #58a6ff, #ffc65b); color: #04121f; font-weight: 800; }
+	.avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); font-weight: 800; }
 	.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 32px; }
 	.action-box { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px; min-width: 0; }
 	.panel-grid > .action-box { height: 100%; }
@@ -644,7 +644,7 @@
 	   inactive and the header offers the link instead of a copy. */
 	.install-code.locked pre { opacity: .5; }
 	.install-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
-		background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 15px;
+		background: var(--accent); color: var(--on-accent); border-radius: 8px; padding: 9px 15px;
 		font-size: 13px; font-weight: 600; }
 	.install-btn:hover { filter: brightness(1.08); }
 	.connect-inline-note { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(220,104,3,.35);
@@ -1269,7 +1269,7 @@
 		font-size: var(--pg-chat); line-height: var(--pg-lh-body); letter-spacing: -.003em;
 		/* Prose, so it wraps on a measure rather than on the panel edge. */
 		max-width: 58ch; overflow-wrap: anywhere; }
-	.pg-msg.user .pg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px;
+	.pg-msg.user .pg-bubble { background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 4px;
 		margin-left: auto; }
 	.pg-msg.assistant .pg-bubble { background: var(--panel2); color: var(--text); border-bottom-left-radius: 4px; }
 	/* The capture that came out of the message directly above it. */
@@ -1541,14 +1541,33 @@
 	.theme-preview::before { content: ""; border-right: 1px solid var(--border2); background: var(--panel2); }
 	.theme-preview::after { content: ""; width: 48%; height: 7px; align-self: center; justify-self: center;
 		border-radius: 999px; background: var(--accent); }
-	.theme-preview.preview-light { --panel: #ffffff; --panel2: #eef0f3; --border2: #cdd1d8; --accent: #5b4fcf; }
-	.theme-preview.preview-dark { --panel: #17181d; --panel2: #1e2026; --border2: #3a3e48; --accent: #8b7cf6; }
-	.theme-preview.preview-system { background: linear-gradient(90deg, #ffffff 0 50%, #17181d 50% 100%); }
-	.theme-preview.preview-system::before { background: linear-gradient(90deg, #eef0f3 0 50%, #1e2026 50% 100%); }
+	.theme-preview.preview-light { --panel: #fbf8f1; --panel2: #eee3d2; --border2: #958772; --accent: #b64221; }
+	.theme-preview.preview-dark { --panel: #161617; --panel2: #1e1e20; --border2: #585860; --accent: #e38362; }
+	.theme-preview.preview-system { background: linear-gradient(90deg, #fbf8f1 0 50%, #161617 50% 100%); }
+	.theme-preview.preview-system::before { background: linear-gradient(90deg, #eee3d2 0 50%, #1e1e20 50% 100%); }
 	.theme-quick { min-width: 92px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center;
 		gap: 7px; padding: 5px 10px; color: var(--muted); }
 	.theme-quick:hover { color: var(--text); }
 	.theme-quick-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; font-size: 15px; }
+	/* Compact account control. Same popover mechanics as the scope switchers:
+	   hidden attribute, aria-expanded on the trigger, outside-click + Escape. */
+	.profile-menu-wrap { position: relative; display: inline-flex; }
+	.profile-trigger { background: transparent; border: 0; padding: 2px; border-radius: 50%; display: inline-grid; place-items: center; }
+	.profile-trigger:hover { filter: none; }
+	.profile-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+	.profile-menu { position: absolute; z-index: 70; top: calc(100% + 8px); right: 0; width: min(280px, calc(100vw - 24px));
+		padding: 8px; background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; box-shadow: var(--shadow-lg); }
+	.profile-menu[hidden] { display: none; }
+	.profile-id { padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+	.profile-id b { display: block; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+	.profile-id span { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+	.profile-theme { display: flex; gap: 2px; padding: 2px; margin: 0 2px 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; }
+	.profile-theme button { flex: 1; min-height: 30px; background: transparent; border: 0; border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 500; }
+	.profile-theme button:hover { color: var(--text); filter: none; }
+	.profile-theme button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+	.profile-menu [role="menuitem"] { display: flex; width: 100%; align-items: center; gap: 8px; padding: 9px 10px; background: transparent;
+		border: 0; border-radius: 8px; color: var(--text); font-size: 13px; font-weight: 500; text-align: left; text-decoration: none; }
+	.profile-menu [role="menuitem"]:hover { background: var(--panel2); filter: none; }
 	.scope-switchers { display: flex; align-items: stretch; gap: 7px; min-width: 0; flex: 0 1 auto; }
 	.project-switcher, .organization-switcher { position: relative; flex: 0 1 auto; min-width: 0; }
 	.project-switcher-button, .organization-switcher-button { min-width: 172px; max-width: 250px; min-height: 44px; display: grid;
@@ -1871,6 +1890,13 @@
 	.mw-tech summary:hover { color: var(--text); }
 	.mw-tech pre { margin: 0 11px 11px; padding: 10px; background: var(--bg); border: 1px solid var(--border);
 		border-radius: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--muted); overflow-x: auto; }
+	/* Settings variant: immutable ids and metadata live behind the disclosure so
+	   Save/Cancel sit right under the editable fields. */
+	.set-tech { margin-top: 18px; }
+	.set-tech summary { color: var(--muted); font-size: 12px; font-weight: 600; }
+	.set-tech-body { padding: 4px 11px 12px; }
+	.set-tech-body .set-summary { margin-top: 12px; }
+	.set-leave { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 	.mw-doc { max-width: 68ch; }
 	.mw-doc .mw-doc-body { font-size: 13px; line-height: 1.66; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 	.mw-body-note { margin: 0 0 11px; font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
@@ -2279,8 +2305,8 @@
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
 </style>
-<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=3" />
-<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=2" />
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=4" />
+<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=3" />
 </head>
 <body>
 <div id="landing" class="public-shell lp-shell">
@@ -2308,8 +2334,8 @@
 			<div class="hero-copy">
 				<p class="eyebrow"><span>01</span> Structured memory infrastructure</p>
 				<div class="hero-japanese" aria-label="Itsuki, written in Japanese"><span lang="ja">イツキ</span><small>ITSUKI / MEMORY THAT CARRIES FORWARD</small></div>
-				<h1>The memory layer<br />that keeps <em>AI in context.</em></h1>
-				<p class="hero-deck">Itsuki turns conversations, documents, and events into structured memory that applications, assistants, agents, and workflows can use across sessions and tools.</p>
+				<h1>Not more context.<br /><em>Better memory.</em></h1>
+				<p class="hero-deck">Itsuki turns conversations, documents, and events into structured memory — source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools.</p>
 				<div class="hero-actions">
 					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
 					<a class="secondary-action" href="/docs/">Read the docs</a>
@@ -2465,15 +2491,56 @@ const { context } = await memory.search("When is the review?");</code></pre>
 
 		<section class="closing-section">
 			<div class="closing-seal" aria-hidden="true"><span></span><span></span><i></i></div>
-			<div><span class="closing-label">09 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2></div>
-			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="mailto:hello@itsuki.app">Talk to Itsuki</a></div>
+			<div><span class="closing-label">09 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2><p class="closing-support">Connect a tool, save one conversation, and recall it in the next one.</p></div>
+			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="/docs/">Read the docs</a></div>
 		</section>
 		</main>
 
-		<footer class="footer">
-			<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
-			<p>Structured memory for applications, assistants, agents, and workflows.</p>
-			<div><a href="/docs/">Docs</a><a href="#control">Security</a><a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a><a href="mailto:hello@itsuki.app">Support</a><a href="/privacy" onclick="showLegal('privacy', event)">Privacy</a><a href="/terms" onclick="showLegal('terms', event)">Terms</a></div>
+		<footer class="footer" role="contentinfo">
+			<div class="footer-grid">
+				<div class="footer-brand">
+					<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
+					<p>Structured memory for applications, assistants, agents, and workflows.</p>
+					<p class="footer-japanese"><span lang="ja">イツキ</span><span aria-hidden="true"> · </span>memory that carries forward</p>
+					<ul class="footer-trust" aria-label="How Itsuki handles data">
+						<li>Tenant-isolated</li>
+						<li>Source-backed</li>
+						<li>Versioned</li>
+						<li>Deletable by design</li>
+					</ul>
+				</div>
+				<nav class="footer-col" aria-label="Developer resources">
+					<h3>Developers</h3>
+					<a href="/docs/">Documentation</a>
+					<a href="/docs/#/quickstart">Quickstart</a>
+					<a href="/docs/#/api/rest">REST API reference</a>
+					<a href="/docs/#/api/mcp">MCP tools</a>
+					<a href="/docs/#/sdk/python">Python SDK</a>
+					<a href="/docs/#/sdk/js">JavaScript SDK</a>
+					<a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">GitHub</a>
+				</nav>
+				<nav class="footer-col" aria-label="Product">
+					<h3>Product</h3>
+					<a href="/signup" onclick="showAuth('signup', event)">Get started</a>
+					<a href="/app">Playground</a>
+					<a href="/docs/#/install/claude">Connect a tool</a>
+					<a href="/docs/#/integrations/native">Integrations</a>
+					<a href="/docs/#/concepts/memory">How memory works</a>
+					<a href="/docs/#/operate/observability">Observability</a>
+				</nav>
+				<nav class="footer-col" aria-label="Company and trust">
+					<h3>Company</h3>
+					<a href="mailto:hello@itsuki.app">Support</a>
+					<a href="#control">Security</a>
+					<a href="/docs/#/privacy">Privacy &amp; limits</a>
+					<a href="/privacy" onclick="showLegal('privacy', event)">Privacy policy</a>
+					<a href="/terms" onclick="showLegal('terms', event)">Terms</a>
+				</nav>
+			</div>
+			<div class="footer-base">
+				<span>© 2026 Itsuki</span>
+				<span>Structured memory infrastructure</span>
+			</div>
 		</footer>
 	</div>
 </div>
@@ -2513,6 +2580,12 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	<button class="ghost theme-quick" id="themeQuick" type="button" onclick="cycleTheme()" aria-label="Change appearance theme" title="Change appearance theme">
 		<span class="theme-quick-icon" id="themeQuickIcon" aria-hidden="true">&#9680;</span><span id="themeQuickLabel">System</span>
 	</button>
+	<div class="profile-menu-wrap" id="profileMenuWrap" hidden>
+		<button class="profile-trigger" id="profileTrigger" type="button" onclick="toggleProfileMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">
+			<span class="avatar" id="profileAvatar" aria-hidden="true"></span>
+		</button>
+		<div class="profile-menu" id="profileMenu" role="menu" aria-label="Account" hidden></div>
+	</div>
 </header>
 
 <div class="banner" id="banner"></div>
@@ -3745,7 +3818,7 @@ async function copyLandingCode(button) {
 
 async function refreshMe() {
 	try {
-		const res = await fetch("/auth/me", { credentials: "include" });
+		const res = await fetchWithTimeout("/auth/me", { credentials: "include" });
 		const body = await res.json().catch(() => ({}));
 		S.me = body.authenticated ? body : null;
 		return S.me;
@@ -3760,8 +3833,56 @@ function renderAppUser() {
 	if (!wrap) return;
 	updateAdminTabVisibility();
 	const user = S.me?.user;
+	renderProfileTrigger();
 	if (!user) { wrap.innerHTML = ""; return; }
 	wrap.innerHTML = `<span class="avatar">${esc(initials(user))}</span><span>${esc(user.name || user.email)}</span>`;
+}
+
+/* Header account menu. Mirrors the scope-switcher popover contract exactly:
+   hidden attribute for state, aria-expanded on the trigger, closed by
+   outside-click and Escape, focus handed back to the trigger on close. */
+function renderProfileTrigger() {
+	const wrap = $("#profileMenuWrap");
+	if (!wrap) return;
+	const user = S.me?.user;
+	wrap.hidden = !user;
+	if (!user) { toggleProfileMenu(false); return; }
+	const avatar = $("#profileAvatar");
+	if (avatar) avatar.textContent = initials(user);
+	const menu = $("#profileMenu");
+	if (menu && !menu.hidden) renderProfileMenu();
+}
+
+function renderProfileMenu() {
+	const menu = $("#profileMenu");
+	const user = S.me?.user;
+	if (!menu || !user) return;
+	const pref = themePreference();
+	const themeBtn = (value, label) =>
+		`<button type="button" aria-pressed="${pref === value}" onclick="setTheme('${value}'); renderProfileMenu();">${label}</button>`;
+	menu.innerHTML = `
+		<div class="profile-id"><b>${esc(user.name || user.email)}</b>${user.name ? `<span>${esc(user.email)}</span>` : ""}</div>
+		<div class="profile-theme" role="group" aria-label="Appearance">${themeBtn("light", "Light")}${themeBtn("dark", "Dark")}${themeBtn("system", "System")}</div>
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('settings');">Settings</button>
+		<a role="menuitem" href="mailto:hello@itsuki.app">Support</a>
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutNow();">Log out</button>`;
+}
+
+function toggleProfileMenu(force) {
+	const menu = $("#profileMenu");
+	const button = $("#profileTrigger");
+	if (!menu || !button) return;
+	const open = typeof force === "boolean" ? force : menu.hidden;
+	const focusWasInside = !menu.hidden && menu.contains(document.activeElement);
+	menu.hidden = !open;
+	button.setAttribute("aria-expanded", open ? "true" : "false");
+	if (open) {
+		toggleProjectMenu(false);
+		toggleOrganizationMenu(false);
+		renderProfileMenu();
+	} else if (focusWasInside) {
+		button.focus();
+	}
 }
 
 const GOOGLE_BTN_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
@@ -3856,12 +3977,12 @@ function renderAuth(mode = "login") {
 			<div class="auth-card-mark"><img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki" /></div>
 			<div class="auth-step-label">${codeStep ? "02 / Verify" : "01 / Access"}</div>
 			<h2>${codeStep ? "Enter the six-digit code" : hasInvitation ? "Sign in to review the invitation" : isSignup ? "Create your Itsuki account" : "Continue to Itsuki"}</h2>
-			<p>${codeStep ? `We sent a one-time code to ${esc(AUTH_FLOW.maskedEmail || AUTH_FLOW.email)}. It expires in 10 minutes.` : hasInvitation ? "Use the email address that was invited. We keep the invitation in this tab through sign-in." : "No password to remember. Choose a verified provider or receive a one-time email code."}</p>
+			<p>${codeStep ? `We sent a one-time code to ${esc(AUTH_FLOW.maskedEmail || AUTH_FLOW.email)}. <span id="authExpiry">It expires in 10 minutes.</span>` : hasInvitation ? "Use the email address that was invited. We keep the invitation in this tab through sign-in." : "No password to remember. Choose a verified provider or receive a one-time email code."}</p>
 			${authErrorBox()}
 			${codeStep ? `
 				<div class="form-row auth-code-row"><label for="authCode">Verification code</label>
 					<input id="authCode" class="auth-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required aria-describedby="authCodeHelp" autofocus placeholder="000000" /></div>
-				<div id="authCodeHelp" class="auth-code-meta"><span>Code sent</span><button type="button" class="auth-text-button" onclick="resendAuthCode()" ${AUTH_FLOW.busy || Date.now() < AUTH_FLOW.resendAt ? "disabled" : ""}>Send another code</button></div>
+				<div id="authCodeHelp" class="auth-code-meta"><span>Code sent</span><button type="button" class="auth-text-button" id="authResend" onclick="resendAuthCode()" ${AUTH_FLOW.busy || Date.now() < AUTH_FLOW.resendAt ? "disabled" : ""}>Send another code</button></div>
 				<div class="auth-actions"><button type="submit" ${AUTH_FLOW.busy ? "disabled" : ""}>${AUTH_FLOW.busy ? "Verifying…" : "Verify and continue"}</button>
 					<button type="button" class="cta-secondary" onclick="resetAuthEmail()" ${AUTH_FLOW.busy ? "disabled" : ""}>Use another email</button></div>` : `
 				<div class="auth-provider-grid">
@@ -3880,6 +4001,8 @@ function renderAuth(mode = "login") {
 		if (AUTH_FLOW.step === "code") await submitAuthCode();
 		else await submitAuth(isSignup ? "signup" : "login");
 	};
+	if (codeStep) startAuthCountdown();
+	else stopAuthCountdown();
 	const oauthError = AUTH_ERROR_MESSAGES[new URLSearchParams(location.search).get("error")];
 	if (oauthError) {
 		AUTH_FLOW.error = oauthError;
@@ -3894,6 +4017,56 @@ function resetAuthEmail() {
 	renderAuth(AUTH_FLOW.mode);
 }
 
+/* Bounded fetch for the auth and bootstrap lanes. These calls gate the whole
+   shell, so a hung request must resolve into an error the user can retry —
+   never a button stuck on "Sending…". Same pattern as loadRequests(). */
+const AUTH_FETCH_TIMEOUT_MS = 15_000;
+async function fetchWithTimeout(url, init = {}, timeoutMs = AUTH_FETCH_TIMEOUT_MS) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		return await fetch(url, { ...init, signal: controller.signal });
+	} catch (error) {
+		if (controller.signal.aborted) {
+			const failure = new Error("The server took too long to respond. Check your connection and try again.");
+			failure.timedOut = true;
+			throw failure;
+		}
+		throw error;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/* One ticking timer drives both the resend cooldown and the expiry note on
+   the code step. Direct DOM writes only — a re-render would clear the code
+   the user is typing. */
+function syncAuthCountdown() {
+	if (AUTH_FLOW.step !== "code") { stopAuthCountdown(); return; }
+	const resendBtn = document.getElementById("authResend");
+	if (resendBtn) {
+		const waitMs = AUTH_FLOW.resendAt - Date.now();
+		const waiting = waitMs > 0;
+		resendBtn.disabled = AUTH_FLOW.busy || waiting;
+		resendBtn.textContent = waiting ? `Send another code (${Math.ceil(waitMs / 1000)}s)` : "Send another code";
+	}
+	const expiry = document.getElementById("authExpiry");
+	if (expiry && AUTH_FLOW.expiresAt) {
+		const leftMs = AUTH_FLOW.expiresAt - Date.now();
+		expiry.textContent = leftMs > 0
+			? `It expires in ${Math.max(1, Math.ceil(leftMs / 60_000))} minute${leftMs > 60_000 ? "s" : ""}.`
+			: "That code has expired — request a new one.";
+	}
+}
+function startAuthCountdown() {
+	stopAuthCountdown();
+	syncAuthCountdown();
+	AUTH_FLOW.countdownTimer = setInterval(syncAuthCountdown, 1000);
+}
+function stopAuthCountdown() {
+	if (AUTH_FLOW.countdownTimer) { clearInterval(AUTH_FLOW.countdownTimer); AUTH_FLOW.countdownTimer = null; }
+}
+
 async function submitAuth(mode) {
 	if (AUTH_FLOW.busy) return;
 	AUTH_FLOW.mode = mode;
@@ -3904,7 +4077,7 @@ async function submitAuth(mode) {
 	renderAuth(mode);
 	try {
 		stashPendingInvitation();
-		const res = await fetch("/auth/email/start", {
+		const res = await fetchWithTimeout("/auth/email/start", {
 			method: "POST", credentials: "include", headers: { "content-type": "application/json" },
 			body: JSON.stringify({ email: AUTH_FLOW.email }),
 		});
@@ -3947,7 +4120,7 @@ async function submitAuthCode() {
 	AUTH_FLOW.error = "";
 	renderAuth(AUTH_FLOW.mode);
 	try {
-		const res = await fetch("/auth/email/verify", {
+		const res = await fetchWithTimeout("/auth/email/verify", {
 			method: "POST", credentials: "include", headers: { "content-type": "application/json" },
 			body: JSON.stringify({ code }),
 		});
@@ -4142,26 +4315,30 @@ function renderFirstRunKey() {
 	const key = FIRST_RUN.key;
 	view.innerHTML = firstRunFrame(`<p class="first-run-intro">Create one project-bound API key. The full secret is shown once and never written to browser storage.</p>
 		${key ? `<div class="first-key-panel">
-			<div class="first-key-label"><span>itsuki_live</span><b>First API key</b></div>
+			<div class="first-key-label"><span>itsuki_live</span><b>${esc(FIRST_RUN.keyLabel || "First API key")}</b></div>
 			<div class="secret-field first-key-secret"><input id="firstRunKey" readonly value="${esc(key)}" onclick="this.select()" aria-label="First API key" />
 				<button type="button" onclick="copyFirstRunKey()" aria-label="Copy first API key">${FIRST_RUN.keyCopied ? "Copied ✓" : "Copy"}</button></div>
 			<div class="key-warning">Copy this key now. It cannot be shown again after you proceed.</div>
 			${FIRST_RUN.error ? `<div class="auth-error" role="alert" style="display:block">${esc(FIRST_RUN.error)}</div>` : ""}
 			${FIRST_RUN.keyCopied ? '<div class="auth-actions first-run-actions"><button type="button" onclick="proceedFirstRunKey()">Proceed</button></div>' : ""}
 		</div>` : `<div class="first-key-empty"><span class="first-key-index">01</span><div><h3>Create your first API key</h3><p>It is permanently bound to <b>${esc(selectedManagedProject()?.name || "Default project")}</b>. You can delete it at any time without affecting other integrations.</p></div></div>
+			<div class="form-row first-key-name"><label for="firstRunKeyName">Key name</label>
+				<input id="firstRunKeyName" maxlength="60" value="${esc(FIRST_RUN.keyLabel || "First API key")}" ${FIRST_RUN.busy ? "disabled" : ""} placeholder="First API key" /></div>
 			<div class="auth-actions first-run-actions"><button type="button" onclick="createFirstRunKey()" ${FIRST_RUN.busy ? "disabled" : ""}>${FIRST_RUN.busy ? "Creating key…" : "Create API key"}</button></div>`}
 	`, { step: 1, total: 2, title: "Connect your first client", eyebrow: "Workspace created" });
 }
 
 async function createFirstRunKey() {
 	if (FIRST_RUN.busy || FIRST_RUN.key) return;
+	const label = String(document.getElementById("firstRunKeyName")?.value || "").trim().slice(0, 60) || "First API key";
+	FIRST_RUN.keyLabel = label;
 	FIRST_RUN.busy = true;
 	FIRST_RUN.error = "";
 	renderFirstRun();
 	try {
 		const result = await api("/auth/tokens", {
 			method: "POST",
-			body: JSON.stringify({ type: "api", label: "First API key" }),
+			body: JSON.stringify({ type: "api", label }),
 		});
 		if (!result?.token || !result?.tokenRecord?.id) throw new Error("The server did not return the one-time key.");
 		// Copy-once material exists in memory only. Never localStorage, sessionStorage,
@@ -4219,7 +4396,13 @@ async function finishAuthentication() {
 	localStorage.setItem("uml_user", S.userId);
 	pushUrl("/app", { preserveInvite: true });
 	renderAppUser();
-	const bootstrap = await refreshProjects();
+	// Bounded: if /auth/bootstrap hangs, the caller's catch must fire and show
+	// a recoverable error instead of leaving the landing shell painted under
+	// an /app URL with no interface at all.
+	const bootstrap = await Promise.race([
+		refreshProjects(),
+		new Promise((_, reject) => setTimeout(() => reject(new Error("Workspace data took too long to load.")), 20_000)),
+	]);
 	if (bootstrap?.onboarding?.required) {
 		prepareFirstRun(bootstrap);
 		renderFirstRun();
@@ -4542,9 +4725,46 @@ async function api(path, opts={}) {
 		failure.status = res.status;
 		failure.code = typeof body?.error === "string" ? body.error : "";
 		failure.body = body;
+		// A project that stops resolving for this session usually means the seat
+		// was revoked in another session. Revalidate scope once so dead
+		// organizations/projects fall out of the switchers immediately instead
+		// of lingering until the next full reload.
+		if (projectBound && (failure.code === "project_not_found" || res.status === 403) && projectEpoch === S.projectEpoch) {
+			scheduleScopeRevalidation();
+		}
 		throw failure;
 	}
 	return res.json();
+}
+
+/* One revalidation per project epoch: re-read the authoritative bootstrap.
+   applyAccountBootstrap() snaps S.projectId to a scope the server still
+   authorizes and prunes the switcher lists; when that moved us off the stale
+   project, finish the hop the way switchManagedProject would — new epoch,
+   aborted in-flight requests, reset project-bound state, fresh load. */
+let scopeRevalidationEpoch = -1;
+function scheduleScopeRevalidation() {
+	if (scopeRevalidationEpoch === S.projectEpoch) return;
+	scopeRevalidationEpoch = S.projectEpoch;
+	(async () => {
+		const staleProjectId = S.projectId;
+		try {
+			await refreshProjects();
+		} catch {
+			scopeRevalidationEpoch = -1; // transient — the next failure retries
+			return;
+		}
+		const stillListed = S.projects.some((project) => project.id === staleProjectId);
+		if (stillListed && staleProjectId === S.projectId) return; // permission refusal, not a revoked seat
+		S.projectEpoch += 1;
+		S.projectController?.abort();
+		S.projectController = new AbortController();
+		resetProjectBoundUiState();
+		banner("Your access to that workspace changed in another session. Switched to an available scope.");
+		if (S.projectId) {
+			await Promise.all([refreshProjectCapabilities(), refreshTokens(), load()]).catch(() => {});
+		}
+	})().catch(() => {});
 }
 
 function scopedPayload(payload = {}) {
@@ -13733,6 +13953,8 @@ function setClearTransient() {
 		auditLoadId: SET.auditLoadId + 1,
 		auditError: "",
 		auditFilters: { action: "", from: "", to: "" },
+		auditDraft: null,
+		auditFilterError: "",
 		integrationsLoaded: false,
 		integrationsLoading: false,
 		integrationsLoadId: SET.integrationsLoadId + 1,
@@ -14059,25 +14281,34 @@ function setProjectGeneral() {
 				<textarea id="setProjDesc" maxlength="500" placeholder="What this project contains"
 					oninput="setEditField('description',this.value)"${fieldsDisabled ? " disabled" : ""}>${esc(draft.description)}</textarea>
 				<div class="set-hint">Shown to collaborators to explain the project's purpose. It does not alter extraction or grant access.</div></div>
-			<div class="set-field"><label>Project ID</label>
-				<div class="set-readonly"><code>${esc(p.id ?? "")}</code>
-					<button class="ghost mini" onclick="copyText('${esc(p.id ?? "")}')">Copy</button></div>
-				<div class="set-hint">${p.is_default ? "This is your default project." : "Created project."}
-					Keys are bound to this id and cannot be pointed at another project.</div></div>
-			<div class="set-summary" aria-label="Project details">
-				<div class="kv">Lifecycle: <b>${esc(p.status || "active")}</b></div>
-				<div class="kv">Type: <b>${p.is_default ? "Default project" : "Project"}</b></div>
-				<div class="kv">Created: <b>${esc(fmtDate(p.created_at) || "Unavailable")}</b></div>
-				<div class="kv">Updated: <b>${esc(fmtDate(p.updated_at) || "Unavailable")}</b></div>
-				<div class="kv">Organization owner: <b>${esc(organizationOwnerLabel)}</b>${organizationOwnerEmail ? `<div class="set-hint">${esc(organizationOwnerEmail)}</div>` : ""}</div>
-				<div class="kv">Your effective role: <b>${esc(role)}</b></div>
-				<div class="kv">Usage: <b>${usageCopy}</b></div>
-			</div>
 			<div class="set-actions">
 				<button id="setGeneralSave" onclick="saveProjectGeneral()"${saveDisabled ? " disabled" : ""}${!editable ? ' title="You need project edit access to change this."' : !revisionReady ? ' title="Reload Settings before saving; the project revision is unavailable."' : ""}>${SET.busy ? "Saving…" : "Save changes"}</button>
 				<button id="setGeneralCancel" class="ghost" onclick="setCancelGeneral()"${cancelDisabled ? " disabled" : ""}>Cancel</button>
 				<span id="setGeneralStatus" class="set-status" role="status" aria-live="polite" data-kind="${esc(SET.statusKind)}">${esc(SET.status)}</span>
 			</div>
+			<details class="mw-tech set-tech">
+				<summary>Technical details</summary>
+				<div class="set-tech-body">
+					<div class="set-field"><label>Project ID</label>
+						<div class="set-readonly"><code>${esc(p.id ?? "")}</code>
+							<button class="ghost mini" onclick="copyText('${esc(p.id ?? "")}')">Copy</button></div>
+						<div class="set-hint">${p.is_default ? "This is your default project." : "Created project."}
+							Keys are bound to this id and cannot be pointed at another project.</div></div>
+					<div class="set-summary" aria-label="Project details">
+						<div class="kv">Lifecycle: <b>${esc(p.status || "active")}</b></div>
+						<div class="kv">Type: <b>${p.is_default ? "Default project" : "Project"}</b></div>
+						<div class="kv">Created: <b>${esc(fmtDate(p.created_at) || "Unavailable")}</b></div>
+						<div class="kv">Updated: <b>${esc(fmtDate(p.updated_at) || "Unavailable")}</b></div>
+						<div class="kv">Organization owner: <b>${esc(organizationOwnerLabel)}</b>${organizationOwnerEmail ? `<div class="set-hint">${esc(organizationOwnerEmail)}</div>` : ""}</div>
+						<div class="kv">Your effective role: <b>${esc(role)}</b></div>
+						<div class="kv">Usage: <b>${usageCopy}</b></div>
+					</div>
+				</div>
+			</details>
+			${SET.data.membership?.project_role ? `<div class="set-leave">
+				<button class="ghost" onclick="leaveCurrentProject()"${SET.busy ? " disabled" : ""}>Leave project</button>
+				<span class="set-hint">Removes your seat and revokes your keys and connections for this project. The project and its memories are not deleted.</span>
+			</div>` : ""}
 		</div>
 		${setDangerZone()}`;
 }
@@ -14559,7 +14790,7 @@ function setProjectExtraction() {
 
 		<div class="set-section">
 			<h4>Test these rules</h4>
-			<p class="set-note">A no-write preview: the real deterministic admission filter decides Allow or Deny first, then one bounded model call proposes a governed filing category only for allowed samples. Model proposals can be uncertain. Nothing is persisted.</p>
+			<p class="set-note">A no-write preview in three separate judgments: the real deterministic admission filter decides Allowed or Blocked, one bounded model call estimates whether an allowed line is worth extracting as durable memory, and another proposes a governed filing category. "Allowed by rules" alone never means a line will be stored. Model judgments can be uncertain. Nothing is persisted.</p>
 			<div class="set-note">Governed project categories available to real extraction: ${activeCategories.length
 				? activeCategories.map((category) => projectCategoryBadge({ project_category: category })).join(" ")
 				: "None configured."} A proposal is accepted only when it exactly matches this active list.</div>
@@ -14568,7 +14799,8 @@ function setProjectExtraction() {
 			<button class="ghost" onclick="setRunPreview()"${SET.previewBusy || !editable ? " disabled" : ""}>${SET.previewBusy ? "Testing…" : "Run test"}</button>
 			${SET.preview ? `<div style="margin-top:16px">${SET.preview.map((row) => `
 				<div class="set-preview-row"><q>${esc(row.text)}</q>
-					<span class="set-pill ${row.kept ? "ok" : "warn"}">${row.kept ? "Allow" : `Deny: ${esc(setReasonLabel(row.reason))}`}</span>
+					<span class="set-pill ${row.kept ? "ok" : "warn"}">${row.kept ? "Allowed by rules" : `Blocked by policy: ${esc(setReasonLabel(row.reason))}`}</span>
+					${row.kept ? `<span class="set-pill ${setAssessmentPillClass(row)}">${esc(setAssessmentCopy(row))}</span>` : ""}
 					<span class="set-hint">Category: ${esc(setPreviewCategoryCopy(row))}</span></div>`).join("")}
 				<div class="set-hint" style="margin-top:8px">Server checked ${Number(SET.previewActiveCategoryCount)} active governed categor${Number(SET.previewActiveCategoryCount) === 1 ? "y" : "ies"}. This preview never creates a memory, source packet, receipt, usage record, or graph item.</div></div>` : ""}
 		</div>
@@ -14601,6 +14833,21 @@ function setReasonLabel(reason) {
 		excluded_by_rule: "excluded",
 		outside_include_rules: "outside your topics",
 	}[reason] ?? "not kept";
+}
+
+/* Worthiness assessment display. The pill states are deliberately blunt:
+   deterministic policy and model judgment are different authorities, and the
+   UI must never let "passed the rules" impersonate "will be stored". */
+function setAssessmentCopy(row) {
+	return {
+		durable: "Likely durable memory",
+		not_durable: "Not durable — would not be stored",
+		uncertain: "Uncertain — model review",
+	}[row?.assessment] ?? "Worthiness not evaluated";
+}
+
+function setAssessmentPillClass(row) {
+	return { durable: "ok", not_durable: "warn" }[row?.assessment] ?? "";
 }
 
 function setPreviewCategoryCopy(row) {
@@ -15736,21 +15983,30 @@ function setOrgGeneral() {
 			<div class="set-field"><label for="setOrgDesc">Description</label>
 				<textarea id="setOrgDesc" maxlength="500" oninput="setEditField('description',this.value)"${fieldsDisabled ? " disabled" : ""}>${esc(draft.description ?? "")}</textarea>
 				<div class="set-hint">Shared context for members. It does not change project access or memory behavior.</div></div>
-			<div class="set-field"><label>Organization ID</label>
-				<div class="set-readonly"><code>${esc(org.id ?? "")}</code>
-					<button class="ghost mini" onclick="copyText('${esc(org.id ?? "")}')">Copy</button></div></div>
-			<div class="set-summary" aria-label="Organization details">
-				<div class="kv">Owner: <b>${esc(ownerName)}</b><div class="set-hint">${ownerEmail ? `${esc(ownerEmail)} · ` : ""}immutable id ${esc(org.owner_user_id || org.owner?.id || "Unavailable")}</div></div>
-				<div class="kv">Created: <b>${esc(fmtDate(org.created_at) || "Unavailable")}</b></div>
-				<div class="kv">Projects visible to you: <b>${projectCount}</b></div>
-				<div class="kv">Members: <b>${(SET.data.org_members ?? []).length}</b></div>
-				<div class="kv">Plan / quota: <b>${plan ? esc(plan.label || plan.name || "Configured") : "No organization quota is configured."}</b></div>
-			</div>
 			<div class="set-actions">
 				<button id="setGeneralSave" onclick="saveOrgGeneral()"${saveDisabled ? " disabled" : ""}${!editable ? ' title="You need organization edit access to change this."' : !revisionReady ? ' title="Reload Settings before saving; the organization revision is unavailable."' : ""}>${SET.busy ? "Saving…" : "Save changes"}</button>
 				<button id="setGeneralCancel" class="ghost" onclick="setCancelGeneral()"${cancelDisabled ? " disabled" : ""}>Cancel</button>
 				<span id="setGeneralStatus" class="set-status" role="status" aria-live="polite" data-kind="${esc(SET.statusKind)}">${esc(SET.status)}</span>
 			</div>
+			<details class="mw-tech set-tech">
+				<summary>Technical details</summary>
+				<div class="set-tech-body">
+					<div class="set-field"><label>Organization ID</label>
+						<div class="set-readonly"><code>${esc(org.id ?? "")}</code>
+							<button class="ghost mini" onclick="copyText('${esc(org.id ?? "")}')">Copy</button></div></div>
+					<div class="set-summary" aria-label="Organization details">
+						<div class="kv">Owner: <b>${esc(ownerName)}</b><div class="set-hint">${ownerEmail ? `${esc(ownerEmail)} · ` : ""}immutable id ${esc(org.owner_user_id || org.owner?.id || "Unavailable")}</div></div>
+						<div class="kv">Created: <b>${esc(fmtDate(org.created_at) || "Unavailable")}</b></div>
+						<div class="kv">Projects visible to you: <b>${projectCount}</b></div>
+						<div class="kv">Members: <b>${(SET.data.org_members ?? []).length}</b></div>
+						<div class="kv">Plan / quota: <b>${plan ? esc(plan.label || plan.name || "Configured") : "No organization quota is configured."}</b></div>
+					</div>
+				</div>
+			</details>
+			${SET.data.membership?.org_role && SET.data.membership.org_role !== "owner" ? `<div class="set-leave">
+				<button class="ghost" onclick="leaveCurrentOrganization()"${SET.busy ? " disabled" : ""}>Leave organization</button>
+				<span class="set-hint">Removes your membership and project seats here and revokes your credentials for its projects. Nothing is deleted.</span>
+			</div>` : ""}
 		</div>`;
 }
 
@@ -16211,10 +16467,64 @@ async function loadSettingsIntegrations(force = false) {
 	}
 }
 
+/* Self-service leave. The server is the authority on every guard (sole-owner
+   refusal, implicit-access refusal, idempotent repeats); the client's job is a
+   clear confirmation, then the same clean scope hop a revoked seat gets. */
+async function leaveCurrentProject() {
+	if (SET.busy) return;
+	const projectName = SET.data.project?.name || "this project";
+	if (!confirm(`Leave ${projectName}? Your keys and connections for it stop working immediately. The project and its memories are not deleted.`)) return;
+	SET.busy = true;
+	renderSettingsSection();
+	try {
+		const result = await api("/v1/settings/members/leave", { method: "POST", body: JSON.stringify({}) });
+		toast(result?.already_left ? "You had already left this project." : "You left the project.");
+		await adoptPostLeaveScope();
+	} catch (error) {
+		if (!error?.projectChanged) toast(error.message || "You could not leave this project.", true);
+	} finally {
+		SET.busy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
+}
+
+async function leaveCurrentOrganization() {
+	if (SET.busy) return;
+	const org = SET.data.organization ?? {};
+	if (!confirm(`Leave ${org.name || "this organization"}? You lose access to all of its projects immediately. Nothing is deleted.`)) return;
+	SET.busy = true;
+	renderSettingsSection();
+	try {
+		const result = await api("/v1/settings/org-members/leave", { method: "POST", body: JSON.stringify(org.id ? { orgId: org.id } : {}) });
+		toast(result?.already_left ? "You had already left this organization." : "You left the organization.");
+		await adoptPostLeaveScope();
+	} catch (error) {
+		if (!error?.projectChanged) toast(error.message || "You could not leave this organization.", true);
+	} finally {
+		SET.busy = false;
+		if (S.view === "settings") renderSettingsSection();
+	}
+}
+
+async function adoptPostLeaveScope() {
+	await refreshProjects().catch(() => {});
+	S.projectEpoch += 1;
+	S.projectController?.abort();
+	S.projectController = new AbortController();
+	resetProjectBoundUiState();
+	if (S.projectId) {
+		await Promise.all([refreshProjectCapabilities(), refreshTokens(), load()]).catch(() => {});
+	}
+}
+
 function setProjectAudit() {
 	if (!setCan("project.audit.view")) return `<div class="set-empty">Only a project admin can view audit history.</div>`;
 	const events = SET.audit?.events ?? [];
 	const filters = SET.auditFilters ?? { action: "", from: "", to: "" };
+	const draftFilters = SET.auditDraft ?? filters;
+	const auditBusy = SET.auditLoading || SET.auditLoadingMore;
+	const auditApplyDisabled = auditBusy || setAuditFiltersEqual(draftFilters, filters);
+	const auditClearDisabled = auditBusy || (setAuditFiltersBlank(draftFilters) && setAuditFiltersBlank(filters));
 	const canExport = setCan("project.audit.export");
 	return `
 		<div class="set-head"><div><h3>Audit history</h3>
@@ -16224,11 +16534,12 @@ function setProjectAudit() {
 		<div class="set-section">
 			<form class="set-filter-grid" onsubmit="event.preventDefault(); setApplyAuditFilters();">
 				<div class="form-row"><label for="setAuditAction">Action</label><input id="setAuditAction" maxlength="60"
-					placeholder="e.g. project.member.added" value="${esc(filters.action)}" /></div>
-				<div class="form-row"><label for="setAuditFrom">From</label><input id="setAuditFrom" type="datetime-local" value="${esc(filters.from)}" /></div>
-				<div class="form-row"><label for="setAuditTo">To</label><input id="setAuditTo" type="datetime-local" value="${esc(filters.to)}" /></div>
-				<div class="set-actions"><button type="submit"${SET.auditLoading ? " disabled" : ""}>Apply filters</button>
-					<button type="button" class="ghost" onclick="setClearAuditFilters()"${SET.auditLoading ? " disabled" : ""}>Clear</button></div>
+					placeholder="e.g. project.member.added" value="${esc(draftFilters.action)}" oninput="setAuditDraftField('action', this.value)" /></div>
+				<div class="form-row"><label for="setAuditFrom">From</label><input id="setAuditFrom" type="datetime-local" value="${esc(draftFilters.from)}" oninput="setAuditDraftField('from', this.value)" /></div>
+				<div class="form-row"><label for="setAuditTo">To</label><input id="setAuditTo" type="datetime-local" value="${esc(draftFilters.to)}" oninput="setAuditDraftField('to', this.value)" /></div>
+				<div class="set-actions"><button type="submit" id="setAuditApply"${auditApplyDisabled ? " disabled" : ""} title="Apply becomes available once the filters differ from what is shown.">Apply filters</button>
+					<button type="button" class="ghost" id="setAuditClear" onclick="setClearAuditFilters()"${auditClearDisabled ? " disabled" : ""}>Clear</button>
+					<span id="setAuditFilterStatus" class="set-status" role="status" aria-live="polite" data-kind="error">${esc(SET.auditFilterError ?? "")}</span></div>
 			</form>
 			${SET.auditError ? `<div class="set-empty" role="alert">Audit history could not be loaded: ${esc(SET.auditError)}
 				<div class="set-actions"><button class="ghost" onclick="loadAuditPage()">Try again</button></div></div>` : ""}
@@ -16263,6 +16574,44 @@ function setAuditFilterQuery({ cursor = null } = {}) {
 	return params;
 }
 
+/* Draft-vs-applied filter state. The inputs write into SET.auditDraft on every
+   keystroke; Apply only lights up when the draft differs from what the table
+   already shows, and Clear only when there is anything to clear. Validation
+   problems surface in the inline status span via direct DOM writes — a full
+   re-render here would wipe the very fields the user is correcting. */
+function setAuditFiltersEqual(a, b) {
+	return String(a?.action ?? "").trim() === String(b?.action ?? "").trim()
+		&& String(a?.from ?? "") === String(b?.from ?? "")
+		&& String(a?.to ?? "") === String(b?.to ?? "");
+}
+
+function setAuditFiltersBlank(filters) {
+	return !String(filters?.action ?? "").trim() && !String(filters?.from ?? "") && !String(filters?.to ?? "");
+}
+
+function setAuditDraftField(field, value) {
+	const applied = SET.auditFilters ?? { action: "", from: "", to: "" };
+	SET.auditDraft = { ...(SET.auditDraft ?? applied), [field]: value };
+	setSyncAuditActions();
+}
+
+function setSyncAuditActions() {
+	const applied = SET.auditFilters ?? { action: "", from: "", to: "" };
+	const draft = SET.auditDraft ?? applied;
+	const busy = SET.auditLoading || SET.auditLoadingMore;
+	const apply = document.getElementById("setAuditApply");
+	const clear = document.getElementById("setAuditClear");
+	if (apply) apply.disabled = busy || setAuditFiltersEqual(draft, applied);
+	if (clear) clear.disabled = busy || (setAuditFiltersBlank(draft) && setAuditFiltersBlank(applied));
+	setAuditFilterStatus("");
+}
+
+function setAuditFilterStatus(message) {
+	SET.auditFilterError = message || "";
+	const span = document.getElementById("setAuditFilterStatus");
+	if (span) span.textContent = SET.auditFilterError;
+}
+
 function setApplyAuditFilters() {
 	if (SET.auditLoading || SET.auditLoadingMore) return;
 	const action = String(document.getElementById("setAuditAction")?.value || "").trim();
@@ -16271,26 +16620,30 @@ function setApplyAuditFilters() {
 	const fromAt = dateTimeLocalMs(from);
 	const toAt = dateTimeLocalMs(to);
 	if ((from && !Number.isFinite(fromAt)) || (to && !Number.isFinite(toAt))) {
-		SET.auditError = "Choose valid From and To dates.";
-		renderSettingsSection();
+		setAuditFilterStatus("Choose valid From and To dates.");
 		return;
 	}
 	if (Number.isFinite(fromAt) && Number.isFinite(toAt) && fromAt > toAt) {
-		SET.auditError = "From must be earlier than To.";
-		renderSettingsSection();
+		setAuditFilterStatus("From must be earlier than To.");
 		return;
 	}
+	if (setAuditFiltersEqual({ action, from, to }, SET.auditFilters ?? { action: "", from: "", to: "" })) return;
 	SET.auditFilters = { action, from, to };
+	SET.auditDraft = { action, from, to };
 	SET.audit = null;
 	SET.auditError = "";
+	SET.auditFilterError = "";
 	loadAuditPage();
 }
 
 function setClearAuditFilters() {
 	if (SET.auditLoading || SET.auditLoadingMore) return;
+	if (setAuditFiltersBlank(SET.auditDraft ?? SET.auditFilters) && setAuditFiltersBlank(SET.auditFilters)) return;
 	SET.auditFilters = { action: "", from: "", to: "" };
+	SET.auditDraft = { action: "", from: "", to: "" };
 	SET.audit = null;
 	SET.auditError = "";
+	SET.auditFilterError = "";
 	loadAuditPage();
 }
 
@@ -17875,7 +18228,7 @@ async function initShell() {
 	if (mode === "login" || mode === "signup") {
 		if (S.me) {
 			try { await finishAuthentication(); }
-			catch (projectError) { banner("Account setup could not be loaded: " + projectError.message); }
+			catch (projectError) { renderShellLoadError(projectError); }
 			return;
 		}
 		renderAuth(mode);
@@ -17891,11 +18244,32 @@ async function initShell() {
 			return;
 		}
 		try { await finishAuthentication(); }
-		catch (projectError) { banner("Account setup could not be loaded: " + projectError.message); }
+		catch (projectError) { renderShellLoadError(projectError); }
 		return;
 	}
 	setMode("public");
 	sendVisitBeacon("landing");
+}
+
+/* A failed account bootstrap must land on a VISIBLE, recoverable screen. The
+   old path wrote a banner into the hidden app shell while the landing page
+   stayed painted under an /app URL — a dead end with no skeleton and no way
+   back. */
+function renderShellLoadError(error) {
+	const view = $("#authView");
+	if (!view) return;
+	view.innerHTML = `<div class="auth-layout">
+		${authBrandPanel({ step: "Reconnect" })}
+		<main class="auth-entry-panel"><div class="auth-card auth-access-card">
+			<div class="auth-card-mark"><img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki" /></div>
+			<div class="auth-step-label">Reconnect</div>
+			<h2>Your workspace could not be loaded</h2>
+			<p>${esc(error?.message || "The server did not respond.")}</p>
+			<div class="auth-actions"><button type="button" onclick="location.reload()">Try again</button>
+				<button type="button" class="cta-secondary" onclick="logoutNow()">Sign out</button></div>
+		</div></main>
+	</div>`;
+	setMode("login");
 }
 
 function restoreCurrentAppLocation() {
@@ -17995,10 +18369,12 @@ window.addEventListener("keydown", (event) => {
 	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }
 	toggleProjectMenu(false);
 	toggleOrganizationMenu(false);
+	toggleProfileMenu(false);
 });
 document.addEventListener("click", (event) => {
 	if (!event.target.closest("#projectSwitcher")) toggleProjectMenu(false);
 	if (!event.target.closest("#organizationSwitcher")) toggleOrganizationMenu(false);
+	if (!event.target.closest("#profileMenuWrap")) toggleProfileMenu(false);
 });
 initConnectWidget();
 initHeroReel();

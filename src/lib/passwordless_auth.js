@@ -1,4 +1,5 @@
 import { newId } from "./ids.js";
+import { renderEmail } from "./email_template.js";
 import { resolveVerifiedIdentity } from "./auth_identity.js";
 import {
 	isValidEmail,
@@ -113,7 +114,11 @@ function randomSixDigitCode() {
 }
 
 function senderAddress(env) {
-	return String(env.INVITE_EMAIL_FROM || DEFAULT_SENDER).trim().toLowerCase();
+	// Same guard as invitation_email.js: Email Sending rejects a malformed
+	// sender with an opaque provider error, so a misconfigured override falls
+	// back to the one address wrangler allowlists instead of failing sign-in.
+	const value = String(env.INVITE_EMAIL_FROM || DEFAULT_SENDER).trim().toLowerCase();
+	return /^[^\s@]+@[^\s@]+$/.test(value) ? value : DEFAULT_SENDER;
 }
 
 function maskedEmail(email) {
@@ -123,24 +128,20 @@ function maskedEmail(email) {
 }
 
 function mailContent(code) {
-	const subject = "Your Itsuki sign-in code";
-	const text = [
-		"Sign in to Itsuki",
-		"",
-		`Your verification code is: ${code}`,
-		"",
-		"It expires in 10 minutes and can be used once. If you did not request it, you can ignore this email.",
-	].join("\n");
-	const html = `<!doctype html><html><body style="margin:0;background:#f5efe3;color:#17130f;font-family:Arial,sans-serif">
-		<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:40px 16px">
-		<table role="presentation" width="100%" style="max-width:520px;background:#fffaf1;border:1px solid #d6c8b6"><tr><td style="padding:36px">
-		<div style="font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#c94f2c">Itsuki · secure access</div>
-		<h1 style="margin:20px 0 8px;font:normal 32px Georgia,serif">Your sign-in code</h1>
-		<p style="margin:0 0 24px;color:#62584d">Enter this code in the browser where you started signing in.</p>
-		<div style="padding:18px;border:1px solid #c94f2c;background:#fff;font:700 34px ui-monospace,monospace;letter-spacing:.22em;text-align:center">${code}</div>
-		<p style="margin:24px 0 0;color:#756a5e;font-size:13px;line-height:1.5">Expires in 10 minutes and works once. If you did not request this, no action is needed.</p>
-		</td></tr></table></td></tr></table></body></html>`;
-	return { subject, text, html };
+	return {
+		subject: "Your Itsuki sign-in code",
+		...renderEmail({
+			kicker: "Itsuki · secure access",
+			heading: "Your sign-in code",
+			intro: "Enter this code in the browser where you started signing in.",
+			blocks: [
+				// The label keeps "Your verification code is: NNNNNN" on one line
+				// in the plain-text body; people and tooling both key on it.
+				{ type: "code", value: code, label: "Your verification code is:" },
+				{ type: "note", text: "Expires in 10 minutes and works once. If you did not request this, no action is needed." },
+			],
+		}),
+	};
 }
 
 async function requestFingerprint(env, request) {

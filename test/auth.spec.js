@@ -497,8 +497,8 @@ describe("product shell routes", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
 		expect(html).toContain("Structured memory infrastructure");
-		expect(html).toContain("The memory layer");
-		expect(html).toContain("that keeps <em>AI in context.</em>");
+		expect(html).toContain("Not more context.");
+		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
 		expect(html).toContain("Cross-session");
@@ -525,7 +525,7 @@ describe("product shell routes", () => {
 		expect(html).toContain('href="/terms"');
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=3");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=4");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");

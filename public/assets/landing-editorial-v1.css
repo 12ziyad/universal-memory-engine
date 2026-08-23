@@ -199,9 +199,22 @@ html { scroll-behavior: smooth; }
 #landing.lp-shell .primary-action.inverse { background: var(--ink); box-shadow: 7px 7px 0 var(--clay); }
 #landing.lp-shell .primary-action.inverse:hover { box-shadow: 3px 3px 0 var(--clay); }
 
-#landing.lp-shell .footer { display: grid; min-height: 140px; grid-template-columns: 1fr 1.2fr 1fr; align-items: center; padding: 30px 5.6vw; border-top: 1px solid var(--hairline); background: var(--paper); }
-#landing.lp-shell .footer p { margin: 0; color: var(--ink-soft); font-size: 11px; text-align: center; }
-#landing.lp-shell .footer > div { display: flex; justify-content: flex-end; gap: 26px; font-size: 11px; font-weight: 600; }
+#landing.lp-shell .closing-support { margin: 22px 0 0; max-width: 44ch; color: var(--ink-soft); font-size: 14px; line-height: 1.7; }
+
+/* Footer: a deliberate final section, not a strip. Brand column plus three
+   navigation columns, ending on a hairline base bar. */
+#landing.lp-shell .footer { padding: 74px 5.6vw 34px; border-top: 1px solid var(--hairline); background: var(--paper); }
+#landing.lp-shell .footer-grid { display: grid; grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(150px, 1fr)); gap: 48px; padding-bottom: 52px; }
+#landing.lp-shell .footer-brand p { margin: 14px 0 0; max-width: 34ch; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
+#landing.lp-shell .footer-japanese { color: var(--ink-soft); font-size: 11px; letter-spacing: .08em; }
+#landing.lp-shell .footer-japanese [lang="ja"] { color: var(--clay); font-size: 13px; }
+#landing.lp-shell .footer-trust { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 0; padding: 0; list-style: none; }
+#landing.lp-shell .footer-trust li { padding: 5px 10px; border: 1px solid var(--hairline); background: var(--porcelain); font-family: 'IBM Plex Mono', Consolas, monospace; font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); }
+#landing.lp-shell .footer-col { display: flex; flex-direction: column; gap: 11px; }
+#landing.lp-shell .footer-col h3 { margin: 0 0 6px; color: var(--clay); font-family: 'IBM Plex Mono', Consolas, monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+#landing.lp-shell .footer-col a { font-size: 12px; font-weight: 500; color: var(--ink); }
+#landing.lp-shell .footer-col a:hover { color: var(--clay); }
+#landing.lp-shell .footer-base { display: flex; justify-content: space-between; gap: 18px; padding-top: 22px; border-top: 1px solid var(--hairline); color: var(--ink-soft); font-family: 'IBM Plex Mono', Consolas, monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 
 #landing.lp-shell .auth-page { display: grid; min-height: 100vh; grid-template-columns: minmax(390px,5fr) minmax(560px,7fr); background: var(--porcelain); }
 #landing.lp-shell .auth-rail { position: relative; display: flex; min-height: 100vh; flex-direction: column; overflow: hidden; padding: 34px 42px 38px; background: var(--clay); color: white; }
@@ -427,9 +440,9 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .closing-seal { width: 120px; }
   #landing.lp-shell .closing-section h2 { font-size: 57px; }
   #landing.lp-shell .closing-actions { grid-column: auto; align-items: flex-start; flex-direction: column; }
-  #landing.lp-shell .footer { grid-template-columns: 1fr; gap: 28px; padding: 48px 22px; }
-  #landing.lp-shell .footer p { text-align: left; }
-  #landing.lp-shell .footer > div { flex-wrap: wrap; justify-content: flex-start; }
+  #landing.lp-shell .footer { padding: 56px 22px 30px; }
+  #landing.lp-shell .footer-grid { grid-template-columns: 1fr; gap: 36px; }
+  #landing.lp-shell .footer-base { flex-direction: column; gap: 8px; }
   #landing.lp-shell .auth-page { grid-template-columns: 1fr; }
   #landing.lp-shell .auth-rail { min-height: 230px; padding: 24px 22px; }
   #landing.lp-shell .auth-art { position: absolute; top: -95px; right: -65px; width: 260px; height: 260px; opacity: .78; }

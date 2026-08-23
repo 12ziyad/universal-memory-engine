@@ -286,4 +286,42 @@ describe("passwordless email authentication", () => {
 		expect(await env.DB.prepare("SELECT id FROM auth_email_challenges WHERE id = ?")
 			.bind(challengeIdValue).first()).toBeNull();
 	});
+
+	it("delivers the unified template with the code in both surfaces and no remote loads", async () => {
+		const send = vi.fn(async () => ({ messageId: "msg_template" }));
+		const email = `template-${crypto.randomUUID()}@example.com`;
+		const result = await startEmailChallenge(testEnv(send), request("/auth/email/start"), { email });
+		expect(result.status).toBe(202);
+		const mail = send.mock.calls[0][0];
+		const code = deliveredCode(send);
+		expect(mail.subject).toBe("Your Itsuki sign-in code");
+		expect(mail.text).toContain(code);
+		expect(mail.html).toContain(code);
+		expect(mail.html).toContain("Itsuki · secure access");
+		// A sign-in code email carries no links at all, and never loads anything
+		// remote — no images, scripts, styles, or fonts to phone home with.
+		expect(mail.html).not.toMatch(/https?:/);
+		expect(mail.html).not.toMatch(/<img|<link|<script|@import|url\(|src=/i);
+		expect(mail.text).not.toContain("<");
+	});
+
+	it("falls back to the allowlisted sender when INVITE_EMAIL_FROM is malformed", async () => {
+		const garbageSend = vi.fn(async () => ({ messageId: "msg_garbage_sender" }));
+		const garbage = await startEmailChallenge(
+			{ ...testEnv(garbageSend), INVITE_EMAIL_FROM: "not an address" },
+			request("/auth/email/start"),
+			{ email: `sender-a-${crypto.randomUUID()}@example.com` },
+		);
+		expect(garbage.status).toBe(202);
+		expect(garbageSend.mock.calls[0][0].from.email).toBe("invites@notify.itsuki.app");
+
+		const customSend = vi.fn(async () => ({ messageId: "msg_custom_sender" }));
+		const custom = await startEmailChallenge(
+			{ ...testEnv(customSend), INVITE_EMAIL_FROM: "  Codes@Notify.Itsuki.App  " },
+			request("/auth/email/start"),
+			{ email: `sender-b-${crypto.randomUUID()}@example.com` },
+		);
+		expect(custom.status).toBe(202);
+		expect(customSend.mock.calls[0][0].from.email).toBe("codes@notify.itsuki.app");
+	});
 });

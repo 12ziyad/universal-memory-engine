@@ -8,6 +8,7 @@
  */
 
 import { newId } from "./ids.js";
+import { renderEmail } from "./email_template.js";
 import { writeAudit } from "./audit.js";
 
 const DEFAULT_ORIGIN = "https://itsuki.app";
@@ -29,15 +30,6 @@ function base64UrlToBytes(value) {
 	const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
 	const binary = atob(padded);
 	return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-function escapeHtml(value) {
-	return String(value ?? "")
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#039;");
 }
 
 function publicOrigin(env) {
@@ -267,26 +259,22 @@ function emailContent(env, row, token) {
 	const subject = projectName
 		? `Invitation to ${orgName} - ${projectName}`
 		: `Invitation to ${orgName}`;
-	const text = [
-		access,
-		"",
-		"Open this single-use invitation:",
-		link,
-		"",
-		`Sign in or create an Itsuki account using ${row.recipient_email}.`,
-		`The invitation expires ${expires}. If you were not expecting it, you can ignore this email.`,
-	].join("\n");
-	const html = `<!doctype html><html><body style="margin:0;background:#f5f3ff;color:#171522;font-family:Arial,sans-serif">
-		<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px">
-		<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #ddd7f7;border-radius:16px"><tr><td style="padding:32px">
-		<p style="margin:0 0 8px;color:#6d5ce7;font-weight:700">ITSUKI</p>
-		<h1 style="margin:0 0 16px;font-size:24px">You're invited</h1>
-		<p style="margin:0 0 24px;line-height:1.55">${escapeHtml(access)}</p>
-		<p style="margin:0 0 28px"><a href="${escapeHtml(link)}" style="display:inline-block;background:#6d5ce7;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">Review invitation</a></p>
-		<p style="margin:0 0 8px;line-height:1.55">Use <strong>${escapeHtml(row.recipient_email)}</strong> to sign in or create your account.</p>
-		<p style="margin:0;color:#625f70;font-size:13px;line-height:1.55">This link works once and expires ${escapeHtml(expires)}. Itsuki invitation emails never include memory content, project descriptions, API keys, or webhook secrets.</p>
-		</td></tr></table></td></tr></table></body></html>`;
-	return { subject, text, html };
+	return {
+		subject,
+		...renderEmail({
+			kicker: "Itsuki · workspace invitation",
+			heading: `You're invited to ${orgName}`,
+			intro: access,
+			blocks: [
+				{ type: "paragraph", text: `Sign in or create an Itsuki account using ${row.recipient_email}.` },
+				{ type: "button", label: "Review invitation", url: link },
+				// "project details", not "descriptions": the reassurance now also
+				// renders in the plain-text body, which must never carry a project
+				// description — this wording keeps that guard mechanically testable.
+				{ type: "note", text: `This link works once and expires ${expires}. Itsuki invitation emails never include memory content, project details, API keys, or webhook secrets.` },
+			],
+		}),
+	};
 }
 
 async function suppressRow(env, id, code, now) {

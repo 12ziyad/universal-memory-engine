@@ -112,6 +112,15 @@ describe("invitation email outbox", () => {
 		expect(message.text).not.toContain("project description");
 		expect(message.html).toContain("Acme &amp; Partners");
 		expect(message.html).toContain("Launch &lt;Alpha&gt;");
+		// Unified template: the accept button href is byte-identical to the
+		// single-use link — no tracking or query additions — and the only
+		// http(s) occurrence in the html is that one href; nothing loads remotely.
+		expect(message.html).toContain("Itsuki · workspace invitation");
+		expect(message.html).toContain(`href="https://itsuki.app/app#invite=${encodeURIComponent(token)}"`);
+		expect(message.html.match(/href=/g)).toHaveLength(1);
+		expect(message.html.match(/https?:/g)).toHaveLength(1);
+		expect(message.html).not.toMatch(/<img|<link|<script|@import|url\(|src=|utm_/i);
+		expect(message.text).not.toContain("<table");
 
 		const row = await env.DB.prepare(
 			"SELECT status, payload_ciphertext, payload_iv, provider_message_id FROM invitation_email_outbox WHERE invitation_id = ?",

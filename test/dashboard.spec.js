@@ -53,8 +53,8 @@ describe("dashboard script", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
 		expect(html).toContain("Structured memory infrastructure");
-		expect(html).toContain("The memory layer");
-		expect(html).toContain("that keeps <em>AI in context.</em>");
+		expect(html).toContain("Not more context.");
+		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
 		expect(html).toContain("Cross-session");
@@ -98,7 +98,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=3");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=4");
 		expect(publicLanding).not.toMatch(/paper trail/i);
 		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
 		for (const forbidden of [

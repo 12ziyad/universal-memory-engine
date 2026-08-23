@@ -45,19 +45,23 @@ body.legal-mode {
 	color-scheme: light;
 }
 
+/* Dark is neutral black with deliberate orange. Surfaces, borders, and text
+   stay achromatic so the terracotta accent only appears where it means
+   something: primary actions, active navigation, links, focus, selection
+   edges. The warm brown-black ramp this replaced tinted every panel. */
 html[data-theme="dark"] body.app-mode,
 html[data-theme="dark"] body.auth-mode,
 html[data-theme="dark"] body.legal-mode {
-	--bg: #11100d;
-	--panel: #181612;
-	--panel2: #211e19;
-	--panel3: #29251f;
-	--input-bg: #1d1a16;
-	--border: #383229;
-	--border2: #746957;
-	--text: #fbf8f1;
-	--muted: #c8bca8;
-	--faint: #9a907f;
+	--bg: #0f0f10;
+	--panel: #161617;
+	--panel2: #1e1e20;
+	--panel3: #242427;
+	--input-bg: #1a1a1d;
+	--border: #2c2c30;
+	--border2: #585860;
+	--text: #f4f4f2;
+	--muted: #b3b3b6;
+	--faint: #85858a;
 	--accent: #e38362;
 	--accent-hover: #ef9677;
 	--on-accent: #18120e;
@@ -66,19 +70,19 @@ html[data-theme="dark"] body.legal-mode {
 	--amber: #d5a85d;
 	--red: #ef9185;
 	--purple: #b39ad6;
-	--success-bg: #14271d;
-	--warning-bg: #302511;
-	--danger-bg: #321a17;
+	--success-bg: #142520;
+	--warning-bg: #2a2312;
+	--danger-bg: #2e1a18;
 	--success-border: #357458;
 	--warning-border: #8d692c;
 	--danger-border: #9e4e47;
 	--overlay: rgba(0, 0, 0, .76);
-	--shadow-sm: 0 1px 0 rgba(255, 248, 235, .04), 0 5px 16px rgba(0, 0, 0, .3);
+	--shadow-sm: 0 1px 0 rgba(244, 244, 242, .04), 0 5px 16px rgba(0, 0, 0, .3);
 	--shadow-md: 0 16px 42px rgba(0, 0, 0, .42);
 	--shadow-lg: 0 30px 86px rgba(0, 0, 0, .58);
-	--editorial-press-shadow: #e38362;
-	--editorial-grid: rgba(251, 248, 241, .035);
-	--mw-selbg: rgba(227, 131, 98, .085);
+	--editorial-press-shadow: #000000;
+	--editorial-grid: rgba(244, 244, 242, .03);
+	--mw-selbg: rgba(244, 244, 242, .055);
 	color-scheme: dark;
 }
 
@@ -126,6 +130,14 @@ body.app-mode .tab.active {
 	background: color-mix(in srgb, var(--accent) 11%, var(--panel));
 	box-shadow: inset 3px 0 0 var(--accent);
 	color: var(--accent);
+}
+
+/* In dark, the active state keeps the orange bar and label but sits on a
+   neutral surface — an 11% orange wash across a full black row read as a
+   tinted stripe, not a highlight. Same treatment for the settings sub-nav. */
+html[data-theme="dark"] body.app-mode .tab.active,
+html[data-theme="dark"] body.app-mode .set-nav button.active {
+	background: color-mix(in srgb, var(--text) 6%, var(--panel));
 }
 
 body.app-mode .tab-badge {
@@ -206,33 +218,35 @@ body.app-mode .toast {
 	box-shadow: var(--shadow-md);
 }
 
-/* The memory graph is intentionally an instrument panel in both themes. */
+/* The memory graph is intentionally an instrument panel in both themes.
+   Neutral charcoal instrument housing; the orange survives only as the
+   accent token and a faint centre glow so nodes and edges carry the color. */
 body.app-mode #graphWrap {
-	--panel: #171510;
-	--panel2: #211e18;
-	--panel3: #29251e;
-	--input-bg: #1c1914;
-	--border: #39332a;
-	--border2: #756a58;
-	--text: #fbf8f1;
-	--muted: #c8bca8;
-	--faint: #9a907f;
+	--panel: #151516;
+	--panel2: #1e1e20;
+	--panel3: #242427;
+	--input-bg: #191a1c;
+	--border: #303034;
+	--border2: #585860;
+	--text: #f4f4f2;
+	--muted: #b3b3b6;
+	--faint: #85858a;
 	--accent: #e38362;
 	--on-accent: #18120e;
 	background:
-		radial-gradient(circle at 50% 44%, rgba(227, 131, 98, .12), transparent 35%),
-		linear-gradient(180deg, #171510 0%, #0f0e0b 100%);
-	border: 1px solid #39332a;
+		radial-gradient(circle at 50% 44%, rgba(227, 131, 98, .07), transparent 35%),
+		linear-gradient(180deg, #151516 0%, #0d0d0e 100%);
+	border: 1px solid #303034;
 }
 
 body.app-mode #graphWrap::before {
 	background-image:
-		linear-gradient(rgba(251, 248, 241, .035) 1px, transparent 1px),
-		linear-gradient(90deg, rgba(251, 248, 241, .035) 1px, transparent 1px);
+		linear-gradient(rgba(244, 244, 242, .03) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(244, 244, 242, .03) 1px, transparent 1px);
 }
 
 body.app-mode #graphWrap::after {
-	background: radial-gradient(circle at 50% 45%, rgba(227, 131, 98, .12), transparent 35%);
+	background: radial-gradient(circle at 50% 45%, rgba(227, 131, 98, .07), transparent 35%);
 }
 
 /* -------------------------------------------------------------------------
@@ -1025,19 +1039,19 @@ html[data-theme="dark"] body.auth-mode .brand-lockup img {
 }
 
 html[data-theme="dark"] #legalView.legal-shell {
-	--bg: #11100d;
-	--panel: #181612;
-	--panel2: #211e19;
-	--input-bg: #1d1a16;
-	--border: #383229;
-	--border2: #746957;
-	--text: #fbf8f1;
-	--muted: #c8bca8;
+	--bg: #0f0f10;
+	--panel: #161617;
+	--panel2: #1e1e20;
+	--input-bg: #1a1a1d;
+	--border: #2c2c30;
+	--border2: #585860;
+	--text: #f4f4f2;
+	--muted: #b3b3b6;
 	--accent: #e38362;
 	--accent-hover: #ef9677;
 	--on-accent: #18120e;
 	--focus-ring: #f1a488;
-	background: rgba(17, 16, 13, .97);
+	background: rgba(15, 15, 16, .97);
 	color-scheme: dark;
 }
 

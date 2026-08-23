@@ -1130,6 +1130,54 @@ export async function setOrganizationRole(
 	return auditIntent ? auditedMutationResult(mutation, auditIntent) : mutation;
 }
 
+/**
+ * Org-wide credential quarantine for one user, shared by admin removal and
+ * self-service leave so the two doors can never drift: however a membership
+ * ends, the same credentials die in the same batch. Reaches every active
+ * project whose EFFECTIVE organization is this one, including historical
+ * NULL-organization projects mapped through the owner's default org.
+ */
+function organizationCredentialRevocationStatements(env, { userId, orgId, now, reason }) {
+	return [
+		env.DB.prepare(
+			`UPDATE connection_tokens SET status = 'revoked', revoked_at = ?
+			  WHERE user_id = ? AND revoked_at IS NULL
+			    AND project_id IN (
+			      SELECT p.id FROM managed_projects p
+			       WHERE p.status = 'active'
+			         AND COALESCE(p.organization_id, (
+			           SELECT o.id FROM organizations o
+			            WHERE o.owner_user_id = p.owner_user_id
+			              AND o.is_default = 1 AND o.status = 'active'
+			            LIMIT 1
+			         )) = ?
+			    )`,
+		).bind(now, userId, orgId),
+		// Same reach for OAuth grants: every grant this user holds on a project
+		// belonging to this organization dies with the membership, in the same
+		// batch, so leave-and-re-add cannot revive an old authorization.
+		env.DB.prepare(
+			`UPDATE oauth_grants SET revoked_at = ?, revoked_reason = ?
+			  WHERE user_id = ? AND revoked_at IS NULL
+			    AND (project_id IS NULL OR project_id IN (
+			      SELECT p.id FROM managed_projects p
+			       WHERE p.status = 'active'
+			         AND COALESCE(p.organization_id, (
+			           SELECT o.id FROM organizations o
+			            WHERE o.owner_user_id = p.owner_user_id
+			              AND o.is_default = 1 AND o.status = 'active'
+			            LIMIT 1
+			         )) = ?
+			    ))`,
+		).bind(now, reason, userId, orgId),
+		env.DB.prepare(
+			`UPDATE oauth_tokens SET revoked_at = ?
+			  WHERE user_id = ? AND revoked_at IS NULL
+			    AND grant_id IN (SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NOT NULL)`,
+		).bind(now, userId, userId),
+	];
+}
+
 export async function removeOrganizationMember(env, orgId, targetUserId, expectedRevision, { auditIntent = null } = {}) {
 	const expected = parseExpectedMemberRevision(expectedRevision);
 	const org = await getOrganization(env, orgId);
@@ -1166,42 +1214,9 @@ export async function removeOrganizationMember(env, orgId, targetUserId, expecte
 		 env.DB.prepare(
 			"DELETE FROM organization_members WHERE org_id = ? AND user_id = ? AND id = ? AND role != 'owner'",
 		).bind(orgId, targetUserId, current.id),
-		env.DB.prepare(
-			`UPDATE connection_tokens SET status = 'revoked', revoked_at = ?
-			  WHERE user_id = ? AND revoked_at IS NULL
-			    AND project_id IN (
-			      SELECT p.id FROM managed_projects p
-			       WHERE p.status = 'active'
-			         AND COALESCE(p.organization_id, (
-			           SELECT o.id FROM organizations o
-			            WHERE o.owner_user_id = p.owner_user_id
-			              AND o.is_default = 1 AND o.status = 'active'
-			            LIMIT 1
-			         )) = ?
-			    )`,
-		).bind(revokedAt, targetUserId, orgId),
-		// Same reach for OAuth grants: every grant this user holds on a project
-		// belonging to this organization dies with the membership, in the same
-		// batch, so remove-and-re-add cannot revive an old authorization.
-		env.DB.prepare(
-			`UPDATE oauth_grants SET revoked_at = ?, revoked_reason = 'org_membership_removed'
-			  WHERE user_id = ? AND revoked_at IS NULL
-			    AND (project_id IS NULL OR project_id IN (
-			      SELECT p.id FROM managed_projects p
-			       WHERE p.status = 'active'
-			         AND COALESCE(p.organization_id, (
-			           SELECT o.id FROM organizations o
-			            WHERE o.owner_user_id = p.owner_user_id
-			              AND o.is_default = 1 AND o.status = 'active'
-			            LIMIT 1
-			         )) = ?
-			    ))`,
-		).bind(revokedAt, targetUserId, orgId),
-		env.DB.prepare(
-			`UPDATE oauth_tokens SET revoked_at = ?
-			  WHERE user_id = ? AND revoked_at IS NULL
-			    AND grant_id IN (SELECT id FROM oauth_grants WHERE user_id = ? AND revoked_at IS NOT NULL)`,
-		).bind(revokedAt, targetUserId, targetUserId),
+		...organizationCredentialRevocationStatements(env, {
+			userId: targetUserId, orgId, now: revokedAt, reason: "org_membership_removed",
+		}),
 	];
 	let results;
 	try {
@@ -1426,6 +1441,22 @@ export async function updateProjectRole(
 	return auditIntent ? auditedMutationResult(mutation, auditIntent) : mutation;
 }
 
+/**
+ * Project-scoped credential quarantine, shared by admin removal and
+ * self-service leave for the same never-drift reason as the org-wide builder.
+ */
+function projectCredentialRevocationStatements(env, { userId, projectId, now = Date.now(), reason }) {
+	return [
+		env.DB.prepare(
+			`UPDATE connection_tokens SET status = 'revoked', revoked_at = ?
+			  WHERE user_id = ? AND project_id = ? AND revoked_at IS NULL`,
+		).bind(now, userId, projectId),
+		// An OAuth grant is a credential for this project too: losing project
+		// membership must not leave a live MCP authorization behind.
+		...grantRevocationStatements(env, { userId, projectId, now, reason }),
+	];
+}
+
 export async function removeProjectMember(env, projectId, targetUserId, expectedRevision, { auditIntent = null } = {}) {
 	const expected = parseExpectedMemberRevision(expectedRevision);
 	const current = await env.DB.prepare(
@@ -1441,16 +1472,8 @@ export async function removeProjectMember(env, projectId, targetUserId, expected
 		env.DB.prepare(
 			"DELETE FROM project_members WHERE project_id = ? AND user_id = ? AND id = ?",
 		).bind(projectId, targetUserId, current.id),
-		env.DB.prepare(
-			`UPDATE connection_tokens SET status = 'revoked', revoked_at = ?
-			  WHERE user_id = ? AND project_id = ? AND revoked_at IS NULL`,
-		).bind(Date.now(), targetUserId, projectId),
-		// An OAuth grant is a credential for this project too: losing project
-		// membership must not leave a live MCP authorization behind.
-		...grantRevocationStatements(env, {
-			userId: targetUserId,
-			projectId,
-			reason: "project_membership_removed",
+		...projectCredentialRevocationStatements(env, {
+			userId: targetUserId, projectId, reason: "project_membership_removed",
 		}),
 	];
 	let results;
@@ -1485,5 +1508,203 @@ export async function removeProjectMember(env, projectId, targetUserId, expected
 		throw memberConflict();
 	}
 	const mutation = { ok: true, removed: true, already_removed: false, previous_role: current.role };
+	return auditIntent ? auditedMutationResult(mutation, auditIntent) : mutation;
+}
+
+/**
+ * Why leaving refuses implicit access with a 409 rather than a quiet noop: a
+ * project owner, or an organization owner/admin reaching the project through
+ * their org role, has no seat row to delete. Their access is derived, so
+ * "leaving" would change nothing while claiming otherwise — a lie about the
+ * caller's own security posture. Org-level access ends by leaving the
+ * organization; ownership cannot be walked away from at all.
+ */
+async function refuseImplicitOnlyProjectLeave(env, { userId, project, orgId }) {
+	let implicit = project.owner_user_id === userId;
+	if (!implicit && orgId) {
+		const seat = await env.DB.prepare(
+			"SELECT role FROM organization_members WHERE org_id = ? AND user_id = ? LIMIT 1",
+		).bind(orgId, userId).first();
+		implicit = seat?.role === "owner" || seat?.role === "admin";
+	}
+	if (implicit) {
+		throw new OrgError(
+			"not_a_member",
+			"You have no project seat to leave: your access comes from project ownership or an organization role. Leave the organization to give up org-level access; ownership cannot be left.",
+			409,
+		);
+	}
+}
+
+/**
+ * Self-service exit from one project seat.
+ *
+ * Deliberately weaker than removeProjectMember in exactly one way: no If-Match
+ * revision. Leaving your own seat is not ABA-sensitive — there is only one
+ * seat with your name on it and you can only leave it once — so demanding a
+ * revision would add a read round trip before an action whose outcome is the
+ * same either way. The id-scoped DELETE still makes concurrent calls
+ * converge: one wins, the other reads the empty seat back and reports it
+ * honestly as { left: false, already_left: true }.
+ */
+export async function leaveProject(env, { userId, projectId }, { auditIntent = null } = {}) {
+	const project = await env.DB.prepare(
+		`SELECT id, owner_user_id, organization_id
+		   FROM managed_projects WHERE id = ? AND status = 'active' LIMIT 1`,
+	).bind(projectId).first();
+	if (!project) throw new OrgError("project_not_found", "That project does not exist.", 404);
+	const orgId = await effectiveProjectOrganizationId(env, project);
+	const current = await env.DB.prepare(
+		`SELECT id, project_id, org_id, user_id, role, created_at, updated_at
+		   FROM project_members WHERE project_id = ? AND user_id = ? LIMIT 1`,
+	).bind(projectId, userId).first();
+	if (!current) {
+		await refuseImplicitOnlyProjectLeave(env, { userId, project, orgId });
+		const noop = { ok: true, left: false, already_left: true, previous_role: null };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, noop) : noop;
+	}
+	const statements = [
+		env.DB.prepare(
+			"DELETE FROM project_members WHERE project_id = ? AND user_id = ? AND id = ?",
+		).bind(projectId, userId, current.id),
+		...projectCredentialRevocationStatements(env, {
+			userId, projectId, reason: "project_membership_left",
+		}),
+	];
+	let results;
+	try {
+		results = auditIntent
+			? await commitAuditedBatch(env, auditIntent, statements, {
+				preconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ? AND id = ?",
+					[projectId, userId, current.id],
+				)],
+				postconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?)",
+					[projectId, userId],
+				)],
+			})
+			: await env.DB.batch(statements);
+	} catch (error) {
+		if (auditIntent && /fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			// The precondition raced a concurrent leave or an admin removal. The
+			// caller's stated goal — not holding this seat — may already hold, and
+			// then a repeat must not dress the outcome up as a conflict.
+			const after = await env.DB.prepare(
+				"SELECT id FROM project_members WHERE project_id = ? AND user_id = ? LIMIT 1",
+			).bind(projectId, userId).first();
+			if (!after) {
+				return commitAuditedNoop(env, auditIntent, {
+					ok: true, left: false, already_left: true, previous_role: null,
+				});
+			}
+			throw memberConflict();
+		}
+		throw error;
+	}
+	if (!(results[0].meta?.changes ?? 0)) {
+		const after = await env.DB.prepare(
+			"SELECT id FROM project_members WHERE project_id = ? AND user_id = ? LIMIT 1",
+		).bind(projectId, userId).first();
+		if (!after) {
+			const noop = { ok: true, left: false, already_left: true, previous_role: null };
+			return auditIntent ? auditedMutationResult(noop, auditIntent) : noop;
+		}
+		throw memberConflict();
+	}
+	const mutation = { ok: true, left: true, already_left: false, previous_role: current.role };
+	return auditIntent ? auditedMutationResult(mutation, auditIntent) : mutation;
+}
+
+/**
+ * Self-service exit from an organization: the caller's own seat, every project
+ * seat they hold inside it, and every credential those seats justified, in one
+ * atomic batch. Mirrors removeOrganizationMember exactly except for who asks —
+ * and being self-targeted needs no If-Match revision (see leaveProject for why
+ * self-leave is not ABA-sensitive). No organization or project data is touched.
+ *
+ * The owner can never leave. Ownership transfer does not exist, so an owner
+ * walking out would orphan the organization with nobody able to administer
+ * it; the only honest exit an owner has is deleting the organization.
+ */
+export async function leaveOrganization(env, { userId, orgId }, { auditIntent = null } = {}) {
+	const org = await getOrganization(env, orgId);
+	if (!org) throw new OrgError("org_not_found", "That organization does not exist.", 404);
+	const current = await env.DB.prepare(
+		`SELECT id, org_id, user_id, role, created_at, updated_at
+		   FROM organization_members WHERE org_id = ? AND user_id = ? LIMIT 1`,
+	).bind(orgId, userId).first();
+	if (org.owner_user_id === userId || current?.role === "owner") {
+		throw new OrgError(
+			"owner_immutable",
+			"The organization owner cannot leave. Ownership cannot be transferred yet, so deleting the organization is the only way to give it up.",
+			409,
+		);
+	}
+	if (!current) {
+		const noop = { ok: true, left: false, already_left: true, previous_role: null };
+		return auditIntent ? commitAuditedNoop(env, auditIntent, noop) : noop;
+	}
+	const revokedAt = Date.now();
+	const statements = [
+		env.DB.prepare(
+			`DELETE FROM project_members
+			  WHERE org_id = ? AND user_id = ?
+			    AND EXISTS (
+			      SELECT 1 FROM organization_members
+			       WHERE org_id = ? AND user_id = ? AND id = ? AND role != 'owner'
+			    )`,
+		).bind(orgId, userId, orgId, userId, current.id),
+		env.DB.prepare(
+			"DELETE FROM organization_members WHERE org_id = ? AND user_id = ? AND id = ? AND role != 'owner'",
+		).bind(orgId, userId, current.id),
+		...organizationCredentialRevocationStatements(env, {
+			userId, orgId, now: revokedAt, reason: "org_membership_left",
+		}),
+	];
+	let results;
+	try {
+		results = auditIntent
+			? await commitAuditedBatch(env, auditIntent, statements, {
+				preconditions: [auditInvariantStatement(
+					env,
+					"SELECT 1 FROM organization_members WHERE org_id = ? AND user_id = ? AND id = ? AND role != 'owner'",
+					[orgId, userId, current.id],
+				)],
+				postconditions: [
+					auditInvariantStatement(env, "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM organization_members WHERE org_id = ? AND user_id = ?)", [orgId, userId]),
+					auditInvariantStatement(env, "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM project_members WHERE org_id = ? AND user_id = ?)", [orgId, userId]),
+				],
+			})
+			: await env.DB.batch(statements);
+	} catch (error) {
+		if (auditIntent && /fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+			// Same convergence rule as leaveProject: a lost race with a concurrent
+			// leave or an admin removal is a satisfied goal, not a conflict.
+			const after = await env.DB.prepare(
+				"SELECT id FROM organization_members WHERE org_id = ? AND user_id = ? LIMIT 1",
+			).bind(orgId, userId).first();
+			if (!after) {
+				return commitAuditedNoop(env, auditIntent, {
+					ok: true, left: false, already_left: true, previous_role: null,
+				});
+			}
+			throw memberConflict();
+		}
+		throw error;
+	}
+	if (!(results?.[1]?.meta?.changes ?? 0)) {
+		const after = await env.DB.prepare(
+			"SELECT id FROM organization_members WHERE org_id = ? AND user_id = ? LIMIT 1",
+		).bind(orgId, userId).first();
+		if (!after) {
+			const noop = { ok: true, left: false, already_left: true, previous_role: null };
+			return auditIntent ? auditedMutationResult(noop, auditIntent) : noop;
+		}
+		throw memberConflict();
+	}
+	const mutation = { ok: true, left: true, already_left: false, previous_role: current.role };
 	return auditIntent ? auditedMutationResult(mutation, auditIntent) : mutation;
 }
