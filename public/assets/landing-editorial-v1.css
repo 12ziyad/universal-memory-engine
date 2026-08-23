@@ -600,7 +600,17 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .flow-status span::before { animation: tickGlow 2.6s ease-in-out infinite; }
   #landing.lp-shell .flow-status span:nth-child(2)::before { animation-delay: .85s; }
   #landing.lp-shell .flow-status span:nth-child(3)::before { animation-delay: 1.7s; }
+  /* landingSelectStep() already re-triggers the panel animation by clearing
+     and restoring animation-name; this is the animation it re-triggers. */
+  #landing.lp-shell .step-canvas { animation: stepFade .38s ease; }
+  /* Use-case cards cascade in as their section reveals. */
+  html.reveal-armed #landing.lp-shell .folio-section.reveal .folio-grid article { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+  html.reveal-armed #landing.lp-shell .folio-section.reveal .folio-grid article:nth-child(2) { transition-delay: .1s; }
+  html.reveal-armed #landing.lp-shell .folio-section.reveal .folio-grid article:nth-child(3) { transition-delay: .2s; }
+  html.reveal-armed #landing.lp-shell .folio-section.reveal .folio-grid article:nth-child(4) { transition-delay: .3s; }
+  html.reveal-armed #landing.lp-shell .folio-section.reveal.visible .folio-grid article { opacity: 1; transform: none; }
 }
+@keyframes stepFade { from { opacity: .25; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes heroRise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
 @keyframes heroFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes railPulse {
