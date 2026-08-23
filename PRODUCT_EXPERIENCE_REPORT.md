@@ -2,7 +2,9 @@
 
 Date: 2026-08-24 · Branch: `codex/prod-google-plus-unified-theme` · Rollback checkpoint: branch `codex/checkpoint-pre-experience-campaign-20260824`, production version `f8c9e253-47b3-4872-b622-a207be783826`
 
-## Production verdict: [PENDING — filled after production verification]
+## Production verdict: GO
+
+Deployed version `5342aa3a-0ff9-4429-8323-a892482e3e69` on worker `uml` (itsuki.app), verified live with a cold cache: new hero/title/footer served at the edge (byte-checked UTF-8), zero console errors, zero dead footer anchors, zero horizontal overflow, theme bootstrap resolving before paint, `/health` ok with `ai_routing: off` untouched, `/docs/` 200, `POST /auth/email/start` honoring the 202 contract, and both OAuth doors 302-ing to accounts.google.com / github.com. The login surface boots with Google + GitHub + progressive email-code (no code field pre-start).
 
 ## What changed
 
@@ -32,7 +34,7 @@ Enemy-claim hero (the field sells *more context*; Itsuki sells *better memory*) 
 
 Added: `test/product_experience.spec.js` (22), `test/product_experience_css.unit.js` (6), `test/membership_leave.spec.js` (9), `test/email_template.spec.js` (5), extensions to `rules_preview` (+5), `passwordless_auth` (+2), `invitation_email`. Provider-campaign gates updated for the intentional preview change (golden fixtures recaptured via the sanctioned script; schema census now expects both preview schemas).
 
-- Full regression: **[PENDING — filled at completion]**
+- Full regression: **workers pool 184 files / 2,306 tests, unit lane 43 files / 663 tests — all green.** (Three first-pass workers failures and two unit failures were pins on intentionally changed behavior — bounded auth fetches, the two-call truthful preview — updated with rationale, never weakened; the golden forwarding fixture was recaptured through its sanctioned script.)
 - Local live verification (wrangler dev, real Worker/D1/AI): full email-code signup → branded OTP email → live countdown → atomic onboarding (Canary Workspace + Default project + root space, consent-gated sample) → named first key, copy-gated Proceed, no secret in browser storage → app shell → profile menu behaviors → neutral dark (`rgb(15,15,16)` computed) → settings layout → conditional audit filters → truthful preview with real model calls → 375 px: zero horizontal overflow, 42 px touch targets.
 
 ## Migration status
@@ -41,8 +43,9 @@ None added by this campaign. Remote D1 already carries 0052–0057 (verified `No
 
 ## Production deployment
 
-- Version: **[PENDING]**
-- Verified journeys: **[PENDING]**
+- Version: **`5342aa3a-0ff9-4429-8323-a892482e3e69`** (previous: `f8c9e253…` — the hard rollback, alongside checkpoint branch `codex/checkpoint-pre-experience-campaign-20260824`)
+- Verified journeys (production): landing cold-cache render, footer link integrity, login boot with all three doors, email-start 202 (one self-purging canary challenge to an example.com blackhole address), OAuth start redirects, docs, health, mobile-width overflow check.
+- Verified journeys (local wrangler dev, real Worker/D1/AI semantics): the full new-user path — email code → branded OTP → live countdown → atomic onboarding → named first key with copy-gated Proceed → app shell → profile menu → neutral dark → settings layout → conditional audit filters → truthful preview with real model calls → responsive sweep.
 
 ## Known limits stated honestly
 
