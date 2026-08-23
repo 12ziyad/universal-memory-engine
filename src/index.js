@@ -56,6 +56,12 @@ import {
 	updateOrganization,
 } from "./lib/organizations.js";
 import {
+	AccountBootstrapError,
+	completeOnboarding,
+	readBootstrap,
+	saveScope,
+} from "./lib/account_bootstrap.js";
+import {
 	acceptInvitation,
 	createInvitation,
 	describeInvitation,
@@ -231,6 +237,15 @@ import {
 	signup,
 	timingSafeEqualString,
 } from "./auth.js";
+import {
+	purgeExpiredEmailChallenges,
+	startEmailChallenge,
+	verifyEmailChallenge,
+} from "./lib/passwordless_auth.js";
+import {
+	githubAuthCallback,
+	githubAuthStart,
+} from "./lib/github_auth.js";
 import { handleOAuthRoutes } from "./lib/oauth_routes.js";
 import {
 	ACCESS_TOKEN_PREFIX,
@@ -859,6 +874,30 @@ function orgFailure(error) {
 	return json({ error: "organization_unavailable", message: "That could not be completed. Try again." }, 500);
 }
 
+function accountBootstrapFailure(error, request = null) {
+	const auditResponse = auditFailure(error);
+	if (auditResponse) {
+		return request
+			? withResponseRequestId(auditResponse, auditRequestId(request))
+			: auditResponse;
+	}
+	if (error instanceof AccountBootstrapError || error?.name === "AccountBootstrapError") {
+		const code = String(error.code ?? "invalid_account_setup");
+		const status = Number(error.status ?? 400);
+		return json({
+			error: code,
+			code,
+			message: String(error.message ?? "The account setup request is invalid."),
+		}, status >= 400 && status < 500 ? status : 400);
+	}
+	console.error("account bootstrap route failed:", error?.message ?? error);
+	return json({
+		error: "account_bootstrap_unavailable",
+		code: "account_bootstrap_unavailable",
+		message: "Account setup is temporarily unavailable. Nothing was changed. Try again.",
+	}, 500);
+}
+
 function auditFailure(error) {
 	if (!(error instanceof AuditReplayError) && !(error instanceof AuditUnavailableError)
 		&& !["AuditReplayError", "AuditUnavailableError"].includes(error?.name)) return null;
@@ -1126,6 +1165,110 @@ const routes = {
 		return json(authPayload(auth));
 	},
 
+	"GET /auth/bootstrap": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.READ_LIMITER, `account-bootstrap:actor:${auth.userId}`))) return tooManyFor("read");
+		if (!(await allowRate(env.READ_LIMITER, `account-bootstrap:ip:${clientIp(request)}`))) return tooManyFor("read");
+		try {
+			return json(
+				{ ok: true, ...await readBootstrap(env, auth.userId) },
+				200,
+				{ "cache-control": "no-store" },
+			);
+		} catch (error) {
+			return accountBootstrapFailure(error, request);
+		}
+	},
+
+	"POST /auth/onboarding": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `account-onboarding:actor:${auth.userId}`))) return tooManyFor("auth");
+		if (!(await allowRate(env.AUTH_LIMITER, `account-onboarding:ip:${clientIp(request)}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/auth/onboarding", 32 * 1024);
+		if (parsed.response) return parsed.response;
+		try {
+			const result = await runAuditedMutation(
+				env,
+				{
+					actorUserId: auth.userId,
+					actorType: "user",
+					action: "account.onboarding.completed",
+					targetType: "account",
+					targetId: auth.userId,
+					requestId: auditRequestId(request),
+					waitUntil: waitUntilFrom(ctx),
+					metadata: { status: { from: "incomplete", to: "complete" } },
+				},
+				(intent) => completeOnboarding(env, auth.userId, parsed.body, { auditIntent: intent }),
+				(completed) => ({
+					orgId: completed.scope?.organization_id ?? completed.onboarding?.organization_id ?? null,
+					projectId: completed.scope?.project_id ?? completed.onboarding?.project_id ?? null,
+					targetType: "account",
+					targetId: auth.userId,
+					metadata: { changed: { from: false, to: Boolean(completed.changed) } },
+				}),
+			);
+			return json({ ok: true, ...result }, 200, { "cache-control": "no-store" });
+		} catch (error) {
+			return accountBootstrapFailure(error, request);
+		}
+	},
+
+	"POST /auth/scope": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `account-scope:actor:${auth.userId}`))) return tooManyFor("auth");
+		if (!(await allowRate(env.AUTH_LIMITER, `account-scope:ip:${clientIp(request)}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/auth/scope", 8 * 1024);
+		if (parsed.response) return parsed.response;
+		try {
+			const body = parsed.body;
+			if (!body || typeof body !== "object" || Array.isArray(body)) {
+				throw new AccountBootstrapError("invalid_scope", "Scope must be a JSON object.");
+			}
+			const unknown = Object.keys(body).filter(
+				(key) => !["organizationId", "projectId", "expectedRevision"].includes(key),
+			);
+			if (unknown.length) {
+				throw new AccountBootstrapError("unknown_scope_field", `Unknown scope field: ${unknown[0]}.`);
+			}
+			const selection = {
+				organizationId: body.organizationId,
+				projectId: body.projectId,
+			};
+			const result = await runAuditedMutation(
+				env,
+				{
+					orgId: selection.organizationId ?? null,
+					projectId: selection.projectId ?? null,
+					actorUserId: auth.userId,
+					actorType: "user",
+					action: "account.scope.selected",
+					targetType: "scope",
+					targetId: auth.userId,
+					requestId: auditRequestId(request),
+					waitUntil: waitUntilFrom(ctx),
+					metadata: { status: { from: "previous", to: "selected" } },
+				},
+				(intent) => saveScope(env, auth.userId, selection, {
+					auditIntent: intent,
+					expectedRevision: body.expectedRevision ?? null,
+				}),
+				(selected) => ({
+					orgId: selected.scope?.organization_id ?? selection.organizationId,
+					projectId: selected.scope?.project_id ?? selection.projectId,
+					targetType: "scope",
+					targetId: auth.userId,
+				}),
+			);
+			return json({ ok: true, ...result }, 200, { "cache-control": "no-store" });
+		} catch (error) {
+			return accountBootstrapFailure(error, request);
+		}
+	},
+
 	"POST /auth/signup": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		try {
@@ -1161,6 +1304,75 @@ const routes = {
 			);
 		} catch (error) {
 			return authFailureResponse("login", error);
+		}
+	},
+
+	"POST /auth/email/start": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, `email-start:${clientIp(request)}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/auth/email/start", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		if (!body || typeof body !== "object" || Array.isArray(body)) {
+			return json({ error: "invalid_email_request", message: "Enter a valid email address." }, 400);
+		}
+		const unknown = Object.keys(body).filter((key) => key !== "email");
+		if (unknown.length) {
+			return json({ error: "unknown_email_field", message: `Unknown email sign-in field: ${unknown[0]}.` }, 400);
+		}
+		try {
+			const result = await startEmailChallenge(env, request, body);
+			const headers = new Headers({ "cache-control": "no-store" });
+			if (result.cookie) headers.append("set-cookie", result.cookie);
+			if (result.retryAfter) headers.set("retry-after", String(result.retryAfter));
+			if (result.error) {
+				return json({
+					error: result.error,
+					message: result.status === 429
+						? "A code was just sent. Wait a minute before requesting another."
+						: "Itsuki could not send the sign-in code. Try again shortly.",
+				}, result.status ?? 503, headers);
+			}
+			return json(result.body, result.status ?? 202, headers);
+		} catch (error) {
+			console.error("email sign-in start failed", { message: error?.message ?? String(error) });
+			return json({ error: "email_signin_unavailable", message: "Itsuki could not send the sign-in code. Try again shortly." }, 503);
+		}
+	},
+
+	"POST /auth/email/verify": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, `email-verify:${clientIp(request)}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/auth/email/verify", 4 * 1024);
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		if (!body || typeof body !== "object" || Array.isArray(body)) {
+			return json({ error: "invalid_email_code", message: "Enter the six-digit code from your email." }, 400);
+		}
+		const unknown = Object.keys(body).filter((key) => key !== "code");
+		if (unknown.length) {
+			return json({ error: "unknown_email_field", message: `Unknown email verification field: ${unknown[0]}.` }, 400);
+		}
+		try {
+			const result = await verifyEmailChallenge(env, request, body);
+			const headers = new Headers({ "cache-control": "no-store" });
+			if (result.cookie) headers.append("set-cookie", result.cookie);
+			if (result.session?.cookie) headers.append("set-cookie", result.session.cookie);
+			if (result.error) {
+				return json({
+					error: result.error,
+					message: result.error === "email_code_expired"
+						? "That code expired. Request a new one."
+						: "That code is not valid.",
+				}, result.status ?? 401, headers);
+			}
+			return json({
+				authenticated: true,
+				created: Boolean(result.created),
+				user: result.user,
+				session: { id: result.session.id, expires_at: result.session.expiresAt },
+			}, result.status ?? 200, headers);
+		} catch (error) {
+			console.error("email sign-in verification failed", { message: error?.message ?? String(error) });
+			return json({ error: "email_signin_unavailable", message: "Itsuki could not verify the code. Try again shortly." }, 503);
 		}
 	},
 
@@ -2033,6 +2245,28 @@ const routes = {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
 		const result = await googleAuthCallback(env, request);
 		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
+		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
+		return new Response(null, { status: 302, headers });
+	},
+
+	"GET /auth/github": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, `github-start:${clientIp(request)}`))) return tooManyFor("auth");
+		const result = await githubAuthStart(env, request);
+		const headers = new Headers({
+			location: new URL(result.redirect, request.url).toString(),
+			"cache-control": "no-store",
+		});
+		if (result.cookie) headers.append("set-cookie", result.cookie);
+		return new Response(null, { status: 302, headers });
+	},
+
+	"GET /auth/github/callback": async (request, env) => {
+		if (!(await allowRate(env.AUTH_LIMITER, `github-callback:${clientIp(request)}`))) return tooManyFor("auth");
+		const result = await githubAuthCallback(env, request);
+		const headers = new Headers({
+			location: new URL(result.redirect, request.url).toString(),
+			"cache-control": "no-store",
+		});
 		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
 		return new Response(null, { status: 302, headers });
 	},
@@ -4116,6 +4350,12 @@ export default {
 		ctx.waitUntil(runReconciliationSweep(env));
 		ctx.waitUntil(retryPendingWebhookDeliveries(env, (promise) => ctx.waitUntil(promise)));
 		ctx.waitUntil(processInvitationEmailOutbox(env, { limit: 25 }));
+		ctx.waitUntil(purgeExpiredEmailChallenges(env, {
+			now: Number(controller?.scheduledTime) || Date.now(),
+			limit: 250,
+		}).catch((error) => {
+			console.warn("email challenge cleanup failed:", error?.message ?? error);
+		}));
 		ctx.waitUntil((async () => {
 			await drainAuditCompletions(env, { limit: 100 });
 			await reconcileStaleAuditIntents(env, {

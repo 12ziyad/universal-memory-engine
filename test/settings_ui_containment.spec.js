@@ -875,13 +875,13 @@ describe("Stage 3 enterprise Settings UI", () => {
 		expect(projectRender).not.toContain("SET.data.organization?.owner_user_id || \"Unavailable\"");
 	});
 
-	it("preserves invitation tokens across password and OAuth authentication without durable storage", () => {
+	it("preserves invitation tokens across passwordless authentication without durable storage", () => {
 		const location = { hash: "#invite=once%2Btoken", pathname: "/app", search: "", href: "" };
 		const historyCalls = [];
 		const sessionValues = new Map();
 		const S = { me: null };
 		const built = build([
-			"invitationTokenFromHash", "routeMode", "pushUrl", "startGoogle",
+			"invitationTokenFromHash", "routeMode", "pushUrl", "stashPendingInvitation", "startGoogle",
 		], {
 			location, history: { pushState: (_state, _title, url) => historyCalls.push(url) },
 			sessionStorage: { setItem: (key, value) => sessionValues.set(key, value) }, S,
@@ -1197,17 +1197,17 @@ describe("Stage 3 enterprise Settings UI", () => {
 		expect(members).toContain("Email is a delivery aid, not the authority");
 	});
 
-	it("groups the project chooser by organization and searches collaborator context", () => {
+	it("keeps adjacent organization and project choosers while searching collaborator context", () => {
 		const render = fnSource("renderProjectMenu");
 		expect(render).toContain("projectOrganizationId(project)");
-		expect(render).toContain("projectOrganization(project)");
 		expect(render).toContain("project.description");
-		expect(render).toContain("project.organization_name");
-		expect(render).toContain('class="project-group"');
 		expect(render).toContain("project-option-description");
 		expect(render).toContain("Description is context only; it does not change extraction or access.");
-		expect(render).toContain("openOrganizationModal()");
-		expect(fnSource("refreshProjects")).toContain('api("/auth/organizations", { projectBound: false })');
+		const organizations = fnSource("renderOrganizationMenu");
+		expect(organizations).toContain("openOrganizationModal()");
+		expect(organizations).toContain("switchManagedOrganization");
+		expect(organizations).toContain("projectOrganizationId(project)");
+		expect(fnSource("refreshProjects")).toContain('api("/auth/bootstrap", { projectBound: false })');
 		expect(fnSource("renderProjectSwitcher")).toContain("The description is collaborator context only");
 	});
 

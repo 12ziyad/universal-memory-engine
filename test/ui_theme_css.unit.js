@@ -8,6 +8,15 @@ const stylesheet = readFileSync(
 ).replace(/\r\n/g, "\n");
 
 describe("product editorial stylesheet", () => {
+	it("ships a responsive two-panel auth and onboarding surface", () => {
+		expect(stylesheet).toContain("body.auth-mode .auth-layout");
+		expect(stylesheet).toContain("grid-template-columns: minmax(360px, 43%) minmax(0, 57%)");
+		expect(stylesheet).toContain("body.auth-mode .auth-editorial-panel");
+		expect(stylesheet).toContain("body.auth-mode .onboarding-choice-grid");
+		expect(stylesheet).toContain("@media (max-width: 980px)");
+		expect(stylesheet).toContain("@media (max-width: 620px)");
+	});
+
 	it("ships independent light and dark palettes for app, auth, and legal doors", () => {
 		expect(stylesheet).toContain("Itsuki product editorial theme v1");
 		for (const scope of [

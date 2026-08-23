@@ -1071,6 +1071,21 @@ async function advanceDestructive(env, run, project, checkpoint, inventory) {
 			env.DB.prepare("DELETE FROM oauth_authorization_codes WHERE grant_id IN (SELECT id FROM oauth_grants WHERE project_id = ?)").bind(run.project_id),
 			env.DB.prepare("DELETE FROM oauth_consent_requests WHERE project_id = ?").bind(run.project_id),
 			env.DB.prepare("DELETE FROM oauth_grants WHERE project_id = ?").bind(run.project_id),
+			// Managed projects are retained as permanent tombstones rather than
+			// hard-deleted, so foreign-key ON DELETE actions never run here. Clear
+			// every durable account selector in the same control-plane transaction
+			// before the project becomes logically deleted.
+			env.DB.prepare(
+				`UPDATE account_onboarding
+				    SET project_id = NULL, updated_at = ?, revision = revision + 1
+				  WHERE project_id = ?`,
+			).bind(now, run.project_id),
+			env.DB.prepare(
+				`UPDATE user_scope_preferences
+				    SET selected_project_id = NULL, updated_at = ?, revision = revision + 1
+				  WHERE selected_project_id = ?`,
+			).bind(now, run.project_id),
+			env.DB.prepare("DELETE FROM user_org_project_preferences WHERE project_id = ?").bind(run.project_id),
 			env.DB.prepare("DELETE FROM project_members WHERE project_id = ?").bind(run.project_id),
 			env.DB.prepare(
 				`UPDATE organization_invitations SET project_id = NULL, project_role = NULL

@@ -201,6 +201,34 @@ export const CENSUS = {
 	audit_event_completions: { kind: "project", purge: "retain", projectDelete: "retain", archive: "retain", why: "content-free security evidence required by policy" },
 
 	// ——— account / organization scope: outside project lifecycle ————————
+	auth_identities: {
+		kind: "account",
+		accountErase: "delete",
+		why: "verified login identities cascade with the owning account",
+	},
+	auth_email_challenges: {
+		kind: "account",
+		accountErase: "delete",
+		why: "short-lived mailbox proofs; cron bounds retention and account erasure deletes the stable email-HMAC residue",
+	},
+	account_onboarding: {
+		kind: "account",
+		accountErase: "delete",
+		projectDelete: "scrub",
+		why: "first-run profile and optional conversation sample cascade with the owning account; a deleted project selector is cleared",
+	},
+	user_scope_preferences: {
+		kind: "account",
+		accountErase: "delete",
+		projectDelete: "scrub",
+		why: "account UI scope selection cascades with the owning account; a deleted project selector is cleared",
+	},
+	user_org_project_preferences: {
+		kind: "account",
+		accountErase: "delete",
+		projectDelete: "delete",
+		why: "per-organization project selection cascades with the owning account and is removed when that project is permanently deleted",
+	},
 	users: { kind: "account" },
 	sessions: { kind: "account" },
 	organizations: { kind: "account" },

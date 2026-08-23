@@ -102,7 +102,8 @@ describe("app type scale", () => {
 
 	it("uses the page title on the views that have one", () => {
 		const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? "";
-		expect(script).toContain('"Log in to Itsuki"');
+		expect(script).toContain('"Continue to Itsuki"');
+		expect(script).toContain('"Create your Itsuki account"');
 		expect(script).toContain('<h2 class="page-title">Connect ${PRODUCT.name}');
 		for (const title of ["API keys", "History"]) {
 			expect(script).toContain(`class="page-title">${title}`);

@@ -23,7 +23,7 @@ describe("app appearance themes", () => {
 
 	it("loads the product editorial layer after the landing theme", () => {
 		const landingHref = "/assets/landing-editorial-v1.css?v=2";
-		const productHref = "/assets/app-editorial-v1.css?v=1";
+		const productHref = "/assets/app-editorial-v1.css?v=2";
 		expect(html).toContain(`<link rel="stylesheet" href="${productHref}" />`);
 		expect(html.indexOf(productHref)).toBeGreaterThan(html.indexOf(landingHref));
 	});
@@ -31,7 +31,7 @@ describe("app appearance themes", () => {
 	it("keeps semantic light and dark scopes wired for app and auth", () => {
 		expect(css).toContain("body.app-mode {");
 		expect(css).toContain('html[data-theme="dark"] body.app-mode');
-		expect(appScript).toContain('mode === "login" || mode === "signup" ? "auth-mode" : "public-mode"');
+		expect(appScript).toContain('["login", "signup", "onboarding", "first-key"].includes(mode) ? "auth-mode" : "public-mode"');
 		for (const variable of [
 			"--bg", "--panel", "--panel2", "--panel3", "--border", "--border2",
 			"--text", "--muted", "--faint", "--accent", "--on-accent", "--shadow-sm",

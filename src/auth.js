@@ -1,4 +1,6 @@
 import { newId } from "./lib/ids.js";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+import { resolveVerifiedIdentity } from "./lib/auth_identity.js";
 import {
 	auditedMutationResult,
 	auditInvariantStatement,
@@ -148,7 +150,7 @@ function sessionCookie(request, token, expiresAt) {
 	return `${SESSION_COOKIE}=${encodeURIComponent(token)}; ${cookieBase(request)}; Max-Age=${maxAge}`;
 }
 
-function publicUser(row) {
+export function publicUser(row) {
 	if (!row) return null;
 	return {
 		id: row.id,
@@ -162,7 +164,7 @@ function publicUser(row) {
 	};
 }
 
-async function createSession(env, request, userId) {
+export async function createSession(env, request, userId) {
 	const token = base64Url(randomBytes(32));
 	const sessionHash = await sha256Hex(token);
 	const createdAt = now();
@@ -179,6 +181,16 @@ async function createSession(env, request, userId) {
 		.bind(id, userId, sessionHash, createdAt, expiresAt, createdAt, userAgent, ipHash)
 		.run();
 	return { id, token, expiresAt, cookie: sessionCookie(request, token, expiresAt) };
+}
+
+/** Shared final door for every interactive identity provider. */
+export async function issueAuthenticatedSession(env, request, userId, outcome, email = null) {
+	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ? LIMIT 1").bind(userId).first();
+	if (!user) return { error: "account_not_found", status: 401 };
+	if (user.status === "disabled") return { error: "account_disabled", status: 403 };
+	const session = await createSession(env, request, user.id);
+	await recordLoginEvent(env, request, user.id, outcome, email);
+	return { user: publicUser(user), session, status: 200 };
 }
 
 export async function getSessionUser(env, request) {
@@ -276,6 +288,9 @@ export async function login(env, request, body) {
 // account (password_hash NULL) with consent + verified email recorded.
 
 const OAUTH_STATE_COOKIE = "uml_oauth_state";
+const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+const GOOGLE_JWKS_URL = new URL("https://www.googleapis.com/oauth2/v3/certs");
+let googleRemoteJwks = null;
 
 function oauthStateCookie(request, value, maxAgeSeconds) {
 	return `${OAUTH_STATE_COOKIE}=${encodeURIComponent(value)}; ${cookieBase(request)}; Max-Age=${maxAgeSeconds}`;
@@ -286,24 +301,34 @@ export function googleAuthStart(env, request) {
 		return { redirect: "/login?error=google_not_configured", cookie: null };
 	}
 	const state = base64Url(randomBytes(24));
+	const nonce = base64Url(randomBytes(24));
 	const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
 	url.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
 	url.searchParams.set("redirect_uri", new URL("/auth/google/callback", request.url).toString());
 	url.searchParams.set("response_type", "code");
 	url.searchParams.set("scope", "openid email profile");
 	url.searchParams.set("state", state);
+	url.searchParams.set("nonce", nonce);
 	url.searchParams.set("prompt", "select_account");
-	return { redirect: url.toString(), cookie: oauthStateCookie(request, state, 600) };
+	return { redirect: url.toString(), cookie: oauthStateCookie(request, `${state}.${nonce}`, 600) };
 }
 
-function decodeIdTokenPayload(idToken) {
-	try {
-		const payload = String(idToken).split(".")[1] ?? "";
-		const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-		return JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "=")));
-	} catch {
-		return null;
-	}
+/**
+ * Verify the Google ID token cryptographically, including issuer, audience,
+ * expiry and the browser-bound nonce.  A key resolver can be injected only
+ * by focused tests; production always uses Google's published JWKS.
+ */
+export async function verifyGoogleIdToken(env, idToken, { nonce, keyResolver = null } = {}) {
+	if (!env.GOOGLE_CLIENT_ID || !nonce) throw new Error("google_verification_not_configured");
+	if (!googleRemoteJwks) googleRemoteJwks = createRemoteJWKSet(GOOGLE_JWKS_URL);
+	const { payload } = await jwtVerify(String(idToken ?? ""), keyResolver || googleRemoteJwks, {
+		issuer: GOOGLE_ISSUERS,
+		audience: env.GOOGLE_CLIENT_ID,
+		algorithms: ["RS256"],
+	});
+	if (!(await timingSafeEqualString(payload.nonce, nonce))) throw new Error("google_nonce_mismatch");
+	if (payload.email_verified !== true) throw new Error("google_email_unverified");
+	return payload;
 }
 
 /**
@@ -316,37 +341,14 @@ export async function resolveGoogleUser(env, profile) {
 	const sub = String(profile?.sub ?? "").trim();
 	const email = normalizeEmail(profile?.email);
 	if (!sub || !isValidEmail(email)) return { error: "google_profile_invalid" };
-	const verifiedAt = profile.email_verified ? now() : null;
-
-	const bySub = await env.DB.prepare("SELECT * FROM users WHERE google_sub = ? LIMIT 1").bind(sub).first();
-	if (bySub) {
-		if (bySub.status === "disabled") return { error: "account_disabled" };
-		return { user: bySub, created: false };
-	}
-
-	const byEmail = await env.DB.prepare("SELECT * FROM users WHERE email_normalized = ? LIMIT 1").bind(email).first();
-	if (byEmail) {
-		if (byEmail.status === "disabled") return { error: "account_disabled" };
-		await env.DB.prepare(
-			`UPDATE users SET google_sub = ?, updated_at = ?,
-				email_verified_at = COALESCE(email_verified_at, ?),
-				name = CASE WHEN COALESCE(name, '') = '' THEN ? ELSE name END
-			 WHERE id = ?`,
-		).bind(sub, now(), verifiedAt, String(profile.name ?? "").slice(0, 120) || null, byEmail.id).run();
-		const linked = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(byEmail.id).first();
-		return { user: linked, created: false };
-	}
-
-	const id = newId("user");
-	const createdAt = now();
-	await env.DB.prepare(
-		`INSERT INTO users
-			(id, email, email_normalized, password_hash, password_salt, name, created_at, updated_at,
-			 status, role, terms_accepted_at, email_verified_at, google_sub)
-		 VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, 'active', 'user', ?, ?, ?)`,
-	).bind(id, email, email, String(profile.name ?? "").slice(0, 120) || null, createdAt, createdAt, createdAt, verifiedAt, sub).run();
-	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
-	return { user, created: true };
+	if (profile.email_verified !== true) return { error: "google_email_unverified" };
+	return resolveVerifiedIdentity(env, {
+		provider: "google",
+		subject: sub,
+		email,
+		name: profile.name,
+		verifiedAt: now(),
+	});
 }
 
 export async function googleAuthCallback(env, request) {
@@ -355,8 +357,11 @@ export async function googleAuthCallback(env, request) {
 	if (url.searchParams.get("error")) return { redirect: "/login?error=google_denied", cookies: [clearState] };
 	const code = url.searchParams.get("code");
 	const state = url.searchParams.get("state");
-	const expectedState = parseCookies(request).get(OAUTH_STATE_COOKIE);
-	if (!code || !state || !expectedState || !(await timingSafeEqualString(state, expectedState))) {
+	const stateEnvelope = parseCookies(request).get(OAUTH_STATE_COOKIE) || "";
+	const separator = stateEnvelope.indexOf(".");
+	const expectedState = separator > 0 ? stateEnvelope.slice(0, separator) : "";
+	const nonce = separator > 0 ? stateEnvelope.slice(separator + 1) : "";
+	if (!code || !state || !expectedState || !nonce || !(await timingSafeEqualString(state, expectedState))) {
 		return { redirect: "/login?error=google_state", cookies: [clearState] };
 	}
 	let payload = null;
@@ -374,9 +379,7 @@ export async function googleAuthCallback(env, request) {
 		});
 		const token = await tokenRes.json().catch(() => ({}));
 		if (!tokenRes.ok || !token.id_token) throw new Error(token.error ?? `token exchange failed (${tokenRes.status})`);
-		// The id_token arrives directly from Google's token endpoint over TLS, so
-		// its claims are trusted without a second signature verification step.
-		payload = decodeIdTokenPayload(token.id_token);
+		payload = await verifyGoogleIdToken(env, token.id_token, { nonce });
 	} catch (error) {
 		console.warn("google token exchange failed:", error?.message ?? error);
 		return { redirect: "/login?error=google_failed", cookies: [clearState] };
@@ -386,12 +389,19 @@ export async function googleAuthCallback(env, request) {
 		const reason = resolved.error === "account_disabled" ? "account_disabled" : "google_failed";
 		return { redirect: `/login?error=${reason}`, cookies: [clearState] };
 	}
-	const session = await createSession(env, request, resolved.user.id);
-	await recordLoginEvent(env, request, resolved.user.id, resolved.created ? "google_signup" : "google_login");
-	return { redirect: "/?app=1", cookies: [clearState, session.cookie] };
+	const authenticated = await issueAuthenticatedSession(
+		env,
+		request,
+		resolved.user.id,
+		resolved.created ? "google_signup" : "google_login",
+	);
+	if (authenticated.error) {
+		return { redirect: `/login?error=${authenticated.error}`, cookies: [clearState] };
+	}
+	return { redirect: "/?app=1", cookies: [clearState, authenticated.session.cookie] };
 }
 
-async function recordLoginEvent(env, request, userId, outcome, email = null) {
+export async function recordLoginEvent(env, request, userId, outcome, email = null) {
 	try {
 		const ip = request.headers.get("cf-connecting-ip") ?? "";
 		await env.DB.prepare(

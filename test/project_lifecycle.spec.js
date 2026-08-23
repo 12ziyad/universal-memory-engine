@@ -548,6 +548,7 @@ describe("archive and restore", () => {
 describe("permanent project deletion", () => {
 	it("converges the purge, tears down the control plane, and leaves only content-free evidence", async () => {
 		const world = await makeWorld({ subtenants: 2, member: true });
+		const bystander = await makeWorld({ label: "selectoriso", subtenants: 0 });
 		for (const space of world.spaces) await seedSpace(world, space, { shadow: true });
 		const now = Date.now();
 		await env.DB.batch([
@@ -559,6 +560,34 @@ describe("permanent project deletion", () => {
 				`INSERT INTO project_categories (id, project_id, memory_owner_user_id, slug, name, status, created_at, updated_at)
 				 VALUES (?, ?, ?, 'cat', 'Category', 'active', ?, ?)`,
 			).bind(`cat_${world.suffix}`, world.projectId, world.memoryOwnerUserId, now, now),
+			env.DB.prepare(
+				`INSERT INTO account_onboarding
+				 (user_id, organization_id, project_id, completed_at, created_at, updated_at, revision)
+				 VALUES (?, ?, ?, ?, ?, ?, 4)`,
+			).bind(world.ownerUserId, world.orgId, world.projectId, now, now, now),
+			env.DB.prepare(
+				`INSERT INTO user_scope_preferences
+				 (user_id, selected_org_id, selected_project_id, updated_at, revision)
+				 VALUES (?, ?, ?, ?, 4)`,
+			).bind(world.ownerUserId, world.orgId, world.projectId, now),
+			env.DB.prepare(
+				`INSERT INTO user_org_project_preferences (user_id, org_id, project_id, updated_at)
+				 VALUES (?, ?, ?, ?)`,
+			).bind(world.ownerUserId, world.orgId, world.projectId, now),
+			env.DB.prepare(
+				`INSERT INTO account_onboarding
+				 (user_id, organization_id, project_id, completed_at, created_at, updated_at, revision)
+				 VALUES (?, ?, ?, ?, ?, ?, 7)`,
+			).bind(bystander.ownerUserId, bystander.orgId, bystander.projectId, now, now, now),
+			env.DB.prepare(
+				`INSERT INTO user_scope_preferences
+				 (user_id, selected_org_id, selected_project_id, updated_at, revision)
+				 VALUES (?, ?, ?, ?, 7)`,
+			).bind(bystander.ownerUserId, bystander.orgId, bystander.projectId, now),
+			env.DB.prepare(
+				`INSERT INTO user_org_project_preferences (user_id, org_id, project_id, updated_at)
+				 VALUES (?, ?, ?, ?)`,
+			).bind(bystander.ownerUserId, bystander.orgId, bystander.projectId, now),
 		]);
 
 		const preview = await previewLifecycleAction(env, {
@@ -594,6 +623,23 @@ describe("permanent project deletion", () => {
 		expect(Number(registry.results[0].n)).toBe(0);
 		expect(tombstone.results[0]).toBeTruthy();
 		expect(tombstone.results[0].action).toBe("project_delete");
+
+		const [targetOnboarding, targetScope, targetOrgProject, otherOnboarding, otherScope, otherOrgProject] = await env.DB.batch([
+			env.DB.prepare("SELECT project_id, revision FROM account_onboarding WHERE user_id = ?").bind(world.ownerUserId),
+			env.DB.prepare("SELECT selected_project_id, revision FROM user_scope_preferences WHERE user_id = ?").bind(world.ownerUserId),
+			env.DB.prepare("SELECT project_id FROM user_org_project_preferences WHERE user_id = ? AND org_id = ?")
+				.bind(world.ownerUserId, world.orgId),
+			env.DB.prepare("SELECT project_id, revision FROM account_onboarding WHERE user_id = ?").bind(bystander.ownerUserId),
+			env.DB.prepare("SELECT selected_project_id, revision FROM user_scope_preferences WHERE user_id = ?").bind(bystander.ownerUserId),
+			env.DB.prepare("SELECT project_id FROM user_org_project_preferences WHERE user_id = ? AND org_id = ?")
+				.bind(bystander.ownerUserId, bystander.orgId),
+		]);
+		expect(targetOnboarding.results[0]).toEqual({ project_id: null, revision: 5 });
+		expect(targetScope.results[0]).toEqual({ selected_project_id: null, revision: 5 });
+		expect(targetOrgProject.results).toEqual([]);
+		expect(otherOnboarding.results[0]).toEqual({ project_id: bystander.projectId, revision: 7 });
+		expect(otherScope.results[0]).toEqual({ selected_project_id: bystander.projectId, revision: 7 });
+		expect(otherOrgProject.results[0]).toEqual({ project_id: bystander.projectId });
 
 		// Terminal semantics: replay returns the terminal run; new actions 410.
 		const replay = await executeLifecycleAction(env, {}, {

@@ -1549,18 +1549,22 @@
 		gap: 7px; padding: 5px 10px; color: var(--muted); }
 	.theme-quick:hover { color: var(--text); }
 	.theme-quick-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; font-size: 15px; }
-	.project-switcher { position: relative; flex: 0 0 auto; }
-	.project-switcher-button { min-width: 190px; max-width: 280px; min-height: 36px; display: grid;
+	.scope-switchers { display: flex; align-items: stretch; gap: 7px; min-width: 0; flex: 0 1 auto; }
+	.project-switcher, .organization-switcher { position: relative; flex: 0 1 auto; min-width: 0; }
+	.project-switcher-button, .organization-switcher-button { min-width: 172px; max-width: 250px; min-height: 44px; display: grid;
 		grid-template-columns: 20px minmax(0, 1fr) 14px; align-items: center; gap: 8px; padding: 6px 10px;
 		background: var(--panel); color: var(--text); border: 1px solid var(--border2); box-shadow: var(--shadow-sm); }
-	.project-switcher-button:hover { border-color: var(--accent); filter: none; }
-	.project-switcher-button .project-folder { color: var(--muted); display: inline-grid; place-items: center; }
-	.project-switcher-button .project-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-		text-align: left; font-size: 13.5px; font-weight: 600; }
-	.project-switcher-button .project-chevron { color: var(--faint); font-size: 11px; }
-	.project-menu { position: absolute; z-index: 70; top: calc(100% + 8px); left: 0; width: min(440px, calc(100vw - 32px));
+	.project-switcher-button:hover, .organization-switcher-button:hover { border-color: var(--accent); filter: none; }
+	.project-switcher-button .project-folder, .organization-switcher-button .organization-symbol { color: var(--muted); display: inline-grid; place-items: center; }
+	.scope-switcher-copy { min-width: 0; display: grid; gap: 1px; text-align: left; }
+	.scope-switcher-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: 9px/1.2 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+	.project-switcher-button .project-current, .organization-switcher-button .organization-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+		text-align: left; font-size: 13.5px; font-weight: 650; }
+	.project-switcher-button .project-chevron, .organization-switcher-button .organization-chevron { color: var(--faint); font-size: 11px; }
+	.project-menu, .organization-menu { position: absolute; z-index: 70; top: calc(100% + 8px); left: 0; width: min(440px, calc(100vw - 32px));
 		background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 10px; }
-	.project-menu[hidden] { display: none; }
+	.organization-menu { width: min(360px, calc(100vw - 32px)); }
+	.project-menu[hidden], .organization-menu[hidden] { display: none; }
 	.project-menu-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-bottom: 8px; }
 	.project-menu-head input { width: 100%; min-width: 0; }
 	.project-menu-actions { display: flex; gap: 6px; }
@@ -1947,9 +1951,17 @@
 			transition: transform .18s ease; box-shadow: 0 0 40px rgba(16,24,40,.18); }
 		body.rail-open #rail { transform: none; }
 		.rail-toggle { display: inline-grid; place-items: center; }
-		.project-switcher-button { min-width: 0; width: min(210px, 48vw); }
+		.scope-switchers { width: min(500px, calc(100vw - 116px)); }
+		.project-switcher, .organization-switcher { flex: 1 1 0; }
+		.project-switcher-button, .organization-switcher-button { min-width: 0; width: 100%; }
 		#appHeader .header-divider, #pageTitle { display: none; }
 		.view { padding: 24px 18px 36px; }
+	}
+	@media (max-width: 620px) {
+		.scope-switchers { width: min(390px, calc(100vw - 108px)); gap: 5px; }
+		.project-switcher-button, .organization-switcher-button { min-height: 38px; padding: 5px 7px; grid-template-columns: 16px minmax(0, 1fr) 10px; gap: 5px; }
+		.scope-switcher-label { display: none; }
+		.project-switcher-button .project-current, .organization-switcher-button .organization-current { font-size: 12px; }
 	}
 
 	/* ---- sidebar ---- */
@@ -2268,7 +2280,7 @@
 	}
 </style>
 <link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=2" />
-<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=1" />
+<link rel="stylesheet" href="/assets/app-editorial-v1.css?v=2" />
 </head>
 <body>
 <div id="landing" class="public-shell lp-shell">
@@ -2425,14 +2437,25 @@ const { context } = await memory.search("When is the review?");</code></pre>
 
 <header id="appHeader">
 	<button class="rail-toggle" id="railToggle" aria-label="Menu" onclick="toggleRail()">☰</button>
-	<div class="project-switcher" id="projectSwitcher">
-		<button class="project-switcher-button" id="projectSwitcherButton" type="button"
-			onclick="toggleProjectMenu()" aria-haspopup="menu" aria-expanded="false">
-			<span class="project-folder" aria-hidden="true">&#128193;</span>
-			<span class="project-current" id="projectCurrentName">Default project</span>
-			<span class="project-chevron" aria-hidden="true">&#9662;</span>
-		</button>
-		<div class="project-menu" id="projectMenu" role="menu" hidden></div>
+	<div class="scope-switchers">
+		<div class="organization-switcher" id="organizationSwitcher">
+			<button class="organization-switcher-button" id="organizationSwitcherButton" type="button"
+				onclick="toggleOrganizationMenu()" aria-haspopup="menu" aria-expanded="false">
+				<span class="organization-symbol" aria-hidden="true">&#9671;</span>
+				<span class="scope-switcher-copy"><span class="scope-switcher-label">Organization</span><span class="organization-current" id="organizationCurrentName">Organization</span></span>
+				<span class="organization-chevron" aria-hidden="true">&#9662;</span>
+			</button>
+			<div class="organization-menu" id="organizationMenu" role="menu" hidden></div>
+		</div>
+		<div class="project-switcher" id="projectSwitcher">
+			<button class="project-switcher-button" id="projectSwitcherButton" type="button"
+				onclick="toggleProjectMenu()" aria-haspopup="menu" aria-expanded="false">
+				<span class="project-folder" aria-hidden="true">&#128193;</span>
+				<span class="scope-switcher-copy"><span class="scope-switcher-label">Project</span><span class="project-current" id="projectCurrentName">Default project</span></span>
+				<span class="project-chevron" aria-hidden="true">&#9662;</span>
+			</button>
+			<div class="project-menu" id="projectMenu" role="menu" hidden></div>
+		</div>
 	</div>
 	<span class="header-divider" aria-hidden="true"></span>
 	<h1 id="pageTitle">Home</h1>
@@ -2688,7 +2711,8 @@ const S = {
 	focusCluster: "",
 	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true,
 	onboardKeyBusy: false, onboardKeyMutationId: 0, onboardKeyMutation: null,
-	projects: [], organizations: [], organizationsError: "", projectId: "", projectEpoch: 0, projectController: null,
+	projects: [], organizations: [], organizationsError: "", organizationId: "", projectId: "", projectEpoch: 0, projectController: null,
+	bootstrap: null, scopeRevision: 0,
 	projectSwitching: false, projectSettingsBusy: false,
 	projectCapabilities: null, projectCapabilitiesLoading: false,
 	overview: {
@@ -2823,6 +2847,10 @@ function projectStorageKey() {
 	return `itsuki_project:${S.me?.user?.id || "anonymous"}`;
 }
 
+function organizationStorageKey() {
+	return `itsuki_organization:${S.me?.user?.id || "anonymous"}`;
+}
+
 function selectedManagedProject() {
 	return S.projects.find((project) => project.id === S.projectId) || S.projects.find((project) => project.is_default) || null;
 }
@@ -2841,6 +2869,7 @@ function projectDescriptionCopy(project) {
 }
 
 function selectedOrganizationId() {
+	if (S.organizationId) return S.organizationId;
 	if (SET.data?.project?.id === S.projectId && SET.data?.organization?.id) return SET.data.organization.id;
 	if (S.projectCapabilities?.projectId === S.projectId && S.projectCapabilities.organizationId) {
 		return S.projectCapabilities.organizationId;
@@ -2848,13 +2877,33 @@ function selectedOrganizationId() {
 	return projectOrganizationId(selectedManagedProject());
 }
 
+function selectedOrganization() {
+	const id = selectedOrganizationId();
+	return S.organizations.find((organization) => organization.id === id) || projectOrganization(selectedManagedProject()) || null;
+}
+
 function selectedOrganizationName() {
+	const selected = selectedOrganization();
+	if (selected?.name) return selected.name;
 	if (SET.data?.project?.id === S.projectId && SET.data?.organization?.name) return SET.data.organization.name;
 	const project = selectedManagedProject();
 	return S.projectCapabilities?.organizationName || projectOrganization(project)?.name || project?.organization_name || "the selected organization";
 }
 
 function renderProjectSwitcher() {
+	const organization = selectedOrganization();
+	const organizationName = document.getElementById("organizationCurrentName");
+	if (organizationName) organizationName.textContent = organization?.name || "Organization";
+	const organizationButton = document.getElementById("organizationSwitcherButton");
+	if (organizationButton) {
+		organizationButton.disabled = S.projectSwitching || !S.organizations.length;
+		organizationButton.title = organization
+			? `${organization.name}. ${organization.role || "member"} access. Choose an organization.`
+			: "Loading organizations";
+		organizationButton.setAttribute("aria-label", organization
+			? `Current organization ${organization.name}. Choose an organization.`
+			: "Loading organizations");
+	}
 	const current = selectedManagedProject();
 	const name = document.getElementById("projectCurrentName");
 	if (name) name.textContent = current?.name || "Default project";
@@ -2869,6 +2918,7 @@ function renderProjectSwitcher() {
 			: "Loading projects");
 	}
 	if (!document.getElementById("projectMenu")?.hidden) renderProjectMenu();
+	if (!document.getElementById("organizationMenu")?.hidden) renderOrganizationMenu();
 }
 
 function projectSearch(value) {
@@ -2881,43 +2931,25 @@ function renderProjectMenu(query = document.getElementById("projectSearch")?.val
 	const menu = document.getElementById("projectMenu");
 	if (!menu) return;
 	const needle = String(query).trim().toLocaleLowerCase("en-US");
+	const organizationId = selectedOrganizationId();
 	const projects = S.projects.filter((project) => {
-		const organization = projectOrganization(project);
-		return !needle || [project.name, project.description, organization?.name, project.organization_name]
+		if (organizationId && projectOrganizationId(project) !== organizationId) return false;
+		return !needle || [project.name, project.description]
 			.some((value) => String(value || "").toLocaleLowerCase("en-US").includes(needle));
 	});
-	const groups = [];
-	for (const project of projects) {
-		const organizationId = projectOrganizationId(project) || `legacy:${project.owner_user_id || "unknown"}`;
-		let group = groups.find((candidate) => candidate.id === organizationId);
-		if (!group) {
-			const organization = projectOrganization(project);
-			group = {
-				id: organizationId,
-				name: organization?.name || project.organization_name || "Organization unavailable",
-				role: organization?.role || project.organization_role || "",
-				projects: [],
-			};
-			groups.push(group);
-		}
-		group.projects.push(project);
-	}
 	const createNote = projectCapabilityActionCopy("project.create", "Only an organization owner or admin can create projects.");
 	menu.innerHTML = `
 		<div class="project-menu-head">
-			<input id="projectSearch" value="${esc(query)}" placeholder="Search projects or descriptions" aria-label="Search projects by name or description"
+			<input id="projectSearch" value="${esc(query)}" placeholder="Search projects" aria-label="Search projects by name or description"
 				oninput="projectSearch(this.value)" />
 			<div class="project-menu-actions">
-				<button type="button" class="ghost" onclick="openOrganizationModal()">New organization</button>
 				${projectCan("project.create")
 					? '<button type="button" onclick="openProjectModal()">New project</button>'
 					: `<button type="button" disabled title="${esc(createNote)}">New project</button>`}
 			</div>
 		</div>
 		<div class="project-list" role="menu">
-			${groups.length ? groups.map((group) => `<div class="project-group" role="group" aria-label="${esc(group.name)}">
-				<div class="project-group-label"><span>${esc(group.name)}</span><span class="project-group-role">${esc(group.role || "access granted")}</span></div>
-				${group.projects.map((project) => `
+			${projects.length ? projects.map((project) => `
 					<button type="button" class="project-option ${project.id === S.projectId ? "active" : ""}"
 						role="menuitemradio" aria-checked="${project.id === S.projectId ? "true" : "false"}"
 						title="${esc(projectDescriptionCopy(project))}. Description is context only; it does not change extraction or access."
@@ -2926,14 +2958,37 @@ function renderProjectMenu(query = document.getElementById("projectSearch")?.val
 						<span class="project-option-copy"><span class="project-option-name">${esc(project.name)}</span>
 							<span class="project-option-description">${esc(projectDescriptionCopy(project))}</span></span>
 						<span class="project-option-check">${project.id === S.projectId ? "✓" : ""}</span>
-					</button>`).join("")}
-			</div>`).join("") : `<div class="project-empty">No matching projects.</div>`}
+					</button>`).join("") : `<div class="project-empty">No matching projects in ${esc(selectedOrganizationName())}.</div>`}
 			${S.organizationsError ? `<div class="project-error" role="alert">Organization details could not be refreshed. Project access shown here is still current.</div>` : ""}
 		</div>`;
 	requestAnimationFrame(() => {
 		const input = document.getElementById("projectSearch");
 		if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 	});
+}
+
+function renderOrganizationMenu() {
+	const menu = document.getElementById("organizationMenu");
+	if (!menu) return;
+	menu.innerHTML = `
+		<div class="project-menu-head">
+			<div><div class="scope-switcher-label">Organizations</div><div class="help">Governance and billing boundaries</div></div>
+			<div class="project-menu-actions"><button type="button" onclick="openOrganizationModal()">New organization</button></div>
+		</div>
+		<div class="project-list" role="menu">
+			${S.organizations.length ? S.organizations.map((organization) => {
+				const count = S.projects.filter((project) => projectOrganizationId(project) === organization.id).length;
+				return `<button type="button" class="project-option ${organization.id === selectedOrganizationId() ? "active" : ""}"
+					role="menuitemradio" aria-checked="${organization.id === selectedOrganizationId() ? "true" : "false"}"
+					onclick="switchManagedOrganization('${esc(organization.id)}')">
+					<span aria-hidden="true">&#9671;</span>
+					<span class="project-option-copy"><span class="project-option-name">${esc(organization.name)}</span>
+						<span class="project-option-description">${esc(organization.role || "member")} · ${count} project${count === 1 ? "" : "s"}</span></span>
+					<span class="project-option-check">${organization.id === selectedOrganizationId() ? "✓" : ""}</span>
+				</button>`;
+			}).join("") : '<div class="project-empty">No organizations available.</div>'}
+			${S.organizationsError ? `<div class="project-error" role="alert">${esc(S.organizationsError)}</div>` : ""}
+		</div>`;
 }
 
 function toggleProjectMenu(force) {
@@ -2943,7 +2998,17 @@ function toggleProjectMenu(force) {
 	const open = typeof force === "boolean" ? force : menu.hidden;
 	menu.hidden = !open;
 	button?.setAttribute("aria-expanded", open ? "true" : "false");
-	if (open) renderProjectMenu("");
+	if (open) { toggleOrganizationMenu(false); renderProjectMenu(""); }
+}
+
+function toggleOrganizationMenu(force) {
+	const menu = document.getElementById("organizationMenu");
+	const button = document.getElementById("organizationSwitcherButton");
+	if (!menu || button?.disabled) return;
+	const open = typeof force === "boolean" ? force : menu.hidden;
+	menu.hidden = !open;
+	button?.setAttribute("aria-expanded", open ? "true" : "false");
+	if (open) { toggleProjectMenu(false); renderOrganizationMenu(); }
 }
 
 function projectSwitchBlocked() {
@@ -3156,30 +3221,63 @@ async function submitProjectModal() {
 	}
 }
 
-async function refreshProjects() {
-	if (!S.me?.user?.id || S.devMode) return;
-	const [result, organizationsResult] = await Promise.all([
-		api("/auth/projects", { projectBound: false }),
-		api("/auth/organizations", { projectBound: false }).catch((error) => ({ organizations: null, error })),
-	]);
-	S.projects = result.projects || [];
-	if (Array.isArray(organizationsResult.organizations)) {
-		S.organizations = organizationsResult.organizations;
-		S.organizationsError = "";
-	} else {
-		S.organizations = [];
-		S.organizationsError = organizationsResult.error?.message || "Organization details are unavailable.";
-	}
-	const stored = localStorage.getItem(projectStorageKey());
-	const selected = S.projects.find((project) => project.id === S.projectId)
-		|| S.projects.find((project) => project.id === stored)
+function applyAccountBootstrap(result) {
+	if (!result || typeof result !== "object") throw new Error("Account setup returned an invalid response.");
+	S.bootstrap = result;
+	S.projects = Array.isArray(result.projects) ? result.projects : [];
+	S.organizations = Array.isArray(result.organizations) ? result.organizations : [];
+	S.organizationsError = "";
+	const scope = result.scope && typeof result.scope === "object" ? result.scope : null;
+	S.scopeRevision = Number.isSafeInteger(Number(scope?.revision)) ? Number(scope.revision) : 0;
+
+	// The server is authoritative. A revoked seat, archived project, or scope
+	// changed in another browser must beat every stale browser cache.
+	const scopedProject = scope
+		? S.projects.find((project) => project.id === scope.project_id
+			&& projectOrganizationId(project) === scope.organization_id)
+		: null;
+	const selected = scopedProject
+		|| S.projects.find((project) => project.id === result.onboarding?.project_id)
 		|| S.projects.find((project) => project.is_default)
-		|| S.projects[0];
+		|| S.projects[0]
+		|| null;
 	S.projectId = selected?.id || "";
-	if (S.projectId) localStorage.setItem(projectStorageKey(), S.projectId);
+	S.organizationId = scope?.organization_id
+		|| projectOrganizationId(selected)
+		|| result.onboarding?.organization_id
+		|| S.organizations[0]?.id
+		|| "";
+	if (S.organizationId && projectOrganizationId(selected) !== S.organizationId) {
+		const organizationProject = S.projects.find((project) => projectOrganizationId(project) === S.organizationId && project.is_default)
+			|| S.projects.find((project) => projectOrganizationId(project) === S.organizationId);
+		S.projectId = organizationProject?.id || S.projectId;
+	}
 	if (!S.projectController) S.projectController = new AbortController();
 	renderProjectSwitcher();
-	await refreshProjectCapabilities();
+	return result;
+}
+
+async function refreshProjects() {
+	if (!S.me?.user?.id || S.devMode) return null;
+	const result = await api("/auth/bootstrap", { projectBound: false });
+	applyAccountBootstrap(result);
+	if (S.projectId) await refreshProjectCapabilities();
+	return result;
+}
+
+async function persistScopeSelection(organizationId, projectId) {
+	if (S.devMode || !S.me?.user?.id) return null;
+	const result = await api("/auth/scope", {
+		method: "POST",
+		projectBound: false,
+		body: JSON.stringify({
+			organizationId,
+			projectId,
+			expectedRevision: S.scopeRevision > 0 ? S.scopeRevision : null,
+		}),
+	});
+	applyAccountBootstrap(result);
+	return result;
 }
 
 function resetProjectBoundUiState() {
@@ -3232,7 +3330,10 @@ function resetProjectBoundUiState() {
 		version: null, projectId: "", projectEpoch: -1, busy: false, mutation: null, conflict: null,
 	});
 	clearTimeout(EX.poll); Object.assign(EX, { rows: [], loading: false, creating: false, error: "", poll: null });
-	Object.assign(RQ, { rows: [], loading: false, error: "" });
+	Object.assign(RQ, {
+		rows: [], loading: false, loaded: false, loadingRange: "", error: "",
+		requestId: RQ.requestId + 1,
+	});
 	Object.assign(WH, {
 		rows: [], deliveries: [], loading: false, creating: false, openLog: null, error: "", listError: "",
 		secret: null, mutation: null,
@@ -3252,21 +3353,61 @@ async function switchManagedProject(projectId) {
 	if (!setConfirmDiscard("switch projects")) return;
 	if (S.oneTimeToken && !confirm("A newly created secret is still visible. Switch projects only after you have copied it. Continue?")) return;
 	toggleProjectMenu(false);
+	toggleOrganizationMenu(false);
+	const previousProjectId = S.projectId;
+	const previousOrganizationId = S.organizationId;
 	S.projectSwitching = true;
 	S.projectEpoch += 1;
 	S.projectController?.abort();
 	S.projectController = new AbortController();
 	S.projectId = project.id;
-	localStorage.setItem(projectStorageKey(), project.id);
+	S.organizationId = projectOrganizationId(project) || S.organizationId;
 	resetProjectBoundUiState();
 	renderProjectSwitcher();
 	renderAll();
 	try {
+		try {
+			await persistScopeSelection(S.organizationId, S.projectId);
+		} catch (error) {
+			// A selector is a durable server preference, not a browser-only choice.
+			// On a CAS conflict (or a revoked seat), re-read the authorized scope and
+			// never leave the UI pointed at a scope the server rejected.
+			try { await refreshProjects(); }
+			catch {
+				S.projectId = previousProjectId;
+				S.organizationId = previousOrganizationId;
+			}
+			banner(error.status === 412
+				? "Your project selection changed in another session. The latest selection has been restored."
+				: `That project selection could not be saved. Your last verified selection has been restored: ${error.message}`);
+		}
 		await Promise.all([refreshProjectCapabilities(), refreshTokens(), load()]);
 	} finally {
 		S.projectSwitching = false;
 		renderProjectSwitcher();
 	}
+}
+
+async function switchManagedOrganization(organizationId) {
+	const organization = S.organizations.find((candidate) => candidate.id === organizationId);
+	if (!organization || S.projectSwitching) return;
+	if (organization.id === selectedOrganizationId()) { toggleOrganizationMenu(false); return; }
+	if (projectSwitchBlocked()) {
+		toast("Wait for the current save, delete, create, or send action before switching organizations.", true);
+		return;
+	}
+	if (!setConfirmDiscard("switch organizations")) return;
+	if (S.oneTimeToken && !confirm("A newly created secret is still visible. Switch organizations only after you have copied it. Continue?")) return;
+	const projects = S.projects.filter((project) => projectOrganizationId(project) === organization.id);
+	const rememberedProjectId = organization.selected_project_id || organization.last_project_id || "";
+	const project = projects.find((candidate) => candidate.id === rememberedProjectId)
+		|| projects.find((candidate) => candidate.is_default)
+		|| projects[0];
+	if (!project) {
+		toast("No accessible project is available in that organization.", true);
+		return;
+	}
+	await switchManagedProject(project.id);
 }
 
 async function saveManagedProjectDetails() {
@@ -3370,7 +3511,7 @@ let revealObserver = null;
 
 function setMode(mode) {
 	document.body.classList.remove("public-mode", "auth-mode", "app-mode");
-	document.body.classList.add(mode === "app" ? "app-mode" : mode === "login" || mode === "signup" ? "auth-mode" : "public-mode");
+	document.body.classList.add(mode === "app" ? "app-mode" : ["login", "signup", "onboarding", "first-key"].includes(mode) ? "auth-mode" : "public-mode");
 	if (mode === "public") requestAnimationFrame(initReveal);
 }
 
@@ -3525,131 +3666,475 @@ function renderAppUser() {
 }
 
 const GOOGLE_BTN_SVG = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+const GITHUB_BTN_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.02c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.28-1.29-5.28-5.73 0-1.27.45-2.3 1.19-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.16 1.19a10.9 10.9 0 0 1 5.76 0c2.19-1.5 3.16-1.19 3.16-1.19.63 1.6.23 2.78.11 3.07.74.81 1.19 1.84 1.19 3.11 0 4.46-2.71 5.43-5.3 5.72.42.36.79 1.07.79 2.16v3.02c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>`;
 
 const AUTH_ERROR_MESSAGES = {
 	google_denied: "Google sign-in was cancelled. You can try again any time.",
 	google_state: "That sign-in attempt expired — please try again.",
-	google_failed: "Google sign-in failed. Please try again, or log in with your email and password.",
+	google_failed: "Google sign-in failed. Please try again, or use an email code.",
 	google_not_configured: "Google sign-in is not available right now.",
+	github_denied: "GitHub sign-in was cancelled. You can try again any time.",
+	github_state: "That GitHub sign-in attempt expired — please try again.",
+	github_failed: "GitHub sign-in failed. Please try again, or use an email code.",
+	github_not_configured: "GitHub sign-in is not available right now.",
+	github_verified_email_required: "GitHub needs a verified primary email before it can sign you in.",
 	account_disabled: "This account is disabled. Contact support if you think this is a mistake.",
 };
 
-function startGoogle(event) {
-	if (event) event.preventDefault();
+const AUTH_FLOW = {
+	mode: "login", step: "entry", email: "", maskedEmail: "", busy: false, error: "",
+	expiresAt: 0, resendAt: 0,
+};
+
+function resetAuthFlow() {
+	Object.assign(AUTH_FLOW, {
+		mode: "login", step: "entry", email: "", maskedEmail: "", busy: false, error: "",
+		expiresAt: 0, resendAt: 0,
+	});
+}
+
+const FIRST_RUN = {
+	stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false,
+	fields: {
+		workspaceName: "", useScope: "personal", useCase: "", useCaseOther: "",
+		heardAbout: "", heardAboutOther: "", conversationSample: "", conversationSampleConsent: false,
+	},
+};
+
+function stashPendingInvitation() {
 	const inviteToken = invitationTokenFromHash();
 	// OAuth cannot preserve a URL fragment. Keep the token only in this tab for
 	// the round trip; never localStorage, cookie, analytics, or a server log.
 	if (inviteToken) sessionStorage.setItem("itsuki_pending_invite", inviteToken);
+}
+
+function startGoogle(event) {
+	if (event) event.preventDefault();
+	stashPendingInvitation();
 	location.href = "/auth/google/start";
+}
+
+function startGithub(event) {
+	if (event) event.preventDefault();
+	stashPendingInvitation();
+	location.href = "/auth/github";
+}
+
+function authBrandPanel({ eyebrow = "Structured memory infrastructure", title = "Your memory layer, with the record intact.", step = "Secure access" } = {}) {
+	return `<aside class="auth-editorial-panel" aria-label="Itsuki ${esc(step)}">
+		<a class="auth-editorial-brand" href="/" onclick="showPublic(event)">
+			<img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" />
+			<span><b>Itsuki</b><small>イツキ</small></span>
+		</a>
+		<div class="auth-editorial-copy">
+			<span class="auth-kicker">${esc(eyebrow)}</span>
+			<h1>${esc(title)}</h1>
+			<p>Source-backed memory for agents that need durable context, safe updates, and evidence you can inspect.</p>
+		</div>
+		<div class="auth-proof-grid" aria-label="Product assurances">
+			<span><b>01</b> Passwordless</span><span><b>02</b> Project isolated</span><span><b>03</b> Revision safe</span>
+		</div>
+	</aside>`;
+}
+
+function authErrorBox(message = AUTH_FLOW.error) {
+	return `<div class="auth-error" id="authError" role="alert" aria-live="polite" style="${message ? "display:block" : ""}">${esc(message)}</div>`;
 }
 
 function renderAuth(mode = "login") {
 	const isSignup = mode === "signup";
 	const hasInvitation = Boolean(invitationTokenFromHash());
+	AUTH_FLOW.mode = mode;
 	if (isSignup) sendFunnelStep("signup_view");
 	const view = $("#authView");
-	view.innerHTML = `
-		<form class="auth-card" id="authForm">
-			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki logo" />
-				<span><b>Itsuki</b><span>Personal memory layer</span></span>
-			</a>
-			<h2>${hasInvitation ? (isSignup ? "Create an account to review your invitation" : "Log in to review your invitation") : (isSignup ? "Create your Itsuki account" : "Log in to Itsuki")}</h2>
-			<p>${hasInvitation ? "Use the email address the organization invited. The link stays in this tab until you accept or dismiss it." : (isSignup ? "Start one private memory layer for supported AI tools and your own agents." : "Open your private memory dashboard.")}</p>
-			<div class="auth-error" id="authError"></div>
-			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
-			<div class="auth-agree">By continuing with Google you agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
-			<div class="auth-divider">or continue with email</div>
-			${isSignup ? `<div class="form-row"><label for="authName">Name</label><input id="authName" autocomplete="name" placeholder="Your name" /></div>` : ""}
-			<div class="form-row"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div>
-			<div class="form-row"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required minlength="8" placeholder="At least 8 characters" />
-			${isSignup ? "" : `<a class="forgot-link" href="#" onclick="showForgotPassword(event)">Forgot password?</a>`}</div>
-			${isSignup ? `<label class="help" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer">
-				<input id="authConsent" type="checkbox" required style="margin-top:2px" />
-				<span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
-			</label>` : ""}
-			<div class="auth-actions" style="margin-top:16px">
-				<button type="submit">${isSignup ? "Sign up" : "Login"}</button>
-				<a class="cta-secondary" href="${isSignup ? "/login" : "/signup"}" onclick="showAuth('${isSignup ? "login" : "signup"}', event)">${isSignup ? "I have an account" : "Create account"}</a>
-			</div>
-		</form>`;
+	const codeStep = AUTH_FLOW.step === "code";
+	view.innerHTML = `<div class="auth-layout">
+		${authBrandPanel({
+			eyebrow: hasInvitation ? "Invitation waiting" : "Structured memory infrastructure",
+			title: hasInvitation ? "One verified identity. Then the invitation is yours to review." : "Your memory layer, with the record intact.",
+		})}
+		<main class="auth-entry-panel"><form class="auth-card auth-access-card" id="authForm" aria-busy="${AUTH_FLOW.busy}">
+			<div class="auth-card-mark"><img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki" /></div>
+			<div class="auth-step-label">${codeStep ? "02 / Verify" : "01 / Access"}</div>
+			<h2>${codeStep ? "Enter the six-digit code" : hasInvitation ? "Sign in to review the invitation" : isSignup ? "Create your Itsuki account" : "Continue to Itsuki"}</h2>
+			<p>${codeStep ? `We sent a one-time code to ${esc(AUTH_FLOW.maskedEmail || AUTH_FLOW.email)}. It expires in 10 minutes.` : hasInvitation ? "Use the email address that was invited. We keep the invitation in this tab through sign-in." : "No password to remember. Choose a verified provider or receive a one-time email code."}</p>
+			${authErrorBox()}
+			${codeStep ? `
+				<div class="form-row auth-code-row"><label for="authCode">Verification code</label>
+					<input id="authCode" class="auth-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required aria-describedby="authCodeHelp" autofocus placeholder="000000" /></div>
+				<div id="authCodeHelp" class="auth-code-meta"><span>Code sent</span><button type="button" class="auth-text-button" onclick="resendAuthCode()" ${AUTH_FLOW.busy || Date.now() < AUTH_FLOW.resendAt ? "disabled" : ""}>Send another code</button></div>
+				<div class="auth-actions"><button type="submit" ${AUTH_FLOW.busy ? "disabled" : ""}>${AUTH_FLOW.busy ? "Verifying…" : "Verify and continue"}</button>
+					<button type="button" class="cta-secondary" onclick="resetAuthEmail()" ${AUTH_FLOW.busy ? "disabled" : ""}>Use another email</button></div>` : `
+				<div class="auth-provider-grid">
+					<button type="button" class="google-btn" onclick="startGoogle(event)" ${AUTH_FLOW.busy ? "disabled" : ""}>${GOOGLE_BTN_SVG}Continue with Google</button>
+					<button type="button" class="github-btn" onclick="startGithub(event)" ${AUTH_FLOW.busy ? "disabled" : ""}>${GITHUB_BTN_SVG}Continue with GitHub</button>
+				</div>
+				<div class="auth-divider">or use a work email</div>
+				<div class="form-row"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required value="${esc(AUTH_FLOW.email)}" placeholder="you@company.com" /></div>
+				<div class="auth-actions"><button type="submit" ${AUTH_FLOW.busy ? "disabled" : ""}>${AUTH_FLOW.busy ? "Sending…" : "Email me a code"}</button></div>`}
+			<div class="auth-agree">By continuing, you agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
+			<div class="auth-card-seal" aria-hidden="true"><img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" /> Memory with provenance</div>
+		</form></main>
+	</div>`;
 	$("#authForm").onsubmit = async (event) => {
 		event.preventDefault();
-		await submitAuth(isSignup ? "signup" : "login");
+		if (AUTH_FLOW.step === "code") await submitAuthCode();
+		else await submitAuth(isSignup ? "signup" : "login");
 	};
 	const oauthError = AUTH_ERROR_MESSAGES[new URLSearchParams(location.search).get("error")];
 	if (oauthError) {
+		AUTH_FLOW.error = oauthError;
 		const err = $("#authError");
-		err.textContent = oauthError;
-		err.style.display = "block";
+		if (err) { err.textContent = oauthError; err.style.display = "block"; }
 	}
 }
 
-function showForgotPassword(event) {
-	if (event) event.preventDefault();
-	const view = $("#authView");
-	view.innerHTML = `
-		<div class="auth-card">
-			<a class="brand-lockup" href="/" onclick="showPublic(event)">
-				<img src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="Itsuki logo" />
-				<span><b>Itsuki</b><span>Personal memory layer</span></span>
-			</a>
-			<h2>Forgot your password?</h2>
-			<p>No reset email needed — your Google account is the recovery key.</p>
-			<button type="button" class="google-btn" onclick="startGoogle(event)">${GOOGLE_BTN_SVG}Continue with Google</button>
-			<div class="auth-agree">Use the <b>same email</b> as your Itsuki account and you'll land right back in it — same memory, no password required. You can keep using Google from then on.</div>
-			<div class="auth-divider">no Google account with that email?</div>
-			<p class="help">Email <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> from your account email and we'll verify you and reset it manually — usually within a day. Automatic email reset links are coming once email sending launches.</p>
-			<div class="auth-actions" style="margin-top:16px">
-				<a class="cta-secondary" href="/login" onclick="showAuth('login', event)">&larr; Back to login</a>
-			</div>
-		</div>`;
+function resetAuthEmail() {
+	if (AUTH_FLOW.busy) return;
+	Object.assign(AUTH_FLOW, { step: "entry", maskedEmail: "", error: "", expiresAt: 0, resendAt: 0 });
+	renderAuth(AUTH_FLOW.mode);
 }
 
 async function submitAuth(mode) {
-	const err = $("#authError");
-	if (err) err.style.display = "none";
-	const fallback = mode === "signup" ? "Could not create account. Please try again." : "Could not log in. Please try again.";
-	const payload = {
-		email: $("#authEmail")?.value || "",
-		password: $("#authPassword")?.value || "",
-	};
-	if (mode === "signup") {
-		payload.name = $("#authName")?.value || "";
-		payload.acceptTerms = Boolean($("#authConsent")?.checked);
-	}
+	if (AUTH_FLOW.busy) return;
+	AUTH_FLOW.mode = mode;
+	AUTH_FLOW.email = ($("#authEmail")?.value || AUTH_FLOW.email).trim();
+	AUTH_FLOW.error = "";
+	if (!AUTH_FLOW.email) { AUTH_FLOW.error = "Enter your email address."; renderAuth(mode); return; }
+	AUTH_FLOW.busy = true;
+	renderAuth(mode);
 	try {
-		let res;
-		try {
-			res = await fetch(`/auth/${mode}`, {
-				method: "POST",
-				credentials: "include",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-		} catch {
-			throw new Error(FRIENDLY_NETWORK);
-		}
+		stashPendingInvitation();
+		const res = await fetch("/auth/email/start", {
+			method: "POST", credentials: "include", headers: { "content-type": "application/json" },
+			body: JSON.stringify({ email: AUTH_FLOW.email }),
+		});
 		const body = await res.json().catch(() => ({}));
-		if (!res.ok) throw new Error(typeof body.error === "string" && body.error ? body.error : friendlyHttpError(res.status, body) || fallback);
-		if (mode === "signup") sendFunnelStep("signup_done");
-		S.me = body;
-		S.userId = body.user.id;
-		localStorage.setItem("uml_user", S.userId);
-		pushUrl("/app", { preserveInvite: true });
-		setMode("app");
-		renderAppUser();
-		try { await refreshProjects(); }
-		catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
-		await beginInvitationRedemption();
-		await refreshTokens();
-		await load();
-	} catch (e) {
-		if (err) {
-			err.textContent = e.message || fallback;
-			err.style.display = "block";
+		if (!res.ok) {
+			const failure = new Error(friendlyHttpError(res.status, body));
+			failure.status = res.status;
+			failure.body = body;
+			throw failure;
 		}
+		Object.assign(AUTH_FLOW, {
+			step: "code", maskedEmail: body.email || AUTH_FLOW.email,
+			expiresAt: Number(body.expires_at || 0), resendAt: Number(body.resend_at || 0), error: "",
+		});
+	} catch (e) {
+		AUTH_FLOW.error = e.status === 429
+			? "A code was already sent recently. Wait a moment before requesting another."
+			: e.message || "The code could not be sent. Please try again.";
+	} finally {
+		AUTH_FLOW.busy = false;
+		renderAuth(mode);
 	}
+}
+
+async function resendAuthCode() {
+	if (AUTH_FLOW.busy || Date.now() < AUTH_FLOW.resendAt) return;
+	AUTH_FLOW.step = "entry";
+	await submitAuth(AUTH_FLOW.mode);
+}
+
+async function submitAuthCode() {
+	if (AUTH_FLOW.busy) return;
+	const code = String($("#authCode")?.value || "").replace(/\D/g, "");
+	if (!/^\d{6}$/.test(code)) {
+		AUTH_FLOW.error = "Enter all six digits from the email.";
+		renderAuth(AUTH_FLOW.mode);
+		return;
+	}
+	AUTH_FLOW.busy = true;
+	AUTH_FLOW.error = "";
+	renderAuth(AUTH_FLOW.mode);
+	try {
+		const res = await fetch("/auth/email/verify", {
+			method: "POST", credentials: "include", headers: { "content-type": "application/json" },
+			body: JSON.stringify({ code }),
+		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) {
+			const copy = {
+				invalid_email_code: "That code is not valid. Check the email and try again.",
+				email_code_expired: "That code expired. Request a new one.",
+			}[body.error] || friendlyHttpError(res.status, body);
+			throw new Error(copy);
+		}
+		if (AUTH_FLOW.mode === "signup" || body.created) sendFunnelStep("signup_done");
+		Object.assign(AUTH_FLOW, { busy: false, error: "", step: "entry", maskedEmail: "" });
+		await finishAuthentication();
+		return;
+	} catch (error) {
+		AUTH_FLOW.error = error.message || "The code could not be verified. Try again.";
+	} finally {
+		AUTH_FLOW.busy = false;
+		if (!S.me) renderAuth(AUTH_FLOW.mode);
+	}
+}
+
+function defaultWorkspaceName() {
+	const name = String(S.me?.user?.name || "").trim();
+	if (name) return `${name}'s workspace`.slice(0, 80);
+	const local = String(S.me?.user?.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+	return local ? `${local}'s workspace`.slice(0, 80) : "My workspace";
+}
+
+function prepareFirstRun(bootstrap) {
+	const onboarding = bootstrap?.onboarding || {};
+	Object.assign(FIRST_RUN, { stage: "onboarding", step: 0, busy: false, error: "", key: null, keyCopied: false });
+	FIRST_RUN.fields = {
+		workspaceName: onboarding.workspace_name || defaultWorkspaceName(),
+		useScope: onboarding.use_scope || "personal",
+		useCase: onboarding.use_case || "",
+		useCaseOther: onboarding.use_case_other || "",
+		heardAbout: onboarding.heard_about || "",
+		heardAboutOther: onboarding.heard_about_other || "",
+		conversationSample: "",
+		conversationSampleConsent: false,
+	};
+}
+
+function firstRunFrame(content, { step = 1, total = 3, title = "Set up your memory workspace", eyebrow = "First run" } = {}) {
+	return `<div class="auth-layout first-run-layout">
+		${authBrandPanel({ eyebrow, title, step: "account setup" })}
+		<main class="auth-entry-panel"><section class="auth-card first-run-card" aria-busy="${FIRST_RUN.busy}">
+			<div class="first-run-head"><div><span class="auth-step-label">${String(step).padStart(2, "0")} / ${String(total).padStart(2, "0")}</span><h2>${esc(title)}</h2></div>
+				<div class="first-run-progress" aria-label="Step ${step} of ${total}">${Array.from({ length: total }, (_, index) => `<span class="${index < step ? "active" : ""}"></span>`).join("")}</div></div>
+			${FIRST_RUN.error ? `<div class="auth-error" role="alert" aria-live="polite" style="display:block">${esc(FIRST_RUN.error)}</div>` : ""}
+			${content}
+		</section></main>
+	</div>`;
+}
+
+function onboardingSet(field, value, { rerender = false } = {}) {
+	if (!Object.prototype.hasOwnProperty.call(FIRST_RUN.fields, field)) return;
+	FIRST_RUN.fields[field] = value;
+	FIRST_RUN.error = "";
+	if (rerender) renderFirstRun();
+}
+
+function onboardingScopeOption(value, title, copy) {
+	const active = FIRST_RUN.fields.useScope === value;
+	return `<button type="button" class="onboarding-choice ${active ? "active" : ""}" aria-pressed="${active}"
+		onclick="onboardingSet('useScope','${value}',{rerender:true})"><span class="onboarding-choice-dot" aria-hidden="true"></span><span><b>${esc(title)}</b><small>${esc(copy)}</small></span></button>`;
+}
+
+function onboardingOption(value, label, selected) {
+	return `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`;
+}
+
+function renderFirstRun() {
+	setMode(FIRST_RUN.stage === "key" ? "first-key" : "onboarding");
+	const view = $("#authView");
+	if (!view) return;
+	if (FIRST_RUN.stage === "key") {
+		renderFirstRunKey();
+		return;
+	}
+	const fields = FIRST_RUN.fields;
+	const step = FIRST_RUN.step;
+	let content = "";
+	if (step === 0) {
+		content = `<p class="first-run-intro">Name the workspace that will own your first organization and its isolated Default project.</p>
+			<div class="form-row"><label for="workspaceName">Workspace name</label><input id="workspaceName" maxlength="80" required autofocus
+				value="${esc(fields.workspaceName)}" placeholder="Acme AI" oninput="onboardingSet('workspaceName',this.value)" /></div>
+			<fieldset class="onboarding-fieldset"><legend>Where will you use Itsuki?</legend><div class="onboarding-choice-grid">
+				${onboardingScopeOption("personal", "Personal", "One private memory layer for your own tools.")}
+				${onboardingScopeOption("team", "Team", "A shared workspace with governed project access.")}
+				${onboardingScopeOption("product", "Product", "Memory infrastructure inside a customer-facing product.")}
+			</div></fieldset>
+			<div class="auth-actions first-run-actions"><button type="button" onclick="advanceOnboarding()">Continue</button></div>`;
+	} else if (step === 1) {
+		content = `<p class="first-run-intro">This shapes the setup guidance only. It does not change extraction, retention, or access rules.</p>
+			<div class="form-row"><label for="onboardingUseCase">Primary use case</label><select id="onboardingUseCase" required onchange="onboardingSet('useCase',this.value,{rerender:true})">
+				${onboardingOption("", "Choose one", fields.useCase)}${onboardingOption("agent_memory", "Agent memory", fields.useCase)}${onboardingOption("customer_support", "Customer support", fields.useCase)}
+				${onboardingOption("knowledge_assistant", "Knowledge assistant", fields.useCase)}${onboardingOption("coding_agent", "Coding agent", fields.useCase)}${onboardingOption("personal_ai", "Personal AI", fields.useCase)}${onboardingOption("other", "Other", fields.useCase)}
+			</select></div>
+			${fields.useCase === "other" ? `<div class="form-row"><label for="onboardingUseCaseOther">Tell us what you are building</label><textarea id="onboardingUseCaseOther" maxlength="500" required oninput="onboardingSet('useCaseOther',this.value)">${esc(fields.useCaseOther)}</textarea></div>` : ""}
+			<div class="form-row"><label for="onboardingHeard">How did you hear about Itsuki?</label><select id="onboardingHeard" required onchange="onboardingSet('heardAbout',this.value,{rerender:true})">
+				${onboardingOption("", "Choose one", fields.heardAbout)}${onboardingOption("search", "Search", fields.heardAbout)}${onboardingOption("github", "GitHub", fields.heardAbout)}
+				${onboardingOption("community", "Developer community", fields.heardAbout)}${onboardingOption("friend", "Friend or colleague", fields.heardAbout)}${onboardingOption("social", "Social media", fields.heardAbout)}${onboardingOption("other", "Other", fields.heardAbout)}
+			</select></div>
+			${fields.heardAbout === "other" ? `<div class="form-row"><label for="onboardingHeardOther">Where did you find us?</label><input id="onboardingHeardOther" maxlength="500" required value="${esc(fields.heardAboutOther)}" oninput="onboardingSet('heardAboutOther',this.value)" /></div>` : ""}
+			<div class="auth-actions first-run-actions"><button type="button" class="cta-secondary" onclick="backOnboarding()">Back</button><button type="button" onclick="advanceOnboarding()">Continue</button></div>`;
+	} else {
+		content = `<p class="first-run-intro">Optional: share the conversation that led you here so Itsuki can improve setup guidance. Nothing is stored unless you explicitly opt in below.</p>
+			<label class="onboarding-consent"><input type="checkbox" ${fields.conversationSampleConsent ? "checked" : ""}
+				onchange="onboardingSet('conversationSampleConsent',this.checked,{rerender:true})" /><span><b>Share this sample with Itsuki</b><small>It is stored only with your onboarding response after setup is submitted. It is not imported into project memory. Leave this off to store nothing.</small></span></label>
+			${fields.conversationSampleConsent ? `<div class="form-row"><label for="conversationSample">Conversation sample <span class="help">(optional · 20,000 characters max)</span></label>
+				<textarea id="conversationSample" maxlength="20000" rows="7" placeholder="User: I prefer concise project updates…" oninput="onboardingSet('conversationSample',this.value)">${esc(fields.conversationSample)}</textarea></div>` : `<div class="onboarding-private-note"><b>No sample will be stored.</b><span>You can add a conversation later from Playground or the API.</span></div>`}
+			<div class="auth-actions first-run-actions"><button type="button" class="cta-secondary" onclick="backOnboarding()" ${FIRST_RUN.busy ? "disabled" : ""}>Back</button><button type="button" onclick="submitOnboarding()" ${FIRST_RUN.busy ? "disabled" : ""}>${FIRST_RUN.busy ? "Creating workspace…" : "Create workspace"}</button></div>`;
+	}
+	view.innerHTML = firstRunFrame(content, { step: step + 1, total: 3, title: "Set up your memory workspace" });
+}
+
+function validateOnboardingStep(step = FIRST_RUN.step) {
+	const fields = FIRST_RUN.fields;
+	if (step === 0) {
+		if (!String(fields.workspaceName).trim()) return "Enter a workspace name.";
+		if (!["personal", "team", "product"].includes(fields.useScope)) return "Choose where you will use Itsuki.";
+	}
+	if (step === 1) {
+		if (!fields.useCase) return "Choose your primary use case.";
+		if (fields.useCase === "other" && !String(fields.useCaseOther).trim()) return "Tell us what you are building.";
+		if (!fields.heardAbout) return "Choose how you heard about Itsuki.";
+		if (fields.heardAbout === "other" && !String(fields.heardAboutOther).trim()) return "Tell us where you found Itsuki.";
+	}
+	return "";
+}
+
+function advanceOnboarding() {
+	const error = validateOnboardingStep();
+	if (error) { FIRST_RUN.error = error; renderFirstRun(); return; }
+	FIRST_RUN.error = "";
+	FIRST_RUN.step = Math.min(2, FIRST_RUN.step + 1);
+	renderFirstRun();
+}
+
+function backOnboarding() {
+	if (FIRST_RUN.busy) return;
+	FIRST_RUN.error = "";
+	FIRST_RUN.step = Math.max(0, FIRST_RUN.step - 1);
+	renderFirstRun();
+}
+
+async function submitOnboarding() {
+	if (FIRST_RUN.busy) return;
+	const error = validateOnboardingStep(0) || validateOnboardingStep(1);
+	if (error) { FIRST_RUN.error = error; renderFirstRun(); return; }
+	const fields = FIRST_RUN.fields;
+	FIRST_RUN.busy = true;
+	FIRST_RUN.error = "";
+	renderFirstRun();
+	try {
+		const result = await api("/auth/onboarding", {
+			method: "POST", projectBound: false,
+			body: JSON.stringify({
+				workspaceName: String(fields.workspaceName).trim(),
+				useScope: fields.useScope,
+				useCase: fields.useCase,
+				useCaseOther: fields.useCase === "other" ? String(fields.useCaseOther).trim() : null,
+				heardAbout: fields.heardAbout,
+				heardAboutOther: fields.heardAbout === "other" ? String(fields.heardAboutOther).trim() : null,
+				conversationSample: fields.conversationSampleConsent ? String(fields.conversationSample).trim() : null,
+				conversationSampleConsent: fields.conversationSampleConsent === true,
+			}),
+		});
+		applyAccountBootstrap(result);
+		const project = S.projects.find((candidate) => candidate.id === S.projectId);
+		const organization = S.organizations.find((candidate) => candidate.id === S.organizationId);
+		if (!result.onboarding?.completed || !organization || !project || !project.is_default) {
+			throw new Error("The workspace was created, but its Default project could not be verified. Reload before continuing.");
+		}
+		Object.assign(FIRST_RUN, { stage: "key", step: 0, busy: false, error: "", key: null, keyCopied: false });
+		renderFirstRun();
+		return;
+	} catch (setupError) {
+		FIRST_RUN.error = setupError.message || "The workspace could not be created. Nothing was partially applied; try again.";
+	} finally {
+		FIRST_RUN.busy = false;
+		renderFirstRun();
+	}
+}
+
+function renderFirstRunKey() {
+	const view = $("#authView");
+	if (!view) return;
+	const key = FIRST_RUN.key;
+	view.innerHTML = firstRunFrame(`<p class="first-run-intro">Create one project-bound API key. The full secret is shown once and never written to browser storage.</p>
+		${key ? `<div class="first-key-panel">
+			<div class="first-key-label"><span>itsuki_live</span><b>First API key</b></div>
+			<div class="secret-field first-key-secret"><input id="firstRunKey" readonly value="${esc(key)}" onclick="this.select()" aria-label="First API key" />
+				<button type="button" onclick="copyFirstRunKey()" aria-label="Copy first API key">${FIRST_RUN.keyCopied ? "Copied ✓" : "Copy"}</button></div>
+			<div class="key-warning">Copy this key now. It cannot be shown again after you proceed.</div>
+			${FIRST_RUN.error ? `<div class="auth-error" role="alert" style="display:block">${esc(FIRST_RUN.error)}</div>` : ""}
+			${FIRST_RUN.keyCopied ? '<div class="auth-actions first-run-actions"><button type="button" onclick="proceedFirstRunKey()">Proceed</button></div>' : ""}
+		</div>` : `<div class="first-key-empty"><span class="first-key-index">01</span><div><h3>Create your first API key</h3><p>It is permanently bound to <b>${esc(selectedManagedProject()?.name || "Default project")}</b>. You can delete it at any time without affecting other integrations.</p></div></div>
+			<div class="auth-actions first-run-actions"><button type="button" onclick="createFirstRunKey()" ${FIRST_RUN.busy ? "disabled" : ""}>${FIRST_RUN.busy ? "Creating key…" : "Create API key"}</button></div>`}
+	`, { step: 1, total: 2, title: "Connect your first client", eyebrow: "Workspace created" });
+}
+
+async function createFirstRunKey() {
+	if (FIRST_RUN.busy || FIRST_RUN.key) return;
+	FIRST_RUN.busy = true;
+	FIRST_RUN.error = "";
+	renderFirstRun();
+	try {
+		const result = await api("/auth/tokens", {
+			method: "POST",
+			body: JSON.stringify({ type: "api", label: "First API key" }),
+		});
+		if (!result?.token || !result?.tokenRecord?.id) throw new Error("The server did not return the one-time key.");
+		// Copy-once material exists in memory only. Never localStorage, sessionStorage,
+		// a URL, logs, telemetry, or a persisted application object.
+		FIRST_RUN.key = result.token;
+		FIRST_RUN.keyCopied = false;
+	} catch (error) {
+		FIRST_RUN.error = error.message || "The API key could not be created. Try again.";
+	} finally {
+		FIRST_RUN.busy = false;
+		renderFirstRun();
+	}
+}
+
+async function copyFirstRunKey() {
+	if (!FIRST_RUN.key || FIRST_RUN.busy) return;
+	FIRST_RUN.error = "";
+	try {
+		await navigator.clipboard.writeText(FIRST_RUN.key);
+		// The browser resolves writeText only after the clipboard write succeeds.
+		// That fulfilled operation is the verification gate for Proceed.
+		FIRST_RUN.keyCopied = true;
+	} catch {
+		FIRST_RUN.keyCopied = false;
+		FIRST_RUN.error = "Copy failed. Allow clipboard access and try again; Proceed stays locked until the copy succeeds.";
+	}
+	renderFirstRun();
+}
+
+async function proceedFirstRunKey() {
+	if (!FIRST_RUN.key || !FIRST_RUN.keyCopied || FIRST_RUN.busy) return;
+	FIRST_RUN.key = null;
+	FIRST_RUN.keyCopied = false;
+	FIRST_RUN.stage = "idle";
+	FIRST_RUN.error = "";
+	S.view = "install";
+	await completeFirstRun();
+}
+
+async function openAuthenticatedApp() {
+	S.view = hashView() || S.view || "overview";
+	setMode("app");
+	setView(S.view, { updateHash: false });
+	renderAppUser();
+	sendVisitBeacon("app");
+	await beginInvitationRedemption();
+	await refreshTokens();
+	await load();
+}
+
+async function finishAuthentication() {
+	const me = await refreshMe();
+	if (!me?.user?.id) throw new Error("The secure session could not be verified. Please sign in again.");
+	S.userId = me.user.id;
+	localStorage.setItem("uml_user", S.userId);
+	pushUrl("/app", { preserveInvite: true });
+	renderAppUser();
+	const bootstrap = await refreshProjects();
+	if (bootstrap?.onboarding?.required) {
+		prepareFirstRun(bootstrap);
+		renderFirstRun();
+		return false;
+	}
+	await openAuthenticatedApp();
+	return true;
+}
+
+async function completeFirstRun() {
+	if (FIRST_RUN.busy || FIRST_RUN.key) return;
+	FIRST_RUN.stage = "idle";
+	FIRST_RUN.error = "";
+	await openAuthenticatedApp();
 }
 
 function invitationReasonCopy(reason, message = "") {
@@ -3726,7 +4211,9 @@ async function signOutForInvitation() {
 	if (!INVITE_ACCEPT.token || INVITE_ACCEPT.loading || INVITE_ACCEPT.accepting) return;
 	await fetch("/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.projects = []; S.organizations = []; S.organizationsError = ""; S.projectId = ""; S.projectController = null;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	resetAuthFlow();
+	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	Object.assign(INVITE_ACCEPT, { loading: false, accepting: false, detail: null, error: "", reason: "", done: false });
 	pushUrl("/login", { preserveInvite: true });
 	renderInvitationModal();
@@ -8192,7 +8679,7 @@ function createKeyFor(type) {
  */
 function installKeyGuard() {
 	window.addEventListener("beforeunload", (event) => {
-		if (!copyOnceLifecycleActive()) {
+		if (!copyOnceLifecycleActive() && !FIRST_RUN.key) {
 			if (!S.oneTimeToken && !setHasUnsavedWork() && !setMutationBusy()
 				&& !PROJECT_CREATE.open && !ORG_CREATE.open) return;
 		}
@@ -8630,6 +9117,8 @@ function updatePlaygroundVisibility() {
 	}
 	const menu = document.getElementById("projectMenu");
 	if (menu && !menu.hidden) renderProjectMenu();
+	const organizationMenu = document.getElementById("organizationMenu");
+	if (organizationMenu && !organizationMenu.hidden) renderOrganizationMenu();
 }
 
 async function refreshProjectCapabilities() {
@@ -11084,7 +11573,11 @@ async function deleteToken(id, label) {
  * sentence: the server does not even select those columns. What happened, how
  * long it took, whether it worked. The admin analytics follow the same rule.
  */
-const RQ = { rows: [], range: "7d", type: "all", query: "", loading: false, error: "" };
+const REQUEST_TIMEOUT_MS = 15_000;
+const RQ = {
+	rows: [], range: "7d", type: "all", query: "", loading: false,
+	loaded: false, loadingRange: "", error: "", requestId: 0,
+};
 
 // Two request types exist in this engine: writes and lookups. There is no
 // third — inventing one to fill a column would be inventing data.
@@ -11184,7 +11677,7 @@ function viewRequests(v) {
 				${Object.entries(REQUEST_TYPES).map(([id, label]) => `<option value="${id}" ${RQ.type === id ? "selected" : ""}>${esc(label)}</option>`).join("")}
 			</select>
 			<div class="terminal-tabs">${rangeButton("1d", "24h")}${rangeButton("7d", "7d")}${rangeButton("30d", "30d")}${rangeButton("90d", "90d")}</div>
-			<button class="ghost" onclick="loadRequests()">${RQ.loading ? "Refreshing…" : "Refresh"}</button>
+			<button class="ghost" onclick="loadRequests()" ${RQ.loading ? "disabled" : ""}>${RQ.loading ? "Refreshing…" : "Refresh"}</button>
 		</div>
 		<div class="box" style="max-width:none">
 			<div class="section-h">Request volume</div>
@@ -11199,7 +11692,9 @@ function viewRequests(v) {
 		</div>`;
 	v.appendChild(wrap);
 	renderRequestsTable();
-	if (!RQ.rows.length && !RQ.loading) loadRequests();
+	// Loading state is lifecycle state, not data state. A valid response can be
+	// empty, and must not turn into an automatic request loop.
+	if (!RQ.loaded && !RQ.loading) loadRequests();
 }
 
 function renderRequestsTable() {
@@ -11236,25 +11731,58 @@ function renderRequestsTable() {
 }
 
 function setRequestRange(range) {
+	if (range === RQ.range) return;
 	RQ.range = range;
+	RQ.rows = [];
+	RQ.error = "";
+	RQ.loaded = false;
 	loadRequests();
 }
 
 async function loadRequests() {
+	const range = RQ.range;
+	// Re-renders and repeated clicks must share the current load. A different
+	// range is allowed to supersede it and is fenced by requestId below.
+	if (RQ.loading && RQ.loadingRange === range) return;
+	const requestId = ++RQ.requestId;
 	const projectEpoch = S.projectEpoch;
+	const controller = new AbortController();
+	const projectSignal = S.projectController?.signal;
+	const abortForProjectChange = () => controller.abort();
+	if (projectSignal?.aborted) controller.abort();
+	else projectSignal?.addEventListener("abort", abortForProjectChange, { once: true });
+	let timedOut = false;
+	const timeout = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, REQUEST_TIMEOUT_MS);
 	RQ.loading = true;
+	RQ.loaded = false;
+	RQ.loadingRange = range;
+	RQ.error = "";
 	if (S.view === "requests") renderView();
 	try {
-		const res = await api(`/v1/requests?range=${encodeURIComponent(RQ.range)}`);
-		if (projectEpoch !== S.projectEpoch) return;
+		const res = await api(`/v1/requests?range=${encodeURIComponent(range)}`, { signal: controller.signal });
+		if (requestId !== RQ.requestId || projectEpoch !== S.projectEpoch || range !== RQ.range) return;
 		RQ.rows = res.requests || [];
 		RQ.error = "";
+		RQ.loaded = true;
 	} catch (e) {
-		if (e?.projectChanged || projectEpoch !== S.projectEpoch) return;
-		RQ.error = e.message || "Could not load your requests. Try refreshing in a moment.";
+		if (requestId !== RQ.requestId || projectEpoch !== S.projectEpoch || range !== RQ.range) return;
+		if (timedOut) {
+			RQ.error = "Requests took too long to load. Try refreshing in a moment.";
+		} else if (e?.projectChanged) {
+			return;
+		} else {
+			RQ.error = e.message || "Could not load your requests. Try refreshing in a moment.";
+		}
+		RQ.loaded = true;
 	} finally {
-		if (projectEpoch !== S.projectEpoch) return;
+		clearTimeout(timeout);
+		projectSignal?.removeEventListener("abort", abortForProjectChange);
+		if (requestId !== RQ.requestId || projectEpoch !== S.projectEpoch || range !== RQ.range) return;
 		RQ.loading = false;
+		RQ.loadingRange = "";
 		if (S.view === "requests") renderView();
 	}
 }
@@ -17213,7 +17741,9 @@ async function copyText(t, msg) {
 async function logoutNow() {
 	await fetch("/auth/logout", { method:"POST", credentials:"include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.projectId = ""; S.projectController = null;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	resetAuthFlow();
+	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	pushUrl("/");
 	setMode("public");
 }
@@ -17222,7 +17752,9 @@ async function logoutAllNow() {
 	if (!confirm("Log out all browser sessions for this account?")) return;
 	await fetch("/auth/logout-all", { method:"POST", credentials:"include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.projectId = ""; S.projectController = null;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	resetAuthFlow();
+	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	pushUrl("/");
 	setMode("public");
 }
@@ -17243,16 +17775,8 @@ async function initShell() {
 	}
 	if (mode === "login" || mode === "signup") {
 		if (S.me) {
-			pushUrl("/app");
-			S.view = hashView() || S.view || "overview";
-			setMode("app");
-			setView(S.view, { updateHash: false });
-			sendVisitBeacon("app");
-			try { await refreshProjects(); }
-			catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
-			await beginInvitationRedemption();
-			await refreshTokens();
-			await load();
+			try { await finishAuthentication(); }
+			catch (projectError) { banner("Account setup could not be loaded: " + projectError.message); }
 			return;
 		}
 		renderAuth(mode);
@@ -17267,15 +17791,8 @@ async function initShell() {
 			sendVisitBeacon("landing");
 			return;
 		}
-		S.view = hashView() || S.view || "overview";
-		setMode("app");
-		setView(S.view, { updateHash: false });
-		sendVisitBeacon("app");
-		try { await refreshProjects(); }
-		catch (projectError) { banner("Projects could not be loaded: " + projectError.message); return; }
-		await beginInvitationRedemption();
-		await refreshTokens();
-		await load();
+		try { await finishAuthentication(); }
+		catch (projectError) { banner("Account setup could not be loaded: " + projectError.message); }
 		return;
 	}
 	setMode("public");
@@ -17378,9 +17895,11 @@ window.addEventListener("keydown", (event) => {
 	if (modal?.id === "installExpanded") { event.preventDefault(); closeInstallExpanded(); return; }
 	if (S.installExpanded) { event.preventDefault(); closeInstallExpanded(); return; }
 	toggleProjectMenu(false);
+	toggleOrganizationMenu(false);
 });
 document.addEventListener("click", (event) => {
 	if (!event.target.closest("#projectSwitcher")) toggleProjectMenu(false);
+	if (!event.target.closest("#organizationSwitcher")) toggleOrganizationMenu(false);
 });
 initConnectWidget();
 initHeroReel();

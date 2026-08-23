@@ -10,7 +10,9 @@ describe("dashboard script", () => {
 		expect(script).toContain("function initReveal()");
 		expect(script).toContain("function renderAuth(");
 		expect(script).toContain("function hashView()");
-		expect(script.match(/setView\(S\.view, \{ updateHash: false \}\);/g)).toHaveLength(2);
+		// All authenticated entry paths converge on one loader; duplicate shell
+		// initialization was removed when first-run onboarding was introduced.
+		expect(script.match(/setView\(S\.view, \{ updateHash: false \}\);/g)).toHaveLength(1);
 		expect(script).toContain('APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"])');
 		expect(script).toContain("function viewMemory(");
 		expect(script).toContain("/v1/candidates");

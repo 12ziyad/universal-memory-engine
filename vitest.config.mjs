@@ -25,6 +25,7 @@ export default defineConfig(async () => {
 						// Test-only overrides win even if the host process carries
 						// same-named production secrets. GCP bindings stay absent.
 						API_KEY: "itsuki_test_only_not_a_secret",
+						AUTH_EMAIL_SECRET: "itsuki-test-only-email-auth-secret-at-least-32-bytes",
 						GOOGLE_CLIENT_ID: "test-client-id.apps.googleusercontent.com",
 						GOOGLE_CLIENT_SECRET: "test-client-secret-not-a-secret",
 						AI_ROUTING: "off",

@@ -54,5 +54,6 @@
  "0053_ai_routing_and_pins.sql": "cab458c1aa288ca184e0ac54644984f6b881d1f1e34bcf9927081bc0c1fcc674",
  "0054_ai_shadow_jobs.sql": "825a1d39c3aec6a380cba958f0cdecd68346bc9fa764fca87dab88173550cb61",
  "0055_ai_provider_reservation_hardening.sql": "f49bd94d3833315718dc381c0f72d63ace24a92cd144fac26e566602153920f8",
- "0056_ai_shadow_hardening.sql": "846b9f9b72772b3c0609d9628e23c914243c6dac516141dfa5124e2a7b451ae1"
+ "0056_ai_shadow_hardening.sql": "846b9f9b72772b3c0609d9628e23c914243c6dac516141dfa5124e2a7b451ae1",
+ "0057_passwordless_onboarding_scope.sql": "9064feaa15f31e663afeb42dff6e7926fbbbd8f21cee32af2f04a6742207d4e2"
 }

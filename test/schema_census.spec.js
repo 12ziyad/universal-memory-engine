@@ -112,4 +112,19 @@ describe("lifecycle schema census", () => {
 			accountErase: "scrub",
 		});
 	});
+
+	it("classifies every passwordless and onboarding table for account erasure", () => {
+		for (const table of [
+			"auth_identities",
+			"auth_email_challenges",
+			"account_onboarding",
+			"user_scope_preferences",
+			"user_org_project_preferences",
+		]) {
+			expect(CENSUS[table]).toMatchObject({ kind: "account", accountErase: "delete" });
+		}
+		expect(CENSUS.account_onboarding).toMatchObject({ projectDelete: "scrub" });
+		expect(CENSUS.user_scope_preferences).toMatchObject({ projectDelete: "scrub" });
+		expect(CENSUS.user_org_project_preferences).toMatchObject({ projectDelete: "delete" });
+	});
 });

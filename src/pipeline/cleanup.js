@@ -26,6 +26,7 @@ import { countSemanticAtomCandidates } from "./atomic_candidates.mjs";
 import { rebuildConversationPageFromSources } from "./mcp_engine.js";
 import { grantRevocationStatements } from "../lib/oauth.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "./source.js";
+import { emailChallengeErasureStatement } from "../lib/passwordless_auth.js";
 import {
 	assertNoActiveProviderInvocation,
 	scrubProviderReservationLifecycle,
@@ -862,6 +863,11 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		const unchanged = { deleted: false, already_deleted: true, memory_spaces: 0 };
 		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
 	}
+	// Build every mandatory erasure key before the first destructive write. The
+	// keyed email digest is required to find terminal challenges whose plaintext
+	// address was already minimized; a missing secret must fail the request while
+	// the account is still fully active and untouched.
+	const emailChallengeErasure = await emailChallengeErasureStatement(env, user.email_normalized);
 
 	// Ownership is governance, not an implementation detail we may silently
 	// discard. A shared organization must be transferred explicitly before its
@@ -1205,6 +1211,7 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		env.DB.prepare("DELETE FROM playground_messages WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM playground_threads WHERE account_user_id = ?").bind(userId),
 		env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+		emailChallengeErasure,
 		env.DB.prepare("DELETE FROM connection_tokens WHERE user_id = ?").bind(userId),
 		// OAuth credentials are torn down with the rest of the account's
 		// credentials. Children first: a token or code outliving its grant
@@ -1333,7 +1340,11 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 	}
 	const deleteUser = env.DB.prepare("DELETE FROM users WHERE id = ? AND status = 'disabled'").bind(userId);
 	const deleted = await deleteUser.run();
-	if (Number(deleted?.meta?.changes ?? 0) !== 1) throw new Error("account deletion lost its final state transition");
+	// D1 includes foreign-key cascade work in meta.changes. Passwordless users
+	// now have identity/onboarding children, so a successful guarded user delete
+	// can legitimately report more than one affected row. Zero still proves that
+	// the disabled-state CAS did not linearize.
+	if (Number(deleted?.meta?.changes ?? 0) < 1) throw new Error("account deletion lost its final state transition");
 	const result = { deleted: true, memory: memoryResults[0], memory_spaces: memoryResults.length };
 	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }
