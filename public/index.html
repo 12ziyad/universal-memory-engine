@@ -2310,7 +2310,7 @@
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
 </style>
-<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=6" />
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=7" />
 <link rel="stylesheet" href="/assets/app-editorial-v1.css?v=4" />
 </head>
 <body>
@@ -2393,37 +2393,51 @@ const { context } = await memory.search("When is the review?");</code></pre>
 			</div>
 		</section>
 
-		<section class="product-proof-section reveal" id="product" aria-label="Itsuki product preview">
+		<section class="contrast-section reveal" id="product" aria-label="Raw conversation compared with structured memory">
 			<header class="proof-heading">
-				<div class="section-kicker"><span>03</span> Product visibility</div>
-				<h2>See what your AI<br />remembers.</h2>
-				<p>Every memory carries where it came from, which revision is current, and what it connects to. Select one to inspect it.</p>
+				<div class="section-kicker"><span>03</span> The difference</div>
+				<h2>What a context window<br />hands your model.</h2>
+				<p>Everyone else replays the transcript and hopes the model finds the point. Itsuki keeps the point, its source, and the shape of what it connects to.</p>
 			</header>
-			<div class="product-frame">
-				<div class="product-frame-bar"><strong>Memory inspector</strong><small>EXAMPLE WORKSPACE</small></div>
-				<div class="product-list" role="tablist" aria-label="Example memories">
-					<span class="product-label">MEMORIES</span>
-					<button type="button" role="tab" id="landingMemoryTab0" aria-selected="true" aria-controls="landingMemoryDetail" tabindex="0" class="product-memory active" data-landing-memory="0" onclick="landingSelectMemory(0)"><b>Pricing review moves to October.</b><small>Fact · Updated today</small></button>
-					<button type="button" role="tab" id="landingMemoryTab1" aria-selected="false" aria-controls="landingMemoryDetail" tabindex="-1" class="product-memory" data-landing-memory="1" onclick="landingSelectMemory(1)"><b>Team prefers async project updates.</b><small>Preference · Updated 2d ago</small></button>
-					<button type="button" role="tab" id="landingMemoryTab2" aria-selected="false" aria-controls="landingMemoryDetail" tabindex="-1" class="product-memory" data-landing-memory="2" onclick="landingSelectMemory(2)"><b>Support escalations follow the incident runbook.</b><small>Procedure · Updated 5d ago</small></button>
-				</div>
-				<div class="product-detail" role="tabpanel" id="landingMemoryDetail" aria-labelledby="landingMemoryTab0">
-					<div class="detail-state"><span id="landingMemoryState">Current</span><small id="landingMemoryRevision">REVISION 04</small></div>
-					<h3 id="landingMemoryTitle">Pricing review moves to October.</h3>
-					<p id="landingMemoryBody">Superseded September on 12 Aug. The previous revision is still readable, and one click restores it as a new forward revision.</p>
-					<dl>
-						<div><dt>Type</dt><dd id="landingMemoryType">Fact</dd></div>
-						<div><dt>Scope</dt><dd id="landingMemoryScope">Project</dd></div>
-						<div><dt>Source</dt><dd id="landingMemorySource">Planning conversation</dd></div>
-						<div><dt>History</dt><dd id="landingMemoryHistory">4 revisions · reversible</dd></div>
-					</dl>
-				</div>
-				<div class="product-connections" aria-label="Example memory connections">
-					<span class="product-label">CONNECTIONS</span>
-					<div class="connection-map"><i class="c-line one"></i><i class="c-line two"></i><b class="c-node center" id="landingMemoryNode0">Review</b><b class="c-node top" id="landingMemoryNode1">October</b><b class="c-node left" id="landingMemoryNode2">Pricing</b><b class="c-node right" id="landingMemoryNode3">Planning</b></div>
-					<p>Structured relationships keep recall precise.</p>
+			<dl class="contrast-stats" aria-label="What the example produces">
+				<div><dt>18</dt><dd>turns of conversation in</dd></div>
+				<div><dt>4</dt><dd>durable objects out</dd></div>
+				<div><dt>14</dt><dd>lines deliberately discarded</dd></div>
+				<div><dt>1</dt><dd>source every object points to</dd></div>
+			</dl>
+			<div class="contrast-split">
+				<article class="contrast-pane raw">
+					<header><b>Raw</b><span>Transcript<br />replayed in full</span></header>
+					<p class="contrast-lines">
+						<span>&ldquo;hey are we still on for the review&rdquo;</span>
+						<span>&ldquo;let me check the calendar one sec&rdquo;</span>
+						<span>&ldquo;ok so september is completely packed&rdquo;</span>
+						<b>&ldquo;we're moving the pricing review to october&rdquo;</b>
+						<span>&ldquo;who's calling it?&rdquo;</span>
+						<b>&ldquo;the growth lead owns it now&rdquo;</b>
+						<span>&ldquo;cool, i'll tell the team&rdquo;</span>
+						<span>&ldquo;thanks!&rdquo;</span>
+					</p>
+					<p class="contrast-more">&plus; 10 more turns of the same, replayed on every request.</p>
+				</article>
+				<div class="contrast-arrow" aria-hidden="true"><span></span><b>&rarr;</b><span></span></div>
+				<article class="contrast-pane structured">
+					<header><b>Structured</b><span>Typed<br />and source-linked</span></header>
+					<div class="contrast-row"><b>Fact</b><span>Pricing review moves to October.<i>Current &middot; revision 04 &middot; earlier versions restorable</i></span></div>
+					<div class="contrast-row"><b>Event</b><span>Review rescheduled &mdash; 12 Aug<i>Dated, so &ldquo;when did this change?&rdquo; has an answer</i></span></div>
+					<div class="contrast-row"><b>Entity</b><span>Growth lead &mdash; person<i>Recalled whenever they come up again</i></span></div>
+					<div class="contrast-row"><b>Relationship</b><span>Pricing review &rarr; owned by &rarr; Growth lead<i>Lets recall follow the graph, not just keywords</i></span></div>
+					<p class="contrast-drop"><b>Discarded on purpose:</b> greetings, scheduling chatter, and questions with no durable answer. Your rules decide what never becomes memory.</p>
+				</article>
+			</div>
+			<div class="contrast-recall">
+				<span class="contrast-later">Six months later</span>
+				<div>
+					<p class="contrast-q">&ldquo;Who moved the pricing review, and when?&rdquo;</p>
+					<div class="contrast-chips"><span><b>fact</b> pricing review &rarr; October</span><span><b>event</b> rescheduled 12 Aug</span><span><b>entity</b> growth lead</span><span><b>source</b> planning call</span></div>
 				</div>
 			</div>
+			<p class="contrast-note">A worked example. Your agent receives four typed objects and a source it can cite &mdash; not eighteen turns it has to re-read and guess at.</p>
 		</section>
 
 		<section class="lifecycle-section reveal" id="workflow">
@@ -3766,69 +3780,6 @@ function landingSelectStep(index) {
 	}
 }
 
-/* The landing inspector is a real control, not a picture of one. Selecting a
-   memory swaps the detail panel and the connection map, so the interaction a
-   visitor expects from three stacked rows actually happens. */
-const LANDING_MEMORIES = [
-	{
-		title: "Pricing review moves to October.",
-		body: "Superseded September on 12 Aug. The previous revision is still readable, and one click restores it as a new forward revision.",
-		state: "Current", revision: "REVISION 04", type: "Fact", scope: "Project",
-		source: "Planning conversation", history: "4 revisions · reversible",
-		nodes: ["Review", "October", "Pricing", "Planning"],
-	},
-	{
-		title: "Team prefers async project updates.",
-		body: "Recalled whenever an assistant drafts a status message, so tone and cadence stay consistent without being restated.",
-		state: "Current", revision: "REVISION 02", type: "Preference", scope: "Organization",
-		source: "Team retrospective", history: "2 revisions · reversible",
-		nodes: ["Updates", "Async", "Team", "Retro"],
-	},
-	{
-		title: "Support escalations follow the incident runbook.",
-		body: "Linked to the runbook document it came from, so an agent answering an escalation question cites the current procedure.",
-		state: "Current", revision: "REVISION 01", type: "Procedure", scope: "Project",
-		source: "Runbook document", history: "1 revision · reversible",
-		nodes: ["Escalation", "Runbook", "Support", "Incident"],
-	},
-];
-
-function landingSelectMemory(index) {
-	const memory = LANDING_MEMORIES[index];
-	if (!memory) return;
-	document.querySelectorAll("[data-landing-memory]").forEach((button, buttonIndex) => {
-		const active = buttonIndex === index;
-		button.classList.toggle("active", active);
-		button.setAttribute("aria-selected", String(active));
-		button.tabIndex = active ? 0 : -1;
-	});
-	const values = {
-		landingMemoryState: memory.state,
-		landingMemoryRevision: memory.revision,
-		landingMemoryTitle: memory.title,
-		landingMemoryBody: memory.body,
-		landingMemoryType: memory.type,
-		landingMemoryScope: memory.scope,
-		landingMemorySource: memory.source,
-		landingMemoryHistory: memory.history,
-	};
-	Object.entries(values).forEach(([id, value]) => {
-		const node = document.getElementById(id);
-		if (node) node.textContent = value;
-	});
-	memory.nodes.forEach((label, nodeIndex) => {
-		const node = document.getElementById(`landingMemoryNode${nodeIndex}`);
-		if (node) node.textContent = label;
-	});
-	const panel = document.getElementById("landingMemoryDetail");
-	if (panel) {
-		panel.setAttribute("aria-labelledby", `landingMemoryTab${index}`);
-		panel.style.animation = "none";
-		void panel.offsetHeight;
-		panel.style.animation = "";
-	}
-}
-
 function landingSelectSdk(name) {
 	const sample = LANDING_CODE_SAMPLES[name];
 	if (!sample) return;
@@ -3864,9 +3815,6 @@ function landingTabKeydown(event, selector, activate) {
 
 document.querySelector(".step-selector")?.addEventListener("keydown", (event) => {
 	landingTabKeydown(event, "[data-landing-step]", (_button, index) => landingSelectStep(index));
-});
-document.querySelector(".product-list")?.addEventListener("keydown", (event) => {
-	landingTabKeydown(event, "[data-landing-memory]", (_button, index) => landingSelectMemory(index));
 });
 document.querySelector(".sdk-tabs")?.addEventListener("keydown", (event) => {
 	landingTabKeydown(event, "[data-landing-sdk]", (button) => landingSelectSdk(button.dataset.landingSdk));

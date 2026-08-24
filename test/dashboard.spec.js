@@ -62,8 +62,8 @@ describe("dashboard script", () => {
 		// redundant surface band and positioning spread are gone for good.
 		expect(html).toContain('class="hero-mono"');
 		expect(html.indexOf('<span>02</span> Developer surface'))
-			.toBeLessThan(html.indexOf('<span>03</span> Product visibility'));
-		expect(html.indexOf('<span>03</span> Product visibility'))
+			.toBeLessThan(html.indexOf('<span>03</span> The difference'));
+		expect(html.indexOf('<span>03</span> The difference'))
 			.toBeLessThan(html.indexOf('<span>04</span> How it works'));
 		expect(html.indexOf('<span>06</span> Enterprise control'))
 			.toBeLessThan(html.indexOf('<span>07</span> Open architecture'));
@@ -77,8 +77,8 @@ describe("dashboard script", () => {
 		expect(html).toContain("landingSelectStep");
 		expect(html).toContain("Memory across");
 		expect(html).toContain("the entire stack.");
-		expect(html).toContain("See what your AI");
-		expect(html).toContain("EXAMPLE WORKSPACE");
+		expect(html).toContain("What a context window");
+		expect(html).toContain("hands your model.");
 		expect(html).toContain('data-landing-sdk="node"');
 		expect(html).toContain('data-landing-sdk="mcp"');
 		expect(html).toContain("npm install itsuki");
@@ -104,7 +104,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=6");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=7");
 		expect(publicLanding).not.toMatch(/paper trail/i);
 		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
 		for (const forbidden of [

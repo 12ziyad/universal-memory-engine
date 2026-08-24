@@ -56,7 +56,7 @@ describe("hero stays uncluttered", () => {
 });
 
 describe("developer surface states real coverage", () => {
-	const dev = html.slice(html.indexOf('<section class="developer-section'), html.indexOf('<section class="product-proof-section'));
+	const dev = html.slice(html.indexOf('<section class="developer-section'), html.indexOf('<section class="contrast-section'));
 
 	it("replaces loose chips with counted, named integration groups", () => {
 		expect(dev).toContain('class="surface-stats"');
@@ -76,31 +76,40 @@ describe("developer surface states real coverage", () => {
 	});
 });
 
-describe("memory inspector is a real control", () => {
-	const proof = html.slice(html.indexOf('<section class="product-proof-section'), html.indexOf('<section class="lifecycle-section'));
+describe("raw versus structured section", () => {
+	const contrast = html.slice(html.indexOf('<section class="contrast-section'), html.indexOf('<section class="lifecycle-section'));
 
-	it("makes every listed memory selectable, not decorative", () => {
-		for (let index = 0; index < 3; index += 1) {
-			expect(proof, `memory ${index} is a button`).toContain(`data-landing-memory="${index}"`);
-			expect(proof).toContain(`landingSelectMemory(${index})`);
-		}
-		expect(proof).toContain('role="tablist"');
-		expect(proof).toContain('role="tabpanel"');
-		// The rows were <article> elements with a hardcoded active class.
-		expect(proof).not.toContain('<article class="product-memory');
+	it("names the transformation in display type, not a caption", () => {
+		// The panes carry RAW and STRUCTURED as headings so the change of state
+		// is legible from the layout before any prose is read.
+		expect(contrast).toContain("<header><b>Raw</b>");
+		expect(contrast).toContain("<header><b>Structured</b>");
+		expect(contrast).toContain('class="contrast-arrow"');
 	});
 
-	it("drops the fake window chrome that implied a swipeable carousel", () => {
-		expect(proof).not.toMatch(/<span><i><\/i><i><\/i><i><\/i><\/span>/);
+	it("shows the discarded lines as a deliberate product behaviour", () => {
+		expect(contrast).toContain("Discarded on purpose:");
+		expect(contrast).toContain("Your rules decide what never becomes memory.");
 	});
 
-	it("swaps detail and connection content per memory", () => {
-		const source = fnSource("landingSelectMemory");
-		for (const field of ["landingMemoryTitle", "landingMemoryScope", "landingMemorySource", "landingMemoryHistory"]) {
-			expect(source).toContain(field);
+	it("emits every typed object the extractor produces", () => {
+		for (const kind of ["Fact", "Event", "Entity", "Relationship"]) {
+			expect(contrast, `names the ${kind} row`).toContain(`<b>${kind}</b>`);
 		}
-		expect(source).toContain("landingMemoryNode");
-		expect(html).toContain("const LANDING_MEMORIES");
+	});
+
+	it("closes the loop with what an agent recalls later", () => {
+		expect(contrast).toContain('class="contrast-recall"');
+		expect(contrast).toContain("Six months later");
+		expect(contrast).toContain("Who moved the pricing review, and when?");
+	});
+
+	it("labels itself an example so nothing reads as live product data", () => {
+		expect(contrast).toContain("A worked example.");
+		// The old panel imitated a dashboard, down to fake window chrome.
+		expect(contrast).not.toContain("MEMORY INSPECTOR");
+		expect(contrast).not.toContain("EXAMPLE WORKSPACE");
+		expect(html).not.toContain("landingSelectMemory");
 	});
 });
 

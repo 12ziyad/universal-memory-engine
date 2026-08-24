@@ -177,6 +177,46 @@ html { scroll-behavior: smooth; }
 #landing.lp-shell .surface-all { display: inline-flex; align-self: flex-start; margin-top: 28px; padding-bottom: 5px; border-bottom: 1px solid #f2a284; color: #f2a284; font-size: 12px; font-weight: 600; }
 #landing.lp-shell .surface-all:hover { border-color: white; color: white; }
 
+/* Raw versus structured. The two panes carry display-sized RAW and
+   STRUCTURED headings so the transformation reads from the layout before a
+   word is parsed: dull paper on the left, typed rows on the right, one arrow
+   between them. */
+#landing.lp-shell .contrast-section { padding: 108px 5.6vw 118px; border-bottom: 1px solid var(--hairline); background: var(--paper); }
+#landing.lp-shell .contrast-stats { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); margin: 46px 0 34px; padding: 0; border-top: 1px solid var(--hairline); }
+#landing.lp-shell .contrast-stats div { padding: 20px 24px 0 0; }
+#landing.lp-shell .contrast-stats dt { font: 400 clamp(30px,3vw,44px)/1 var(--display); letter-spacing: -.035em; }
+#landing.lp-shell .contrast-stats dd { margin: 10px 0 0; color: var(--ink-soft); font: 400 9.5px/1.5 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+#landing.lp-shell .contrast-split { display: grid; grid-template-columns: minmax(0,1fr) 92px minmax(0,1.12fr); align-items: stretch; }
+#landing.lp-shell .contrast-pane { display: flex; min-width: 0; flex-direction: column; border: 1px solid var(--ink); }
+#landing.lp-shell .contrast-pane > header { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; padding: 22px 24px; border-bottom: 1px solid var(--hairline); }
+#landing.lp-shell .contrast-pane > header b { font: 400 clamp(28px,2.7vw,40px)/.95 var(--display); letter-spacing: -.035em; }
+#landing.lp-shell .contrast-pane > header span { color: var(--ink-soft); font: 400 9.5px/1.6 var(--mono); letter-spacing: .11em; text-transform: uppercase; text-align: right; }
+#landing.lp-shell .contrast-pane.raw { background: #eae1d1; color: var(--ink-soft); }
+#landing.lp-shell .contrast-pane.raw > header { border-bottom-color: #d6c9b4; }
+#landing.lp-shell .contrast-pane.raw > header b { color: #6f6657; }
+#landing.lp-shell .contrast-pane.structured { background: var(--porcelain); }
+#landing.lp-shell .contrast-pane.structured > header b { color: var(--ink); }
+#landing.lp-shell .contrast-pane.structured > header span { color: var(--clay-readable); }
+#landing.lp-shell .contrast-lines { margin: 0; padding: 20px 24px; font-size: 12.5px; line-height: 2.1; }
+#landing.lp-shell .contrast-lines span { display: block; opacity: .44; }
+#landing.lp-shell .contrast-lines b { display: block; width: fit-content; padding: 1px 6px; margin: 2px -6px; font-weight: 400; color: var(--ink); background: rgb(200 79 42 / 13%); }
+#landing.lp-shell .contrast-more { margin: auto 0 0; padding: 15px 24px; border-top: 1px dashed #d6c9b4; font-size: 11.5px; line-height: 1.7; opacity: .72; }
+#landing.lp-shell .contrast-row { display: grid; grid-template-columns: 104px minmax(0,1fr); gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--hairline); font-size: 12.5px; line-height: 1.5; }
+#landing.lp-shell .contrast-row > b { color: var(--clay-readable); font: 400 8.5px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+#landing.lp-shell .contrast-row i { display: block; margin-top: 5px; color: var(--ink-soft); font-size: 11px; font-style: normal; line-height: 1.6; }
+#landing.lp-shell .contrast-drop { margin: auto 0 0; padding: 15px 24px; border-top: 1px dashed var(--hairline); background: #faf6ee; color: var(--ink-soft); font-size: 11.5px; line-height: 1.7; }
+#landing.lp-shell .contrast-drop b { color: var(--ink); font-weight: 600; }
+#landing.lp-shell .contrast-arrow { display: grid; grid-template-rows: 1fr auto 1fr; justify-items: center; gap: 12px; }
+#landing.lp-shell .contrast-arrow span { width: 1px; background: var(--hairline); }
+#landing.lp-shell .contrast-arrow b { color: var(--clay); font-size: 19px; font-weight: 400; }
+#landing.lp-shell .contrast-recall { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 44px; align-items: center; margin-top: 32px; padding: 32px 36px; background: var(--ink); color: var(--porcelain); }
+#landing.lp-shell .contrast-later { color: #f2a284; font: 400 9.5px/1.4 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+#landing.lp-shell .contrast-q { margin: 0 0 18px; font: 400 clamp(20px,2vw,26px)/1.25 var(--display); letter-spacing: -.025em; }
+#landing.lp-shell .contrast-chips { display: flex; flex-wrap: wrap; gap: 9px; }
+#landing.lp-shell .contrast-chips span { padding: 9px 12px; border: 1px solid #4a443b; background: #1c1915; color: #d8cebf; font: 400 10px/1 var(--mono); }
+#landing.lp-shell .contrast-chips b { color: var(--porcelain); font-weight: 400; }
+#landing.lp-shell .contrast-note { margin: 24px 0 0; color: var(--ink-soft); font-size: 12.5px; line-height: 1.7; }
+
 /* Open architecture. The GitHub action uses the same letterpress affordance
    as Start building, because it is a real destination, not a footnote. */
 #landing.lp-shell .oss-section { display: grid; min-height: 560px; grid-template-columns: minmax(320px,1.25fr) minmax(280px,.85fr); gap: 6vw; align-items: center; padding: 110px 5.6vw; border-bottom: 1px solid var(--hairline); background: var(--ink); color: var(--porcelain); }
@@ -758,6 +798,11 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .hero-mono-jp { writing-mode: horizontal-tb; text-orientation: mixed; font-size: clamp(64px,12vw,120px); letter-spacing: .18em; }
   #landing.lp-shell .hero-mono-tag { writing-mode: horizontal-tb; align-self: flex-end; padding-bottom: 14px; letter-spacing: .3em; }
   #landing.lp-shell .oss-section { grid-template-columns: 1fr; gap: 52px; }
+  #landing.lp-shell .contrast-split { grid-template-columns: minmax(0,1fr); }
+  #landing.lp-shell .contrast-arrow { grid-template-rows: none; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 18px 0; }
+  #landing.lp-shell .contrast-arrow span { width: auto; height: 1px; }
+  #landing.lp-shell .contrast-arrow b { transform: rotate(90deg); }
+  #landing.lp-shell .contrast-stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
   #landing.lp-shell .surface-band { grid-template-columns: repeat(2,1fr); }
   #landing.lp-shell .surface-band-title { grid-column: 1 / -1; min-height: 120px; }
   #landing.lp-shell .surface-band-title strong { max-width: none; }
@@ -780,6 +825,13 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .oss-section { min-height: auto; padding: 82px 22px 92px; }
   #landing.lp-shell .oss-copy h2 { font-size: clamp(38px,10vw,58px); }
   #landing.lp-shell .oss-actions { gap: 18px; }
+  #landing.lp-shell .contrast-section { padding: 82px 22px 92px; }
+  #landing.lp-shell .contrast-stats { grid-template-columns: 1fr; }
+  #landing.lp-shell .contrast-stats div { padding: 16px 0 16px; border-bottom: 1px solid var(--hairline); }
+  #landing.lp-shell .contrast-pane > header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  #landing.lp-shell .contrast-pane > header span { text-align: left; }
+  #landing.lp-shell .contrast-row { grid-template-columns: 1fr; gap: 7px; }
+  #landing.lp-shell .contrast-recall { grid-template-columns: 1fr; gap: 20px; padding: 26px 22px; }
   #landing.lp-shell .hero-japanese small { max-width: 180px; line-height: 1.4; }
   #landing.lp-shell .hero-system { min-height: 570px; padding: 46px 22px 38px; }
   #landing.lp-shell .hero-system::after { inset: 16px; }

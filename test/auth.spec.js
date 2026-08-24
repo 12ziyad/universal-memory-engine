@@ -506,14 +506,13 @@ describe("product shell routes", () => {
 		expect(html).toContain('class="hero-mono"');
 		expect(html).toContain('class="hero-mono-jp"');
 		expect(html).toContain('<span>02</span> Developer surface');
-		expect(html).toContain('<span>03</span> Product visibility');
+		expect(html).toContain('<span>03</span> The difference');
 		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');
 		expect(html).toContain('data-landing-sdk="node"');
 		expect(html).toContain('data-landing-sdk="mcp"');
 		expect(html).toContain("landingSelectStep");
 		expect(html).toContain("landingSelectSdk");
-		expect(html).toContain("EXAMPLE WORKSPACE");
 		expect(html).toContain("PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI");
 		expect(html).toContain('id="landingCodeAction" data-action="copy"');
 		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
@@ -526,7 +525,7 @@ describe("product shell routes", () => {
 		expect(html).toContain('href="/terms"');
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=6");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=7");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");
