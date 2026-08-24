@@ -57,18 +57,21 @@ describe("dashboard script", () => {
 		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
-		// Section order is part of the product story: the code surface sits at
-		// 02, immediately after the hero, and the old redundant surface band
-		// is gone for good.
-		expect(html).toContain('class="hero-system hero-flow"');
-		expect(html.indexOf('<span>02</span> Developer surface')).toBeGreaterThan(-1);
-		expect(html.indexOf('<span>02</span> Developer surface')).toBeLessThan(html.indexOf('<span>03</span> The memory system'));
+		// Section order is the product story: code surface at 02, the live
+		// inspector at 03, and no section repeating another's argument. The
+		// redundant surface band and positioning spread are gone for good.
+		expect(html).toContain('class="hero-mono"');
+		expect(html.indexOf('<span>02</span> Developer surface'))
+			.toBeLessThan(html.indexOf('<span>03</span> Product visibility'));
+		expect(html.indexOf('<span>03</span> Product visibility'))
+			.toBeLessThan(html.indexOf('<span>04</span> How it works'));
+		expect(html.indexOf('<span>06</span> Enterprise control'))
+			.toBeLessThan(html.indexOf('<span>07</span> Open architecture'));
 		expect(html).not.toContain("Built for every AI surface");
+		expect(html).not.toContain("Context that survives");
 		for (const surface of ["Applications", "Assistants", "Agents", "Workflows"]) {
 			expect(publicLanding).toContain(surface);
 		}
-		expect(html).toContain("Context that survives");
-		expect(html).toContain("the next prompt.");
 		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');
 		expect(html).toContain("landingSelectStep");
@@ -101,7 +104,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=5");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=6");
 		expect(publicLanding).not.toMatch(/paper trail/i);
 		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
 		for (const forbidden of [

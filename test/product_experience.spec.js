@@ -37,6 +37,101 @@ describe("landing hero and narrative", () => {
 	});
 });
 
+describe("hero stays uncluttered", () => {
+	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<section class="developer-section'));
+
+	it("carries only the eyebrow, headline, deck, and two actions", () => {
+		expect(hero).toContain("Not more context.");
+		expect(hero).toContain('class="hero-actions"');
+		// Furniture that used to crowd this panel must stay out.
+		for (const clutter of ["fact-row", "flow-rail", "flow-status", "system-inputs", "surface-band"]) {
+			expect(hero, `hero stays free of ${clutter}`).not.toContain(clutter);
+		}
+	});
+
+	it("gives the copy the width and the mark the remaining third", () => {
+		expect(hero).toContain('class="hero-mono"');
+		expect(hero).toContain('lang="ja"');
+	});
+});
+
+describe("developer surface states real coverage", () => {
+	const dev = html.slice(html.indexOf('<section class="developer-section'), html.indexOf('<section class="product-proof-section'));
+
+	it("replaces loose chips with counted, named integration groups", () => {
+		expect(dev).toContain('class="surface-stats"');
+		expect(dev).toContain("supported tools");
+		expect(dev).toContain("documented setup paths");
+		for (const group of ["SDKs &amp; API", "AI assistants", "Coding agents", "Agent harnesses", "Agent frameworks", "Workflow automation"]) {
+			expect(dev, `names the ${group} group`).toContain(group);
+		}
+		// The old chip strip put "n8n" beside "Dashboard" with no category.
+		expect(dev).not.toContain('class="surface-list"');
+	});
+
+	it("keeps the stated counts equal to the pinned catalog contract", () => {
+		// test/get_started.spec.js pins exactly 26 products and 38 setup leaves.
+		expect(dev).toContain("<dt>26</dt>");
+		expect(dev).toContain("<dt>38</dt>");
+	});
+});
+
+describe("memory inspector is a real control", () => {
+	const proof = html.slice(html.indexOf('<section class="product-proof-section'), html.indexOf('<section class="lifecycle-section'));
+
+	it("makes every listed memory selectable, not decorative", () => {
+		for (let index = 0; index < 3; index += 1) {
+			expect(proof, `memory ${index} is a button`).toContain(`data-landing-memory="${index}"`);
+			expect(proof).toContain(`landingSelectMemory(${index})`);
+		}
+		expect(proof).toContain('role="tablist"');
+		expect(proof).toContain('role="tabpanel"');
+		// The rows were <article> elements with a hardcoded active class.
+		expect(proof).not.toContain('<article class="product-memory');
+	});
+
+	it("drops the fake window chrome that implied a swipeable carousel", () => {
+		expect(proof).not.toMatch(/<span><i><\/i><i><\/i><i><\/i><\/span>/);
+	});
+
+	it("swaps detail and connection content per memory", () => {
+		const source = fnSource("landingSelectMemory");
+		for (const field of ["landingMemoryTitle", "landingMemoryScope", "landingMemorySource", "landingMemoryHistory"]) {
+			expect(source).toContain(field);
+		}
+		expect(source).toContain("landingMemoryNode");
+		expect(html).toContain("const LANDING_MEMORIES");
+	});
+});
+
+describe("open source section", () => {
+	const oss = html.slice(html.indexOf('<section class="oss-section'), html.indexOf('<section class="closing-section'));
+
+	it("offers a real GitHub destination with the primary-action affordance", () => {
+		expect(oss).toContain('class="primary-action oss-cta"');
+		expect(oss).toContain('href="https://github.com/12ziyad/universal-memory-engine"');
+		expect(oss).toContain('target="_blank"');
+		expect(oss).toContain('rel="noopener"');
+	});
+
+	it("states only verifiable facts", () => {
+		expect(oss).toContain("Apache 2.0");
+		expect(oss).toContain("No lock-in");
+		expect(oss).not.toMatch(/SOC\s*2|certified|enterprise[- ]ready/i);
+	});
+});
+
+describe("navigation reaches every section it names", () => {
+	it("links only anchors that exist in the document", () => {
+		const nav = html.slice(html.indexOf('class="primary-nav"'), html.indexOf("</nav>"));
+		const anchors = [...nav.matchAll(/href="#([a-z-]+)"/g)].map((match) => match[1]);
+		expect(anchors.length).toBeGreaterThanOrEqual(5);
+		for (const anchor of anchors) {
+			expect(html, `#${anchor} exists`).toContain(`id="${anchor}"`);
+		}
+	});
+});
+
 describe("enterprise footer", () => {
 	const footer = html.slice(html.indexOf('<footer class="footer" role="contentinfo">'), html.indexOf("</footer>"));
 

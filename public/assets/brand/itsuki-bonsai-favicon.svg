@@ -1,11 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="title">
   <title id="title">Itsuki</title>
+  <!-- The tile is the point: an ink-on-transparent mark vanishes against dark
+       browser chrome. A cream ground plus a faint ink edge keeps the whole
+       mark — ring, trunk, and every node — legible in both browser themes. -->
+  <rect width="32" height="32" rx="7" fill="#F5EFE3"/>
+  <rect x=".6" y=".6" width="30.8" height="30.8" rx="6.4" fill="none" stroke="#15130F" stroke-opacity=".22" stroke-width="1.2"/>
   <g fill="none" stroke="#15130F" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M25.3 8.6A12 12 0 1 0 25.3 23.4" stroke-width="1.8"/>
-    <path d="M16 26V15M16 16L10 10M16 16L22 10" stroke-width="2.6"/>
-    <path d="M16 25L12 27M16 25L20 27" stroke-width="2.2"/>
+    <path d="M24.4 10.3A10 10 0 1 0 24.4 21.7" stroke-width="1.7"/>
+    <path d="M16 24.4V15.2M16 15.6L11.7 11.6M16 15.6L20.3 11.6" stroke-width="2.4"/>
+    <path d="M16 23.6L13.2 25M16 23.6L18.8 25" stroke-width="1.9"/>
   </g>
-  <circle cx="16" cy="7" r="2.2" fill="#15130F"/>
-  <circle cx="22" cy="10" r="3" fill="#C84F2A"/>
-  <circle cx="10" cy="10" r="2" fill="#AE8741"/>
+  <circle cx="16" cy="8.8" r="2" fill="#15130F"/>
+  <circle cx="20.4" cy="11.4" r="2.5" fill="#C84F2A"/>
+  <circle cx="11.6" cy="11.4" r="1.9" fill="#AE8741"/>
 </svg>

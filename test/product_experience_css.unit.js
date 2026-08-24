@@ -49,4 +49,32 @@ describe("landing editorial sheet", () => {
 			expect(landingCss).toContain(cls);
 		}
 	});
+
+	it("gives the hero copy 70% and the vertical mark the remaining third", () => {
+		expect(landingCss).toContain("grid-template-columns: minmax(0,7fr) minmax(210px,3fr)");
+		expect(landingCss).toContain(".hero-mono-jp");
+		expect(landingCss).toContain("writing-mode: vertical-rl");
+	});
+
+	it("keeps the folio heading anchored to the top of its column", () => {
+		const folio = landingCss.slice(landingCss.indexOf(".folio-heading {"));
+		expect(folio.slice(0, 260)).toContain("justify-content: flex-start");
+		// space-between pushed the title to the bottom of a 760px column.
+		expect(folio.slice(0, 260)).not.toContain("justify-content: space-between");
+	});
+
+	it("styles the counted integration groups and the open-source action", () => {
+		for (const cls of [".surface-stats", ".surface-groups", ".surface-all", ".oss-section", ".oss-cta", ".oss-facts"]) {
+			expect(landingCss).toContain(cls);
+		}
+		// The GitHub action wears the same letterpress slab as Start building.
+		const oss = landingCss.slice(landingCss.indexOf(".oss-cta {"));
+		expect(oss.slice(0, 200)).toContain("box-shadow: 7px 7px 0 var(--clay)");
+	});
+
+	it("makes inspector rows look and behave selectable", () => {
+		expect(landingCss).toContain(".product-memory:hover:not(.active)");
+		expect(landingCss).toContain(".product-memory:focus-visible");
+		expect(landingCss).toContain("cursor: pointer");
+	});
 });

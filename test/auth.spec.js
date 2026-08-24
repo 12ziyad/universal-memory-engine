@@ -501,13 +501,12 @@ describe("product shell routes", () => {
 		expect(html).toContain("<em>Better memory.</em>");
 		expect(html).toContain("Itsuki turns conversations, documents, and events into structured memory");
 		expect(html).toContain("イツキ");
-		// The decongested hero: brand mark at the flow core, status wedge line,
-		// and the developer surface promoted to section 02 right after it.
-		expect(html).toContain('class="hero-system hero-flow"');
-		expect(html).toContain("ITSUKI MEMORY LAYER");
-		expect(html).toContain("Source linked");
+		// The decongested hero: copy takes 70%, the right third is one calm
+		// vertical mark, and the developer surface follows immediately.
+		expect(html).toContain('class="hero-mono"');
+		expect(html).toContain('class="hero-mono-jp"');
 		expect(html).toContain('<span>02</span> Developer surface');
-		expect(html).toContain("Context that survives");
+		expect(html).toContain('<span>03</span> Product visibility');
 		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');
 		expect(html).toContain('data-landing-sdk="node"');
@@ -527,7 +526,7 @@ describe("product shell routes", () => {
 		expect(html).toContain('href="/terms"');
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
-		expect(html).toContain("/assets/landing-editorial-v1.css?v=5");
+		expect(html).toContain("/assets/landing-editorial-v1.css?v=6");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
 		expect(html).toContain("hello@itsuki.app");
