@@ -190,3 +190,4 @@ CLAUDE_ENTERPRISE_COMPLETION_HANDOFF.md
 worker-configuration.d.ts
 
 .claude/worktrees/
+private-policies/

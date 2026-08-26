@@ -2189,6 +2189,12 @@
 	.legal-doc { width: min(860px, calc(100% - 32px)); margin: 40px auto 80px; background: var(--panel); border: 1px solid var(--border);
 		border-radius: 14px; padding: 34px 38px; line-height: 1.62; }
 	.legal-doc h1 { margin: 0 0 4px; font-size: 26px; }
+	.legal-doc table { width: 100%; margin: 14px 0 18px; border-collapse: collapse; font-size: 13px; }
+	.legal-doc th { text-align: left; padding: 8px 10px; border: 1px solid var(--border); background: var(--panel2);
+		font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+	.legal-doc td { padding: 9px 10px; border: 1px solid var(--border); vertical-align: top; line-height: 1.55; }
+	.legal-doc .legal-changelog { color: var(--muted); font-size: 12.5px; line-height: 1.8; }
+	.legal-doc .legal-code { font-family: var(--font-mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
 	.legal-doc h2 { margin: 26px 0 8px; font-size: 17px; color: var(--accent); }
 	.legal-doc p, .legal-doc li { color: var(--text-soft, #b8c7d4); font-size: 14px; }
 	.legal-doc ul { padding-left: 20px; }
@@ -2547,13 +2553,21 @@ const { context } = await memory.search("When is the review?");</code></pre>
 					<a href="/docs/#/concepts/memory">How memory works</a>
 					<a href="/docs/#/operate/observability">Observability</a>
 				</nav>
+				<nav class="footer-col" aria-label="Trust">
+					<h3>Trust</h3>
+					<a href="/security" onclick="showLegal('security', event)">Security</a>
+					<a href="/subprocessors" onclick="showLegal('subprocessors', event)">Subprocessors</a>
+					<a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>
+					<a href="/retention" onclick="showLegal('retention', event)">Retention &amp; deletion</a>
+					<a href="/disclosure" onclick="showLegal('disclosure', event)">Responsible disclosure</a>
+				</nav>
 				<nav class="footer-col" aria-label="Company and trust">
 					<h3>Company</h3>
 					<a href="mailto:hello@itsuki.app">Support</a>
-					<a href="#control">Security</a>
 					<a href="/docs/#/privacy">Privacy &amp; limits</a>
 					<a href="/privacy" onclick="showLegal('privacy', event)">Privacy policy</a>
 					<a href="/terms" onclick="showLegal('terms', event)">Terms</a>
+					<a href="/aup" onclick="showLegal('aup', event)">Acceptable use</a>
 				</nav>
 			</div>
 			<div class="footer-base">
@@ -3626,13 +3640,15 @@ function initials(user = S.me?.user) {
 	return label.trim().slice(0, 1).toUpperCase() || "U";
 }
 
+const LEGAL_KINDS = ["terms", "privacy", "aup", "security", "subprocessors", "ai-data", "retention", "disclosure"];
+
 function routeMode() {
 	const q = new URLSearchParams(location.search);
 	if (invitationTokenFromHash()) return S.me ? "app" : "login";
 	if (q.get("view") === "login" || location.pathname === "/login") return "login";
 	if (q.get("view") === "signup" || location.pathname === "/signup") return "signup";
-	if (q.get("view") === "terms" || location.pathname === "/terms") return "terms";
-	if (q.get("view") === "privacy" || location.pathname === "/privacy") return "privacy";
+	const legalKind = LEGAL_KINDS.find((kind) => q.get("view") === kind || location.pathname === `/${kind}`);
+	if (legalKind) return `legal:${legalKind}`;
 	if (q.has("app") || location.pathname === "/app") return "app";
 	return "public";
 }
@@ -12959,7 +12975,8 @@ function viewProfile(v) {
 }
 
 // ---- Full legal pages (/terms, /privacy) ----------------------------------
-const LEGAL_EFFECTIVE_DATE = "July 31, 2026";
+const LEGAL_EFFECTIVE_DATE = "August 27, 2026";
+const LEGAL_INITIAL_DATE = "July 31, 2026";
 const LEGAL_PAGES = {
 	terms: {
 		title: "Terms of Service",
@@ -12988,7 +13005,7 @@ const LEGAL_PAGES = {
 			</ul>
 
 			<h2>5. Acceptable use</h2>
-			<p>You agree not to use the Service to:</p>
+			<p>Use of the Service is governed by the standalone <a href="/aup" onclick="showLegal('aup', event)">Acceptable Use Policy</a>, which is part of these Terms and includes rules on data you must never store (credentials and secrets, payment-card data, regulated health information). In summary, you agree not to use the Service to:</p>
 			<ul>
 				<li>violate any law, or store or distribute content that is unlawful where you or we operate;</li>
 				<li>store or transmit malware, or use the Service to phish, defraud, or steal credentials;</li>
@@ -13045,7 +13062,10 @@ const LEGAL_PAGES = {
 			<p>We may update these Terms as the Service evolves. For material changes we will give notice in the app (and by email where appropriate) before the changes take effect. Continued use of the Service after the effective date constitutes acceptance. The "Effective" date above always reflects the current version.</p>
 
 			<h2>17. Contact</h2>
-			<p>Questions about these Terms: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</p>`,
+			<p>Questions about these Terms: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</p>
+
+			<h2>Changes to this document</h2>
+			<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> Section 5 now references the standalone <a href="/aup" onclick="showLegal('aup', event)">Acceptable Use Policy</a>. No other substantive change.<br /><b>${LEGAL_INITIAL_DATE}:</b> Initial version.</p>`,
 	},
 	privacy: {
 		title: "Privacy Policy",
@@ -13094,6 +13114,7 @@ const LEGAL_PAGES = {
 			<h2>5. Who we share data with</h2>
 			<ul>
 				<li><b>Infrastructure processor:</b> the Service runs entirely on <b>Cloudflare</b> (Workers compute, D1 database, Vectorize index, Workers AI inference). Cloudflare processes data on our behalf under its enterprise data-protection commitments.</li>
+				<li><b>Sign-in providers:</b> if you sign in with Google or GitHub, <b>Google LLC</b> or <b>GitHub, Inc.</b> processes your name, email address, and account identifier to authenticate you. They never receive memory content. The complete, dated list of every company that processes data for us is the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">Subprocessors page</a>.</li>
 				<li><b>Tools you connect:</b> your memory is returned to the tools you explicitly authorize via tokens you create and can revoke. Those tools are third-party services under their own policies.</li>
 				<li><b>Authorities:</b> only if legally compelled, and we will tell you unless legally prohibited from doing so.</li>
 				<li><b>Business transfer:</b> if the Service is ever acquired or merged, your data remains protected under this policy or a successor policy with equivalent protections, and you will be notified.</li>
@@ -13115,6 +13136,7 @@ const LEGAL_PAGES = {
 			<p>We do not discriminate against you for exercising any right, and exercising them is free.</p>
 
 			<h2>8. Data retention</h2>
+			<p>The per-class retention table, backup aging, and every deletion flow are documented in full on <a href="/retention" onclick="showLegal('retention', event)">Data Retention &amp; Deletion</a>. In summary:</p>
 			<ul>
 				<li><b>Project data:</b> follows the active policy for its data class. The default is <i>Keep until deleted</i>; an authorized project administrator may activate a shorter policy only after reviewing an exact deletion preview.</li>
 				<li><b>Account data:</b> kept while the account is active. Account-erasure requests are completed through the support process after ownership and shared-organization safety checks.</li>
@@ -13126,6 +13148,7 @@ const LEGAL_PAGES = {
 			</ul>
 
 			<h2>9. Security</h2>
+			<p>The full description of our security architecture &mdash; encryption, tenant isolation, access control, audit, backups, and our certification status &mdash; is on <a href="/security" onclick="showLegal('security', event)">Security at Itsuki</a>.</p>
 			<p>Measures include: TLS encryption for all data in transit; encryption at rest on our infrastructure provider; salted PBKDF2 password hashing; session tokens and connection tokens stored only as SHA-256 hashes; IP addresses stored only as hashes; strict per-account data isolation (every query is scoped to your account, with per-account compute isolation and per-account vector namespaces); scoped, revocable connection tokens shown only once; and role-restricted operator access. No internet service can guarantee absolute security, but we designed the Service so that a minimum of sensitive material exists to lose.</p>
 
 			<h2>10. Breach notification</h2>
@@ -13144,7 +13167,306 @@ const LEGAL_PAGES = {
 			<p>We keep this policy under review. For material changes we will give notice in the app before they take effect, and update the date above. Earlier versions are available on request.</p>
 
 			<h2>15. Grievances and contact</h2>
-			<p>Privacy questions, rights requests, and grievances: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>`,
+			<p>Privacy questions, rights requests, and grievances: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>
+
+			<h2>Changes to this document</h2>
+			<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> Section 5 now names the sign-in providers (Google, GitHub) and links the new <a href="/subprocessors" onclick="showLegal('subprocessors', event)">Subprocessors</a> page; sections 8 and 9 link the new <a href="/retention" onclick="showLegal('retention', event)">Retention</a> and <a href="/security" onclick="showLegal('security', event)">Security</a> pages. No collection or sharing practice changed.<br /><b>${LEGAL_INITIAL_DATE}:</b> Initial version.</p>`,
+	},
+	aup: {
+		title: "Acceptable Use Policy",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>This Acceptable Use Policy ("AUP") is part of the <a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a> and applies to everything you do with the Itsuki dashboard, API, SDKs, and MCP connectors. It exists to protect the people whose lives end up inside memory, the tenants who share this infrastructure, and the Service itself. Where this page and the Terms overlap, the stricter rule applies.</p>
+
+		<h2>1. Illegal use</h2>
+		<p>You may not use the Service to violate any law, or to store, generate, or distribute content that is unlawful where you operate or where we operate. This includes using memory to facilitate fraud, trafficking, or the sale of illegal goods and services.</p>
+
+		<h2>2. Content that is never acceptable</h2>
+		<ul>
+			<li><b>Child sexual abuse material</b>, in any form, for any reason. We remove it, terminate the account, and report it to the relevant authorities.</li>
+			<li><b>Content that incites or threatens violence</b> against any person or group.</li>
+			<li><b>Malware</b>: storing or distributing malicious code, or using memory as command-and-control, staging, or exfiltration infrastructure.</li>
+		</ul>
+
+		<h2>3. Data you must not store as memory</h2>
+		<p>Itsuki is a memory layer, not a secrets vault, a medical record system, or a payment processor. Do not store:</p>
+		<ul>
+			<li><b>Credentials and secrets:</b> passwords, API keys, private keys, access tokens, seed phrases, or one-time codes &mdash; yours or anyone else's. The <a href="/retention" onclick="showLegal('retention', event)">deletion tools</a> exist if one slips in, but the rule is: never send them.</li>
+			<li><b>Payment-card data</b> (card numbers, CVV, magnetic-stripe data). The Service is not assessed for payment-card handling.</li>
+			<li><b>Protected health information</b> in a regulated context. The Service offers no healthcare-specific safeguards or agreements.</li>
+			<li><b>Government identifiers</b> such as passport, Aadhaar, or social-security numbers, except where you have a lawful basis and a genuine need.</li>
+		</ul>
+
+		<h2>4. Other people's data</h2>
+		<p>Memory is usually <i>about</i> people. If you store personal data about others &mdash; your users, your customers, people in your conversations &mdash; you are responsible for having a lawful basis to do so, honoring their deletion requests with the tools we provide, and not using the Service for unlawful surveillance, stalking, or monitoring of any person. Building stalkerware or covert tracking on Itsuki is prohibited, full stop.</p>
+
+		<h2>5. Attacks on the Service and its tenants</h2>
+		<ul>
+			<li>Do not probe, scan, or test the security of the Service except within the <a href="/disclosure" onclick="showLegal('disclosure', event)">Responsible Disclosure Policy</a>.</li>
+			<li>Do not attempt to access, enumerate, or infer another tenant's organizations, projects, or memories. Tenant boundaries are a security control, not a suggestion.</li>
+			<li>Do not overload the Service, evade rate limits, rotate accounts to multiply free-tier resources, or interfere with other users' access.</li>
+			<li>Do not scrape the Service or systematically extract its behavior to build a directly competing memory service.</li>
+		</ul>
+
+		<h2>6. Deception</h2>
+		<p>Do not use the Service to impersonate any person or organization, to generate spam, or to present AI-generated output as human-authored where doing so is deceptive or unlawful.</p>
+
+		<h2>7. Resale</h2>
+		<p>You may build products on top of Itsuki &mdash; that is the point. You may not resell raw access to the Service as if it were your own infrastructure without our written agreement.</p>
+
+		<h2>8. Enforcement</h2>
+		<p>We enforce this policy as described in the Terms: where practical we warn first; where content or conduct is dangerous, unlawful, or attacks the Service or its tenants, we suspend or terminate immediately. We honor lawful process, and we tell you what happened unless the law prevents us.</p>
+
+		<h2>9. Reporting abuse</h2>
+		<p>Seen something on Itsuki that violates this policy? Write to <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> with the subject "Abuse report". Reports are read by the operator, not a queue.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First standalone version, extracted and expanded from Terms &sect;5.</p>
+	`,
+	},
+	security: {
+		title: "Security at Itsuki",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>Memory is some of the most personal data an application can hold, so this page does not deal in vague assurances. It describes the actual mechanisms &mdash; and because the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">engine is open source</a>, every claim here can be checked against the code that enforces it.</p>
+
+		<h2>1. Architecture: one provider, small surface</h2>
+		<p>The entire Service runs inside <b>Cloudflare's network</b>: Workers (compute), D1 (database), Vectorize (vector index), Workers AI (inference), and Cloudflare Email (transactional mail). There is no second cloud, no third-party analytics service, and no advertising or tracking script anywhere in the product. Fewer parties means fewer places your data can leak; the complete list of companies that touch customer data has <a href="/subprocessors" onclick="showLegal('subprocessors', event)">three entries</a>.</p>
+
+		<h2>2. Encryption</h2>
+		<ul>
+			<li><b>In transit:</b> TLS for every connection &mdash; browser, API, SDK, and MCP.</li>
+			<li><b>At rest:</b> storage encryption on Cloudflare's infrastructure for the database, vector index, and assets.</li>
+			<li><b>Credentials:</b> passwords are salted PBKDF2 hashes; session and API tokens are stored only as SHA-256 hashes and shown exactly once; sign-in codes are single-use, HMAC-protected, and expire in ten minutes; IP addresses are stored only as hashes.</li>
+		</ul>
+
+		<h2>3. Tenant isolation</h2>
+		<p>Isolation is enforced in the write path, not just at the door:</p>
+		<ul>
+			<li>Every query is scoped to an account; every project has its own memory space, keys, rules, and webhooks; vector data lives in per-account namespaces.</li>
+			<li>Authorization is <b>re-derived on every request</b> &mdash; there is no cached permission a stale session can ride. A revoked seat loses access on its next request.</li>
+			<li>Governed writes are committed with <b>commit-time authorization guards</b>: a batch whose permissions changed mid-flight fails instead of writing.</li>
+			<li>Removing a member <b>quarantines their credentials transactionally</b> &mdash; project seat, connection tokens, and OAuth grants are revoked in one atomic operation, so a remove-and-re-add can never revive an old credential.</li>
+		</ul>
+
+		<h2>4. Access control</h2>
+		<ul>
+			<li>API keys are <b>project-bound</b>: a key for one project cannot be pointed at another. Keys are created named, shown once, and revocable individually.</li>
+			<li>Organization and project roles (owner, admin, member, viewer) gate every capability through one explicit permission matrix; the tests assert a viewer can never write and a member can never administer.</li>
+			<li>Production access is limited to the operator, protected by multi-factor authentication on the infrastructure account, and is not used to read memory content except when strictly required to investigate abuse or a security incident, or at your request.</li>
+		</ul>
+
+		<h2>5. Auditability</h2>
+		<ul>
+			<li><b>Every write gets a receipt</b> you can inspect: what was stored, from which source, under which rules.</li>
+			<li><b>Governance actions produce audit events</b> (membership, rules, keys, lifecycle). Audit rows are content-free by construction &mdash; the schema has no column that can hold memory text, an instruction, or a token.</li>
+			<li>Requests carry correlation IDs so a support question can be traced without exposing content.</li>
+		</ul>
+
+		<h2>6. Backups and recovery</h2>
+		<p>The database supports point-in-time recovery for roughly <b>30 days</b> (Cloudflare D1 Time Travel). A recovery bookmark is captured before every schema migration. Deleted data ages out of the recovery window on the same clock &mdash; see <a href="/retention" onclick="showLegal('retention', event)">Data Retention &amp; Deletion</a>.</p>
+
+		<h2>7. How the software itself is kept honest</h2>
+		<ul>
+			<li>The repository is <b>public</b>, including every schema migration &mdash; with a checksum manifest that makes migration history append-only.</li>
+			<li>Around <b>3,000 automated tests</b> run against the real Worker, including suites that specifically prove tenant isolation, credential revocation, role enforcement, and deletion residue removal.</li>
+			<li>Architecture gates are tests too: source-level census checks fail the build if code touches the AI layer or writes memory outside the fenced paths.</li>
+			<li>All AI inference runs through a metered, budget-capped dispatch layer &mdash; see <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</li>
+		</ul>
+
+		<h2>8. Certifications</h2>
+		<p>None yet, and we will not pretend otherwise: Itsuki is an early-stage service and has not completed a third-party audit framework. What we offer instead is unusual in this market &mdash; the code that enforces every claim on this page is public, the test suites that prove the security properties run on every change, and this page states dates and mechanisms rather than badges. When a formal audit happens, its report will be linked here.</p>
+
+		<h2>9. Incident response</h2>
+		<p>If an incident affects your data: we assess and contain it, fix the cause, and notify you and the relevant authority within <b>72 hours</b> of confirming a personal-data breach, as committed in the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. The notice states plainly what happened and what we did &mdash; not a lawyer's fog.</p>
+
+		<h2>10. Reporting a vulnerability</h2>
+		<p>Found a weakness? We want it: <a href="/disclosure" onclick="showLegal('disclosure', event)">Responsible Disclosure Policy</a>. Good-faith research is welcome and safe here, and <a href="/.well-known/security.txt">security.txt</a> is published.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First version of this page.</p>
+	`,
+	},
+	subprocessors: {
+		title: "Subprocessors",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>A subprocessor is any company that processes customer or account data on our behalf. Itsuki has <b>three</b>. That number is a design decision: the Service was built on a single infrastructure provider precisely so this page would stay short, and comparable products commonly list twelve to twenty.</p>
+
+		<table>
+			<thead><tr><th>Provider</th><th>Purpose</th><th>Data involved</th><th>Location</th><th>Terms</th></tr></thead>
+			<tbody>
+				<tr>
+					<td><b>Cloudflare, Inc.</b></td>
+					<td>All infrastructure: compute (Workers), database (D1), vector index (Vectorize), AI inference (Workers AI), transactional email, network delivery</td>
+					<td>All service data, including memory content, account data, and email delivery</td>
+					<td>Cloudflare's global network (US company)</td>
+					<td><a href="https://www.cloudflare.com/cloudflare-customer-dpa/" target="_blank" rel="noopener">Customer DPA</a></td>
+				</tr>
+				<tr>
+					<td><b>Google LLC</b></td>
+					<td>"Continue with Google" sign-in only</td>
+					<td>Your name, email address, and Google account identifier at sign-in. Never memory content.</td>
+					<td>Global (US company)</td>
+					<td><a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy policy</a></td>
+				</tr>
+				<tr>
+					<td><b>GitHub, Inc.</b></td>
+					<td>"Continue with GitHub" sign-in only</td>
+					<td>Your username, email address, and GitHub account identifier at sign-in. Never memory content.</td>
+					<td>Global (US company)</td>
+					<td><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">Privacy statement</a></td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h2>Generative AI providers</h2>
+		<p>All AI inference &mdash; memory extraction, embeddings, reranking, previews &mdash; runs on <b>Cloudflare Workers AI</b>, inside the same Cloudflare network that hosts the database. No separate AI vendor receives your content. The models, what each one does, and our training commitments are documented on <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</p>
+
+		<h2>What is deliberately absent</h2>
+		<p>No analytics vendor, no advertising or tracking service, no marketing-email platform, no third-party error-reporting service, and no payment processor (the Service is currently free). If any of these is ever added, it appears in the table above first.</p>
+
+		<h2>How changes are announced</h2>
+		<p>This page is the mechanism: <b>a new subprocessor is added to this table, with a new effective date, before any customer data reaches it.</b> The provider-routing layer inside the Service enforces the technical half of that promise &mdash; a disabled provider stops receiving new calls immediately, and stored memory is never handed to a provider that is not on this page.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First version. Three subprocessors: Cloudflare (all infrastructure and inference), Google and GitHub (sign-in only).</p>
+	`,
+	},
+	"ai-data": {
+		title: "AI & Your Data",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>Itsuki uses AI models to turn conversations into structured memory. This page answers the questions that matter about that: which models see your content, where they run, what happens to it afterward, and what we will never do with it.</p>
+
+		<h2>1. The commitment first</h2>
+		<p><b>Your memory is never used to train AI models &mdash; not ours, not anyone's, on any plan, free or paid.</b> Content sent for inference is used to produce the response you asked for and for nothing else. This is not a tier feature or a toggle; it is how the Service works. (For contrast, it is common in this market for free-tier content to carry a training license. Read any provider's terms &mdash; including ours &mdash; before trusting them with memory.)</p>
+
+		<h2>2. Where inference runs</h2>
+		<p>Every AI call the Service makes runs on <b>Cloudflare Workers AI</b> &mdash; models hosted inside Cloudflare's own network, the same infrastructure that runs the database. Your content is not sent to any separate AI company. Cloudflare's <a href="https://www.cloudflare.com/service-specific-terms-developer-platform/" target="_blank" rel="noopener">developer platform terms</a> govern that processing, and under those terms inference inputs and outputs are not used to train Cloudflare's models.</p>
+
+		<h2>3. What each model does</h2>
+		<table>
+			<thead><tr><th>Capability</th><th>What it sees</th><th>What it produces</th></tr></thead>
+			<tbody>
+				<tr><td><b>Memory extraction</b></td><td>The conversation chunk being saved</td><td>Proposed facts, events, entities, and relationships &mdash; a deterministic backend decides what is actually written, and every write gets a receipt</td></tr>
+				<tr><td><b>Embeddings</b></td><td>Memory text being indexed, or a recall query</td><td>Numeric vectors for semantic search, stored in per-account namespaces</td></tr>
+				<tr><td><b>Reranking</b></td><td>A recall query and the candidate memories already authorized for you</td><td>A better ordering of those same candidates &mdash; it can never introduce content from outside your authorized set</td></tr>
+				<tr><td><b>Summaries &amp; titles</b></td><td>Conversation content being organized</td><td>Digests and page titles</td></tr>
+				<tr><td><b>Rules preview &amp; playground</b></td><td>Sample text you explicitly submit for testing</td><td>A no-write preview &mdash; nothing is stored: no memory, no source, no receipt</td></tr>
+			</tbody>
+		</table>
+		<p>The exact model identifiers are public in the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">repository configuration</a> &mdash; currently open-weight models from the Qwen, Llama, and BGE families.</p>
+
+		<h2>4. Retention of inference data</h2>
+		<p>We keep the memory you chose to store, plus content-free metering records (token counts, model name, latency &mdash; never the text). Prompts and raw model outputs are not retained as a separate corpus. Deleting a memory deletes it; there is no shadow copy kept "for model improvement".</p>
+
+		<h2>5. Human access</h2>
+		<p>No human reads your memory in normal operation. Operator access to production exists to run the Service and is used on content only when strictly required to investigate abuse or a security incident, or when you ask for help with your own data. Governance actions are audited; audit records are content-free by construction.</p>
+
+		<h2>6. How provider changes work</h2>
+		<p>The Service contains a provider-routing layer built so that AI providers are attachable and detachable without touching stored memory. The rules it enforces:</p>
+		<ul>
+			<li>A new provider is named on this page and in the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessor list</a> <b>before</b> any customer content reaches it.</li>
+			<li>Disabling a provider stops new calls to it immediately. Your stored memory is untouched &mdash; it lives in the database, not in any model.</li>
+			<li>Each inference run records which provider and model handled it, so the history is auditable after the fact.</li>
+		</ul>
+
+		<h2>7. AI output is not gospel</h2>
+		<p>Extraction models propose; they can be wrong. That is why every write carries a receipt showing what was stored and from where, why memories are versioned with restorable history, and why the <a href="/terms" onclick="showLegal('terms', event)">Terms</a> tell you not to rely on recalled memory for consequential decisions without verifying it.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First version of this page.</p>
+	`,
+	},
+	retention: {
+		title: "Data Retention & Deletion",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>What we keep, for how long, and exactly what happens when you delete something. The defaults favor you keeping your memory until <i>you</i> decide otherwise &mdash; that is what a memory layer is for &mdash; and deletion, when you choose it, is real.</p>
+
+		<h2>1. Retention by data class</h2>
+		<table>
+			<thead><tr><th>Data</th><th>Kept</th><th>Deleted by</th></tr></thead>
+			<tbody>
+				<tr><td><b>Memory</b> (facts, events, entities, relationships, pages)</td><td>Until you delete it</td><td>Dashboard, API delete, source-scoped deletion, project purge, account erasure</td></tr>
+				<tr><td><b>Memory revisions</b></td><td>With their memory &mdash; history is the product</td><td>Deleting the memory removes its history; restoring writes a new forward revision</td></tr>
+				<tr><td><b>Sources</b> (conversation records backing memories)</td><td>While the memory they support exists</td><td>Removed by the same deletion flows, including one-pass residue removal</td></tr>
+				<tr><td><b>Vectors</b> (semantic index)</td><td>While their memory exists</td><td>Purged through a deletion ledger when the memory is deleted</td></tr>
+				<tr><td><b>Operational records</b> (write history, jobs)</td><td>Per the project's operational-records policy</td><td>Project retention policy (admin-set, with an exact deletion preview first) or project deletion</td></tr>
+				<tr><td><b>Audit events</b> (content-free governance log)</td><td>While the organization exists</td><td>Account and organization deletion</td></tr>
+				<tr><td><b>Sessions</b></td><td>Up to 30 days, or until logout or revocation</td><td>Expiry, "log out all sessions", account erasure</td></tr>
+				<tr><td><b>Sign-in codes</b></td><td>10 minutes, single-use, stored hashed</td><td>Automatic expiry; invalidated on delivery failure</td></tr>
+				<tr><td><b>Invitations</b></td><td>30 days after acceptance, revocation, or expiry</td><td>Automatic purge of the encrypted invitation record</td></tr>
+				<tr><td><b>Internal quality evaluations</b></td><td>At most 30 days, content-minimized</td><td>Automatic purge; honors account erasure immediately</td></tr>
+				<tr><td><b>AI metering records</b></td><td>Operational lifetime; contain counts and model names, never text</td><td>Account deletion</td></tr>
+			</tbody>
+		</table>
+
+		<h2>2. Project retention policies</h2>
+		<p>A project administrator can activate a shorter retention policy per data class. Activation requires reviewing an <b>exact deletion preview</b> &mdash; the Service shows precisely what will be removed before anything is. No silent expiry.</p>
+
+		<h2>3. Deletion flows, precisely</h2>
+		<ul>
+			<li><b>Single memory:</b> deletable from the dashboard or the API; removal includes its details, events, connections, and vector entries in one pass.</li>
+			<li><b>By source:</b> delete everything a given conversation or connector produced.</li>
+			<li><b>Project memory purge:</b> removes all memory in a project while keeping its configuration; runs under a lifecycle epoch so in-flight writes cannot resurrect data.</li>
+			<li><b>Project deletion:</b> removes the project and everything in it, after safety checks.</li>
+			<li><b>Account erasure:</b> requested through support; completed after ownership and shared-organization safety checks (you cannot orphan an organization other people depend on &mdash; transfer or remove members first). Erasure removes account records, sessions, credentials, memory spaces, and residue, verified by automated tests.</li>
+		</ul>
+
+		<h2>4. Backups</h2>
+		<p>The database keeps a point-in-time recovery window of roughly <b>30 days</b> (Cloudflare D1 Time Travel) for disaster recovery. Deleted data ages out of that window on the same clock &mdash; deletion is complete everywhere within about 30 days of the delete, and the recovery window is never used to restore data you deleted.</p>
+
+		<h2>5. Export</h2>
+		<p>You can export your current memory space as machine-readable JSON at any time, before or instead of deleting. No lock-in, no export fee, no waiting period.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First version, replacing the summary previously inside the Privacy Policy with per-class specifics.</p>
+	`,
+	},
+	disclosure: {
+		title: "Responsible Disclosure Policy",
+		body: `
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p>Security research makes Itsuki safer, and good-faith researchers deserve clarity, speed, and safety. This policy is that promise, and <a href="/.well-known/security.txt">/.well-known/security.txt</a> points here.</p>
+
+		<h2>1. Scope</h2>
+		<ul>
+			<li><b>In scope:</b> itsuki.app (dashboard, API, SDK endpoints, MCP connectors, sign-in flows) and the open-source engine at <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">github.com/12ziyad/universal-memory-engine</a>.</li>
+			<li><b>Out of scope:</b> Cloudflare's own platform (report to Cloudflare), Google and GitHub sign-in infrastructure (report to them), and social engineering of the operator.</li>
+		</ul>
+
+		<h2>2. How to report</h2>
+		<ul>
+			<li>Email <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> with the subject <b>"SECURITY"</b>, or use <a href="https://github.com/12ziyad/universal-memory-engine/security" target="_blank" rel="noopener">GitHub private vulnerability reporting</a>. Never open a public issue for a vulnerability.</li>
+			<li>Include: what you found, where, reproduction steps, and impact as you understand it. A proof-of-concept helps; a working exploit chain is not required.</li>
+		</ul>
+
+		<h2>3. Rules of engagement</h2>
+		<ul>
+			<li><b>Test only against your own data.</b> Create your own accounts, organizations, and projects. Never access, modify, or delete another tenant's data &mdash; if a boundary flaw shows you someone else's data, stop, capture the minimum needed to report, and tell us.</li>
+			<li>No denial-of-service, resource exhaustion, or spam testing.</li>
+			<li>No social engineering, phishing, or physical attacks.</li>
+			<li>Do not take data beyond the minimum proof, and delete what you captured once the report is acknowledged.</li>
+		</ul>
+
+		<h2>4. Safe harbor</h2>
+		<p>Research conducted in good faith under this policy is <b>authorized</b>. We will not pursue legal action or law-enforcement referral for it, and we consider it exempt from the anti-circumvention restrictions in our Terms. If a third party raises a claim about your good-faith research under this policy, we will say on the record that it was authorized.</p>
+
+		<h2>5. What we commit to</h2>
+		<ul>
+			<li><b>Acknowledgment within 72 hours</b> &mdash; usually much faster; reports go directly to the operator.</li>
+			<li>An assessment and expected-fix timeline once triaged; critical issues are fixed with priority over feature work.</li>
+			<li>A heads-up before any public disclosure on our side, and credit here or in release notes if you want it (or anonymity if you prefer).</li>
+		</ul>
+
+		<h2>6. Coordinated disclosure</h2>
+		<p>Please give us reasonable time to fix an issue before publishing details. If we are unresponsive for 90 days after acknowledgment, you are free to disclose responsibly.</p>
+
+		<h2>Changes</h2>
+		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First version of this policy.</p>
+	`,
 	},
 };
 
@@ -13167,7 +13489,7 @@ function showLegal(kind, eventOrOptions) {
 function closeLegal() {
 	const view = $("#legalView");
 	if (view) view.hidden = true;
-	if (location.pathname === "/terms" || location.pathname === "/privacy") {
+	if (LEGAL_KINDS.some((kind) => location.pathname === `/${kind}`)) {
 		pushUrl(document.body.classList.contains("app-mode") ? "/app" : "/");
 		if (!document.body.classList.contains("app-mode")) setMode("public");
 	}
@@ -18236,9 +18558,9 @@ async function logoutAllNow() {
 
 async function initShell() {
 	const mode = routeMode();
-	if (mode === "terms" || mode === "privacy") {
+	if (mode.startsWith("legal:")) {
 		setMode("public");
-		showLegal(mode, { push: false });
+		showLegal(mode.slice(6), { push: false });
 		sendVisitBeacon("legal");
 		refreshMe();
 		return;

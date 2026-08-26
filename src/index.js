@@ -4578,7 +4578,10 @@ async function handleRequest(request, env, ctx) {
 
 // HTML paths a legacy host 301s to the canonical origin. API and MCP paths are
 // deliberately absent: both hosts serve those natively, forever.
-const REDIRECT_EXACT_PATHS = new Set(["/", "/terms", "/privacy", "/app", "/login", "/signup"]);
+// Legal document slugs served as SPA routes. Keep in sync with LEGAL_KINDS
+// in public/index.html — each resolves on a direct visit via redirect below.
+const LEGAL_PATHS = ["/terms", "/privacy", "/aup", "/security", "/subprocessors", "/ai-data", "/retention", "/disclosure"];
+const REDIRECT_EXACT_PATHS = new Set(["/", "/app", "/login", "/signup", ...LEGAL_PATHS]);
 
 function isRedirectableHtmlPath(pathname) {
 	return REDIRECT_EXACT_PATHS.has(pathname) || pathname === "/docs" || pathname.startsWith("/docs/");
@@ -4593,10 +4596,24 @@ async function handleRequestInner(request, env, ctx, url) {
 			return Response.redirect(`${PUBLIC_ORIGIN}${url.pathname}${url.search}`, 301);
 		}
 
-		if ((request.method === "GET" || request.method === "HEAD") && ["/terms", "/privacy"].includes(url.pathname)) {
+		if ((request.method === "GET" || request.method === "HEAD") && LEGAL_PATHS.includes(url.pathname)) {
 			// Legal pages must resolve on a direct visit (directory listings,
-			// payment-provider reviews) — serve the shell; the client routes it.
+			// security researchers, provider reviews) — serve the shell; the
+			// client routes it to the matching document.
 			return redirectTo(request, `/?view=${url.pathname.slice(1)}`);
+		}
+
+		if (request.method === "GET" && url.pathname === "/.well-known/security.txt") {
+			// RFC 9116. Expires must stay under a year out; bump it alongside the
+			// legal effective date when documents are revised.
+			return new Response([
+				"Contact: mailto:hello@itsuki.app",
+				"Expires: 2027-08-01T00:00:00.000Z",
+				"Policy: https://itsuki.app/disclosure",
+				"Canonical: https://itsuki.app/.well-known/security.txt",
+				"Preferred-Languages: en",
+				"",
+			].join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
 		}
 
 		if ((request.method === "GET" || request.method === "HEAD") && ["/app", "/login", "/signup"].includes(url.pathname)) {
