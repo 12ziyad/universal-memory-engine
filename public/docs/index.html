@@ -435,7 +435,7 @@ const NAV = [
 	]},
 	{ sec: "Operate & trust", items: [
 		["/operate/observability", "Monitoring & diagnostics"],
-		["/privacy", "Privacy & limits"],
+		["/privacy", "Privacy"],
 	]},
 ];
 
@@ -3727,8 +3727,8 @@ ${nextSteps([
 ])}
 ` };
 
-PAGES["/privacy"] = { title: "Privacy & limits", html: `
-<h1>Privacy &amp; limits</h1>
+PAGES["/privacy"] = { title: "Privacy", html: `
+<h1>Privacy</h1>
 <p class="lede">What Itsuki keeps, what it never does with it, and the exact engineering bounds your code has to live inside.</p>
 
 ${prereq([
@@ -3906,48 +3906,8 @@ ${outputBlock(`{ "ok": true, "counts": { "memories": 0, "pages": 0, "slices": 0,
 
 <div class="note"><b>Two export paths, two filenames.</b> The <b>Memory exports</b> screen builds an export as a background job and hands you <code>itsuki-export-&lt;date&gt;.json</code>. The one-shot <b>Export current memory space</b> button in Settings → Personal → Profile &amp; security → Data &amp; Privacy calls <code>GET /v1/export</code> directly and saves <code>uml-export-&lt;date&gt;.json</code>, with the pre-rename prefix. Same content, different file name — do not let a script key off the name.</div>
 
-<h2>The limits</h2>
-<p>Three different things are bounded, and they have different errors and different recoveries. <b>Rate buckets</b> stop a runaway loop. <b>Input bounds</b> refuse a request the extractor could not use anyway. The <b>context bound</b> caps what recall hands back to a model.</p>
-
-<h3>The six rate buckets</h3>
-<table>
-<tr><th>Bucket</th><th>Limit</th><th>Applies to</th></tr>
-<tr><td><code>auth</code></td><td>10 / 60 s</td><td><code>/auth/*</code> — sign-in, sign-up, email codes, password changes. Keyed per IP as well as per actor.</td></tr>
-<tr><td><code>save</code></td><td>60 / 60 s</td><td><code>POST /v1/save</code>, <code>POST /v1/turn</code>, and the MCP save tools.</td></tr>
-<tr><td><code>recall</code></td><td>120 / 60 s</td><td><code>POST /v1/recall</code> and the MCP recall tool.</td></tr>
-<tr><td><code>delete</code></td><td>30 / 60 s</td><td>Both delete routes and the MCP delete tools. Tighter than saving on purpose: a loop that deletes is worse than a loop that saves.</td></tr>
-<tr><td><code>import</code></td><td>300 / 60 s</td><td><code>POST /v1/ingest</code>. Bulk backfill is legitimate burst traffic.</td></tr>
-<tr><td><code>read</code></td><td>240 / 60 s</td><td>Listing and fetching memory objects, and the MCP read tools. Reads cost database rows, not inference.</td></tr>
-</table>
-<p>A bucket is keyed by the authenticated actor and the project it is bound to — never by the caller-selected <code>userId</code>. If the sub-tenant id were part of the key, an SDK could rotate it every request and buy itself a fresh bucket. One key serving a thousand end users shares one bucket.</p>
-
-<div class="note">These counters are protection, not accounting. The underlying limiter is eventually consistent, so the exact request at which a bucket trips is not deterministic. That is also why a <code>429</code> carries <code>ratelimit-limit</code> but no remaining or reset figure — publishing a count that cannot be computed would be a lie.</div>
-
-<h3>Input bounds</h3>
-<table>
-<tr><th>Boundary</th><th>Limit</th><th>Refusal</th></tr>
-<tr><td>Messages in one ingest request</td><td>30</td><td><code>422 ingest_message_count_exceeded</code></td></tr>
-<tr><td>One message's content</td><td>4,000 Unicode code points</td><td><code>422 ingest_message_characters_exceeded</code></td></tr>
-<tr><td>Combined message content</td><td>120,000 Unicode code points</td><td><code>422 ingest_total_characters_exceeded</code></td></tr>
-<tr><td>Serialized ingest request</td><td>512 KiB of UTF-8 JSON</td><td><code>413 ingest_request_too_large</code></td></tr>
-<tr><td><code>content</code> on a save</td><td>120,000 characters</td><td><code>400 payload_too_large</code>, naming the field and its actual size</td></tr>
-<tr><td><code>query</code> on a recall</td><td>8,000 characters</td><td><code>400 payload_too_large</code> — a recall query is a question, not a document</td></tr>
-</table>
-<p>Characters are counted as Unicode <i>code points</i> and the byte ceiling is measured on the real serialized body, so neither can be slipped past with multibyte text or JSON escape sequences. Every violation is atomic: nothing was queued, and the response carries the full limits object so a batcher can re-plan in one pass.</p>
-
-<h3>What recall hands back</h3>
-<p>The context block is bounded so memory sharpens a prompt rather than flooding it. The budget depends on how deeply recall decided to go:</p>
-<table>
-<tr><th>Recall mode</th><th>Context budget</th></tr>
-<tr><td><code>no_recall</code></td><td>0 — the question did not need personal context</td></tr>
-<tr><td><code>light_recall</code>, the targeted default</td><td>1,800 characters</td></tr>
-<tr><td>Update mode</td><td>2,400 characters</td></tr>
-<tr><td><code>deep_recall</code></td><td>2,800 characters</td></tr>
-<tr><td>Raised by an explicit <code>limit</code></td><td>Grows by 220 characters per extra item, to a hard ceiling of 24,000</td></tr>
-</table>
-<p><code>limit</code> is validated by name and never silently clamped: a value outside 1–200 is a <code>400</code> with code <code>invalid_limit</code> and a message saying so. A line that would overflow the remaining budget is clipped with a trailing ellipsis rather than dropped, because breaking on the first long line used to return an empty context while recall had strong matches.</p>
-
-<div class="note"><b>Read the numbers, do not copy them.</b> <code>GET /v1/limits</code> is the authoritative live document and needs no key; <code>GET /v1/ingest/limits</code> returns the ingest half alone for clients that only batch conversations. <a href="#/api/limits">Rate limits and quotas</a> covers the AI write ceiling, backoff strategy, and the internal engine boundaries in full.</div>
+<h2>The limits that apply to you</h2>
+<p>Every enforced bound — the six rate buckets, the input size limits, the recall context budget and the monthly AI write ceiling — lives on <a href="#/api/limits">Rate limits and quotas</a>, and is readable live and unauthenticated from <code>GET /v1/limits</code>. It is generated from the same constants the enforcement path reads, so the published number cannot drift from the enforced one. Reading it beats copying it into your client.</p>
 
 <h2>When it doesn't work</h2>
 <table>
@@ -6675,7 +6635,7 @@ PAGES["/faq"] = { title: "FAQ", html: `
 <p>Until you delete it. There is no default expiry. If you want one, retention policies are configurable per class — playground transcripts, source episodes, semantic memory, export blobs, webhook deliveries, operational records — each set independently in days, previewed before it applies. Security audit records are locked and cannot be shortened.</p>
 
 <h3>Can I get everything out?</h3>
-<p>Yes. <code>GET /v1/export</code> streams a complete JSON export of the memory space that credential and request resolve to. Note the boundary: it exports <i>that</i> space, not every sub-tenant space in the project. Keep exports of anything critical — this is an early product.</p>
+<p>Yes. <code>GET /v1/export</code> streams a complete JSON export of the memory space that credential and request resolve to. Note the boundary: it exports <i>that</i> space, not every sub-tenant space in the project. Keep exports of anything critical.</p>
 
 <h2>Running it</h2>
 
@@ -9446,7 +9406,7 @@ ${outputBlock(`{
 <tr><td><code>project.playground.policy.edit</code></td><td>admin</td><td><b>Apply to this chat</b> and every editable field in the Rules panel</td></tr>
 <tr><td><code>project.playground.delete</code></td><td>admin</td><td>The <b>✕</b> that deletes a chat</td></tr>
 </table>
-<p>The project role table in <b>Settings → Project → Members</b> states the same thing in role language: a member can <i>use Playground</i>, an admin additionally manages <i>Playground policy</i>, and a viewer <i>cannot use Playground</i>. Roles are per project — a role in one project grants nothing in another. See <a href="#/guides/projects">Projects, organizations, and teams</a>.</p>
+<p>Roles are per project — a role in one project grants nothing in another. See <a href="#/guides/projects">Projects, organizations, and teams</a>.</p>
 
 <h2>When it doesn't work</h2>
 <table>
