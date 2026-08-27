@@ -579,6 +579,7 @@ ${nextSteps([
 	["#/install/claude", "Connect a chat app", "Give Claude, ChatGPT or your editor the same memory over MCP."],
 	["#/api/rest", "REST API reference", "Every endpoint, field and error, with real request bodies."],
 	["#/concepts/memory", "How memory works", "The write path and the read path in full detail."],
+	["#/faq", "FAQ", "The questions people ask before they commit to it."],
 ])}
 ` };
 
@@ -686,6 +687,7 @@ ${nextSteps([
 	["#/sdk/python", "Use an SDK", "Python and JavaScript clients, with retries and typed errors."],
 	["#/guides/save", "Save memory properly", "Conversation capture, provenance, and what gets kept."],
 	["#/concepts/memory", "Understand the machinery", "What happens between your text and a stored memory."],
+	["#/guides/playground", "Try it without code", "Save and recall from inside the app, and watch extraction happen."],
 ])}
 ` };
 
@@ -1031,6 +1033,9 @@ ${codeBlock(`You have an ${PRODUCT.name} memory tool. At the start of each sessi
 <tr><td>Claude never calls the tools on its own</td><td>By design. The host decides when a tool runs.</td><td>Add the standing instructions above, or ask explicitly in the turn.</td></tr>
 </table>
 
+<h2>Other MCP clients</h2>
+<p>The same server, the same URL, a different config file: <a href="#/install/cursor">Cursor and other editors</a>, <a href="#/install/opencode">OpenCode</a>, <a href="#/install/antigravity">Antigravity</a>, <a href="#/install/openclaw">OpenClaw</a>, <a href="#/install/hermes">Hermes Agent</a> and <a href="#/install/pi">Pi Agent</a> each have their own page, because the config path and the caveats differ even though the endpoint does not.</p>
+
 <h2>Where to go next</h2>
 ${nextSteps([
 	["#/install/plugin", "Claude Code plugin", "The same tools plus lifecycle hooks, an outbox, and /itsuki:doctor."],
@@ -1364,6 +1369,7 @@ PAGES["/integrations/native"] = { title: "Native packages", html: `
 <p class="lede">Five frameworks can reach ${PRODUCT.name} through their own memory interface instead of MCP: install one package, pass it where the framework expects memory, and the agent gets recall and capture without learning a tool.</p>
 <p>These need an <b>API key</b> from <b>API Keys</b> — a server credential, not an MCP link. Every package reads <code>ITSUKI_API_KEY</code> from the environment.</p>
 <h2 id="native-agno">Agno</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/agno">Full Agno page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install agno-itsuki
 
 from agno.agent import Agent
@@ -1372,6 +1378,7 @@ from agno_itsuki import ItsukiTools
 agent = Agent(tools=[ItsukiTools(user_id="alex")])`)}
 <p>Model-called memory: the agent decides when to search and when to save.</p>
 <h2 id="native-llamaindex">LlamaIndex</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/llamaindex">Full LlamaIndex page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install llama-index-memory-itsuki
 
 from llama_index.memory.itsuki import itsuki_memory
@@ -1380,6 +1387,7 @@ memory = itsuki_memory(user_id="alex", session_id="thread_9")
 response = await agent.run("What am I working on?", memory=memory)`)}
 <p>A memory <i>block</i>, so it composes with the rest of LlamaIndex's memory rather than replacing it.</p>
 <h2 id="native-camel">CAMEL</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/camel">Full CAMEL page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install camel-itsuki
 
 from camel.memories import ChatHistoryMemory
@@ -1391,6 +1399,7 @@ memory = ChatHistoryMemory(
 )`)}
 <p>Agent history persists to ${PRODUCT.name} and to a local mirror, so a run survives a restart.</p>
 <h2 id="native-vercel-ai">Vercel AI SDK</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/vercel-ai">Full Vercel AI SDK page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`npm install ai-sdk-itsuki
 
 import { openai } from "@ai-sdk/openai";
@@ -1405,6 +1414,7 @@ const { text } = await generateText({
 });`)}
 <p>A middleware around the model, so recall and capture ride along with every call.</p>
 <h2 id="native-mastra">Mastra</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/mastra">Full Mastra page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`npm install mastra-itsuki
 
 import { Agent } from "@mastra/core/agent";
@@ -1432,9 +1442,10 @@ const agent = new Agent({
 
 PAGES["/integrations/python"] = { title: "Python frameworks", html: `
 <h1>Python frameworks</h1>
-<p class="lede">One MCP endpoint, every framework's own client. Each shape below is taken from that framework's current documentation — connect once and your agent gets save, recall, list, get, delete, and whoami as tools.</p>
-<p>Every route needs an <b>MCP link</b> from <b>API Keys</b> (shown once). The URL or header carrying it is a credential — treat the file that holds it as a secret.</p>
+<p class="lede">One MCP endpoint, every framework's own client. Each shape below is taken from that framework's current documentation — connect once and your agent gets the full memory tool set as tools.</p>
+<p>Every route needs an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b>. It is shown once. The URL or header carrying it is a credential — treat the file that holds it as a secret.</p>
 <h2 id="langchain">LangChain &amp; LangGraph</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/langchain">Full LangChain & LangGraph page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install langchain-mcp-adapters
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -1448,6 +1459,7 @@ client = MultiServerMCPClient({
 })
 tools = await client.get_tools()  # hand these to your LangGraph agent`)}
 <h2 id="crewai">CrewAI</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/crewai">Full CrewAI page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 <p>The MCP support lives in an extra — install <code>crewai-tools[mcp]</code>, not plain <code>crewai-tools</code>, or <code>MCPServerAdapter</code> will not be exported.</p>
 ${codeBlock(`pip install "crewai-tools[mcp]"
 
@@ -1462,6 +1474,7 @@ server_params = {
 with MCPServerAdapter(server_params) as tools:
     agent = Agent(tools=tools, role="...", goal="...")`)}
 <h2 id="autogen">AutoGen</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/autogen">Full AutoGen page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install autogen-ext
 
 from autogen_ext.tools.mcp import StreamableHttpServerParams, mcp_server_tools
@@ -1472,6 +1485,7 @@ params = StreamableHttpServerParams(
 )
 tools = await mcp_server_tools(params)`)}
 <h2 id="agno">Agno</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/agno">Full Agno page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install agno
 
 from agno.tools.mcp import MCPTools, StreamableHTTPClientParams
@@ -1483,6 +1497,7 @@ params = StreamableHTTPClientParams(
 async with MCPTools(transport="streamable-http", server_params=params) as mcp:
     agent = Agent(tools=[mcp])`)}
 <h2 id="openai-agents">OpenAI Agents SDK</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/openai-agents">Full OpenAI Agents SDK page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 ${codeBlock(`pip install openai-agents
 
 from agents.mcp import MCPServerStreamableHttp
@@ -1497,6 +1512,7 @@ async with MCPServerStreamableHttp(
 ) as server:
     agent = Agent(name="Assistant", mcp_servers=[server])`)}
 <h2 id="google-adk">Google ADK</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/google-adk">Full Google ADK page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 <p>A native <code>BaseMemoryService</code> plus the automatic capture ADK does not ship. Needs <code>google-adk</code> 2.5–2.7.</p>
 ${codeBlock(`pip install adk-itsuki
 
@@ -1528,6 +1544,7 @@ toolset = McpToolset(
     )
 )`)}
 <h2 id="llamaindex">LlamaIndex</h2>
+<p class="lede" style="margin:6px 0 12px"><a href="#/integrations/llamaindex">Full LlamaIndex page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
 <p>LlamaIndex's MCP client documents OAuth but <b>no custom headers</b> — a header-only memory service cannot connect there at all. ${PRODUCT.name}'s path-token door carries the credential in the URL itself, so <code>BasicMCPClient</code> works as-is:</p>
 ${codeBlock(`pip install llama-index-tools-mcp
 
@@ -1695,6 +1712,8 @@ ${codeBlock(`n8n-nodes-itsuki`)}
 </ul>
 <p>The node is usable as an AI Agent tool. On self-hosted n8n that additionally requires <code>N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true</code>. Recall and the save operations are the sensible tools to expose; destructive operations are deliberately unattractive as tools, since Delete All previews unless a human enables confirmation.</p>
 <p>To correct a memory, use <b>Update Memory</b> rather than deleting and re-saving. An update keeps the previous wording as an immutable revision you can read with <b>Memory History</b> and restore with <b>Rollback Memory</b>; deleting destroys that history instead. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</p>
+<div class="note">Building on <b>Dify</b> instead? It reaches the same MCP endpoint with no plugin to install — see <a href="#/integrations/dify">Dify</a>.</div>
+
 <h2 id="http">Route B — HTTP Request node (any workflow, incl. Cloud)</h2>
 <p>The deterministic route: "form submitted → save to memory", "nightly digest → recall". Create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b> — which doubles as a REST Bearer credential.</p>
 ${codeBlock(`Node: HTTP Request
@@ -3355,6 +3374,7 @@ GET /v1/jobs?limit=20</code></pre>
 <ul>
 <li><a href="#/concepts/extraction">How extraction works</a> — chunking, the proposing model, the gates, idempotency.</li>
 <li><a href="#/concepts/graph">The memory graph</a> — how connections form and what they do at recall time.</li>
+<li><a href="#/concepts/conversation-pages">Conversation pages</a> — what a captured conversation becomes, and how re-sends converge onto one page.</li>
 <li><a href="#/concepts/retrieval">How recall works</a> — query to bounded context.</li>
 <li><a href="#/concepts/receipts">Receipts &amp; rules</a> — proof of what happened, and control over what may happen.</li>
 <li><a href="#/concepts/delete">Delete &amp; erasure</a> — how any of this is removed.</li>
@@ -3919,7 +3939,7 @@ ${nextSteps([
 
 PAGES["/integrations/langchain"] = { title: "LangChain", html: `
 <h1>LangChain</h1>
-<p class="lede">LangChain and LangGraph reach Itsuki through the MCP endpoint: connect once with <code>langchain-mcp-adapters</code> and your agent gets save, recall, list, get, delete, and whoami as ordinary LangChain tools.</p>
+<p class="lede">LangChain and LangGraph reach Itsuki through the MCP endpoint: connect once with <code>langchain-mcp-adapters</code> and your agent gets the full memory tool set as ordinary LangChain tools.</p>
 
 <h2>What this integration is</h2>
 <p>There is no <code>itsuki-langchain</code> package, and there should not be. LangChain already ships an MCP adapter, and Itsuki already serves a Streamable HTTP MCP endpoint, so the connection is four lines of configuration instead of a dependency you would have to keep in step with two moving frameworks. The same client covers LangGraph: <code>get_tools()</code> returns <code>BaseTool</code> instances, which is what both accept.</p>
@@ -4228,7 +4248,7 @@ PAGES["/integrations/autogen"] = { title: "AutoGen", html: `
 <p class="lede">AutoGen reaches Itsuki through <code>autogen-ext</code>'s MCP support: one call to <code>mcp_server_tools()</code> wraps every memory tool as an AutoGen tool, ready for an <code>AssistantAgent</code> or a whole team.</p>
 
 <h2>What this integration is</h2>
-<p>There is no <code>itsuki-autogen</code> package. AutoGen's extension library already speaks MCP over Streamable HTTP, and that is the same door Itsuki serves, so the integration is a parameters object and one await. <code>mcp_server_tools()</code> connects, lists what the server advertises, and returns an AutoGen tool per entry — save, recall, list, get, delete, and whoami.</p>
+<p>There is no <code>itsuki-autogen</code> package. AutoGen's extension library already speaks MCP over Streamable HTTP, and that is the same door Itsuki serves, so the integration is a parameters object and one await. <code>mcp_server_tools()</code> connects, lists what the server advertises, and returns an AutoGen tool per entry — the full memory tool set.</p>
 <p>Because these are tools, <b>the model decides when to use them</b>. In a multi-agent team that cuts both ways: any agent holding the tools can write memory, and none of them is obliged to read it. Give the tools to the agent whose job is actually to remember, not to all of them by reflex.</p>
 
 <h2>Install</h2>
@@ -5914,7 +5934,7 @@ await memory.search("how does Atlas deploy?", {
 <tr><td>400</td><td><code>unknown_member_field</code>, <code>unknown_invitation_field</code>, <code>unknown_project_field</code></td><td>Unknown fields are refused by name rather than ignored.</td></tr>
 <tr><td>409</td><td><code>invalid_invitation</code> / expired</td><td>The link is wrong, already used, revoked, or older than seven days.</td></tr>
 </table>
-<p>Related: <a href="#/concepts/scope">Who memory belongs to</a> · <a href="#/api/auth">Authentication &amp; keys</a> · <a href="#/guides/rules">Control what gets remembered</a>.</p>
+<p>Related: <a href="#/guides/lifecycle">Archive, transfer &amp; delete a project</a> · <a href="#/concepts/scope">Who memory belongs to</a> · <a href="#/api/auth">Authentication &amp; keys</a> · <a href="#/guides/rules">Control what gets remembered</a>.</p>
 ` };
 
 PAGES["/guides/export"] = { title: "Export and delete your data", html: `
