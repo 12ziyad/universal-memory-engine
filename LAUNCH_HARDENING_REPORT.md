@@ -451,4 +451,30 @@ untracked, OAuth endpoints rate-limited, `/eval/llm` timing-safe.
 
 ## Deployment
 
-<!-- DEPLOYMENT -->
+- Commit `4ab9e83` on `codex/prod-google-plus-unified-theme`, pushed to
+  GitHub. Migrations 0058/0059/0060 applied remotely **before** the worker
+  deploy.
+- `npx wrangler deploy` → version **`f34fda77-daef-42b7-b928-37f48c706799`**
+  at 100%, created 2026-08-27T22:33:58Z, worker startup 203 ms, 3 changed
+  assets uploaded (`index.html`, `docs/index.html`, landing CSS).
+
+**Live production smoke test** (throwaway account, demoted + disabled after;
+raw JSON evidence per check ran from this machine against itsuki.app):
+
+| check | result |
+|---|---|
+| `/health` | 200; `ai_routing: off`, `google_credentials: absent` |
+| signup + onboarding | 201 / completed |
+| `/v1/limits` | new `daily` + `huba` blocks published |
+| save → job | accepted, extraction ran on production, job `enriched`, **62 measured neurons** for the save (matching the Task 0 numbers) |
+| recall | 200, "Found relevant memory" with receipt + packet provenance |
+| `/v1/usage` | `quota_daily` 62/15,000 used, `early_access: true`, `approx_saves_remaining: 99`; `huba` 0/50 (first day) |
+| **Huba, grounded in live data** | asked "how many saves do I have left today" → "You have about 100 saves left today (based on 15,000 daily neuron limit minus 62 used)…" citing `/guides/usage`, `/api/limits`, `/api/usage` — an answer only live account data can produce |
+| **quota wall** | after a 1-message entitlement: HTTP 429 `ai_quota_exhausted`, `capped: "huba_daily_messages"`, `usage {used:1, limit:1, unit:"messages", resets_at}` |
+| `/v1/graph` | 200, the saved memory present |
+| upgrade request → admin queue | filed by the user, visible in `GET /v1/admin/upgrade-requests`, dismissed via the new admin action |
+| `/v1/admin/errors` | 200 with entries (admin-gated; 401/403 for anonymous/non-admin verified in CI) |
+
+The smoke account (`user_8da66464…`, `smoke-1787870203230@example.com`) was
+demoted, disabled, and its sessions revoked; its dismissed upgrade request
+and a 1-message Huba entitlement remain as inert rows on a disabled account.
