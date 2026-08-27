@@ -50,8 +50,11 @@ describe("landing editorial sheet", () => {
 		}
 	});
 
-	it("gives the hero copy 70% and the vertical mark the remaining third", () => {
-		expect(landingCss).toContain("grid-template-columns: minmax(0,7fr) minmax(210px,3fr)");
+	it("centers the copy and keeps the vertical mark as a right-edge sliver", () => {
+		// v4 hero: single centered column; the katakana mark survives as a
+		// narrow absolute band on the right edge.
+		expect(landingCss).toContain("#landing.lp-shell .hero { position: relative; grid-template-columns: 1fr;");
+		expect(landingCss).toContain("width: clamp(58px, 7vw, 104px)");
 		expect(landingCss).toContain(".hero-mono-jp");
 		expect(landingCss).toContain("writing-mode: vertical-rl");
 	});

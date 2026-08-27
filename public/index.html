@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Itsuki — not more context, better memory</title>
-<meta name="description" content="Itsuki turns conversations, documents, and events into structured memory — source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools." />
+<title>Itsuki — your AI forgets. Itsuki remembers.</title>
+<meta name="description" content="Itsuki is the memory layer under your AI tools. Save once from Claude, ChatGPT, Cursor, or 26 other tools — every other one remembers it. Source-linked, versioned, reversible." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Itsuki — not more context, better memory" />
+<meta property="og:title" content="Itsuki — your AI forgets. Itsuki remembers." />
 <meta property="og:description" content="Structured memory for applications, assistants, agents, and workflows — source-linked, versioned, and reversible." />
 <meta property="og:url" content="https://itsuki.app/" />
 <link rel="canonical" href="https://itsuki.app/" />
@@ -2315,8 +2315,53 @@
 		#landing *, #landing *::before, #landing *::after { animation: none !important; transition: none !important; }
 		.reveal, .reveal * { opacity: 1 !important; transform: none !important; }
 	}
+
+	/* ---- Usage & plan, failed-save report, Huba AI (launch hardening) ---- */
+	.usage-bar { display: block; height: 7px; margin-top: 8px; border: 1px solid var(--border); background: var(--panel2); overflow: hidden; }
+	.usage-bar > i { display: block; height: 100%; background: var(--green); transition: width .3s ease; }
+	.usage-bar.warn > i { background: var(--amber); }
+	.usage-bar.full > i { background: var(--red); }
+
+	#requestMoreOverlay, #failedSavesOverlay { position: fixed; inset: 0; z-index: 340; display: flex; align-items: center; justify-content: center; padding: 18px; background: var(--overlay); }
+	.rm-card { width: min(480px, 100%); max-height: 85vh; overflow: auto; padding: 20px 22px; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
+	.rm-card select, .rm-card textarea { width: 100%; margin-top: 4px; }
+
+	.tab .fail-dot { display: inline-block; width: 8px; height: 8px; margin-left: 7px; border-radius: 50%; background: var(--red); vertical-align: middle; }
+
+	#hubaBar { display: none; }
+	body.app-mode #hubaBar { display: block; position: fixed; right: 18px; bottom: 18px; z-index: 330; font-family: var(--font-ui); }
+	#hubaFab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--border2); background: var(--panel); color: var(--text); font: 600 13px/1 var(--font-ui); cursor: pointer; box-shadow: var(--shadow-md); }
+	#hubaFab:hover { border-color: var(--accent); color: var(--accent); }
+	#hubaFab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+	.huba-mark { font-size: 15px; color: var(--accent); }
+	#hubaPanel { position: fixed; right: 18px; bottom: 74px; width: min(400px, calc(100vw - 24px)); height: min(560px, calc(100vh - 120px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
+	#hubaPanel header { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border); font-size: 13px; }
+	#hubaLog { flex: 1; overflow-y: auto; padding: 13px; display: flex; flex-direction: column; gap: 10px; }
+	.huba-msg { display: flex; flex-direction: column; max-width: 88%; }
+	.huba-user { align-self: flex-end; align-items: flex-end; }
+	.huba-assistant { align-self: flex-start; }
+	.huba-bubble { padding: 9px 12px; border: 1px solid var(--border); background: var(--panel3); font-size: 13px; line-height: 1.55; word-break: break-word; }
+	.huba-user .huba-bubble { background: var(--panel2); }
+	.huba-thinking { color: var(--muted); font-style: italic; }
+	.huba-srcs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+	.huba-src { font: 500 11px/1 var(--font-mono); padding: 4px 8px; border: 1px solid var(--border); color: var(--muted); text-decoration: none; }
+	.huba-src:hover { color: var(--accent); border-color: var(--accent); }
+	#hubaForm { display: flex; gap: 7px; padding: 11px 13px; border-top: 1px solid var(--border); }
+	#hubaInput { flex: 1; min-width: 0; }
+	.huba-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
+	.huba-icon:hover, .huba-icon.active { color: var(--accent); border-color: var(--accent); }
+	.huba-icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+	.huba-send { padding: 0 14px; }
+	.huba-more { border: 0; background: transparent; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+	@media (max-width: 640px) {
+		body.app-mode #hubaBar { right: 12px; bottom: 12px; }
+		#hubaPanel { right: 0; left: 0; bottom: 64px; width: 100vw; height: min(70vh, 520px); border-left: 0; border-right: 0; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.usage-bar > i, #hubaPanel, #hubaFab { transition: none !important; }
+	}
 </style>
-<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=7" />
+<link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=8" />
 <link rel="stylesheet" href="/assets/app-editorial-v1.css?v=4" />
 </head>
 <body>
@@ -2336,6 +2381,10 @@
 				<a href="#open-source">Open source</a>
 			</nav>
 			<div class="nav-actions">
+				<a class="nav-github" href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">
+					<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+					Open source
+				</a>
 				<a class="text-link" href="/login" onclick="showAuth('login', event)">Sign in</a>
 				<a class="nav-cta" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">↗</span></a>
 			</div>
@@ -2344,13 +2393,14 @@
 
 		<section class="hero" id="top">
 			<div class="hero-copy">
-				<p class="eyebrow"><span>01</span> Structured memory infrastructure</p>
-				<h1>Not more context.<br /><em>Better memory.</em></h1>
-				<p class="hero-deck">Itsuki turns conversations, documents, and events into structured memory — source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools.</p>
+				<p class="eyebrow"><span>01</span> One memory, every AI tool</p>
+				<h1>Your AI forgets.<br /><em>Itsuki remembers.</em></h1>
+				<p class="hero-deck">Itsuki is the memory layer under your AI tools. Tell something to Claude, ChatGPT, Cursor, or any of 26 supported tools once, and every other one remembers it — structured memory, source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools.</p>
 				<div class="hero-actions">
 					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
 					<a class="secondary-action" href="/docs/">Read the docs</a>
 				</div>
+				<p class="hero-proof">Open source · One key, two minutes to connect · Free during early access</p>
 			</div>
 			<aside class="hero-mono" aria-label="Itsuki, written in Japanese">
 				<span class="hero-mono-jp" lang="ja">イツキ</span>
@@ -2876,6 +2926,9 @@ const S = {
 	resizeObserver: null, fitTimer: null, clusterHulls: [],
 	hullPulseTimer: null, hullPulse: 0,
 };
+// Deliberately visible on window: the dashboard has no build step, and a
+// reachable state object is what makes live debugging and smoke checks honest.
+window.S = S;
 
 const THEME_STORAGE_KEY = "itsuki_theme";
 const THEME_VALUES = new Set(["light", "dark", "system"]);
@@ -3599,7 +3652,7 @@ async function saveManagedProjectDetails() {
 	}
 }
 
-const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks"]);
+const APP_VIEWS = new Set(["overview", "memory", "graph", "candidates", "connect", "receipts", "rules", "settings", "admin", "install", "playground", "keys", "requests", "exports", "webhooks", "usage"]);
 
 const nodeKey = (id) => `node:${id}`;
 const pageKey = (id) => `page:${id}`;
@@ -3898,6 +3951,7 @@ function renderProfileMenu() {
 	menu.innerHTML = `
 		<div class="profile-id"><b>${esc(user.name || user.email)}</b>${user.name ? `<span>${esc(user.email)}</span>` : ""}</div>
 		<div class="profile-theme" role="group" aria-label="Appearance">${themeBtn("light", "Light")}${themeBtn("dark", "Dark")}${themeBtn("system", "System")}</div>
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('usage');">Usage &amp; plan</button>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('settings');">Settings</button>
 		<a role="menuitem" href="mailto:hello@itsuki.app">Support</a>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutNow();">Log out</button>`;
@@ -4419,6 +4473,11 @@ async function openAuthenticatedApp() {
 	setView(S.view, { updateHash: false });
 	renderAppUser();
 	sendVisitBeacon("app");
+	initHuba();
+	// Failed-save surfacing: check now, then keep a slow background watch so
+	// a write that dies while the app is open still becomes visible.
+	checkFailedSaves();
+	if (!S.failedJobsTimer) S.failedJobsTimer = setInterval(() => checkFailedSaves({ announce: true }), 3 * 60 * 1000);
 	await beginInvitationRedemption();
 	await refreshTokens();
 	await load();
@@ -4893,7 +4952,7 @@ const VIEW_TITLES = {
 	overview: "Dashboard", memory: "Memories", graph: "Graph",
 	install: "Get started", playground: "Playground", keys: "API Keys",
 	receipts: "History", settings: "Settings", admin: "Admin",
-	requests: "Requests", exports: "Memory exports",
+	requests: "Requests", exports: "Memory exports", usage: "Usage & plan",
 };
 
 function toggleRail() {
@@ -4953,7 +5012,7 @@ function renderView() {
 	const v = $("#view"); v.className = "view" + (S.view==="graph" ? " pad0" : "");
 	// Setup screens must never wait on /v1/graph — a brand-new account has no
 	// graph to load, and Get started is the first thing they open.
-	if (!S.data && !["overview","memory","connect","settings","rules","receipts","install","playground","keys","requests","exports","webhooks"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
+	if (!S.data && !["overview","memory","connect","settings","rules","receipts","install","playground","keys","requests","exports","webhooks","usage"].includes(S.view)) { v.innerHTML = `<div class="empty">Loading your memories…</div>`; return; }
 	v.innerHTML = "";
 	({
 		overview: viewOverview,
@@ -4969,6 +5028,7 @@ function renderView() {
 		receipts: viewReceipts,
 		rules: viewRules,
 		admin: viewAdmin,
+		usage: viewUsage,
 		settings: viewSettings,
 		home: viewOverview,
 		memories: viewMemory,
@@ -13651,13 +13711,403 @@ function updateAdminTabVisibility() {
 	if (tab) tab.hidden = S.me?.user?.role !== "admin";
 }
 
+/* ---- Usage & plan ------------------------------------------------------ */
+/* The page behind the top-right profile menu entry: today's allowance as a
+   filling bar (warns at 80% — a surprise wall feels broken), the 00:00 UTC
+   countdown, the monthly plan, Huba's allowance, recent activity, and the
+   "Request more" flow. All numbers come from GET /v1/usage — nothing here is
+   computed client-side except the countdown. */
+function usageBar(used, limit, { warnAt = 0.8 } = {}) {
+	const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
+	const state = ratio >= 1 ? " full" : ratio >= warnAt ? " warn" : "";
+	return `<span class="usage-bar${state}" role="img" aria-label="${Math.round(ratio * 100)}% used"><i style="width:${Math.round(ratio * 100)}%"></i></span>`;
+}
+
+function usageCountdownText(resetsAt) {
+	const ms = new Date(resetsAt).getTime() - Date.now();
+	if (!Number.isFinite(ms) || ms <= 0) return "any moment now";
+	const h = Math.floor(ms / 3_600_000);
+	const m = Math.floor((ms % 3_600_000) / 60_000);
+	const s = Math.floor((ms % 60_000) / 1000);
+	return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+async function viewUsage(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">Loading your usage…</div></div>`;
+	v.appendChild(wrap);
+	let usage;
+	try { usage = await api("/v1/usage?range=7d"); }
+	catch (err) { wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">${esc(err.message)}</div></div>`; return; }
+	let myRequests = [];
+	try { myRequests = (await api("/v1/upgrade-requests")).requests || []; } catch { myRequests = []; }
+	const openRequest = (kind) => myRequests.find((r) => r.status === "open" && r.kind === kind);
+	const daily = usage.quota_daily;
+	const monthly = usage.quota;
+	const huba = usage.huba;
+	const recent = (usage.by_day || []).slice(-7).reverse();
+	const ratio = daily && daily.limit > 0 ? daily.used / daily.limit : 0;
+	wrap.innerHTML = `<div class="box" style="max-width:860px">
+		<h3>Usage &amp; plan</h3>
+		<div class="help">What this account has used, what remains, and when it resets. Recall is never metered — a full allowance never locks you out of reading your own memory.</div>
+		${daily ? `<div class="action-box" style="margin-top:12px">
+			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+				<h3 style="margin:0">Today's saves</h3>
+				<span class="help">resets at 00:00 UTC — in <b id="usageCountdown">${usageCountdownText(daily.resets_at)}</b></span>
+			</div>
+			${usageBar(daily.used, daily.limit)}
+			<div class="kv" style="margin-top:6px"><b>${daily.used.toLocaleString()}</b> of <b>${daily.limit.toLocaleString()}</b> neurons used · about <b>${daily.approx_saves_remaining}</b> saves left today</div>
+			${ratio >= 1 ? `<div class="help" style="color:var(--red);margin-top:4px">Today's allowance is used up. Saves resume at 00:00 UTC; recall keeps working.</div>`
+				: ratio >= 0.8 ? `<div class="help" style="color:var(--amber);margin-top:4px">Over 80% used — if today is a heavy day, request more below before you hit the wall.</div>` : ""}
+			<div class="help" style="margin-top:6px">A direct save costs ~150 neurons; a long conversation save costs proportionally more. ${daily.early_access ? `<span class="badge state-active" style="opacity:.8">early access</span>` : ""}</div>
+			<div style="margin-top:10px">${openRequest("saves")
+				? `<span class="help">Request sent ${ago(openRequest("saves").created_at)} — the owner reviews these personally.</span>`
+				: `<button class="ghost mini" onclick="openRequestMore('saves')">Request more</button>`}</div>
+		</div>` : `<div class="help" style="margin-top:12px">Daily usage is unavailable right now.</div>`}
+		${monthly ? `<div class="action-box" style="margin-top:10px">
+			<h3 style="margin:0 0 6px">This month's plan</h3>
+			${usageBar(monthly.used, monthly.limit)}
+			<div class="kv" style="margin-top:6px"><b>${monthly.used.toLocaleString()}</b> of <b>${monthly.limit.toLocaleString()}</b> AI saves this month · resets ${esc(String(monthly.resets_at).slice(0, 10))}</div>
+		</div>` : ""}
+		${huba ? `<div class="action-box" style="margin-top:10px">
+			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+				<h3 style="margin:0">Huba AI</h3>
+				<span class="help">resets at 00:00 UTC</span>
+			</div>
+			${usageBar(huba.used, huba.limit)}
+			<div class="kv" style="margin-top:6px"><b>${huba.used}</b> of <b>${huba.limit}</b> messages today</div>
+			<div style="margin-top:10px">${openRequest("huba")
+				? `<span class="help">Request sent ${ago(openRequest("huba").created_at)}.</span>`
+				: `<button class="ghost mini" onclick="openRequestMore('huba')">Request more</button>`}</div>
+		</div>` : ""}
+		<div class="action-box" style="margin-top:10px">
+			<h3 style="margin:0 0 6px">Recent activity</h3>
+			${recent.map((row) => `<div class="kv">${esc(row.day)}: <b>${row.saves}</b> save(s) · <b>${row.recalls}</b> recall(s)${row.memories_added ? ` · ${row.memories_added} memories added` : ""}</div>`).join("") || `<div class="help">Nothing in the last 7 days.</div>`}
+		</div>
+		<div class="help" style="margin-top:10px">There is no checkout and no card on file — "Request more" sends a note to the owner, who grants limits by hand while Itsuki is in early access.</div>
+	</div>`;
+	if (S.usageTimer) clearInterval(S.usageTimer);
+	S.usageTimer = setInterval(() => {
+		if (S.view !== "usage") { clearInterval(S.usageTimer); S.usageTimer = null; return; }
+		const span = $("#usageCountdown");
+		if (span && daily) span.textContent = usageCountdownText(daily.resets_at);
+	}, 1000);
+}
+
+function openRequestMore(kind) {
+	closeRequestMore();
+	const overlay = el("div");
+	overlay.id = "requestMoreOverlay";
+	overlay.innerHTML = `<div class="rm-card" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
+		<h3 id="rmTitle">Request more</h3>
+		<div class="help">This goes straight to the owner with your current usage attached. No payment, no card — limits are granted by hand during early access.</div>
+		<label class="help" style="display:block;margin-top:12px">What do you need?</label>
+		<select id="rmKind">
+			<option value="saves"${kind === "saves" ? " selected" : ""}>More daily saves</option>
+			<option value="huba"${kind === "huba" ? " selected" : ""}>More Huba messages</option>
+			<option value="other"${kind === "other" ? " selected" : ""}>Something else</option>
+		</select>
+		<label class="help" style="display:block;margin-top:10px">Anything the owner should know? (optional)</label>
+		<textarea id="rmNote" rows="3" maxlength="500" placeholder="What you're building, how much you need…"></textarea>
+		<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+			<button class="ghost mini" onclick="closeRequestMore()">Cancel</button>
+			<button class="btn" id="rmSend">Send request</button>
+		</div>
+	</div>`;
+	overlay.addEventListener("click", (event) => { if (event.target === overlay) closeRequestMore(); });
+	document.body.appendChild(overlay);
+	const escHandler = (event) => { if (event.key === "Escape") closeRequestMore(); };
+	overlay._escHandler = escHandler;
+	document.addEventListener("keydown", escHandler);
+	$("#rmSend").addEventListener("click", async () => {
+		const button = $("#rmSend");
+		button.disabled = true;
+		try {
+			await api("/v1/upgrade-requests", {
+				method: "POST",
+				body: JSON.stringify({ kind: $("#rmKind").value, note: $("#rmNote").value }),
+			});
+			toast("Request sent — the owner will take a look.");
+			closeRequestMore();
+			if (S.view === "usage") setView("usage", { updateHash: false }) || render();
+		} catch (err) {
+			toast(err.message, true);
+			button.disabled = false;
+		}
+	});
+	$("#rmNote").focus();
+}
+
+function closeRequestMore() {
+	const overlay = document.getElementById("requestMoreOverlay");
+	if (!overlay) return;
+	if (overlay._escHandler) document.removeEventListener("keydown", overlay._escHandler);
+	overlay.remove();
+}
+
+/* ---- Failed-save surfacing --------------------------------------------- */
+/* The other half of the capacity fix: a write that dies terminally must be
+   DISCOVERABLE. The watcher polls /v1/jobs for recent failures, badges the
+   History tab, and — for failures the person hasn't seen — opens a plain-
+   language report they can send with one click. Acknowledged job ids live in
+   localStorage so nothing nags twice. */
+const FAILED_ACK_KEY = "itsuki_ack_failed_jobs";
+
+function ackedFailedJobs() {
+	try { return new Set(JSON.parse(localStorage.getItem(FAILED_ACK_KEY) || "[]")); }
+	catch { return new Set(); }
+}
+
+function ackFailedJobs(ids) {
+	try {
+		const seen = ackedFailedJobs();
+		for (const id of ids) seen.add(id);
+		localStorage.setItem(FAILED_ACK_KEY, JSON.stringify([...seen].slice(-200)));
+	} catch { /* storage blocked — the badge still shows */ }
+}
+
+async function checkFailedSaves({ announce = true } = {}) {
+	if (!document.body.classList.contains("app-mode")) return;
+	let jobs = [];
+	try {
+		const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
+		const res = await api(`/v1/jobs?status=failed&since=${since}&limit=20`);
+		jobs = (res.jobs || []).filter((job) => !/cancelled_by_/.test(String(job.error || "")));
+	} catch { return; }
+	S.failedJobs = jobs;
+	const badgeHost = document.querySelector('.tab[data-view="receipts"]');
+	if (badgeHost) {
+		let dot = badgeHost.querySelector(".fail-dot");
+		if (jobs.length && !dot) {
+			dot = document.createElement("span");
+			dot.className = "fail-dot";
+			dot.setAttribute("aria-label", "Some saves failed");
+			badgeHost.appendChild(dot);
+		} else if (!jobs.length && dot) {
+			dot.remove();
+		}
+	}
+	if (!announce) return;
+	const unseen = jobs.filter((job) => !ackedFailedJobs().has(job.id));
+	if (unseen.length && !document.getElementById("failedSavesOverlay")) showFailedSavesReport(unseen);
+}
+
+function friendlyJobError(error) {
+	const text = String(error || "");
+	if (text.startsWith("workers_ai_capacity")) return "The AI provider stayed overloaded for so long that this save finally gave up. Your text was received but no memory was created from it.";
+	if (text.startsWith("db_write_failed")) return "A storage error interrupted this save. Your text was received but the memory may not have been written.";
+	if (text.includes("never reached the queue")) return "This save was accepted but its background work was lost before processing. No memory was created from it.";
+	return "Processing failed after several attempts. Your text was received but no memory was created from it.";
+}
+
+function showFailedSavesReport(jobs) {
+	const overlay = el("div");
+	overlay.id = "failedSavesOverlay";
+	const rows = jobs.slice(0, 5).map((job) => `<div class="action-box" style="margin-top:8px">
+		<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+			<b>${esc(job.type || "save")}</b><span class="help">${ago(job.completed_at || job.updated_at || job.created_at)}</span>
+		</div>
+		<div class="help" style="margin-top:4px">${esc(friendlyJobError(job.error))}</div>
+		<div class="help" style="margin-top:3px;font-family:var(--font-mono);font-size:11px">reference ${esc(job.id)}</div>
+	</div>`).join("");
+	overlay.innerHTML = `<div class="rm-card" role="dialog" aria-modal="true" aria-labelledby="fsTitle">
+		<h3 id="fsTitle">${jobs.length === 1 ? "A save didn't make it" : `${jobs.length} saves didn't make it`}</h3>
+		<div class="help">Itsuki accepted ${jobs.length === 1 ? "this write" : "these writes"} and then couldn't finish processing ${jobs.length === 1 ? "it" : "them"}. That's on us, not you — you can send this report with one click so it gets fixed.</div>
+		${rows}
+		${jobs.length > 5 ? `<div class="help" style="margin-top:6px">…and ${jobs.length - 5} more, listed in History.</div>` : ""}
+		<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+			<button class="ghost mini" id="fsDismiss">Dismiss</button>
+			<button class="btn" id="fsSend">Send report</button>
+		</div>
+	</div>`;
+	document.body.appendChild(overlay);
+	const close = () => { ackFailedJobs(jobs.map((j) => j.id)); overlay.remove(); };
+	$("#fsDismiss").addEventListener("click", close);
+	overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+	$("#fsSend").addEventListener("click", async () => {
+		const button = $("#fsSend");
+		button.disabled = true;
+		try {
+			await fetch("/v1/error-report", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					scope: "user_write_failed",
+					message: jobs.slice(0, 5).map((job) => `job ${job.id} (${job.type || "save"}): ${String(job.error || "failed").slice(0, 120)}`).join(" | "),
+				}),
+			});
+			toast("Report sent — thank you.");
+		} catch {
+			toast("Could not send the report — it is still visible to the operator either way.", true);
+		}
+		close();
+	});
+}
+
+/* ---- Huba AI ----------------------------------------------------------- */
+/* The fixed bar at the bottom of the app. Grounded answers only (docs +
+   this account's own state, assembled server-side); voice in and out via the
+   browser's Web Speech API — zero neurons, no audio ever leaves the page
+   except as the text it recognized. */
+const HUBA = { open: false, history: [], speaking: false, tts: false, busy: false, usage: null };
+
+function initHuba() {
+	if (document.getElementById("hubaBar")) return;
+	const bar = el("div");
+	bar.id = "hubaBar";
+	const speechIn = "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
+	const speechOut = "speechSynthesis" in window;
+	bar.innerHTML = `
+		<button id="hubaFab" type="button" aria-expanded="false" aria-controls="hubaPanel" title="Huba AI — ask anything about Itsuki">
+			<span class="huba-mark" aria-hidden="true">羽</span> Huba
+		</button>
+		<section id="hubaPanel" hidden aria-label="Huba AI">
+			<header>
+				<b>Huba</b><span class="help">answers from the docs and your account — nothing else</span>
+				<span style="flex:1"></span>
+				<span id="hubaUsage" class="help"></span>
+				${speechOut ? `<button id="hubaTts" type="button" class="huba-icon" aria-pressed="false" title="Read answers aloud">🔊</button>` : ""}
+				<button id="hubaClose" type="button" class="huba-icon" title="Close" aria-label="Close Huba">×</button>
+			</header>
+			<div id="hubaLog" role="log" aria-live="polite"></div>
+			<form id="hubaForm">
+				${speechIn ? `<button id="hubaMic" type="button" class="huba-icon" title="Speak your question" aria-label="Speak your question">🎙</button>` : ""}
+				<input id="hubaInput" type="text" autocomplete="off" maxlength="2000" placeholder="Ask Huba about Itsuki…" aria-label="Ask Huba about Itsuki" />
+				<button type="submit" class="btn huba-send">Ask</button>
+			</form>
+		</section>`;
+	document.body.appendChild(bar);
+	$("#hubaFab").addEventListener("click", () => toggleHuba());
+	$("#hubaClose").addEventListener("click", () => toggleHuba(false));
+	$("#hubaForm").addEventListener("submit", (event) => { event.preventDefault(); sendHuba(); });
+	document.addEventListener("keydown", (event) => {
+		if (event.key === "Escape" && HUBA.open) toggleHuba(false);
+	});
+	const tts = $("#hubaTts");
+	if (tts) tts.addEventListener("click", () => {
+		HUBA.tts = !HUBA.tts;
+		tts.setAttribute("aria-pressed", String(HUBA.tts));
+		tts.classList.toggle("active", HUBA.tts);
+		if (!HUBA.tts) window.speechSynthesis?.cancel();
+	});
+	const mic = $("#hubaMic");
+	if (mic) mic.addEventListener("click", () => hubaListen(mic));
+}
+
+function toggleHuba(force) {
+	const panel = $("#hubaPanel");
+	const fab = $("#hubaFab");
+	if (!panel || !fab) return;
+	HUBA.open = typeof force === "boolean" ? force : panel.hidden;
+	panel.hidden = !HUBA.open;
+	fab.setAttribute("aria-expanded", String(HUBA.open));
+	if (HUBA.open) {
+		if (!HUBA.history.length) hubaAppend("assistant", "Hi — I'm Huba. Ask me anything about Itsuki: how saving works, what a receipt means, where your usage stands. I only answer from the documentation and your own account, so if I don't know, I'll say so.", []);
+		$("#hubaInput")?.focus();
+	} else {
+		window.speechSynthesis?.cancel();
+	}
+}
+
+function hubaAppend(role, text, sources) {
+	const log = $("#hubaLog");
+	if (!log) return;
+	const row = el("div");
+	row.className = `huba-msg huba-${role}`;
+	const sourceChips = (sources || []).map((s) =>
+		`<a class="huba-src" href="/docs/#${esc(s.route)}" target="_blank" rel="noopener">${esc(s.title)}</a>`).join("");
+	row.innerHTML = `<div class="huba-bubble">${esc(text).replace(/\n/g, "<br />")}</div>${sourceChips ? `<div class="huba-srcs">${sourceChips}</div>` : ""}`;
+	log.appendChild(row);
+	log.scrollTop = log.scrollHeight;
+}
+
+async function sendHuba() {
+	const input = $("#hubaInput");
+	const message = String(input?.value ?? "").trim();
+	if (!message || HUBA.busy) return;
+	input.value = "";
+	hubaAppend("user", message, []);
+	HUBA.history.push({ role: "user", content: message });
+	HUBA.busy = true;
+	const log = $("#hubaLog");
+	const thinking = el("div");
+	thinking.className = "huba-msg huba-assistant";
+	thinking.innerHTML = `<div class="huba-bubble huba-thinking">Looking that up…</div>`;
+	log?.appendChild(thinking);
+	try {
+		const res = await fetch("/v1/huba/chat", {
+			method: "POST",
+			credentials: "include",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ message, history: HUBA.history.slice(-6) }),
+		});
+		const body = await res.json().catch(() => ({}));
+		thinking.remove();
+		if (res.status === 429) {
+			hubaAppend("assistant", body.message || "Huba has answered today's allowance of questions. It resets at 00:00 UTC.", []);
+			const usage = $("#hubaUsage");
+			if (usage) usage.innerHTML = `out of messages · <button class="huba-more" onclick="openRequestMore('huba')">request more</button>`;
+			return;
+		}
+		if (!res.ok || !body.ok) {
+			hubaAppend("assistant", body.message || "Something went wrong on my side — try again in a minute, or check /docs/.", []);
+			return;
+		}
+		HUBA.history.push({ role: "assistant", content: body.reply });
+		hubaAppend("assistant", body.reply, body.sources || []);
+		if (body.usage) {
+			HUBA.usage = body.usage;
+			const usage = $("#hubaUsage");
+			if (usage) usage.textContent = `${Math.max(0, body.usage.limit - body.usage.used)} left today`;
+		}
+		if (HUBA.tts && "speechSynthesis" in window) {
+			try {
+				window.speechSynthesis.cancel();
+				window.speechSynthesis.speak(new SpeechSynthesisUtterance(body.reply));
+			} catch { /* voice is a convenience, never an error */ }
+		}
+	} catch {
+		thinking.remove();
+		hubaAppend("assistant", "I couldn't reach the server. The docs at /docs/ have everything I know.", []);
+	} finally {
+		HUBA.busy = false;
+	}
+}
+
+function hubaListen(button) {
+	const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+	if (!Recognition) return;
+	if (HUBA.listening) { HUBA.listening.stop(); return; }
+	try {
+		const recognition = new Recognition();
+		recognition.lang = document.documentElement.lang || "en-US";
+		recognition.interimResults = false;
+		recognition.maxAlternatives = 1;
+		HUBA.listening = recognition;
+		button.classList.add("active");
+		recognition.onresult = (event) => {
+			const text = event.results?.[0]?.[0]?.transcript ?? "";
+			const input = $("#hubaInput");
+			if (input && text) { input.value = text; sendHuba(); }
+		};
+		recognition.onerror = () => toast("Voice input isn't available right now — the text box always works.", true);
+		recognition.onend = () => { button.classList.remove("active"); HUBA.listening = null; };
+		recognition.start();
+	} catch {
+		button.classList.remove("active");
+		HUBA.listening = null;
+		toast("Voice input isn't available in this browser — the text box always works.", true);
+	}
+}
+
 function viewAdmin(v) {
 	const wrap = el("div");
 	const tab = S.adminTab || "overview";
 	wrap.innerHTML = `<div class="box" style="max-width:1100px"><h3>Admin</h3>
 		<div class="help">Operator console — accounts, visits, activity, and system health. Visible only to admin accounts; every route is role-gated server-side.</div>
 		<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-			${["overview", "users", "activity", "health"].map((name) =>
+			${["overview", "users", "activity", "errors", "requests", "spend", "health"].map((name) =>
 				`<button class="ghost mini${name === tab ? " admin-tab-active" : ""}" data-atab="${name}" onclick="adminTab('${name}')">${name[0].toUpperCase()}${name.slice(1)}</button>`).join("")}
 		</div></div>
 		<div id="adminBody" class="empty" style="margin-top:12px">Loading…</div>`;
@@ -13671,6 +14121,128 @@ function adminTab(name) {
 		button.classList.toggle("admin-tab-active", button.dataset.atab === name));
 	renderAdminBody();
 	if (name === "users" && !S.adminUsers) refreshAdminUsers();
+	if (name === "errors" && !S.adminErrors) refreshAdminErrors();
+	if (name === "requests" && !S.adminUpgradeRequests) refreshAdminUpgradeRequests();
+	if (name === "spend" && !S.adminSpend) refreshAdminSpend();
+}
+
+async function refreshAdminErrors() {
+	const params = new URLSearchParams();
+	if (S.adminErrorQuery) params.set("q", S.adminErrorQuery);
+	if (S.adminErrorSide) params.set("side", S.adminErrorSide);
+	if (S.adminErrorNoise) params.set("noise", "true");
+	params.set("limit", "100");
+	try {
+		let res;
+		try { res = await fetch(`/v1/admin/errors?${params}`, { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		S.adminErrors = (await res.json()).errors || [];
+	} catch (err) {
+		S.adminErrors = [];
+		toast(err.message, true);
+	}
+	if ((S.adminTab || "overview") === "errors") renderAdminBody();
+}
+
+async function refreshAdminUpgradeRequests(status = S.adminUpgradeStatus || "open") {
+	S.adminUpgradeStatus = status;
+	try {
+		let res;
+		try { res = await fetch(`/v1/admin/upgrade-requests?status=${encodeURIComponent(status)}`, { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		S.adminUpgradeRequests = (await res.json()).requests || [];
+	} catch (err) {
+		S.adminUpgradeRequests = [];
+		toast(err.message, true);
+	}
+	if ((S.adminTab || "overview") === "requests") renderAdminBody();
+}
+
+async function refreshAdminSpend() {
+	try {
+		let res;
+		try { res = await fetch("/v1/admin/ai-spend?days=14", { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		S.adminSpend = (await res.json()).spend || [];
+	} catch (err) {
+		S.adminSpend = [];
+		toast(err.message, true);
+	}
+	if ((S.adminTab || "overview") === "spend") renderAdminBody();
+}
+
+// One-click copy of a whole error entry, ready to paste into a fix session.
+async function copyAdminError(index) {
+	const row = (S.adminErrors || [])[index];
+	if (!row) return;
+	const text = [
+		`time: ${new Date(Number(row.created_at)).toISOString()}`,
+		`user: ${row.email || row.user_id || "anonymous"}`,
+		`side: ${row.side || "?"}`,
+		`scope: ${row.scope || "?"}`,
+		`report id: ${row.id}`,
+		`message: ${row.message || ""}`,
+	].join("\n");
+	try {
+		await navigator.clipboard.writeText(text);
+		toast("Error entry copied.");
+	} catch {
+		toast("Could not copy — clipboard blocked.", true);
+	}
+}
+
+// The one-click grant from the upgrade queue. Presets keep it one click;
+// the custom row covers everything else.
+async function adminGrant(userId, requestId, days, dailyNeurons, monthlyWrites, hubaDaily) {
+	try {
+		let res;
+		try {
+			res = await fetch("/v1/admin/users/action", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					userId,
+					action: "grant_entitlement",
+					request_id: requestId || null,
+					days: days || null,
+					daily_neurons: dailyNeurons || null,
+					monthly_writes: monthlyWrites || null,
+					huba_daily_messages: hubaDaily || null,
+				}),
+			});
+		} catch {
+			throw new Error(FRIENDLY_NETWORK);
+		}
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		toast("Granted.");
+		S.adminUpgradeRequests = null;
+		refreshAdminUpgradeRequests();
+	} catch (err) {
+		toast(`Grant failed: ${err.message}`, true);
+	}
+}
+
+async function adminDismissUpgrade(userId, requestId) {
+	try {
+		const res = await fetch("/v1/admin/users/action", {
+			method: "POST",
+			credentials: "include",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ userId, action: "dismiss_upgrade_request", request_id: requestId }),
+		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		toast("Dismissed.");
+		S.adminUpgradeRequests = null;
+		refreshAdminUpgradeRequests();
+	} catch (err) {
+		toast(`Dismiss failed: ${err.message}`, true);
+	}
 }
 
 async function refreshAdminData() {
@@ -13730,7 +14302,29 @@ async function toggleUserJourney(userId) {
 			<div class="action-box"><h3>Usage by day</h3>${(journey.usage_by_day || []).slice(0, 10).map(usageRow).join("") || `<div class="help">No saves or recalls yet.</div>`}</div>
 			<div class="action-box"><h3>Errors they hit</h3>${(journey.errors || []).slice(0, 8).map(errorRow).join("") || `<div class="help">None — clean.</div>`}</div>
 			<div class="action-box"><h3>Connection tokens</h3>${(journey.tokens || []).map(tokenRow).join("") || `<div class="help">No tokens created.</div>`}</div>
+			<div class="action-box"><h3>Jobs</h3>
+				${(journey.jobs || []).map((row) => `<div class="kv">${esc(row.status)}: <b>${row.n}</b></div>`).join("") || `<div class="help">No jobs yet.</div>`}
+				${(journey.failed_jobs || []).slice(0, 4).map((row) => `<div class="help" style="margin-top:3px;font-family:var(--font-mono);font-size:11px">${esc(String(row.error || "failed").slice(0, 110))}</div>`).join("")}
+			</div>
+			<div class="action-box"><h3>Entitlement</h3>
+				${journey.entitlement ? `
+					<div class="kv">Daily neurons: <b>${journey.entitlement.daily_neurons ?? "default"}</b> · Monthly writes: <b>${journey.entitlement.monthly_writes ?? "default"}</b></div>
+					<div class="kv">Huba/day: <b>${journey.entitlement.huba_daily_messages ?? "default"}</b> · Early access: <b>${journey.entitlement.early_access ? "yes" : "no"}</b></div>
+					${journey.entitlement.expires_at ? `<div class="kv">Expires: <b>${fmtDate(journey.entitlement.expires_at)}</b></div>` : ""}
+					${journey.entitlement.note ? `<div class="help">${esc(journey.entitlement.note)}</div>` : ""}`
+				: `<div class="help">Env defaults, no overrides.</div>`}
+			</div>
+			<div class="action-box"><h3>AI spend by day</h3>
+				${(() => {
+					const byDay = new Map();
+					for (const row of journey.ai_spend_by_day || []) byDay.set(row.day, (byDay.get(row.day) || 0) + Number(row.neurons || 0));
+					return [...byDay.entries()].slice(0, 10).map(([day, n]) => `<div class="kv">${esc(day)}: <b>${Math.round(n).toLocaleString()}</b> neurons</div>`).join("") || `<div class="help">No AI spend recorded.</div>`;
+				})()}
+			</div>
 		</div>
+		${(journey.timeline || []).length ? `<div class="action-box" style="margin-top:10px"><h3>What happened, in order</h3>
+			${journey.timeline.slice(0, 30).map((event) => `<div class="kv">${ago(event.at)} — <span class="badge state-active" style="opacity:.7">${esc(event.kind)}</span> ${esc(String(event.detail || "").slice(0, 160))}</div>`).join("")}
+		</div>` : ""}
 		<div class="help" style="margin-top:6px">Events and metadata only — memory content is never shown to the operator.</div>`;
 	} catch (e) {
 		panel.innerHTML = `<div class="help">${esc(e.message || "Could not load journey.")}</div>`;
@@ -13829,6 +14423,12 @@ function renderAdminBody() {
 				<div class="kv">Signed up: <b>${funnel.signup_done ?? 0}</b></div>
 				<div class="kv">Accounts with ≥1 memory: <b>${activation.with_memories ?? 0}</b> / ${activation.accounts ?? "?"}</div>
 			</div>
+			<div class="action-box"><h3>Signed up → activated → errored</h3>
+				<div class="kv">Signed up (all time): <b>${stats.funnel?.signed_up ?? "?"}</b></div>
+				<div class="kv">Activated (saved something): <b>${stats.funnel?.activated ?? 0}</b></div>
+				<div class="kv">Hit a failed save (14d): <b>${stats.funnel?.errored_jobs_14d ?? 0}</b></div>
+				<div class="kv">Hit a reported error (14d): <b>${stats.funnel?.errored_reports_14d ?? 0}</b></div>
+			</div>
 			<div class="action-box"><h3>Users</h3>
 				<div class="kv">Total accounts: <b>${stats.users}</b></div>
 				<div class="kv">Accepted terms: <b>${stats.consented_users}</b></div>
@@ -13909,6 +14509,97 @@ function renderAdminBody() {
 		return;
 	}
 
+	if (tab === "errors") {
+		const rows = S.adminErrors;
+		body.innerHTML = `<div class="box" style="max-width:1100px"><h3>Error log</h3>
+			<div class="help">Every reported failure, filterable, one click to copy the whole entry. Benign browser noise is excluded unless you ask for it.</div>
+			<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+				<input id="adminErrorSearch" placeholder="Filter message or scope…" value="${esc(S.adminErrorQuery || "")}" style="min-width:220px" />
+				<select id="adminErrorSide">
+					<option value="">both sides</option>
+					<option value="server"${S.adminErrorSide === "server" ? " selected" : ""}>server</option>
+					<option value="client"${S.adminErrorSide === "client" ? " selected" : ""}>client</option>
+				</select>
+				<label class="help" style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="adminErrorNoise"${S.adminErrorNoise ? " checked" : ""} /> include noise</label>
+				<button class="ghost mini" onclick="S.adminErrorQuery=$('#adminErrorSearch').value;S.adminErrorSide=$('#adminErrorSide').value;S.adminErrorNoise=$('#adminErrorNoise').checked;refreshAdminErrors()">Filter</button>
+			</div>
+			<div style="margin-top:12px">
+			${rows === undefined || rows === null ? `<div class="help">Loading…</div>` : rows.map((row, index) => `<div class="action-box" style="margin-bottom:8px">
+				<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+					<b>${esc(row.side || "client")} · ${esc(row.scope || "")}</b>
+					<span style="display:flex;gap:8px;align-items:center">
+						<span class="help">${esc(row.email || "anonymous")} · ${ago(row.created_at)}</span>
+						<button class="ghost mini" onclick="copyAdminError(${index})">Copy</button>
+					</span>
+				</div>
+				<div class="help" style="margin-top:4px;font-family:var(--font-mono);font-size:12px;word-break:break-word">${esc(String(row.message || "").slice(0, 400))}</div>
+				<div class="help" style="margin-top:3px;font-size:11px">report ${esc(row.id)}</div>
+			</div>`).join("") || `<div class="help">No errors match — clean.</div>`}
+			</div></div>`;
+		const search = $("#adminErrorSearch");
+		if (search) search.addEventListener("keydown", (event) => { if (event.key === "Enter") { S.adminErrorQuery = search.value; refreshAdminErrors(); } });
+		return;
+	}
+
+	if (tab === "requests") {
+		const rows = S.adminUpgradeRequests;
+		const kindLabel = { saves: "more daily saves", huba: "more Huba messages", other: "a limit change" };
+		body.innerHTML = `<div class="box" style="max-width:1100px"><h3>Upgrade requests</h3>
+			<div class="help">Who asked for more, what they were using when they asked, and one-click grants. A grant writes their personal entitlement and lapses on its own.</div>
+			<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+				${["open", "granted", "dismissed", "all"].map((s) => `<button class="ghost mini${(S.adminUpgradeStatus || "open") === s ? " admin-tab-active" : ""}" onclick="S.adminUpgradeRequests=null;refreshAdminUpgradeRequests('${s}')">${s}</button>`).join("")}
+			</div>
+			<div style="margin-top:12px">
+			${rows === undefined || rows === null ? `<div class="help">Loading…</div>` : rows.map((row) => {
+				const usage = row.usage || {};
+				const usageLine = [
+					usage.neurons_today != null ? `${usage.neurons_today}/${usage.daily_limit ?? "?"} neurons today` : null,
+					usage.writes_this_month != null ? `${usage.writes_this_month}/${usage.monthly_limit ?? "?"} writes this month` : null,
+					usage.huba_today != null ? `${usage.huba_today} Huba msgs today` : null,
+				].filter(Boolean).join(" · ");
+				return `<div class="action-box" style="margin-bottom:10px">
+				<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+					<div><b>${esc(row.name || row.email || row.user_id)}</b> <span class="help">${esc(row.email || "")}</span> <span class="badge state-active" style="opacity:.75">${esc(kindLabel[row.kind] || row.kind)}</span> ${row.status !== "open" ? `<span class="badge state-paused">${esc(row.status)}</span>` : ""}</div>
+					<span class="help">${ago(row.created_at)}${row.notify_status !== "sent" ? ` · email ${esc(row.notify_status)}` : ""}</span>
+				</div>
+				${usageLine ? `<div class="kv" style="margin-top:5px">${esc(usageLine)}</div>` : ""}
+				${row.note ? `<div class="help" style="margin-top:5px">“${esc(row.note)}”</div>` : ""}
+				${row.status === "open" ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+					<button class="ghost mini" onclick="adminGrant('${esc(row.user_id)}','${esc(row.id)}',30,30000,2000,50)">2× for 30d</button>
+					<button class="ghost mini" onclick="adminGrant('${esc(row.user_id)}','${esc(row.id)}',30,60000,4000,100)">4× for 30d</button>
+					<button class="ghost mini" onclick="adminGrant('${esc(row.user_id)}','${esc(row.id)}',null,60000,4000,100)">4× forever</button>
+					<span class="help" style="margin-left:6px">custom:</span>
+					<input id="gd-${esc(row.id)}" placeholder="days" style="width:60px" />
+					<input id="gn-${esc(row.id)}" placeholder="neurons/day" style="width:100px" />
+					<input id="gm-${esc(row.id)}" placeholder="writes/mo" style="width:90px" />
+					<input id="gh-${esc(row.id)}" placeholder="huba/day" style="width:80px" />
+					<button class="ghost mini" onclick="adminGrant('${esc(row.user_id)}','${esc(row.id)}',Number($('#gd-${esc(row.id)}').value)||null,Number($('#gn-${esc(row.id)}').value)||null,Number($('#gm-${esc(row.id)}').value)||null,Number($('#gh-${esc(row.id)}').value)||null)">Grant</button>
+					<button class="ghost mini danger" onclick="adminDismissUpgrade('${esc(row.user_id)}','${esc(row.id)}')">Dismiss</button>
+				</div>` : row.grant ? `<div class="kv" style="margin-top:6px">granted: ${esc(Object.entries(row.grant).filter(([, v]) => v != null).map(([k, v]) => `${k}=${k === "expires_at" ? new Date(v).toISOString().slice(0, 10) : v}`).join(" · ") || "defaults")}</div>` : ""}
+			</div>`;
+			}).join("") || `<div class="help">No ${esc(S.adminUpgradeStatus || "open")} requests.</div>`}
+			</div></div>`;
+		return;
+	}
+
+	if (tab === "spend") {
+		const rows = S.adminSpend;
+		const byDay = new Map();
+		for (const row of rows || []) {
+			if (!byDay.has(row.day)) byDay.set(row.day, []);
+			byDay.get(row.day).push(row);
+		}
+		body.innerHTML = `<div class="box" style="max-width:1100px"><h3>Neuron spend per user per day</h3>
+			<div class="help">Measured neurons where Workers AI reported them, token-derived estimates where it didn't — the same rule the quota enforces. ~$0.011 per 1,000 neurons past the free tier. This table is what a future price gets set from.</div>
+			<div style="margin-top:12px">
+			${rows === undefined || rows === null ? `<div class="help">Loading…</div>` : [...byDay.entries()].map(([day, entries]) => `<div class="action-box" style="margin-bottom:8px">
+				<div style="display:flex;justify-content:space-between;gap:10px"><b>${esc(day)}</b><span class="help">${Math.round(entries.reduce((a, r) => a + Number(r.neurons || 0), 0)).toLocaleString()} neurons total</span></div>
+				${entries.map((row) => `<div class="kv" style="margin-top:4px">${esc(row.email || row.account_id || "unattributed")}: <b>${Math.round(Number(row.neurons || 0)).toLocaleString()}</b> neurons <span class="help">· ${row.calls} calls · ≈$${(Number(row.neurons || 0) * 0.011 / 1000).toFixed(4)}</span></div>`).join("")}
+			</div>`).join("") || `<div class="help">No AI spend in the last 14 days.</div>`}
+			</div></div>`;
+		return;
+	}
+
 	const q = stats.queue || {};
 	const unp = q.edge_pass_unparseable_24h || {};
 	const queueHealthy = (q.queue_depth ?? 0) === 0 && (q.failed_24h ?? 0) === 0;
@@ -13930,6 +14621,9 @@ function renderAdminBody() {
 	</div>
 	<div class="box" style="margin-top:14px" id="admin-ai-routing"><h3>AI providers</h3>
 		<div class="help">Loading provider routing…</div>
+	</div>
+	<div class="box" style="margin-top:14px" id="admin-ops-overview"><h3>Account health rollup</h3>
+		<div class="help">Loading /v1/ops/overview…</div>
 	</div>
 	<div class="box" style="margin-top:14px"><h3>Recent failures</h3>
 		${(stats.recent_failures || []).map((row) => `<div class="action-box" style="margin-bottom:8px">
@@ -13955,6 +14649,29 @@ function renderAdminBody() {
 		</div>`).join("") || `<div class="help">No reported errors — clean.</div>`}
 	</div>`;
 	renderAiRoutingCard();
+	renderOpsOverviewCard();
+}
+
+/**
+ * The account-health rollup that already existed at GET /v1/ops/overview but
+ * had no reader: per-tenant queue depth, stuck work, retries, latency.
+ */
+async function renderOpsOverviewCard() {
+	const box = document.getElementById("admin-ops-overview");
+	if (!box) return;
+	try {
+		const res = await api("/v1/ops/overview?range=7d");
+		const tenants = res.tenants || [];
+		const roll = res.account || {};
+		const jobs = roll.jobs || {};
+		box.innerHTML = `<h3>Account health rollup (7 days)</h3>
+			<div class="kv">Jobs: ${Object.entries(jobs).map(([k, v]) => `${esc(k)} <b>${v}</b>`).join(" · ") || "<b>none</b>"}</div>
+			<div class="kv">Backlog: <b>${roll.backlog?.depth ?? 0}</b>${roll.backlog?.oldest_age_s ? ` · oldest ${Math.round(roll.backlog.oldest_age_s / 60)}m` : ""} · Stuck: <b>${roll.stuck?.count ?? 0}</b> · Retries: <b>${roll.retries?.jobs_retried ?? 0}</b></div>
+			<div class="kv">Latency p50: <b>${roll.latency?.p50_ms ?? "—"}ms</b> · p95: <b>${roll.latency?.p95_ms ?? "—"}ms</b></div>
+			${tenants.length > 1 ? `<div class="help" style="margin-top:6px">${tenants.length} memory spaces; the rollup above is the sum.</div>` : ""}`;
+	} catch (error) {
+		box.innerHTML = `<h3>Account health rollup</h3><div class="help">Unavailable (${esc(String(error?.message ?? error))}).</div>`;
+	}
 }
 
 /**
@@ -17291,23 +18008,28 @@ function graphNode(n, sortedIndex, total, hasEdges) {
 }
 
 function graphPage(p, sortedIndex, total) {
+	// Conversation pages are SQUARES at memory-dot scale: shape alone carries
+	// the type distinction (round = memory, square = page) without the old
+	// oversized rectangle hogging the canvas. Label renders below the mark,
+	// exactly like the dots.
 	const selected = S.selected === pageKey(p.id);
 	const color = clusterColor(p.cluster) || "#58a6ff";
 	const accent = projectCategoryColor(p, color);
 	const projectCategory = projectCategoryLabel(p);
-	const size = Math.min(48, 34 + Math.round(Number(p.heat_score || 1) * 2));
+	const size = selected ? 24 : Math.max(14, Math.min(22, 15 + Math.round(Number(p.heat_score || 1))));
 	return {
 		id: pageKey(p.id),
 		cluster: p.cluster || "projects_systems",
 		clusterLabel: p.cluster_label || clusterInfo(p.cluster || "projects_systems").label,
 		clusterColor: color,
 		visualKind: "page",
-		hullRadius: Math.max(52, size),
-		label: `PAGE\n${p.title}`,
+		hullRadius: Math.max(22, size + 6),
+		label: String(p.title || "Conversation").slice(0, 60),
 		title: `${esc(p.title)} (conversation page)${projectCategory ? ` · project category: ${esc(projectCategory)}` : ""}`,
-		shape: "box",
+		shape: "square",
 		size,
-		borderWidth: selected ? 4 : 2,
+		borderWidth: selected ? 4 : 3,
+		borderWidthSelected: 5,
 		color: {
 			background: selected ? "#172033" : "#101923",
 			border: accent,
@@ -17316,7 +18038,7 @@ function graphPage(p, sortedIndex, total) {
 		},
 		font: {
 			color: "#f8fafc",
-			size: selected ? 16 : 14,
+			size: selected ? 16 : 13,
 			// vis-network paints labels onto a canvas, so it takes a font stack as a
 			// string rather than inheriting one. Left on the system stack, the whole
 			// Graph view rendered in a different typeface from the app around it.
@@ -17324,10 +18046,8 @@ function graphPage(p, sortedIndex, total) {
 			strokeWidth: 5,
 			strokeColor: "rgba(9,13,19,.92)",
 		},
-		shadow: { enabled: true, color: `${accent}55`, size: selected ? 24 : 16, x: 0, y: 0 },
-		margin: { top: 10, right: 14, bottom: 10, left: 14 },
-		widthConstraint: { minimum: 150, maximum: 230 },
-		heightConstraint: { minimum: 58 },
+		shadow: { enabled: true, color: `${accent}55`, size: selected ? 22 : 14, x: 0, y: 0 },
+		margin: 10,
 		...layoutPosition(p, p.cluster || "projects_systems", sortedIndex, total, "page"),
 	};
 }
@@ -17455,20 +18175,92 @@ function edgeStyle(e, i) {
 		smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
 		font: { color: "#cbd5e1", size: 10, face: GRAPH_FONT_FACE, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
 	};
+	// Every edge stays visible at rest (alpha floor .45 — the owner explicitly
+	// does not want hover-only edges); hover/selection brightens the connected
+	// subset and dims the rest, so a dense graph reads as structure instead of
+	// a hairball. _lit/_dim are precomputed so the hover handler only swaps
+	// strings instead of parsing colors per frame.
 	const styles = {
 		part_of: { dashes: false, color: "rgba(210,168,255,.62)" },
 		uses: { dashes: false, color: "rgba(126,231,135,.66)" },
 		depends_on: { dashes: [8,6], color: "rgba(121,192,255,.64)" },
-		supports: { dashes: false, color: "rgba(63,185,80,.48)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
+		supports: { dashes: false, color: "rgba(63,185,80,.5)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
 		drives: { dashes: false, color: "rgba(242,204,96,.75)" },
 		improves: { dashes: false, color: "rgba(86,211,100,.72)" },
 		blocked_by: { dashes: [4,4], color: "rgba(248,81,73,.78)" },
 		caused: { dashes: false, color: "rgba(255,123,114,.78)" },
 		replaced_by: { dashes: [10,7], color: "rgba(139,148,158,.52)" },
-		related_to: { dashes: [2,7], color: "rgba(148,163,184,.28)" },
+		related_to: { dashes: [2,7], color: "rgba(148,163,184,.45)" },
 	};
 	const s = styles[type] || styles.related_to;
-	return { ...base, dashes: s.dashes, smooth: s.smooth || base.smooth, color: { color: s.color, highlight: "#58a6ff", hover: "#79c0ff" } };
+	const rgb = /rgba\((\d+),(\d+),(\d+),/.exec(s.color);
+	const lit = rgb ? `rgba(${rgb[1]},${rgb[2]},${rgb[3]},1)` : s.color;
+	const dim = rgb ? `rgba(${rgb[1]},${rgb[2]},${rgb[3]},.12)` : s.color;
+	return {
+		...base,
+		dashes: s.dashes,
+		smooth: s.smooth || base.smooth,
+		color: { color: s.color, highlight: lit, hover: lit },
+		_base: s.color,
+		_lit: lit,
+		_dim: dim,
+		_baseWidth: base.width,
+	};
+}
+
+/**
+ * The connected-subset spotlight: focus a node and its edges go fully lit
+ * while every other edge dims; focus nothing and everything returns to the
+ * resting (always-visible) alpha. One batched DataSet update per change.
+ */
+function highlightConnectedEdges(focusId) {
+	if (!S.network || !S.graphEdgesDs) return;
+	const connected = new Set(focusId != null ? S.network.getConnectedEdges(focusId) : []);
+	const updates = [];
+	for (const edge of S.graphEdgesDs.get()) {
+		if (edge._base == null) continue; // guide edges keep their own styling
+		const wanted = focusId == null ? edge._base : connected.has(edge.id) ? edge._lit : edge._dim;
+		const wantedWidth = focusId != null && connected.has(edge.id)
+			? Math.min(5, (edge._baseWidth ?? 1.5) + 1)
+			: (edge._baseWidth ?? 1.5);
+		if (edge.color?.color !== wanted || edge.width !== wantedWidth) {
+			updates.push({ id: edge.id, color: { ...edge.color, color: wanted }, width: wantedWidth });
+		}
+	}
+	if (updates.length) S.graphEdgesDs.update(updates);
+}
+
+/**
+ * Deterministic collision relaxation over the precomputed layout: nodes must
+ * never overlap or touch. A bounded number of pairwise-separation sweeps with
+ * a hard minimum gap; positions only ever move apart, so cluster membership
+ * (and therefore hulls, computed afterwards) is preserved.
+ */
+function separateGraphNodes(visualNodes, { gap = 16, sweeps = 24 } = {}) {
+	const movable = visualNodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y));
+	for (let sweep = 0; sweep < sweeps; sweep++) {
+		let moved = false;
+		for (let a = 0; a < movable.length; a++) {
+			for (let b = a + 1; b < movable.length; b++) {
+				const nodeA = movable[a], nodeB = movable[b];
+				const minDist = (nodeA.size ?? 18) + (nodeB.size ?? 18) + gap;
+				let dx = nodeB.x - nodeA.x, dy = nodeB.y - nodeA.y;
+				let dist = Math.hypot(dx, dy);
+				if (dist >= minDist) continue;
+				if (dist < 1) { // exact overlap: nudge apart deterministically
+					const angle = (a * 2.399963) % (Math.PI * 2); // golden-angle spread
+					dx = Math.cos(angle); dy = Math.sin(angle); dist = 1;
+				}
+				const push = (minDist - dist) / 2 + 0.5;
+				const ux = dx / dist, uy = dy / dist;
+				nodeA.x -= ux * push; nodeA.y -= uy * push;
+				nodeB.x += ux * push; nodeB.y += uy * push;
+				moved = true;
+			}
+		}
+		if (!moved) break;
+	}
+	return visualNodes;
 }
 
 function graphSearchFocus() {
@@ -18094,10 +18886,11 @@ function drawGraph() {
 		for (const group of pageGroups.values()) group.forEach((p, i) => pageNodes.push(graphPage(p, i, group.length)));
 		const candidateNodes = [];
 		for (const group of candidateGroups.values()) group.forEach((c, i) => candidateNodes.push(graphCandidate(c, i, group.length)));
-		const visualNodes = [...pageNodes, ...graphNodes, ...candidateNodes];
+		const visualNodes = separateGraphNodes([...pageNodes, ...graphNodes, ...candidateNodes]);
 		S.clusterHulls = computeClusterHulls(visualNodes, S.data?.clusters || []);
 		const vn = new vis.DataSet(dedupeById([...visualNodes, ...clusterHullAnchors(S.clusterHulls)]));
 		const ve = new vis.DataSet(dedupeById([...graphEdges.map((e, i) => edgeStyle(e, i)), ...guideEdges]));
+		S.graphEdgesDs = ve;
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
 			autoResize: true,
 			layout: { improvedLayout: false },
@@ -18107,6 +18900,12 @@ function drawGraph() {
 			edges: { arrows: { to: { enabled: true, scaleFactor: .65 } } },
 		});
 		S.graphDs = vn;
+		// The always-visible-edges contract: connected edges light up on hover
+		// AND on selection; everything else dims while a focus exists.
+		S.network.on("hoverNode", (p) => { if (!String(p.node).startsWith("hull:")) highlightConnectedEdges(p.node); });
+		S.network.on("blurNode", () => highlightConnectedEdges(S.network.getSelectedNodes()[0] ?? null));
+		S.network.on("selectNode", (p) => highlightConnectedEdges(p.nodes?.[0] ?? null));
+		S.network.on("deselectNode", () => highlightConnectedEdges(null));
 		S.network.on("beforeDrawing", (ctx) => drawClusterHulls(ctx, S.clusterHulls));
 		S.network.on("afterDrawing", (ctx) => { drawClusterLabels(ctx, S.clusterHulls); updateClusterHandle(); });
 		S.network.on("click", (p) => {

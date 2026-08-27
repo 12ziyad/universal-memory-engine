@@ -167,6 +167,33 @@ function scopeIncomplete(message = "Historical memory spaces could not be attrib
  * json_each(); activation/execution persist exactly the same set in one guarded
  * statement so an empty rollout registry can never produce an under-delete.
  */
+/**
+ * One UNION arm of the extraction_runs/receipts provenance discovery. The
+ * projection is byte-identical across arms (a UNION requirement) and matches
+ * what the old single-OR query computed per row, so the ownership-conflict
+ * checks downstream are unaffected by the restructure.
+ */
+function provenanceArm(table, sourceLabel, joinKind) {
+	return `SELECT r.user_id AS memory_user_id,
+	        NULL AS memory_owner_user_id, NULL AS project_id,
+	        COALESCE(
+	          CASE WHEN json_valid(r.scope_json)
+	               THEN json_extract(r.scope_json, '$.managed_project_id') END,
+	          sp.managed_project_id,
+	          CASE WHEN json_valid(sp.raw_meta_json)
+	               THEN json_extract(sp.raw_meta_json, '$.managed_project_id') END
+	        ) AS explicit_project_id,
+	        COALESCE(
+	          CASE WHEN json_valid(r.scope_json)
+	               THEN json_extract(r.scope_json, '$.owner_user_id') END,
+	          sp.owner_user_id
+	        ) AS explicit_owner_id,
+	        '${sourceLabel}' AS source
+	   FROM ${table} r
+	   ${joinKind} source_packets sp
+	     ON sp.id = r.source_packet_id AND sp.user_id = r.user_id`;
+}
+
 export async function discoverProjectMemorySpaces(env, input = {}) {
 	const scope = cleanScope(input);
 	await requireProject(env, scope);
@@ -178,8 +205,19 @@ export async function discoverProjectMemorySpaces(env, input = {}) {
 			  WHERE pms.project_id = ? OR pms.memory_owner_user_id = ?
 			  LIMIT ?`,
 		).bind(scope.projectId, scope.memoryOwnerUserId, MAX_RETENTION_MEMORY_SPACES + 1),
+		// Two independently-indexable UNION arms instead of one OR: migration
+		// 0058 backfilled the historical raw_meta_json project ids into the
+		// first-class managed_project_id column, so the un-indexable JSON
+		// branch (which forced a full scan of source_packets) is gone. UNION
+		// dedupes, and LIMIT applies to the combined result so the caller's
+		// over-limit detection is unchanged.
+		// The PROJECTION keeps the raw_meta_json fallback: it runs per matched
+		// row (cheap), and it is what lets a caller-claimed conflicting project
+		// id on an already-discovered packet still fail the scope closed. Only
+		// the WHERE lost its JSON branch — the row-finding dimension — which is
+		// what the 0058 backfill made redundant and what forced the scan.
 		env.DB.prepare(
-			`SELECT DISTINCT COALESCE(sp.memory_user_id, sp.user_id) AS memory_user_id,
+			`SELECT COALESCE(sp.memory_user_id, sp.user_id) AS memory_user_id,
 			        NULL AS memory_owner_user_id, NULL AS project_id,
 			        COALESCE(
 			          sp.managed_project_id,
@@ -189,11 +227,20 @@ export async function discoverProjectMemorySpaces(env, input = {}) {
 			        sp.owner_user_id AS explicit_owner_id,
 			        'source_packet' AS source
 			   FROM source_packets sp
-			  WHERE sp.owner_user_id = ? OR sp.managed_project_id = ?
-			     OR (json_valid(sp.raw_meta_json)
-			         AND json_extract(sp.raw_meta_json, '$.managed_project_id') = ?)
-			  LIMIT ?`,
-		).bind(scope.memoryOwnerUserId, scope.projectId, scope.projectId, MAX_RETENTION_MEMORY_SPACES + 1),
+			  WHERE sp.owner_user_id = ?1
+			  UNION
+			 SELECT COALESCE(sp.memory_user_id, sp.user_id),
+			        NULL, NULL,
+			        COALESCE(
+			          sp.managed_project_id,
+			          CASE WHEN json_valid(sp.raw_meta_json)
+			               THEN json_extract(sp.raw_meta_json, '$.managed_project_id') END
+			        ),
+			        sp.owner_user_id, 'source_packet'
+			   FROM source_packets sp
+			  WHERE sp.managed_project_id = ?2
+			  LIMIT ?3`,
+		).bind(scope.memoryOwnerUserId, scope.projectId, MAX_RETENTION_MEMORY_SPACES + 1),
 		env.DB.prepare(
 			`SELECT DISTINCT COALESCE(e.memory_user_id, e.user_id) AS memory_user_id,
 			        NULL AS memory_owner_user_id, NULL AS project_id,
@@ -208,74 +255,47 @@ export async function discoverProjectMemorySpaces(env, input = {}) {
 			        'semantic_atom_candidate' AS source
 			   FROM semantic_atom_candidates c WHERE c.owner_user_id = ? LIMIT ?`,
 		).bind(scope.memoryOwnerUserId, MAX_RETENTION_MEMORY_SPACES + 1),
+		// Four UNION arms, each independently index-served: the two scope_json
+		// arms ride the 0060 expression indexes, the two source_packet arms
+		// start from the indexed sp filter and reach the run ledger through
+		// idx_extraction_runs_source_packet(user_id, source_packet_id). The
+		// projected COALESCE values are computed identically in every arm, so
+		// the conflict checks downstream see exactly what the OR form produced
+		// (minus the 0058-backfilled raw_meta_json fallback).
 		env.DB.prepare(
-			`SELECT DISTINCT r.user_id AS memory_user_id,
-			        NULL AS memory_owner_user_id, NULL AS project_id,
-			        COALESCE(
-			          CASE WHEN json_valid(r.scope_json)
-			               THEN json_extract(r.scope_json, '$.managed_project_id') END,
-			          sp.managed_project_id,
-			          CASE WHEN json_valid(sp.raw_meta_json)
-			               THEN json_extract(sp.raw_meta_json, '$.managed_project_id') END
-			        ) AS explicit_project_id,
-			        COALESCE(
-			          CASE WHEN json_valid(r.scope_json)
-			               THEN json_extract(r.scope_json, '$.owner_user_id') END,
-			          sp.owner_user_id
-			        ) AS explicit_owner_id,
-			        'extraction_run' AS source
-			   FROM extraction_runs r
-			   LEFT JOIN source_packets sp
-			     ON sp.id = r.source_packet_id AND sp.user_id = r.user_id
-			  WHERE (json_valid(r.scope_json) AND (
-			           json_extract(r.scope_json, '$.managed_project_id') = ?
-			           OR json_extract(r.scope_json, '$.owner_user_id') = ?
-			        ))
-			     OR sp.owner_user_id = ? OR sp.managed_project_id = ?
-			     OR (json_valid(sp.raw_meta_json)
-			         AND json_extract(sp.raw_meta_json, '$.managed_project_id') = ?)
-			  LIMIT ?`,
+			`${provenanceArm("extraction_runs", "extraction_run", "LEFT JOIN")}
+			  WHERE json_valid(r.scope_json) AND json_extract(r.scope_json, '$.managed_project_id') = ?1
+			  UNION
+			 ${provenanceArm("extraction_runs", "extraction_run", "LEFT JOIN")}
+			  WHERE json_valid(r.scope_json) AND json_extract(r.scope_json, '$.owner_user_id') = ?2
+			  UNION
+			 ${provenanceArm("extraction_runs", "extraction_run", "JOIN")}
+			  WHERE sp.owner_user_id = ?2
+			  UNION
+			 ${provenanceArm("extraction_runs", "extraction_run", "JOIN")}
+			  WHERE sp.managed_project_id = ?1
+			  LIMIT ?3`,
 		).bind(
 			scope.projectId,
 			scope.memoryOwnerUserId,
-			scope.memoryOwnerUserId,
-			scope.projectId,
-			scope.projectId,
 			MAX_RETENTION_MEMORY_SPACES + 1,
 		),
 		env.DB.prepare(
-			`SELECT DISTINCT r.user_id AS memory_user_id,
-			        NULL AS memory_owner_user_id, NULL AS project_id,
-			        COALESCE(
-			          CASE WHEN json_valid(r.scope_json)
-			               THEN json_extract(r.scope_json, '$.managed_project_id') END,
-			          sp.managed_project_id,
-			          CASE WHEN json_valid(sp.raw_meta_json)
-			               THEN json_extract(sp.raw_meta_json, '$.managed_project_id') END
-			        ) AS explicit_project_id,
-			        COALESCE(
-			          CASE WHEN json_valid(r.scope_json)
-			               THEN json_extract(r.scope_json, '$.owner_user_id') END,
-			          sp.owner_user_id
-			        ) AS explicit_owner_id,
-			        'receipt' AS source
-			   FROM receipts r
-			   LEFT JOIN source_packets sp
-			     ON sp.id = r.source_packet_id AND sp.user_id = r.user_id
-			  WHERE (json_valid(r.scope_json) AND (
-			           json_extract(r.scope_json, '$.managed_project_id') = ?
-			           OR json_extract(r.scope_json, '$.owner_user_id') = ?
-			        ))
-			     OR sp.owner_user_id = ? OR sp.managed_project_id = ?
-			     OR (json_valid(sp.raw_meta_json)
-			         AND json_extract(sp.raw_meta_json, '$.managed_project_id') = ?)
-			  LIMIT ?`,
+			`${provenanceArm("receipts", "receipt", "LEFT JOIN")}
+			  WHERE json_valid(r.scope_json) AND json_extract(r.scope_json, '$.managed_project_id') = ?1
+			  UNION
+			 ${provenanceArm("receipts", "receipt", "LEFT JOIN")}
+			  WHERE json_valid(r.scope_json) AND json_extract(r.scope_json, '$.owner_user_id') = ?2
+			  UNION
+			 ${provenanceArm("receipts", "receipt", "JOIN")}
+			  WHERE sp.owner_user_id = ?2
+			  UNION
+			 ${provenanceArm("receipts", "receipt", "JOIN")}
+			  WHERE sp.managed_project_id = ?1
+			  LIMIT ?3`,
 		).bind(
 			scope.projectId,
 			scope.memoryOwnerUserId,
-			scope.memoryOwnerUserId,
-			scope.projectId,
-			scope.projectId,
 			MAX_RETENTION_MEMORY_SPACES + 1,
 		),
 	];

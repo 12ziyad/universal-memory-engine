@@ -355,6 +355,8 @@ const NAV = [
 		["/guides/projects", "Projects & teams"],
 		["/guides/lifecycle", "Archive & delete a project"],
 		["/guides/export", "Export & delete memory"],
+		["/guides/usage", "Usage & limits"],
+		["/guides/huba", "Huba AI"],
 	]},
 	/* One section for every client you point at the service. The old split
 	   between "Connect a tool" and "Agent harnesses" put two agentic CLIs on
@@ -6167,7 +6169,7 @@ PAGES["/api/errors"] = { title: "Errors", html: `
 <tr><th>Code</th><th>Status</th><th>What happened, and the fix</th></tr>
 <tr><td><code>too_many_requests</code></td><td>429</td><td>A rate bucket. Carries <code>bucket</code> and <code>retry_after_s</code>; headers carry <code>retry-after</code> and <code>ratelimit-limit</code>.</td></tr>
 <tr><td><code>queue_full</code></td><td>429</td><td>Too much work is already in flight for this memory space. Carries <code>queue_depth</code> and <code>retry_after_s</code>. Back off; nothing was lost.</td></tr>
-<tr><td><code>ai_quota_exhausted</code></td><td>429</td><td>The monthly AI-write quota is spent. Carries <code>capped: "monthly_ai"</code> and a <code>usage</code> block with <code>used</code>, <code>limit</code>, and <code>resets_at</code>.</td></tr>
+<tr><td><code>ai_quota_exhausted</code></td><td>429</td><td>An AI budget is spent. <code>capped</code> names which: <code>"monthly_ai"</code> (the monthly write quota), <code>"daily_neurons"</code> (the daily processing allowance), or <code>"huba_daily_messages"</code> (the Huba message allowance). Each carries a <code>usage</code> object with <code>used</code>, <code>limit</code>, <code>unit</code>, and <code>resets_at</code>.</td></tr>
 <tr><td><code>ai_capacity_paused</code></td><td>429</td><td>A service-wide daily processing ceiling, not a limit on your account. Saves resume at 00:00 UTC.</td></tr>
 <tr><td><code>ai_quota_unavailable</code></td><td>503</td><td>The quota could not be read, so the write was refused rather than guessed at. Nothing was saved. Retry shortly.</td></tr>
 <tr><td><code>something_went_wrong</code></td><td>500</td><td>An unhandled failure. It is captured server-side automatically before the response leaves. Retry with backoff and quote the request id.</td></tr>
@@ -6178,7 +6180,7 @@ PAGES["/api/errors"] = { title: "Errors", html: `
 <h3>Recall under its rate bucket</h3>
 <p>A rate-limited <code>POST /v1/recall</code> returns <code>200</code> with <code>ok: true</code>, an empty <code>context</code>, <code>count: 0</code>, and <code>recall_status: "rate_limited"</code>. Recall is a read inside somebody's chat loop; a hard error there breaks the turn for no benefit. If you treat "empty context" as "nothing is stored", check <code>recall_status</code> first.</p>
 <h3>Capture under the AI quota on /v1/turn</h3>
-<p><code>POST /v1/turn</code> stays <code>200</code> when the write quota is spent: recall still answers, and <code>collect</code> reports <code>ok: false</code> with <code>capped: "monthly_ai"</code> and the usage block. Refusing the whole request over a <i>write</i> quota would break the caller's loop for no saving.</p>
+<p><code>POST /v1/turn</code> stays <code>200</code> when a write budget is spent — the daily allowance or the monthly quota: recall still answers, and <code>collect</code> reports <code>ok: false</code> with <code>capped</code> naming the spent dimension (<code>"daily_neurons"</code> or <code>"monthly_ai"</code>) and the usage block. Refusing the whole request over a <i>write</i> quota would break the caller's loop for no saving.</p>
 <h3>MCP tool refusals</h3>
 <p>Over MCP, a refusal is a tool <i>result</i> with <code>isError: true</code> and the reason in <code>structuredContent</code> (<code>rate_limited</code>, <code>ai_quota_exhausted</code>, <code>insufficient_capability</code>). An HTTP 429 would tear down the connection and the model would never see why.</p>
 <div class="warn"><b>A cancelled save is terminal, not transient.</b> If a confirmed delete erased the space while a save was processing, its job settles as <code>failed</code> with <code>cancelled_by_delete: true</code> and <code>outcome_reason: "cancelled_by_delete"</code>. Do not retry it — the barrier applies to the original work. Write the content again as a new save instead. See <a href="#/concepts/delete">Delete &amp; erasure</a>.</div>
@@ -6232,8 +6234,8 @@ try {
 
 PAGES["/api/limits"] = { title: "Rate limits and quotas", html: `
 <h1>Rate limits and quotas</h1>
-<p class="lede">Six request buckets, one monthly AI-write quota, and a set of published input bounds — all readable from the API so you never hard-code them.</p>
-<p>Itsuki bounds three different things, and it is worth keeping them separate in your head. <b>Rate buckets</b> stop a runaway loop. The <b>AI write quota</b> bounds how much inference one account can spend in a month. <b>Input bounds</b> stop a request that the extractor could not do anything useful with anyway. Each has its own error, its own recovery, and its own place to read the current numbers.</p>
+<p class="lede">Six request buckets, a daily processing allowance, one monthly AI-write quota, and a set of published input bounds — all readable from the API so you never hard-code them.</p>
+<p>Itsuki bounds three different things, and it is worth keeping them separate in your head. <b>Rate buckets</b> stop a runaway loop. The <b>AI budget</b> bounds how much inference one account can spend — per day in neurons, and per month in writes. <b>Input bounds</b> stop a request that the extractor could not do anything useful with anyway. Each has its own error, its own recovery, and its own place to read the current numbers.</p>
 
 <h2>Read the limits, don't copy them</h2>
 <p><code>GET /v1/limits</code> needs no authentication and returns every published figure in one document. It is generated from the same constants the enforcement path reads, so the published number cannot drift from the enforced one.</p>
@@ -6256,7 +6258,12 @@ PAGES["/api/limits"] = { title: "Rate limits and quotas", html: `
                           "maxTotalCharacters": 120000, "maxRequestBytes": 524288 },
               "character_unit": "unicode_code_points",
               "request_encoding": "utf-8-json" },
-  "ai": { "monthly_writes": 1000, "unit": "ai_writes", "period": "calendar_month_utc" }
+  "ai": {
+    "monthly_writes": 1000, "unit": "ai_writes", "period": "calendar_month_utc",
+    "daily": { "limit": 15000, "unit": "neurons", "approx_saves": 100,
+               "period": "utc_day", "resets": "00:00 UTC", "recall_metered": false },
+    "huba": { "first_day_messages": 50, "daily_messages": 20, "period": "utc_day" }
+  }
 }</code></pre>
 <p><code>GET /v1/ingest/limits</code> returns the ingest half on its own, plus the ordered-delivery schema, for clients that only batch conversations. Both are unauthenticated so a client can plan its batching before it has a key.</p>
 
@@ -6289,14 +6296,33 @@ ratelimit-limit: 60
 <p>Two other refusals share the 429 status and are worth distinguishing:</p>
 <ul>
 <li><code>queue_full</code> — up to 200 accepted-but-unfinished writes are allowed per memory space. Past that, new work is refused clearly rather than accepted invisibly. The body carries <code>queue_depth</code> and <code>retry_after_s</code> (30 s). This is backlog, not throttling: it clears as the queue drains, and <code>GET /v1/jobs</code> shows you what is in it.</li>
-<li><code>ai_quota_exhausted</code> — the monthly AI budget below.</li>
+<li><code>ai_quota_exhausted</code> — the daily allowance or the monthly AI budget below. Read <code>capped</code> to tell which.</li>
 </ul>
 
 <h3>Recall is the exception: it degrades instead of failing</h3>
 <div class="warn">A rate-limited <code>POST /v1/recall</code> returns <b>HTTP 200</b> with <code>ok: true</code>, an empty <code>context</code>, <code>count: 0</code>, and <code>recall_status: "rate_limited"</code>. Recall usually sits inside somebody's chat loop, where a hard error breaks the turn for no benefit. If your code reads "empty context" as "this user has no memory", check <code>recall_status</code> before you conclude anything.</div>
 
-<h2>The AI write quota</h2>
-<p>Rate buckets bound requests per minute. The AI write quota bounds <b>inference per month</b>, because inference is the part that scales with use.</p>
+<h2>The daily processing allowance</h2>
+<p>Every account has a daily processing allowance of <b>15,000 neurons</b> — a neuron is Workers AI's unit of compute. At the measured ~150 neurons per direct save, that is about <b>100 saves a day</b>. The unit is compute rather than a flat save count on purpose: a long conversation save honestly costs proportionally more of the day than a one-line note, and a flat count would hide that. The allowance resets at <b>00:00 UTC</b> every day.</p>
+<p><b>Recall is deliberately not metered.</b> One recall costs roughly 1–3 neurons — a query embedding — and a person who has hit their write cap must still be able to read everything they stored. Running out of saves never locks you out of your own memory.</p>
+<h3>What the wall looks like</h3>
+<p>When the day's allowance is spent, the write endpoints refuse with <code>429</code> and a <code>retry-after</code> header:</p>
+<pre><button class="copy">Copy</button><code>{
+  "error": "ai_quota_exhausted",
+  "capped": "daily_neurons",
+  "used": 15000,
+  "limit": 15000,
+  "resetsAt": "2026-08-29T00:00:00.000Z",
+  "usage": { "used": 15000, "limit": 15000, "unit": "neurons",
+             "resets_at": "2026-08-29T00:00:00.000Z" },
+  "message": "You've used today's save allowance. It resets at 00:00 UTC — recall keeps working, nothing already saved is affected, and you can request more from the Usage page."
+}</code></pre>
+<p>The same doors degrade the same way they do for the monthly quota: <code>POST /v1/turn</code> stays <code>200</code> and answers from recall while <code>collect</code> reports the cap, and the MCP save tools return a soft tool result carrying the same error code rather than tearing down the connection. Nothing already saved is affected.</p>
+<h3>Getting more</h3>
+<p>The Usage page in the dashboard — profile menu, top right, <b>Usage &amp; plan</b> — has a <b>Request more</b> button. There is no self-serve payment: the owner grants limits manually, and a grant can be temporary — it lapses on its own when it expires. Per-account overrides exist server-side, so an individual account's real limits can be higher than the defaults on this page; <code>GET /v1/usage</code> always reports your account's actual limits, not the published defaults. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
+
+<h2>The monthly AI write quota</h2>
+<p>Rate buckets bound requests per minute and the daily allowance bounds compute per day. The AI write quota bounds <b>inference per month</b>, because inference is the part that scales with use. It is checked <i>after</i> the daily allowance — a write must clear both — and its refusal carries the same <code>usage</code> object, with <code>capped: "monthly_ai"</code>.</p>
 <table>
 <tr><th>Property</th><th>Value</th></tr>
 <tr><td>Unit</td><td><code>ai_writes</code> — one accepted write, however many model calls it took internally</td></tr>
@@ -6321,9 +6347,19 @@ ratelimit-limit: 60
     "period": "calendar_month_utc",
     "resets_at": "2026-09-01T00:00:00.000Z",
     "capped": false
+  },
+  "quota_daily": {
+    "unit": "neurons",
+    "used": 4830,
+    "limit": 15000,
+    "remaining": 10170,
+    "approx_saves_remaining": 67,
+    "period": "utc_day",
+    "resets_at": "2026-08-29T00:00:00.000Z",
+    "capped": false
   }
 }</code></pre>
-<p><code>GET /v1/limits</code> publishes the plan; <code>GET /v1/usage</code> publishes your consumption. The plan is public, so it needs no key; consumption is yours, so it does.</p>
+<p><code>GET /v1/limits</code> publishes the plan; <code>GET /v1/usage</code> publishes your consumption against both bounds — abridged above, in full on <a href="#/api/usage">GET /v1/usage</a>. The plan is public, so it needs no key; consumption is yours, so it does.</p>
 <h3>What happens at the ceiling</h3>
 <table>
 <tr><th>Door</th><th>Behaviour</th></tr>
@@ -6368,7 +6404,7 @@ ratelimit-limit: 60
 <li><b>Fetch <code>GET /v1/limits</code> once at startup</b> and size your batches from it. Constants copied into a client go stale silently; a fetched document does not.</li>
 <li><b>Send an <code>idempotencyKey</code> on every write you might retry.</b> The same key is processed at most once, so a retry after a 429 or a timeout cannot produce a second save. Reusing a key for <i>different</i> content is a <code>409</code>, which is the check working.</li>
 <li><b>Honour <code>retry-after</code>.</b> It is present on every 429 and on the 503 paths. Prefer it to your own backoff curve, and cap the whole sequence with your own deadline.</li>
-<li><b>Separate throttling from exhaustion.</b> <code>too_many_requests</code> and <code>queue_full</code> clear in seconds. <code>ai_quota_exhausted</code> clears at the start of next month — spinning on it wastes round trips. Branch on <code>code</code>, hold the work, and use <code>resets_at</code>.</li>
+<li><b>Separate throttling from exhaustion.</b> <code>too_many_requests</code> and <code>queue_full</code> clear in seconds. <code>ai_quota_exhausted</code> clears at a calendar boundary — 00:00 UTC tonight when <code>capped</code> is <code>daily_neurons</code>, the 1st of next month when it is <code>monthly_ai</code>. Spinning on it wastes round trips: branch on <code>code</code>, hold the work, and use <code>resets_at</code>.</li>
 <li><b>Watch the backlog, not just the errors.</b> <code>GET /v1/ops/overview</code> reports <code>backlog.depth</code> and <code>backlog.oldest_age_ms</code> across your whole account, so you can slow down before you hit <code>queue_full</code>.</li>
 </ol>
 <pre><button class="copy">Copy</button><code>import os, time
@@ -6382,7 +6418,7 @@ try:
                idempotency_key=MemoryClient.new_idempotency_key())
 except MemoryAPIError as error:
     if error.code == "ai_quota_exhausted":
-        hold_until(error.body["usage"]["resets_at"])   # terminal this month
+        hold_until(error.body["usage"]["resets_at"])   # terminal until the reset
     elif error.status == 429:
         time.sleep(error.retry_after or 60)            # transient
     else:
@@ -6392,6 +6428,7 @@ except MemoryAPIError as error:
 <h2>Related</h2>
 <ul>
 <li><a href="#/api/errors">Errors</a> — every code above, with the body fields each one carries.</li>
+<li><a href="#/guides/usage">Usage &amp; the daily allowance</a> — the dashboard view of these numbers, and how to request more.</li>
 <li><a href="#/api/rest">REST API reference</a> — the endpoints these limits apply to.</li>
 <li><a href="#/operate/observability">Monitoring &amp; diagnostics</a> — backlog, stuck jobs, retries, and latency across your account.</li>
 <li><a href="#/privacy">Privacy &amp; limits</a> — the short summary table.</li>
@@ -8292,6 +8329,10 @@ ${outputBlock(`{
 
 <div class="note"><b>A transient failure is retried before it is published.</b> A model or write error inside the coordinator is retried with backoff up to three attempts; the job sits in <code>processing</code> meanwhile and only becomes <code>failed</code> when the last attempt is spent. A single poll returning <code>processing</code> is not evidence of a stall.</div>
 
+<div class="note"><b>Out-of-capacity gets a far more patient ladder than three attempts.</b> When Workers AI itself is out of capacity, the save is <i>not</i> dead-lettered on the normal three-attempt budget. It retries on jittered backoff growing from 30 seconds to 15 minutes, sustained for roughly two hours; while the ladder runs the job stays visibly non-terminal — <code>queued</code> or <code>processing</code>. Only after the ladder is exhausted does it become <code>failed</code>, with an <code>error</code> beginning <code>workers_ai_capacity:</code>. The dashboard surfaces terminal failures with a report popup, so a job that has merely been waiting out a capacity event never shows up as one.</div>
+
+<div class="note"><b>History is bounded to the last 30 days.</b> Terminal job rows are pruned 30 days after they settle, so the ledger reaches back at most 30 days and an old <code>source_packet_id</code> can legitimately return <code>404</code> from the packet route. A job still in flight is never pruned. If you need a longer record, copy rows out as you read them.</div>
+
 <div class="note"><b>The packet route returns the most recent job for that packet</b> &mdash; the newest <code>extract</code> or <code>mcp_enrich</code> row, not a list. An id that names no accepted write in this memory space is a <code>404</code>, which is also what you get if you look up a packet belonging to a different memory space.</div>
 
 <div class="note"><b>Both routes are scoped to one memory space.</b> If you run sub-tenants, a per-user listing will not show you account-wide backlog or cancellations; <code>GET /v1/ops/overview</code> is the account-level view.</div>
@@ -8621,7 +8662,7 @@ ${nextSteps([
 
 PAGES["/api/usage"] = { title: "GET /v1/usage", html: `
 <h1>GET /v1/usage</h1>
-<p class="lede">Activity rollups for one memory space — how much was written and read over a window, how much is stored right now, and where the AI write quota stands.</p>
+<p class="lede">Activity rollups for one memory space — how much was written and read over a window, how much is stored right now, and where the daily allowance and the AI write quota stand.</p>
 
 <table>
 <tr><th>Method</th><td><code>GET</code></td></tr>
@@ -8682,6 +8723,25 @@ ${outputBlock(`{
     "period": "calendar_month_utc",
     "resets_at": "2026-09-01T00:00:00.000Z",
     "capped": false
+  },
+  "quota_daily": {
+    "unit": "neurons",
+    "used": 4830,
+    "limit": 15000,
+    "remaining": 10170,
+    "approx_saves_remaining": 67,
+    "period": "utc_day",
+    "resets_at": "2026-08-28T00:00:00.000Z",
+    "capped": false,
+    "early_access": true
+  },
+  "huba": {
+    "unit": "messages",
+    "used": 4,
+    "limit": 20,
+    "remaining": 16,
+    "period": "utc_day",
+    "resets_at": "2026-08-28T00:00:00.000Z"
   }
 }`)}
 
@@ -8695,7 +8755,9 @@ ${outputBlock(`{
 <tr><td><code>by_source</code></td><td>One row per receipt source, ordered by <code>count</code> descending. Sources you will see include <code>save_memory</code>, <code>save_conversation</code>, <code>ingest</code>, <code>plugin</code>, <code>recall</code>, <code>delete</code> and <code>candidate_review</code>.</td></tr>
 <tr><td><code>last_activity_at</code></td><td>Epoch milliseconds of the most recent receipt, or <code>null</code>.</td></tr>
 <tr><td><code>ai</code></td><td>Inference consumed inside the window. <code>neurons_measured</code> is what the model binding reported; <code>neurons_derived</code> is a labelled estimate for calls that reported nothing; <code>neurons_total</code> is their sum, and the two halves are never blended silently. Figures round to three decimals.</td></tr>
-<tr><td><code>quota</code></td><td>Where the memory space stands against the AI write bound. Detailed below.</td></tr>
+<tr><td><code>quota</code></td><td>Where the account stands against the monthly AI write bound. Detailed below.</td></tr>
+<tr><td><code>quota_daily</code></td><td>Where the account stands against today's processing allowance, in neurons. Detailed below.</td></tr>
+<tr><td><code>huba</code></td><td>Today's <a href="#/guides/huba">Huba AI</a> message allowance: <code>used</code>, <code>limit</code>, <code>remaining</code>, over a <code>utc_day</code> period with the same <code>resets_at</code> shape as the daily block.</td></tr>
 </table>
 
 <div class="warn"><b>Half of <code>totals</code> ignores <code>range</code>.</b> <code>nodes</code>, <code>pages</code>, <code>slices</code>, <code>events</code> and <code>memories</code> are current inventory — every live object, whenever it was written, excluding anything deleted, archived or suppressed. Only <code>saves</code>, <code>recalls</code> and <code>requests</code> are windowed. <code>last_activity_at</code> is likewise taken over all receipts ever, so it can fall outside the window you asked for.</div>
@@ -8711,7 +8773,7 @@ ${outputBlock(`{
 <tr><th>Field</th><th>Meaning</th></tr>
 <tr><td><code>unit</code></td><td>Always <code>ai_writes</code>. The unit is a write, not a token or a model call: one save is one write however many model calls it took.</td></tr>
 <tr><td><code>used</code></td><td>Distinct AI-processed writes so far this UTC month.</td></tr>
-<tr><td><code>limit</code></td><td>The monthly bound for this deployment. The same number is published unauthenticated at <code>GET /v1/limits</code> as <code>ai.monthly_writes</code>.</td></tr>
+<tr><td><code>limit</code></td><td>The monthly bound for this account — the default published unauthenticated at <code>GET /v1/limits</code> as <code>ai.monthly_writes</code>, or higher while a per-account grant is in force.</td></tr>
 <tr><td><code>remaining</code></td><td><code>limit</code> minus <code>used</code>, floored at zero.</td></tr>
 <tr><td><code>period</code></td><td>Always <code>calendar_month_utc</code>.</td></tr>
 <tr><td><code>resets_at</code></td><td>ISO timestamp of 00:00:00 UTC on the first day of the next month, when <code>used</code> returns to zero. It is a fixed calendar boundary, not a rolling window from your first write.</td></tr>
@@ -8722,9 +8784,30 @@ ${outputBlock(`{
 
 <p>When <code>capped</code> is <code>true</code>, the write endpoints refuse with <code>429</code> and <code>error: "ai_quota_exhausted"</code>, carrying <code>retry-after</code> and a <code>usage</code> object with the same <code>used</code>, <code>limit</code> and <code>resets_at</code> fields. <code>POST /v1/turn</code> behaves differently: it stays <code>200</code> and still answers from recall, reporting <code>collect.capped: "monthly_ai"</code> instead of failing the whole turn.</p>
 
-<div class="warn"><b><code>quota</code> ignores <code>range</code>, and <code>userId</code> does not move it.</b> The quota is always the current UTC month, whatever window you asked for. Both <code>ai</code> and <code>quota</code> are attributed to the authenticated account, not to the memory space being read — so passing a sub-tenant <code>userId</code> narrows the activity half of the response while <code>ai</code> and <code>quota</code> keep reporting the account&rsquo;s figures.</div>
+<h2>The daily allowance</h2>
+<p>Alongside the monthly quota, each account has a daily processing allowance measured in neurons — Workers AI&rsquo;s compute unit. It is checked <i>before</i> the monthly quota on every write, and <code>quota_daily</code> reports the position against it. Recall never draws on it: a recall costs roughly 1&ndash;3 neurons and is deliberately not metered, so hitting the write cap never stops you reading what you stored. The mechanism — the default of 15,000 neurons, the refusal shape, and how to request more — is on <a href="#/api/limits">Rate limits and quotas</a>.</p>
 
-<div class="note"><b><code>ai</code> and <code>quota</code> can both be <code>null</code>.</b> If the AI accounting store cannot be read, the endpoint still answers <code>200</code> with the activity half intact and both blocks set to <code>null</code>, rather than failing the whole request. Treat <code>null</code> as &ldquo;unknown right now&rdquo;, not as zero.</div>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>unit</code></td><td>Always <code>neurons</code>. The unit is compute, not a save count — a direct save measures ~150 neurons, and a long conversation save honestly costs more.</td></tr>
+<tr><td><code>used</code></td><td>Neurons spent so far this UTC day, rounded to a whole number.</td></tr>
+<tr><td><code>limit</code></td><td>Today&rsquo;s allowance. 15,000 by default; higher while a per-account grant is in force. This is always the account&rsquo;s <i>actual</i> limit, not the published default.</td></tr>
+<tr><td><code>remaining</code></td><td><code>limit</code> minus <code>used</code>, floored at zero.</td></tr>
+<tr><td><code>approx_saves_remaining</code></td><td><code>remaining</code> divided by the measured ~150 neurons per direct save, rounded down. An estimate for people, not a promise — bigger saves spend it faster.</td></tr>
+<tr><td><code>period</code></td><td>Always <code>utc_day</code>.</td></tr>
+<tr><td><code>resets_at</code></td><td>ISO timestamp of the next 00:00 UTC, when <code>used</code> returns to zero.</td></tr>
+<tr><td><code>capped</code></td><td><code>true</code> once <code>used</code> has reached <code>limit</code>. Write endpoints are refusing with <code>capped: "daily_neurons"</code>; recall still works.</td></tr>
+<tr><td><code>early_access</code></td><td><code>true</code> when the account signed up during the early-access window. It records who was here early — it is not itself a limit, and it survives the expiry of any temporary grant.</td></tr>
+</table>
+
+<p>The <code>huba</code> block has the same shape over messages instead of neurons: <a href="#/guides/huba">Huba AI</a> answers are counted per UTC day (50 on an account&rsquo;s first day, 20 per day after), and the neurons each answer spends — roughly 20&ndash;35 — come out of the same daily allowance that <code>quota_daily</code> reports.</p>
+
+<h2>The usage dashboard</h2>
+<p>The same numbers render in the dashboard: profile menu, top right, <b>Usage &amp; plan</b>. Each allowance is a filling bar that turns into a warning at 80%, with a countdown to the 00:00 UTC reset, and a <b>Request more</b> button when an allowance runs out — the request goes to the owner with your usage attached and is granted manually; a temporary grant lapses on its own. The walkthrough is <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
+
+<div class="warn"><b><code>quota</code>, <code>quota_daily</code> and <code>huba</code> ignore <code>range</code>, and <code>userId</code> does not move them.</b> The quotas are always the current UTC month or day, whatever window you asked for. <code>ai</code> and all three quota blocks are attributed to the authenticated account, not to the memory space being read — so passing a sub-tenant <code>userId</code> narrows the activity half of the response while these blocks keep reporting the account&rsquo;s figures.</div>
+
+<div class="note"><b><code>ai</code>, <code>quota</code>, <code>quota_daily</code> and <code>huba</code> can all be <code>null</code>.</b> If the AI accounting store cannot be read, the endpoint still answers <code>200</code> with the activity half intact and these blocks set to <code>null</code>, rather than failing the whole request. Treat <code>null</code> as &ldquo;unknown right now&rdquo;, not as zero.</div>
 
 <h2>GET /v1/requests</h2>
 <p>The per-request history behind the same numbers: one row per receipt, newest first. Same authentication, same scope, same <code>userId</code> parameter.</p>
@@ -8822,7 +8905,8 @@ ${outputBlock(`{
 
 <h2>Where to go next</h2>
 ${nextSteps([
-	["#/api/limits", "Rate limits and quotas", "The buckets, the monthly write bound, and what a 429 carries."],
+	["#/api/limits", "Rate limits and quotas", "The buckets, the daily and monthly write bounds, and what a 429 carries."],
+	["#/guides/usage", "Usage & the daily allowance", "The dashboard view of these numbers, and how to request more."],
 	["#/operate/observability", "Monitoring & diagnostics", "Watching a live integration, beyond the rollups."],
 	["#/concepts/receipts", "Receipts & rules", "What a receipt records and why a save can store nothing."],
 	["#/api/auth", "Authentication & keys", "Scopes, sub-tenant userId, and the legacy header."],
@@ -9661,6 +9745,113 @@ ${nextSteps([
 	[`#/guides/projects`, `Projects, organizations, and teams`, `The role and capability table these permissions come from.`],
 	[`#/concepts/delete`, `Delete & erasure`, `What an erasure barrier is, and why a cancelled save must not be retried.`],
 	[`#/guides/versions`, `Corrections, history, and rollback`, `The reversible way to change one memory instead.`],
+])}
+` };
+
+PAGES["/guides/usage"] = { title: "Usage & the daily allowance", html: `
+<h1>Usage &amp; the daily allowance</h1>
+<p class="lede">Read the three allowance bars on the Usage page, know exactly what happens when one runs out, and request more when the defaults stop fitting.</p>
+
+${prereq([
+	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. The Usage page describes your account, so an API key or MCP link cannot open it — the same numbers are available over the API at <a href="#/api/usage">GET /v1/usage</a>.`,
+	`Nothing else. Every account has the page, whatever its project roles.`,
+])}
+
+<h2>Open the Usage page</h2>
+<ol class="steps">
+<li><b>Open the profile menu.</b><p>Top right of the dashboard.</p></li>
+<li><b>Choose Usage &amp; plan.</b><p>What you should see: three filling bars — today's saves, this month's plan, and Huba messages — each with its numbers, and a countdown to the next 00:00 UTC reset on the daily ones.</p></li>
+</ol>
+
+<h2>The three bars</h2>
+<table>
+<tr><th>Bar</th><th>Measures</th><th>Resets</th></tr>
+<tr><td><b>Today's saves</b></td><td>Neurons — Workers AI's compute unit. The default allowance is 15,000 a day, about 100 direct saves at the measured ~150 neurons each, and the bar shows an estimate of saves left alongside the raw number.</td><td>00:00 UTC, every day</td></tr>
+<tr><td><b>This month's plan</b></td><td>AI-processed writes — 1,000 per calendar month by default. A write must clear the daily bar first; this one is checked behind it.</td><td>00:00 UTC on the 1st</td></tr>
+<tr><td><b>Huba messages</b></td><td>Messages to <a href="#/guides/huba">Huba AI</a>: 50 on your account's first day, 20 a day after that.</td><td>00:00 UTC, every day</td></tr>
+</table>
+
+<div class="note"><b>Why the daily unit is compute, not a save count.</b> A long conversation save honestly costs proportionally more of the day than a one-line note, so a flat "saves per day" number would either overcharge small saves or hide big ones. The ~100-saves figure is an estimate at the measured average, not a second limit.</div>
+
+<p>Each bar warns once it passes 80%, so the first sign of a heavy day is a colour change, not a refusal. The countdown under the daily bars is the answer to "when do I get it back": 00:00 UTC, every day, no action needed.</p>
+
+<h2>What happens at the wall</h2>
+<p>When today's allowance is spent, write endpoints refuse with <code>429</code> and a <code>retry-after</code> header:</p>
+${outputBlock(`{
+  "error": "ai_quota_exhausted",
+  "capped": "daily_neurons",
+  "used": 15000,
+  "limit": 15000,
+  "resetsAt": "2026-08-29T00:00:00.000Z",
+  "usage": { "used": 15000, "limit": 15000, "unit": "neurons",
+             "resets_at": "2026-08-29T00:00:00.000Z" },
+  "message": "You've used today's save allowance. It resets at 00:00 UTC — recall keeps working, nothing already saved is affected, and you can request more from the Usage page."
+}`, "HTTP 429")}
+<p>Three things stay true at the wall, and they are the point of its design:</p>
+<ul>
+<li><b>Recall keeps working.</b> Reading is deliberately not metered — one recall costs roughly 1–3 neurons — so everything you stored stays reachable while saving waits for the reset.</li>
+<li><b>Nothing already saved is affected.</b> The wall refuses new processing; it never touches stored memory.</li>
+<li><b>Chat loops degrade instead of breaking.</b> <a href="#/api/turn">POST /v1/turn</a> stays <code>200</code> and answers from recall, and the MCP save tools return a soft tool result carrying the same code, so a connected assistant sees why instead of losing its connection.</li>
+</ul>
+
+<h2>Request more</h2>
+<ol class="steps">
+<li><b>Press Request more on the Usage page.</b><p>The request goes to the owner with your current usage attached, so you do not need to explain your numbers.</p></li>
+<li><b>Wait for the grant.</b><p>There is no self-serve payment — the owner grants limits manually. A grant can be temporary: it lapses on its own when it expires, with nothing for you to undo.</p></li>
+<li><b>Confirm your real limits.</b><p>Overrides are per account, so your actual limits can be higher than the published defaults. <a href="#/api/usage">GET /v1/usage</a> — and this page — always report the limits your account actually has.</p></li>
+</ol>
+
+<p>The mechanism behind all of this — the refusal shapes, what is and is not counted, and the published defaults — is on <a href="#/api/limits">Rate limits and quotas</a>.</p>
+
+${nextSteps([
+	["#/api/limits", "Rate limits and quotas", "The mechanism: buckets, the daily and monthly bounds, and every refusal shape."],
+	["#/api/usage", "GET /v1/usage", "The same numbers over the API, field by field."],
+	["#/guides/huba", "Huba AI", "The assistant bar the third bar meters."],
+	["#/api/errors", "Errors", "ai_quota_exhausted next to every other code."],
+])}
+` };
+
+PAGES["/guides/huba"] = { title: "Huba AI", html: `
+<h1>Huba AI</h1>
+<p class="lede">The assistant bar pinned to the bottom-right of the signed-in dashboard. Ask it about Itsuki and it answers from this documentation and your own account's state — never from model guesswork.</p>
+
+${prereq([
+	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. Huba is a dashboard surface — there is no way to reach it with an API key or over MCP.`,
+	`A question about Itsuki. Huba answers about the product and your account; it is not a general-purpose chat.`,
+])}
+
+<h2>Where the answers come from</h2>
+<p>Huba never answers from model knowledge. Every answer is grounded in two sources and nothing else:</p>
+<ul>
+<li><b>This documentation</b> — the same pages you are reading now.</li>
+<li><b>Your account's own state</b> — a snapshot the server builds for the signed-in account: recent saves, job health, and where your quotas stand. That is what lets it answer "did my last save land?" about your account specifically, not in general.</li>
+</ul>
+<p>When it cannot find the answer in either, it says so and points at the closest docs page instead of guessing. An assistant that invents plausible product behaviour is worse than none, so honest "I don't know, look here" is a designed outcome, not a failure.</p>
+
+<h2>It only ever sees your account</h2>
+<p>The snapshot is built server-side from your session, the same way every dashboard view resolves who you are. Nothing another account stored is reachable — not through a clever question, not through anything. There is no cross-account surface for a prompt to leak.</p>
+
+<h2>The allowance</h2>
+<table>
+<tr><th>Property</th><th>Value</th></tr>
+<tr><td>First day</td><td>50 messages — room to explore while everything is new</td></tr>
+<tr><td>After that</td><td>20 messages per day</td></tr>
+<tr><td>Resets</td><td>00:00 UTC, every day</td></tr>
+<tr><td>Cost</td><td>Roughly 20–35 neurons per answer, metered like everything else — it appears in <a href="#/api/usage">GET /v1/usage</a> under <code>huba</code>, and the neurons come out of the same daily allowance as saves</td></tr>
+</table>
+<p>When the day's messages are spent, the bar says so and shows a <b>Request more</b> link — the same flow as saves: the request goes to the owner with your usage attached, grants are manual, and a temporary grant lapses on its own. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
+
+<h2>Voice</h2>
+<p>The microphone and read-aloud buttons use the browser's own Web Speech API. The audio is processed by your browser, not sent to Itsuki's models, and costs no neurons. Where a browser does not support speech, the buttons are absent and the text box always works — typing is never the degraded path.</p>
+
+<h2>A dashboard surface, not an API</h2>
+<p>There is no public Huba endpoint. API keys cannot call it, MCP clients cannot list it as a tool, and nothing you build on the API depends on it. If you want an assistant of your own answering from memory, that is what <a href="#/api/recall">POST /v1/recall</a> and <a href="#/api/turn">POST /v1/turn</a> are for.</p>
+
+${nextSteps([
+	["#/guides/usage", "Usage & the daily allowance", "The bar that meters Huba, and how to request more."],
+	["#/api/usage", "GET /v1/usage", "Where the huba block reports today's messages."],
+	["#/api/limits", "Rate limits and quotas", "The published allowance figures, unauthenticated."],
+	["#/quickstart", "Quickstart", "Build the thing Huba can only explain."],
 ])}
 ` };
 

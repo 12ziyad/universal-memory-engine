@@ -55,5 +55,8 @@
  "0054_ai_shadow_jobs.sql": "825a1d39c3aec6a380cba958f0cdecd68346bc9fa764fca87dab88173550cb61",
  "0055_ai_provider_reservation_hardening.sql": "f49bd94d3833315718dc381c0f72d63ace24a92cd144fac26e566602153920f8",
  "0056_ai_shadow_hardening.sql": "846b9f9b72772b3c0609d9628e23c914243c6dac516141dfa5124e2a7b451ae1",
- "0057_passwordless_onboarding_scope.sql": "9064feaa15f31e663afeb42dff6e7926fbbbd8f21cee32af2f04a6742207d4e2"
+ "0057_passwordless_onboarding_scope.sql": "9064feaa15f31e663afeb42dff6e7926fbbbd8f21cee32af2f04a6742207d4e2",
+ "0058_sweep_indexes_and_packet_project_backfill.sql": "62c8446990847f6cad72dd2dff8f38cdfcd3e226252c4e9276efa379af2e6167",
+ "0059_user_entitlements_upgrade_requests.sql": "ebe7aa9aa72e4cda39b746290a3933a9baa8c0a86b60857dd4faa1a5920aadef",
+ "0060_retention_discovery_indexes.sql": "f46a1106866f5b072a8ba30577da57f11e44f0ea0bfce14a9c0d1d0160db3143"
 }

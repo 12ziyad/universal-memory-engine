@@ -33,7 +33,7 @@ import {
 	memoryV3ExtractionB1Enabled,
 } from "../lib/memory_v3.js";
 import { shortlistNodes } from "./shortlist.js";
-import { proposeMemory } from "./llm.js";
+import { proposeMemory, isCapacityError } from "./llm.js";
 import { attachProvenance, numberEntities, proposeEdges, proposeReflexion } from "./engine_v2.js";
 import { applyGates } from "./gates.js";
 import { writeApproved } from "./write.js";
@@ -270,13 +270,16 @@ async function extractionRunResult(env, userId, row, chunk, meta, {
 		const outcome = interrupted
 			? "interrupted_unknown"
 			: providerTerminal ? "provider_terminal"
-				: storedError.startsWith("db_write_failed:") ? "db_write_failed" : "llm_failed";
+				: storedError.startsWith("db_write_failed:") ? "db_write_failed"
+					: storedError.startsWith("workers_ai_capacity:") ? "llm_capacity" : "llm_failed";
 		const receipt = emptyReceipt(
 			outcome,
 			interrupted
 				? "processing was interrupted after inference began; the model was not called again"
 				: providerTerminal ? "the provider refused a safe retry; the model was not called again"
-				: outcome === "db_write_failed" ? "a storage error interrupted the save" : "the extractor returned nothing readable",
+				: outcome === "db_write_failed" ? "a storage error interrupted the save"
+				: outcome === "llm_capacity" ? "the model provider is at capacity; this save is queued and will retry automatically"
+				: "the extractor returned nothing readable",
 			recoveredMeta,
 		);
 		receipt.created_at = Number(current.created_at ?? Date.now());
@@ -637,7 +640,7 @@ export async function runExtraction(env, userId, chunk, recent, overrides = {}, 
 					 SET status = 'failed', error = ?, updated_at = ?
 					 WHERE id = ? AND user_id = ? AND status = 'running' AND updated_at IS ?`,
 				).bind(
-					`llm_failed: ${String(error?.message ?? error).slice(0, 300)}`,
+					`${isCapacityError(error) ? "workers_ai_capacity" : "llm_failed"}: ${String(error?.message ?? error).slice(0, 300)}`,
 					Date.now(),
 					row.id,
 					userId,
@@ -953,11 +956,17 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 		const terminalOutcome = ["interrupted_unknown", "provider_terminal"].includes(proposal._outcome)
 			? proposal._outcome
 			: null;
+		// Capacity is not a failure of the save — the provider's queue was full.
+		// A distinct outcome lets the DO retry far longer than the poison
+		// ceiling instead of dead-lettering a healthy write after 35 seconds.
+		const capacity = !terminalOutcome && proposal._outcome === "capacity";
 		const failedError = terminalOutcome === "interrupted_unknown"
 			? "inference_outcome_unknown: provider response could not be safely replayed"
 			: terminalOutcome === "provider_terminal"
 				? "provider_terminal: provider refused a safe immediate retry"
-				: "llm_failed: the extractor returned nothing readable";
+				: capacity
+					? "workers_ai_capacity: the model provider is temporarily out of capacity"
+					: "llm_failed: the extractor returned nothing readable";
 		// Guarded like the other finalizations: never stomp a concurrent
 		// erasure's cancelled_by_delete back to a retryable `failed`.
 		const failed = await updateExtractionRun(env, userId, extractionRunId, {
@@ -979,7 +988,7 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 				return { outcome: row.status, error: row.status, receipt };
 			}
 		}
-		const outcome = terminalOutcome ?? "llm_failed";
+		const outcome = terminalOutcome ?? (capacity ? "llm_capacity" : "llm_failed");
 		return {
 			outcome,
 			error: failedError,
@@ -989,7 +998,9 @@ async function runExtractionInner(env, userId, chunk, recent, overrides = {}, me
 					? "the provider outcome is unknown; the model was not called again"
 					: outcome === "provider_terminal"
 						? "the provider refused a safe retry; the model was not called again"
-						: "the extractor returned nothing I could read",
+						: outcome === "llm_capacity"
+							? "the model provider is at capacity; this save is queued and will retry automatically"
+							: "the extractor returned nothing I could read",
 				{ ...meta, latency_ms: elapsed() },
 			),
 		};

@@ -1,6 +1,0 @@
-Error: idempotency convergence failed: 1/1/2/1
-    at assert (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/e6/harness/common.mjs:49:24)
-    at packetIdempotencyAudit (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:255:2)
-    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
-    at async liveRun (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:369:22)
-    at async main (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:646:3)

@@ -77,11 +77,11 @@ describe("aiBudget config", () => {
 	it("honours env vars and rejects garbage", () => {
 		env.AI_MONTHLY_WRITES = "250";
 		env.AI_DAILY_NEURON_CEILING = "9000";
-		expect(aiBudget(env)).toEqual({ monthlyWrites: 250, dailyNeuronCeiling: 9000 });
+		expect(aiBudget(env)).toMatchObject({ monthlyWrites: 250, dailyNeuronCeiling: 9000 });
 		env.AI_MONTHLY_WRITES = "-5";
 		env.AI_DAILY_NEURON_CEILING = "banana";
 		expect(aiBudget(env).monthlyWrites).toBe(1000);
-		expect(aiBudget(env).dailyNeuronCeiling).toBe(750_000);
+		expect(aiBudget(env).dailyNeuronCeiling).toBe(1_500_000);
 	});
 
 	it("derives neurons from token sums at the published rates", () => {

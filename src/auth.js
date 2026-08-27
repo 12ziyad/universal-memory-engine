@@ -1,4 +1,5 @@
 import { newId } from "./lib/ids.js";
+import { stampEarlyAccess } from "./lib/ai_budget.js";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { resolveVerifiedIdentity } from "./lib/auth_identity.js";
 import {
@@ -258,6 +259,7 @@ export async function signup(env, request, body) {
 		.bind(id, valid.email, valid.email, password.passwordHash, password.passwordSalt, valid.name || null, createdAt, createdAt, createdAt)
 		.run();
 	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
+	await stampEarlyAccess(env, id, createdAt);
 	const session = await createSession(env, request, id);
 	await recordLoginEvent(env, request, id, "signup");
 	return { user: publicUser(user), session, status: 201 };

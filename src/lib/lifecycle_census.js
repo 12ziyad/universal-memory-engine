@@ -217,6 +217,16 @@ export const CENSUS = {
 		projectDelete: "scrub",
 		why: "first-run profile and optional conversation sample cascade with the owning account; a deleted project selector is cleared",
 	},
+	user_entitlements: {
+		kind: "account",
+		accountErase: "delete",
+		why: "per-account quota overrides (numbers, a grant note) cascade with the owning account; no memory content",
+	},
+	upgrade_requests: {
+		kind: "account",
+		accountErase: "delete",
+		why: "quota requests (kind, note, usage snapshot) cascade with the owning account; no memory content",
+	},
 	user_scope_preferences: {
 		kind: "account",
 		accountErase: "delete",

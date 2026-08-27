@@ -340,7 +340,27 @@ export function responseRefused(res) {
 	return false;
 }
 
+/**
+ * A Workers AI capacity refusal (account text-generation ~300 req/min, upstream
+ * code 3040 "Out of capacity", or a plain 429) is TRANSIENT by definition — the
+ * model is fine, the queue is full. It must never be classified like a real
+ * extraction failure: the DO gives capacity a far longer, jittered retry ladder
+ * instead of the 3-attempt poison ceiling. The binding throws a raw Error (no
+ * status/code fields for Workers AI), so this is a message match by necessity.
+ */
+export function isCapacityError(error) {
+	const msg = String(error?.message ?? "").toLowerCase();
+	const code = String(error?.code ?? "");
+	return code === "3040"
+		|| msg.includes("out of capacity")
+		|| msg.includes("capacity temporarily exceeded")
+		|| msg.includes("3040")
+		|| msg.includes("too many requests")
+		|| msg.includes("429");
+}
+
 function failureKind(error) {
+	if (isCapacityError(error)) return "capacity";
 	const name = String(error?.name ?? "").toLowerCase();
 	const code = String(error?.code ?? "").toLowerCase();
 	if (name.includes("timeout") || name.includes("abort") || code.includes("timeout")) return "timeout";
@@ -515,6 +535,13 @@ async function callModel(env, config, packet, shortlist, {
 }
 
 export async function proposeMemory(env, config, { packet, shortlist }, overrides = {}) {
+	// Deterministic capacity fault (tests only — overrides reach here solely
+	// through ENABLE_TEST_OVERRIDES): throws the exact shape a Workers AI
+	// out-of-capacity refusal produces, so the DO's patient ladder can be
+	// exercised end to end without a real capacity event.
+	if (overrides && overrides.llmFault === "capacity") {
+		throw new Error("3040: Out of capacity — deterministic test fault");
+	}
 	// Deterministic test hook: caller supplies the canned proposal JSON, or a
 	// function of ({ packet, shortlist }) when a test needs the response to
 	// differ per call (how the split-rescue specs simulate a poisoned chunk).

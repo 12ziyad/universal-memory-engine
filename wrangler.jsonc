@@ -151,13 +151,29 @@
 		"ITSUKI_MEMORY_V3_EPISODE_FALLBACK_USERS": "",
 		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT": "off",
 		"ITSUKI_MEMORY_V3_ADAPTIVE_CONTEXT_USERS": "",
-		// The AI budget: one launch plan for everyone. MONTHLY_WRITES is the
+		// The AI budget: one launch plan for everyone, per-user overrides in
+		// user_entitlements (migration 0059). MONTHLY_WRITES is the
 		// per-account calendar-month cap on AI-processed saves (exact, counted
-		// in D1). DAILY_NEURON_CEILING is the account-wide circuit breaker —
-		// the wallet backstop, since Workers AI has no hard spend cap. Values
-		// chosen from the B1 production measurement (see ai_budget.js).
+		// in D1). DAILY_NEURONS_PER_USER is the per-user daily allowance
+		// (~100 saves at the measured ~150 neurons/save), reset 00:00 UTC.
+		// DAILY_NEURON_CEILING is the account-wide circuit breaker — the
+		// wallet backstop, since Workers AI has no hard spend cap. Raised to
+		// 1.5M so 100 users at the full per-user allowance (100 × 15,000 =
+		// 1.5M) is the collision point rather than 50 — the per-user cap and
+		// the global breaker must not meet at exactly the planned headcount.
 		"AI_MONTHLY_WRITES": "1000",
-		"AI_DAILY_NEURON_CEILING": "750000",
+		"AI_DAILY_NEURON_CEILING": "1500000",
+		"AI_DAILY_NEURONS_PER_USER": "15000",
+		// Huba AI: the grounded product assistant. Same account, same meter
+		// (scope huba_chat), its own message allowance. The model is the
+		// proven extraction MoE — high instruction-following for the
+		// grounding/refusal contract at ~3B active parameters of cost.
+		"HUBA_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+		"HUBA_MAX_TOKENS": "1024",
+		"HUBA_FIRST_DAY_MESSAGES": "50",
+		"HUBA_DAILY_MESSAGES": "20",
+		// Upgrade-request notifications (usage page "Request more" → owner).
+		"OWNER_NOTIFY_EMAIL": "kayotenetwork@gmail.com",
 		// Safe memory updates staged rollout. "track": schema + revision
 		// tracking live, public update/history/rollback doors disabled
 		// (Stage A). "on": doors enabled (Stage B). Stage B's rollback target

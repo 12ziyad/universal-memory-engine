@@ -864,3 +864,59 @@ html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto !important; }
 }
+
+/* Landing v4 — centered hero, the mark reduced to a right-edge sliver.
+   The sentence stands alone in the middle of the page; イツキ stays as a
+   narrow ink band on the right — a signature, not a co-star. Symmetric
+   inline padding keeps the centered copy optically centered despite the
+   band. */
+#landing.lp-shell .hero { position: relative; grid-template-columns: 1fr; min-height: 720px; }
+#landing.lp-shell .hero-copy {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 720px; padding: 88px clamp(84px, 9vw, 150px) 72px; border-right: 0; text-align: center;
+}
+#landing.lp-shell .hero-copy .eyebrow { justify-content: center; }
+#landing.lp-shell .hero h1 { max-width: 1020px; margin-inline: auto; }
+#landing.lp-shell .hero-deck { max-width: 740px; margin-inline: auto; }
+#landing.lp-shell .hero-actions { justify-content: center; }
+#landing.lp-shell .hero-proof {
+  margin: 36px 0 0; color: var(--ink-soft);
+  font: 400 10px/1.7 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+}
+#landing.lp-shell .hero-mono {
+  position: absolute; top: 0; right: 0; bottom: 0; width: clamp(58px, 7vw, 104px);
+  min-height: 0; padding: 40px 0; border-top: 0; border-left: 1px solid var(--ink);
+}
+#landing.lp-shell .hero-mono::before { width: 320px; }
+#landing.lp-shell .hero-mono-jp {
+  writing-mode: vertical-rl; text-orientation: upright;
+  font-size: clamp(38px, 4.4vw, 68px); letter-spacing: .12em;
+}
+#landing.lp-shell .hero-mono-tag { display: none; }
+#landing.lp-shell .nav-github {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px;
+  border: 1px solid var(--ink); color: var(--ink); font-size: 13px; font-weight: 600;
+  transition: 180ms ease;
+}
+#landing.lp-shell .nav-github:hover, #landing.lp-shell .nav-github:focus-visible {
+  background: var(--ink); color: var(--porcelain); transform: translateY(-2px);
+}
+
+@media (max-width: 1100px) {
+  /* The v3 tablet rules turned the mark into a horizontal band under the
+     copy; v4 keeps the sliver at every width instead. */
+  #landing.lp-shell .hero-copy { min-height: 640px; padding-right: clamp(84px, 11vw, 130px); padding-left: clamp(84px, 11vw, 130px); border-right: 0; }
+  #landing.lp-shell .hero-mono { position: absolute; min-height: 0; padding: 40px 0; border-top: 0; }
+  #landing.lp-shell .hero-mono-jp { writing-mode: vertical-rl; text-orientation: upright; font-size: clamp(34px, 4.6vw, 56px); }
+  #landing.lp-shell .nav-github { min-height: 38px; padding: 0 11px; }
+  #landing.lp-shell .nav-github svg { width: 13px; height: 13px; }
+}
+
+@media (max-width: 760px) {
+  #landing.lp-shell .hero { min-height: 560px; }
+  #landing.lp-shell .hero-copy { min-height: 560px; padding: 58px 52px 50px; }
+  #landing.lp-shell .hero-mono { width: 42px; padding: 30px 0; }
+  #landing.lp-shell .hero-mono-jp { font-size: 26px; letter-spacing: .1em; }
+  #landing.lp-shell .hero-proof { font-size: 9px; letter-spacing: .12em; }
+  #landing.lp-shell .nav-github span, #landing.lp-shell .nav-github { font-size: 12px; }
+}

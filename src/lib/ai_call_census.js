@@ -48,6 +48,7 @@ export const RUN_AI_IMPORTERS = Object.freeze([
 	"src/pipeline/atomic_candidates.mjs",
 	"src/lib/embeddings.js",
 	"src/lib/rules_preview.js",
+	"src/huba/huba.js", // Huba AI grounded chat, metered under scope huba_chat
 ]);
 
 const BINDING_INVOCATION = /env\.AI\.run\s*\(|env\[\s*["']AI["']\s*\]/;

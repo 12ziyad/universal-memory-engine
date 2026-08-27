@@ -258,7 +258,9 @@ import {
 } from "./lib/oauth.js";
 import { allowRate, managedActorRateKey, RATE_BUCKETS } from "./lib/rate.js";
 import { LIMITS_SCHEMA, RATE_LIMITS_DOC } from "./lib/limits_contract.mjs";
-import { aiBudget, aiLimitsDocument, checkAiBudget, countWritesThisMonth, derivedNeurons, startOfNextUtcMonth } from "./lib/ai_budget.js";
+import { aiBudget, aiLimitsDocument, checkAiBudget, checkHubaBudget, countWritesThisMonth, derivedNeurons, loadEntitlements, neuronsSpentTodayForAccount, hubaMessagesToday, startOfNextUtcMonth, startOfNextUtcDay, startOfUtcDay } from "./lib/ai_budget.js";
+import { hubaTurn } from "./huba/huba.js";
+import { createUpgradeRequest, processUpgradeRequestNotifications, listUpgradeRequests, grantEntitlementStatements, dismissUpgradeRequest } from "./lib/upgrade_requests.js";
 
 function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
@@ -1697,6 +1699,7 @@ const routes = {
 		if (!(await allowRate(
 			env.SAVE_LIMITER,
 			`rules-preview:${context.auth.userId}:project:${context.project.id}`,
+			{ fail: "closed" },
 		))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/rules/preview");
 		if (parsed.response) return parsed.response;
@@ -1904,7 +1907,7 @@ const routes = {
 	"POST /v1/settings/retention/process": async (request, env) => {
 		const context = await requireSessionProject(request, env, "project.retention.manage");
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `retention:${context.auth.userId}:${context.project.id}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `retention:${context.auth.userId}:${context.project.id}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/retention/process");
 		if (parsed.response) return parsed.response;
 		try {
@@ -1961,7 +1964,7 @@ const routes = {
 	"POST /v1/settings/lifecycle/preview": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/preview");
 		if (parsed.response) return parsed.response;
 		try {
@@ -1979,7 +1982,7 @@ const routes = {
 	"POST /v1/settings/lifecycle/execute": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.DELETE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("delete");
+		if (!(await allowRate(env.DELETE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("delete");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/execute");
 		if (parsed.response) return parsed.response;
 		try {
@@ -2003,7 +2006,7 @@ const routes = {
 	"POST /v1/settings/lifecycle/retry": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/retry");
 		if (parsed.response) return parsed.response;
 		try {
@@ -2034,7 +2037,7 @@ const routes = {
 	"POST /v1/settings/lifecycle/transfer": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
-		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/transfer");
 		if (parsed.response) return parsed.response;
 		try {
@@ -2241,7 +2244,7 @@ const routes = {
 	"POST /v1/settings/members/leave": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env);
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		try {
 			const mutation = await runContextAuditedMutation(
 				request, env, ctx, context, null,
@@ -2270,7 +2273,7 @@ const routes = {
 	"POST /v1/settings/org-members/leave": async (request, env, ctx) => {
 		const context = await requireSessionProject(request, env);
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `membership-leave:${context.auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		try {
 			const sessionOrg = await sessionOrganization(env, context);
 			const parsed = await readSmallJsonObject(request, "/v1/settings/org-members/leave", 4 * 1024);
@@ -2387,7 +2390,7 @@ const routes = {
 	// the harness reaches Workers AI without separate REST credentials.
 	"POST /eval/llm": async (request, env) => {
 		if (env.EVAL_MODE !== "1") return json({ error: "not_found" }, 404);
-		if (request.headers.get("x-api-key") !== env.API_KEY) return json({ error: "unauthorized" }, 401);
+		if (!(await isAuthorized(request, env))) return json({ error: "unauthorized" }, 401);
 		const body = await request.json().catch(() => ({}));
 		if (!Array.isArray(body.messages) || body.messages.length === 0) {
 			return json({ error: "messages_required" }, 400);
@@ -2433,7 +2436,7 @@ const routes = {
 		// Bulk import is legitimate burst traffic (workspace files, backfills):
 		// it gets the roomy IMPORT bucket, keyed to the credential+project so a
 		// rotated body.userId cannot buy a fresh bucket.
-		if (!(await allowRate(env.IMPORT_LIMITER, managedActorRateKey("ingest", auth)))) return tooManyFor("import");
+		if (!(await allowRate(env.IMPORT_LIMITER, managedActorRateKey("ingest", auth, { fail: "closed" })))) return tooManyFor("import");
 		const capped = await refuseWriteOverAiBudget(env, auth);
 		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
@@ -2546,7 +2549,7 @@ const routes = {
 			requiredCapability: "project.chooser.use",
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth)))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth, { fail: "closed" })))) return tooManyFor("save");
 
 		// AutoChoose is a read-only host adapter. It selects and validates an
 		// action, but the selected MCP tool remains responsible for its own
@@ -2730,7 +2733,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth)))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth, { fail: "closed" })))) return tooManyFor("save");
 		const capped = await refuseWriteOverAiBudget(env, auth);
 		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
@@ -3116,7 +3119,7 @@ const routes = {
 			return json({ error: "You cannot do that to your own admin account." }, 400);
 		}
 		const now = Date.now();
-		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete"].includes(action)) {
+		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete", "grant_entitlement", "dismiss_upgrade_request"].includes(action)) {
 			return json({ error: "unknown action" }, 400);
 		}
 		const auditDetails = {
@@ -3156,6 +3159,37 @@ const routes = {
 			}
 		};
 		switch (action) {
+			// The one-click grant from the upgrade queue (or a direct grant with
+			// no request attached). Writes user_entitlements and, when a request
+			// id rides along, marks that request granted in the same audited
+			// batch. NULL amounts leave that dimension on the env default; days
+			// sets expires_at so the bump lapses on its own.
+			case "grant_entitlement": {
+				const { statements, grant, expiresAt } = grantEntitlementStatements(env, {
+					userId: target.id,
+					grantedBy: auth.userId,
+					days: body.days,
+					dailyNeurons: body.daily_neurons ?? body.dailyNeurons,
+					monthlyWrites: body.monthly_writes ?? body.monthlyWrites,
+					hubaDailyMessages: body.huba_daily_messages ?? body.hubaDailyMessages,
+					note: body.note,
+					requestId: body.request_id ?? body.requestId ?? null,
+				});
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(
+					intent,
+					statements,
+					[auditInvariantStatement(env, "SELECT 1 FROM user_entitlements WHERE user_id = ?", [target.id])],
+					{ ok: true },
+				), () => ({ metadata: { grant, expires_at: expiresAt } }));
+				return json({ ok: true, action, grant, expires_at: expiresAt });
+			}
+			case "dismiss_upgrade_request": {
+				const requestId = String(body.request_id ?? body.requestId ?? "").trim();
+				if (!requestId) return json({ error: "request_id is required" }, 400);
+				const result = await dismissUpgradeRequest(env, { requestId, resolvedBy: auth.userId });
+				if (!result.dismissed) return json({ error: "request not open" }, 409);
+				return json({ ok: true, action, request_id: requestId });
+			}
 			case "disable": {
 				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
 					env.DB.prepare("UPDATE users SET status = 'disabled', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
@@ -3399,6 +3433,25 @@ const routes = {
 				 JOIN account_spaces s ON s.memory_user_id = n.user_id
 				 WHERE n.deleted_at IS NULL) AS with_memories`,
 		).all().catch(() => ({ results: [{}] }));
+		// The operator funnel: signed up → activated (actually saved
+		// something) → errored (something broke for them recently). Joined
+		// through the account-spaces mapping so managed-project saves count.
+		const funnel = await env.DB.prepare(
+			`WITH account_spaces(account_user_id, memory_user_id) AS (
+				SELECT id, id FROM users
+				UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
+			)
+			 SELECT
+				(SELECT COUNT(*) FROM users) AS signed_up,
+				(SELECT COUNT(DISTINCT s.account_user_id) FROM receipts r
+				 JOIN account_spaces s ON s.memory_user_id = r.user_id) AS activated,
+				(SELECT COUNT(DISTINCT s.account_user_id) FROM memory_jobs j
+				 JOIN account_spaces s ON s.memory_user_id = j.user_id
+				 WHERE j.status = 'failed' AND COALESCE(j.completed_at, j.updated_at) > ?1) AS errored_jobs_14d,
+				(SELECT COUNT(DISTINCT s.account_user_id) FROM error_reports er
+				 JOIN account_spaces s ON s.memory_user_id = er.user_id
+				 WHERE er.created_at > ?1 AND er.scope NOT LIKE 'noise:%') AS errored_reports_14d`,
+		).bind(since14).all().catch(() => ({ results: [{}] }));
 		// Part 2.4 — the queue-health numbers the cron sweep alerts on.
 		const queue = await queueCounters(env).catch((error) => {
 			console.warn("queue counters failed:", error?.message ?? error);
@@ -3408,6 +3461,7 @@ const routes = {
 			ok: true,
 			generated_at: now,
 			queue,
+			funnel: funnel.results?.[0] ?? {},
 			users: Number(users.results?.[0]?.n ?? 0),
 			consented_users: Number(verifiedUsers.results?.[0]?.n ?? 0),
 			active_sessions_users: Number(sessionsActive.results?.[0]?.n ?? 0),
@@ -3482,6 +3536,46 @@ const routes = {
 				"SELECT COUNT(*) AS active, MAX(last_seen_at) AS last_seen FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?",
 			).bind(targetId, Date.now()),
 		]);
+		// The stitched half: six ledgers keyed by this user, merged into one
+		// "what happened to this person" view. Metadata only, same as above.
+		const [jobs, failedJobs, aiSpend, audits, entitlement, upgrades] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT status, COUNT(*) AS n FROM memory_jobs WHERE user_id = ? GROUP BY status`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT id, type, status, attempts, substr(error, 1, 200) AS error, created_at, completed_at
+				 FROM memory_jobs WHERE user_id = ? AND status = 'failed'
+				 ORDER BY COALESCE(completed_at, updated_at) DESC LIMIT 15`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT date(created_at / 1000, 'unixepoch') AS day, scope, COUNT(*) AS calls,
+				        ROUND(SUM(CASE WHEN neurons IS NOT NULL THEN neurons
+				          ELSE (COALESCE(input_tokens,0) * 4625.0 + COALESCE(output_tokens,0) * 30475.0) / 1e6 END), 1) AS neurons
+				 FROM ai_calls WHERE account_user_id = ?
+				 GROUP BY day, scope ORDER BY day DESC LIMIT 90`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT created_at AS at, action, target_type, outcome, reason
+				 FROM audit_events WHERE actor_user_id = ? ORDER BY created_at DESC LIMIT 25`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT daily_neurons, monthly_writes, huba_daily_messages, early_access, expires_at, note, granted_by, updated_at
+				 FROM user_entitlements WHERE user_id = ?`,
+			).bind(targetId),
+			env.DB.prepare(
+				`SELECT id, kind, note, status, created_at, resolved_at FROM upgrade_requests
+				 WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`,
+			).bind(targetId),
+		]);
+		// One chronological stream for the "what happened" read. Bounded per
+		// source above, newest first overall.
+		const timeline = [
+			...(logins.results ?? []).map((r) => ({ at: r.at, kind: "login", detail: `${r.detail}${r.reason ? ` (${r.reason})` : ""}` })),
+			...(errors.results ?? []).map((r) => ({ at: r.at, kind: "error", detail: `${r.side ?? "?"} ${r.scope ?? ""}: ${r.message ?? ""}`.trim() })),
+			...(failedJobs.results ?? []).map((r) => ({ at: r.completed_at ?? r.created_at, kind: "job_failed", detail: `${r.type} ${r.id}: ${r.error ?? "failed"}` })),
+			...(audits.results ?? []).map((r) => ({ at: r.at, kind: "audit", detail: `${r.action} → ${r.outcome}${r.reason ? ` (${r.reason})` : ""}` })),
+			...(upgrades.results ?? []).map((r) => ({ at: r.created_at, kind: "upgrade_request", detail: `${r.kind} (${r.status})${r.note ? `: ${r.note}` : ""}` })),
+		].filter((e) => Number.isFinite(Number(e.at))).sort((a, b) => b.at - a.at).slice(0, 80);
 		return json({
 			user: target,
 			logins: logins.results ?? [],
@@ -3489,7 +3583,78 @@ const routes = {
 			errors: errors.results ?? [],
 			tokens: tokens.results ?? [],
 			sessions: sessions.results?.[0] ?? {},
+			jobs: jobs.results ?? [],
+			failed_jobs: failedJobs.results ?? [],
+			ai_spend_by_day: aiSpend.results ?? [],
+			audit_events: audits.results ?? [],
+			entitlement: entitlement.results?.[0] ?? null,
+			upgrade_requests: upgrades.results ?? [],
+			timeline,
 		});
+	},
+
+	/** The upgrade queue: who asked, their usage snapshot, their note. */
+	"GET /v1/admin/upgrade-requests": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const status = new URL(request.url).searchParams.get("status") ?? "open";
+		return json({ ok: true, requests: await listUpgradeRequests(env, { status }) });
+	},
+
+	/**
+	 * The real error log: filterable, copy-pasteable. error_reports has always
+	 * been written; this is the first honest read of it beyond the stats
+	 * page's 20-row teaser.
+	 */
+	"GET /v1/admin/errors": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const params = new URL(request.url).searchParams;
+		const limit = Math.min(200, Math.max(1, Number(params.get("limit") ?? 50) || 50));
+		const side = ["client", "server"].includes(params.get("side")) ? params.get("side") : null;
+		const q = String(params.get("q") ?? "").trim().slice(0, 120);
+		const since = Number(params.get("since") ?? 0) || 0;
+		const includeNoise = params.get("noise") === "true";
+		const where = ["1=1"];
+		const bind = [];
+		if (!includeNoise) where.push("er.scope NOT LIKE 'noise:%'");
+		if (side) { where.push("er.side = ?"); bind.push(side); }
+		if (since) { where.push("er.created_at >= ?"); bind.push(since); }
+		if (q) { where.push("(er.message LIKE ? OR er.scope LIKE ?)"); bind.push(`%${q}%`, `%${q}%`); }
+		const { results } = await env.DB.prepare(
+			`SELECT er.id, er.created_at, er.side, er.scope, er.message, er.user_id, u.email
+			 FROM error_reports er LEFT JOIN users u ON u.id = er.user_id
+			 WHERE ${where.join(" AND ")}
+			 ORDER BY er.created_at DESC LIMIT ?`,
+		).bind(...bind, limit).all();
+		return json({ ok: true, errors: results ?? [], count: (results ?? []).length });
+	},
+
+	/**
+	 * Neuron spend per account per day — the numbers a future price gets set
+	 * from. Measured-else-derived, same rule as the quota and the breaker.
+	 */
+	"GET /v1/admin/ai-spend": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const days = Math.min(60, Math.max(1, Number(new URL(request.url).searchParams.get("days") ?? 14) || 14));
+		const since = Date.now() - days * 24 * 60 * 60 * 1000;
+		const { results } = await env.DB.prepare(
+			`SELECT date(a.created_at / 1000, 'unixepoch') AS day,
+			        COALESCE(a.account_user_id, a.user_id) AS account_id,
+			        u.email,
+			        COUNT(*) AS calls,
+			        ROUND(SUM(CASE WHEN a.neurons IS NOT NULL THEN a.neurons
+			          ELSE (COALESCE(a.input_tokens,0) * 4625.0 + COALESCE(a.output_tokens,0) * 30475.0) / 1e6 END), 1) AS neurons
+			 FROM ai_calls a LEFT JOIN users u ON u.id = COALESCE(a.account_user_id, a.user_id)
+			 WHERE a.created_at >= ?
+			 GROUP BY day, account_id
+			 ORDER BY day DESC, neurons DESC LIMIT 400`,
+		).bind(since).all();
+		return json({ ok: true, days, spend: results ?? [] });
 	},
 
 	"GET /v1/rules": async (request, env) => {
@@ -3606,7 +3771,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("turn", auth)))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("turn", auth, { fail: "closed" })))) return tooManyFor("save");
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -3745,7 +3910,7 @@ const routes = {
 		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
 		const userId = context.memoryOwnerUserId;
-		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `pg:${userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/playground/chat");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
@@ -3773,13 +3938,130 @@ const routes = {
 	"POST /v1/playground/preview": async (request, env) => {
 		const context = await requireSessionProject(request, env, "project.playground.use");
 		if (context.response) return context.response;
-		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, `pgprev:${context.memoryOwnerUserId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/playground/preview");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
 		const rules = await getMemoryRules(env, context.memoryOwnerUserId);
 		return json(await withFlushedAiMeter(env, "playground_preview", { userId: context.memoryOwnerUserId }, () =>
 			playgroundPreviewExtract(env, body.message, { rules })));
+	},
+
+	/**
+	 * Huba AI — the grounded assistant bar. Session-only on purpose (like the
+	 * playground): API/MCP keys must not spend chat-model calls. Quota is
+	 * per-message per UTC day (fail closed), every model call is metered under
+	 * scope huba_chat, and the answer is grounded in the bundled docs corpus
+	 * plus this account's own snapshot — never model knowledge.
+	 */
+	"POST /v1/huba/chat": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `huba:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
+		const parsed = await readSmallJsonObject(request, "/v1/huba/chat");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const identity = { accountUserId: auth.userId, userId: auth.userId };
+		let quotaState;
+		try {
+			quotaState = await checkHubaBudget(env, identity, { userCreatedAt: auth.user?.created_at ?? null });
+		} catch (error) {
+			await reportServerError(env, "huba_quota", error, auth.userId);
+			return json({
+				error: "huba_quota_unavailable",
+				message: "Huba's allowance could not be verified just now — try again in a minute. The docs at /docs/ are always open.",
+			}, 503);
+		}
+		if (quotaState?.error) {
+			return json({ ok: false, ...quotaState }, 429, { "retry-after": String(quotaState.retryAfterSeconds ?? 60) });
+		}
+		// A compact quota block rides into the account snapshot so Huba can
+		// answer "how many saves do I have left" from live numbers.
+		let quotaSnapshot = null;
+		try {
+			const budget = aiBudget(env);
+			const entitlements = await loadEntitlements(env, auth.userId);
+			quotaSnapshot = {
+				saves_today: {
+					used_neurons: Math.round(await neuronsSpentTodayForAccount(env, identity)),
+					limit_neurons: entitlements?.dailyNeurons ?? budget.dailyNeuronsPerUser,
+					note: "one direct save is roughly 150 neurons; resets 00:00 UTC",
+				},
+				writes_this_month: {
+					used: await countWritesThisMonth(env, identity),
+					limit: entitlements?.monthlyWrites ?? budget.monthlyWrites,
+				},
+				huba_messages_today: { used: quotaState.used, limit: quotaState.limit },
+			};
+		} catch (error) {
+			console.warn("huba quota snapshot unavailable:", error?.message ?? error);
+		}
+		const result = await hubaTurn(env, { userId: auth.userId, accountUserId: auth.userId }, {
+			message: body.message,
+			history: body.history,
+		}, { quota: quotaSnapshot });
+		return json({
+			...result,
+			usage: {
+				used: quotaState.used + (result.ok ? 1 : 0),
+				limit: quotaState.limit,
+				resets_at: quotaState.resetsAt,
+			},
+		});
+	},
+
+	/**
+	 * The "Request more" flow behind every quota wall. No payment processor —
+	 * a durable request row plus a best-effort owner email; the admin queue
+	 * (GET /v1/admin/upgrade-requests) is the source of truth.
+	 */
+	"POST /v1/upgrade-requests": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `upreq:${auth.userId}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/v1/upgrade-requests");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const identity = { accountUserId: auth.userId, userId: auth.userId };
+		let usage = null;
+		try {
+			const budget = aiBudget(env);
+			const entitlements = await loadEntitlements(env, auth.userId);
+			usage = {
+				neurons_today: Math.round(await neuronsSpentTodayForAccount(env, identity)),
+				daily_limit: entitlements?.dailyNeurons ?? budget.dailyNeuronsPerUser,
+				writes_this_month: await countWritesThisMonth(env, identity),
+				monthly_limit: entitlements?.monthlyWrites ?? budget.monthlyWrites,
+				huba_today: await hubaMessagesToday(env, identity),
+			};
+		} catch (error) {
+			console.warn("upgrade-request usage snapshot unavailable:", error?.message ?? error);
+		}
+		const result = await createUpgradeRequest(env, {
+			userId: auth.userId,
+			kind: body.kind,
+			note: body.note,
+			usage,
+		});
+		if (ctx) ctx.waitUntil(processUpgradeRequestNotifications(env, { limit: 3 }));
+		return json({ ok: true, request: result });
+	},
+
+	"GET /v1/upgrade-requests": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const { results } = await env.DB.prepare(
+			`SELECT id, kind, note, status, created_at, resolved_at, grant_json
+			 FROM upgrade_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`,
+		).bind(auth.userId).all();
+		return json({
+			ok: true,
+			requests: (results ?? []).map((row) => {
+				let grant = null;
+				try { grant = row.grant_json ? JSON.parse(row.grant_json) : null; } catch { grant = null; }
+				return { ...row, grant_json: undefined, grant };
+			}),
+		});
 	},
 
 	"POST /v1/playground/thread": async (request, env) => {
@@ -4355,6 +4637,8 @@ const routes = {
 		const budget = aiBudget(env);
 		let aiUsage = null;
 		let quota = null;
+		let quotaDaily = null;
+		let huba = null;
 		try {
 			const accountColumn = identity.accountUserId
 				? "account_user_id = ?1"
@@ -4379,15 +4663,46 @@ const routes = {
 				neurons_total: Math.round((measured + derived) * 1000) / 1000,
 				neurons_source: "measured+derived",
 			};
+			const entitlements = await loadEntitlements(env, identity.accountUserId ?? identity.userId);
+			const monthlyLimit = entitlements?.monthlyWrites ?? budget.monthlyWrites;
 			const used = await countWritesThisMonth(env, identity);
 			quota = {
 				unit: "ai_writes",
 				used,
-				limit: budget.monthlyWrites,
-				remaining: Math.max(0, budget.monthlyWrites - used),
+				limit: monthlyLimit,
+				remaining: Math.max(0, monthlyLimit - used),
 				period: "calendar_month_utc",
 				resets_at: new Date(startOfNextUtcMonth()).toISOString(),
-				capped: used >= budget.monthlyWrites,
+				capped: used >= monthlyLimit,
+			};
+			// The daily allowance — what the Usage page's bar and countdown
+			// render. Same measured-else-derived spend rule as enforcement.
+			const dailyLimit = entitlements?.dailyNeurons ?? budget.dailyNeuronsPerUser;
+			const usedToday = await neuronsSpentTodayForAccount(env, identity);
+			quotaDaily = {
+				unit: "neurons",
+				used: Math.round(usedToday),
+				limit: dailyLimit,
+				remaining: Math.max(0, dailyLimit - Math.round(usedToday)),
+				approx_saves_remaining: Math.max(0, Math.floor((dailyLimit - usedToday) / 150)),
+				period: "utc_day",
+				resets_at: new Date(startOfNextUtcDay()).toISOString(),
+				capped: usedToday >= dailyLimit,
+				early_access: entitlements?.earlyAccess ?? false,
+			};
+			const hubaUsed = await hubaMessagesToday(env, identity);
+			// requireMemoryUser wraps the session: the user row (and its
+			// created_at, which decides the generous first day) is auth.auth.user.
+			const hubaBudgetState = await checkHubaBudget(env, identity, {
+				userCreatedAt: auth.auth?.user?.created_at ?? null,
+			});
+			huba = {
+				unit: "messages",
+				used: hubaUsed,
+				limit: hubaBudgetState?.limit ?? budget.hubaDailyMessages,
+				remaining: Math.max(0, (hubaBudgetState?.limit ?? budget.hubaDailyMessages) - hubaUsed),
+				period: "utc_day",
+				resets_at: new Date(startOfNextUtcDay()).toISOString(),
 			};
 		} catch (error) {
 			// Usage must answer even if the AI accounting is unreadable — the
@@ -4412,6 +4727,8 @@ const routes = {
 			last_activity_at: lastActivity.results?.[0]?.at ?? null,
 			ai: aiUsage,
 			quota,
+			quota_daily: quotaDaily,
+			huba,
 		});
 	},
 
@@ -4459,6 +4776,9 @@ export default {
 		ctx.waitUntil(runReconciliationSweep(env));
 		ctx.waitUntil(retryPendingWebhookDeliveries(env, (promise) => ctx.waitUntil(promise)));
 		ctx.waitUntil(processInvitationEmailOutbox(env, { limit: 25 }));
+		ctx.waitUntil(processUpgradeRequestNotifications(env, { limit: 10 }).catch((error) => {
+			console.warn("upgrade-request notification drain failed:", error?.message ?? error);
+		}));
 		ctx.waitUntil(purgeExpiredEmailChallenges(env, {
 			now: Number(controller?.scheduledTime) || Date.now(),
 			limit: 250,
@@ -5665,7 +5985,7 @@ async function handleMemoryUpdateRoutes(request, env, ctx, url) {
 		requiredCapability: "project.memory.write",
 	});
 	if (auth.response) return auth.response;
-	if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth)))) return tooManyFor("save");
+	if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth, { fail: "closed" })))) return tooManyFor("save");
 
 	// Precondition: If-Match strong ETag "rN" and/or body expectedRevision.
 	const ifMatch = request.headers.get("if-match");
@@ -5786,7 +6106,7 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 	if (auth.response) return auth.response;
 	// Destructive work gets the tighter DELETE bucket: a loop that deletes is
 	// worse than a loop that saves.
-	if (!(await allowRate(env.DELETE_LIMITER, managedActorRateKey("del", auth)))) return tooManyFor("delete");
+	if (!(await allowRate(env.DELETE_LIMITER, managedActorRateKey("del", auth, { fail: "closed" })))) return tooManyFor("delete");
 	const by = auth.auth?.type === "token" ? `token:${auth.auth.token?.id ?? "unknown"}` : auth.auth?.type ?? "session";
 
 	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));

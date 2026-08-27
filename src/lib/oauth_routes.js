@@ -17,7 +17,10 @@
  */
 
 import { getSessionUser } from "../auth.js";
+import { allowRate } from "./rate.js";
 import { ensureDefaultManagedProject } from "./managed_projects.js";
+
+const clientIpOf = (request) => request.headers.get("cf-connecting-ip") ?? "local";
 import {
 	MAX_STATE_LENGTH,
 	OAuthError,
@@ -532,9 +535,22 @@ export async function handleOAuthRoutes(request, env, ctx, url) {
 			if (request.method === "POST") return handleAuthorizePost(request, env);
 			return oauthJson({ error: "invalid_request", error_description: "Method not allowed." }, 405);
 		}
-		if (path === "/oauth/token" && request.method === "POST") return await handleToken(request, env);
+		// Unauthenticated-by-spec doors still get the auth bucket per IP: an
+		// unmetered /oauth/register writes a D1 row per call, and /oauth/token
+		// is a guessing surface. Same limiter and refusal shape as /auth/login.
+		if (path === "/oauth/token" && request.method === "POST") {
+			if (!(await allowRate(env.AUTH_LIMITER, `oauth-token:${clientIpOf(request)}`))) {
+				return oauthJson({ error: "slow_down", error_description: "Too many requests. Wait a minute and try again." }, 429);
+			}
+			return await handleToken(request, env);
+		}
 		if (path === "/oauth/revoke" && request.method === "POST") return await handleRevoke(request, env);
-		if (path === "/oauth/register" && request.method === "POST") return await handleRegister(request, env);
+		if (path === "/oauth/register" && request.method === "POST") {
+			if (!(await allowRate(env.AUTH_LIMITER, `oauth-register:${clientIpOf(request)}`))) {
+				return oauthJson({ error: "slow_down", error_description: "Too many requests. Wait a minute and try again." }, 429);
+			}
+			return await handleRegister(request, env);
+		}
 		return oauthJson({ error: "not_found", error_description: "No such OAuth endpoint." }, 404);
 	} catch (error) {
 		if (error instanceof OAuthError || error?.name === "OAuthError") return errorJson(error);

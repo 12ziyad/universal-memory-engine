@@ -1882,7 +1882,12 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 		// never collide with the failed generation's ledger records.
 		const generation = Number(job.repairGeneration ?? 0);
 		const runKey = generation > 0 ? `${job.jobId}#g${generation}` : job.jobId;
-		const extractionRunId = await mcpExtractionRunId(userId, runKey, attempt);
+		// Capacity retries keep `attempts` untouched (they are not poison), so
+		// they must vary the attempt identity themselves or every retry would
+		// re-claim the previous failed run and recover it without inference.
+		const capacityAttempt = Number(job.capacityAttempts ?? 0);
+		const attemptKey = capacityAttempt > 0 ? `${attempt}:c${capacityAttempt}` : attempt;
+		const extractionRunId = await mcpExtractionRunId(userId, runKey, attemptKey);
 		const result = await runExtraction(
 			env,
 			userId,
@@ -1905,6 +1910,13 @@ export async function enrichMcpConversation(env, userId, job, defer = null) {
 			} catch (error) {
 				return { retry: true, terminalPending: true, reason, error: String(error?.message ?? error) };
 			}
+		}
+
+		// Workers AI out-of-capacity is transient by definition — hand it back
+		// to the Durable Object's patient capacity ladder instead of the
+		// 3-attempt poison cap.
+		if (result.outcome === "llm_capacity") {
+			return { retry: true, capacity: true, reason: "workers_ai_capacity" };
 		}
 
 		if (result.outcome === "llm_failed" || result.outcome === "db_write_failed") {

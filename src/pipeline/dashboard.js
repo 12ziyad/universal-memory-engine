@@ -33,7 +33,7 @@ const RELIABILITY_OUTCOMES = Object.freeze({
 	meaningful_no_write: new Set(["meaningful_no_write", "no_write", "ignored", "duplicate", "skipped_duplicate"]),
 	policy_skipped: new Set(["excluded_by_rule", "suppressed"]),
 	cancelled: new Set(["cancelled_by_delete", "cancelled_by_retention"]),
-	genuine_failure: new Set(["llm_failed", "db_write_failed", "internal_error", "extraction_failed_terminal", "enrich_failed"]),
+	genuine_failure: new Set(["llm_failed", "llm_capacity", "db_write_failed", "internal_error", "extraction_failed_terminal", "enrich_failed"]),
 });
 // Public doors stamp one of these closed engine dimensions. The receipt table
 // predates CHECK constraints, though, so legacy/internal drift must not turn a

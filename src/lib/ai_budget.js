@@ -24,18 +24,43 @@
  */
 
 const DEFAULT_MONTHLY_WRITES = 1000;
-const DEFAULT_DAILY_NEURON_CEILING = 750_000;
+const DEFAULT_DAILY_NEURON_CEILING = 1_500_000;
+// Per-user daily allowance: ~100 direct saves at the measured ~150 neurons a
+// save. The user-facing promise is "about 100 saves a day"; the unit is
+// neurons so a heavy conversation save honestly consumes more of the day
+// than a one-line note.
+const DEFAULT_DAILY_NEURONS_PER_USER = 15_000;
+// Huba AI: generous on day one (people poke a new assistant hard), steady
+// after. An answer costs ~20–35 neurons, so even 50 messages is ~1,500
+// neurons — noise next to the save allowance.
+const DEFAULT_HUBA_FIRST_DAY_MESSAGES = 50;
+const DEFAULT_HUBA_DAILY_MESSAGES = 20;
 
-/** Scopes that count against the per-user write quota. Recall is deliberately
- * excluded: RECALL_LIMITER bounds it and its inference share is small. */
+/** Scopes that count against the per-user MONTHLY write quota. Recall is
+ * deliberately excluded: RECALL_LIMITER bounds it and its inference share is
+ * small. Huba is not a save — it has its own per-message daily quota and
+ * counts against the daily-neuron dimension below instead. */
 export const QUOTA_SCOPES = Object.freeze(["save", "playground_chat"]);
+
+/** Scopes EXEMPT from the per-user daily-neuron quota. An exclusion list, not
+ * an inclusion list, so a future scope can never become an unmetered cost
+ * hole by omission. recall: a capped user must still read everything they
+ * stored (and one query embedding is ~1–3 neurons). provider_health /
+ * shadow_extract: operator-synthetic, not user work. */
+export const DAILY_NEURON_EXEMPT_SCOPES = Object.freeze(["recall", "provider_health", "shadow_extract"]);
 
 export function aiBudget(env) {
 	const monthly = Number(env?.AI_MONTHLY_WRITES ?? DEFAULT_MONTHLY_WRITES);
 	const ceiling = Number(env?.AI_DAILY_NEURON_CEILING ?? DEFAULT_DAILY_NEURON_CEILING);
+	const daily = Number(env?.AI_DAILY_NEURONS_PER_USER ?? DEFAULT_DAILY_NEURONS_PER_USER);
+	const hubaFirstDay = Number(env?.HUBA_FIRST_DAY_MESSAGES ?? DEFAULT_HUBA_FIRST_DAY_MESSAGES);
+	const hubaDaily = Number(env?.HUBA_DAILY_MESSAGES ?? DEFAULT_HUBA_DAILY_MESSAGES);
 	return {
 		monthlyWrites: Number.isFinite(monthly) && monthly > 0 ? Math.floor(monthly) : DEFAULT_MONTHLY_WRITES,
 		dailyNeuronCeiling: Number.isFinite(ceiling) && ceiling > 0 ? Math.floor(ceiling) : DEFAULT_DAILY_NEURON_CEILING,
+		dailyNeuronsPerUser: Number.isFinite(daily) && daily > 0 ? Math.floor(daily) : DEFAULT_DAILY_NEURONS_PER_USER,
+		hubaFirstDayMessages: Number.isFinite(hubaFirstDay) && hubaFirstDay > 0 ? Math.floor(hubaFirstDay) : DEFAULT_HUBA_FIRST_DAY_MESSAGES,
+		hubaDailyMessages: Number.isFinite(hubaDaily) && hubaDaily > 0 ? Math.floor(hubaDaily) : DEFAULT_HUBA_DAILY_MESSAGES,
 	};
 }
 
@@ -43,6 +68,18 @@ export function aiBudget(env) {
 export function startOfUtcMonth(now = Date.now()) {
 	const d = new Date(now);
 	return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+/** First instant of the current UTC day, in epoch ms. */
+export function startOfUtcDay(now = Date.now()) {
+	const d = new Date(now);
+	return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** First instant of the NEXT UTC day — when daily quotas reset. */
+export function startOfNextUtcDay(now = Date.now()) {
+	const d = new Date(now);
+	return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
 }
 
 /** First instant of the NEXT UTC month — when the quota resets. */
@@ -97,6 +134,102 @@ export async function countWritesThisMonth(env, identity, now = Date.now()) {
 		 WHERE user_id = ? AND account_user_id IS NULL AND created_at >= ? AND scope IN (${placeholders})`,
 	).bind(identity?.userId ?? null, since, ...QUOTA_SCOPES).first();
 	return Number(row?.writes ?? 0);
+}
+
+/**
+ * Everyone who signs up before launch+30d is marked early_access, so
+ * grandfathering later is a WHERE clause instead of archaeology. Launch day
+ * is 2026-08-28; the cutoff is fixed, not env-tunable — a moving flag would
+ * make "early" meaningless. Migration 0059 stamped every pre-existing user.
+ */
+export const EARLY_ACCESS_CUTOFF_MS = Date.UTC(2026, 8, 27); // 2026-09-27T00:00Z
+
+export async function stampEarlyAccess(env, userId, now = Date.now()) {
+	if (!env?.DB || !userId || now >= EARLY_ACCESS_CUTOFF_MS) return;
+	try {
+		await env.DB.prepare(
+			"INSERT OR IGNORE INTO user_entitlements (user_id, early_access, created_at, updated_at) VALUES (?, 1, ?, ?)",
+		).bind(userId, now, now).run();
+	} catch (error) {
+		// Best-effort: an entitlement stamp must never break account creation.
+		console.warn("early-access stamp failed:", error?.message ?? error);
+	}
+}
+
+/**
+ * Per-user entitlement overrides (migration 0059). A missing row or NULL
+ * column falls back to the env default. Numeric overrides past expires_at are
+ * ignored at read time — a temporary grant lapses on its own with no cleanup
+ * job — while early_access survives expiry (it records who was here, not what
+ * they may spend). Reads are quota reads: a throw propagates and the caller
+ * fails CLOSED, exactly like the monthly counter.
+ */
+export async function loadEntitlements(env, userId, now = Date.now()) {
+	if (!env?.DB || !userId) return null;
+	const row = await env.DB.prepare(
+		`SELECT daily_neurons, monthly_writes, huba_daily_messages, early_access, expires_at, note
+		 FROM user_entitlements WHERE user_id = ?`,
+	).bind(userId).first();
+	if (!row) return null;
+	const expired = row.expires_at != null && Number(row.expires_at) <= now;
+	const positive = (value) => {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+	};
+	return {
+		earlyAccess: Number(row.early_access) === 1,
+		dailyNeurons: expired ? null : positive(row.daily_neurons),
+		monthlyWrites: expired ? null : positive(row.monthly_writes),
+		hubaDailyMessages: expired ? null : positive(row.huba_daily_messages),
+		expiresAt: row.expires_at ?? null,
+		note: row.note ?? null,
+	};
+}
+
+/**
+ * Neurons this account spent today, on the same measured-else-derived rule
+ * the breaker uses — per CALL rather than per rollup, because here the sum
+ * must be per account. Keyed on account_user_id (rotating body.userId cannot
+ * buy a fresh allowance), with the legacy operator-door fallback matching
+ * countWritesThisMonth.
+ */
+export async function neuronsSpentTodayForAccount(env, identity, now = Date.now()) {
+	const since = startOfUtcDay(now);
+	const exempt = DAILY_NEURON_EXEMPT_SCOPES.map(() => "?").join(", ");
+	const spendExpr = `SUM(CASE WHEN neurons IS NOT NULL THEN neurons
+		ELSE (COALESCE(input_tokens, 0) * ${DERIVED_RATE.inputPerMillion}
+			+ COALESCE(output_tokens, 0) * ${DERIVED_RATE.outputPerMillion}) / 1e6 END)`;
+	if (identity?.accountUserId) {
+		const row = await env.DB.prepare(
+			`SELECT ${spendExpr} AS neurons FROM ai_calls
+			 WHERE account_user_id = ? AND created_at >= ?
+			   AND (scope IS NULL OR scope NOT IN (${exempt}))`,
+		).bind(identity.accountUserId, since, ...DAILY_NEURON_EXEMPT_SCOPES).first();
+		return Number(row?.neurons ?? 0);
+	}
+	const row = await env.DB.prepare(
+		`SELECT ${spendExpr} AS neurons FROM ai_calls
+		 WHERE user_id = ? AND account_user_id IS NULL AND created_at >= ?
+		   AND (scope IS NULL OR scope NOT IN (${exempt}))`,
+	).bind(identity?.userId ?? null, since, ...DAILY_NEURON_EXEMPT_SCOPES).first();
+	return Number(row?.neurons ?? 0);
+}
+
+/** Huba messages this account sent today (one metered call per message). */
+export async function hubaMessagesToday(env, identity, now = Date.now()) {
+	const since = startOfUtcDay(now);
+	if (identity?.accountUserId) {
+		const row = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM ai_calls
+			 WHERE account_user_id = ? AND created_at >= ? AND scope = 'huba_chat'`,
+		).bind(identity.accountUserId, since).first();
+		return Number(row?.n ?? 0);
+	}
+	const row = await env.DB.prepare(
+		`SELECT COUNT(*) AS n FROM ai_calls
+		 WHERE user_id = ? AND account_user_id IS NULL AND created_at >= ? AND scope = 'huba_chat'`,
+	).bind(identity?.userId ?? null, since).first();
+	return Number(row?.n ?? 0);
 }
 
 /**
@@ -168,27 +301,85 @@ export async function checkAiBudget(env, identity, now = Date.now()) {
 		};
 	}
 
-	const used = await countWritesThisMonth(env, identity, now); // throws → caller refuses (fail closed)
-	if (used >= budget.monthlyWrites) {
+	// Everything below is a quota read: a throw propagates and the caller
+	// refuses (fail closed) — an unreadable quota means unbounded spend of
+	// unknown size.
+	const entitlements = await loadEntitlements(env, identity?.accountUserId ?? identity?.userId ?? null, now);
+
+	// Per-user daily neurons — the "about 100 saves a day" allowance.
+	const dailyLimit = entitlements?.dailyNeurons ?? budget.dailyNeuronsPerUser;
+	const usedToday = await neuronsSpentTodayForAccount(env, identity, now);
+	if (usedToday >= dailyLimit) {
+		const resetsAtMs = startOfNextUtcDay(now);
+		const resetsAtIso = new Date(resetsAtMs).toISOString();
+		return {
+			reason: "daily",
+			error: "ai_quota_exhausted",
+			capped: "daily_neurons",
+			used: Math.round(usedToday),
+			limit: dailyLimit,
+			resetsAt: resetsAtIso,
+			retryAfterSeconds: Math.max(1, Math.ceil((resetsAtMs - now) / 1000)),
+			usage: { used: Math.round(usedToday), limit: dailyLimit, unit: "neurons", resets_at: resetsAtIso },
+			message: "You've used today's save allowance. It resets at 00:00 UTC — recall keeps working, nothing already saved is affected, and you can request more from the Usage page.",
+		};
+	}
+
+	const monthlyLimit = entitlements?.monthlyWrites ?? budget.monthlyWrites;
+	const used = await countWritesThisMonth(env, identity, now);
+	if (used >= monthlyLimit) {
 		const resetsAtMs = startOfNextUtcMonth(now);
 		return {
 			reason: "monthly",
 			error: "ai_quota_exhausted",
 			capped: "monthly_ai",
 			used,
-			limit: budget.monthlyWrites,
+			limit: monthlyLimit,
 			resetsAt: new Date(resetsAtMs).toISOString(),
 			retryAfterSeconds: Math.max(1, Math.ceil((resetsAtMs - now) / 1000)),
-			message: `You've used all ${budget.monthlyWrites} AI saves in this month's plan. The quota resets on ${new Date(resetsAtMs).toISOString().slice(0, 10)}.`,
+			usage: { used, limit: monthlyLimit, unit: "ai_writes", resets_at: new Date(resetsAtMs).toISOString() },
+			message: `You've used all ${monthlyLimit} AI saves in this month's plan. The quota resets on ${new Date(resetsAtMs).toISOString().slice(0, 10)}.`,
 		};
 	}
 	return null;
 }
 
 /**
- * The published half of the budget for GET /v1/limits. The global ceiling is
- * NOT here: it is operational, and publishing it would tell a hostile caller
- * exactly how much traffic halts inference for everyone.
+ * The Huba AI admission decision: per-message daily cap, generous on the
+ * account's first UTC day. Same fail-closed posture as the write quota.
+ */
+export async function checkHubaBudget(env, identity, { userCreatedAt = null } = {}, now = Date.now()) {
+	if (!env?.DB) return null;
+	const budget = aiBudget(env);
+	const entitlements = await loadEntitlements(env, identity?.accountUserId ?? identity?.userId ?? null, now);
+	const firstDay = userCreatedAt != null && startOfUtcDay(Number(userCreatedAt)) === startOfUtcDay(now);
+	const limit = entitlements?.hubaDailyMessages
+		?? (firstDay ? budget.hubaFirstDayMessages : budget.hubaDailyMessages);
+	const used = await hubaMessagesToday(env, identity, now);
+	if (used >= limit) {
+		const resetsAtMs = startOfNextUtcDay(now);
+		const resetsAtIso = new Date(resetsAtMs).toISOString();
+		return {
+			reason: "huba_daily",
+			error: "ai_quota_exhausted",
+			capped: "huba_daily_messages",
+			used,
+			limit,
+			resetsAt: resetsAtIso,
+			retryAfterSeconds: Math.max(1, Math.ceil((resetsAtMs - now) / 1000)),
+			usage: { used, limit, unit: "messages", resets_at: resetsAtIso },
+			message: "Huba has answered today's allowance of questions for this account. It resets at 00:00 UTC — the docs stay open, and you can request more from the Usage page.",
+		};
+	}
+	return { allowed: true, used, limit, resetsAt: new Date(startOfNextUtcDay(now)).toISOString() };
+}
+
+/**
+ * The published half of the budget for GET /v1/limits. The account-wide
+ * GLOBAL ceiling is NOT here: it is operational, and publishing it would tell
+ * a hostile caller exactly how much traffic halts inference for everyone.
+ * The per-user daily allowance IS here — it is a product fact a caller must
+ * be able to read before hitting it.
  */
 export function aiLimitsDocument(env) {
 	const budget = aiBudget(env);
@@ -197,11 +388,24 @@ export function aiLimitsDocument(env) {
 		unit: "ai_writes",
 		period: "calendar_month_utc",
 		counted_scopes: [...QUOTA_SCOPES],
+		daily: {
+			limit: budget.dailyNeuronsPerUser,
+			unit: "neurons",
+			approx_saves: Math.round(budget.dailyNeuronsPerUser / 150),
+			period: "utc_day",
+			resets: "00:00 UTC",
+			recall_metered: false,
+		},
+		huba: {
+			first_day_messages: budget.hubaFirstDayMessages,
+			daily_messages: budget.hubaDailyMessages,
+			period: "utc_day",
+		},
 		on_exceeded: {
 			http_status: 429,
 			error: "ai_quota_exhausted",
 			headers: ["retry-after", "ratelimit-limit"],
-			turn: "HTTP 200 — recall still answers; collect reports capped=monthly_ai",
+			turn: "HTTP 200 — recall still answers; collect reports the capped dimension",
 			mcp: "tool result with isError and error=ai_quota_exhausted",
 		},
 	};

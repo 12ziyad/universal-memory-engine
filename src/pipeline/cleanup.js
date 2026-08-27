@@ -1479,7 +1479,7 @@ export async function deleteAllMemories(env, userId, confirm, { auditIntent = nu
 export async function clearFailedReceipts(env, userId) {
 	const res = await env.DB.prepare(
 		`DELETE FROM receipts
-		 WHERE user_id = ? AND (saved_total = 0 OR outcome IN ('llm_failed', 'db_write_failed', 'meaningful_no_write'))`,
+		 WHERE user_id = ? AND (saved_total = 0 OR outcome IN ('llm_failed', 'llm_capacity', 'db_write_failed', 'meaningful_no_write'))`,
 	)
 		.bind(userId)
 		.run();

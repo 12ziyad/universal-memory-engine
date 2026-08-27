@@ -23,6 +23,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { classifyMessage, shouldFire, meaningfulCount } from "../pipeline/trigger.js";
 import { runExtraction as runExtractionPipeline } from "../pipeline/extract.js";
+import { isCapacityError } from "../pipeline/llm.js";
 import { announceMcpTerminal, enrichMcpConversation, markMcpEnrichmentFailed } from "../pipeline/mcp_engine.js";
 import {
 	formatReceipt,
@@ -72,6 +73,20 @@ const MAX_REPAIR_GENERATION = 5;
 // 1.5 poison ceiling and 1.9 drain pacing.
 const MAX_ATTEMPTS = 3;
 const MAX_JOBS_PER_DRAIN = 3;
+
+// Workers AI capacity refusals get their own, far more patient ladder: the
+// input is healthy, the provider's queue is full, and dead-lettering after
+// the 35-second poison ladder was the launch-blocking silent-write-loss bug.
+// Capacity attempts are counted SEPARATELY from poison attempts, with
+// jittered exponential backoff 30s → 15min. Twelve attempts is ~2 hours of
+// patience before the failure finally becomes visible to the user.
+const MAX_CAPACITY_ATTEMPTS = 12;
+const capacityBackoffMs = (attempts) => {
+	const base = Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 900_000);
+	// ±20% jitter so a fleet of stalled saves does not re-dogpile the
+	// provider on synchronized boundaries.
+	return Math.round(base + base * 0.2 * (Math.random() * 2 - 1));
+};
 // A meaningful no-write gets one deliberate second look when later activity
 // fires its settled rescue buffer. Persist this counter across held/queued
 // transitions: resetting it with `attempts` lets two contexts exchange rescue
@@ -2043,14 +2058,42 @@ export class UserMemory extends DurableObject {
 			res = await enrichMcpConversation(
 				this.env,
 				userId,
-				{ ...entry.job, attempts: entry.attempts },
+				{ ...entry.job, attempts: entry.attempts, capacityAttempts: entry.capacityAttempts ?? 0 },
 				(p) => this.ctx.waitUntil(p),
 			);
 		} catch (error) {
 			// enrichMcpConversation catches internally; this is belt-and-braces.
-			res = { retry: true, reason: String(error?.message ?? error) };
+			res = isCapacityError(error)
+				? { retry: true, capacity: true, reason: "workers_ai_capacity" }
+				: { retry: true, reason: String(error?.message ?? error) };
 		}
 		if (res?.retry) {
+			// Capacity gets the patient ladder here too: poison attempts stay
+			// untouched, the entry sleeps on jittered exponential backoff, and
+			// only ~2 hours of sustained refusals dead-letter it.
+			if (res.capacity && !res.terminalPending) {
+				const capacityAttempts = (Number(entry.capacityAttempts) || 0) + 1;
+				if (capacityAttempts >= MAX_CAPACITY_ATTEMPTS) {
+					const terminalReason = `workers_ai_capacity: the model provider stayed out of capacity through ${capacityAttempts} spaced retries (~2 hours); this save was not processed`;
+					await this.ctx.storage.put(key, {
+						...entry,
+						capacityAttempts,
+						phase: "terminal_pending",
+						terminalReason,
+						settlementAttempts: 0,
+						runAfter: 0,
+					});
+					return this.#processMcpEntry(userId, key, {
+						...entry,
+						capacityAttempts,
+						phase: "terminal_pending",
+						terminalReason,
+						settlementAttempts: 0,
+					});
+				}
+				await this.ctx.storage.put(key, { ...entry, capacityAttempts, runAfter: Date.now() + capacityBackoffMs(capacityAttempts) });
+				return { kind: "mcp", jobId: entry.job.jobId, outcome: "capacity_retry", retry: true, capacityAttempts };
+			}
 			if (res.inProgress) {
 				// A waiter (e.g. a Conversation Page follower waiting on another
 				// lane's extraction verdict) may name how long it is worth
@@ -2669,9 +2712,15 @@ export class UserMemory extends DurableObject {
 		const lastIdentity = lastId ? dedupeByMessage[lastId] ?? null : null;
 		const extractionAttempt = Number(entry.attempts ?? 0);
 		const repairGeneration = Math.max(0, Math.trunc(Number(entry.repairGeneration ?? 0)));
-		const attemptIdentity = repairGeneration > 0
+		// Capacity retries do not consume poison attempts, but each one must
+		// mint a FRESH deterministic run id — a reused id would re-claim the
+		// previous attempt's failed run row and "recover" its stored outcome
+		// without ever calling the model again.
+		const capacityAttempt = Math.max(0, Math.trunc(Number(entry.capacityAttempts ?? 0)));
+		const attemptIdentity = (repairGeneration > 0
 			? `${repairGeneration}:${extractionAttempt}`
-			: String(extractionAttempt);
+			: String(extractionAttempt))
+			+ (capacityAttempt > 0 ? `:c${capacityAttempt}` : "");
 		const extractionRunId = `run_extract_${(await sha256Hex(`${userId}\u0000${key}\u0000${attemptIdentity}`)).slice(0, 48)}`;
 
 		let result;
@@ -2687,7 +2736,11 @@ export class UserMemory extends DurableObject {
 		} catch (error) {
 			// An engine throw (not a reported outcome) counts as an attempt like
 			// any other transient failure — recorded, bounded, never head-of-line.
-			result = { outcome: "llm_failed", error: String(error?.message ?? error) };
+			// Except capacity: a raw Workers AI out-of-capacity throw takes the
+			// patient ladder, exactly like the classified pipeline outcome.
+			result = isCapacityError(error)
+				? { outcome: "llm_capacity", error: `workers_ai_capacity: ${String(error?.message ?? error).slice(0, 300)}` }
+				: { outcome: "llm_failed", error: String(error?.message ?? error) };
 			console.warn(`extraction threw user=${userId}:`, result.error);
 		}
 		if (result.outcome === "in_progress") {
@@ -2775,6 +2828,40 @@ export class UserMemory extends DurableObject {
 				error: error.startsWith(cancellation) ? error : `${cancellation}: ${error}`,
 			});
 			return this.#processPendingExtract(userId, key, pending, overrides);
+		}
+
+		// Workers AI out-of-capacity → the patient ladder. The write is not
+		// failed — the provider's queue is full — so no llm_failed receipt is
+		// stored per attempt (the job stays visibly non-terminal in /v1/jobs
+		// instead), poison `attempts` is NOT consumed, and only after ~2 hours
+		// of sustained capacity refusals does the entry dead-letter visibly.
+		if (result.outcome === "llm_capacity") {
+			const capacityAttempts = (Number(entry.capacityAttempts) || 0) + 1;
+			if (capacityAttempts >= MAX_CAPACITY_ATTEMPTS) {
+				const error = `workers_ai_capacity: the model provider stayed out of capacity through ${capacityAttempts} spaced retries (~2 hours); this save was not processed`;
+				const pending = await this.#persistExtractSettlement(userId, key, { ...entry, capacityAttempts }, result, {
+					action: "failed",
+					processedIds,
+					processedIdentities,
+					lastId,
+					lastIdentity,
+					error,
+				});
+				return this.#processPendingExtract(userId, key, pending, overrides);
+			}
+			const retryEntry = { ...entry, capacityAttempts, runAfter: Date.now() + capacityBackoffMs(capacityAttempts) };
+			await this.ctx.storage.put(key, retryEntry);
+			try {
+				await settleMemoryJobs(
+					this.env,
+					userId,
+					this.#extractJobUpdates(entry, "attempted", { attempts: entry.attempts + capacityAttempts }),
+					{ strict: true },
+				);
+			} catch (error) {
+				console.warn("capacity attempt bookkeeping deferred:", error?.message ?? error);
+			}
+			return { kind: "extract", outcome: result.outcome, retry: true, capacityAttempts, receipt: null, jobIds: [...new Set(Object.values(entry.jobByMessage ?? {}))] };
 		}
 
 		// llm_failed / db_write_failed / engine throw → bounded retry with

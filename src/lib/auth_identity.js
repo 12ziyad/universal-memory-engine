@@ -1,4 +1,5 @@
 import { newId } from "./ids.js";
+import { stampEarlyAccess } from "./ai_budget.js";
 
 const PROVIDERS = new Set(["google", "github", "email"]);
 
@@ -128,6 +129,7 @@ export async function resolveVerifiedIdentity(env, {
 	user = await identityUser(env, provider, subject);
 	if (!user) return { error: "identity_create_failed" };
 	if (user.status === "disabled") return { error: "account_disabled" };
+	if (user.id === id) await stampEarlyAccess(env, user.id, stamp);
 	return { user, created: user.id === id };
 }
 

@@ -41,6 +41,14 @@ describe("GET /v1/limits", () => {
 		// The AI plan is published; the account-wide ceiling must NOT be.
 		expect(body.ai.monthly_writes).toBeGreaterThan(0);
 		expect(body.ai.unit).toBe("ai_writes");
+		// The per-user DAILY allowance is a product fact and IS published
+		// (lower-case "neurons"); the operational account-wide ceiling — the
+		// word "ceiling", or the shouting constant name — still must not leak.
+		expect(body.ai.daily.limit).toBeGreaterThan(0);
+		expect(body.ai.daily.unit).toBe("neurons");
+		expect(body.ai.daily.recall_metered).toBe(false);
+		expect(body.ai.huba.daily_messages).toBeGreaterThan(0);
+		expect(body.ai.huba.first_day_messages).toBeGreaterThan(body.ai.huba.daily_messages);
 		expect(JSON.stringify(body)).not.toContain("ceiling");
 		expect(JSON.stringify(body)).not.toContain("NEURON");
 	});
@@ -90,20 +98,45 @@ describe("429 shape", () => {
 	});
 });
 
-describe("allowRate fail-open", () => {
-	it("allows when the binding is absent", async () => {
+describe("allowRate failure policy", () => {
+	// Launch hardening 2026-08-28: the brakes must not release exactly when
+	// braking hardest. An ABSENT binding still allows (tests and local dev
+	// deliberately omit bindings), but a binding that THROWS now refuses on
+	// write-shaped paths ({ fail: "closed" } — save/import/delete call sites)
+	// while auth/recall/read stay fail-open for availability.
+	it("allows when the binding is absent, whatever the policy", async () => {
 		expect(await allowRate(undefined, "k")).toBe(true);
 		expect(await allowRate(null, "k")).toBe(true);
+		expect(await allowRate(null, "k", { fail: "closed" })).toBe(true);
 	});
 
-	it("allows when the binding throws", async () => {
+	it("read-shaped default: allows when the binding throws", async () => {
 		expect(await allowRate({ limit: async () => { throw new Error("unavailable"); } }, "k")).toBe(true);
 	});
 
-	it("refuses only on an explicit success:false", async () => {
+	it("write-shaped fail-closed: refuses when the binding throws", async () => {
+		expect(await allowRate(
+			{ limit: async () => { throw new Error("unavailable"); } },
+			"k",
+			{ fail: "closed" },
+		)).toBe(false);
+	});
+
+	it("refuses on an explicit success:false in either mode", async () => {
 		expect(await allowRate({ limit: async () => ({ success: false }) }, "k")).toBe(false);
+		expect(await allowRate({ limit: async () => ({ success: false }) }, "k", { fail: "closed" })).toBe(false);
 		expect(await allowRate({ limit: async () => ({ success: true }) }, "k")).toBe(true);
 		expect(await allowRate({ limit: async () => ({}) }, "k")).toBe(true);
+	});
+
+	it("every save/import/delete call site in the router passes fail closed", async () => {
+		const source = (await import("../src/index.js?raw")).default;
+		const sites = [...source.matchAll(/allowRate\(env\.(SAVE|IMPORT|DELETE)_LIMITER/g)];
+		expect(sites.length).toBeGreaterThan(10);
+		for (const match of sites) {
+			const call = source.slice(match.index, match.index + 240);
+			expect(call, call.slice(0, 90)).toContain('fail: "closed"');
+		}
 	});
 });
 

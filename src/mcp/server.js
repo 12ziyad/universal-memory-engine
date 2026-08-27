@@ -455,7 +455,10 @@ export function buildMemoryServer(env, ctx, userId, authz = {}) {
 	// passes no rateContext and deliberately shares one "legacy:configured"
 	// bucket — one master key IS one actor.
 	const rateLimited = async (bucket, binding, mode, source) => {
-		if (await allowRate(binding, managedActorRateKey(bucket, authz.rateContext ?? {}))) return null;
+		// Write-shaped buckets fail closed when the limiter itself errors —
+		// same policy as the REST door (see src/lib/rate.js).
+		const fail = ["save", "import", "delete"].includes(bucket) ? "closed" : "open";
+		if (await allowRate(binding, managedActorRateKey(bucket, authz.rateContext ?? {}), { fail })) return null;
 		return mcpResult({
 			ok: false,
 			command_mode: mode,

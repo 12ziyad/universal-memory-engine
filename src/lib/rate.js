@@ -22,17 +22,28 @@ export const RATE_BUCKETS = Object.freeze({
 
 /**
  * Workers rate limiting. No-ops when the binding is absent (tests, local dev
- * without unsafe bindings), fails open on errors — protection, not a gate.
+ * without unsafe bindings — deliberate, and the only fail-open that applies
+ * unconditionally).
+ *
+ * When the binding EXISTS but throws, the failure policy is per-path:
+ *   - write-shaped buckets (save / import / delete) pass { fail: "closed" }
+ *     and REFUSE. A broken limiter under write pressure is exactly when the
+ *     brakes matter most: every allowed write spends inference and mutates
+ *     data, so the exposure of failing open is unbounded.
+ *   - auth / recall / read default to fail open. They spend no inference and
+ *     mutate nothing, and a limiter blip must not lock people out of signing
+ *     in or reading their own memory. Auth abuse stays bounded by the
+ *     passwordless attempt caps and OAuth provider limits.
  */
-export async function allowRate(binding, key) {
+export async function allowRate(binding, key, { fail = "open" } = {}) {
 	if (!binding?.limit) return true;
 	try {
 		const { success } = await binding.limit({ key: String(key ?? "anon") });
 		return success !== false;
 	} catch (error) {
-		// Fail open — rate limiting is protection, not a gate — but never silently.
-		console.warn("rate limiter unavailable:", error?.message ?? error);
-		return true;
+		// Never silent, whichever way it fails.
+		console.warn(`rate limiter unavailable (fail ${fail}):`, error?.message ?? error);
+		return fail !== "closed";
 	}
 }
 

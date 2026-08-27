@@ -1,6 +1,0 @@
-Error: recall failed status=409
-    at assert (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/e6/harness/common.mjs:49:24)
-    at recall (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:109:2)
-    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
-    at async liveRun (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:405:26)
-    at async main (file:///C:/Users/ziyad/uml/tmp/itsuki-memory-v3-implementation-20260809/final/harness/live-reattack.mjs:658:3)

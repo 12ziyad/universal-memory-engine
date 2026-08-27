@@ -96,7 +96,7 @@ One commit (`54aafa8`) across all four contract surfaces:
 
 ## 5. Deployment
 
-Account `Ejziyad@gmail.com's Account` (`b6009ce8df89884b79e4f6fa49e52942`), worker `uml`,
+Account `the owner's Cloudflare account` (`b6009ce8df89884b79e4f6fa49e52942`), worker `uml`,
 custom domain `itsuki.app`. Rollback anchor recorded before deploying:
 **`80bb22d6-941e-4810-94e7-f177ee8a2927`**.
 

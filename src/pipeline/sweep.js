@@ -4,12 +4,14 @@
  * accident. Runs from a Workers Cron Trigger, deliberately NOT from the same
  * Durable Object alarm chain it audits.
  *
- * Three duties every few minutes:
+ * Four duties every few minutes:
  *   1. RESCUE — jobs sitting non-terminal past the threshold get their user's
  *      DO kicked (re-arm + drain). Alarms can be lost; the sweep cannot.
  *   2. ALERT — new failed jobs are reported to the admin.
  *   3. INVARIANT — an accepted/staged receipt with no memory_jobs row for its
  *      packet is a red alert: a promise nothing is responsible for keeping.
+ *   4. PRUNE — terminal job rows older than the retention window are deleted
+ *      in bounded batches, so the ledger stops growing forever.
  */
 
 import { reportServerError } from "../lib/report.js";
@@ -17,6 +19,13 @@ import { updateMemoryJob } from "../lib/db.js";
 import { settleStagedText } from "./staged_text.js";
 
 const STALE_MS = 5 * 60 * 1000;
+// Terminal job rows are an operational ledger, not memory: after this window
+// they stop being useful to anyone (the UI shows recent jobs, the sweep
+// alerts on the last 10 minutes) and before pruning existed the table only
+// ever grew — 6,907 rows and every cron scan paying for all of them, forever.
+const JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_PRUNE_PER_SWEEP = 400;
+const TERMINAL_JOB_PRUNE_STATES = ["enriched", "completed", "skipped", "failed"];
 // A job the owning Durable Object has no work for is ORPHANED: no queue entry,
 // no held message, nothing a kick can reach. Given a wider margin than plain
 // staleness so a slow drain (one entry can take tens of seconds) is never
@@ -31,7 +40,7 @@ const MAX_STALE_JOBS_PER_USER = 200;
 
 export async function runReconciliationSweep(env) {
 	const now = Date.now();
-	const result = { rescued: [], orphaned: [], failedUsers: [], orphanReceipts: 0, errors: [] };
+	const result = { rescued: [], orphaned: [], failedUsers: [], orphanReceipts: 0, pruned: 0, errors: [] };
 
 	// 1. Rescue stale non-terminal jobs — and tell a real rescue apart from a
 	// futile one. A kick can only drain what is in the Durable Object's
@@ -170,9 +179,34 @@ export async function runReconciliationSweep(env) {
 		result.errors.push(`invariant query: ${error?.message ?? error}`);
 	}
 
+	// 4. PRUNE — terminal rows past the retention window, in bounded batches
+	// so a backlog drains across ticks instead of one giant delete. Both
+	// slices ride the 0058 (status, completed_at)/(status, updated_at)
+	// indexes; updated_at covers legacy terminal rows that never got a
+	// completed_at stamp.
+	try {
+		const cutoff = now - JOB_RETENTION_MS;
+		const statuses = TERMINAL_JOB_PRUNE_STATES.map(() => "?").join(", ");
+		const completed = await env.DB.prepare(
+			`DELETE FROM memory_jobs WHERE id IN (
+			   SELECT id FROM memory_jobs
+			    WHERE status IN (${statuses}) AND completed_at IS NOT NULL AND completed_at < ?
+			    LIMIT ?)`,
+		).bind(...TERMINAL_JOB_PRUNE_STATES, cutoff, MAX_PRUNE_PER_SWEEP).run();
+		const unstamped = await env.DB.prepare(
+			`DELETE FROM memory_jobs WHERE id IN (
+			   SELECT id FROM memory_jobs
+			    WHERE status IN (${statuses}) AND completed_at IS NULL AND updated_at < ?
+			    LIMIT ?)`,
+		).bind(...TERMINAL_JOB_PRUNE_STATES, cutoff, MAX_PRUNE_PER_SWEEP).run();
+		result.pruned = Number(completed.meta?.changes ?? 0) + Number(unstamped.meta?.changes ?? 0);
+	} catch (error) {
+		result.errors.push(`prune query: ${error?.message ?? error}`);
+	}
+
 	console.log(
 		`sweep: rescued=${result.rescued.length} orphanedJobs=${result.orphaned.reduce((a, o) => a + o.count, 0)} ` +
-		`failedUsers=${result.failedUsers.length} orphanReceipts=${result.orphanReceipts} errors=${result.errors.length}`,
+		`failedUsers=${result.failedUsers.length} orphanReceipts=${result.orphanReceipts} pruned=${result.pruned ?? 0} errors=${result.errors.length}`,
 	);
 	return result;
 }

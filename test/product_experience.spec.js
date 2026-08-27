@@ -22,7 +22,10 @@ function fnSource(name) {
 
 describe("landing hero and narrative", () => {
 	it("leads with the approved enemy-claim headline and the wedge subhead", () => {
-		expect(html).toContain("Not more context.<br /><em>Better memory.</em>");
+		// Launch hardening 2026-08-28: the owner asked for a centered hero with a
+		// clearer, product-naming two-beat line. Same enemy (forgetting), the
+		// product named in the answer.
+		expect(html).toContain("Your AI forgets.<br /><em>Itsuki remembers.</em>");
 		expect(html).toContain("source-linked, versioned, and reversible");
 		// Breadth requirement: never positioned as agents-only.
 		expect(html).toContain("applications, assistants, agents, and workflows carry across sessions and tools");
@@ -41,7 +44,7 @@ describe("hero stays uncluttered", () => {
 	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<section class="developer-section'));
 
 	it("carries only the eyebrow, headline, deck, and two actions", () => {
-		expect(hero).toContain("Not more context.");
+		expect(hero).toContain("Your AI forgets.");
 		expect(hero).toContain('class="hero-actions"');
 		// Furniture that used to crowd this panel must stay out.
 		for (const clutter of ["fact-row", "flow-rail", "flow-status", "system-inputs", "surface-band"]) {
@@ -49,7 +52,7 @@ describe("hero stays uncluttered", () => {
 		}
 	});
 
-	it("gives the copy the width and the mark the remaining third", () => {
+	it("keeps the mark as the right-edge sliver beside the centered copy", () => {
 		expect(hero).toContain('class="hero-mono"');
 		expect(hero).toContain('lang="ja"');
 	});
