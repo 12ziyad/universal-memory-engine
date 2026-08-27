@@ -6982,7 +6982,7 @@ ${outputBlock(`{
 <tr><td><code>collect.job_id</code></td><td>The queued extraction job, also visible in <code>GET /v1/jobs</code>.</td></tr>
 <tr><td><code>collect.counts</code></td><td><code>received</code>, <code>held</code> and <code>skipped</code> for this batch. Object counts stay at zero until extraction finishes.</td></tr>
 <tr><td><code>rules.autoCollect</code></td><td>The resolved rule that decided whether capture ran at all. Default <code>true</code>.</td></tr>
-<tr><td><code>rules.captureDefault</code></td><td><code>auto</code> (whole-chat capture pages allowed) or <code>graph_only</code> (never build them).</td></tr>
+<tr><td><code>rules.captureDefault</code></td><td><code>auto</code> (whole-chat conversation pages allowed) or <code>graph_only</code> (never build them).</td></tr>
 </table>
 
 <h2>An exhausted write budget degrades this door, it does not break it</h2>
@@ -9057,7 +9057,7 @@ PAGES["/api/rules"] = { title: "GET /v1/rules", html: `
 <tr><td><code>excludes</code></td><td>string[]</td><td><code>[]</code></td><td>Deny-list, same bounds. An exclude always wins over an include.</td></tr>
 <tr><td><code>customCategories</code></td><td>object[]</td><td><code>[]</code></td><td>Maximum 16. Each entry is a string or <code>{ name, description }</code>. <code>name</code> is lower-cased with non-alphanumerics folded to underscores and truncated to 40 characters; <code>description</code> to 160.</td></tr>
 <tr><td><code>projectCategories</code></td><td>object[]</td><td><code>[]</code></td><td>Governed filing categories, <code>{ id, slug, name, description }</code>, maximum 32. Injected at the write door for a managed project — this field is always empty in a <code>/v1/rules</code> response and cannot be set here.</td></tr>
-<tr><td><code>captureDefault</code></td><td>string</td><td><code>"auto"</code></td><td><code>auto</code> or <code>graph_only</code>. <code>graph_only</code> never builds whole-chat capture pages. Any other value normalizes to <code>auto</code>.</td></tr>
+<tr><td><code>captureDefault</code></td><td>string</td><td><code>"auto"</code></td><td><code>auto</code> or <code>graph_only</code>. <code>graph_only</code> never builds whole-chat conversation pages. Any other value normalizes to <code>auto</code>.</td></tr>
 <tr><td><code>captureDensity</code></td><td>string</td><td><code>"standard"</code></td><td><code>standard</code> (selective, high precision) or <code>dense</code> (exhaustive, lower gate floor). Anything that is not exactly <code>dense</code> normalizes to <code>standard</code>.</td></tr>
 <tr><td><code>autoCollect</code></td><td>boolean</td><td><code>true</code></td><td>Whether <code>POST /v1/turn</code> feeds the turn into the auto-collect lane.</td></tr>
 <tr><td><code>retentionDays</code></td><td>integer or null</td><td><code>null</code></td><td>Positive integer, floored. Zero, a negative number or a non-number becomes <code>null</code>, meaning no retention limit.</td></tr>
