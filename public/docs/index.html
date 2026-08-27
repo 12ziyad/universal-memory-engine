@@ -7026,6 +7026,19 @@ function slugifyText(text) {
 const searchInput = document.getElementById("search");
 const resultsBox = document.getElementById("searchResults");
 
+/* Crude suffix stripping, so "rotate" finds "rotation" and "saving" finds
+   "save". Without it a reader searching the verb form of a word we happened to
+   write as a noun gets nothing, which reads as the docs not covering it. */
+function stemTerm(term) {
+	if (term.length < 5) return term;
+	const stripped = term.replace(/(ions|ing|ion|ies|ed|es|s|e)$/, "");
+	return stripped.length >= 4 ? stripped : term;
+}
+
+function termMatches(term, haystack) {
+	return haystack.includes(term) || haystack.includes(stemTerm(term));
+}
+
 function runSearch(query) {
 	const terms = query.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t && !STOP.has(t));
 	if (!terms.length) return [];
@@ -7033,19 +7046,19 @@ function runSearch(query) {
 		const titleLower = entry.title.toLowerCase();
 		/* Every term must appear somewhere on the page, so adding a word
 		   narrows the result set instead of widening it. */
-		if (!terms.every((t) => titleLower.includes(t) || entry.lower.includes(t))) return null;
+		if (!terms.every((t) => termMatches(t, titleLower) || termMatches(t, entry.lower))) return null;
 
 		let score = 0;
 		for (const t of terms) {
-			if (titleLower.includes(t)) score += 6;
-			if (entry.headingsLower.some((h) => h.includes(t))) score += 3;
-			if (entry.lower.includes(t)) score += 1;
+			if (termMatches(t, titleLower)) score += 6;
+			if (entry.headingsLower.some((h) => termMatches(t, h))) score += 3;
+			if (termMatches(t, entry.lower)) score += 1;
 		}
 		/* Prefer a heading that carries the most terms - that is the section
 		   the reader actually wants, not just the page. */
 		let best = null, bestHits = 0;
 		entry.headingsLower.forEach((h, i) => {
-			const hits = terms.filter((t) => h.includes(t)).length;
+			const hits = terms.filter((t) => termMatches(t, h)).length;
 			if (hits > bestHits) { bestHits = hits; best = entry.headings[i]; }
 		});
 
