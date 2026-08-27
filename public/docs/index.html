@@ -348,7 +348,9 @@ const NAV = [
 		["/guides/recall", "Recall memory"],
 		["/guides/rules", "Control what gets remembered"],
 		["/guides/versions", "Corrections & rollback"],
+		["/guides/playground", "Playground"],
 		["/guides/projects", "Projects & teams"],
+		["/guides/lifecycle", "Archive, transfer & delete"],
 		["/guides/export", "Export & delete"],
 	]},
 	/* One section for every client you point at the service. The old split
@@ -386,20 +388,17 @@ const NAV = [
 		["/integrations/dify", "Dify"],
 		["/integrations/convex", "Convex"],
 	]},
-	{ sec: "API reference", items: [
+	{ sec: "Using the API", items: [
 		["/api/rest", "REST API reference"],
 		["/api/auth", "Authentication & keys"],
 		["/api/mcp", "MCP tools"],
 		["/api/errors", "Errors"],
 		["/api/limits", "Rate limits & quotas"],
 		["/api/webhooks", "Webhooks"],
-		["/sdk/python", "Python SDK"],
-		["/sdk/js", "JavaScript SDK"],
 	]},
-	/* Ordered as the write path runs, then the read path, then the edges. */
-	/* One page per endpoint. The single REST page compressed twenty endpoints
-	   into table rows, which is the main reason this reference read as thinner
-	   than the ones it sits beside. */
+	/* One page per endpoint, ordered write -> read -> manage -> operate. The
+	   single REST page compressed twenty endpoints into table rows, which is
+	   the main reason this reference read thinner than its neighbours. */
 	{ sec: "Endpoints", items: [
 		["/api/save", "POST /v1/save"],
 		["/api/recall", "POST /v1/recall"],
@@ -416,10 +415,16 @@ const NAV = [
 		["/api/export", "GET /v1/export"],
 		["/api/rules", "GET /v1/rules"],
 	]},
+	{ sec: "SDKs", items: [
+		["/sdk/python", "Python SDK"],
+		["/sdk/js", "JavaScript SDK"],
+	]},
+	/* Ordered as the write path runs, then the read path, then the edges. */
 	{ sec: "How it works", items: [
 		["/concepts/memory", "How memory works"],
 		["/concepts/extraction", "How extraction works"],
 		["/concepts/graph", "The memory graph"],
+		["/concepts/conversation-pages", "Conversation pages"],
 		["/concepts/retrieval", "How recall works"],
 		["/concepts/receipts", "Receipts & rules"],
 		["/concepts/scope", "Who memory belongs to"],
@@ -9250,6 +9255,606 @@ ${nextSteps([
 	["#/concepts/extraction", "How extraction works", "Where these rules sit in the write path."],
 	["#/api/auth", "Authentication & keys", "Scopes, roles, and rules attached to a key."],
 	["#/api/errors", "Errors", "Every code and what to do about it."],
+])}
+` };
+
+PAGES["/guides/playground"] = { title: "Playground", html: `
+<h1>Playground</h1>
+<p class="lede">Save and recall memory from inside the app without writing any code: run a read-only example to watch capture happen, then open a chat that writes to your project's real memory.</p>
+
+${prereq([
+	`A project role of <b>admin</b> or <b>member</b>. A viewer has no Playground at all — see <a href="#/guides/projects">Projects, organizations, and teams</a>.`,
+	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. The Playground is session-authenticated: an API key or an MCP link cannot open it.`,
+	`Project <b>admin</b>, if you intend to change a chat's Rules panel or delete a chat.`,
+])}
+
+<h2>What it is</h2>
+<p>In the left rail, under <b>Setup</b>, choose <b>Playground</b>. It is a split screen — a graph on the left, a chat on the right — and it runs in one of two modes. The difference between them is the only thing about this screen worth memorising.</p>
+
+<table>
+<tr><th></th><th>An example</th><th>A chat</th></tr>
+<tr><td>How you get there</td><td><b>Pick example</b>. This is the mode the Playground opens in.</td><td><b>Threads</b> → a chat, or <b>+ New chat</b></td></tr>
+<tr><td>How you know which one you are in</td><td>A bar across the chat: <i>Preview — a sample world, so you can see how memory behaves. Nothing here is saved to your account.</i></td><td>No bar. The Threads menu is headed <i>Your chats — these capture for real</i>.</td></tr>
+<tr><td>The graph on the left</td><td>A hand-built world seeded for that scenario</td><td>What this chat has captured, arranged around a hub node reading <b>This chat</b></td></tr>
+<tr><td>The reply</td><td>Scripted, for the suggested lines</td><td>From a chat model, handed the context recall assembled. It is a smaller, separate model from the one that extracts.</td></tr>
+<tr><td>A sentence you type yourself</td><td>Runs extraction for real and shows what it would keep. Nothing is written: no source packet, no memory, no receipt.</td><td>Recall and capture run through the same two commands every other door uses. There is no second extraction path here.</td></tr>
+<tr><td>What is left behind</td><td>Nothing</td><td>Memories in this project, and a receipt on the <b>History</b> page</td></tr>
+</table>
+
+<div class="note"><b>Both modes spend real model calls, which is why the gate is stricter than plain memory access.</b> Reading project memory is not enough to open the Playground: a viewer can inspect memory, the graph and history, and still has no Playground tab.</div>
+
+<h2>1 · Run an example</h2>
+<ol class="steps">
+<li><b>Open the Playground.</b><p>Left rail, group <b>Setup</b>, item <b>Playground</b>. What you should see: the split screen on the first example, <b>Thesis research assistant</b>, with the preview bar above the chat and an opening exchange already in the transcript. On a first visit the guided tour starts by itself; you can re-launch it any time with <b>Take the tour</b> at the bottom of the graph.</p></li>
+<li><b>Switch example.</b><p>Click the chip in the chat header — in an example it shows the scenario's name rather than the words <b>Pick example</b> — and choose one of the five listed under <b>Read-only examples</b>. What you should see: the graph is replaced, the transcript resets to that scenario's opening exchange, and the check mark moves to the row you picked.</p></li>
+<li><b>Send a suggested line.</b><p>Directly above the composer sit up to two buttons carrying the scenario's next scripted lines. Click one. What you should see, in order: your message; a chip reading <b>Extracting…</b>; then the outcome — <b>Captured · N facts</b> or <b>Nothing durable to capture</b> — followed by a <b>Context block</b> and the reply. Every assistant turn is labelled <i>Assistant turns are not captured</i>.</p></li>
+<li><b>Expand the context block.</b><p>Its header reads <b>Context block</b> with the sub-line <i>used in the reply · N facts · N entities</i>, and the control on the right reads <b>Expand</b>. Inside are the facts and entities assembled for that turn, which is exactly the material a connected model would be handed. A validity range ending in <b>present</b> is currently true; one with an end date used to be true and no longer is.</p></li>
+<li><b>Type a sentence of your own.</b><p>The composer placeholder reads <i>Say something to this example…</i>. Enter sends, Shift+Enter starts a new line. Anything that is not one of the scripted lines goes to the preview extractor: one real model call that stores nothing. What you should see: the entities it named arrive as new nodes ringing the outside of the graph, and the reply says what it would have kept. If nothing in the sentence would still be true next month, it says that too.</p></li>
+</ol>
+
+<p>The <b>JSON</b> toggle in the chat header prints the example the way the API would describe it — the world as it stands, then each turn's extraction underneath:</p>
+
+${outputBlock(`{
+  "example": "thesis",
+  "mode": "preview",
+  "persisted": false,
+  "graph": {
+    "nodes": 40,
+    "clusters": {
+      "Identity & Career": 12,
+      "Projects & Systems": 11,
+      "Skills & Tech": 8,
+      "Active Goals": 4,
+      "Preferences & Research": 3,
+      "Life & Family": 2
+    },
+    "relations": 21,
+    "latest": []
+  },
+  "relations": [
+    { "from": "Maya Okonkwo", "verb": "writes", "to": "thesis draft" },
+    { "from": "Chapter 3", "verb": "due for", "to": "SIGMOD deadline" }
+  ],
+  "turns_taken": 0
+}`, "JSON view")}
+
+<p>Abridged above: the block prints the first twelve relations, not two. <code>persisted: false</code> is the point of the whole mode. The toggle applies to examples — in one of your own chats, each message carries its own <b>Written to memory</b> list instead.</p>
+
+<h2>The five examples</h2>
+<p>Each is a hand-built world: a clustered graph of uneven density, an opening exchange already in progress, and three follow-up lines carrying the exact facts and entities the reader was shown. None of them touch your memory.</p>
+<table>
+<tr><th>Example</th><th>What it holds</th></tr>
+<tr><td>Thesis research assistant</td><td>A doctoral project tracked across months</td></tr>
+<tr><td>Engineering team copilot</td><td>Architecture decisions across a platform team</td></tr>
+<tr><td>Health &amp; training coach</td><td>A training block with preferences that change</td></tr>
+<tr><td>Travel concierge</td><td>A trip assembled over many conversations</td></tr>
+<tr><td>Customer support agent</td><td>One account remembered across tickets</td></tr>
+</table>
+<p>Once an example runs out of scripted lines the suggestion strip becomes a single button, <b>↻ Replay this example from the start</b>. The <b>↻</b> control in the header does the same thing and asks first: <i>Replay "&lt;name&gt;" from the start?</i> — <i>The N messages in this example and the memories they added will be cleared. Nothing in your own memory is affected.</i></p>
+
+<h2>2 · Open a chat of your own</h2>
+<ol class="steps">
+<li><b>Open the Threads menu.</b><p>The <b>Threads</b> chip in the chat header. It is the only place in the product where a Playground chat is created or deleted. What you should see: the heading <i>Your chats — these capture for real</i>, your existing chats, and at the bottom <b>+ New chat</b> with a sub-line reading <i>N of 5 used · N messages left today</i>. With nothing there yet the menu reads <i>No chats yet. Start one to write to your own memory.</i></p></li>
+<li><b>Click + New chat.</b><p>What you should see: the preview bar is gone, the graph is empty, and the stream reads <i>This chat is empty. Anything durable you say here is captured into your real memory — a decision, a preference, a person, a plan.</i> Two openers sit above the composer — they fill the box rather than sending, because the send is your decision.</p></li>
+<li><b>Send something worth remembering.</b><p>The placeholder is now <i>Tell it something worth remembering…</i>. Write one durable fact. What you should see: your message, a reply, and a status line under your message saying which of several honest things happened — <b>Added to graph · N</b> with a <b>Written to memory</b> list of what was stored, <b>Captured · extracting</b> while enrichment is still running, or <b>Captured — receipt in History</b>. The new memories appear as nodes around the <b>This chat</b> hub on the left.</p></li>
+<li><b>Confirm it outside the Playground.</b><p>Open <b>History</b> in the left rail for the receipt naming what was stored and what was skipped, and <b>Memories</b> for the memories themselves. A Playground turn is a normal write: it is visible everywhere a write from the API is visible.</p></li>
+</ol>
+
+<div class="note"><b>Two limits, and neither is an error.</b> An account keeps <b>5</b> chats here and <b>30</b> messages per UTC day (your messages only; replies are not counted). Reaching the first disables <b>+ New chat</b>; reaching the second answers with <i>You've used all 30 playground messages for today. They reset at midnight UTC — your memory and every connected tool keep working in the meantime.</i> The caps are on this screen, not on your memory: the API, the SDKs and every connected client are unaffected.</div>
+
+<div class="warn"><b>Deleting a chat deletes the transcript, not the memories.</b> The <b>✕</b> on a chat row asks: <i>Delete "&lt;name&gt;"?</i> — <i>The conversation is removed. Memories it already captured stay in your memory — remove those from the Memories page.</i> Deletion needs project admin; a member sees the control disabled with the note <i>Project admins manage chat policy and deletion.</i></div>
+
+<h2>3 · Narrow what one chat remembers</h2>
+<p>The <b>⚖ Rules</b> button in the chat header opens a capture policy that belongs to one conversation — the scope header names the project, then the chat, then a badge reading <b>This chat only</b>. It is not a second rules engine. The server normalizes what you type with the same cleaner the project's own rules use, layers it under them, and enforces the result per extracted item.</p>
+<ol class="steps">
+<li><b>Open a chat first.</b><p>A policy attaches to one conversation. With nothing open the panel says so — <i>Open a chat from Threads first — a policy attaches to one conversation.</i> — and <b>Apply to this chat</b> stays disabled.</p></li>
+<li><b>Choose a capture mode.</b><p>Under the label <b>Capture</b>: <b>Standard</b> (<i>Keep anything durable</i>), <b>Only these topics</b> (<i>Nothing outside the list</i>), or <b>Off</b> (<i>Capture nothing from this chat</i>).</p></li>
+<li><b>Add topics.</b><p>In <b>Only these topics</b> mode a <b>Remember only</b> list appears; a <b>Never remember</b> list is available in every mode but <b>Off</b>. Type into <i>Add a topic, then Enter</i>. What you should see: the term becomes a chip with a remove control. Adding the first <b>Remember only</b> topic while in <b>Standard</b> switches the mode for you; removing the last one switches it back, because an empty allow-list would mean capture nothing.</p></li>
+<li><b>Apply it.</b><p>Click <b>Apply to this chat</b>. What you should see: the panel closes back to the conversation and a message states what was actually saved — <i>Applied — only &lt;topics&gt;; never &lt;topics&gt;.</i>, or <i>Applied — back to your account rules.</i> when both lists are empty. The panel is then re-seeded from what the server normalized, not from what you typed. <b>Reset</b> discards an unapplied draft.</p></li>
+</ol>
+
+<p>The panel also carries <b>Custom categories</b> — pairs of <i>name</i> and <i>what it means</i> — for filing memories under a name that means something to you. Its own explainer states the contract: <i>Enforced before anything is written, on future turns in this chat only. Can narrow your account rules, never widen them.</i></p>
+
+<h3>How a chat's rules combine with the project's</h3>
+<p>The project's rules live in <b>Settings → Memory extraction</b>, and their precedence box is the authority: safety and secret scrubbing run first, this project's <b>Never remember</b> rules then deny storage, and Playground rules may narrow what remains but can never weaken the project deny list. Concretely:</p>
+<table>
+<tr><th>Panel setting</th><th>What it does to the project's rules</th></tr>
+<tr><td><b>Never remember</b></td><td>Union. The chat may add denials; it can never drop one the project made.</td></tr>
+<tr><td><b>Remember only</b></td><td>If only one side has an allow-list, that list applies. If both do, only the terms they agree on survive — narrower than either. If they agree on nothing, the turn captures nothing and the message is badged <b>Outside this chat's topics — not captured</b>.</td></tr>
+<tr><td><b>Capture: Off</b></td><td>The capture lane is not run for this chat at all. The reply still comes back, and the message is badged <b>Capture is off for this chat</b>.</td></tr>
+<tr><td><b>Custom categories</b></td><td>Union. A category is filing metadata, never permission — adding one cannot admit anything a rule denies.</td></tr>
+</table>
+<p>Whatever the panel produces, the shared pipeline enforces the project's rules again behind it, per extracted item. A mistake in a chat's policy can only ever store less. Changes apply to future turns in that chat; nothing already captured is affected. See <a href="#/guides/rules">Control what gets remembered</a>.</p>
+
+<h2>Every control on the screen</h2>
+<table>
+<tr><th>Where</th><th>Control</th><th>What it does</th></tr>
+<tr><td>Graph</td><td><b>Focus a cluster</b></td><td>Dims every cluster but the one you pick. <b>All clusters</b> restores.</td></tr>
+<tr><td>Graph</td><td><b>Search graph</b></td><td>Dims every node that does not match what you type. Nothing is removed.</td></tr>
+<tr><td>Graph</td><td><b>+</b> · <b>100%</b> · <b>−</b> · <b>⤾</b></td><td>Zoom in, the current zoom, zoom out, and <b>Fit to view</b>.</td></tr>
+<tr><td>Graph</td><td><b>Take the tour</b></td><td>Five steps over the composer, the graph, the context block, the reply, and the header. The last one is titled <i>This is a preview — your memory is separate</i>.</td></tr>
+<tr><td>Chat header</td><td><b>↻</b></td><td><i>Restart this example</i>: replays the scenario from the start, after a confirmation. In one of your own chats it re-loads the conversation and deletes nothing.</td></tr>
+<tr><td>Chat header</td><td><b>Pick example</b> ▾</td><td>The five read-only scenarios. In an example the chip shows the scenario's name instead.</td></tr>
+<tr><td>Chat header</td><td><b>Threads</b> ▾</td><td>Your real chats. The only place one is created or deleted.</td></tr>
+<tr><td>Chat header</td><td><b>JSON</b></td><td><i>Show what was extracted, as JSON</i>, for an example.</td></tr>
+<tr><td>Chat header</td><td><b>⚖ Rules</b></td><td><i>What this chat may and may not remember</i> — the per-chat capture policy.</td></tr>
+<tr><td>Composer</td><td>Message box</td><td>Enter sends, Shift+Enter starts a new line. A message is cut at 4,000 characters.</td></tr>
+<tr><td>Composer</td><td><b>Send</b></td><td>Disabled, with a note, for a role that can read the Playground but not run conversations.</td></tr>
+</table>
+
+<h2>Who can use it</h2>
+<p>Four separate capabilities gate this screen, and the rail hides the tab rather than showing a dead one. Project <b>admin</b> holds all four; <b>member</b> holds the first two; <b>viewer</b> holds none. Organization <b>owner</b> and <b>admin</b> hold all four in every project.</p>
+<table>
+<tr><th>Capability</th><th>Held by</th><th>What it unlocks</th></tr>
+<tr><td><code>project.playground.read</code></td><td>admin, member</td><td>The <b>Playground</b> item in the rail, the examples, and reading an open chat and its Rules panel</td></tr>
+<tr><td><code>project.playground.use</code></td><td>admin, member</td><td>The composer, <b>Send</b>, and <b>+ New chat</b></td></tr>
+<tr><td><code>project.playground.policy.edit</code></td><td>admin</td><td><b>Apply to this chat</b> and every editable field in the Rules panel</td></tr>
+<tr><td><code>project.playground.delete</code></td><td>admin</td><td>The <b>✕</b> that deletes a chat</td></tr>
+</table>
+<p>The project role table in <b>Settings → Project → Members</b> states the same thing in role language: a member can <i>use Playground</i>, an admin additionally manages <i>Playground policy</i>, and a viewer <i>cannot use Playground</i>. Roles are per project — a role in one project grants nothing in another. See <a href="#/guides/projects">Projects, organizations, and teams</a>.</p>
+
+<h2>When it doesn't work</h2>
+<table>
+<tr><th>What you see</th><th>What it means</th><th>Fix</th></tr>
+<tr><td>No <b>Playground</b> item in the left rail</td><td>Your role does not hold <code>project.playground.read</code>. The rail hides capability-gated tabs rather than showing them broken.</td><td>Ask a project admin for member access.</td></tr>
+<tr><td><i>Playground is not available for viewers</i></td><td>You reached it by link with a viewer role: <i>Viewers can inspect project memory and history, but cannot open or run conversations.</i></td><td>Ask a project admin for member access.</td></tr>
+<tr><td><i>Checking Playground access…</i> that does not finish, or <i>Playground access unavailable</i></td><td>Your role in this project could not be confirmed. It is not a denial.</td><td>Use <b>Try again</b>.</td></tr>
+<tr><td><i>Your role can read this Playground but cannot run conversations.</i></td><td>Read without <code>project.playground.use</code>. The composer and <b>Send</b> are disabled.</td><td>Ask a project admin.</td></tr>
+<tr><td><i>You can keep 5 chats here. Delete one to start another.</i></td><td>The chat cap. <b>+ New chat</b> is disabled and its sub-line reads <i>5 of 5 used</i>.</td><td>Delete a chat from <b>Threads</b>, which needs project admin.</td></tr>
+<tr><td><i>You've used all 30 playground messages for today.</i></td><td>The per-day message cap, counted per UTC day over your messages only.</td><td>Wait for midnight UTC. Your memory and every connected client keep working meanwhile.</td></tr>
+<tr><td><b>Captured · extracting</b> for a while</td><td>Acceptance is already durable; only enrichment is still running. The panel re-checks every few seconds.</td><td>Nothing. It settles into <b>Added to graph · N</b> or <b>Captured — receipt in History</b>, and stops claiming to watch once it has stopped.</td></tr>
+<tr><td><b>Outside this chat's topics — not captured</b></td><td>This chat's <b>Remember only</b> list and the project's allow-list share no term, so the whole turn was refused rather than being widened into keeping everything.</td><td>Add a term both lists carry, or clear one of the two lists.</td></tr>
+<tr><td><b>Capture is off for this chat</b></td><td><b>Rules → Capture → Off</b>. The reply still comes back; nothing is written.</td><td>Switch to <b>Standard</b> and apply, if you wanted the turn kept.</td></tr>
+<tr><td><b>Blocked by your memory rules</b></td><td>A rule denied the item before anything was written. In an example, the same rule is applied to what the preview reports.</td><td>This is the rule doing its job. Change it in <b>Settings → Memory extraction</b>.</td></tr>
+<tr><td><i>Your memory rules could not be read, so nothing was captured</i></td><td>The rules store was unreadable for that turn, so capture failed closed rather than guessing. The reply was still returned.</td><td>Send it again. Nothing was stored under the wrong policy.</td></tr>
+<tr><td><i>Only a project admin can change chat policy.</i> / <i>Only a project admin can delete Playground chats.</i></td><td>You hold read and use, but not <code>policy.edit</code> or <code>delete</code>.</td><td>Ask a project admin. You can still read the policy in force.</td></tr>
+<tr><td><i>Could not load your chats. Try again in a moment.</i></td><td>The chat list did not load, or the project was switched mid-request.</td><td>Reload the view. Switching project resets the Playground to that project's chats.</td></tr>
+</table>
+
+${nextSteps([
+	["#/guides/rules", "Control what gets remembered", "The project rules a chat's panel can narrow but never widen."],
+	["#/concepts/receipts", "Receipts & rules", "What the receipt behind a captured turn actually records."],
+	["#/quickstart", "Quickstart", "The same save and recall from a terminal, with an API key."],
+	["#/guides/projects", "Projects, organizations, and teams", "Roles, and what each one may do in a project."],
+])}
+` };
+
+PAGES["/guides/lifecycle"] = { title: "Archive, transfer & delete a project", html: `
+<h1>Archive, transfer &amp; delete a project</h1>
+<p class="lede">Take a project out of circulation and bring it back, hand it to a new owner, empty its memory, or remove it permanently — knowing before you press anything which of those you can undo.</p>
+
+${prereq([
+	`A project you can administer. <b>Archive</b>, <b>Restore</b> and <b>Delete project memory</b> need the project role <code>admin</code> (organization <code>owner</code> and <code>admin</code> hold it implicitly). <b>Transfer</b> and <b>Delete project</b> need the organization <code>owner</code> and are never delegated to a project role — see <a href="#/guides/projects">Projects, organizations, and teams</a>.`,
+	`A signed-in browser session. Every lifecycle route resolves the session directly and accepts no API key, MCP token, or path token. There is no headless equivalent.`,
+	`An export, if you want to keep any of it. None of these operations hands you a copy on the way out — take one first from <a href="#/guides/export">Export and delete your data</a>.`,
+])}
+
+<h2>The four operations</h2>
+<table>
+<tr><th>Operation</th><th>Control</th><th>Who</th><th>Reversible</th></tr>
+<tr><td><b>Archive</b> / <b>Restore</b></td><td><b>Archive</b>, then <b>Restore</b></td><td>Project admin, or organization owner/admin (<code>project.archive</code>)</td><td>Yes. Nothing is deleted.</td></tr>
+<tr><td><b>Transfer ownership</b></td><td><b>Transfer</b></td><td>Organization owner only (<code>project.transfer</code>)</td><td>Governance only. The new owner can transfer it back; no memory moves.</td></tr>
+<tr><td><b>Delete project memory</b></td><td><b>Delete memory…</b></td><td>Project admin, or organization owner/admin (<code>project.memory.delete</code>)</td><td><b>No.</b> Every memory in the project is destroyed.</td></tr>
+<tr><td><b>Delete project</b></td><td><b>Delete project…</b></td><td>Organization owner only (<code>project.delete</code>)</td><td><b>No.</b> The project and its memory are destroyed.</td></tr>
+</table>
+
+<div class="warn"><b>Two of these destroy data and cannot be undone.</b> <b>Delete project memory</b> empties the project's root memory space and every SDK sub-tenant space registered under it — facts, pages, source episodes, vectors, exports and queued work — then hands the empty project back to you, active. <b>Delete project</b> does that and then removes the project itself, leaving a content-free tombstone. Neither is a soft delete, neither is recoverable from the app, and revision history goes with the objects. Archive is the reversible option, and it is the one to reach for when you are not certain.</div>
+
+<h2>Where the controls live</h2>
+<p>All five controls sit in one place: the left rail's <b>Settings</b>, then <b>Project → General</b>, at the bottom of the page. That section is headed <i>"Everything under this project — memory, keys, rules, requests, exports and webhooks — is isolated from every other project."</i> and the lifecycle controls follow it in a bordered danger zone.</p>
+<p>The danger zone always acts on the project named in the project switcher in the top header, not on some project you pick inside the dialog. Select the right project first. Its id, which you need for the API, is under <b>Technical details → Project ID</b> in the same section.</p>
+<div class="note"><b>The default project is protected.</b> It carries the account's root memory identity, so it cannot be archived, transferred, or deleted — those buttons stay disabled with the tooltip <i>"The default project cannot be deleted."</i> You can still empty its memory with <b>Delete memory…</b>.</div>
+
+<h2>Archive, and restore later</h2>
+<ol class="steps">
+<li><b>Open Settings → Project → General.</b><p>Scroll to the danger zone. The first row reads <b>Archive project</b>: <i>"Reversible. Fences all writes and API activity, cancels in-flight processing, preserves every memory. Restore from Settings at any time."</i></p></li>
+<li><b>Press Archive.</b><p>There is no dialog and no typed confirmation — the operation is reversible, so it starts on one click. A toast reads <i>"Archive project: accepted. Progress shows below."</i></p></li>
+<li><b>Watch the progress row that appears above.</b><p>It reads <b>Archive project — accepted</b>, then <b>running</b>, with a line like <i>"Phase: cancel_work. 2/4 memory spaces."</i> The page re-reads lifecycle state every four seconds while Settings is open.</p></li>
+<li><b>Confirm the project has left circulation.</b><p>When the run reaches <b>completed</b>, the project is gone from the project switcher and from ordinary listings. Its memory is untouched; keys, members, rules and settings are untouched.</p></li>
+<li><b>Restore it from any project's Settings.</b><p>Because an archived project is not selectable, restore does not start from it. Open <b>Settings → Project → General</b> in any project you can administer: a warning-coloured row appears above the danger zone reading <b>Restore “Atlas”</b> — <i>"Archived project. Restoring re-enables it with a fresh lifecycle epoch; stale pre-archive work stays cancelled."</i> Press <b>Restore</b>. The toast reads <i>"Restore accepted. The project returns to the selector when it completes."</i></p></li>
+</ol>
+<div class="note"><b>Work that was in flight does not resume.</b> Archiving settles every accepted save in the project as terminal: the job becomes <code>failed</code> with the error line <i>"cancelled_by_archive: a project lifecycle operation fenced this work"</i>. Restoring re-enables the project with a new lifecycle epoch; it does not replay those saves. If the content mattered, write it again after the restore completes.</div>
+
+<h2>Transfer ownership</h2>
+<p>Transfer moves governance to another member of the same organization. It is the only lifecycle operation that changes nothing about stored memory: the storage owner, every registered memory-space id, and every object and vector id are proved unchanged as a postcondition of the same transaction that swaps the owner.</p>
+<ol class="steps">
+<li><b>Seat the recipient first.</b><p>The new owner must already be an active member of this project's organization. Add them from <b>Settings → Organization → Members &amp; invitations</b>; the picker on this screen only lists existing organization members.</p></li>
+<li><b>In the danger zone, open the New owner select.</b><p>The row is headed <b>Transfer ownership</b> — <i>"Moves governance to another member of this organization. Storage, memory-space and vector identities never change. You keep admin access."</i> The select starts on <b>Choose a member…</b>.</p></li>
+<li><b>Choose the member, then press Transfer.</b><p>On success the toast reads <i>"Ownership transferred. You keep admin access."</i> and the page reloads its scope. The former owner is seated as project <code>admin</code> in the same batch, so there is never an instant with no owner and never one where you lose access to what you just handed over.</p></li>
+</ol>
+<p>Transfer is refused for the default project, for a project that is not active (restore it first), and when the recipient already owns an active project with this name — rename one of them and try again.</p>
+
+<h2>Delete the memory, or the project</h2>
+<p>Both destructive operations use the same three-part flow: preview, type the project's name, execute. The preview is content-free — it counts, it never returns memory text — and it mints a single-use confirmation that expires after ten minutes.</p>
+<ol class="steps">
+<li><b>Export first if you want a copy.</b><p><b>Settings → Personal → Profile &amp; security → Data &amp; Privacy → Export current memory space</b> saves one space; the <b>Memory exports</b> screen queues a job. Neither covers every sub-tenant space in one file, so export each space you care about. After the purge there is nothing left to export.</p></li>
+<li><b>In the danger zone, press Delete memory… or Delete project….</b><p><b>Delete project memory</b> reads <i>"Deletes every memory in this project — the root space and every SDK subtenant, including sources, vectors, exports and queued work — then returns the empty project to active. Settings, members and keys survive. Irreversible."</i> <b>Delete project</b> reads <i>"Permanently deletes the project: all memory, keys, members and settings. A content-free tombstone remains. This cannot be undone."</i> Pressing either runs the preview only — nothing is deleted yet.</p></li>
+<li><b>Read the count line that appears.</b><p>A confirmation row opens under the button with the inventory the server just measured, across every memory space it discovered:</p>
+${outputBlock(`4 memory space(s): 812 facts, 30 pages, 419 source episodes, 2 exports, 1 jobs still processing.`, "What the confirmation row shows")}
+<p>If that number of memory spaces is larger than you expected, stop: every sub-tenant space created by a <code>userId</code> on a write counts, and all of them are in scope.</p></li>
+<li><b>Type the project's name.</b><p>The field is placeheld <i>"Type Atlas to confirm"</i>. The red button stays disabled until what you typed equals the project name exactly — trimmed, case-sensitive. <b>Cancel</b> discards the confirmation without touching anything.</p></li>
+<li><b>Press the red button.</b><p>It is labelled <b>Delete project memory</b> or <b>Delete project</b>. The toast reads <i>"Delete project memory: accepted. Progress shows below."</i> Accepted is not finished — see the next section.</p></li>
+</ol>
+<div class="warn"><b>Acceptance fences the project immediately.</b> Before the call answers, the project is flipped out of service and its lifecycle epoch advances, so no writer, queue, or connected client can add anything behind the deletion. From that instant the operation must converge; there is no state where the project reopens still holding half its memory. Accepted work that had not committed is cancelled — a job settles as <code>failed</code> with <i>"cancelled_by_delete: a project lifecycle operation fenced this work"</i> — and retrying it does not bring the content back, because the erasure barrier applies to the original work. Write it again as new work instead.</div>
+
+<h2>Follow a run to completion</h2>
+<p>A destructive run is durable and checkpointed. The HTTP call performs only the fence; the rest runs in bounded slices driven by the page's polling and by a scheduled sweep, so closing the browser does not stall it. At most one non-terminal run exists per project.</p>
+<p>The progress row in Settings reports the action, the status, the phase, spaces completed, and rows removed:</p>
+${outputBlock(`Delete project memory — running
+Phase: spaces. 2/4 memory spaces. 1180 rows removed.`, "Progress row")}
+<table>
+<tr><th>Status</th><th>What it means</th></tr>
+<tr><td><code>accepted</code></td><td>The run exists and the fence is applied. Still cancellable, but only until it moves.</td></tr>
+<tr><td><code>running</code></td><td>Working through the phases below.</td></tr>
+<tr><td><code>verifying</code></td><td>Re-counting what is left. This status can return to <code>running</code> if the scan finds residue.</td></tr>
+<tr><td><code>failed_retryable</code></td><td>A step did not settle. The run keeps its place; press <b>Retry</b>, or wait for the scheduled sweep to resume it.</td></tr>
+<tr><td><code>completed</code></td><td>Finished, after a residual scan proved every space empty.</td></tr>
+<tr><td><code>failed_terminal</code></td><td>Fenced under a superseded epoch, or the project vanished. Start again from preview.</td></tr>
+<tr><td><code>cancelled</code></td><td>Withdrawn before any work started.</td></tr>
+</table>
+<table>
+<tr><th>Action</th><th>Phases, in order</th></tr>
+<tr><td><code>archive</code></td><td><code>pending</code> (fence) → <code>inventory</code> → <code>cancel_work</code> → <code>verify</code> → <code>done</code></td></tr>
+<tr><td><code>restore</code></td><td><code>pending</code> → <code>inventory</code> → <code>quiesce_stale</code> → <code>reactivate</code> → <code>done</code></td></tr>
+<tr><td><code>memory_purge</code></td><td><code>pending</code> → <code>inventory</code> → <code>spaces</code> → <code>verify</code> → <code>reopen</code> → <code>done</code></td></tr>
+<tr><td><code>project_delete</code></td><td><code>pending</code> → <code>inventory</code> → <code>spaces</code> → <code>verify</code> → <code>control_plane</code> → <code>tombstone</code> → <code>done</code></td></tr>
+</table>
+<p>Inside <code>spaces</code>, each memory space is taken through cancel, vectors, erase, sweep, and a residual re-count, one space at a time. A space that has not reached zero goes round again rather than being passed over, which is why <code>verifying</code> sometimes drops back to <code>running</code>. <code>reopen</code> is the step that returns a purged project to active; <code>control_plane</code> is the step that revokes and removes a deleted project's keys, connections, authorizations, members, categories and retention policies; <code>tombstone</code> is the last one, and only reached after every space was proven empty.</p>
+<p>Cancelling is possible only before the run moves off <code>pending</code>. After that the answer is <code>cancel_unsafe</code> — <i>"This operation has already started and cannot be cancelled; let it converge or retry it."</i> A half-purged project is never silently reopened.</p>
+
+<h2>What survives each operation</h2>
+<table>
+<tr><th>Operation</th><th>Destroys</th><th>Keeps</th></tr>
+<tr><td>Archive / Restore</td><td>Nothing. Accepted-but-uncommitted work is settled as cancelled.</td><td>All memory, keys, members, rules, categories, retention, audit.</td></tr>
+<tr><td>Transfer</td><td>Nothing.</td><td>Everything, including every memory-space, object and vector id. The previous owner keeps project <code>admin</code>.</td></tr>
+<tr><td>Delete project memory</td><td>Every memory object, detail, event, edge, suggestion and conversation page in every space of the project, with their revision history, search index entries, vectors, source episodes, exports and queued work.</td><td>The project, its settings, members, keys, rules and categories. Lifecycle run records and the audit trail.</td></tr>
+<tr><td>Delete project</td><td>All of the above, then the project's keys and connections, OAuth authorizations, member seats, categories and retention policies.</td><td>A content-free project tombstone and the audit trail. The project id is never reused and never resolves again.</td></tr>
+</table>
+<p>What is kept in the destructive cases is bookkeeping, not content: run records, counts, timestamps and audit entries. That trail is what lets a later preview answer "nothing left" honestly.</p>
+
+<h2>Doing it from the API</h2>
+<p>These are the routes the app itself calls. All five require a signed-in session and refuse API keys; <code>projectId</code> may travel in the body or as the <code>x-itsuki-project</code> header.</p>
+
+<p><b>Read state, restorable projects, and the active run.</b> Polling this route also nudges an idle run forward, so a status check is never a passive wait:</p>
+${codeBlock(`GET ${ORIGIN}/v1/settings/lifecycle?projectId=proj_atlas`, "request")}
+${outputBlock(`{
+  "ok": true,
+  "project": {
+    "id": "proj_atlas", "name": "Atlas", "is_default": false,
+    "status": "archived", "lifecycle_state": "purging_memory",
+    "lifecycle_epoch": 7, "revision": "prv1.7c4f…", "deleted": false
+  },
+  "membership": { "org_role": "owner", "project_role": "admin" },
+  "capabilities": { "memory_purge": false, "project_delete": false, "archive": false, "restore": false },
+  "transfer_allowed": false,
+  "active_run": {
+    "id": "lrun_9f2c…", "action": "memory_purge", "status": "running", "phase": "spaces",
+    "lifecycle_epoch": 7, "attempts": 14, "error_code": null,
+    "counts": { "memory_spaces": 4, "spaces_completed": 2, "deleted": 1180, "vectors_deleted": 812, "jobs_cancelled": 1 },
+    "completed_at": null
+  },
+  "recent_runs": [],
+  "restorable_projects": []
+}`, "Run status")}
+<p>Every entry in <code>capabilities</code> answers "could I start this action right now", so it goes false while a run holds the project — that is state, not a permission change.</p>
+
+<p><b>Preview.</b> Required for the two destructive actions, and harmless for the other two:</p>
+${codeBlock(`POST ${ORIGIN}/v1/settings/lifecycle/preview
+{ "projectId": "proj_atlas", "action": "memory_purge" }`, "request")}
+${outputBlock(`{
+  "ok": true,
+  "preview": {
+    "action": "memory_purge",
+    "project": { "id": "proj_atlas", "name": "Atlas", "revision": "prv1.7c4f…",
+                 "lifecycle_state": "active", "lifecycle_epoch": 6 },
+    "memory_spaces": 4,
+    "counts": { "nodes": 812, "pages": 30, "source_episodes": 419,
+                "source_packets": 512, "pending_jobs": 1, "exports": 2, "webhooks": 1 },
+    "inventory_hash": "9f2c1d4a…",
+    "confirmation": { "token": "lcf_8s2e….b71f…", "expires_at": 1786144705593 },
+    "confirmation_text": "PURGE MEMORY"
+  }
+}`)}
+<div class="note"><b>Do not send <code>confirmation_text</code> as the confirmation.</b> It is a fixed per-action string (<code>PURGE MEMORY</code> or <code>DELETE PROJECT</code>) that a caller may display. What the execute door actually checks is <code>confirmName</code> against the project's exact name, which is why the app asks you to type <i>Atlas</i>.</div>
+
+<p><b>Execute.</b> Answers <code>202</code> — accepted and fenced, never "deleted":</p>
+${codeBlock(`POST ${ORIGIN}/v1/settings/lifecycle/execute
+{
+  "projectId": "proj_atlas",
+  "action": "memory_purge",
+  "token": "lcf_8s2e….b71f…",
+  "confirmName": "Atlas",
+  "idempotencyKey": "purge-atlas-2026-08-27"
+}`, "request")}
+${outputBlock(`{
+  "ok": true,
+  "replayed": false,
+  "run": {
+    "id": "lrun_9f2c…", "project_id": "proj_atlas", "action": "memory_purge",
+    "status": "running", "phase": "inventory", "lifecycle_epoch": 7,
+    "attempts": 1, "error_code": null, "completed_at": null
+  }
+}`, "202 Accepted")}
+<p><code>idempotencyKey</code> is 8 to 120 characters and required. Replaying the same key returns the same run with <code>replayed: true</code> and a <code>200</code>, even after it finished; a different key against a live run is a stable <code>409</code>. Retrying a timed-out execute is therefore safe.</p>
+
+<p><b>Retry and cancel</b> take the run id from the status route. Retry re-drives a <code>failed_retryable</code> run in place; cancel withdraws a run that has not started:</p>
+${codeBlock(`POST ${ORIGIN}/v1/settings/lifecycle/retry
+{ "projectId": "proj_atlas", "runId": "lrun_9f2c…" }
+
+POST ${ORIGIN}/v1/settings/lifecycle/cancel
+{ "projectId": "proj_atlas", "runId": "lrun_9f2c…" }`, "request")}
+${outputBlock(`{ "ok": true, "retried": true, "run": { "id": "lrun_9f2c…", "status": "running", "phase": "spaces", "error_code": null } }
+
+{ "error": "cancel_unsafe", "code": "cancel_unsafe",
+  "message": "This operation has already started and cannot be cancelled; let it converge or retry it." }`)}
+
+<p><b>Transfer</b> is not a run. It is one audited transaction, and it needs the project revision you last read as its precondition — in the body as <code>expectedRevision</code>, or as an <code>If-Match</code> header:</p>
+${codeBlock(`POST ${ORIGIN}/v1/settings/lifecycle/transfer
+{
+  "projectId": "proj_atlas",
+  "recipientUserId": "user_5b1e…",
+  "expectedRevision": "prv1.7c4f…"
+}`, "request")}
+${outputBlock(`{
+  "ok": true,
+  "project": {
+    "id": "proj_atlas", "name": "Atlas",
+    "owner_user_id": "user_5b1e…", "organization_id": "org_2ad9…",
+    "memory_owner_user_id": "user_0c77…", "lifecycle_epoch": 8, "revision": "prv1.b1e0…"
+  },
+  "previous_owner_role": "admin"
+}`)}
+<p><code>memory_owner_user_id</code> in that response is the same value it held before the transfer. That is the point: nothing stored moves, so no key, link, or saved id changes meaning.</p>
+
+<h2>Retention: how long the rest is kept</h2>
+<p>The operations above are on-demand. If you would rather have data expire on a clock, that is a separate screen: <b>Settings → Project → Retention</b>, headed <i>"Separate, versioned lifetimes for each storage class. Every project defaults to keeping data until explicitly deleted."</i> Viewing and changing it are both project-admin level.</p>
+<table>
+<tr><th>Data class</th><th>Default</th><th>Can be shortened</th></tr>
+<tr><td>Playground transcripts</td><td>Keep until deleted</td><td>Yes</td></tr>
+<tr><td>Scrubbed source episodes</td><td>Keep until deleted</td><td>Yes</td></tr>
+<tr><td>Semantic memory</td><td>Keep until deleted</td><td>Yes</td></tr>
+<tr><td>Completed export blobs</td><td>Keep until deleted</td><td>Yes — the blob is scrubbed, the row survives</td></tr>
+<tr><td>Webhook deliveries</td><td>Keep until deleted</td><td>Yes</td></tr>
+<tr><td>Operational receipts and jobs</td><td>Keep until deleted</td><td>Yes</td></tr>
+<tr><td>Security and audit events</td><td>Keep until deleted</td><td>No. The row shows <i>"Governed separately"</i> and has no <b>Change</b> button.</td></tr>
+</table>
+<p>To change one: press <b>Change</b> on its row, pick a lifetime in the <b>Keep data</b> select (<i>Until deleted</i>, 30, 90, 180, 365 days, or <b>Custom</b> between 1 and 3650 whole days), then <b>Preview change</b>. The preview is count-only — it reports how many items currently match, broken down by storage lane, and expires after ten minutes. <b>Shortening</b> a lifetime then asks you to type <code>APPLY RETENTION</code> before <b>Apply policy</b> is enabled; lengthening does not. Applying installs a fence that only ever moves forward, so a late write cannot land behind an expiry you already applied.</p>
+<p>Expiry deletes the objects and their revision history the same way an explicit delete does. Progress appears in the same screen under <b>Deletion runs</b>, with <b>Process next batch</b> or <b>Retry now</b> on a run that is waiting; those rows carry counts and lane names only, never memory content.</p>
+
+<h2>When it doesn't work</h2>
+<table>
+<tr><th>What you see</th><th>What it means</th><th>Fix</th></tr>
+<tr><td><i>"Lifecycle controls are unavailable right now. Reload Settings to try again."</i></td><td>The lifecycle probe did not answer, so the destructive controls stay honestly disabled rather than guessing.</td><td>Reload Settings.</td></tr>
+<tr><td>Tooltip <i>"You need project admin access."</i></td><td>You lack <code>project.archive</code> or <code>project.memory.delete</code>.</td><td>Ask a project admin or an organization owner/admin.</td></tr>
+<tr><td>Tooltip <i>"Only the organization owner can delete a project."</i> or <i>"…can transfer an active, non-default project."</i></td><td><code>project.delete</code> and <code>project.transfer</code> belong to the organization owner alone.</td><td>Have the owner do it, or have them transfer the project to you first.</td></tr>
+<tr><td>Tooltip <i>"The project is not active."</i></td><td>Archive cannot start on a project that is already archived or mid-operation.</td><td>Restore it, or wait for the run to finish.</td></tr>
+<tr><td>The red confirm button stays disabled</td><td>What you typed does not equal the project name. The match is exact and case-sensitive after trimming.</td><td>Copy the name from the <b>Project name</b> field above the danger zone.</td></tr>
+<tr><td><code>409 lifecycle_run_active</code></td><td>A project may hold only one non-terminal run.</td><td>Follow the run to completion, or cancel it while it is still <code>accepted</code>.</td></tr>
+<tr><td><code>409 confirmation_expired</code> / <code>confirmation_replayed</code></td><td>The confirmation is single-use and lives ten minutes.</td><td>Preview again.</td></tr>
+<tr><td><code>409 stale_confirmation</code></td><td>The project changed after you previewed it, so the counts you approved no longer describe it.</td><td>Preview again and re-read the numbers.</td></tr>
+<tr><td><code>400 confirmation_name_mismatch</code> — <i>"Type the project's exact name to confirm."</i></td><td><code>confirmName</code> was missing or wrong.</td><td>Send the project's <code>name</code> exactly as the preview returned it.</td></tr>
+<tr><td><code>409 default_project_protected</code></td><td>Archive, transfer and delete are refused for the default project.</td><td>Purge its memory instead, or move the work to a created project.</td></tr>
+<tr><td>Run sits at <code>failed_retryable</code> with <code>residual_not_converging</code> or <code>vector_deletion_unverified</code></td><td>A space or its vectors had not reached zero within the check budget. Nothing is lost and nothing is half-open.</td><td>Press <b>Retry</b>. The scheduled sweep also resumes it on its own.</td></tr>
+<tr><td>Run carries <code>error_code: "attempt_budget_exhausted"</code></td><td>The run used its full attempt budget without converging.</td><td>Press <b>Retry</b>; if it recurs, quote the run id.</td></tr>
+<tr><td><code>412 project_conflict</code> on transfer — <i>"This project changed in another session."</i></td><td>The revision you sent is not the current one.</td><td>Reload Settings, then transfer again.</td></tr>
+<tr><td><code>409 invalid_recipient</code></td><td>The new owner is not an active member of this project's organization, or is the current owner.</td><td>Seat them from <b>Organization → Members &amp; invitations</b> first.</td></tr>
+<tr><td><code>410 project_deleted</code></td><td>Only a tombstone remains under that id.</td><td>Nothing to do — the id will never resolve again.</td></tr>
+</table>
+
+${nextSteps([
+	[`#/guides/export`, `Export and delete your data`, `Take a copy first, and the per-object and per-space deletion routes.`],
+	[`#/guides/projects`, `Projects, organizations, and teams`, `The role and capability table these permissions come from.`],
+	[`#/concepts/delete`, `Delete & erasure`, `What an erasure barrier is, and why a cancelled save must not be retried.`],
+	[`#/guides/versions`, `Corrections, history, and rollback`, `The reversible way to change one memory instead.`],
+])}
+` };
+
+PAGES["/concepts/conversation-pages"] = { title: "Conversation pages", html: `
+<h1>Conversation pages</h1>
+<p class="lede">Read a conversation page, keep every re-send of one thread on a single page instead of a pile of near-duplicates, and correct one without losing what it said before.</p>
+
+<p>A conversation page is a rendered Markdown document about one conversation. A memory is an extracted fact with a label, a category, and edges to other facts. Both can come out of the same batch of messages, and they answer different questions: the graph answers <i>what is true</i>, a page answers <i>what was said, and when</i>.</p>
+
+${prereq([
+	`An API key with <code>memory:write</code> to create pages and <code>memory:read</code> to read them back — see <a href="#/api/auth">Authentication &amp; keys</a>.`,
+	`A save through a conversation door: the MCP tool <code>save_conversation</code>, or <code>POST /v1/save</code> with <code>mode: "conversation"</code>. Nothing else writes a page — see <a href="#/api/save">POST /v1/save</a>.`,
+	`In the app, <b>Settings → Memory extraction → Conversation pages</b> left on <b>Auto — build Conversation pages</b>. The other option, <b>Graph only — never build Conversation pages</b>, turns the lane off for the whole project.`,
+	`Editing a page needs <code>memory:write</code> plus the <code>project.memory.write</code> capability. A project viewer can read a page but not correct one.`,
+])}
+
+<h2>Three durable representations, not one</h2>
+<p>An accepted batch of messages can produce three different kinds of durable record. They have separate lifecycles, separate storage, and separate deletion behaviour.</p>
+<table>
+<tr><th>Record</th><th>Id</th><th>Granularity</th><th>When it is written</th></tr>
+<tr><td>Conversation page</td><td><code>page_…</code></td><td>One per conversation</td><td>At the conversation door, as a provisional body; finished in the background from the extraction verdict</td></tr>
+<tr><td>Memory, detail, event, edge</td><td><code>node_…</code>, <code>slice_…</code>, <code>event_…</code>, <code>edge_…</code></td><td>One per fact</td><td>By extraction, after the gates approve each one</td></tr>
+<tr><td>Source episode</td><td>internal</td><td>One per message</td><td>At accept time, before any model call runs</td></tr>
+</table>
+<p>Only the graph write is fenced by the extraction commit. A page is staged and finalized on its own job, so an extraction that declines to promote anything still leaves you a page, and a page problem never fails an accepted save.</p>
+
+<h2>When a page is created — and when it is not</h2>
+<table>
+<tr><th>Door</th><th>Creates a page?</th></tr>
+<tr><td>MCP <code>save_conversation</code></td><td>Yes. Page <code>source_mode</code> is <code>mcp_save</code>.</td></tr>
+<tr><td><code>POST /v1/save</code> with <code>mode: "conversation"</code></td><td>Yes. Page <code>source_mode</code> is <code>conversation_collect</code>.</td></tr>
+<tr><td><code>POST /v1/save</code> without that mode (a direct save)</td><td>No.</td></tr>
+<tr><td><code>POST /v1/ingest</code></td><td>No. Background capture writes the graph and source episodes only.</td></tr>
+<tr><td><code>POST /v1/turn</code></td><td>No. Its capture half runs the ingest lane.</td></tr>
+</table>
+<p>On a REST conversation save the page is reported in its own field on the <code>200</code>, not inside <code>counts</code>:</p>
+${outputBlock(`{
+  "ok": true,
+  "command_mode": "conversation_collect",
+  "source": "save_conversation",
+  "received": true,
+  "job_id": "job_7b2e…",
+  "source_packet_id": "sp_c41d…",
+  "conversation_page": { "id": "page_2a55d1…", "status": "staged", "advance": false }
+}`, "Response (abridged)")}
+<p><code>advance: false</code> means this batch created the page; <code>advance: true</code> means it moved an existing one forward. On an idempotent replay the object carries <code>"replayed": true</code> and the page's current <code>enrich_status</code> instead of <code>staged</code>. The MCP tool reports the same thing as <code>page_id</code>, alongside <code>title</code>, <code>staged_facts</code>, <code>job_id</code> and <code>job_status</code>.</p>
+
+<p>When no page is written, the field says so rather than going missing:</p>
+<table>
+<tr><th>Value</th><th>What happened</th></tr>
+<tr><td><code>{"skipped": "pages_off_by_rule"}</code></td><td>The project rule is set to <b>Graph only — never build Conversation pages</b>.</td></tr>
+<tr><td><code>{"skipped": "nothing_durable"}</code></td><td>After scrubbing and the project's topic rules, no user line survived. A bare "save this" is not content.</td></tr>
+<tr><td><code>{"skipped": "conversation_page_archived"}</code> · <code>"conversation_page_suppressed"</code></td><td>The page for this conversation was archived, or the conversation was deleted and its identity suppressed. Extraction still runs.</td></tr>
+<tr><td><code>{"skipped": "conversation_page_advance_limit"}</code></td><td>The page already has 200 linked batches. Start a new conversation id.</td></tr>
+<tr><td><code>{"skipped": "queue_full"}</code></td><td>Your memory queue is at its ceiling of active jobs.</td></tr>
+<tr><td><code>{"error": "conversation_page_staging_failed"}</code></td><td>The page half raised. The save itself was still accepted — the receipt and the graph write are unaffected.</td></tr>
+</table>
+
+<h2>How conversationId converges re-sends</h2>
+<p>A stable conversation id converges to <b>one live page per account, project and conversation</b>. The convergence key is <code>conversationId</code>, or <code>threadId</code> when you send no <code>conversationId</code>, capped at 200 characters. Send neither and every batch legitimately makes its own page.</p>
+<p>Send more of the same conversation later and the page is not duplicated and not overwritten. The batch is appended as a dated section headed <code>## Update — Aug 19, 2026</code>, and the page's <code>revision</code> moves forward. That is the same forward-only revision machinery every editable object uses, so an advance participates in history and can be rolled back like any other change. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</p>
+<div class="note"><b>Convergence is enforced by a unique index, not by a check-then-write.</b> Two batches of the same conversation racing each other cannot both create a page — the loser re-reads whoever won and advances that page instead. The same reasoning covers the link table that records which batches a page was built from: a replayed link is a no-op, never a second row.</div>
+<p>Three independent mechanisms sit under that behaviour, which is why re-sending an overlapping batch is safe rather than merely tolerated:</p>
+<table>
+<tr><th>Layer</th><th>Effect</th></tr>
+<tr><td>Packet identity</td><td><code>conversationId</code> is part of the content hash and the derived idempotency key. Re-sending an identical batch returns the original receipt and starts no second job.</td></tr>
+<tr><td>Context identity</td><td>The conversation is the primary identity for per-context state, so the same conversation always lands in the same de-duplication universe.</td></tr>
+<tr><td>Per-message identity</td><td>A message already processed for that context is skipped. Callers that omit message ids get a deterministic id derived from the conversation id and the line, so the same line re-sent resolves to the same id.</td></tr>
+</table>
+<p>Two bounds are worth designing around. A page accepts at most <b>200</b> linked batches. Its rendered body is capped at <b>24,000</b> characters; when an advance would exceed that, the <b>oldest</b> update sections are trimmed first and a line is written into the document recording how many were removed. The newest material is never the thing that gets dropped.</p>
+
+<h2>What a page carries</h2>
+<table>
+<tr><th>Field</th><th>What it holds</th><th>Where you can see it</th></tr>
+<tr><td><code>title</code></td><td>Provisionally the top entity plus the date, as in <i>Deploy runbook — Aug 12, 2026</i>. On finalize a single small model pass proposes a better one, falling back to the deterministic form. An advance keeps the existing title.</td><td>List, get, recall, the workspace row</td></tr>
+<tr><td><code>canonical_title</code></td><td>The normalized form used for identity matching.</td><td><code>GET /v1/memories/&lt;id&gt;</code></td></tr>
+<tr><td><code>short_summary</code></td><td>The first kept fact line, clamped to 200 characters. Surfaced as <code>summary</code> in list results.</td><td>List, get, recall, the recall context line</td></tr>
+<tr><td><code>full_markdown</code></td><td>The document: a heading, a provenance line, then <code>## Facts</code>, <code>## Relationships</code>, and any <code>## Update — …</code> sections. Returned capped at 20,000 characters, with <code>full_markdown_truncated: true</code> when it was cut.</td><td><code>GET /v1/memories/&lt;id&gt;</code>, the source <b>Content</b> tab</td></tr>
+<tr><td><code>key_points</code>, <code>related_concepts</code></td><td>Arrays recall reads, up to 6 and 8 entries. They are <b>empty on conversation-door pages</b> — the digest lane that filled them is retired from the public surface.</td><td>The <code>pages</code> array of a recall response only</td></tr>
+<tr><td><code>topic_filter</code></td><td>Exposed as <code>category</code>, defaulting to <code>interest</code>.</td><td>List, get, recall</td></tr>
+<tr><td><code>source_conversation_id</code></td><td>The conversation id the batch carried.</td><td><code>GET /v1/memories/&lt;id&gt;</code></td></tr>
+<tr><td><code>message_count</code></td><td>Distinct message ids across every linked batch, or <code>null</code> when a linked batch no longer exposes message identity — unknown is recorded as unknown, never guessed.</td><td>Stored; not returned by the memory-object API</td></tr>
+<tr><td><code>enrich_status</code></td><td><code>staged</code> while the follower job runs, <code>enriched</code> once the body is written from the extraction verdict.</td><td>The <b>Sources</b> view's PROCESSING STATE</td></tr>
+<tr><td><code>revision</code></td><td>The concurrency token. Served as a strong <code>ETag</code> of the form <code>"r3"</code>.</td><td>Get, PATCH, history</td></tr>
+</table>
+
+<h2>How a page shows up in recall</h2>
+<p>Pages are ranked in the same fusion as memories, not appended afterwards. They match on title in the exact and alias lane, and on title, summary, key points and related concepts in the keyword lane. A page that survives the cut appears twice in the response: once as a ranked item, once as a hydrated object.</p>
+${outputBlock(`{
+  "ok": true,
+  "recall_mode": "light_recall",
+  "context": "Postgres (system, state: active) - moved to read replicas\\nConversation page: Deploy runbook — Aug 12, 2026 - we cut over on Fridays",
+  "items": [
+    { "type": "node", "id": "node_7c1e…", "label": "Postgres", "category": "system", "score": 0.7412 },
+    { "type": "page", "id": "page_2a55…", "title": "Deploy runbook — Aug 12, 2026", "score": 0.5107 }
+  ]
+}`, "Response (abridged)")}
+<p>Inside <code>context</code>, a page renders as one line: <code>Conversation page: &lt;title&gt; - &lt;short summary&gt;</code>, with up to three key points appended when there are any. Pages have their own ceiling inside the character budget — at most 4 on a targeted query, 5 in update mode, 6 on a broad profile query — so a conversation cannot crowd out the facts. The full Markdown is never placed in the context block; fetch it by id when you want the document. See <a href="#/concepts/retrieval">How recall works</a>.</p>
+
+<h2>Read a page, and correct it</h2>
+<ol class="steps">
+<li><b>List the pages.</b><p>In the app, open <b>Memories</b> in the left rail, then the <b>Type</b> filter and tick <b>Conversation page</b>. You should see rows under the headings MEMORY, SEMANTIC TYPE, SOURCE, STATE and UPDATED, with the page title in the MEMORY cell. From the API, filter the inventory by kind.</p>
+${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
+  "https://itsuki.app/v1/memories?kind=page&limit=20"`, "terminal")}
+${outputBlock(`{
+  "ok": true,
+  "count": 1,
+  "items": [
+    { "id": "page_2a55d1…", "kind": "page", "revision": 4,
+      "label": "Deploy runbook — Aug 12, 2026",
+      "title": "Deploy runbook — Aug 12, 2026",
+      "category": "interest",
+      "summary": "we cut over on Fridays",
+      "project_id": null, "project_name": null,
+      "created_at": 1786144705593, "updated_at": 1786578112004 }
+  ],
+  "next_cursor": null
+}`)}
+</li>
+<li><b>Read the whole document.</b><p>Fetch the page by id. The response carries <code>full_markdown</code> and the revision, both in the body and as a strong <code>ETag</code> — you need that value to write.</p>
+${codeBlock(`curl -i -H "authorization: Bearer $ITSUKI_API_KEY" \\
+  https://itsuki.app/v1/memories/page_2a55d1`, "terminal")}
+${outputBlock(`ETag: "r4"
+
+{ "ok": true, "kind": "page",
+  "memory": {
+    "id": "page_2a55d1", "kind": "page", "revision": 4,
+    "title": "Deploy runbook — Aug 12, 2026",
+    "canonical_title": "deploy runbook aug 12 2026",
+    "category": "interest",
+    "summary": "we cut over on Fridays",
+    "source_conversation_id": "conv-42",
+    "full_markdown": "# Deploy runbook — Aug 12, 2026\\n\\n## Facts\\n- we cut over on Fridays",
+    "archived_at": null, "suppressed_at": null
+  } }`)}
+<p>In the app the document lives under the source, not the memory: switch to the <b>Sources</b> view, select the source, and open its <b>Content</b> tab. You should see the rendered Markdown. A memory-side inspector has no Content tab.</p>
+</li>
+<li><b>Correct it.</b><p>A page has exactly three editable fields: <code>title</code>, <code>short_summary</code>, and <code>full_markdown</code>. Send the revision you read as the precondition and an idempotency key.</p>
+${codeBlock(`curl -X PATCH https://itsuki.app/v1/memories/page_2a55d1 \\
+  -H "authorization: Bearer $ITSUKI_API_KEY" \\
+  -H "content-type: application/json" \\
+  -H 'If-Match: "r4"' \\
+  -d '{
+    "title": "Deploy runbook",
+    "reason": "the date belongs in the body",
+    "idempotencyKey": "fix-runbook-title-01"
+  }'`, "terminal")}
+${outputBlock(`{
+  "ok": true, "id": "page_2a55d1", "kind": "page", "action": "update",
+  "revision": 5, "previous_revision": 4,
+  "projections": { "search": "pending" }
+}`)}
+<p>In the app, select the page row and click <b>Edit</b>. The dialog is headed <b>Edit conversation page</b> and tells you which revision you are working from: <i>"You are editing revision r4. The previous content is kept as history — nothing is overwritten silently."</i> The fields are labelled <b>Title</b>, <b>Short summary</b> and <b>Content (Markdown)</b>, with <b>Reason (optional, kept in history)</b> below them, and the primary button reads <b>Save revision</b>. While the document loads you should see <i>Loading full content…</i> and the save button disabled.</p>
+<p><code>full_markdown</code> is bounded at <b>20,000</b> characters on an edit, below the 24,000 the machine-written body may reach. A page whose body already exceeds 20,000 has to be shortened as part of the correction.</p>
+</li>
+<li><b>Check what changed, and restore if you need to.</b><p>History is a read — anyone who could see the value while it was current can read it as history.</p>
+${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
+  "https://itsuki.app/v1/memories/page_2a55d1/history?limit=20"`, "terminal")}
+${outputBlock(`{
+  "ok": true, "id": "page_2a55d1", "kind": "page",
+  "current_revision": 5, "total_revisions": 5,
+  "revisions": [
+    { "revision": 5, "parent_revision": 4, "action": "update",
+      "snapshot": { "full_markdown": "# Deploy runbook…", "short_summary": "we cut over on Fridays", "title": "Deploy runbook" },
+      "actor": "token", "reason": "the date belongs in the body", "created_at": 1786578112004 }
+  ],
+  "next_cursor": null
+}`)}
+<p>In the app the <b>History</b> tab lists each revision with an action label — <i>edit</i>, <i>captured baseline</i>, <i>automatic change (captured)</i>, or <i>rollback to r&lt;N&gt;</i> — and a <b>Restore</b> button on every non-current one. Confirming reads: <i>"Restore revision r3? The current content stays in history as r5, and the restored content becomes a new revision."</i></p>
+</li>
+</ol>
+
+<div class="warn"><b>Once you edit a page's body, later saves stop rewriting it.</b> Automatic passes are fenced against your own wording: an advance that would replace text you authored records its state and leaves the text alone. Extraction still runs and the facts still land in the graph — only the document stops being regenerated. Roll the page back to machine-written content and regeneration resumes on its own.</div>
+
+<h2>Episodes are not pages</h2>
+<p>Source episodes are the per-message raw text kept at accept time, before any model call, so that a batch extraction declines to promote is still recoverable. They are preservation; a page is presentation; the graph is promotion.</p>
+<ul>
+<li>Only <code>user</code> and <code>assistant</code> messages are preserved. Tool and system output is machinery, not memory.</li>
+<li>They are written after scrubbing and after the project's exclude rules, and they fail closed: if the rules cannot be read, nothing is written.</li>
+<li>Each is capped at 4,000 characters, with at most 40 rows per batch.</li>
+<li>Deleting them is a hard delete, in the same statement that drops their search tokens. A soft-deleted episode would be retained text with a flag on it.</li>
+</ul>
+<p>They are not an API object: they have no id prefix you can fetch, they are not listable through <code>GET /v1/memories</code>, and they cannot be edited or rolled back. The one place they surface is the app — open <b>Memories → Sources</b>, select a source, and read its <b>Evidence</b> tab, which shows the scrubbed episodes in original message order. Recall may also quote one verbatim as a <code>Source evidence [&lt;timestamp&gt;; &lt;role&gt;]: …</code> line when a selected memory has a durable provenance link back to it; the text is re-scrubbed before it is rendered.</p>
+
+<h2>Deleting a page</h2>
+<p>Deleting a page by id removes the page row from every read, hard-deletes its identity rows, its links to the batches it was built from, and its entire revision history. History must never become an undeletable shadow copy, so it goes with the object. The memories extracted from the same conversation are separate objects and are not touched.</p>
+<p>A source-scoped delete behaves differently on purpose: a page whose linked batches are <i>all</i> in scope is deleted, and a page that keeps at least one out-of-scope batch is <b>rebuilt from the survivors</b> rather than removed. Deletion outranks the user-authored fence in that one case — stored wording may quote the deleted source — so the body is replaced and the page's revision history is erased with it. In the app the confirmation for a single page reads: <i>"Delete this conversation page? … This removes it from memory and suppresses re-extraction of the same content."</i> That suppression is why a later save of the same conversation comes back <code>{"skipped": "conversation_page_suppressed"}</code>. See <a href="#/concepts/delete">What delete removes</a>.</p>
+
+<h2>When it doesn't work</h2>
+<table>
+<tr><th>What you see</th><th>What it means</th><th>Fix</th></tr>
+<tr><td>A new page on every save of the same chat</td><td>No <code>conversationId</code> and no <code>threadId</code> was sent, so there was no key to converge on.</td><td>Send a stable <code>conversationId</code>. Each distinct batch without one is a legitimate separate page and cannot be merged after the fact.</td></tr>
+<tr><td>No <code>conversation_page</code> field at all on a <code>200</code></td><td>The save was a direct save, not <code>mode: "conversation"</code>; or it was refused before the page half ran (idempotency conflict, backpressure).</td><td>Check <code>command_mode</code> — a conversation save reports <code>conversation_collect</code>.</td></tr>
+<tr><td><code>{"skipped": "pages_off_by_rule"}</code></td><td>The project is set to build the graph only.</td><td><b>Settings → Memory extraction → Conversation pages</b>, choose <b>Auto — build Conversation pages</b>, then <b>Save changes</b>.</td></tr>
+<tr><td><code>{"skipped": "conversation_page_advance_limit"}</code></td><td>The page holds its maximum of 200 linked batches.</td><td>Move to a new conversation id. The existing page stays readable and correctable.</td></tr>
+<tr><td>An update section is missing, and older ones read <i>"N earlier updates trimmed for size"</i></td><td>The 24,000-character body cap was reached; oldest sections trim first.</td><td>Nothing is lost from the record — the batches remain linked to the page. Start a new conversation id for a long-running thread.</td></tr>
+<tr><td><code>428 precondition_required</code></td><td>The PATCH carried no revision, or an <code>If-Match</code> that was not a revision ETag.</td><td>Re-read the page and send <code>If-Match: "r&lt;revision&gt;"</code> or <code>expectedRevision</code>.</td></tr>
+<tr><td><code>412 stale_revision</code></td><td>A background advance or another editor moved the page first. Your write was <b>not</b> applied.</td><td>Reload, review the newer body, then retry. In the app: <i>"This conversation page changed while you were editing."</i> — your draft is kept, and <b>Load latest for review</b> shows what changed.</td></tr>
+<tr><td><code>400 invalid_field</code></td><td>You sent a field a page does not accept — <code>key_points</code> and <code>related_concepts</code> are not editable.</td><td>Send only <code>title</code>, <code>short_summary</code>, or <code>full_markdown</code>. The error names the allowed set.</td></tr>
+<tr><td><code>404 revision_unavailable</code> on a restore</td><td>That revision was never recorded, or was removed by a delete, a retention pass, or a project purge.</td><td>Restore a revision the history endpoint still lists.</td></tr>
+<tr><td>Later saves no longer change the body</td><td>You edited <code>full_markdown</code> yourself, so the fence pins it against automatic rewriting.</td><td>Expected. Roll back to a machine-written revision to let advances resume.</td></tr>
+<tr><td>A page you edited is refused with <code>409 object_archived</code></td><td>Archived memories leave recall and become read-only.</td><td>Restore it before editing.</td></tr>
+</table>
+
+${nextSteps([
+	["#/api/save", "POST /v1/save", "The conversation door in full, and every field on its response."],
+	["#/api/mcp", "MCP tools", "save_conversation, its arguments, and the page_id it hands back."],
+	["#/guides/versions", "Corrections, history, and rollback", "The revision contract behind every page edit and advance."],
+	["#/concepts/retrieval", "How recall works", "Where pages sit in the ranked, bounded context block."],
 ])}
 ` };
 
