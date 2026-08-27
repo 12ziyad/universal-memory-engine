@@ -3456,7 +3456,7 @@ PAGES["/concepts/scope"] = { title: "Who memory belongs to", html: `
 
 <h2>Project scope, and the thing that surprises people</h2>
 <p>When the Claude Code or Codex plugin captures something while you work in a directory, it tags that memory with a <b>project id</b> derived from the directory path — an opaque hash like <code>local_3f2a…</code>, never the path itself.</p>
-<div class="callout"><b>The rule:</b> memory a plugin saved in a project is reachable from the SDK or REST <b>only when the caller carries that same project scope</b>. It does not automatically become account-global, and a caller that sends no project scope will not see it.</div>
+<div class="note"><b>The rule:</b> memory a plugin saved in a project is reachable from the SDK or REST <b>only when the caller carries that same project scope</b>. It does not automatically become account-global, and a caller that sends no project scope will not see it.</div>
 <p>This is deliberate — the whole value of project scope is that opening one repo does not surface another repo's decisions. But it does mean "I saved it in Claude Code and my script can't find it" is normally a scope question, not a bug.</p>
 <p>To find the project id a directory derives, run the plugin's own diagnostic. It prints the id (never the path):</p>
 ${codeBlock(`# Claude Code plugin — type this in a session
@@ -3536,7 +3536,7 @@ ${codeBlock(`{
   "outcome_reason": "cancelled_by_delete",
   "error": "cancelled_by_delete: a confirmed delete erased this scope while the save was processing"
 }`)}
-<div class="callout"><b>Why <code>failed</code> and not a new status?</b> Because every already-released SDK treats <code>enriched</code>, <code>failed</code> and <code>completed</code> as the complete set of terminal states. Inventing a fourth word would make an older client poll forever on a job that is finished. The state stays in the vocabulary every client knows, and the <i>reason</i> is published as its own field.</div>
+<div class="note"><b>Why <code>failed</code> and not a new status?</b> Because every already-released SDK treats <code>enriched</code>, <code>failed</code> and <code>completed</code> as the complete set of terminal states. Inventing a fourth word would make an older client poll forever on a job that is finished. The state stays in the vocabulary every client knows, and the <i>reason</i> is published as its own field.</div>
 <p><b>Do not retry a cancelled save.</b> It is not a transient error. The barrier applies to the original work, so a retry is cancelled the same way — it just costs you another round trip. If you still want that content stored, write it again as a <b>new</b> save: work submitted <i>after</i> the barrier is ordinary work and lands normally. Erasure clears the past; it does not lock the memory space.</p>
 <p>To separate cancellations from genuine failures:</p>
 ${codeBlock(`GET /v1/jobs?cancelled=true    # only work your own erasure cancelled
