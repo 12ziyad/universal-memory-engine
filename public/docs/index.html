@@ -1812,12 +1812,23 @@ ${nextSteps([
 
 PAGES["/integrations/convex"] = { title: "Convex", html: `
 <h1>Convex</h1>
-<p class="lede">Not an MCP integration — the published <code>itsuki</code> npm SDK running inside your Convex backend. Memory becomes two Convex actions any client or function can call.</p>
-<h2>1. Install</h2>
-${codeBlock(`npm install itsuki convex`)}
-<h2>2. Create an API key</h2>
-<p>In <b>API Keys</b>, create an <b>API key</b> and set it in your Convex deployment environment as <code>ITSUKI_API_KEY</code>. Server-side only — never in client code.</p>
-<h2>3. Write the memory actions</h2>
+<p class="lede">By the end, two Convex actions any client or function can call to save and recall memory, scoped per end user.</p>
+
+${prereq([
+	`A Convex project you can deploy to, and the Convex CLI signed in.`,
+	`An <b>API key</b> from <b>API Keys</b> &rarr; <b>Create API key</b> \u2014 not an MCP link. See <a href="#/api/auth">Authentication &amp; keys</a>.`,
+])}
+
+<div class="note"><b>This is not an MCP integration.</b> It is the published <code>${PRODUCT.pkg}</code> npm SDK running inside your Convex backend, so everything on the <a href="#/sdk/js">JavaScript SDK</a> page applies here unchanged.</div>
+
+<ol class="steps">
+<li><b>Install the packages.</b>
+${codeBlock(`npm install itsuki convex`, "terminal")}</li>
+
+<li><b>Put the key in the deployment environment.</b><p>Server-side only \u2014 never in client code, where anyone can read it.</p>
+${codeBlock(`npx convex env set ITSUKI_API_KEY ${PRODUCT.tokenPrefix}your_key_here`, "terminal")}</li>
+
+<li><b>Write the two actions.</b><p>They must be <code>action</code>, not <code>query</code> or <code>mutation</code>: only actions may make network calls.</p>
 ${codeBlock(`// convex/memory.ts
 import { MemoryClient } from "itsuki";
 import { action } from "./_generated/server";
@@ -1833,17 +1844,56 @@ export const remember = action({
 export const recall = action({
   args: { query: v.string(), userId: v.string() },
   handler: async (_ctx, args) => memory.search(args.query, { userId: args.userId }),
-});`)}
-<p><code>userId</code> scopes each end user to an isolated memory space under your one key — the same sub-tenant model as the <a href="#/sdk/js">JavaScript SDK</a>, because it IS the JavaScript SDK.</p>
-<h2>Verify</h2>
-${codeBlock(`npx convex run memory:remember '{ "content": "Prefers dark mode", "userId": "user_1" }'
-npx convex run memory:recall '{ "query": "preferences", "userId": "user_1" }'`)}
-<p>The first call returns a receipt; the second returns the fact in <code>context</code> after extraction settles.</p>
-<h2>Troubleshooting</h2>
-<ul>
-<li><b>Missing API key</b> — set <code>ITSUKI_API_KEY</code> with <code>npx convex env set</code>, then redeploy.</li>
-<li><b>Recall empty right after save</b> — extraction is asynchronous; allow a few seconds.</li>
-</ul>
+});`, "convex/memory.ts")}</li>
+
+<li><b>Deploy, then save a memory.</b>
+${codeBlock(`npx convex run memory:remember '{ "content": "Prefers dark mode", "userId": "user_1" }'`, "terminal")}
+${outputBlock(`{
+  "ok": true,
+  "summary": "Saved: 1 fact(s) across 1 page.",
+  "source_packet_id": "sp_4c8e2a17",
+  "counts": { "savedTotal": 2, "nodes": 1, "skipped": 0 }
+}`)}</li>
+
+<li><b>Read it back.</b><p>Extraction runs in the background, so allow a few seconds after the save before the fact becomes recallable.</p>
+${codeBlock(`npx convex run memory:recall '{ "query": "preferences", "userId": "user_1" }'`, "terminal")}
+${outputBlock(`{
+  "ok": true,
+  "summary": "Found relevant memory.",
+  "context": "Dark mode - preference",
+  "count": 1,
+  "items": [ { "type": "node", "label": "Dark mode", "category": "preference", "score": 0.79 } ]
+}`)}</li>
+</ol>
+
+<h2>Scoping each end user</h2>
+<p><code>userId</code> gives every end user of your app an isolated memory space under your one key. Nothing saved under one value is reachable from another, on save or on recall. The value is hashed together with your account before it becomes a storage key, so it is yours to choose \u2014 a Convex user id is the obvious one.</p>
+${codeBlock(`export const remember = action({
+  args: { content: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not signed in");
+    return memory.add(args.content, { userId: identity.subject });
+  },
+});`, "convex/memory.ts")}
+<p>Taking the id from <code>ctx.auth</code> rather than from an argument means a client cannot ask for someone else's memory by passing a different string.</p>
+
+<h2>When it doesn't work</h2>
+<table>
+<tr><th>What you see</th><th>Cause</th><th>Fix</th></tr>
+<tr><td><code>401 unauthorized</code></td><td>The key is missing from the deployment, or you set it locally but did not redeploy.</td><td><code>npx convex env set ITSUKI_API_KEY \u2026</code>, then deploy again.</td></tr>
+<tr><td>Recall returns <code>count: 0</code> right after a save</td><td>Extraction is asynchronous.</td><td>Allow a few seconds. If it stays empty, check the receipt \u2014 the save may have found nothing durable to store, which is a normal outcome.</td></tr>
+<tr><td><code>Can't perform network requests</code> from Convex</td><td>The function is a <code>query</code> or <code>mutation</code>.</td><td>Only an <code>action</code> may call out to the network.</td></tr>
+<tr><td><code>400 unknown_parameter</code></td><td>An option name the endpoint does not accept.</td><td>The message names the offending key and suggests the nearest one.</td></tr>
+</table>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/sdk/js", "JavaScript SDK", "Every method these two actions are built from."],
+	["#/api/save", "POST /v1/save", "What memory.add sends, and what comes back."],
+	["#/guides/save", "Save memory", "Conversation capture and what gets kept."],
+	["#/api/auth", "Authentication & keys", "Scoping many end users under one key."],
+])}
 ` };
 
 PAGES["/api/rest"] = { title: "REST API reference", html: `
@@ -2954,7 +3004,7 @@ ${codeBlock(`export ITSUKI_API_KEY=${PRODUCT.tokenPrefix}your_key_here`, "termin
 
 <li><b>Write the script.</b>
 <p>This is the whole first program: save, wait, read back.</p>
-${codeBlock(`import { MemoryClient } from "${PRODUCT.pkg}";
+${codeBlock(`import { MemoryClient } from "itsuki";
 
 const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY });
 
@@ -3476,8 +3526,8 @@ node <plugin-root>/hooks/codex-doctor.mjs`)}
 <p>The first three are the <code>recallScope</code> option in the JavaScript client and <code>recall_scope</code> in Python. There is a fourth, <code>project_bootstrap</code>, sent as a separate <code>recallMode</code> field on <code>POST /v1/recall</code>: a deterministic listing for session start — no similarity search, just this project's most salient and recent memory. Both editor plugins send it when a session opens, because an opening query like "project decisions and conventions" is not something any ranker answers well. Neither SDK exposes it as a typed option today; send it in the request body if you are building your own session-start flow.</p>
 
 <h2>Reaching plugin project memory from your own code</h2>
-${codeBlock(`import { Memory } from "itsuki";
-const memory = new Memory({ apiKey: process.env.ITSUKI_API_KEY });
+${codeBlock(`import { MemoryClient } from "itsuki";
+const memory = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY });
 
 // Carry the project scope the plugin used, or you will not see its memory.
 await memory.recall("deployment decisions", {
