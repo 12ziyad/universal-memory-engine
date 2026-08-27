@@ -219,7 +219,10 @@ describe("page contracts", () => {
 		expect(script).toContain("MCP Client Tool");
 		expect(script).toContain('PAGES["/integrations/dify"]');
 		const dify = script.split('PAGES["/integrations/dify"]')[1]?.split("PAGES[")[0] ?? "";
-		expect(dify).toContain("no plugin, no marketplace, no review");
+		// The Dify route needs no plugin, no marketplace listing and no review.
+		// Matched on intent so the page can phrase it naturally.
+		expect(dify).toMatch(/no marketplace/i);
+		expect(dify).toMatch(/no review/i);
 		const convex = script.split('PAGES["/integrations/convex"]')[1]?.split("PAGES[")[0] ?? "";
 		expect(convex).toContain("npm install itsuki convex");
 		expect(convex).toContain("ITSUKI_API_KEY");

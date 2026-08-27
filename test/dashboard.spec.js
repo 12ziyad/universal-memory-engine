@@ -36,10 +36,13 @@ describe("dashboard script", () => {
 		expect(() => new Function(script)).not.toThrow();
 		expect(docsHtml).toContain("idempotency_key=MemoryClient.new_idempotency_key()");
 		expect(docsHtml).not.toContain("idempotencyKey=MemoryClient.new_idempotency_key()");
-		expect(docsHtml).toContain("packet_status(id)");
-		expect(docsHtml).toContain("packetStatus(id)");
-		expect(docsHtml).toContain("delete_by_source(...)");
-		expect(docsHtml).toContain("deleteBySource(...)");
+		// Assert the methods are documented, not the exact argument text: the
+		// SDK pages now carry full signatures (delete_by_source(source=None,
+		// before=None, after=None, confirm=False)), which is strictly more
+		// useful than the "(...)" these once pinned.
+		for (const method of ["packet_status(", "packetStatus(", "delete_by_source(", "deleteBySource("]) {
+			expect(docsHtml, method).toContain(method);
+		}
 	});
 
 	it("uses procedural graph hulls instead of fixed DOM cluster rectangles", () => {
