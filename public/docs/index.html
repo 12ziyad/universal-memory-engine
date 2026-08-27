@@ -128,6 +128,13 @@
 	.pager a:hover { border-color: var(--clay); }
 	.pager small { display: block; color: var(--faint); font-size: 11.5px; margin-bottom: 4px; }
 	.pager .next { text-align: right; grid-column: 2; }
+	/* A grid item's min-content width is its floor, so a long page title kept
+	   the two-column pager wider than a phone screen. */
+	.pager a { min-width: 0; overflow-wrap: anywhere; }
+	@media (max-width: 560px) {
+		.pager { grid-template-columns: minmax(0, 1fr); }
+		.pager .next { grid-column: 1; text-align: left; }
+	}
 	main .note, main .warn { margin: 18px 0; padding: 13px 16px; border-radius: 10px; font-size: 14px; line-height: 1.65; }
 	main .note { border: 1px solid var(--border2); background: var(--panel2); color: var(--body-text); }
 	main .warn { border: 1px solid var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); color: var(--body-text); }
@@ -212,6 +219,11 @@
 	main .next a:hover { border-color: var(--clay); }
 	main .next a small { display: block; margin-top: 3px; color: var(--faint);
 		font-weight: 400; font-size: 12.5px; line-height: 1.5; }
+	/* A table cannot shrink below its min-content width, so on a narrow
+	   screen it pushes the whole page sideways. Give it its own scroll
+	   container instead - the page body must never scroll horizontally. */
+	.table-scroll { overflow-x: auto; margin: 14px 0; }
+	.table-scroll table { margin: 0; width: auto; min-width: 100%; }
 	table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; background: color-mix(in srgb, var(--panel) 72%, transparent); }
 	th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
 		color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel2) 72%, transparent); }
@@ -6950,6 +6962,14 @@ function render() {
 		+ `<div class="pager">${link(order[at - 1], "prev")}${link(order[at + 1], "next")}</div>`;
 
 	document.title = route === "/" ? `${PRODUCT.name} Docs` : `${page.title} · ${PRODUCT.name} Docs`;
+
+	main.querySelectorAll("table").forEach((table) => {
+		if (table.parentElement?.classList.contains("table-scroll")) return;
+		const wrap = document.createElement("div");
+		wrap.className = "table-scroll";
+		table.replaceWith(wrap);
+		wrap.appendChild(table);
+	});
 
 	renderNav(route);
 	buildToc(main);
