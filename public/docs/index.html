@@ -353,8 +353,8 @@ const NAV = [
 		["/guides/versions", "Corrections & rollback"],
 		["/guides/playground", "Playground"],
 		["/guides/projects", "Projects & teams"],
-		["/guides/lifecycle", "Archive, transfer & delete"],
-		["/guides/export", "Export & delete"],
+		["/guides/lifecycle", "Archive & delete a project"],
+		["/guides/export", "Export & delete memory"],
 	]},
 	/* One section for every client you point at the service. The old split
 	   between "Connect a tool" and "Agent harnesses" put two agentic CLIs on
@@ -431,7 +431,7 @@ const NAV = [
 		["/concepts/retrieval", "How recall works"],
 		["/concepts/receipts", "Receipts & rules"],
 		["/concepts/scope", "Who memory belongs to"],
-		["/concepts/delete", "Delete & erasure"],
+		["/concepts/delete", "How deletion works"],
 	]},
 	{ sec: "Operate & trust", items: [
 		["/operate/observability", "Monitoring & diagnostics"],
@@ -3589,8 +3589,8 @@ ${nextSteps([
 ])}
 ` };
 
-PAGES["/concepts/delete"] = { title: "Delete & erasure", html: `
-<h1>Delete &amp; erasure</h1>
+PAGES["/concepts/delete"] = { title: "How deletion works", html: `
+<h1>How deletion works</h1>
 <p class="lede">Two different operations share one route. Knowing which one you asked for is the difference between tidying up and erasing everything.</p>
 
 <h2>Scoped delete is curation</h2>
@@ -5932,8 +5932,8 @@ await memory.search("how does Atlas deploy?", {
 <p>Related: <a href="#/guides/lifecycle">Archive, transfer &amp; delete a project</a> · <a href="#/concepts/scope">Who memory belongs to</a> · <a href="#/api/auth">Authentication &amp; keys</a> · <a href="#/guides/rules">Control what gets remembered</a>.</p>
 ` };
 
-PAGES["/guides/export"] = { title: "Export and delete your data", html: `
-<h1>Export and delete your data</h1>
+PAGES["/guides/export"] = { title: "Export and delete your memory", html: `
+<h1>Export and delete your memory</h1>
 <p class="lede">Getting a complete copy of stored memory, and the four different removal operations — which one to reach for, what each actually destroys, and what survives on purpose.</p>
 
 <h2>Export and delete are different promises</h2>
