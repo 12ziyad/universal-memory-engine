@@ -336,7 +336,10 @@ applyDocsTheme(docsThemePreference());
 
 /* ---------------------------------------------------------------- nav */
 const NAV = [
-	{ sec: "Get started", items: [
+	/* Deliberately not "Get started": the app has a screen by that name and
+	   these pages send readers to it constantly. Two things, one name, in the
+	   same sentence. */
+	{ sec: "Start here", items: [
 		["/", "What is Itsuki?"],
 		["/quickstart", "Quickstart"],
 		["/faq", "FAQ"],
@@ -1062,6 +1065,14 @@ claude plugin install ${PRODUCT.pkg}@itsuki-plugins`)}
 <div class="note"><b>Delivery states are explicit.</b> “Queued locally” means the protected local write completed. “Accepted” means the service durably created the source packet/job for that batch. Neither means terminal enrichment; packet/job status eventually reports <code>enriched</code> or <code>failed</code>. Offline and retryable failures stay queued with content-bound idempotency; later batches cannot overtake an earlier batch; rejected credentials pause delivery; permanent failures are retained for <code>/itsuki:doctor</code>.</div>
 <p>The protected outbox is capped at 128 raw batch envelopes / 64 MiB total / 2 MiB each and never evicts undelivered content. Existing v1 spool files remain drainable under their former 2 MiB raw-envelope cap and bounded legacy request contract; those responses carry <code>x-itsuki-ingest-contract: legacy-claude-outbox-v1</code> and the server emits content-free migration telemetry. This dual contract exists only to avoid stranding already-protected local data; all new writes use the v2 limits above. Downstream, each extraction queue entry is capped at 20 messages and 12,000 Unicode code points. Every complete serialized chat-model input is guarded at no more than 24,576 UTF-8 bytes; any model-bound omission is labelled, and an unfit fixed prompt fails before inference. Claude deletes plugin data on final uninstall unless you use its <code>--keep-data</code> option.</p>
 <div class="note">Two plugin settings: an absolute Node executable and one sensitive API key; there is no MCP URL to configure. Claude stores the key in its credential store, exports it only to plugin subprocesses, and interpolates it into the bundled MCP Bearer header. If either setting is missing or the key is rejected, the plugin tells you at session start instead of failing quietly.</div>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/install/claude-code", "Claude Code (MCP)", "The lighter alternative: three tools, one command, no hooks."],
+	["#/operate/observability", "Monitoring & diagnostics", "What /itsuki:doctor checks, and the account-wide health view."],
+	["#/concepts/scope", "Who memory belongs to", "Why a memory saved in one project is not visible from another."],
+	["#/api/mcp", "MCP tools", "Every tool the plugin exposes, with its inputs."],
+])}
 ` };
 
 PAGES["/install/cursor"] = { title: "Cursor & other editors", html: `
@@ -1225,7 +1236,7 @@ ${codeBlock(`{
 <li><b>Plugin not loading</b> &mdash; check your OpenCode version is 1.18.18 or newer; the plugin declares that floor and older hosts will refuse it.</li>
 <li><b>Memory inactive</b> &mdash; run the status tool. An unset <code>ITSUKI_API_KEY</code> is reported there rather than failing silently.</li>
 <li><b>No tools appearing (MCP route)</b> &mdash; restart OpenCode after editing the config, and check the JSON parses.</li>
-<li><b>401 unauthorized</b> &mdash; the link is revoked or was an API key. Create an MCP link in API Keys; API keys go in an <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code> instead.</li>
+<li><b>401 unauthorized</b> &mdash; the link is revoked or was an API key. Create an MCP link from <b>Get started</b>; API keys go in an <code>Authorization: Bearer</code> header at <code>${ORIGIN}/mcp</code> instead.</li>
 <li><b>Wrong or missing memories</b> &mdash; say <i>use the whoami tool</i> and check which memory space and project the connection reports.</li>
 </ul>
 <div class="note">On the MCP route the URL carries your credential &mdash; treat <code>opencode.json</code> as a secret, and keep it out of version control unless the key is meant to be shared with that repository&rsquo;s collaborators. The native plugin has no such problem: its key never enters the config file.</div>
@@ -1259,7 +1270,7 @@ ${codeBlock(`{
 <h3>Troubleshooting</h3>
 <ul>
 <li><b>No tools appearing</b> — restart the session after saving the config.</li>
-<li><b>401 unauthorized</b> — the pasted URL must be an MCP link created in API Keys, not an API key.</li>
+<li><b>401 unauthorized</b> — the pasted URL must be an MCP link, created from <b>Get started</b>, not an API key.</li>
 </ul>
 <div class="note">Antigravity's config file does not interpolate environment variables, so the URL you paste carries the credential in plain text. Treat the file as a secret. This is also why the path-token URL is the recommended route here — there is no header for a variable to fail to reach.</div>
 ` };
@@ -1334,7 +1345,7 @@ ${codeBlock(`hermes mcp add ${PRODUCT.name.toLowerCase()}`)}
 <h2>Troubleshooting</h2>
 <ul>
 <li><b>Tools missing</b> — restart Hermes after editing <code>config.yaml</code>, and check the YAML indentation.</li>
-<li><b>401 unauthorized</b> — the link is revoked or was an API key; create an MCP link in API Keys. Hermes also supports header auth: url <code>${ORIGIN}/mcp</code> with a <code>headers:</code> mapping carrying <code>Authorization: Bearer</code> and an API key.</li>
+<li><b>401 unauthorized</b> — the link is revoked or was an API key; create a fresh MCP link from <b>Get started</b>. Hermes also supports header auth: url <code>${ORIGIN}/mcp</code> with a <code>headers:</code> mapping carrying <code>Authorization: Bearer</code> and an API key.</li>
 </ul>
 <div class="note">A native ${PRODUCT.name} memory provider for Hermes's external-provider ecosystem is planned — prefetch before each response, background sync after it. The MCP route above stays supported either way.</div>
 ` };
@@ -2403,7 +2414,7 @@ ${outputBlock(`{
 <tr><td>node</td><td><code>label</code>, <code>category</code>, <code>summary</code></td><td>label at most 200 characters and non-empty; category must be one of person, family, relationship, project, system, tool, skill, habit, health, goal, preference, identity, life_event, place, organization, possession, interest, other; summary at most 4,000 characters or null</td></tr>
 <tr><td>page</td><td><code>title</code>, <code>short_summary</code>, <code>full_markdown</code></td><td>title at most 200 and non-empty; short_summary at most 4,000; full_markdown at most 20,000; the last two accept null</td></tr>
 <tr><td>slice (a detail)</td><td><code>text</code>, <code>kind</code></td><td>text at most 4,000 and non-empty; kind one of feature_detail, technical_detail, progress, blocker, fix, decision, preference, other</td></tr>
-<tr><td>event</td><td><code>text</code>, <code>importance</code>, <code>happened_at</code></td><td>text at most 4,000 and non-empty; importance one of ordinary, important, life_significant; happened_at a unix-millisecond timestamp, not in the future</td></tr>
+<tr><td>event</td><td><code>text</code>, <code>importance</code>, <code>happened_at</code></td><td>text at most 4,000 and non-empty; importance one of ordinary, important, life_significant; happened_at a unix-millisecond timestamp, from 1900-01-01 to roughly a century ahead</td></tr>
 </table>
 
 ${outputBlock(`{
@@ -2519,7 +2530,7 @@ ${outputBlock(`{
     "command_mode": "delete_all",
     "confirmed": false,
     "dry_run": true,
-    "would_delete": { "nodes": 28, "pages": 6, "slices": 4, "events": 3, "candidates": 0 },
+    "would_delete": { "runs": 2, "nodes": 28, "pages": 6, "slices": 4, "events": 3, "edges": 5, "candidates": 0 },
     "sample_labels": ["Kotlin", "Porto depot", "Rahul"],
     "pending_jobs": 0
   }
@@ -3568,6 +3579,14 @@ await memory.recall("deployment decisions", {
 <li>Your account never sees another account's tenants, projects, or counts.</li>
 <li>Nothing you save is used to train a model.</li>
 </ul>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/guides/projects", "Projects & teams", "Creating projects, inviting people, and what each role may do."],
+	["#/api/auth", "Authentication & keys", "How a credential is bound to one project, and how userId derives a space."],
+	["#/api/recall", "POST /v1/recall", "The recallScope parameter, and what each mode reads."],
+	["#/concepts/delete", "Delete & erasure", "What removing memory does inside one of these boundaries."],
+])}
 ` };
 
 PAGES["/concepts/delete"] = { title: "Delete & erasure", html: `
@@ -3628,6 +3647,14 @@ GET /v1/jobs?cancelled=false   # only work that actually failed`)}
 
 <h2>What is kept</h2>
 <p>Erasure removes your memory. It retains the bookkeeping that proves the deletion happened — deletion records, job and receipt history, and the timestamps above. That audit trail carries no memory content, and it is what lets a later preview honestly answer "nothing left".</p>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/guides/export", "Export & delete", "The task guide, including getting your data out first."],
+	["#/api/memories-delete", "DELETE /v1/memories", "The endpoint, its filters, and the dry run that protects you."],
+	["#/guides/lifecycle", "Archive, transfer & delete", "Removing a whole project rather than its memory."],
+	["#/concepts/scope", "Who memory belongs to", "Which boundary a delete actually applies to."],
+])}
 ` };
 
 PAGES["/operate/observability"] = { title: "Monitoring & diagnostics", html: `
@@ -3690,6 +3717,14 @@ ${codeBlock(`# Claude Code — type it in a session
 node <plugin-root>/hooks/codex-doctor.mjs
 node <plugin-root>/hooks/codex-doctor.mjs --json`)}
 <p>Queued captures are never deleted by a diagnostic. If a key rotation stranded them, they are preserved and reported until you rebind deliberately.</p>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/api/jobs", "GET /v1/jobs", "The job ledger and packet status, field by field."],
+	["#/api/receipts", "GET /v1/receipts", "What every write actually did."],
+	["#/api/usage", "GET /v1/usage", "Activity rollups and per-request history."],
+	["#/api/errors", "Errors", "Every code, and which ones are worth paging someone for."],
+])}
 ` };
 
 PAGES["/privacy"] = { title: "Privacy & limits", html: `
@@ -4031,7 +4066,7 @@ def capture_node(state, config):
 <li><b>Import errors mentioning <code>mcp.shared</code>, <code>RequestContext</code>, or "not enough values to unpack"</b> — an upstream clash between adapters written for the <code>mcp</code> 1.x Python API and an installed <code>mcp</code> 2.x. It affects every MCP server, not just Itsuki. Pin with <code>pip install "mcp&lt;2"</code>.</li>
 <li><b>The agent answers without ever calling a tool</b> — tool selection belongs to the model. Put "call recall_memory at the start of a conversation" in the system prompt, or move recall into a node as shown above.</li>
 <li><b>The save returned a receipt but recall is empty</b> — extraction is asynchronous. Allow a few seconds, or poll the packet handle the save returned.</li>
-<li><b>429</b> — writes are limited to 60 per minute per user. Back off and retry; bulk imports belong on <code>POST /v1/ingest</code>.</li>
+<li><b>429</b> — writes are limited to 60 per minute per credential. Back off and retry; bulk imports belong on <code>POST /v1/ingest</code>.</li>
 </ul>
 
 <h2>Related pages</h2>
@@ -4231,7 +4266,7 @@ def run_for(user_id: str, question: str) -> str:
 <li><b>Errors mentioning <code>mcp.shared</code>, <code>RequestContext</code>, or "not enough values to unpack"</b> — an upstream clash with <code>mcp</code> 2.x that affects every MCP server. Pin <code>pip install "mcp&lt;2"</code>.</li>
 <li><b>Tool calls fail after the first task</b> — the crew was built or run outside the <code>with MCPServerAdapter(...)</code> block. Keep the whole run inside it.</li>
 <li><b>Recall returns nothing straight after a save</b> — extraction is asynchronous; allow a few seconds.</li>
-<li><b>429</b> — writes are capped at 60 per minute per user. A crew looping over saves will hit that; back off and honour the retry hint.</li>
+<li><b>429</b> — writes are capped at 60 per minute per credential. A crew looping over saves will hit that; back off and honour the retry hint.</li>
 </ul>
 
 <h2>Related pages</h2>
@@ -4254,7 +4289,7 @@ PAGES["/integrations/autogen"] = { title: "AutoGen", html: `
 <h2>Install</h2>
 <pre><button class="copy">Copy</button><code>pip install autogen-ext "mcp&lt;2"</code></pre>
 <p>The <code>mcp</code> pin is not optional here. AutoGen's adapter targets the <code>mcp</code> 1.x Python API, and an installed 2.x produces import errors about <code>mcp.shared</code>, <code>RequestContext</code>, or "not enough values to unpack". This is an upstream clash that affects every MCP server, not just Itsuki, and 1.x is the line this route was verified against.</p>
-<p>Then create an <b>MCP link</b> in <b>API Keys</b>. It is shown once; keep it in the environment.</p>
+<p>Then create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b>. It is shown once; keep it in the environment.</p>
 
 <h2>A complete example</h2>
 <pre><button class="copy">Copy</button><code>import asyncio
@@ -4338,7 +4373,7 @@ async def answer_for(user_id: str, question: str) -> str:
 <li><b>401</b> — revoked key, or whitespace in the value. A key pasted into the URL rather than the header is reported by name.</li>
 <li><b>Recall returns a tool blob instead of an answer</b> — set <code>reflect_on_tool_use=True</code>.</li>
 <li><b>Saves succeed, recall is empty</b> — extraction is asynchronous. Allow a few seconds before recalling a brand-new fact.</li>
-<li><b>429 during a long team run</b> — writes are capped at 60 per minute per user. Back off; bulk loading belongs on <code>POST /v1/ingest</code>.</li>
+<li><b>429 during a long team run</b> — writes are capped at 60 per minute per credential. Back off; bulk loading belongs on <code>POST /v1/ingest</code>.</li>
 </ul>
 
 <h2>Related pages</h2>
@@ -4449,7 +4484,7 @@ PAGES["/integrations/openai-agents"] = { title: "OpenAI Agents SDK", html: `
 
 <h2>Install</h2>
 <pre><button class="copy">Copy</button><code>pip install openai-agents</code></pre>
-<p>Create an <b>MCP link</b> in <b>API Keys</b>. It is shown once, and the header below carries it — read it from the environment.</p>
+<p>Create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b>. It is shown once, and the header below carries it — read it from the environment.</p>
 
 <h2>A complete example</h2>
 <pre><button class="copy">Copy</button><code>import asyncio
@@ -4533,7 +4568,7 @@ async def answer_for(user_id: str, question: str) -> str:
 <li><b>Tool call fails outside the context manager</b> — keep every <code>Runner.run</code> inside the <code>async with</code> block that owns the server.</li>
 <li><b>Stale tool list after a change</b> — <code>cache_tools_list=True</code> caches for the server's lifetime. Recreate the server to refresh.</li>
 <li><b>Saves succeed but recall is empty</b> — extraction is asynchronous; allow a few seconds.</li>
-<li><b>429</b> — writes are capped at 60 per minute per user. Back off and retry.</li>
+<li><b>429</b> — writes are capped at 60 per minute per credential. Back off and retry.</li>
 </ul>
 
 <h2>Related pages</h2>
@@ -4985,7 +5020,7 @@ const tools = await mcpClient.tools(); // pass to generateText / streamText</cod
 <li><b>Memory never appears in answers</b> — <code>userId</code> is missing, or <code>recall: false</code> is set. Check <code>onEvent</code>, which reports recall outcomes without content.</li>
 <li><b>Recall is empty right after a save</b> — extraction is asynchronous; allow a few seconds.</li>
 <li><b>Peer dependency errors</b> — the package targets <code>ai</code> 7.x and Node 22 or newer.</li>
-<li><b>429</b> — writes are capped at 60 per minute per user; <code>Retry-After</code> is honoured inside the call's budget, and a sustained burst still needs backpressure on your side.</li>
+<li><b>429</b> — writes are capped at 60 per minute per credential; <code>Retry-After</code> is honoured inside the call's budget, and a sustained burst still needs backpressure on your side.</li>
 </ul>
 
 <h2>Related pages</h2>
@@ -5406,7 +5441,7 @@ if (receipt.source_packet_id) {
 <tr><td>413 / 422</td><td>ingest contract violation</td><td>Too many bytes, messages, or characters. Read <code>GET /v1/ingest/limits</code> and split the batch.</td></tr>
 <tr><td>422</td><td><code>extraction_failed_terminal</code></td><td>This exact content failed extraction permanently. Quarantine your copy; do not delete it and do not retry unchanged.</td></tr>
 <tr><td>429</td><td><code>queue_full</code></td><td>Backpressure. The body carries <code>retry_after_s</code>; honour it.</td></tr>
-<tr><td>429</td><td>rate limit</td><td>Writes are limited to 60 per minute per user. Back off and retry.</td></tr>
+<tr><td>429</td><td>rate limit</td><td>Writes are limited to 60 per minute per credential. Back off and retry.</td></tr>
 </table>
 <p>Next: <a href="#/guides/recall">read it back</a>, or <a href="#/guides/rules">decide what is allowed to be saved in the first place</a>.</p>
 ` };
@@ -8272,7 +8307,7 @@ ${outputBlock(`{
 <tr><td><code>job_id</code></td><td>The row&rsquo;s own id, <code>job_</code> followed by a UUID.</td></tr>
 <tr><td><code>source_packet_id</code></td><td>The public handle for the write, <code>src_</code> followed by a UUID. This is the value the packet route takes.</td></tr>
 <tr><td><code>status</code></td><td>One of the seven strings above.</td></tr>
-<tr><td><code>type</code> / <code>lane</code></td><td><code>extract</code> or <code>mcp_enrich</code>, and the door that accepted the write: <code>manual_direct</code> (a direct save), <code>conversation_collect</code> (a conversation-mode save), <code>ingest</code>, or <code>mcp_save</code>.</td></tr>
+<tr><td><code>type</code> / <code>lane</code></td><td><code>extract</code> or <code>mcp_enrich</code>, and the door that accepted the write: <code>manual_direct</code> (a direct save), <code>conversation_collect</code> (a conversation-mode save), <code>ingest</code>, <code>turn</code> (a <a href="#/api/turn">POST /v1/turn</a> capture), or <code>mcp_save</code>.</td></tr>
 <tr><td><code>counts</code></td><td>What this job wrote: <code>nodes</code>, <code>edges</code>, <code>slices</code>, <code>events</code>, <code>pages</code>. All zero is a legitimate <code>enriched</code> result.</td></tr>
 <tr><td><code>remaining_messages</code></td><td>How many accepted messages have not settled yet. The job goes <code>enriched</code> when this reaches zero. <code>null</code> when the row carries no ledger.</td></tr>
 <tr><td><code>receipt_id</code></td><td>The receipt for this write. Linked only once a receipt exists whose own packet id matches this job&rsquo;s &mdash; <code>null</code> before that, and never borrowed from another write.</td></tr>
@@ -8282,7 +8317,7 @@ ${outputBlock(`{
 <tr><td><code>cancelled_by_delete</code></td><td><code>true</code> when a confirmed delete cancelled this work.</td></tr>
 <tr><td><code>outcome_reason</code></td><td><code>cancelled_by_delete</code>, <code>cancelled_by_archive</code>, or <code>null</code>.</td></tr>
 <tr><td><code>error</code></td><td>Present only when the row has one. Free text, capped at 400 characters. Do not parse it &mdash; branch on <code>outcome_reason</code>.</td></tr>
-<tr><td><code>delivery</code></td><td>Ordered-delivery metadata (<code>schema</code>, <code>groupId</code>, <code>batchIndex</code>, <code>batchCount</code>, and the segment counts) when the caller sent it to <code>POST /v1/ingest</code>. <code>null</code> otherwise, including when the metadata failed validation.</td></tr>
+<tr><td><code>delivery</code></td><td>Ordered-delivery metadata (<code>schema</code>, <code>groupId</code>, <code>batchIndex</code>, <code>batchCount</code>, and the segment counts) when the caller sent it to <code>POST /v1/ingest</code>. <code>null</code> when the caller sent none — an invalid <code>delivery</code> object is refused with <code>422</code> before any job exists.</td></tr>
 </table>
 
 <h2>Behaviour worth knowing</h2>
@@ -9898,17 +9933,20 @@ function groupOfRoute(route) {
 /* Which rail sections the reader has collapsed. The section holding the page
    you are on is always expanded regardless of what is stored, so a stale
    preference can never hide the page you are reading. */
-const COLLAPSE_KEY = "itsuki_docs_collapsed";
+const OPEN_KEY = "itsuki_docs_open";
 
-function collapsedSections() {
+/* Which sections the reader has deliberately opened. Storing the OPEN set
+   rather than the collapsed one makes the default collapsed: a first visit
+   shows nine headings with their item counts instead of sixty-nine links. */
+function openedSections() {
 	try {
-		const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? "[]");
+		const raw = JSON.parse(localStorage.getItem(OPEN_KEY) ?? "[]");
 		return new Set(Array.isArray(raw) ? raw : []);
 	} catch { return new Set(); }
 }
 
-function storeCollapsed(set) {
-	try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...set])); } catch {}
+function storeOpened(set) {
+	try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch {}
 }
 
 function slugify(text) {
@@ -9986,11 +10024,13 @@ function pageMarkdown(main) {
 
 function renderNav(route) {
 	const nav = document.getElementById("sideNav");
-	const collapsed = collapsedSections();
+	const opened = openedSections();
 	const openGroup = groupOfRoute(route);
 
 	nav.innerHTML = NAV.map((g, i) => {
-		const isOpen = g === openGroup || !collapsed.has(g.sec);
+		/* The section holding the current page is always open, so a stored
+		   preference can never hide the page you are reading. */
+		const isOpen = g === openGroup || opened.has(g.sec);
 		const id = `navsec${i}`;
 		const items = g.items.map(([r, l]) =>
 			`<a href="#${r}" class="${r === route ? "active" : ""}">${esc(l)}</a>`).join("");
@@ -10006,9 +10046,9 @@ function renderNav(route) {
 			const nowOpen = btn.getAttribute("aria-expanded") !== "true";
 			btn.setAttribute("aria-expanded", String(nowOpen));
 			items.hidden = !nowOpen;
-			const set = collapsedSections();
-			if (nowOpen) set.delete(btn.dataset.sec); else set.add(btn.dataset.sec);
-			storeCollapsed(set);
+			const set = openedSections();
+			if (nowOpen) set.add(btn.dataset.sec); else set.delete(btn.dataset.sec);
+			storeOpened(set);
 		});
 	});
 
