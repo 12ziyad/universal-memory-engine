@@ -47,7 +47,7 @@ export class Itsuki implements INodeType {
 					{ name: 'Save Memory', value: 'saveMemory', description: 'Store one durable fact', action: 'Save a memory' },
 					{ name: 'Update Memory', value: 'updateMemory', description: 'Correct one memory with optimistic concurrency', action: 'Update a memory' },
 					{ name: 'Wait for Packet', value: 'waitForPacket', description: 'Poll a save receipt until extraction settles', action: 'Wait for a packet' },
-					{ name: 'Who Am I', value: 'whoami', description: 'Connection health, identity, and plan usage — never memory content', action: 'Check the connection' },
+					{ name: 'Who Am I', value: 'whoami', description: 'Connection health, identity, and write counts — never memory content', action: 'Check the connection' },
 				],
 			},
 

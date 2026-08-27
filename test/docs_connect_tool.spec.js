@@ -25,7 +25,7 @@ function docPage(route) {
 }
 
 describe("navigation", () => {
-	it("lists the coding-agent pages under Connect a tool", () => {
+	it("lists the coding-agent pages under Connect your tools", () => {
 		for (const entry of [
 			'["/install/cursor", "Cursor & other editors"]',
 			'["/install/opencode", "OpenCode"]',
@@ -35,11 +35,33 @@ describe("navigation", () => {
 		}
 	});
 
-	it("gives agent harnesses their own section", () => {
-		expect(script).toContain('{ sec: "Agent harnesses", items: [');
-		expect(script).toContain('["/install/openclaw", "OpenClaw"]');
-		expect(script).toContain('["/install/hermes", "Hermes Agent"]');
-		expect(script).toContain('["/install/pi", "Pi Agent"]');
+	// Agent harnesses used to be a section of their own, which split five
+	// agentic CLIs across two headings on a line no reader could predict:
+	// OpenCode and Antigravity sat under "Connect a tool" while OpenClaw,
+	// Hermes and Pi sat under "Agent harnesses". They are one section now.
+	it("keeps every client in one Connect your tools section", () => {
+		expect(script).toContain('{ sec: "Connect your tools", items: [');
+		expect(script).not.toContain('sec: "Agent harnesses"');
+		expect(script).not.toContain('sec: "Connect a tool"');
+		for (const entry of [
+			'["/install/openclaw", "OpenClaw"]',
+			'["/install/hermes", "Hermes Agent"]',
+			'["/install/pi", "Pi Agent"]',
+		]) {
+			expect(script).toContain(entry);
+		}
+	});
+
+	// The rail used to render only the sections belonging to a hidden "area",
+	// so from Get started the API reference and Concepts were not merely
+	// collapsed - they were absent. The whole tree is one rail now.
+	it("renders the whole nav tree rather than one area of it", () => {
+		expect(script).not.toContain("const AREAS = [");
+		expect(script).not.toContain('id="areaBar"');
+		expect(script).toContain("function renderNav(");
+		// Every section must be reachable from every page.
+		const secs = [...script.matchAll(/\{ sec: "([^"]+)", items: \[/g)].map((m) => m[1]);
+		expect(secs.length).toBeGreaterThanOrEqual(7);
 	});
 
 	it("documents the native packages, and only the ones that shipped", () => {
@@ -61,8 +83,8 @@ describe("navigation", () => {
 		expect(script).not.toContain("chatdev");
 	});
 
-	it("lists the Frameworks & tools section", () => {
-		expect(script).toContain('{ sec: "Frameworks & tools", items: [');
+	it("lists the Frameworks & integrations section", () => {
+		expect(script).toContain('{ sec: "Frameworks & integrations", items: [');
 		expect(script).toContain('["/integrations/python", "Python frameworks"]');
 		expect(script).toContain('["/integrations/typescript", "TypeScript frameworks"]');
 		expect(script).toContain('["/integrations/n8n", "n8n"]');
@@ -180,8 +202,15 @@ describe("page contracts", () => {
 		expect(n8n).toContain("N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE");
 		// Delete All must be described as preview-first wherever it appears.
 		expect(n8n).toMatch(/previews by default/i);
-		// No Update operation exists; the page must not imply one.
-		expect(n8n).toContain("There is no Update operation");
+		// The node ships twelve operations, including the three safe-update ones
+		// (Itsuki.node.ts:43,45,48). The page used to deny Update existed and told
+		// readers to delete-and-re-save instead, which destroys revision history.
+		expect(n8n).toContain("twelve operations");
+		for (const op of ["Update Memory", "Memory History", "Rollback Memory"]) {
+			expect(n8n, op).toContain(op);
+		}
+		expect(n8n).not.toContain("There is no Update operation");
+		expect(n8n).not.toMatch(/no safe versioned-correction contract/i);
 		expect(script).not.toContain("officially verified by n8n");
 	});
 

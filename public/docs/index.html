@@ -96,16 +96,13 @@
 	.theme-toggle .theme-icon { color: var(--clay); }
 	.theme-toggle .theme-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 	.layout { display: grid; grid-template-columns: 258px minmax(0, 1fr) 210px; max-width: 1440px; margin: 0 auto; }
-	/* Area bar: the top-level map. Without it every section competed for the
-	   same left rail and the docs read as one long undifferentiated list. */
-	.areabar { position: sticky; top: 57px; z-index: 9; display: flex; gap: 2px; overflow-x: auto;
-		padding: 0 max(14px, calc((100vw - 1440px) / 2 + 14px)); border-bottom: 1px solid var(--border);
-		background: var(--panel); scrollbar-width: none; }
-	.areabar::-webkit-scrollbar { display: none; }
-	.areabar a { padding: 12px 13px; border-bottom: 2px solid transparent; color: var(--muted);
-		text-decoration: none; font-size: 13.5px; font-weight: 550; white-space: nowrap; }
-	.areabar a:hover { color: var(--text); }
-	.areabar a.active { color: var(--accent); border-bottom-color: var(--clay); }
+	/* There used to be an "area" bar here that filtered the left rail to one
+	   subject area at a time. It meant that from Get started you could not see
+	   the API reference or Concepts at all, and three of its five tabs repeated
+	   the section heading directly beneath them. The whole tree now lives in one
+	   rail, so nothing is hidden behind a control the reader has to notice. */
+	.search-results a i { display: block; font-style: normal; font-size: 12px; color: var(--accent); margin: 1px 0 2px; }
+	.search-results a mark { background: color-mix(in srgb, var(--clay) 26%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 	/* On-this-page rail, built from the rendered h2/h3 of each page. */
 	.toc { padding: 30px 16px 60px; font-size: 13px; }
 	.toc-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
@@ -137,11 +134,23 @@
 	main h2 { scroll-margin-top: 120px; }
 	main h3 { scroll-margin-top: 120px; }
 	@media (max-width: 1180px) { .layout { grid-template-columns: 240px minmax(0, 1fr); } .toc { display: none; } }
-	nav.side { padding: 22px 14px 60px; border-right: 1px solid var(--border); }
-	nav.side .sec { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-		color: var(--faint); padding: 16px 10px 6px; }
-	nav.side .sec:first-child { padding-top: 0; }
-	nav.side a { display: block; padding: 7px 10px; border-radius: 8px; color: var(--muted);
+	/* Sticky and self-scrolling. The rail used to scroll away with the page, so
+	   on any long page the entire menu was off-screen. */
+	nav.side { position: sticky; top: 57px; align-self: start; height: calc(100vh - 57px);
+		overflow-y: auto; overscroll-behavior: contain; padding: 22px 14px 60px;
+		border-right: 1px solid var(--border); scrollbar-width: thin; }
+	nav.side .sec { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 16px;
+		padding: 6px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+		font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+		text-transform: uppercase; color: var(--faint); text-align: left; }
+	nav.side .sec:hover { color: var(--muted); background: var(--panel2); }
+	nav.side .sec:first-child { margin-top: 0; }
+	nav.side .sec .chev { flex: 0 0 9px; transition: transform .15s ease; }
+	nav.side .sec[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+	nav.side .sec .count { margin-left: auto; font-size: 10px; font-weight: 600;
+		letter-spacing: 0; color: var(--faint); opacity: .75; }
+	nav.side .sec-items[hidden] { display: none; }
+	nav.side a { display: block; padding: 7px 10px 7px 26px; border-radius: 8px; color: var(--muted);
 		text-decoration: none; font-size: 14px; }
 	nav.side a:hover { color: var(--text); background: var(--panel2); }
 	nav.side a.active { color: var(--accent); background: color-mix(in srgb, var(--clay) 11%, transparent); font-weight: 600;
@@ -164,6 +173,45 @@
 		border-radius: 7px; cursor: pointer; transition: transform .15s ease, background .15s ease; }
 	.copy:hover { background: rgba(251,248,241,.18); }
 	.copy:active { transform: translateY(2px); }
+	/* A typed fence. A reader can tell at a glance what to copy and what to
+	   compare their own result against. */
+	main pre[data-label]::before { content: attr(data-label); position: absolute; top: 0; left: 16px;
+		transform: translateY(-50%); padding: 2px 8px; border-radius: 20px;
+		background: var(--panel2); border: 1px solid var(--border2); color: var(--faint);
+		font-family: var(--font-ui); font-size: 10.5px; font-weight: 700;
+		letter-spacing: .07em; text-transform: uppercase; }
+	main pre.out { background: var(--panel); color: var(--body-text);
+		border: 1px solid var(--border2); box-shadow: none; }
+	main pre.out::before { background: var(--panel); }
+	main pre[data-label] { margin-top: 24px; }
+	/* Prerequisites: what you must already have, as a checklist you can fail
+	   fast against rather than a sentence buried in the lede. */
+	main .prereq { margin: 18px 0 26px; padding: 14px 18px 14px 16px; border-radius: 12px;
+		border: 1px solid var(--border2); border-left: 3px solid var(--clay);
+		background: color-mix(in srgb, var(--panel2) 60%, transparent); }
+	main .prereq b { display: block; font-size: 11px; letter-spacing: .08em;
+		text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+	main .prereq ul { margin: 0; padding-left: 20px; }
+	main .prereq li { margin: 4px 0; }
+	/* Numbered procedure. One action per step; the number is the countable
+	   signal that a page is thorough. */
+	main ol.steps { counter-reset: step; list-style: none; margin: 18px 0; padding: 0; }
+	main ol.steps > li { counter-increment: step; position: relative; margin: 0 0 26px;
+		padding: 0 0 0 42px; }
+	main ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: -2px;
+		width: 27px; height: 27px; border-radius: 50%; background: var(--clay); color: var(--on-clay);
+		font-size: 13px; font-weight: 700; display: grid; place-items: center; }
+	main ol.steps > li > b:first-child { display: block; color: var(--text); font-size: 15.5px;
+		margin: 3px 0 6px; }
+	main ol.steps > li > p:first-of-type { margin-top: 0; }
+	/* Next steps: one line each, so the end of a page is a door and not a wall. */
+	main .next { display: grid; grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+		gap: 12px; margin: 18px 0; }
+	main .next a { display: block; padding: 13px 15px; border: 1px solid var(--border);
+		border-radius: 12px; color: var(--text); text-decoration: none; font-weight: 600; font-size: 14px; }
+	main .next a:hover { border-color: var(--clay); }
+	main .next a small { display: block; margin-top: 3px; color: var(--faint);
+		font-weight: 400; font-size: 12.5px; line-height: 1.5; }
 	table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; background: color-mix(in srgb, var(--panel) 72%, transparent); }
 	th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
 		color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel2) 72%, transparent); }
@@ -209,7 +257,6 @@
 	<a class="app-link" href="/app" target="_blank" rel="noopener">Open Itsuki →</a>
 </div>
 <button class="theme-toggle" id="themeToggle" type="button" aria-label="System appearance. Click to change theme."><span class="theme-icon" id="themeIcon" aria-hidden="true">◐</span> <span class="theme-label" id="themeLabel">System</span></button>
-<div class="areabar" id="areaBar"></div>
 <div class="layout">
 	<nav class="side" id="sideNav"></nav>
 	<main id="page"></main>
@@ -279,19 +326,23 @@ applyDocsTheme(docsThemePreference());
 const NAV = [
 	{ sec: "Get started", items: [
 		["/", "What is Itsuki?"],
-		["/quickstart", "Quickstart (5 minutes)"],
-	
+		["/quickstart", "Quickstart"],
 		["/faq", "FAQ"],
 	]},
-	{ sec: "Guides", items: [
+	/* Task-shaped: "I want to do X". Kept deliberately distinct from
+	   "How it works", which explains the machinery behind the same words. */
+	{ sec: "How-to guides", items: [
 		["/guides/save", "Save memory"],
 		["/guides/recall", "Recall memory"],
-		["/guides/rules", "Control what's remembered"],
+		["/guides/rules", "Control what gets remembered"],
 		["/guides/versions", "Corrections & rollback"],
 		["/guides/projects", "Projects & teams"],
 		["/guides/export", "Export & delete"],
 	]},
-	{ sec: "Connect a tool", items: [
+	/* One section for every client you point at the service. The old split
+	   between "Connect a tool" and "Agent harnesses" put two agentic CLIs on
+	   one side and three on the other. */
+	{ sec: "Connect your tools", items: [
 		["/install/claude", "Claude"],
 		["/install/chatgpt", "ChatGPT"],
 		["/install/claude-code", "Claude Code (MCP)"],
@@ -299,20 +350,16 @@ const NAV = [
 		["/install/cursor", "Cursor & other editors"],
 		["/install/opencode", "OpenCode"],
 		["/install/antigravity", "Antigravity"],
-	]},
-	{ sec: "Agent harnesses", items: [
 		["/install/openclaw", "OpenClaw"],
 		["/install/hermes", "Hermes Agent"],
 		["/install/pi", "Pi Agent"],
 	]},
-	{ sec: "Frameworks & tools", items: [
+	/* The three overview pages lead, so a reader meets the map before the
+	   individual framework pages that the map indexes. */
+	{ sec: "Frameworks & integrations", items: [
 		["/integrations/native", "Native packages"],
 		["/integrations/python", "Python frameworks"],
 		["/integrations/typescript", "TypeScript frameworks"],
-		["/integrations/n8n", "n8n"],
-		["/integrations/dify", "Dify"],
-		["/integrations/convex", "Convex"],
-	
 		["/integrations/langchain", "LangChain"],
 		["/integrations/llamaindex", "LlamaIndex"],
 		["/integrations/crewai", "CrewAI"],
@@ -323,39 +370,55 @@ const NAV = [
 		["/integrations/camel", "CAMEL"],
 		["/integrations/mastra", "Mastra"],
 		["/integrations/vercel-ai", "Vercel AI SDK"],
+		["/integrations/n8n", "n8n"],
+		["/integrations/dify", "Dify"],
+		["/integrations/convex", "Convex"],
 	]},
-	{ sec: "Build with the API", items: [
+	{ sec: "API reference", items: [
 		["/api/rest", "REST API reference"],
 		["/api/auth", "Authentication & keys"],
 		["/api/mcp", "MCP tools"],
-		["/sdk/python", "Python SDK"],
-		["/sdk/js", "JavaScript SDK"],
-	
 		["/api/errors", "Errors"],
 		["/api/limits", "Rate limits & quotas"],
 		["/api/webhooks", "Webhooks"],
+		["/sdk/python", "Python SDK"],
+		["/sdk/js", "JavaScript SDK"],
 	]},
-	{ sec: "Concepts", items: [
+	/* Ordered as the write path runs, then the read path, then the edges. */
+	{ sec: "How it works", items: [
 		["/concepts/memory", "How memory works"],
-		["/concepts/receipts", "Receipts & rules"],
-		["/concepts/scope", "Who memory belongs to"],
-		["/concepts/delete", "Delete & erasure"],
-	
 		["/concepts/extraction", "How extraction works"],
 		["/concepts/graph", "The memory graph"],
 		["/concepts/retrieval", "How recall works"],
+		["/concepts/receipts", "Receipts & rules"],
+		["/concepts/scope", "Who memory belongs to"],
+		["/concepts/delete", "Delete & erasure"],
 	]},
-	{ sec: "Operate", items: [
+	{ sec: "Operate & trust", items: [
 		["/operate/observability", "Monitoring & diagnostics"],
-	]},
-	{ sec: "Trust", items: [
 		["/privacy", "Privacy & limits"],
 	]},
 ];
 
 /* ---------------------------------------------------------------- helpers */
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const codeBlock = (text) => `<pre><button class="copy">Copy</button><code>${esc(text)}</code></pre>`;
+const codeBlock = (text, label) => `<pre${label ? ` data-label="${esc(label)}"` : ""}>`
+	+ `<button class="copy">Copy</button><code>${esc(text)}</code></pre>`;
+
+/* What the reader should see back. Deliberately has no Copy button - it is for
+   comparing against, not for pasting - and is tinted like the page rather than
+   like a command, so the two never blur together in a long procedure. */
+const outputBlock = (text, label) => `<pre class="out" data-label="${esc(label ?? "Response")}">`
+	+ `<code>${esc(text)}</code></pre>`;
+
+/* 2-4 things you must already have. More than that belongs in step 1. */
+const prereq = (items) => `<div class="prereq"><b>Before you start</b><ul>`
+	+ items.map((i) => `<li>${i}</li>`).join("") + `</ul></div>`;
+
+/* One-line doors out of a page. */
+const nextSteps = (links) => `<div class="next">`
+	+ links.map(([href, title, blurb]) => `<a href="${href}">${esc(title)}<small>${esc(blurb)}</small></a>`).join("")
+	+ `</div>`;
 
 /* ---------------------------------------------------------------- pages */
 const PAGES = {};
@@ -384,42 +447,109 @@ PAGES["/"] = { title: "What is Itsuki?", html: `
 
 PAGES["/quickstart"] = { title: "Quickstart", html: `
 <h1>Quickstart</h1>
-<p class="lede">From zero to a working memory in about five minutes.</p>
-<h2>1 · Create an account</h2>
-<p>Sign up at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a> (free, email or Google).</p>
-<h2>2 · Create a key</h2>
-<p>In the app: <b>API Keys → Create API key</b>. The full key (<code>${PRODUCT.tokenPrefix}…</code>) is shown once — copy it somewhere safe.</p>
-<h2>3 · Save a memory</h2>
+<p class="lede">Save your first memory from the command line, read it back, and learn how to tell whether it actually worked.</p>
+
+${prereq([
+	`An ${PRODUCT.name} account. Sign up at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a> — sign-in is passwordless: <b>Continue with Google</b>, <b>Continue with GitHub</b>, or a six-digit code by email.`,
+	`A terminal with <code>curl</code>, or any HTTP client you prefer.`,
+])}
+
+<h2>1 · Create an API key</h2>
+<ol class="steps">
+<li><b>Open API Keys.</b><p>In the left rail of the app, under <b>Setup</b>, choose <b>API Keys</b>. Every key you create there is permanently bound to the project you are in and cannot read or write another project.</p></li>
+<li><b>Click Create API key.</b><p>Give it a name that says where it will live — the placeholder suggests <i>Production agent</i> or <i>Claude desktop</i>. The name is optional but worth setting: it is how you tell keys apart later.</p></li>
+<li><b>Copy the key before you close the dialog.</b><p>The app tells you plainly: <i>"Copy it now. This API key won't be shown again."</i> Only a hash is stored on the server, so a lost key cannot be recovered — you would create a new one and delete the old.</p></li>
+</ol>
+
+<div class="note"><b>Two kinds of credential, and they are not interchangeable.</b> An <b>API key</b> is what you just made: it travels in an <code>Authorization: Bearer</code> header and is what the REST API and the SDKs want. An <b>MCP link</b> is a URL that carries its credential in the path, for chat clients that cannot send custom headers — you mint those from <b>Get started</b>, not from this screen. See <a href="#/api/auth">Authentication &amp; keys</a>.</div>
+
+<p>Keep the key in your shell for the rest of this page:</p>
+${codeBlock(`export ITSUKI_API_KEY=${PRODUCT.tokenPrefix}your_key_here`, "terminal")}
+
+<h2>2 · Save your first memory</h2>
+<p>One fact, in your own words. ${PRODUCT.name} stores durable facts rather than chat logs, so write something that would still be true next month.</p>
 ${codeBlock(`curl -X POST ${ORIGIN}/v1/save \\
-  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "authorization: Bearer $ITSUKI_API_KEY" \\
   -H "content-type: application/json" \\
-  -d '{"content": "I started learning Kotlin this week."}'`)}
-<p>The response distinguishes acceptance from background enrichment and includes a packet handle when work continues asynchronously. Inspect packet/job status before treating enrichment as terminal.</p>
-<h2>4 · Recall it</h2>
+  -d '{"content": "I started learning Kotlin this week."}'`, "terminal")}
+
+<p>A direct save waits for the real extraction result before it answers, so the response tells you what was actually stored:</p>
+${outputBlock(`{
+  "ok": true,
+  "mode": "direct_save",
+  "summary": "Saved: 1 fact(s) across 1 page.",
+  "source_packet_id": "sp_9f2c1d4a…",
+  "receipt_id": "receipt_door_sp_9f2c1d4a…",
+  "counts": { "received": 1, "savedTotal": 2, "nodes": 1, "slices": 1, "skipped": 0 }
+}`)}
+
+<p>Read it like this:</p>
+<table>
+<tr><th>Field</th><th>What it tells you</th></tr>
+<tr><td><code>summary</code></td><td>A sentence you can show a user. It never claims an acceptance that did not happen.</td></tr>
+<tr><td><code>counts.savedTotal</code></td><td>How many objects were written. <b>Zero is a legitimate answer</b> — see the note below.</td></tr>
+<tr><td><code>source_packet_id</code></td><td>The public handle for this write. Poll <code>GET /v1/packets/&lt;id&gt;/status</code> with it if you need to know when background enrichment settles.</td></tr>
+<tr><td><code>processing</code></td><td><code>true</code> means the write was accepted but the final receipt had not landed inside the wait budget. It is not a failure.</td></tr>
+</table>
+
+<div class="note"><b>Not everything is worth remembering, and that is the point.</b> If you save a question, small talk, or something you already stored, the response comes back <code>ok: true</code> with <code>savedTotal: 0</code> and a reason such as <i>"nothing durable here (chatter, a question, or a duplicate)"</i>. A save that stores nothing is a working save, not an error.</div>
+
+<h2>3 · Read it back</h2>
 ${codeBlock(`curl -X POST ${ORIGIN}/v1/recall \\
-  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "authorization: Bearer $ITSUKI_API_KEY" \\
   -H "content-type: application/json" \\
-  -d '{"query": "what am I learning?"}'`)}
-<p>The <code>context</code> field of the response is a compact text block — exactly what a connected AI receives.</p>
-<h2>4b · Serving many end users</h2>
-<p>Your API key is your account. Add <code>userId</code> and each of <i>your</i> end users gets an
-<b>isolated memory space inside it</b> — nothing saved under one value is reachable from another,
-on save or on recall.</p>
+  -d '{"query": "what am I learning?"}'`, "terminal")}
+
+${outputBlock(`{
+  "ok": true,
+  "summary": "Found relevant memory.",
+  "context": "Kotlin — skill\\n- started learning this week\\n",
+  "count": 1,
+  "items": [
+    { "type": "node", "id": "node_7c…", "label": "Kotlin", "category": "skill", "score": 0.8421 }
+  ],
+  "recall_status": "light_recall"
+}`)}
+
+<p><code>context</code> is the whole point: a compact, ready-to-paste block that is exactly what a connected AI receives. Paste it into a prompt and the model knows what you know. <code>items</code> is the ranked shortlist behind it, if you would rather build your own presentation.</p>
+
+<div class="note"><b>Nothing back yet?</b> Extraction runs in the background, so a brand-new fact can take a few seconds to become recallable. An empty result is an honest <code>200</code> with <code>context: ""</code> and <code>count: 0</code> — never an error. If a recent save is still settling, the response carries a <code>processing_note</code> saying so.</div>
+
+<h2>4 · Serve many end users from one key</h2>
+<p>Your API key is your account. Add <code>userId</code> and each of <i>your</i> end users gets an isolated memory space inside it — nothing saved under one value is reachable from another, on save or on recall.</p>
 ${codeBlock(`curl -X POST ${ORIGIN}/v1/save \\
-  -H "authorization: Bearer YOUR_API_KEY" \\
+  -H "authorization: Bearer $ITSUKI_API_KEY" \\
   -H "content-type: application/json" \\
-  -d '{"content": "Ada'"'"'s depot is in Porto.", "userId": "ada"}'`)}
-<p>The SDKs take it per call — <code>memory.add("…", user_id="ada")</code> in Python,
-<code>memory.add("…", { userId: "ada" })</code> in JavaScript — or once on the client.
-The value is yours to pick (a user id, a tenant slug, an email); it is hashed with your account id
-before it becomes a storage key, so two different API keys using the same string still get
-different spaces.</p>
-<div class="note"><b>Unknown parameters are rejected, not ignored.</b> A misspelled
-<code>usr_id</code> returns <code>400</code> naming the offending key. Silently dropping it is how
-somebody ships a multi-tenant app believing isolation worked.</div>
-<h2>5 · Connect an AI chat</h2>
-<p>Follow the guide for <a href="#/install/claude">Claude</a> or <a href="#/install/chatgpt">ChatGPT</a>. You can then explicitly ask the host to save or recall through the connector; actual tool selection remains controlled by that host.</p>
-<div class="note">Prefer clicking to curling? The <b>Playground</b> in the app does steps 3–4 with buttons.</div>
+  -d '{"content": "Ada'"'"'s depot is in Porto.", "userId": "ada"}'`, "terminal")}
+
+<p>The SDKs take it per call — <code>memory.add("…", user_id="ada")</code> in Python, <code>memory.add("…", { userId: "ada" })</code> in JavaScript — or once on the client. Pick any stable string you like: a user id, a tenant slug. It is hashed together with your account id before it becomes a storage key, so two different accounts using the string <code>ada</code> still get different spaces.</p>
+
+<div class="note"><b>A misspelled parameter is refused, not ignored.</b> Send <code>usr_id</code> and you get a <code>400</code> naming the key: <i>"usr_id" isn't a parameter of /v1/save. Did you mean "userId"?</i> Silently dropping it is how somebody ships a multi-tenant app believing isolation worked. Common spellings like <code>user_id</code> are accepted as aliases; anything unrecognised is an error.</div>
+
+<h2>Verify it end to end</h2>
+<p>One call confirms the credential, the memory space it resolves to, and what is in it:</p>
+${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" ${ORIGIN}/v1/status`, "terminal")}
+<p>A healthy account answers with live counts of memories, pages, details and events. If those numbers moved after step 2, the round trip works.</p>
+
+<h2>When it doesn't work</h2>
+<table>
+<tr><th>What you see</th><th>What it means</th><th>Fix</th></tr>
+<tr><td><code>401 unauthorized</code></td><td>No usable credential. The message guesses at what you sent — it recognises a URL, an OpenAI-style <code>sk-</code> key, and a webhook secret by shape.</td><td>Check the header is <code>authorization: Bearer</code> and the key starts <code>${PRODUCT.tokenPrefix}</code>.</td></tr>
+<tr><td><code>403 insufficient_scope</code></td><td>The key is valid but lacks the scope for this call. Saving needs <code>memory:write</code>.</td><td>Use a key with write scope. Keys carry both scopes unless you asked for otherwise.</td></tr>
+<tr><td><code>400 unknown_parameter</code></td><td>A field name the endpoint does not accept. The message names it and suggests the nearest match.</td><td>Fix the spelling. If there is no near match, the message lists every accepted field.</td></tr>
+<tr><td><code>404 not found</code></td><td>Routes match exactly — <code>/v1/save/</code> with a trailing slash is not <code>/v1/save</code>.</td><td>Drop the trailing slash.</td></tr>
+<tr><td><code>429 too_many_requests</code></td><td>A rate bucket tripped. Saving allows 60 per minute; the body names the bucket.</td><td>Honour <code>retry-after</code> rather than sleeping a fixed amount. See <a href="#/api/limits">Rate limits</a>.</td></tr>
+<tr><td><code>409 idempotency_conflict</code></td><td>You reused an <code>idempotencyKey</code> for different content.</td><td>Mint a new key. The same key with the same content is a safe replay and returns the original receipt.</td></tr>
+</table>
+<p>Every response carries an <code>x-request-id</code> header. It ties your call to the server-side record without anyone reading your memory content, so quote it if you report a problem.</p>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/install/claude", "Connect a chat app", "Give Claude or ChatGPT the same memory through MCP."],
+	["#/sdk/python", "Use an SDK", "Python and JavaScript clients, with retries and typed errors."],
+	["#/guides/save", "Save memory properly", "Conversation capture, provenance, and what gets kept."],
+	["#/concepts/memory", "Understand the machinery", "What happens between your text and a stored memory."],
+])}
 ` };
 
 PAGES["/install/claude"] = { title: "Connect Claude", html: `
@@ -428,7 +558,7 @@ PAGES["/install/claude"] = { title: "Connect Claude", html: `
 <div class="note"><b>Set up on a computer, not your phone.</b> The Claude mobile apps can't add connectors — configure once in a computer browser and it syncs to your phone automatically.</div>
 <h2>Steps</h2>
 <ol>
-<li>In the Itsuki app, open <b>API Keys → Create MCP link</b> and copy your private URL (shown once): <code>${ORIGIN}/mcp/${PRODUCT.tokenPrefix}…</code></li>
+<li>In the Itsuki app, open <b>Get started</b>, pick your client, and click <b>Create link</b>. Copy the URL it shows you — it is shown once: <code>${ORIGIN}/mcp/${PRODUCT.tokenPrefix}…</code></li>
 <li>Open Claude's <b>Customize → Connectors</b>, click <b>+</b>, then <b>Add custom connector</b>. This <a href="https://claude.ai/settings/connectors?modal=add-custom-connector" target="_blank" rel="noopener">direct link</a> may open the same dialog. On Team or Enterprise, an Owner or Primary Owner must add it for the organization.</li>
 <li>Name it <code>${PRODUCT.name.toLowerCase()}</code>, paste the URL, click <b>Add</b>.</li>
 <li>In any chat: click the <b>+</b> (bottom-left) → <b>Connectors</b> → switch on <code>${PRODUCT.name.toLowerCase()}</code>. A saved connector stays off until you enable it in a chat — this step is the one everyone misses.</li>
@@ -451,7 +581,7 @@ PAGES["/install/chatgpt"] = { title: "Connect ChatGPT", html: `
 <h2>Steps</h2>
 <ol>
 <li>A Business admin/owner enables Developer mode from <b>Settings → Apps → Advanced settings</b> or starts at <b>Workspace settings → Apps → Create</b>. Enterprise/Edu admins first grant developer access under Permissions &amp; Roles.</li>
-<li>Create a custom MCP app. Name it <code>${PRODUCT.name.toLowerCase()}</code> and use the MCP link from <b>API Keys → Create MCP link</b>. Review the server's three tools and write permissions before publishing it to the workspace.</li>
+<li>Create a custom MCP app. Name it <code>${PRODUCT.name.toLowerCase()}</code> and use an MCP link — open <b>Get started</b>, pick your client, and click <b>Create link</b>. Review the server's tools and write permissions before publishing it to the workspace.</li>
 <li>After the workspace approves/publishes the app, enable it in a new web chat. The host may request confirmation before a save action.</li>
 </ol>
 <h2>Limits worth knowing</h2>
@@ -463,7 +593,7 @@ PAGES["/install/chatgpt"] = { title: "Connect ChatGPT", html: `
 ` };
 
 PAGES["/install/claude-code"] = { title: "Claude Code (MCP)", html: `
-<h1>Connect Claude Code</h1>
+<h1>Connect Claude Code (MCP)</h1>
 <p class="lede">One command. Your coding agent gets save, recall, and conversation capture.</p>
 ${codeBlock(`claude mcp add --transport http ${PRODUCT.name.toLowerCase()} ${ORIGIN}/mcp/YOUR_MCP_KEY`)}
 <p>Replace <code>YOUR_MCP_KEY</code> with a fresh MCP link from <b>API Keys</b> (the full <code>${PRODUCT.tokenPrefix}…</code> value is shown once at creation).</p>
@@ -540,7 +670,8 @@ ${codeBlock(`export ITSUKI_API_KEY=your_api_key`)}
 <h3>What it does</h3>
 <p>Recall runs once per genuinely new human turn and is injected on the system channel, so it reaches the model without entering your transcript or your session titles. Capture runs only after a turn that settled successfully &mdash; never on retries, errors, cancellations, tool-only turns, or subagent sessions. Work is staged to disk before any network call, so a crash mid-save loses nothing.</p>
 <p>Five tools are available to the agent: <code>itsuki_recall</code>, <code>itsuki_save</code>, <code>itsuki_memories</code>, <code>itsuki_memory</code>, <code>itsuki_status</code>.</p>
-<p><b>Deliberately absent:</b> updating a memory in place, memory history, and entity operations &mdash; none exist on the server, and no tool here fakes them. Destructive tools are also absent by design: deletion needs a confirmation surface a tool call cannot provide. Use the MCP route below or the dashboard to delete.</p>
+<p><b>Deliberately absent from this package:</b> updating a memory in place, memory history, and entity operations. The five tools above stay on the save-and-read path, and no tool here fakes the rest. Destructive tools are absent by design too: deletion needs a confirmation surface a tool call cannot provide. Use the MCP route below or the dashboard to delete.</p>
+<div class="note"><b>Corrections exist, just not here.</b> The service supports <code>update_memory</code>, <code>memory_history</code> and <code>rollback_memory</code>, each keeping an immutable revision. They are simply not wired into this package &mdash; reach them over the MCP route below, from the dashboard, or through the API. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</div>
 <p>Recalled memories are wrapped in explicit markers and bounded before they reach the model. That is structural delimitation, not a guarantee: no wrapper can force a model to treat remembered text as inert, and that residual risk is inherent to memory injection.</p>
 
 <h2>MCP route</h2>
@@ -560,7 +691,7 @@ ${codeBlock(`{
 <h3>3. Verify</h3>
 <p>Restart OpenCode and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>. You should see the connected memory space, scopes, and live counts.</p>
 <h3>What you get</h3>
-<p>All eight memory tools: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>. For recall and save without prompting, add the proactive-use instructions from the dashboard&rsquo;s Get started page to your OpenCode rules.</p>
+<p>The full memory tool set — save, recall, browse, inspect, correct and delete. <a href="#/api/mcp">MCP tools</a> lists every tool with its inputs. For recall and save without prompting, add the proactive-use instructions from the dashboard&rsquo;s Get started page to your OpenCode rules.</p>
 
 <h2>Troubleshooting</h2>
 <ul>
@@ -597,7 +728,7 @@ ${codeBlock(`{
 <h3>3. Verify</h3>
 <p>Restart the Antigravity session and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>.</p>
 <h3>What you get</h3>
-<p>All eight memory tools: <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, and <code>whoami</code>.</p>
+<p>The full memory tool set — save, recall, browse, inspect, correct and delete. <a href="#/api/mcp">MCP tools</a> lists every tool with its inputs.</p>
 <h3>Troubleshooting</h3>
 <ul>
 <li><b>No tools appearing</b> — restart the session after saving the config.</li>
@@ -624,13 +755,15 @@ ${codeBlock(`{
     }
   }
 }`)}
-<p>Create an <b>MCP link</b> under <b>API Keys</b> (shown once), set it as <code>ITSUKI_API_KEY</code> in the Gateway's environment, restart the Gateway, and verify — <code>diagnostics</code> must be empty:</p>
+<p>Create an <b>API key</b> under <b>API keys</b> (shown once), set it as <code>ITSUKI_API_KEY</code> in the Gateway's environment, restart the Gateway, and verify — <code>diagnostics</code> must be empty:</p>
+<div class="note"><b>An API key, not an MCP link.</b> This plugin sends the credential as an <code>Authorization: Bearer</code> header and checks its shape first, so a full <code>/mcp/…</code> URL is refused before a request is made. MCP links belong in the URL of routes B and C below.</div>
 ${codeBlock(`openclaw plugins inspect itsuki --runtime --json`)}
 <p>Memory then recalls before every user-originated turn and saves after each settled one, exactly once — across Gateway restarts, compaction, and subagents. Cron and heartbeat runs are never captured. Recalled context is injected behind an explicit stored-context-not-instructions label, every message is scrubbed for credentials locally before it leaves the machine, and undeliverable saves wait in a crash-safe local spool rather than being lost. There is no delete surface of any kind in the plugin.</p>
 <p>Optional <b>per-sender tenancy</b> (<code>"tenancy": "per-sender"</code> in the plugin config) gives each channel-scoped sender an isolated memory space derived as a one-way hash of channel + sender id. A turn without derivable sender identity skips memory entirely rather than falling back to the owner's space. Turning this on means storing per-person memory for the people who talk to your agent — tell them.</p>
-<p>Deliberately absent, because the backend has no honest contract for them: update/edit of a stored memory, multimodal memory, automatic consolidation — and the plugin never claims OpenClaw's exclusive memory slot, which would disable built-in memory for every agent in the install.</p>
+<p>Deliberately absent from this plugin: in-place editing of a stored memory, multimodal memory, and automatic consolidation — and the plugin never claims OpenClaw's exclusive memory slot, which would disable built-in memory for every agent in the install.</p>
+<div class="note"><b>Editing is absent from the plugin, not from the service.</b> Correct a memory over the MCP routes below, in the dashboard, or through the API; every correction keeps an immutable revision you can roll back. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</div>
 <h2>Route B — prompt install (MCP)</h2>
-<p>Create an <b>MCP link</b> in API Keys, open the dashboard's <b>Get started → Agents → OpenClaw</b> tab, and copy the installation prompt. Paste it into OpenClaw. The agent adds the memory server to its own configuration, imports your workspace files (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>USER.md</code>, <code>MEMORY.md</code>, and the last 30 days of <code>memory/YYYY-MM-DD.md</code>) through the bounded ingest door, and verifies the round trip with <code>whoami</code> and <code>recall_memory</code>. Every accepted batch returns a receipt you can inspect under <b>Requests</b>.</p>
+<p>In the dashboard, open <b>Get started</b>, choose <b>OpenClaw</b>, click <b>Create link</b> for an MCP link, and copy the installation prompt. Paste it into OpenClaw. The agent adds the memory server to its own configuration, imports your workspace files (<code>SOUL.md</code>, <code>IDENTITY.md</code>, <code>USER.md</code>, <code>MEMORY.md</code>, and the last 30 days of <code>memory/YYYY-MM-DD.md</code>) through the bounded ingest door, and verifies the round trip with <code>whoami</code> and <code>recall_memory</code>. Every accepted batch returns a receipt you can inspect under <b>Requests</b>.</p>
 <h2>Route C — manual config (MCP)</h2>
 ${codeBlock(`openclaw mcp add ${PRODUCT.name.toLowerCase()} --url ${ORIGIN}/mcp/YOUR_MCP_KEY --transport streamable-http`)}
 <p>Reload OpenClaw, then confirm the connection by asking it to call the <code>whoami</code> tool. To import existing workspace notes, batch them through <code>POST ${ORIGIN}/v1/ingest</code> — check <code>GET ${ORIGIN}/v1/ingest/limits</code> first (at most 30 messages per request, 4,000 characters per message).</p>
@@ -670,7 +803,7 @@ ${codeBlock(`hermes mcp add ${PRODUCT.name.toLowerCase()}`)}
 <h2>3. Verify</h2>
 <p>Restart Hermes and say: <i>use the ${PRODUCT.name.toLowerCase()} whoami tool and tell me what it reports</i>.</p>
 <h2>How this sits beside Hermes's own memory</h2>
-<p>Hermes keeps its built-in <code>MEMORY.md</code> and <code>USER.md</code> files; external memory runs alongside them, never replacing them. Through this MCP connection Hermes gets all eight ${PRODUCT.name} tools — <code>save_memory</code>, <code>save_conversation</code>, <code>recall_memory</code>, <code>list_memories</code>, <code>get_memory</code>, <code>delete_memory</code>, <code>delete_all_memories</code>, <code>whoami</code> — so memory persists across sessions, machines, and every other connected tool.</p>
+<p>Hermes keeps its built-in <code>MEMORY.md</code> and <code>USER.md</code> files; external memory runs alongside them, never replacing them. Through this MCP connection Hermes gets the full ${PRODUCT.name} memory tool set — save, recall, browse, inspect, correct and delete, listed in full under <a href="#/api/mcp">MCP tools</a> — so memory persists across sessions, machines, and every other connected tool.</p>
 <h2>Troubleshooting</h2>
 <ul>
 <li><b>Tools missing</b> — restart Hermes after editing <code>config.yaml</code>, and check the YAML indentation.</li>
@@ -685,15 +818,17 @@ PAGES["/install/pi"] = { title: "Pi Agent", html: `
 <h2>Route A — native extension (recommended)</h2>
 <p>Published on npm as <code>pi-itsuki</code>, built and signed from this repository's GitHub Actions workflow with npm provenance. Zero runtime dependencies. Needs Node 22.19+, Pi's own floor.</p>
 ${codeBlock(`pi install npm:pi-itsuki`)}
-<p>Create an <b>MCP link</b> under <b>API Keys</b> (shown once), set it as <code>ITSUKI_API_KEY</code> in your environment, and restart pi. The key is read from the environment only — the extension refuses keys placed in config files, and it travels only as an <code>Authorization</code> header.</p>
+<p>Open <b>API Keys</b>, click <b>Create API key</b>, and copy it — it is shown once. Set it as <code>ITSUKI_API_KEY</code> in your environment and restart pi. The key is read from the environment only: the extension refuses keys placed in config files, and it travels only as an <code>Authorization</code> header.</p>
+<div class="note"><b>An API key, not an MCP link.</b> The extension validates the credential's shape before it makes a request, so a <code>${ORIGIN}/mcp/…</code> URL is rejected outright.</div>
 ${codeBlock(`export ITSUKI_API_KEY=YOUR_MCP_KEY`)}
 <p>Then, inside pi:</p>
 ${codeBlock(`/itsuki status`)}
 <p><code>/itsuki doctor</code> shows the connection, spool depth, last receipt, and circuit-breaker state — never the key. <code>/itsuki recall &lt;query&gt;</code> does a one-off lookup, and the model itself gets <code>itsuki_recall</code> and <code>itsuki_save</code> tools. There is deliberately no delete tool: nothing in the extension can destroy memory.</p>
 <p>Capture is exactly-once: each settled turn is staged to a durable local spool under a content-derived idempotency key before any network call, so retries, crashes, <code>/resume</code> and <code>/fork</code> cannot double-write — and if Itsuki is unreachable, the turn waits on disk and is delivered later. Recalled memory is injected behind an explicit stored-context-not-instructions label. Every message is scrubbed for credentials locally before it leaves your machine.</p>
-<p>Deliberately absent, because the backend has no honest contract for them: update/edit of a stored memory, multimodal memory, and automatic consolidation.</p>
+<p>Deliberately absent from this extension: in-place editing of a stored memory, multimodal memory, and automatic consolidation.</p>
+<div class="note"><b>Editing is absent from the extension, not from the service.</b> Correct a memory from the dashboard or through the API, and every correction keeps an immutable revision you can roll back. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</div>
 <h2>Route B — REST fallback</h2>
-<p>Pi has no MCP support, so the fallback uses the shell tool Pi already has. Copy the installation prompt from the dashboard's <b>Get started → Agents → Pi Agent → REST fallback</b> tab and paste it into Pi. The agent verifies the connection (<code>GET /v1/status</code>), saves a first memory (<code>POST /v1/save</code>), and proves recall (<code>POST /v1/recall</code>) — reporting receipts. Then add the standing instructions from the same tab so recall and save happen every session.</p>
+<p>Pi has no MCP support, so the fallback uses the shell tool Pi already has. Copy the installation prompt from the dashboard's <b>Get started</b> page — choose <b>Pi Agent</b>, then <b>REST fallback</b> — and paste it into Pi. The agent verifies the connection (<code>GET /v1/status</code>), saves a first memory (<code>POST /v1/save</code>), and proves recall (<code>POST /v1/recall</code>) — reporting receipts. Then add the standing instructions from the same tab so recall and save happen every session.</p>
 <h2>Troubleshooting</h2>
 <ul>
 <li><b><code>/itsuki status</code> says the key is not configured</b> — <code>ITSUKI_API_KEY</code> is not visible to the pi process. Set it in the profile of the shell that launches pi, then restart pi.</li>
@@ -892,7 +1027,7 @@ tools = McpToolSpec(client=client)`)}
 
 PAGES["/integrations/typescript"] = { title: "TypeScript frameworks", html: `
 <h1>TypeScript frameworks</h1>
-<p class="lede">The same MCP endpoint, TypeScript clients. Create an <b>MCP link</b> in <b>API Keys</b> first — it is shown once.</p>
+<p class="lede">The same MCP endpoint, TypeScript clients. Create an <b>MCP link</b> first — open <b>Get started</b>, pick your client, and click <b>Create link</b> — it is shown once.</p>
 <h2 id="mastra">Mastra</h2>
 ${codeBlock(`npm install @mastra/mcp
 
@@ -936,20 +1071,23 @@ PAGES["/integrations/n8n"] = { title: "n8n", html: `
 <p>Published on npm as <code>n8n-nodes-itsuki</code>, built and signed from this repository's GitHub Actions workflow with npm provenance. Install it in n8n under <b>Settings → Community Nodes → Install</b>; only instance owners can install community nodes, and n8n Cloud carries only nodes n8n has verified, so Cloud users should use Route B or C below.</p>
 ${codeBlock(`n8n-nodes-itsuki`)}
 <p>Then create an <b>Itsuki API</b> credential (API key from <b>API Keys</b> in the dashboard, base URL <code>${ORIGIN}</code>) and press <b>Test</b> — it verifies the connection against an endpoint that returns counts only, never memory content. The key travels as a header and is never written into workflow exports.</p>
-<p>The node exposes nine operations:</p>
+<p>The node exposes twelve operations:</p>
 <ul>
 <li><b>Save Memory</b> and <b>Save Conversation</b> — store a durable fact, or a batch of chat messages for extraction. Both <b>wait for completion by default</b>, so the next node sees settled state; if the wait times out the output says the save was accepted and is still processing, which is not a failure.</li>
 <li><b>Recall Memory</b> — prompt-ready context plus structured items. Zero results is a result, not an error.</li>
 <li><b>List Memories</b> — one page, or Return All with a hard item cap and pagination-loop detection.</li>
 <li><b>Get Memory</b> · <b>Delete Memory</b> — by prefixed ID. A missing ID is reported as an error, never as a silent success.</li>
 <li><b>Delete All Memories</b> — <b>previews by default</b>; it reports what would be removed and changes nothing until you tick Confirm Destruction.</li>
-<li><b>Who Am I</b> — identity, project scope, connection health and plan usage.</li>
+<li><b>Who Am I</b> — identity, project scope, connection health and current write counts.</li>
+<li><b>Update Memory</b> — correct one memory with optimistic concurrency. It needs the revision you read, so a stale edit is refused rather than silently overwriting a newer one.</li>
+<li><b>Memory History</b> — one memory's bounded revision history, newest first.</li>
+<li><b>Rollback Memory</b> — restore an earlier revision as a new forward revision. History is never rewound.</li>
 <li><b>Wait for Packet</b> — poll a save receipt to a terminal state on its own.</li>
 </ul>
 <p>The node is usable as an AI Agent tool. On self-hosted n8n that additionally requires <code>N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true</code>. Recall and the save operations are the sensible tools to expose; destructive operations are deliberately unattractive as tools, since Delete All previews unless a human enables confirmation.</p>
-<p>There is no Update operation. ${PRODUCT.name} has no safe versioned-correction contract yet, and this node does not pretend otherwise — correct a memory by deleting it and saving the corrected fact.</p>
+<p>To correct a memory, use <b>Update Memory</b> rather than deleting and re-saving. An update keeps the previous wording as an immutable revision you can read with <b>Memory History</b> and restore with <b>Rollback Memory</b>; deleting destroys that history instead. See <a href="#/guides/versions">Corrections, history, and rollback</a>.</p>
 <h2 id="http">Route B — HTTP Request node (any workflow, incl. Cloud)</h2>
-<p>The deterministic route: "form submitted → save to memory", "nightly digest → recall". Create an <b>MCP link</b> in <b>API Keys</b> (it doubles as a REST Bearer credential).</p>
+<p>The deterministic route: "form submitted → save to memory", "nightly digest → recall". Create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b> — which doubles as a REST Bearer credential.</p>
 ${codeBlock(`Node: HTTP Request
 Method: POST
 URL: ${ORIGIN}/v1/save
@@ -974,7 +1112,7 @@ PAGES["/integrations/dify"] = { title: "Dify", html: `
 <h1>Dify</h1>
 <p class="lede">Dify consumes remote MCP servers natively — no plugin, no marketplace, no review. Two minutes in the Tools screen.</p>
 <h2>Connect</h2>
-<p>Create an <b>MCP link</b> in <b>API Keys</b>, then in Dify:</p>
+<p>Create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b> — then in Dify:</p>
 ${codeBlock(`Dify -> Tools -> MCP -> Add server (HTTP transport)
 Server URL: ${ORIGIN}/mcp
 Headers: authorization = Bearer YOUR_MCP_KEY`)}
@@ -1099,33 +1237,123 @@ ${codeBlock(`POST /v1/recall
 <tr><td><code>recallScope</code></td><td><code>global</code> (default) searches the whole account; <code>project_only</code> searches exactly <code>memoryScope.projectId</code>; <code>project_then_global</code> searches that project plus rows without a project. Project modes never include another project.</td></tr>
 </table>
 <h2>Rate limits</h2>
-<p>Writes (<code>/v1/save</code>, <code>/v1/turn</code>, <code>/v1/ingest</code>): 60/minute per user — a <code>429</code> includes a friendly message; honor <code>Retry-After</code> style backoff. Reads are not currently rate limited.</p>
+<p>There are six buckets, all per 60 seconds, keyed per credential and project: <code>auth</code> 10, <code>save</code> 60 (<code>POST /v1/save</code> and <code>POST /v1/turn</code>), <code>recall</code> 120, <code>delete</code> 30, <code>import</code> 300 (<code>POST /v1/ingest</code>), and <code>read</code> 240. Reads <i>are</i> limited — just loosely, because they cost database rows rather than inference. A <code>429</code> carries <code>retry-after</code>; back off on it rather than on a fixed sleep. Read the live numbers from <code>GET /v1/limits</code> instead of copying them: see <a href="#/api/limits">Rate limits and quotas</a>.</p>
 <h2>Errors</h2>
 <p>Errors are JSON: <code>{ "error": "code_or_message" }</code> with conventional status codes (400 invalid body, 401 unauthenticated, 403 wrong scope, 429 slow down, 5xx our fault — automatically reported on our side).</p>
 ` };
 
 PAGES["/api/auth"] = { title: "Authentication & keys", html: `
 <h1>Authentication &amp; keys</h1>
-<p class="lede">Two kinds of key, one rule: secrets are shown once.</p>
-<h2>API keys (Bearer)</h2>
-${codeBlock(`authorization: Bearer ${PRODUCT.tokenPrefix}XXXXXXXX`)}
-<p>Create in <b>API Keys → Create API key</b>. Use for the REST API and SDKs. Also accepted via the <code>x-uml-token</code> header (legacy name kept for compatibility).</p>
-<h2>MCP links</h2>
-<p><code>${ORIGIN}/mcp/&lt;key&gt;</code> — the key rides in the URL because that's what chat clients can carry. An MCP link IS a secret; treat it like a password.</p>
+<p class="lede">Two kinds of credential, one rule: a secret is shown once. This page covers which one to use where, what happens when you mix them up, and how scopes and project roles combine to decide what a key can do.</p>
+
+<h2>The two credentials</h2>
+<table>
+<tr><th></th><th>API key</th><th>MCP link</th></tr>
+<tr><td><b>Looks like</b></td><td><code>${PRODUCT.tokenPrefix}\u2026</code></td><td><code>${ORIGIN}/mcp/${PRODUCT.tokenPrefix}\u2026</code></td></tr>
+<tr><td><b>Travels in</b></td><td>An <code>Authorization: Bearer</code> header</td><td>The URL itself</td></tr>
+<tr><td><b>Use it for</b></td><td>The REST API, the SDKs, and any client that can send headers</td><td>Chat clients and connectors that accept only a URL</td></tr>
+<tr><td><b>Create it from</b></td><td><b>API Keys</b> \u2192 <b>Create API key</b></td><td><b>Get started</b> \u2192 pick your client \u2192 <b>Create link</b></td></tr>
+</table>
+
+<div class="note"><b>The secret is the same shape either way.</b> Both are 32 random bytes behind an <code>${PRODUCT.tokenPrefix}</code> prefix, so you cannot tell them apart by looking. What differs is a stored <code>type</code> field, fixed at creation. That is why the app labels them in its key table with a <b>Type</b> column reading <code>API</code> or <code>MCP</code> \u2014 it is the only way to know.</div>
+
+<h2>Using an API key</h2>
+${codeBlock(`curl ${ORIGIN}/v1/status \\
+  -H "authorization: Bearer ${PRODUCT.tokenPrefix}your_key_here"`, "terminal")}
+
+<p>The legacy header <code>x-uml-token</code> is still accepted everywhere the <code>Authorization</code> header is, kept working for clients written before the rename. New code should use <code>Authorization</code>.</p>
+
+<h2>Using an MCP link</h2>
+<p>Point the client at the whole URL. The credential is the last path segment, so treat the URL exactly as you would a password.</p>
+${codeBlock(`${ORIGIN}/mcp/${PRODUCT.tokenPrefix}your_link_here`, "MCP server URL")}
+
+<p>There is also a header form of the same door, for MCP clients that <i>can</i> send headers: point them at <code>${ORIGIN}/mcp</code> with no path token and an <code>Authorization: Bearer</code> header. That door accepts either credential type.</p>
+
+<h2>What happens if you mix them up</h2>
+<p>This is the most common setup mistake, so the server names it rather than returning a bare failure.</p>
+
+<h3>An API key in the MCP URL</h3>
+<p>Refused. The path door accepts MCP links only, and the message says so:</p>
+${outputBlock(`HTTP/2 401
+
+{
+  "error": "unauthorized mcp token",
+  "message": "That is an API key, not an MCP link. API keys authenticate at POST /mcp with an 'Authorization: Bearer <key>' header \u2014 only MCP links (created as MCP in the app) go in the URL."
+}`, "Response")}
+
+<h3>An MCP link in a Bearer header</h3>
+<p>This one <b>works</b>. The asymmetry is deliberate and one-way: only the URL-path door is restricted to MCP links. An MCP-type credential sent as <code>Authorization: Bearer</code> authenticates anywhere an API key does. Note that the credential is the token, not the whole URL \u2014 if you paste the full <code>https://\u2026</code> string into a Bearer header you get a 401 telling you the key is the last path segment.</p>
+
+<h3>Some other kind of secret entirely</h3>
+<p>A <code>401</code> here carries a hint keyed to the shape of what you sent, because the fastest fix is usually knowing which secret you grabbed:</p>
+<table>
+<tr><th>What you sent</th><th>What the message tells you</th></tr>
+<tr><td>Starts <code>whsec_</code></td><td>That is a webhook signing secret. It only verifies incoming deliveries.</td></tr>
+<tr><td>Starts <code>sk-</code> or <code>sk_</code></td><td>That looks like an OpenAI or Stripe key.</td></tr>
+<tr><td>Starts <code>http://</code> or <code>https://</code></td><td>That looks like a URL. If you copied an MCP link, the key is the last path segment.</td></tr>
+<tr><td>Anything else</td><td>Keys start with <code>${PRODUCT.tokenPrefix}</code>.</td></tr>
+</table>
+
 <h2>Scopes</h2>
 <table>
 <tr><th>Scope</th><th>Grants</th></tr>
-<tr><td><code>memory:read</code></td><td>recall, graph, status, usage, receipts, export, read rules</td></tr>
-<tr><td><code>memory:write</code></td><td>save, turn, ingest, write rules — implies read</td></tr>
+<tr><td><code>memory:read</code></td><td>Recall, status, usage, receipts, jobs, export, and reading rules.</td></tr>
+<tr><td><code>memory:write</code></td><td>Save, turn, ingest, and writing rules. <b>Implies <code>memory:read</code>.</b></td></tr>
+<tr><td><code>memory:delete</code></td><td>Erasure. Deliberately <b>not</b> implied by <code>memory:write</code> \u2014 a credential that may write must not be able to erase.</td></tr>
 </table>
-<p>Default keys carry both. Create a read-only key by passing <code>"scopes": ["memory:read"]</code> when creating the token.</p>
-<h2>Lifecycle</h2>
+
+<p>Keys carry <code>memory:read</code> and <code>memory:write</code> by default. The app has no scope selector, so a narrower key is made through the API:</p>
+${codeBlock(`curl -X POST ${ORIGIN}/auth/tokens \\
+  -H "content-type: application/json" \\
+  --cookie "your signed-in session" \\
+  -d '{"type": "api", "label": "Read-only reporting", "scopes": ["memory:read"]}'`, "terminal")}
+
+${outputBlock(`{
+  "token": "${PRODUCT.tokenPrefix}\u2026",
+  "tokenRecord": { "id": "tok_\u2026", "label": "Read-only reporting", "type": "api", "status": "active" }
+}`, "Response")}
+
+<p>The plaintext <code>token</code> appears in this response and nowhere else, ever. Creating a key is a signed-in operation: this route does not accept an API key, which is what stops one key from minting another.</p>
+
+<div class="note">Two wildcard scopes are honoured if you hold them: <code>*</code> and <code>memory:*</code>. A request for a scope the key lacks returns <code>403</code> with <code>code: "insufficient_scope"</code>.</div>
+
+<h2>Scopes are only the first gate</h2>
+<p>A key also carries the project role of whoever created it, resolved fresh on every request. So a key's real power is its declared scope <i>intersected with</i> its creator's current role \u2014 which means a role change narrows an existing key on its very next request, with nothing to revoke.</p>
+
+<table>
+<tr><th>Capability</th><th>Project admin</th><th>Member</th><th>Viewer</th></tr>
+<tr><td>Read memory</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Write memory</td><td>Yes</td><td>Yes</td><td>\u2014</td></tr>
+<tr><td>Export</td><td>Yes</td><td>Yes</td><td>\u2014</td></tr>
+<tr><td>Create and view keys</td><td>Yes</td><td>Yes</td><td>\u2014</td></tr>
+<tr><td>Delete memory</td><td>Yes</td><td>\u2014</td><td>\u2014</td></tr>
+<tr><td>Edit rules</td><td>Yes</td><td>\u2014</td><td>\u2014</td></tr>
+</table>
+<p>Organization owners and admins hold every capability in every project underneath them. A capability failure returns <code>403</code> naming the capability, rather than the scope.</p>
+
+<h2>One key, many end users</h2>
+<p>A key is bound to one project and cannot read or write another. Inside that project, pass <code>userId</code> to give each of your own end users an isolated space:</p>
+${codeBlock(`{ "content": "Ada's depot is in Porto.", "userId": "ada" }`, "request body")}
+
+<p>The value you send never becomes a storage key directly. It is hashed together with the owning account, so two different accounts both using <code>ada</code> address completely different memory spaces, and the id you chose is not recoverable from the id we store. Omit <code>userId</code> and the write lands on the account's own memory.</p>
+
+<div class="note"><b>Pick an opaque, stable id.</b> The value is kept as provenance so your account can list its own tenants, so prefer an internal user id over an email address.</div>
+
+<h2>Key lifecycle</h2>
 <ul>
-<li><b>Shown once</b> — only a hash is stored server-side. Lose it → rotate.</li>
-<li><b>Rotate</b> — revokes the old key and mints a fresh one with the same name.</li>
-<li><b>Revoke</b> — immediate; revoked keys stay listed for audit and can never be used again.</li>
-<li>Keys minted before the Itsuki rename (<code>uml_live_…</code>) keep working forever.</li>
+<li><b>Shown once.</b> Only a hash is stored. A lost key cannot be recovered \u2014 create a new one and delete the old.</li>
+<li><b>Delete</b> is the only per-key control: the trash icon on the key's row in <b>API Keys</b>, labelled <b>Delete key</b>. It confirms first, then the key stops working immediately.</li>
+<li><b>One key per tool.</b> That is the whole rotation story \u2014 because each tool holds its own key, you can cut one off without touching the others.</li>
+<li><b>Older keys keep working.</b> Keys minted before the rename carry a <code>uml_live_</code> prefix and are still accepted; new keys always mint as <code>${PRODUCT.tokenPrefix}</code>.</li>
 </ul>
+
+<h2>Where to go next</h2>
+${nextSteps([
+	["#/api/rest", "REST API reference", "Every endpoint these credentials open."],
+	["#/api/mcp", "MCP tools", "What an MCP link exposes to a connected client."],
+	["#/api/errors", "Errors", "Every code the API returns, and what to do about it."],
+	["#/guides/projects", "Projects & teams", "Roles, invitations, and how a project scopes a key."],
+])}
 ` };
 
 PAGES["/api/mcp"] = { title: "MCP tools", html: `
@@ -1202,7 +1430,7 @@ alice = MemoryClient(api_key="YOUR_API_KEY", user_id="alice")`)}
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>export_all()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>get_rules()</code> · <code>set_rules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
 </table>
-<p>Errors raise <code>MemoryAPIError</code> with <code>.status</code>, <code>.code</code>, <code>.body</code>, and parsed <code>.retry_after</code>. Reads retry transient failures; POST writes retry only with <code>idempotency_key</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). This checkout prepares <code>0.2.1</code>; registry installation resolves the currently published version, so inspect <code>itsuki.VERSION</code> before relying on the new helpers.</p>
+<p>Errors raise <code>MemoryAPIError</code> with <code>.status</code>, <code>.code</code>, <code>.body</code>, and parsed <code>.retry_after</code>. Reads retry transient failures; POST writes retry only with <code>idempotency_key</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). Registry installation resolves the currently published version; inspect <code>itsuki.VERSION</code> before relying on recently added helpers.</p>
 ` };
 
 PAGES["/sdk/js"] = { title: "JavaScript SDK", html: `
@@ -1239,7 +1467,7 @@ const alice = new MemoryClient({ apiKey: process.env.ITSUKI_API_KEY, userId: "al
 <tr><td><code>graph()</code> · <code>status()</code> · <code>usage()</code> · <code>receipts()</code> · <code>exportAll()</code></td><td>GET /v1/*</td></tr>
 <tr><td><code>getRules()</code> · <code>setRules(rules)</code></td><td>GET/PUT /v1/rules</td></tr>
 </table>
-<p>Errors throw <code>MemoryAPIError</code> with <code>status</code>, <code>code</code>, <code>body</code>, and <code>retryAfterMs</code>. Reads retry transient failures; POST writes retry only with <code>idempotencyKey</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). The package includes TypeScript declarations. This checkout prepares <code>0.2.1</code>; registry installation resolves the currently published version, so inspect <code>VERSION</code> before relying on the new helpers. Keep keys out of browsers.</p>
+<p>Errors throw <code>MemoryAPIError</code> with <code>status</code>, <code>code</code>, <code>body</code>, and <code>retryAfterMs</code>. Reads retry transient failures; POST writes retry only with <code>idempotencyKey</code>. Custom service URLs must be bare HTTPS origins (HTTP is limited to loopback development). The package includes TypeScript declarations. Registry installation resolves the currently published version; inspect <code>VERSION</code> before relying on recently added helpers. Keep keys out of browsers.</p>
 ` };
 
 PAGES["/concepts/memory"] = { title: "How memory works", html: `
@@ -1527,7 +1755,7 @@ await memory.recall("deployment decisions", {
 
 PAGES["/concepts/delete"] = { title: "Delete & erasure", html: `
 <h1>Delete &amp; erasure</h1>
-<p class="lede">Two different operations share one route. Knowing which one you asked for is the difference between tidying up and exercising a right to erasure.</p>
+<p class="lede">Two different operations share one route. Knowing which one you asked for is the difference between tidying up and erasing everything.</p>
 
 <h2>Scoped delete is curation</h2>
 <p>A delete that names a source lane or a time window removes what matched, and nothing else:</p>
@@ -1652,23 +1880,27 @@ PAGES["/privacy"] = { title: "Privacy & limits", html: `
 <p class="lede">The short version we hold ourselves to: no selling data, no ads, no third-party trackers, no training on your memory.</p>
 <h2>Privacy</h2>
 <ul>
-<li>Your memory belongs to you. <code>GET /v1/export</code> exports the memory space resolved for that request, and a confirmed unscoped <code>DELETE /v1/memories</code> erases that same resolved space with an erasure barrier. Settings has no delete-all button, and true project-wide export or deletion must not be inferred from these scoped operations. Project-wide deletion is not self-serve until convergent lifecycle cleanup covers every primary and SDK sub-tenant path — see <a href="/concepts/delete">Delete &amp; erasure</a>.</li>
+<li>Your memory belongs to you. <code>GET /v1/export</code> exports the memory space resolved for that request, and a confirmed unscoped <code>DELETE /v1/memories</code> erases that same resolved space with an erasure barrier. Settings has no delete-all button, and true project-wide export or deletion must not be inferred from these scoped operations. Project-wide deletion is not self-serve until convergent lifecycle cleanup covers every primary and SDK sub-tenant path — see <a href="#/concepts/delete">Delete &amp; erasure</a>.</li>
 <li>Site analytics are aggregate-only: no cookies, no visitor IDs, bot-filtered counts.</li>
-<li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed. The <a href="/operate/observability">operator endpoints</a> available to <i>you</i> return counts, states and timings only — never content.</li>
+<li>Operational metadata (sign-ins, save/recall counts, errors) is visible to the operator for support; memory <i>content</i> is not browsed. The <a href="#/operate/observability">operator endpoints</a> available to <i>you</i> return counts, states and timings only — never content.</li>
 <li>The identifier you pass as <code>userId</code> for a sub-tenant is stored as part of that write's provenance, so your own account can list its tenants. Use an opaque, stable id of your own rather than an end user's email address.</li>
 <li>Secret redaction before storage covers labelled credentials (<i>"api key is …"</i>, <i>"password: …"</i>) and common key formats. It is a strong safety net, not a guarantee: an unlabelled high-entropy string, or a labelled passphrase of ordinary words, can still be stored. Treat memory as you would any store you write to deliberately.</li>
 <li>Full details: <a href="${ORIGIN}/privacy" target="_blank" rel="noopener">Privacy Policy</a> · <a href="${ORIGIN}/terms" target="_blank" rel="noopener">Terms</a>.</li>
 </ul>
-<h2>Limits (early access)</h2>
+<h2>Limits</h2>
 <table>
 <tr><th>Thing</th><th>Limit</th></tr>
-<tr><td>Writes (save/turn/ingest)</td><td>60 per minute per user</td></tr>
+<tr><td>Saves (<code>/v1/save</code>, <code>/v1/turn</code>)</td><td>60 per minute</td></tr>
+<tr><td>Recall</td><td>120 per minute</td></tr>
+<tr><td>Conversation ingest (<code>/v1/ingest</code>)</td><td>300 per minute</td></tr>
+<tr><td>Reads (list, get)</td><td>240 per minute</td></tr>
+<tr><td>Deletes</td><td>30 per minute</td></tr>
 <tr><td>One ingest request</td><td>30 messages; 4,000 Unicode code points/message; 120,000 total; 512 KiB serialized UTF-8 JSON</td></tr>
 <tr><td>Auth attempts</td><td>10 per minute per IP</td></tr>
 <tr><td>Recall context</td><td>Bounded (~1,800 chars) by design — memory should sharpen prompts, not flood them</td></tr>
 <tr><td>Extraction</td><td>Asynchronous; allow a few seconds before recalling brand-new facts</td></tr>
 </table>
-<p>Itsuki is an early product. Keep exports of anything critical, and report anything odd — every server error is auto-reported to the operator already.</p>
+<p>Keep exports of anything critical, and report anything odd — every server error is auto-reported to the operator already.</p>
 ` };
 
 PAGES["/integrations/langchain"] = { title: "LangChain", html: `
@@ -1680,7 +1912,7 @@ PAGES["/integrations/langchain"] = { title: "LangChain", html: `
 <p>One property matters before you build on it. <b>The model decides when to call a tool.</b> A connected server is not proof of a save, and an agent that never gets around to calling <code>recall_memory</code> will answer from nothing. If you need memory on every turn regardless of what the model feels like doing, use the direct route below — instead of the tools, or alongside them.</p>
 
 <h2>Before you start</h2>
-<p>Create an <b>MCP link</b> in <b>API Keys</b>. It is shown once, and it is a credential: the header below carries it, so load it from the environment in anything you commit. An <b>API key</b> works on this door too, in the same header. What does not work is putting either one in the URL path of the header route — see <a href="#/api/auth">Authentication and keys</a>.</p>
+<p>Create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b>. It is shown once, and it is a credential: the header below carries it, so load it from the environment in anything you commit. An <b>API key</b> works on this door too, in the same header. What does not work is putting either one in the URL path of the header route — see <a href="#/api/auth">Authentication and keys</a>.</p>
 
 <h2>Connect the tools</h2>
 <pre><button class="copy">Copy</button><code>pip install langchain-mcp-adapters langgraph</code></pre>
@@ -1881,7 +2113,7 @@ PAGES["/integrations/crewai"] = { title: "CrewAI", html: `
 <h2>Install</h2>
 <p>MCP support lives in an extra. Install <code>crewai-tools[mcp]</code>, not plain <code>crewai-tools</code>, or <code>MCPServerAdapter</code> will not be exported and the import will fail with a name error that looks like a version problem.</p>
 <pre><button class="copy">Copy</button><code>pip install "crewai-tools[mcp]"</code></pre>
-<p>Then create an <b>MCP link</b> in <b>API Keys</b>. It is shown once. The header below carries it, so read it from the environment rather than committing it.</p>
+<p>Then create an <b>MCP link</b> — open <b>Get started</b>, pick your client, and click <b>Create link</b>. It is shown once. The header below carries it, so read it from the environment rather than committing it.</p>
 
 <h2>A complete example</h2>
 <pre><button class="copy">Copy</button><code>import os
@@ -2774,7 +3006,7 @@ PAGES["/concepts/extraction"] = { title: "How extraction works", html: `
 </table>
 
 <h2>Three passes, because relations need their own attention</h2>
-<p>A single combined call spends its attention on facts and produces relations as an afterthought — measured on one conversation as 47 memories and 3 connections. So the work is split.</p>
+<p>A single combined call spends its attention on facts and produces relations as an afterthought. So the work is split.</p>
 <ol>
 <li><b>Facts and entities.</b> The proposing call. Its stance is deliberately generous, because the gates are strict.</li>
 <li><b>Relations only.</b> Code numbers the resolved entities 1..n for this one save — temporary row numbers, not database ids — and the model may cite only those numbers. An edge citing an unknown number is rejected, never repaired. That hard gate is what makes the generous first pass safe.</li>
@@ -3583,7 +3815,7 @@ POST /auth/projects
 <tr><td>Transfer or delete a project</td><td>yes</td><td>no</td><td>no</td><td>no</td><td>no</td></tr>
 <tr><td>Delete the organization</td><td>yes</td><td>no</td><td>no</td><td>no</td><td>no</td></tr>
 </table>
-<div class="note">Read the split between <b>member</b> and <b>viewer</b> carefully. A viewer can inspect memory but cannot write it, export it, hold a key, or spend model quota in the Playground — read-only at the product surface, without bulk portability. A member can write and export but cannot delete, change rules, or see the audit log. Deletion is a distinct permission from writing, deliberately: a project admin can empty a project's memory, and only the organization owner can remove the project itself.</div>
+<div class="note">Read the split between <b>member</b> and <b>viewer</b> carefully. A viewer can inspect memory but cannot write it, export it, hold a key, or use the Playground — read-only at the product surface, without bulk portability. A member can write and export but cannot delete, change rules, or see the audit log. Deletion is a distinct permission from writing, deliberately: a project admin can empty a project's memory, and only the organization owner can remove the project itself.</div>
 
 <h2>Inviting people</h2>
 <p>Invitations are organization-level: <code>org.members.manage</code>, so an organization owner or admin sends them. A <code>project_role</code> in the body also seats the person in the currently selected project.</p>
@@ -3594,7 +3826,7 @@ POST /auth/projects
   "project_role": "member",
   "access_expires_at": 1798761600000
 }</code></pre>
-<p>The response carries a copy-once link. Invitations expire after seven days; <code>access_starts_at</code> and <code>access_expires_at</code> optionally bound the seat itself, which is how you grant time-limited contractor access. The recipient signs in and calls <code>POST /v1/settings/invitations/accept</code> with the token — <code>POST /v1/settings/invitations/describe</code> previews what the link grants before accepting. Pending invitations can be resent (<code>POST /v1/settings/invitations/&lt;id&gt;/resend</code>) or revoked (<code>DELETE /v1/settings/invitations/&lt;id&gt;</code>).</p>
+<p>The response carries a copy-once link. Invitations expire after seven days; <code>access_starts_at</code> and <code>access_expires_at</code> optionally bound the seat itself, which is how you grant time-limited access to someone outside the team. The recipient signs in and calls <code>POST /v1/settings/invitations/accept</code> with the token — <code>POST /v1/settings/invitations/describe</code> previews what the link grants before accepting. Pending invitations can be resent (<code>POST /v1/settings/invitations/&lt;id&gt;/resend</code>) or revoked (<code>DELETE /v1/settings/invitations/&lt;id&gt;</code>).</p>
 <p>For someone already in the organization, seat them directly instead of inviting:</p>
 <pre><button class="copy">Copy</button><code># Add a project seat (project.members.manage)
 POST /v1/settings/members
@@ -4006,7 +4238,7 @@ PAGES["/api/limits"] = { title: "Rate limits and quotas", html: `
 <tr><td><code>save</code></td><td>60 / 60 s</td><td><code>POST /v1/save</code>, <code>POST /v1/turn</code>, and the MCP <code>save_memory</code> / <code>save_conversation</code> tools.</td></tr>
 <tr><td><code>recall</code></td><td>120 / 60 s</td><td><code>POST /v1/recall</code> and the MCP <code>recall_memory</code> tool.</td></tr>
 <tr><td><code>delete</code></td><td>30 / 60 s</td><td><code>DELETE /v1/memories</code> and <code>DELETE /v1/memories/:id</code>, plus the MCP delete tools. Tighter than saving on purpose: a loop that deletes is worse than a loop that saves.</td></tr>
-<tr><td><code>import</code></td><td>300 / 60 s</td><td><code>POST /v1/ingest</code>. Bulk backfills are legitimate burst traffic; the monthly AI budget — not this bucket — is what actually bounds spend.</td></tr>
+<tr><td><code>import</code></td><td>300 / 60 s</td><td><code>POST /v1/ingest</code>. Bulk backfills are legitimate burst traffic; the monthly AI write quota — not this bucket — is what actually bounds inference.</td></tr>
 <tr><td><code>read</code></td><td>240 / 60 s</td><td><code>GET /v1/memories</code>, <code>GET /v1/memories/:id</code>, and the MCP <code>list_memories</code> / <code>get_memory</code> / <code>whoami</code> tools. Reads cost database rows, not inference, so this is deliberately loose.</td></tr>
 </table>
 <h3>How a bucket is keyed</h3>
@@ -4133,7 +4365,7 @@ except MemoryAPIError as error:
 <li><a href="#/api/errors">Errors</a> — every code above, with the body fields each one carries.</li>
 <li><a href="#/api/rest">REST API reference</a> — the endpoints these limits apply to.</li>
 <li><a href="#/operate/observability">Monitoring &amp; diagnostics</a> — backlog, stuck jobs, retries, and latency across your account.</li>
-<li><a href="#/privacy">Privacy &amp; limits</a> — the short summary table for early access.</li>
+<li><a href="#/privacy">Privacy &amp; limits</a> — the short summary table.</li>
 </ul>
 ` };
 
@@ -4326,7 +4558,7 @@ PAGES["/faq"] = { title: "FAQ", html: `
 <h2>Privacy and data</h2>
 
 <h3>Is my memory used to train AI models?</h3>
-<p>No — not ours, not anyone's, on any plan, free or paid. Content sent for inference is used to produce the response you asked for and nothing else. It is not a tier feature or a toggle; it is how the service works. Read the full commitment on <a href="https://itsuki.app/ai-data" target="_blank" rel="noopener">AI &amp; your data</a>.</p>
+<p>No — not ours, not anyone's. Content sent for inference is used to produce the response you asked for and nothing else. It is not a setting you have to find; it is how the service works. Read the full commitment on <a href="https://itsuki.app/ai-data" target="_blank" rel="noopener">AI &amp; your data</a>.</p>
 
 <h3>Who else sees my content?</h3>
 <p>All AI inference — extraction, embeddings, reranking, summaries, previews — runs on Cloudflare Workers AI, inside the same network that hosts the database. No separate AI vendor receives your content. Google and GitHub appear only as sign-in providers and never see memory. Operational metadata (sign-in events, save and recall counts, errors) is visible to the operator for support; memory content is not browsed. See <a href="#/privacy">Privacy &amp; limits</a>.</p>
@@ -4346,7 +4578,7 @@ PAGES["/faq"] = { title: "FAQ", html: `
 <p>Faster than a save, and for a structural reason: recall never runs the extraction model. It embeds the query, runs several ranking lanes over rows already filtered by scope in SQL, and optionally reranks with a cross-encoder — no chat-model generation in the path. Saves are slower because their latency is dominated by that model call. We do not publish a single latency number; measure your own with <code>latency_ms.p50</code> and <code>p95</code> in <code>GET /v1/ops/overview</code>, described on <a href="#/operate/observability">Monitoring &amp; diagnostics</a>.</p>
 
 <h3>Why is the recalled context so short?</h3>
-<p>Because that is the product. The default context block is bounded at roughly 1,800 characters across at most six memories and four conversation pages. Memory should sharpen a prompt, not flood it — an experiment that widened the budget raised evidence availability and <i>lowered</i> the reader's accuracy, which is the failure the bound exists to avoid. Ask a narrower question, or use <code>recallScope</code> to aim at one project.</p>
+<p>Because that is the product. The default context block is bounded at roughly 1,800 characters across at most six memories and four conversation pages. Memory should sharpen a prompt, not flood it — widening the block surfaces more evidence and makes the answer worse, which is the failure the bound exists to avoid. Ask a narrower question, or use <code>recallScope</code> to aim at one project.</p>
 
 <h3>Will Claude or ChatGPT save automatically once I connect the MCP link?</h3>
 <p>No. Over MCP, the host model decides when to call a tool; Itsuki provides the tools and cannot force a call. An installed connector is not proof that anything was saved. If you need a guaranteed write per turn, call <code>POST /v1/turn</code> from your own runtime and inspect its collect receipt and packet status. See <a href="#/api/mcp">MCP tools</a>.</p>
@@ -4376,10 +4608,7 @@ PAGES["/faq"] = { title: "FAQ", html: `
 <h3>Can I get everything out?</h3>
 <p>Yes. <code>GET /v1/export</code> streams a complete JSON export of the memory space that credential and request resolve to. Note the boundary: it exports <i>that</i> space, not every sub-tenant space in the project. Keep exports of anything critical — this is an early product.</p>
 
-<h2>Running it and paying for it</h2>
-
-<h3>How much does it cost?</h3>
-<p>Itsuki is in free early access. There is no payment processor in the stack at all, which is a stronger statement than a price of zero. The bound that exists today is the AI write quota — 1,000 AI-processed writes per UTC calendar month by default, with recall excluded — and you can read your own consumption from <code>GET /v1/usage</code>. See <a href="#/api/limits">Rate limits and quotas</a>.</p>
+<h2>Running it</h2>
 
 <h3>What happens when I hit a limit?</h3>
 <p>A rate bucket or a full queue returns <code>429</code> with <code>retry-after</code>; both clear in seconds. An exhausted monthly quota also returns <code>429</code>, but it is terminal until the month rolls over, so hold the work rather than spinning — the body carries <code>resets_at</code>. <code>POST /v1/turn</code> and recall deliberately degrade to <code>200</code> instead of failing, and say so in the body. Branch on <code>code</code>, never on <code>message</code>. See <a href="#/api/errors">Errors</a>.</p>
@@ -4405,31 +4634,31 @@ function currentRoute() {
 	return PAGES[hash] ? hash : "/";
 }
 
-/* Areas group the sections into a top-level map. Each section belongs to
-   exactly one area; the left rail shows only the current area's sections, so
-   a reader is never scrolling past four unrelated subject areas to find one
-   page. */
-const AREAS = [
-	["Get started", ["Get started", "Guides"]],
-	["Integrations", ["Connect a tool", "Agent harnesses", "Frameworks & tools"]],
-	["API reference", ["Build with the API"]],
-	["Concepts", ["Concepts"]],
-	["Operate", ["Operate", "Trust"]],
-];
-
-function areaOfSection(sec) {
-	const found = AREAS.find(([, sections]) => sections.includes(sec));
-	return found ? found[0] : AREAS[0][0];
+/* One ordered walk through the entire tree, used by the prev/next pager. The
+   pager used to stop at the edge of an "area", so a reader who finished the
+   last Get started page was told there was nothing after it. */
+function allRoutes() {
+	return NAV.flatMap((g) => g.items.map(([r]) => r));
 }
 
-function areaOfRoute(route) {
-	const group = NAV.find((g) => g.items.some(([r]) => r === route));
-	return group ? areaOfSection(group.sec) : AREAS[0][0];
+function groupOfRoute(route) {
+	return NAV.find((g) => g.items.some(([r]) => r === route)) ?? null;
 }
 
-/* Ordered route list, used by the prev/next pager. */
-function areaRoutes(area) {
-	return NAV.filter((g) => areaOfSection(g.sec) === area).flatMap((g) => g.items.map(([r]) => r));
+/* Which rail sections the reader has collapsed. The section holding the page
+   you are on is always expanded regardless of what is stored, so a stale
+   preference can never hide the page you are reading. */
+const COLLAPSE_KEY = "itsuki_docs_collapsed";
+
+function collapsedSections() {
+	try {
+		const raw = JSON.parse(localStorage.getItem(COLLAPSE_KEY) ?? "[]");
+		return new Set(Array.isArray(raw) ? raw : []);
+	} catch { return new Set(); }
+}
+
+function storeCollapsed(set) {
+	try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...set])); } catch {}
 }
 
 function slugify(text) {
@@ -4463,12 +4692,36 @@ function buildToc(main) {
 	heads.forEach((h) => tocObserver.observe(h));
 }
 let tocObserver = null;
+/* Set by a search result, consumed by render() once the page has rendered.
+   Declared here rather than beside the search code because render() runs at
+   load, and a `let` read before its declaration throws. */
+let pendingHeading = null;
 
 /* Copy page hands the reader the whole page as markdown — the fastest way to
    put a doc into an AI assistant that is helping them integrate. */
 function pageMarkdown(main) {
 	const lines = [];
-	main.querySelectorAll("h1, h2, h3, p, li, pre").forEach((el) => {
+	const cell = (c) => c.textContent.trim().replace(/\|/g, "\\|").replace(/\s+/g, " ");
+	/* Tables and callouts used to be skipped entirely, which meant every
+	   parameter table - most of the value on a reference page - was silently
+	   dropped from the copied markdown. */
+	main.querySelectorAll("h1, h2, h3, p, li, pre, table, .note, .warn").forEach((el) => {
+		if (el.closest("table") && el.tagName !== "TABLE") return;
+		if (el.closest(".note, .warn") && !el.classList.contains("note") && !el.classList.contains("warn")) return;
+		if (el.tagName === "TABLE") {
+			const rows = [...el.querySelectorAll("tr")];
+			if (!rows.length) return;
+			const head = [...rows[0].children].map(cell);
+			lines.push("", `| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`);
+			rows.slice(1).forEach((r) => lines.push(`| ${[...r.children].map(cell).join(" | ")} |`));
+			lines.push("");
+			return;
+		}
+		if (el.classList.contains("note") || el.classList.contains("warn")) {
+			const body = el.textContent.trim().replace(/\s+/g, " ");
+			if (body) lines.push("", `> **${el.classList.contains("warn") ? "Warning" : "Note"}** ${body}`, "");
+			return;
+		}
 		const text = el.tagName === "PRE" ? el.querySelector("code")?.textContent ?? "" : el.textContent.trim();
 		if (!text) return;
 		if (el.tagName === "H1") lines.push(`# ${text}`, "");
@@ -4481,40 +4734,68 @@ function pageMarkdown(main) {
 	return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function renderNav(route) {
+	const nav = document.getElementById("sideNav");
+	const collapsed = collapsedSections();
+	const openGroup = groupOfRoute(route);
+
+	nav.innerHTML = NAV.map((g, i) => {
+		const isOpen = g === openGroup || !collapsed.has(g.sec);
+		const id = `navsec${i}`;
+		const items = g.items.map(([r, l]) =>
+			`<a href="#${r}" class="${r === route ? "active" : ""}">${esc(l)}</a>`).join("");
+		return `<button type="button" class="sec" aria-expanded="${isOpen}" aria-controls="${id}" data-sec="${esc(g.sec)}">`
+			+ `<svg class="chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 3l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+			+ `${esc(g.sec)}<span class="count">${g.items.length}</span></button>`
+			+ `<div class="sec-items" id="${id}"${isOpen ? "" : " hidden"}>${items}</div>`;
+	}).join("");
+
+	nav.querySelectorAll(".sec").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			const items = document.getElementById(btn.getAttribute("aria-controls"));
+			const nowOpen = btn.getAttribute("aria-expanded") !== "true";
+			btn.setAttribute("aria-expanded", String(nowOpen));
+			items.hidden = !nowOpen;
+			const set = collapsedSections();
+			if (nowOpen) set.delete(btn.dataset.sec); else set.add(btn.dataset.sec);
+			storeCollapsed(set);
+		});
+	});
+
+	/* Keep the current page visible in a rail that is now taller than the
+	   viewport, without yanking the whole window. */
+	const active = nav.querySelector("a.active");
+	if (active) {
+		const top = active.offsetTop - nav.clientHeight / 2;
+		nav.scrollTop = Math.max(0, top);
+	}
+}
+
 function render() {
 	const route = currentRoute();
 	const page = PAGES[route];
-	const area = areaOfRoute(route);
-	const group = NAV.find((g) => g.items.some(([r]) => r === route));
-	const label = group?.items.find(([r]) => r === route)?.[1] ?? page.title;
+	const group = groupOfRoute(route);
 
-	const order = areaRoutes(area);
+	const order = allRoutes();
 	const at = order.indexOf(route);
 	const link = (r, kind) => {
 		if (!r || !PAGES[r]) return "<span></span>";
-		const g = NAV.find((x) => x.items.some(([rr]) => rr === r));
+		const g = groupOfRoute(r);
 		const l = g?.items.find(([rr]) => rr === r)?.[1] ?? PAGES[r].title;
 		return `<a class="${kind}" href="#${r}"><small>${kind === "next" ? "Next" : "Previous"}</small>${esc(l)}</a>`;
 	};
 
 	const main = document.getElementById("page");
-	main.innerHTML = `<div class="crumbs"><b>${esc(area)}</b>${group ? ` &rsaquo; ${esc(group.sec)}` : ""}</div>
+	main.innerHTML = `<div class="crumbs">${group ? `<b>${esc(group.sec)}</b>` : ""}</div>
 		<div class="page-tools"><button type="button" id="copyPage">Copy page as markdown</button></div>`
 		+ page.html
 		+ `<div class="pager">${link(order[at - 1], "prev")}${link(order[at + 1], "next")}</div>`;
 
 	document.title = route === "/" ? `${PRODUCT.name} Docs` : `${page.title} · ${PRODUCT.name} Docs`;
 
-	document.getElementById("areaBar").innerHTML = AREAS.map(([name, sections]) => {
-		const first = NAV.find((g) => sections.includes(g.sec))?.items[0]?.[0];
-		return first ? `<a href="#${first}" class="${name === area ? "active" : ""}">${esc(name)}</a>` : "";
-	}).join("");
-
-	const nav = document.getElementById("sideNav");
-	nav.innerHTML = NAV.filter((g) => areaOfSection(g.sec) === area).map((g) => `<div class="sec">${g.sec}</div>` +
-		g.items.map(([r, l]) => `<a href="#${r}" class="${r === route ? "active" : ""}">${l}</a>`).join("")).join("");
-
+	renderNav(route);
 	buildToc(main);
+	applyPendingHeading();
 	const copy = document.getElementById("copyPage");
 	if (copy) copy.addEventListener("click", () => {
 		navigator.clipboard.writeText(pageMarkdown(main)).then(() => {
@@ -4543,34 +4824,103 @@ document.addEventListener("click", (event) => {
 });
 
 /* ---------------------------------------------------------------- search */
-const INDEX = Object.entries(PAGES).map(([route, page]) => ({
-	route,
-	title: page.title,
-	text: page.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").toLowerCase(),
-}));
+/* Stop words are dropped from the query so a natural question ("how do I
+   rotate a key") matches on its content words rather than failing on "how". */
+const STOP = new Set(["a","an","and","are","as","at","be","by","can","do","does","for","from","how",
+	"i","in","is","it","its","me","my","of","on","or","that","the","to","use","what","when","where",
+	"which","why","with","you","your"]);
+
+const INDEX = Object.entries(PAGES).map(([route, page]) => {
+	const raw = page.html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">").replace(/&mdash;/g, "\u2014").replace(/&rsquo;/g, "\u2019")
+		.replace(/\s+/g, " ").trim();
+	const headings = [...page.html.matchAll(/<h([23])[^>]*>([\s\S]*?)<\/h\1>/g)]
+		.map((m) => m[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim())
+		.filter(Boolean);
+	return { route, title: page.title, raw, lower: raw.toLowerCase(), headings,
+		headingsLower: headings.map((h) => h.toLowerCase()) };
+});
+
+function slugifyText(text) {
+	return String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 
 const searchInput = document.getElementById("search");
 const resultsBox = document.getElementById("searchResults");
+
+function runSearch(query) {
+	const terms = query.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t && !STOP.has(t));
+	if (!terms.length) return [];
+	return INDEX.map((entry) => {
+		const titleLower = entry.title.toLowerCase();
+		/* Every term must appear somewhere on the page, so adding a word
+		   narrows the result set instead of widening it. */
+		if (!terms.every((t) => titleLower.includes(t) || entry.lower.includes(t))) return null;
+
+		let score = 0;
+		for (const t of terms) {
+			if (titleLower.includes(t)) score += 6;
+			if (entry.headingsLower.some((h) => h.includes(t))) score += 3;
+			if (entry.lower.includes(t)) score += 1;
+		}
+		/* Prefer a heading that carries the most terms - that is the section
+		   the reader actually wants, not just the page. */
+		let best = null, bestHits = 0;
+		entry.headingsLower.forEach((h, i) => {
+			const hits = terms.filter((t) => h.includes(t)).length;
+			if (hits > bestHits) { bestHits = hits; best = entry.headings[i]; }
+		});
+
+		const at = entry.lower.indexOf(terms[0]);
+		return { entry, score, heading: best, at };
+	}).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 8);
+}
+
+function snippetFor(entry, at, terms) {
+	if (at < 0) return entry.raw.slice(0, 90);
+	const from = Math.max(0, at - 34);
+	let text = entry.raw.slice(from, at + 76);
+	if (from > 0) text = "\u2026" + text;
+	if (at + 76 < entry.raw.length) text += "\u2026";
+	let out = esc(text);
+	for (const t of terms) {
+		out = out.replace(new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig"), "<mark>$1</mark>");
+	}
+	return out;
+}
+
 searchInput.addEventListener("input", () => {
-	const q = searchInput.value.trim().toLowerCase();
+	const q = searchInput.value.trim();
 	if (q.length < 2) { resultsBox.classList.remove("open"); return; }
-	const hits = INDEX
-		.map((entry) => {
-			const inTitle = entry.title.toLowerCase().includes(q) ? 2 : 0;
-			const at = entry.text.indexOf(q);
-			return { entry, score: inTitle + (at >= 0 ? 1 : 0), at };
-		})
-		.filter((h) => h.score > 0)
-		.sort((a, b) => b.score - a.score)
-		.slice(0, 8);
+	const terms = q.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t && !STOP.has(t));
+	const hits = runSearch(q);
 	resultsBox.innerHTML = hits.length
-		? hits.map(({ entry, at }) => {
-			const snippet = at >= 0 ? entry.text.slice(Math.max(0, at - 30), at + 70) : "";
-			return `<a href="#${entry.route}"><b>${entry.title}</b><small>…${snippet}…</small></a>`;
+		? hits.map(({ entry, heading, at }) => {
+			const target = heading ? ` data-head="${esc(slugifyText(heading))}"` : "";
+			const where = heading ? `<i>${esc(heading)}</i>` : "";
+			return `<a href="#${entry.route}"${target}><b>${esc(entry.title)}</b>${where}`
+				+ `<small>${snippetFor(entry, at, terms)}</small></a>`;
 		}).join("")
-		: `<a href="#/"><small>No matches — try different words.</small></a>`;
+		: `<a href="#/"><small>No matches \u2014 try different words.</small></a>`;
 	resultsBox.classList.add("open");
 });
+
+/* A result that names a heading scrolls to it once the page has rendered. */
+resultsBox.addEventListener("click", (event) => {
+	const link = event.target.closest("a[data-head]");
+	if (!link) return;
+	pendingHeading = link.dataset.head;
+	if (location.hash.replace(/^#/, "") === link.getAttribute("href").slice(1)) {
+		applyPendingHeading();
+	}
+});
+
+function applyPendingHeading() {
+	if (!pendingHeading) return;
+	const el = document.getElementById(pendingHeading);
+	pendingHeading = null;
+	if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 document.addEventListener("click", (event) => {
 	if (!event.target.closest(".searchbox")) resultsBox.classList.remove("open");
 });
