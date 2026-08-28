@@ -504,7 +504,7 @@ describe("product shell routes", () => {
 		// The decongested hero: copy takes 70%, the right third is one calm
 		// vertical mark, and the developer surface follows immediately.
 		// The hero band was removed; the mark lives on the chapter rule now.
-		expect(html).toContain('class="chapter-rule-mark"');
+		expect(html).toContain('class="masthead-mark"');
 		expect(html).toContain('class="footer-japanese-mark"');
 		expect(html).toContain('<span>02</span> One memory, every tool');
 		expect(html).toContain('<span>03</span> The difference');
@@ -531,7 +531,7 @@ describe("product shell routes", () => {
 		expect(html).toContain("/assets/landing-editorial-v1.css?v=8");
 		expect(html).not.toContain("Skip the copy-paste between Claude and ChatGPT.");
 		expect(html).not.toContain("Your AI context is scattered.");
-		expect(html).toContain("hello@itsuki.app");
+		expect(html).toContain("founder@itsuki.app");
 		expect(publicLanding).not.toContain("ejziyad@gmail.com");
 		expect(publicLanding).not.toMatch(/paper trail/i);
 		// Receipts language is deliberate since the 2026-08-28 rebuild: auditable

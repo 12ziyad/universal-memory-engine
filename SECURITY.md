@@ -4,7 +4,7 @@
 
 Please do **not** open a public issue for a security vulnerability.
 
-- Email **hello@itsuki.app** with the subject **"SECURITY"**, or
+- Email **founder@itsuki.app** with the subject **"SECURITY"**, or
 - use [GitHub private vulnerability reporting](https://github.com/12ziyad/universal-memory-engine/security) on this repository.
 
 Include what you found, where, reproduction steps, and the impact as you

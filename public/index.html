@@ -194,6 +194,11 @@
 	/* ---- product shell ---- */
 	body.public-mode > header, body.public-mode > main#main, body.public-mode > #banner,
 	body.auth-mode > header, body.auth-mode > main#main, body.auth-mode > #banner { display: none; }
+	/* #appHeader is an ID (1,0,0) and outranked the element-selector guard
+	   above, so the org/project switchers and the page title painted under
+	   the landing and the login card. App chrome is now hidden everywhere
+	   except the app, including the class-less first paint. */
+	body:not(.app-mode) > header#appHeader { display: none; }
 	body.app-mode #landing, body.app-mode #authView,
 	body.public-mode #authView, body.auth-mode #landing { display: none; }
 	body:not(.public-mode):not(.auth-mode):not(.app-mode) #landing,
@@ -2345,9 +2350,35 @@
 
 	/* Huba lives in the header: an always-there ask bar where the theme
 	   toggle used to sit, and a panel that expands beneath it. */
-	.huba-omni { display: none; align-items: center; gap: 9px; height: 34px; padding: 0 13px 0 10px;
-		border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
-		font: 600 12.5px/1 var(--font-ui); cursor: pointer; transition: border-color 140ms ease, color 140ms ease; }
+	.huba-omni { position: relative; display: none; align-items: center; gap: 9px; height: 34px; padding: 0 14px 0 11px;
+		overflow: hidden; isolation: isolate;
+		border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+		background:
+			linear-gradient(120deg,
+				color-mix(in srgb, var(--accent) 13%, transparent),
+				color-mix(in srgb, var(--accent) 4%, transparent) 46%,
+				transparent 78%),
+			var(--input-bg);
+		color: var(--text); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+		transition: border-color 160ms ease, color 160ms ease, box-shadow 220ms ease, transform 160ms ease; }
+	/* The sheen. A pseudo-element rather than an animated background-position:
+	   compositing a transform is cheap, animating a gradient's position is not,
+	   and this sits in a header that repaints on every route change. */
+	.huba-omni::after {
+		position: absolute; z-index: -1; top: 0; bottom: 0; left: -60%; width: 46%; content: "";
+		background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
+		animation: hubaSheen 26s cubic-bezier(.4, 0, .2, 1) infinite;
+	}
+	@keyframes hubaSheen {
+		0%, 82% { transform: translateX(0); }
+		94%, 100% { transform: translateX(360%); }
+	}
+	.huba-omni:hover, .huba-omni:focus-visible {
+		border-color: var(--accent); transform: translateY(-1px);
+		box-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 30%, transparent);
+	}
+	.huba-omni.active { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent); }
+	.huba-omni.active::after { animation-play-state: paused; }
 	body.app-mode .huba-omni { display: inline-flex; }
 	.huba-omni:hover, .huba-omni:focus-visible, .huba-omni.active { border-color: var(--accent); color: var(--accent); }
 	.huba-omni:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -2434,6 +2465,7 @@
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.usage-bar > i, #hubaPanel, .huba-omni { transition: none !important; }
+		.huba-omni::after { animation: none; opacity: 0; }
 		.hg-e, .hg-n { animation: none !important; stroke-dashoffset: 0 !important; opacity: .85 !important; transform: none !important; }
 	}
 </style>
@@ -2444,6 +2476,10 @@
 <div id="landing" class="public-shell lp-shell">
 	<div class="site-shell">
 		<a class="skip-link" href="#landingContent">Skip to content</a>
+		<!-- The mark reads as a masthead line: centred above the nav, small,
+		     widely letter-spaced. It sets the page rather than decorating it,
+		     which is what the right-hand band never managed. -->
+		<p class="masthead-mark"><span lang="ja">イツキ</span></p>
 		<header class="topbar">
 			<a class="wordmark" href="/" onclick="showPublic(event)" aria-label="Itsuki home">
 				<img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" />
@@ -2510,16 +2546,6 @@
 				</div>
 			</div>
 		</section>
-
-		<!-- The mark used to be a black band down the right of the hero. It is
-		     centred here instead, on the seam where the cream page turns to
-		     ink — so it reads as a chapter break the page actually needed,
-		     rather than a stripe the fold had to work around. -->
-		<div class="chapter-rule">
-			<span class="chapter-rule-line" aria-hidden="true"></span>
-			<span class="chapter-rule-mark" lang="ja">イツキ</span>
-			<span class="chapter-rule-line" aria-hidden="true"></span>
-		</div>
 
 		<section class="handoff-section reveal" id="developers" aria-label="One memory across every connected tool">
 			<header class="handoff-head">
@@ -2732,7 +2758,7 @@
 				</nav>
 				<nav class="footer-col" aria-label="Company and trust">
 					<h3>Company</h3>
-					<a href="mailto:hello@itsuki.app">Support</a>
+					<a href="mailto:founder@itsuki.app">Support</a>
 					<a href="/docs/#/privacy">Privacy &amp; limits</a>
 					<a href="/privacy" onclick="showLegal('privacy', event)">Privacy policy</a>
 					<a href="/terms" onclick="showLegal('terms', event)">Terms</a>
@@ -4208,7 +4234,7 @@ function renderProfileMenu() {
 		<div class="profile-theme" role="group" aria-label="Appearance">${themeBtn("light", "Light")}${themeBtn("dark", "Dark")}${themeBtn("system", "System")}</div>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('usage');">Usage &amp; plan</button>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('settings');">Settings</button>
-		<a role="menuitem" href="mailto:hello@itsuki.app">Support</a>
+		<a role="menuitem" href="mailto:founder@itsuki.app">Support</a>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutNow();">Log out</button>`;
 }
 
@@ -13363,7 +13389,7 @@ function viewHelp(v) {
 		["Rotate or revoke", "Generate a new token to rotate. Revoke stops that tool immediately."],
 		["Project deletion", "Project-wide memory deletion is unavailable until the convergent lifecycle cleanup can prove every project storage space is removed."],
 		["Troubleshooting", "For signup or login issues, try again with a valid email and an 8+ character password. For connectors, check that the URL and token are pasted into the right fields and that the token has not been revoked."],
-		["Contact", "For help, production feedback, or partnership: hello@itsuki.app or ejziyad@gmail.com."],
+		["Contact", "For help, production feedback, or partnership: founder@itsuki.app or ejziyad@gmail.com."],
 	];
 	const grid = el("div","help-grid");
 	for (const [h,p] of topics) grid.appendChild(el("div","action-box", `<h3>${esc(h)}</h3><div class="help">${esc(p)}</div>`));
@@ -13392,7 +13418,7 @@ const LEGAL_PAGES = {
 	terms: {
 		title: "Terms of Service",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 			<p>Welcome to Itsuki. These Terms of Service ("Terms") are a binding agreement between you and the operator of Itsuki ("Itsuki", "we", "us") governing your use of the Itsuki hosted service on this website, including the dashboard, the HTTP API, and the MCP connector endpoints (together, the "Service"). By creating an account or using the Service you agree to these Terms and to the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. If you do not agree, do not use the Service.</p>
 
 			<h2>1. What the Service is</h2>
@@ -13404,7 +13430,7 @@ const LEGAL_PAGES = {
 			<h2>3. Your account</h2>
 			<ul>
 				<li>You must provide accurate information at signup and keep your login credentials secure. You are responsible for all activity under your account.</li>
-				<li>Notify us promptly at <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> if you suspect unauthorized access to your account.</li>
+				<li>Notify us promptly at <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> if you suspect unauthorized access to your account.</li>
 				<li>We may require email verification or additional sign-in protections as the Service evolves.</li>
 			</ul>
 
@@ -13473,7 +13499,7 @@ const LEGAL_PAGES = {
 			<p>We may update these Terms as the Service evolves. For material changes we will give notice in the app (and by email where appropriate) before the changes take effect. Continued use of the Service after the effective date constitutes acceptance. The "Effective" date above always reflects the current version.</p>
 
 			<h2>17. Contact</h2>
-			<p>Questions about these Terms: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</p>
+			<p>Questions about these Terms: <a href="mailto:founder@itsuki.app">founder@itsuki.app</a>.</p>
 
 			<h2>Changes to this document</h2>
 			<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> Section 5 now references the standalone <a href="/aup" onclick="showLegal('aup', event)">Acceptable Use Policy</a>. No other substantive change.<br /><b>${LEGAL_INITIAL_DATE}:</b> Initial version.</p>`,
@@ -13481,12 +13507,12 @@ const LEGAL_PAGES = {
 	privacy: {
 		title: "Privacy Policy",
 		body: `
-			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+			<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki (Universal Memory Layer), operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 			<p>Itsuki exists to store personal memory, so this policy is written to be read. It describes what we collect through the Itsuki website, dashboard, API, and MCP endpoints (the "Service"), how we use it, who processes it, and the rights and controls you have. The short version we hold ourselves to: <b>we do not sell your data, do not show ads, do not use third-party trackers, and do not train AI models on your memory.</b></p>
 
 			<h2>Summary at a glance</h2>
 			<ul>
-				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a>.</li>
+				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@itsuki.app">founder@itsuki.app</a>.</li>
 				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write. Operational account activity — sign-ins, save/recall counts, and errors your browser reports — is visible to the operator for support and abuse prevention; the content of your memories is not.</li>
 				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
 				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
@@ -13578,7 +13604,7 @@ const LEGAL_PAGES = {
 			<p>We keep this policy under review. For material changes we will give notice in the app before they take effect, and update the date above. Earlier versions are available on request.</p>
 
 			<h2>15. Grievances and contact</h2>
-			<p>Privacy questions, rights requests, and grievances: <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>
+			<p>Privacy questions, rights requests, and grievances: <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> (grievance contact under India's DPDP Act; responses within 7 days). Data controller: Itsuki (Universal Memory Layer), operated by Ziyad Ej, India.</p>
 
 			<h2>Changes to this document</h2>
 			<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> Section 5 now names the sign-in providers (Google, GitHub) and links the new <a href="/subprocessors" onclick="showLegal('subprocessors', event)">Subprocessors</a> page; sections 8 and 9 link the new <a href="/retention" onclick="showLegal('retention', event)">Retention</a> and <a href="/security" onclick="showLegal('security', event)">Security</a> pages. No collection or sharing practice changed.<br /><b>${LEGAL_INITIAL_DATE}:</b> Initial version.</p>`,
@@ -13586,7 +13612,7 @@ const LEGAL_PAGES = {
 	aup: {
 		title: "Acceptable Use Policy",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>This Acceptable Use Policy ("AUP") is part of the <a href="/terms" onclick="showLegal('terms', event)">Terms of Service</a> and applies to everything you do with the Itsuki dashboard, API, SDKs, and MCP connectors. It exists to protect the people whose lives end up inside memory, the tenants who share this infrastructure, and the Service itself. Where this page and the Terms overlap, the stricter rule applies.</p>
 
 		<h2>1. Illegal use</h2>
@@ -13629,7 +13655,7 @@ const LEGAL_PAGES = {
 		<p>We enforce this policy as described in the Terms: where practical we warn first; where content or conduct is dangerous, unlawful, or attacks the Service or its tenants, we suspend or terminate immediately. We honor lawful process, and we tell you what happened unless the law prevents us.</p>
 
 		<h2>9. Reporting abuse</h2>
-		<p>Seen something on Itsuki that violates this policy? Write to <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> with the subject "Abuse report". Reports are read by the operator, not a queue.</p>
+		<p>Seen something on Itsuki that violates this policy? Write to <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> with the subject "Abuse report". Reports are read by the operator, not a queue.</p>
 
 		<h2>Changes</h2>
 		<p class="legal-changelog"><b>${LEGAL_EFFECTIVE_DATE}:</b> First standalone version, extracted and expanded from Terms &sect;5.</p>
@@ -13638,7 +13664,7 @@ const LEGAL_PAGES = {
 	security: {
 		title: "Security at Itsuki",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>Memory is some of the most personal data an application can hold, so this page does not deal in vague assurances. It describes the actual mechanisms &mdash; and because the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">engine is open source</a>, every claim here can be checked against the code that enforces it.</p>
 
 		<h2>1. Architecture: one provider, small surface</h2>
@@ -13701,7 +13727,7 @@ const LEGAL_PAGES = {
 	subprocessors: {
 		title: "Subprocessors",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>A subprocessor is any company that processes customer or account data on our behalf. Itsuki has <b>three</b>. That number is a design decision: the Service was built on a single infrastructure provider precisely so this page would stay short, and comparable products commonly list twelve to twenty.</p>
 
 		<table>
@@ -13747,7 +13773,7 @@ const LEGAL_PAGES = {
 	"ai-data": {
 		title: "AI & Your Data",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>Itsuki uses AI models to turn conversations into structured memory. This page answers the questions that matter about that: which models see your content, where they run, what happens to it afterward, and what we will never do with it.</p>
 
 		<h2>1. The commitment first</h2>
@@ -13793,7 +13819,7 @@ const LEGAL_PAGES = {
 	retention: {
 		title: "Data Retention & Deletion",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>What we keep, for how long, and exactly what happens when you delete something. The defaults favor you keeping your memory until <i>you</i> decide otherwise &mdash; that is what a memory layer is for &mdash; and deletion, when you choose it, is real.</p>
 
 		<h2>1. Retention by data class</h2>
@@ -13839,7 +13865,7 @@ const LEGAL_PAGES = {
 	disclosure: {
 		title: "Responsible Disclosure Policy",
 		body: `
-		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:hello@itsuki.app">hello@itsuki.app</a></p>
+		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 		<p>Security research makes Itsuki safer, and good-faith researchers deserve clarity, speed, and safety. This policy is that promise, and <a href="/.well-known/security.txt">/.well-known/security.txt</a> points here.</p>
 
 		<h2>1. Scope</h2>
@@ -13850,7 +13876,7 @@ const LEGAL_PAGES = {
 
 		<h2>2. How to report</h2>
 		<ul>
-			<li>Email <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> with the subject <b>"SECURITY"</b>, or use <a href="https://github.com/12ziyad/universal-memory-engine/security" target="_blank" rel="noopener">GitHub private vulnerability reporting</a>. Never open a public issue for a vulnerability.</li>
+			<li>Email <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> with the subject <b>"SECURITY"</b>, or use <a href="https://github.com/12ziyad/universal-memory-engine/security" target="_blank" rel="noopener">GitHub private vulnerability reporting</a>. Never open a public issue for a vulnerability.</li>
 			<li>Include: what you found, where, reproduction steps, and impact as you understand it. A proof-of-concept helps; a working exploit chain is not required.</li>
 		</ul>
 
@@ -14575,18 +14601,42 @@ async function sendHuba() {
 	}
 }
 
+const ADMIN_TABS = [
+	["people", "People", "Everyone, and what each one has been doing"],
+	["ledger", "Ledger", "Every recorded action, newest first"],
+	["overview", "Overview", "Traffic and volume"],
+	["activity", "Saves", "Latest writes across all accounts"],
+	["errors", "Errors", "Reported failures"],
+	["requests", "Requests", "Upgrade requests"],
+	["spend", "Spend", "AI cost by day"],
+	["health", "Health", "System and routing"],
+];
+
 function viewAdmin(v) {
 	const wrap = el("div");
-	const tab = S.adminTab || "overview";
-	wrap.innerHTML = `<div class="box" style="max-width:1100px"><h3>Admin</h3>
-		<div class="help">Operator console — accounts, visits, activity, and system health. Visible only to admin accounts; every route is role-gated server-side.</div>
-		<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-			${["overview", "users", "activity", "errors", "requests", "spend", "health"].map((name) =>
-				`<button class="ghost mini${name === tab ? " admin-tab-active" : ""}" data-atab="${name}" onclick="adminTab('${name}')">${name[0].toUpperCase()}${name.slice(1)}</button>`).join("")}
-		</div></div>
-		<div id="adminBody" class="empty" style="margin-top:12px">Loading…</div>`;
+	const tab = S.adminTab || "people";
+	const active = ADMIN_TABS.find(([name]) => name === tab) || ADMIN_TABS[0];
+	wrap.innerHTML = `<section class="ops">
+		<header class="ops-head">
+			<div class="ops-title">
+				<h3>Operator console</h3>
+				<p class="ops-sub">${esc(active[2])}</p>
+			</div>
+			<div class="ops-meta">
+				<span class="ops-pill" id="opsScopePill">metadata only</span>
+				<button class="ghost mini" onclick="refreshAdminData(); refreshAdminUsers(); refreshAdminAuditFeed();">Refresh</button>
+			</div>
+		</header>
+		<nav class="ops-tabs" role="tablist" aria-label="Operator sections">
+			${ADMIN_TABS.map(([name, label]) =>
+				`<button role="tab" aria-selected="${name === tab}" class="ops-tab${name === tab ? " is-active" : ""}" data-atab="${name}" onclick="adminTab('${name}')">${esc(label)}</button>`).join("")}
+		</nav>
+	</section>
+	<div id="adminBody" class="empty" style="margin-top:14px">Loading…</div>`;
 	v.appendChild(wrap);
 	refreshAdminData();
+	if (tab === "people") refreshAdminUsers();
+	if (tab === "ledger") refreshAdminAuditFeed();
 }
 
 function adminTab(name) {
@@ -14594,6 +14644,8 @@ function adminTab(name) {
 	document.querySelectorAll("[data-atab]").forEach((button) =>
 		button.classList.toggle("admin-tab-active", button.dataset.atab === name));
 	renderAdminBody();
+	if (name === "people" && !S.adminUsers) refreshAdminUsers();
+	if (name === "ledger" && !S.adminAudit) refreshAdminAuditFeed();
 	if (name === "users" && !S.adminUsers) refreshAdminUsers();
 	if (name === "errors" && !S.adminErrors) refreshAdminErrors();
 	if (name === "requests" && !S.adminUpgradeRequests) refreshAdminUpgradeRequests();
@@ -14836,6 +14888,162 @@ async function adminUserAction(userId, action) {
 	}
 }
 
+/**
+ * The cross-account ledger. Paged by timestamp rather than OFFSET: new rows
+ * land while an operator reads, and an offset would silently repeat or skip
+ * entries as the window shifts underneath them.
+ */
+async function refreshAdminAuditFeed({ append = false } = {}) {
+	const before = append ? S.adminAuditNext : null;
+	if (append && !before) return;
+	try {
+		const query = new URLSearchParams({ limit: "120" });
+		if (before) query.set("before", String(before));
+		if (S.adminAuditActor) query.set("actor", S.adminAuditActor);
+		const res = await fetch(`/v1/admin/audit-feed?${query}`, { credentials: "include" });
+		if (!res.ok) throw new Error(String(res.status));
+		const body = await res.json();
+		S.adminAudit = append ? [...(S.adminAudit || []), ...(body.entries || [])] : (body.entries || []);
+		S.adminAuditNext = body.next_before || null;
+	} catch {
+		S.adminAudit = S.adminAudit || [];
+		S.adminAuditError = true;
+	}
+	if (["ledger", "people"].includes(S.adminTab || "people")) renderAdminBody();
+}
+
+/** One row of the ledger, shared by the global feed and a person's timeline. */
+function adminLedgerRow(entry) {
+	const who = entry.actor?.email || entry.actor?.name || entry.actor?.id || "system";
+	const failed = entry.outcome && entry.outcome !== "ok";
+	const target = entry.target ? `${entry.target.type}\u2009·\u2009${String(entry.target.id || "").slice(0, 18)}` : "";
+	return `<tr class="${failed ? "ops-row-bad" : ""}">
+		<td class="ops-when" title="${esc(new Date(entry.at).toISOString())}">${esc(ago(entry.at))}</td>
+		<td class="ops-actor">${esc(who)}</td>
+		<td><code class="ops-action">${esc(entry.action || "")}</code></td>
+		<td class="ops-target">${esc(target)}</td>
+		<td>${failed ? `<span class="badge state-inactive">${esc(entry.outcome)}</span>` : `<span class="badge state-active">ok</span>`}${entry.reason ? ` <span class="help">${esc(String(entry.reason).slice(0, 60))}</span>` : ""}</td>
+	</tr>`;
+}
+
+function adminLedgerTable(entries, emptyLine) {
+	if (!entries?.length) return `<div class="help">${esc(emptyLine)}</div>`;
+	return `<div class="ops-scroll"><table class="ops-table">
+		<thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Outcome</th></tr></thead>
+		<tbody>${entries.map(adminLedgerRow).join("")}</tbody>
+	</table></div>`;
+}
+
+async function refreshAdminJourney(userId) {
+	if (!userId) return;
+	S.adminJourneyError = null;
+	try {
+		const res = await fetch(`/v1/admin/user-journey?id=${encodeURIComponent(userId)}`, { credentials: "include" });
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		const journey = await res.json();
+		// A slow response for a person the operator has already navigated away
+		// from must not overwrite the one they are now looking at.
+		if (S.adminPerson !== userId) return;
+		S.adminJourney = journey;
+	} catch (err) {
+		if (S.adminPerson !== userId) return;
+		S.adminJourneyError = err.message || "Could not load this account.";
+	}
+	if ((S.adminTab || "people") === "people") renderAdminBody();
+}
+
+function adminPersonBadges(u) {
+	return [
+		u.role === "admin" ? `<span class="badge state-active">admin</span>` : "",
+		u.status === "disabled" ? `<span class="badge state-inactive">disabled</span>` : "",
+		u.google_linked || u.has_google ? `<span class="badge state-active" style="opacity:.7">google</span>` : "",
+		u.terms_accepted_at ? "" : `<span class="badge state-paused">no consent</span>`,
+	].filter(Boolean).join(" ");
+}
+
+function adminPeopleDirectory(users, selected) {
+	if (users === undefined || users === null) return `<div class="help">Loading people…</div>`;
+	if (!users.length) return `<div class="help">No accounts match that search.</div>`;
+	return users.map((u) => `<button type="button" class="ops-person-row${u.id === selected ? " is-selected" : ""}"
+			aria-current="${u.id === selected}" onclick="adminSelectPerson('${esc(u.id)}')">
+		<span class="ops-person-name">${esc(u.name || u.email)}</span>
+		<span class="ops-person-mail">${esc(u.email)}</span>
+		<span class="ops-person-meta">${u.receipts ?? 0} writes · ${u.last_seen_at ? esc(ago(u.last_seen_at)) : "never seen"}</span>
+	</button>`).join("");
+}
+
+function adminPersonDetail() {
+	const journey = S.adminJourney;
+	if (S.adminJourneyError) return `<div class="ops-empty"><p>${esc(S.adminJourneyError)}</p></div>`;
+	if (!S.adminPerson) {
+		const recent = (S.adminAudit || []).slice(0, 40);
+		return `<div class="ops-person-body">
+			<h4 class="ops-h">Everything happening</h4>
+			<p class="help">Pick someone on the left to see only their trail, or read the whole ledger here.</p>
+			${adminLedgerTable(recent, "Nothing recorded yet.")}
+		</div>`;
+	}
+	if (!journey) return `<div class="ops-empty"><p>Loading this account…</p></div>`;
+	const u = journey.user || {};
+	const sessions = journey.sessions || {};
+	const writes = (journey.usage_by_day || []).reduce((sum, row) => sum + Number(row.n || 0), 0);
+	const failed = (journey.failed_jobs || []).length;
+	const audits = (journey.audit_events || []).map((row) => ({
+		at: Number(row.created_at ?? row.at) || 0,
+		action: row.action,
+		outcome: row.outcome || "ok",
+		reason: row.reason || null,
+		target: row.target_type ? { type: row.target_type, id: row.target_id } : null,
+		actor: { email: u.email, name: u.name },
+	}));
+	const logins = (journey.logins || []).map((row) => ({
+		at: Number(row.at) || 0,
+		action: "auth.sign_in",
+		outcome: row.detail === "success" || row.detail === "ok" ? "ok" : (row.detail || "ok"),
+		reason: row.reason || null,
+		target: null,
+		actor: { email: u.email, name: u.name },
+	}));
+	const trail = [...audits, ...logins].sort((a, b) => b.at - a.at);
+	const stat = (label, value, hint) =>
+		`<div class="ops-stat"><b>${esc(String(value))}</b><span>${esc(label)}</span>${hint ? `<i>${esc(hint)}</i>` : ""}</div>`;
+	return `<div class="ops-person-body">
+		<header class="ops-person-head">
+			<div>
+				<h4 class="ops-h">${esc(u.name || u.email || "Account")}</h4>
+				<p class="ops-person-sub">${esc(u.email || "")} ${adminPersonBadges(u)}</p>
+			</div>
+			<div class="ops-person-actions">
+				${u.status === "disabled"
+					? `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','enable')">Enable</button>`
+					: `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','disable')">Disable</button>`}
+				<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','revoke_sessions')">Revoke sessions</button>
+			</div>
+		</header>
+		<div class="ops-stats">
+			${stat("active sessions", sessions.active ?? 0, sessions.last_seen ? "last seen " + ago(sessions.last_seen) : "")}
+			${stat("writes recorded", writes)}
+			${stat("failed jobs", failed)}
+			${stat("errors hit", (journey.errors || []).length)}
+			${stat("tokens", (journey.tokens || []).length)}
+			${stat("joined", u.created_at ? fmtDate(u.created_at) : "—")}
+		</div>
+		<h4 class="ops-h">What they did</h4>
+		${adminLedgerTable(trail, "No recorded actions for this account.")}
+		${(journey.errors || []).length ? `<h4 class="ops-h">What broke for them</h4>
+			<div class="ops-scroll"><table class="ops-table"><tbody>
+			${journey.errors.slice(0, 12).map((row) => `<tr><td class="ops-when">${esc(ago(row.at))}</td><td class="ops-actor">${esc(row.side || "")}/${esc(row.scope || "")}</td><td colspan="3">${esc(String(row.message || "").slice(0, 160))}</td></tr>`).join("")}
+			</tbody></table></div>` : ""}
+	</div>`;
+}
+
+function adminSelectPerson(id) {
+	S.adminPerson = id;
+	S.adminJourney = null;
+	renderAdminBody();
+	refreshAdminJourney(id);
+}
+
 function adminDayRows(rows, valueOf, label) {
 	if (!rows?.length) return `<div class="help">No ${label} in the last 14 days.</div>`;
 	return rows.map((row) => `<div class="kv">${esc(row.day)}: <b>${valueOf(row)}</b></div>`).join("");
@@ -14924,6 +15132,35 @@ function renderAdminBody() {
 				${dimRows("country", 5).map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("") || `<div class="help">Country counting starts with this deploy.</div>`}
 				<div style="margin-top:6px">${dimRows("device", 2).map(([value, n]) => `<span class="badge state-active" style="margin-right:6px">${esc(value)}: ${n}</span>`).join("")}</div>
 			</div>
+		</div>`;
+		return;
+	}
+
+	if (tab === "people") {
+		body.classList.remove("empty");
+		body.innerHTML = `<div class="ops-people">
+			<aside class="ops-dir" aria-label="People">
+				<div class="ops-dir-search">
+					<input id="adminUserSearch" placeholder="Search email or name…" value="${esc(S.adminUserQuery || "")}"
+						onkeydown="if(event.key==='Enter') refreshAdminUsers(this.value)" />
+				</div>
+				<div class="ops-dir-list">${adminPeopleDirectory(S.adminUsers, S.adminPerson)}</div>
+			</aside>
+			<section class="ops-person" aria-live="polite">${adminPersonDetail()}</section>
+		</div>`;
+		return;
+	}
+
+	if (tab === "ledger") {
+		body.classList.remove("empty");
+		const rows = S.adminAudit;
+		body.innerHTML = `<div class="ops-panel">
+			<div class="ops-panel-head">
+				<h4 class="ops-h">Ledger</h4>
+				<p class="help">Every recorded action and sign-in, newest first. Actor, action, target and outcome — never memory content.</p>
+			</div>
+			${rows === undefined || rows === null ? `<div class="help">Loading ledger…</div>` : adminLedgerTable(rows, "Nothing recorded yet.")}
+			${S.adminAuditNext ? `<div class="ops-more"><button class="ghost mini" onclick="refreshAdminAuditFeed({ append: true })">Load older</button></div>` : ""}
 		</div>`;
 		return;
 	}
@@ -15215,7 +15452,7 @@ const POLICY_CONTENT = {
 	},
 	support: {
 		title: "Support and Reports",
-		body: `<p>For support, reports, or production feedback, contact <a href="mailto:hello@itsuki.app">hello@itsuki.app</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
+		body: `<p>For support, reports, or production feedback, contact <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
 			<ul class="policy-list">
 				<li>For connection issues, include the tool name, token label, and setup path. Do not send full tokens or private MCP URLs.</li>
 				<li>For privacy or safety reports, include enough detail to reproduce the issue without exposing secrets.</li>
@@ -18374,7 +18611,7 @@ function viewSettingsMain(v) {
 		</div>
 		<div class="action-box settings-section"><h3>Support</h3>
 			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
-			<p><a href="mailto:hello@itsuki.app">hello@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
+			<p><a href="mailto:founder@itsuki.app">founder@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
 			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('support')">Support / report issue</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Legal / Terms</h3>

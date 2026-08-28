@@ -348,3 +348,64 @@ describe("recall receipt copy", () => {
 		expect(formatReceipt({ outcome: "recalled" })).not.toContain("Saved: 0");
 	});
 });
+
+describe("the operator ledger", () => {
+	it("is admin-only, like every other operator route", async () => {
+		const plain = await signupAccount("feed-plain");
+		expect((await request("/v1/admin/audit-feed")).status).toBe(401);
+		expect((await request("/v1/admin/audit-feed", { headers: { cookie: plain.cookie } })).status).toBe(403);
+	});
+
+	it("returns actor, action and outcome — and never the metadata blob", async () => {
+		const admin = await signupAccount("feed-admin");
+		await makeAdmin(admin.user.id);
+		// A real audit row, with a metadata_json payload that must not escape.
+		await env.DB.prepare(
+			`INSERT INTO audit_events (id, actor_user_id, actor_type, action, target_type, target_id,
+			 outcome, reason, metadata_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		).bind("aud-feed-1", admin.user.id, "user", "project.member.removed", "project", "prj_1",
+			"ok", null, JSON.stringify({ secret_payload: "must-not-leak" }), Date.now()).run();
+
+		const res = await request("/v1/admin/audit-feed?limit=50", { headers: { cookie: admin.cookie } });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		const entry = body.entries.find((row) => row.action === "project.member.removed");
+		expect(entry).toBeTruthy();
+		expect(entry.actor.email).toBe(admin.user.email);
+		expect(entry.target).toEqual({ type: "project", id: "prj_1" });
+		expect(entry.outcome).toBe("ok");
+		// The whole point of the endpoint's contract: operators see that a thing
+		// happened and to what, never what was inside it.
+		expect(JSON.stringify(body)).not.toContain("must-not-leak");
+		expect(JSON.stringify(body)).not.toContain("metadata_json");
+	});
+
+	it("pages backwards by timestamp, not by offset", async () => {
+		const admin = await signupAccount("feed-page");
+		await makeAdmin(admin.user.id);
+		const base = Date.now();
+		for (let i = 0; i < 4; i++) {
+			await env.DB.prepare(
+				`INSERT INTO audit_events (id, actor_user_id, actor_type, action, outcome, created_at)
+				 VALUES (?,?,?,?,?,?)`,
+			).bind(`aud-page-${i}`, admin.user.id, "user", "account.scope.selected", "ok", base - i * 1000).run();
+		}
+		const first = await (await request("/v1/admin/audit-feed?limit=2", { headers: { cookie: admin.cookie } })).json();
+		expect(first.entries.length).toBe(2);
+		expect(first.next_before).toBeTruthy();
+		// Offset paging repeats or skips rows as new events land mid-read; a
+		// timestamp cursor cannot.
+		const second = await (await request(`/v1/admin/audit-feed?limit=2&before=${first.next_before}`, { headers: { cookie: admin.cookie } })).json();
+		const firstIds = first.entries.map((e) => e.at);
+		for (const entry of second.entries) expect(firstIds).not.toContain(entry.at);
+		expect(second.entries.every((e) => e.at < first.next_before)).toBe(true);
+	});
+
+	it("a short page reports no cursor, so the reader stops", async () => {
+		const admin = await signupAccount("feed-end");
+		await makeAdmin(admin.user.id);
+		const body = await (await request("/v1/admin/audit-feed?limit=300", { headers: { cookie: admin.cookie } })).json();
+		expect(body.entries.length).toBeLessThan(300);
+		expect(body.next_before).toBe(null);
+	});
+});

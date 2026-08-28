@@ -3492,6 +3492,94 @@ const routes = {
 		});
 	},
 
+	"GET /v1/admin/audit-feed": async (request, env) => {
+		// The cross-account ledger. /v1/admin/user-journey answers "what happened
+		// to this person"; nothing answered "what is happening, by whom, right
+		// now" — which is the question an operator actually opens the console
+		// with. Metadata only: actor, action, target, outcome. Never memory
+		// content, and never the metadata_json blob, which can carry payload
+		// fragments an operator has no business reading.
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const url = new URL(request.url);
+		const limitRaw = Number(url.searchParams.get("limit") || 120);
+		const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(300, Math.trunc(limitRaw))) : 120;
+		// Cursor is a millisecond timestamp: page backwards through time rather
+		// than by OFFSET, which drifts as new rows land while an operator reads.
+		const beforeRaw = Number(url.searchParams.get("before") || 0);
+		const before = Number.isFinite(beforeRaw) && beforeRaw > 0 ? Math.trunc(beforeRaw) : Date.now() + 1;
+		const actor = (url.searchParams.get("actor") || "").trim();
+
+		const [audits, logins] = await env.DB.batch([
+			env.DB.prepare(
+				`SELECT a.created_at AS at, a.action, a.outcome, a.reason, a.target_type, a.target_id,
+				        a.actor_user_id, a.actor_type, a.org_id, a.project_id, a.request_id,
+				        u.email AS actor_email, u.name AS actor_name
+				 FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+				 WHERE a.created_at < ?1 AND (?2 = '' OR a.actor_user_id = ?2)
+				 ORDER BY a.created_at DESC LIMIT ?3`,
+			).bind(before, actor, limit),
+			env.DB.prepare(
+				`SELECT l.created_at AS at, l.outcome, l.reason, l.user_id AS actor_user_id,
+				        l.email_normalized, u.email AS actor_email, u.name AS actor_name
+				 FROM login_events l LEFT JOIN users u ON u.id = l.user_id
+				 WHERE l.created_at < ?1 AND (?2 = '' OR l.user_id = ?2)
+				 ORDER BY l.created_at DESC LIMIT ?3`,
+			).bind(before, actor, limit),
+		]);
+
+		const entries = [];
+		for (const row of audits.results || []) {
+			entries.push({
+				at: Number(row.at) || 0,
+				kind: "audit",
+				action: row.action,
+				outcome: row.outcome || "ok",
+				reason: row.reason || null,
+				target: row.target_type ? { type: row.target_type, id: row.target_id || null } : null,
+				actor: {
+					id: row.actor_user_id || null,
+					type: row.actor_type || "user",
+					email: row.actor_email || null,
+					name: row.actor_name || null,
+				},
+				org_id: row.org_id || null,
+				project_id: row.project_id || null,
+				request_id: row.request_id || null,
+			});
+		}
+		for (const row of logins.results || []) {
+			entries.push({
+				at: Number(row.at) || 0,
+				kind: "login",
+				action: "auth.sign_in",
+				outcome: row.outcome || "ok",
+				reason: row.reason || null,
+				target: null,
+				actor: {
+					id: row.actor_user_id || null,
+					type: "user",
+					// A failed sign-in has no user row to join, so the normalised
+					// address is the only identity the ledger holds.
+					email: row.actor_email || row.email_normalized || null,
+					name: row.actor_name || null,
+				},
+				org_id: null,
+				project_id: null,
+				request_id: null,
+			});
+		}
+		entries.sort((a, b) => b.at - a.at);
+		const page = entries.slice(0, limit);
+		return json({
+			entries: page,
+			// Only a full page can have more behind it; a short page is the end.
+			next_before: page.length === limit && page.length ? page[page.length - 1].at : null,
+			counted: page.length,
+		});
+	},
+
 	"GET /v1/admin/user-journey": async (request, env) => {
 		// Per-user operational timeline: events and metadata ONLY — never memory
 		// content. The operator sees what an account did and what broke for it,
@@ -5000,7 +5088,7 @@ async function handleRequestInner(request, env, ctx, url) {
 			// RFC 9116. Expires must stay under a year out; bump it alongside the
 			// legal effective date when documents are revised.
 			return new Response([
-				"Contact: mailto:hello@itsuki.app",
+				"Contact: mailto:founder@itsuki.app",
 				"Expires: 2027-08-01T00:00:00.000Z",
 				"Policy: https://itsuki.app/disclosure",
 				"Canonical: https://itsuki.app/.well-known/security.txt",

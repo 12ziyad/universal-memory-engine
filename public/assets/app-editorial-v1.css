@@ -1207,3 +1207,83 @@ html[data-theme="dark"] #legalView.legal-shell {
 		transform: none !important;
 	}
 }
+
+/* ===========================================================================
+   Operator console — the admin surface, rebuilt.
+
+   The old page was a stack of rounded boxes with ghost buttons: fine for four
+   numbers, useless for answering "who did what". This is a directory beside a
+   trail, with a density closer to a log viewer than a dashboard. Everything
+   here is metadata; memory content never reaches this screen.
+   ======================================================================== */
+
+.ops { border: 1px solid var(--border); background: var(--panel); }
+.ops-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px 12px; }
+.ops-title h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.ops-sub { margin: 3px 0 0; color: var(--faint); font-size: 12.5px; }
+.ops-meta { display: flex; align-items: center; gap: 9px; }
+.ops-pill { border: 1px solid var(--border2); color: var(--faint); padding: 4px 9px;
+  font: 600 10px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.ops-tabs { display: flex; gap: 0; overflow-x: auto; border-top: 1px solid var(--border); }
+.ops-tab { flex: 0 0 auto; border: 0; border-right: 1px solid var(--border); background: transparent;
+  color: var(--faint); padding: 10px 16px; font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, box-shadow 140ms ease; }
+.ops-tab:hover { color: var(--text); background: var(--panel2); }
+.ops-tab.is-active { color: var(--text); background: var(--panel2); box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* ---- people: directory beside trail ---- */
+.ops-people { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.ops-dir { border: 1px solid var(--border); background: var(--panel); min-width: 0; }
+.ops-dir-search { padding: 10px; border-bottom: 1px solid var(--border); }
+.ops-dir-search input { width: 100%; }
+/* A fixed viewport with its own scroll: the directory must not push the trail
+   down the page when the account list grows. */
+.ops-dir-list { max-height: 620px; overflow-y: auto; }
+.ops-person-row { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border: 0;
+  border-bottom: 1px solid var(--border); background: transparent; color: var(--text);
+  text-align: left; cursor: pointer; transition: background 120ms ease, box-shadow 120ms ease; }
+.ops-person-row:hover { background: var(--panel2); }
+.ops-person-row.is-selected { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+.ops-person-name { font-size: 13px; font-weight: 650; }
+.ops-person-mail, .ops-person-meta { color: var(--faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-person-meta { font-family: var(--font-mono); font-size: 10.5px; }
+
+.ops-person, .ops-panel { border: 1px solid var(--border); background: var(--panel); min-width: 0; }
+.ops-person-body, .ops-panel { padding: 16px 18px 18px; }
+.ops-person-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.ops-person-sub { margin: 3px 0 0; color: var(--faint); font-size: 12.5px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.ops-person-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ops-h { margin: 20px 0 9px; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.ops-person-head .ops-h, .ops-panel-head .ops-h { margin-top: 0; font-size: 16px; letter-spacing: -.01em; text-transform: none; color: var(--text); }
+.ops-empty { padding: 34px 18px; color: var(--faint); font-size: 13px; }
+
+.ops-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 1px;
+  margin-top: 14px; background: var(--border); border: 1px solid var(--border); }
+.ops-stat { display: flex; flex-direction: column; gap: 2px; padding: 11px 12px; background: var(--panel); }
+.ops-stat b { font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+.ops-stat span { color: var(--faint); font-size: 11px; }
+.ops-stat i { color: var(--faint); font-style: normal; font-size: 10px; font-family: var(--font-mono); }
+
+/* ---- the ledger table ---- */
+.ops-scroll { overflow-x: auto; border: 1px solid var(--border); }
+.ops-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ops-table th { position: sticky; top: 0; z-index: 1; background: var(--panel2); color: var(--faint);
+  text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--border);
+  font: 600 10px/1 var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
+.ops-table td { padding: 8px 11px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ops-table tr:last-child td { border-bottom: 0; }
+.ops-table tbody tr:hover { background: var(--panel2); }
+.ops-when { color: var(--faint); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+.ops-actor { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-action { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); }
+.ops-target { color: var(--faint); font-family: var(--font-mono); font-size: 11px; }
+/* A failed action gets a left rule rather than a red row: an operator scanning
+   a long ledger needs the failures findable, not the screen alarming. */
+.ops-row-bad td:first-child { box-shadow: inset 2px 0 0 var(--red); }
+.ops-more { margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .ops-people { grid-template-columns: 1fr; }
+  .ops-dir-list { max-height: 280px; }
+  .ops-head { flex-direction: column; gap: 10px; }
+}

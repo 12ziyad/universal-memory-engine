@@ -55,11 +55,19 @@ describe("landing hero and narrative", () => {
 });
 
 describe("hero stays uncluttered", () => {
-	// The hero now ends at the chapter rule, not at a section that no longer
-	// exists — indexOf returned -1 and this slice silently ran to the end of
-	// the page, so every "the hero does not contain X" assertion was passing
-	// against the whole document.
-	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<div class="chapter-rule"'));
+	// This slice has silently broken twice — each time a section named in the
+	// end anchor was removed, indexOf returned -1, the slice ran to the end of
+	// the document, and every "the hero does not contain X" assertion below
+	// passed against the whole page. sliceBetween refuses to return a
+	// degenerate range, so a dead anchor fails loudly instead of widening.
+	function sliceBetween(from, to) {
+		const start = html.indexOf(from);
+		const end = html.indexOf(to);
+		expect(start, `start anchor missing: ${from}`).toBeGreaterThan(-1);
+		expect(end, `end anchor missing: ${to}`).toBeGreaterThan(start);
+		return html.slice(start, end);
+	}
+	const hero = sliceBetween('<section class="hero"', '<section class="handoff-section');
 
 	it("carries only the eyebrow, headline, deck, and two actions", () => {
 		expect(hero).toContain("that sits under");
@@ -88,16 +96,25 @@ describe("hero stays uncluttered", () => {
 		expect(hero).toContain("recalled in Cursor");
 	});
 
-	it("the mark keeps a home: centred on the seam, and signing the footer", () => {
+	it("the mark keeps a home: a masthead line, and the footer signature", () => {
 		// Two placements, both outside the hero. If either disappears the brand
 		// name is gone from the page entirely, which is what this pins.
-		expect(html).toContain('class="chapter-rule-mark" lang="ja">イツキ<');
+		expect(html).toContain('class="masthead-mark"');
+		expect(html).toContain('<span lang="ja">イツキ</span>');
 		expect(html).toContain('class="footer-japanese-mark" lang="ja">イツキ<');
-		// The rule sits between the hero and section 2 — that seam is the whole
-		// reason it works, so the order is part of the contract.
-		const rule = html.indexOf('class="chapter-rule"');
-		expect(rule).toBeGreaterThan(html.indexOf('<section class="hero"'));
-		expect(rule).toBeLessThan(html.indexOf('<section class="handoff-section'));
+		// Masthead means above the nav, not merely near it.
+		const mark = html.indexOf('class="masthead-mark"');
+		expect(mark).toBeGreaterThan(html.indexOf('class="site-shell"'));
+		expect(mark).toBeLessThan(html.indexOf('<header class="topbar">'));
+	});
+
+	it("app chrome never paints outside the app", () => {
+		// #appHeader is an ID (1,0,0); the old guard "body.public-mode > header"
+		// was (0,1,2), so the ID won and the org/project switchers rendered
+		// under the landing and the login card. The same rule hid main only
+		// because it was written "> main#main". The guard must out-specify the
+		// ID and must also cover the class-less first paint.
+		expect(html).toContain("body:not(.app-mode) > header#appHeader { display: none; }");
 	});
 });
 
@@ -267,7 +284,7 @@ describe("header profile menu", () => {
 			expect(menu).toContain(`themeBtn(${t})`);
 		}
 		expect(menu).toContain("setView('settings')");
-		expect(menu).toContain("mailto:hello@itsuki.app");
+		expect(menu).toContain("mailto:founder@itsuki.app");
 		expect(menu).toContain("logoutNow()");
 		expect(html).not.toContain('id="logoutBtn"');
 	});

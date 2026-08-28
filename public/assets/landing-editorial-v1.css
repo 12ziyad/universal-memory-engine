@@ -1128,3 +1128,54 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .chapter-rule { padding: 22px; gap: 16px; }
   #landing.lp-shell .chapter-rule-line { width: 42px; }
 }
+
+/* ===========================================================================
+   Landing v7 — the mark becomes a masthead, the console grows.
+   ======================================================================== */
+
+/* ---- イツキ, centred above the nav ----
+   Small, widely letter-spaced, set in the Japanese serif. A masthead line
+   sets the page; the old right-hand band fought it. */
+#landing.lp-shell .masthead-mark {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 0; padding: 13px 5.6vw 11px; border-bottom: 1px solid var(--hairline);
+  background: var(--paper);
+}
+#landing.lp-shell .masthead-mark span {
+  /* The trailing letter-space would push the glyphs left of true centre; the
+     padding cancels exactly one space back. */
+  padding-left: .46em; color: var(--ink-soft);
+  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif;
+  font-size: 13px; letter-spacing: .46em; line-height: 1;
+}
+#landing.lp-shell .masthead-mark::before,
+#landing.lp-shell .masthead-mark::after {
+  width: clamp(18px, 4vw, 46px); height: 1px; background: var(--hairline); content: "";
+}
+/* The chapter rule left with the mark; its styles are dead but harmless. */
+#landing.lp-shell .chapter-rule { display: none; }
+
+/* ---- the console takes more of the fold ---- */
+#landing.lp-shell .hero-copy { grid-template-columns: minmax(0, .92fr) minmax(0, 1.18fr); }
+#landing.lp-shell .hero-connect pre#landingCodeSample { min-height: 300px; font-size: 13.5px; }
+#landing.lp-shell .code-gutter { min-height: 300px; font-size: 13.5px; line-height: 1.8; }
+#landing.lp-shell .hero-connect .code-window { box-shadow: 14px 14px 0 var(--clay); }
+/* The four SDK formats are the point of the box — make them read as a real
+   control, not as three greyed words beside an orange one. */
+#landing.lp-shell .hero-connect .sdk-tabs { height: 52px; }
+#landing.lp-shell .hero-connect .sdk-tabs button {
+  min-width: 66px; font-size: 10.5px; letter-spacing: .07em; color: #a99f8f; transition: 160ms ease;
+}
+#landing.lp-shell .hero-connect .sdk-tabs button:hover { background: #1b1712; color: var(--porcelain); }
+#landing.lp-shell .hero-connect .sdk-tabs button.active { color: #fff; }
+#landing.lp-shell .hero h1 { font-size: clamp(44px, 4.6vw, 72px); }
+
+@media (max-width: 1100px) {
+  #landing.lp-shell .hero-copy { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  #landing.lp-shell .masthead-mark { padding: 10px 22px 9px; gap: 10px; }
+  #landing.lp-shell .masthead-mark span { font-size: 11px; letter-spacing: .38em; padding-left: .38em; }
+  #landing.lp-shell .hero-connect pre#landingCodeSample,
+  #landing.lp-shell .code-gutter { min-height: 0; font-size: 11px; }
+}

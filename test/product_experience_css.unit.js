@@ -57,7 +57,7 @@ describe("landing editorial sheet", () => {
 		expect(landingCss).toContain("width: clamp(58px, 7vw, 104px)");
 		// .hero-mono-jp styling is retained but the element is gone from the
 		// hero; the mark is styled by these two rules now.
-		expect(landingCss).toContain(".chapter-rule-mark");
+		expect(landingCss).toContain(".masthead-mark");
 		expect(landingCss).toContain(".footer-japanese-mark");
 		expect(landingCss).toContain("writing-mode: vertical-rl");
 	});

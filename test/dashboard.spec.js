@@ -63,7 +63,7 @@ describe("dashboard script", () => {
 		// Section order is the product story: code surface at 02, the live
 		// inspector at 03, and no section repeating another's argument. The
 		// redundant surface band and positioning spread are gone for good.
-		expect(html).toContain('class="chapter-rule-mark"');
+		expect(html).toContain('class="masthead-mark"');
 		expect(html.indexOf('<span>02</span> One memory, every tool'))
 			.toBeLessThan(html.indexOf('<span>03</span> The difference'));
 		expect(html.indexOf('<span>03</span> The difference'))
@@ -107,7 +107,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("/docs/");
 		expect(html).toContain("/privacy");
 		expect(html).toContain("/terms");
-		expect(html).toContain("hello@itsuki.app");
+		expect(html).toContain("founder@itsuki.app");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-mark.svg");
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
 		expect(html).toContain("/assets/landing-editorial-v1.css?v=8");

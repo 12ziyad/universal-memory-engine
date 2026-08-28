@@ -117,7 +117,7 @@ describe("routing", () => {
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toContain("text/plain");
 		const body = await res.text();
-		expect(body).toContain("Contact: mailto:hello@itsuki.app");
+		expect(body).toContain("Contact: mailto:founder@itsuki.app");
 		expect(body).toContain("Policy: https://itsuki.app/disclosure");
 		expect(body).toContain("Canonical: https://itsuki.app/.well-known/security.txt");
 		const expires = body.match(/Expires: (.+)/)?.[1];
