@@ -29,7 +29,7 @@ import {
 } from "../src/lib/upgrade_requests.js";
 import { isCapacityError } from "../src/pipeline/llm.js";
 import { retrieve, scrubMechanismTalk } from "../src/huba/huba.js";
-import { routeFetchers } from "../src/huba/fetchers.js";
+import { routeFetchers, FETCHERS } from "../src/huba/fetchers.js";
 import { classifyTopic } from "../src/huba/topic.js";
 import {
 	titleFromQuestion,
@@ -178,6 +178,35 @@ describe("Huba AI", () => {
 		const both = retrieve("which sdks do you have").routes;
 		expect(both).toContain("/sdk/js");
 		expect(both).toContain("/sdk/python");
+	});
+
+	it("carries the actual command, not just the page that talks about it", () => {
+		// /sdk/js opens with "Install the client…" but the real `npm install
+		// itsuki` sits under the NEXT heading. Given only the intro, the model
+		// filled the gap and invented `itsuki-sdk` in production. Coverage now
+		// takes two sections per canonical page so the command travels.
+		const js = retrieve("typscript sdk how do i connect it", { budget: 10500 });
+		expect(js.chunks.some((chunk) => /npm\s+(install|i)\s+itsuki\b/.test(chunk.text)),
+			"the npm command must be in context, not merely the page that mentions installing").toBe(true);
+		const py = retrieve("how do i connect the python sdk", { budget: 10500 });
+		expect(py.chunks.some((chunk) => /pip install itsuki/.test(chunk.text))).toBe(true);
+	});
+
+	it("reads receipts with the signature the helper actually has", async () => {
+		// getUserReceipts(env, userId, limit) takes a NUMBER. Passing
+		// { limit: 10 } bound an object as the SQL LIMIT, the query threw, the
+		// catch swallowed it, and Huba reported an empty history to an account
+		// that had receipts. Assert against the real helper, not a mock.
+		const user = await signedUpUser();
+		const now = Date.now();
+		await env.DB.prepare(
+			`INSERT INTO receipts (id, user_id, source, outcome, summary, saved_total, created_at)
+			 VALUES (?, ?, 'save_memory', 'wrote', 'Smoke receipt', 1, ?)`,
+		).bind(`receipt_${crypto.randomUUID()}`, user.id, now).run();
+		const rows = await FETCHERS.history.run(env, { userId: user.id, accountUserId: user.id }, { question: "whats in my history" });
+		expect(Array.isArray(rows)).toBe(true);
+		expect(rows.length, "history must not come back empty when receipts exist").toBe(1);
+		expect(rows[0].outcome).toBe("wrote");
 	});
 
 	it("a repaired term cannot drag in an unrelated topic", () => {

@@ -128,7 +128,7 @@ export const FETCHERS = {
 	history: {
 		terms: ["history", "receipt", "receipts", "recent", "last", "saved", "activity", "log", "yesterday", "week"],
 		async run(env, identity) {
-			const receipts = await getUserReceipts(env, identity.userId, { limit: 10 }).catch(() => []);
+			const receipts = await getUserReceipts(env, identity.userId, 10).catch(() => []);
 			return (receipts ?? []).slice(0, 10).map((receipt) => ({
 				at: iso(receipt.created_at),
 				source: receipt.source,

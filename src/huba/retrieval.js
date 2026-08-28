@@ -301,12 +301,20 @@ export function retrieve(question, { budget = 18000, maxChunks = 14, perRoute = 
 	// best section, even if lexical scoring alone would have missed it.
 	// Triggered from INTENT only — see expandQuery.
 	const topics = TOPIC_RULES.filter((rule) => rule.terms.some((term) => intent.has(term)));
+	// TWO sections per canonical page, not one. A page intro often *describes*
+	// what the page covers without carrying the thing itself: /sdk/js opens
+	// with "Install the client…" while the actual `npm install itsuki` lives
+	// under the next heading. Given only the intro, the model filled the gap
+	// and invented a package name. The second-best section is what closes it.
 	const guaranteed = [];
 	for (const rule of topics) {
 		for (const route of rule.routes) {
-			const best = scored.find((entry) => entry.chunk.route === route)
-				?? { chunk: HUBA_CHUNKS.find((chunk) => chunk.route === route), score: 0 };
-			if (best.chunk) guaranteed.push(best);
+			const forRoute = scored.filter((entry) => entry.chunk.route === route).slice(0, 2);
+			if (forRoute.length) guaranteed.push(...forRoute);
+			else {
+				const fallback = HUBA_CHUNKS.find((chunk) => chunk.route === route);
+				if (fallback) guaranteed.push({ chunk: fallback, score: 0 });
+			}
 		}
 	}
 
