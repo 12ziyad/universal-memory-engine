@@ -1,11 +1,11 @@
 {
-	"version": "0.0.1",
-	"configurations": [
-		{
-			"name": "itsuki-dev",
-			"runtimeExecutable": "npx",
-			"runtimeArgs": ["wrangler", "dev", "--port", "8788"],
-			"port": 8788
-		}
-	]
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "landing-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "public", "-p", "8791", "-c-1", "--silent"],
+      "port": 8791
+    }
+  ]
 }

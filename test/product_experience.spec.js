@@ -21,21 +21,35 @@ function fnSource(name) {
 }
 
 describe("landing hero and narrative", () => {
-	it("leads with the approved enemy-claim headline and the wedge subhead", () => {
-		// Launch hardening 2026-08-28: the owner asked for a centered hero with a
-		// clearer, product-naming two-beat line. Same enemy (forgetting), the
-		// product named in the answer.
-		expect(html).toContain("Your AI forgets.<br /><em>Itsuki remembers.</em>");
-		expect(html).toContain("source-linked, versioned, and reversible");
-		// Breadth requirement: never positioned as agents-only.
-		expect(html).toContain("applications, assistants, agents, and workflows carry across sessions and tools");
+	it("leads with the researched cross-tool headline and a mechanism subhead", () => {
+		// Landing rebuild 2026-08-28: the hero came out of a judged research
+		// pass. The H1 is the one claim no competitor can sign — user-side,
+		// cross-TOOL memory, with real tools named (Mem0/Zep/Letta/Supermemory
+		// all speak in category nouns; none names a tool a human recognizes).
+		expect(html).toContain("What you told Claude,<br /><em>Cursor already knows.</em>");
+		// The sub carries mechanism + believability, not a restatement: what it
+		// is (open-source memory service, 26 tools), how it works (extraction,
+		// source-linked), and the verifiable properties.
+		expect(html).toContain("versioned, reversible, receipted");
+		expect(html).toContain("open-source memory service linking 26 AI tools");
+		// The CTA continues the H1's promise (value over action), and the
+		// proof line beneath it is the objection-killing microcopy.
+		expect(html).toContain("Connect your tools <span aria-hidden=\"true\">→</span>");
+		expect(html).toContain("Open source · One key, two minutes · Free during early access");
+		// Breadth requirement survives in the use-case folio: never agents-only.
+		expect(html).toContain('aria-label="Itsuki use cases"');
+		expect(html).toContain("01 / Applications");
+		expect(html).toContain("04 / Workflows");
 	});
 
 	it("keeps the closing section a full CTA: sentence, support line, primary and docs actions", () => {
 		expect(html).toContain('class="closing-support"');
 		expect(html).toContain("Connect a tool, save one conversation, and recall it in the next one.");
+		// Voluntary quota disclosure at the moment of action: reads as
+		// confidence, kills the what's-the-catch objection.
+		expect(html).toContain("about 100 saves a day");
 		const closing = html.slice(html.indexOf('class="closing-section'), html.indexOf("</footer>"));
-		expect(closing).toContain("Start building");
+		expect(closing).toContain("Connect your tools");
 		expect(closing).toContain('href="/docs/"');
 	});
 });
@@ -44,7 +58,7 @@ describe("hero stays uncluttered", () => {
 	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<section class="developer-section'));
 
 	it("carries only the eyebrow, headline, deck, and two actions", () => {
-		expect(hero).toContain("Your AI forgets.");
+		expect(hero).toContain("Cursor already knows.");
 		expect(hero).toContain('class="hero-actions"');
 		// Furniture that used to crowd this panel must stay out.
 		for (const clutter of ["fact-row", "flow-rail", "flow-status", "system-inputs", "surface-band"]) {

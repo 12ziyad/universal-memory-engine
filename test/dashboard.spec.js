@@ -56,9 +56,9 @@ describe("dashboard script", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
 		expect(html).toContain("One memory, every AI tool");
-		expect(html).toContain("Your AI forgets.");
-		expect(html).toContain("<em>Itsuki remembers.</em>");
-		expect(html).toContain("Itsuki is the memory layer under your AI tools");
+		expect(html).toContain("Cursor already knows.");
+		expect(html).toContain("<em>Cursor already knows.</em>");
+		expect(html).toContain("Itsuki is an open-source memory service linking 26 AI tools");
 		expect(html).toContain("イツキ");
 		// Section order is the product story: code surface at 02, the live
 		// inspector at 03, and no section repeating another's argument. The
@@ -68,7 +68,7 @@ describe("dashboard script", () => {
 			.toBeLessThan(html.indexOf('<span>03</span> The difference'));
 		expect(html.indexOf('<span>03</span> The difference'))
 			.toBeLessThan(html.indexOf('<span>04</span> How it works'));
-		expect(html.indexOf('<span>06</span> Enterprise control'))
+		expect(html.indexOf('<span>06</span> Trust &amp; control'))
 			.toBeLessThan(html.indexOf('<span>07</span> Open architecture'));
 		expect(html).not.toContain("Built for every AI surface");
 		expect(html).not.toContain("Context that survives");
@@ -80,25 +80,25 @@ describe("dashboard script", () => {
 		expect(html).toContain("landingSelectStep");
 		expect(html).toContain("Memory across");
 		expect(html).toContain("the entire stack.");
-		expect(html).toContain("What a context window");
-		expect(html).toContain("hands your model.");
+		expect(html).toContain("you can check.");
+		expect(html).toContain("Memory<br />you can check.");
 		expect(html).toContain('data-landing-sdk="node"');
 		expect(html).toContain('data-landing-sdk="mcp"');
 		expect(html).toContain("npm install itsuki");
 		expect(html).toContain("pip install itsuki");
 		expect(html).toContain("PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI");
-		expect(html).toContain('id="landingCodeAction" data-action="copy"');
+		expect(html).toContain('id="landingCodeAction" data-action="create-mcp"');
 		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
 		expect(html).toContain('location.href = "/app#install"');
 		expect(html).toContain("landingSelectSdk");
-		expect(html).toContain("Connect once.");
-		expect(html).toContain("Use everywhere.");
-		expect(html).toContain("Power for builders.");
-		expect(html).toContain("Control for teams.");
-		expect(html).toContain("Evidence and history");
-		expect(html).toContain("Scoped identity");
-		expect(html).toContain("Give every AI surface");
-		expect(html).toContain("memory that carries forward.");
+		expect(html).toContain("Connected in");
+		expect(html).toContain("two minutes.");
+		expect(html).toContain("actually yours.");
+		expect(html).toContain("Delete actually deletes");
+		expect(html).toContain("Every write leaves a receipt");
+		expect(html).toContain("No training on your data");
+		expect(html).toContain("Tell it once.");
+		expect(html).toContain("memory that carries forward");
 		expect(html).toContain("showAuth('signup', event)");
 		expect(html).toContain("showAuth('login', event)");
 		expect(html).toContain("/docs/");
@@ -109,7 +109,12 @@ describe("dashboard script", () => {
 		expect(html).toContain("/assets/brand/itsuki-bonsai-favicon.svg");
 		expect(html).toContain("/assets/landing-editorial-v1.css?v=8");
 		expect(publicLanding).not.toMatch(/paper trail/i);
-		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
+		// The receipts ban was deliberately lifted in the 2026-08-28 landing
+		// rebuild: the competitor audit found auditable memory (write receipts,
+		// source links, rollback) is the one trust territory Mem0/Zep/Letta/
+		// Supermemory leave unclaimed, so the page now says it plainly —
+		// "receipted" in the hero, "Every write leaves a receipt" in trust.
+		expect(publicLanding).toMatch(/\breceipt(ed)?\b/i);
 		for (const forbidden of [
 			"Skip the copy-paste between Claude and ChatGPT",
 			"Your AI context is scattered",

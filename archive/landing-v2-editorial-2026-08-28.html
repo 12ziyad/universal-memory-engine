@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Itsuki — what you told Claude, Cursor already knows.</title>
-<meta name="description" content="Itsuki is an open-source memory service linking 26 AI tools. It extracts structured, source-linked memories from your conversations — versioned, reversible, receipted — and serves them back wherever you work next." />
+<title>Itsuki — your AI forgets. Itsuki remembers.</title>
+<meta name="description" content="Itsuki is the memory layer under your AI tools. Save once from Claude, ChatGPT, Cursor, or 26 other tools — every other one remembers it. Source-linked, versioned, reversible." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Itsuki — what you told Claude, Cursor already knows." />
-<meta property="og:description" content="Open-source memory linking 26 AI tools. Structured, source-linked, versioned, reversible — one memory wherever you work next." />
+<meta property="og:title" content="Itsuki — your AI forgets. Itsuki remembers." />
+<meta property="og:description" content="Structured memory for applications, assistants, agents, and workflows — source-linked, versioned, and reversible." />
 <meta property="og:url" content="https://itsuki.app/" />
 <link rel="canonical" href="https://itsuki.app/" />
 <link rel="icon" href="/assets/brand/itsuki-bonsai-favicon.svg?v=2" type="image/svg+xml" />
@@ -2462,7 +2462,7 @@
 					Open source
 				</a>
 				<a class="text-link" href="/login" onclick="showAuth('login', event)">Sign in</a>
-				<a class="nav-cta" href="/signup" onclick="showAuth('signup', event)">Get your key <span aria-hidden="true">↗</span></a>
+				<a class="nav-cta" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">↗</span></a>
 			</div>
 		</header>
 		<main id="landingContent" tabindex="-1">
@@ -2470,13 +2470,13 @@
 		<section class="hero" id="top">
 			<div class="hero-copy">
 				<p class="eyebrow"><span>01</span> One memory, every AI tool</p>
-				<h1>What you told Claude,<br /><em>Cursor already knows.</em></h1>
-				<p class="hero-deck">Itsuki is an open-source memory service linking 26 AI tools. It extracts structured, source-linked memories from your conversations — versioned, reversible, receipted — and serves them back wherever you work next.</p>
+				<h1>Your AI forgets.<br /><em>Itsuki remembers.</em></h1>
+				<p class="hero-deck">Itsuki is the memory layer under your AI tools. Tell something to Claude, ChatGPT, Cursor, or any of 26 supported tools once, and every other one remembers it — structured memory, source-linked, versioned, and reversible — that applications, assistants, agents, and workflows carry across sessions and tools.</p>
 				<div class="hero-actions">
-					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Connect your tools <span aria-hidden="true">→</span></a>
+					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a>
 					<a class="secondary-action" href="/docs/">Read the docs</a>
 				</div>
-				<p class="hero-proof">Open source · One key, two minutes · Free during early access</p>
+				<p class="hero-proof">Open source · One key, two minutes to connect · Free during early access</p>
 			</div>
 			<aside class="hero-mono" aria-label="Itsuki, written in Japanese">
 				<span class="hero-mono-jp" lang="ja">イツキ</span>
@@ -2487,8 +2487,8 @@
 		<section class="developer-section reveal" id="developers">
 			<div class="developer-copy">
 				<div class="section-kicker light"><span>02</span> Developer surface</div>
-				<h2>Connected in<br />two minutes.</h2>
-				<p>Paste one MCP config or install the SDK, and the same scoped memory sits under every tool on this list. One key. No per-tool rewrite, no second store to keep in sync.</p>
+				<h2>Connect once.<br />Use everywhere.</h2>
+				<p>Install the SDK, call two methods, and the same scoped memory is available to every other tool on this list. No per-tool rewrite, no second store to keep in sync.</p>
 				<dl class="surface-stats">
 					<div><dt>26</dt><dd>supported tools</dd></div>
 					<div><dt>38</dt><dd>documented setup paths</dd></div>
@@ -2506,27 +2506,30 @@
 			</div>
 			<div class="code-window">
 				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
-					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
-					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
+					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
 					<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
 					<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
 				</div></div>
-				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-mcp"><code>{
-  "mcpServers": {
-    "itsuki": {
-      "url": "PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI"
-    }
-  }
-}</code></pre>
-				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="create-mcp" onclick="copyLandingCode(this)">Create MCP link</button><a href="/docs/">Complete setup ↗</a></div>
+				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-node"><code>npm install itsuki
+
+import { MemoryClient } from "itsuki";
+
+const memory = new MemoryClient({
+  apiKey: process.env.ITSUKI_API_KEY,
+});
+
+await memory.add("The pricing review moved to October.");
+const { context } = await memory.search("When is the review?");</code></pre>
+				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="copy" onclick="copyLandingCode(this)">Copy code</button><a href="/docs/">Complete setup ↗</a></div>
 			</div>
 		</section>
 
 		<section class="contrast-section reveal" id="product" aria-label="Raw conversation compared with structured memory">
 			<header class="proof-heading">
 				<div class="section-kicker"><span>03</span> The difference</div>
-				<h2>Memory<br />you can check.</h2>
-				<p>Everyone else replays the transcript and hopes the model finds the point. Itsuki keeps the point, the exact words it came from, and the shape of what it connects to.</p>
+				<h2>What a context window<br />hands your model.</h2>
+				<p>Everyone else replays the transcript and hopes the model finds the point. Itsuki keeps the point, its source, and the shape of what it connects to.</p>
 			</header>
 			<dl class="contrast-stats" aria-label="What the example produces">
 				<div><dt>18</dt><dd>turns of conversation in</dd></div>
@@ -2566,13 +2569,13 @@
 					<div class="contrast-chips"><span><b>fact</b> pricing review &rarr; October</span><span><b>event</b> rescheduled 12 Aug</span><span><b>entity</b> growth lead</span><span><b>source</b> planning call</span></div>
 				</div>
 			</div>
-			<p class="contrast-note">A worked example. Every memory stays linked to the words it came from &mdash; your agent receives four typed objects and a source it can cite, not eighteen turns to re-read and guess at.</p>
+			<p class="contrast-note">A worked example. Your agent receives four typed objects and a source it can cite &mdash; not eighteen turns it has to re-read and guess at.</p>
 		</section>
 
 		<section class="lifecycle-section reveal" id="workflow">
 			<header class="section-heading">
 				<div class="section-kicker"><span>04</span> How it works</div>
-				<h2>How Itsuki<br />remembers.</h2>
+				<h2>From raw input to<br />context every surface can use.</h2>
 				<p>Four moves. One living memory.</p>
 			</header>
 			<div class="lifecycle-instrument">
@@ -2608,14 +2611,14 @@
 		</section>
 
 		<section class="control-section reveal" id="control">
-			<header class="section-heading control-heading"><div class="section-kicker"><span>06</span> Trust &amp; control</div><h2>Your memory,<br />actually yours.</h2></header>
+			<header class="section-heading control-heading"><div class="section-kicker"><span>06</span> Enterprise control</div><h2>Power for builders.<br />Control for teams.</h2></header>
 			<div class="control-spread">
 				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>Move fast without turning memory into a black box.</p><small>The Itsuki principle</small></div>
 				<dl>
-					<div><dt>Delete actually deletes</dt><dd>One pass removes the memory, its sources, its vectors, and its graph edges. No soft-delete residue.</dd></div>
-					<div><dt>Every write leaves a receipt</dt><dd>An audit trail records what was saved, where it came from, and why &mdash; open to inspection any time.</dd></div>
-					<div><dt>Versioned and reversible</dt><dd>Updates keep history. Any memory rolls back to any earlier revision, and everything exports as JSON.</dd></div>
-					<div><dt>No training on your data</dt><dd>Your memories personalize your tools. They never train anyone&rsquo;s models.</dd></div>
+					<div><dt>Policy-controlled writes</dt><dd>Deterministic rules decide what becomes durable memory.</dd></div>
+					<div><dt>Scoped identity</dt><dd>Organization, project, and end-user boundaries remain explicit.</dd></div>
+					<div><dt>Evidence and history</dt><dd>Inspect sources, revisions, outcomes, and audit activity.</dd></div>
+					<div><dt>Portable operations</dt><dd>Export, roll back, archive, delete, and switch AI providers.</dd></div>
 				</dl>
 			</div>
 		</section>
@@ -2624,7 +2627,7 @@
 			<div class="oss-copy">
 				<div class="section-kicker light"><span>07</span> Open architecture</div>
 				<h2>Read the system<br />before you trust it.</h2>
-				<p>Read the extraction engine. Read the admission rules that decide what becomes memory. Read the delete path. Every commit and schema migration is public &mdash; memory infrastructure you cannot inspect is just another black box.</p>
+				<p>The engine, the admission rules that decide what becomes memory, and every schema migration are public. Memory infrastructure that cannot be inspected is just another black box.</p>
 				<div class="oss-actions">
 					<a class="primary-action oss-cta" href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true" width="17" height="17" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg> View on GitHub</a>
 					<a class="secondary-action light" href="/docs/">Read the architecture</a>
@@ -2639,8 +2642,8 @@
 
 		<section class="closing-section reveal">
 			<div class="closing-seal" aria-hidden="true"><span></span><span></span><i></i></div>
-			<div><span class="closing-label">08 / Begin</span><h2>Tell it once.<br />Every tool remembers.</h2><p class="closing-support">Connect a tool, save one conversation, and recall it in the next one. Free during early access &mdash; about 100 saves a day.</p></div>
-			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Connect your tools <span aria-hidden="true">→</span></a><a href="/docs/">Read the docs</a></div>
+			<div><span class="closing-label">08 / Begin</span><h2>Give every AI surface<br />memory that carries forward.</h2><p class="closing-support">Connect a tool, save one conversation, and recall it in the next one.</p></div>
+			<div class="closing-actions"><a class="primary-action inverse" href="/signup" onclick="showAuth('signup', event)">Start building <span aria-hidden="true">→</span></a><a href="/docs/">Read the docs</a></div>
 		</section>
 		</main>
 
@@ -2649,7 +2652,7 @@
 				<div class="footer-brand">
 					<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
 					<p>Structured memory for applications, assistants, agents, and workflows.</p>
-					<p class="footer-japanese"><span lang="ja">イツキ</span><span aria-hidden="true"> · </span>&ldquo;five trees&rdquo; · memory that carries forward</p>
+					<p class="footer-japanese"><span lang="ja">イツキ</span><span aria-hidden="true"> · </span>memory that carries forward</p>
 					<ul class="footer-trust" aria-label="How Itsuki handles data">
 						<li>Tenant-isolated</li>
 						<li>Source-backed</li>

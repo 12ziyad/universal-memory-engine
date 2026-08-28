@@ -1112,3 +1112,96 @@ what the thing is. It now says **Huba AI**, next to the same mark, with the
 header reading `Huba AI` to match. Under 700px the label is `display: none`,
 so the button also carries `aria-label="Huba AI"` and a title — otherwise it
 is an unlabelled icon on every phone. Both pinned by tests.
+
+---
+
+# Sixth pass — 2026-08-28: the landing rebuild
+
+Owner: *"deeply research and find me a good hero headline and sub… find the
+pattern, the successful one… rebuild every section, focus mainly on hero and
+sub… and preserve the current one."*
+
+## The research (11 agents: 4 pattern-miners, 3 writers, 3 judges, 1 synthesis)
+
+**Competitor audit** (Mem0, Zep, Letta, Supermemory — all fetched live):
+every one of them sells memory to a developer *building* an agent, speaks in
+category nouns ("agents", "apps", "LLMs", "the AI era"), and none names a
+tool a human recognizes. "Memory layer for AI agents" is a saturated phrase
+three of them already occupy. The empty quadrant: **user-side memory that
+follows the person across third-party tools** — which is Itsuki's literal
+product — plus **auditable memory** (source links, receipts, rollback):
+nobody sells verifiable memory; all four ask you to trust an opaque store.
+
+**Hero-pattern audit** (Stripe, Vercel, Linear, Supabase, Clerk, Resend,
+Neon, Railway…) and **conversion principles** (Julian Shapiro, Harry Dry,
+CXL, growth.design): ~6-8 word headlines, front-loaded; the sub carries
+mechanism + believability, never a restatement; specific and falsifiable
+beats clever; a line no competitor could sign; CTA continues the headline's
+value; one high-contrast action.
+
+**15 candidates were generated from three angles** (outcome-first,
+problem-first, category-first) and **scored by three harsh judges** (cold-
+visitor clarity, differentiation, credibility — any untrue claim capped the
+score at 2/10).
+
+## The winner
+
+> **What you told Claude, *Cursor already knows.***
+>
+> Itsuki is an open-source memory service linking 26 AI tools. It extracts
+> structured, source-linked memories from your conversations — versioned,
+> reversible, receipted — and serves them back wherever you work next.
+>
+> [ Connect your tools → ]  [ Read the docs ]
+> Open source · One key, two minutes · Free during early access
+
+Concrete, falsifiable, and structurally unclaimable by any competitor — it
+names real tools, which no competitor hero does, and it only makes sense for
+a product that sits *under* the tools rather than inside one of them. The
+sub finally obeys the rules the old one broke: 33 words, mechanism +
+believability, no restatement (the old sub was a 55-word four-clause essay).
+
+## Every section, rebuilt on the blueprint
+
+- **Nav**: CTA renamed "Get your key" — names the object, kills the
+  what-do-I-need objection before the hero answers it.
+- **02 Quickstart** — "Connected in two minutes." proves the proof line.
+  **MCP is now the default tab** (one JSON block, no code — this audience's
+  fastest path); tab order MCP → Node → Python → REST, with the initial
+  panel, aria state, and action button ("Create MCP link") all agreeing.
+- **03 — "Memory you can check."** The raw-vs-structured split now leads
+  with the claim the audit found unclaimed: every memory linked to the exact
+  words it came from.
+- **04 — "How Itsuki remembers."** Same four-step machinery, headline now
+  answers the hero's promise instead of describing pipelines.
+- **06 — "Your memory, actually yours."** The four cards are now entirely
+  falsifiable: delete actually deletes (one-pass residue removal) · every
+  write leaves a receipt · versioned and reversible · no training on your
+  data. Compliance-badge theater stays off the page; every card survives a
+  skeptic reading the repo.
+- **07 Open source** — invitation instead of assertion: "Read the extraction
+  engine. Read the admission rules. Read the delete path."
+- **08 Closing** — "Tell it once. Every tool remembers." with the same CTA
+  pair (message match) and a voluntary quota disclosure: "Free during early
+  access — about 100 saves a day." Confidence, and it kills the
+  what's-the-catch objection at the moment of action.
+- **Title and OG tags** updated to match (they still carried the old hero).
+- No logo bar, no testimonials — none exist, none were invented.
+
+One deliberate contract reversal: two test files banned the word "receipt"
+on the landing (an old jargon rule). The research found auditable memory is
+the differentiator, so the ban is inverted — the tests now *require* the
+word, with the rationale in a comment.
+
+## Preserved
+
+The old landing survives three ways: `archive/landing-v2-editorial-2026-08-28.html`
+plus its CSS in the repo, git commit `5a32f16`, and the off-box bundle in
+`tmp/`.
+
+## Verified before deploy
+
+Local static preview, measured not eyeballed: H1 wraps to exactly 2 lines at
+1920 and 1280, 4 at 375; no horizontal scroll at any width; all fonts and
+assets 200; MCP default tab, code panel, and action button agree; tab
+switching round-trips. 72 landing tests green, full suite run before deploy.

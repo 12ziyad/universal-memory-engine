@@ -497,9 +497,9 @@ describe("product shell routes", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
 		expect(html).toContain("One memory, every AI tool");
-		expect(html).toContain("Your AI forgets.");
-		expect(html).toContain("<em>Itsuki remembers.</em>");
-		expect(html).toContain("Itsuki is the memory layer under your AI tools");
+		expect(html).toContain("Cursor already knows.");
+		expect(html).toContain("<em>Cursor already knows.</em>");
+		expect(html).toContain("Itsuki is an open-source memory service linking 26 AI tools");
 		expect(html).toContain("イツキ");
 		// The decongested hero: copy takes 70%, the right third is one calm
 		// vertical mark, and the developer surface follows immediately.
@@ -514,11 +514,13 @@ describe("product shell routes", () => {
 		expect(html).toContain("landingSelectStep");
 		expect(html).toContain("landingSelectSdk");
 		expect(html).toContain("PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI");
-		expect(html).toContain('id="landingCodeAction" data-action="copy"');
+		// MCP is the default tab — the fastest path for this audience — so the
+		// initial action is the MCP one, not copy.
+		expect(html).toContain('id="landingCodeAction" data-action="create-mcp"');
 		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
 		expect(html).toContain('location.href = "/app#install"');
-		expect(html).toContain("Power for builders.");
-		expect(html).toContain("Give every AI surface");
+		expect(html).toContain("actually yours.");
+		expect(html).toContain("Tell it once.");
 		expect(html).toContain("showAuth('login', event)");
 		expect(html).toContain("showAuth('signup', event)");
 		expect(html).toContain('href="/privacy"');
@@ -531,7 +533,9 @@ describe("product shell routes", () => {
 		expect(html).toContain("hello@itsuki.app");
 		expect(publicLanding).not.toContain("ejziyad@gmail.com");
 		expect(publicLanding).not.toMatch(/paper trail/i);
-		expect(publicLanding).not.toMatch(/\breceipts?\b/i);
+		// Receipts language is deliberate since the 2026-08-28 rebuild: auditable
+		// memory is the unclaimed trust territory the research found.
+		expect(publicLanding).toMatch(/\breceipt(ed)?\b/i);
 		// Brand hygiene, tightened for the domain move: the old brand appears
 		// NOWHERE in the page — not even as a contact address.
 		expect(html).not.toMatch(/gpmai/i);
