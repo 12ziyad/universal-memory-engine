@@ -920,3 +920,123 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .hero-proof { font-size: 9px; letter-spacing: .12em; }
   #landing.lp-shell .nav-github span, #landing.lp-shell .nav-github { font-size: 12px; }
 }
+
+/* ===========================================================================
+   Landing v5 — hero option D, and section 2 rebuilt as "the handoff".
+
+   The hero stops being a centred sentence with an empty right half: the
+   connect card moves up out of section 2 and sits beside the copy, so the
+   fold proves "one key, two minutes" instead of asserting it. That move is
+   what emptied section 2, which is now the one thing the page could not
+   otherwise show — a memory written in one tool arriving in the others.
+   ======================================================================== */
+
+/* ---- hero: two columns, left-aligned ---- */
+#landing.lp-shell .hero-copy {
+  display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  align-items: center; gap: clamp(34px, 4.4vw, 64px);
+  min-height: 720px; padding: 76px clamp(140px, 11vw, 190px) 72px 5.6vw;
+  text-align: left;
+}
+#landing.lp-shell .hero-lede { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+#landing.lp-shell .hero-copy .eyebrow { justify-content: flex-start; }
+#landing.lp-shell .hero h1 { max-width: 100%; margin-inline: 0; font-size: clamp(46px, 4.9vw, 78px); letter-spacing: -.05em; line-height: .88; }
+#landing.lp-shell .hero-deck { max-width: 440px; margin: 26px 0 0; font-size: clamp(15px, 1.15vw, 17px); }
+#landing.lp-shell .hero-actions { justify-content: flex-start; margin-top: 30px; }
+#landing.lp-shell .hero-proof { margin-top: 26px; }
+
+/* The card column. min-width:0 on both tracks is load-bearing — a <pre>
+   inside a grid child refuses to shrink below its longest line otherwise,
+   and the JSON would push the banner off-screen. */
+#landing.lp-shell .hero-connect { min-width: 0; }
+#landing.lp-shell .hero-connect .code-window { align-self: center; box-shadow: 10px 10px 0 var(--clay); }
+#landing.lp-shell .hero-connect .code-topline, #landing.lp-shell .hero-connect .code-foot { min-height: 48px; }
+#landing.lp-shell .hero-connect .sdk-tabs { height: 48px; }
+#landing.lp-shell .hero-connect .sdk-tabs button { min-width: 58px; font-size: 10px; }
+/* The 420px floor was sized for the old full-height section-2 column. In
+   the fold it leaves a tall empty well under six lines of JSON, so the card
+   sizes to its content — with a floor only deep enough that switching to the
+   longer Node sample does not make the whole fold jump. */
+#landing.lp-shell .hero-connect pre { min-height: 236px; padding: 20px 22px; font-size: 13px; line-height: 1.8; overflow-x: auto; }
+#landing.lp-shell .hero-connect-note {
+  display: flex; align-items: center; gap: 9px; margin: 14px 0 0; color: var(--ink-soft);
+  font: 400 10px/1.6 var(--mono); letter-spacing: .13em; text-transform: uppercase;
+}
+#landing.lp-shell .hero-connect-note::before { width: 6px; height: 6px; content: ""; background: var(--clay); }
+
+/* The stagger targeted .hero-copy's children, which are now two columns. */
+@media (prefers-reduced-motion: no-preference) {
+  #landing.lp-shell .hero-copy > * { animation: none; }
+  #landing.lp-shell .hero-lede > * { animation: heroRise .7s ease both; }
+  #landing.lp-shell .hero-lede > :nth-child(2) { animation-delay: .08s; }
+  #landing.lp-shell .hero-lede > :nth-child(3) { animation-delay: .16s; }
+  #landing.lp-shell .hero-lede > :nth-child(4) { animation-delay: .24s; }
+  #landing.lp-shell .hero-lede > :nth-child(5) { animation-delay: .32s; }
+  #landing.lp-shell .hero-connect { animation: heroRise .7s ease .2s both; }
+}
+
+/* ---- section 2: the handoff ---- */
+#landing.lp-shell .handoff-section {
+  display: block; padding: 110px 5.6vw; background: var(--ink); color: var(--porcelain);
+  border-bottom: 1px solid var(--hairline);
+}
+#landing.lp-shell .handoff-head { display: grid; grid-template-columns: .65fr 1.75fr 1fr; gap: clamp(24px, 3vw, 54px); align-items: start; }
+#landing.lp-shell .handoff-head h2 { margin: 0; font-family: var(--display); font-size: clamp(40px, 4.4vw, 70px); font-weight: 400; letter-spacing: -.035em; line-height: .95; }
+#landing.lp-shell .handoff-head h2 em { color: var(--clay); font-style: normal; }
+#landing.lp-shell .handoff-head p { max-width: 300px; margin: 0; color: #c8bca8; font-size: 14px; line-height: 1.7; }
+
+#landing.lp-shell .handoff-instrument {
+  position: relative; display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 84px); align-items: center; margin-top: 72px;
+}
+/* The connector overlay. pointer-events:none so it can never eat a click on
+   a tile beneath it, and it is aria-hidden — the availability line carries
+   the same information as text. */
+#landing.lp-shell .handoff-fan { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+#landing.lp-shell .handoff-fan path { fill: none; stroke: var(--clay); stroke-width: 1.4; stroke-opacity: .78; }
+#landing.lp-shell .handoff-fan circle { fill: var(--clay); }
+
+#landing.lp-shell .handoff-origin { position: relative; z-index: 1; }
+#landing.lp-shell .handoff-origin-cap { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; color: #c8bca8; font: 400 10px/1.5 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+#landing.lp-shell .handoff-origin-cap img { width: 15px; height: 15px; }
+#landing.lp-shell .handoff-card { padding: 24px 24px 18px; background: var(--porcelain); box-shadow: 6px 6px 0 var(--clay); }
+#landing.lp-shell .handoff-card-tag { margin: 0 0 12px; padding-bottom: 9px; border-bottom: 1px solid var(--hairline); color: var(--ink-soft); font: 400 9px/1.4 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+#landing.lp-shell .handoff-card-body { margin: 0 0 13px; color: var(--ink); font-family: var(--display); font-size: 21px; line-height: 1.26; }
+#landing.lp-shell .handoff-card-foot { margin: 0; color: var(--ink-soft); font: 400 9.5px/1.5 var(--mono); }
+
+#landing.lp-shell .handoff-surface { position: relative; z-index: 1; min-width: 0; }
+#landing.lp-shell .handoff-row { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 18px; padding: 8px 0; border-top: 1px solid rgb(251 248 241 / 12%); }
+#landing.lp-shell .handoff-row-label { color: #a99f8f; font: 400 9.5px/1.4 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+#landing.lp-shell .handoff-tiles { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; list-style: none; }
+/* Porcelain tiles, not ink: the brand marks keep their own colours on a dark
+   section, and the two PNG marks need no recolouring. */
+#landing.lp-shell .handoff-tile {
+  display: flex; width: 36px; height: 36px; align-items: center; justify-content: center;
+  border: 1px solid rgb(251 248 241 / 14%); background: var(--porcelain);
+  opacity: .5; transition: opacity 260ms ease, box-shadow 260ms ease;
+}
+#landing.lp-shell .handoff-tile img { width: 20px; height: 20px; object-fit: contain; }
+#landing.lp-shell .handoff-tile.is-lit { opacity: 1; box-shadow: 0 0 0 1px var(--clay); }
+#landing.lp-shell .handoff-available { min-height: 1.6em; margin: 14px 0 0; color: var(--clay); font: 400 10.5px/1.6 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+#landing.lp-shell .handoff-section .surface-all { margin-top: 46px; }
+
+@media (max-width: 1100px) {
+  #landing.lp-shell .hero-copy { grid-template-columns: 1fr; gap: 44px; padding-right: clamp(84px, 11vw, 130px); }
+  #landing.lp-shell .hero h1 { font-size: clamp(46px, 7vw, 74px); }
+  #landing.lp-shell .hero-deck { max-width: 560px; }
+  #landing.lp-shell .handoff-head { grid-template-columns: 1fr; gap: 18px; }
+  #landing.lp-shell .handoff-head p { max-width: 560px; }
+  #landing.lp-shell .handoff-instrument { grid-template-columns: 1fr; gap: 40px; margin-top: 48px; }
+  /* Stacked, the curves would cross the card, so they are hidden and the
+     availability line does the work alone. */
+  #landing.lp-shell .handoff-fan { display: none; }
+}
+
+@media (max-width: 760px) {
+  #landing.lp-shell .hero-copy { padding: 58px 52px 50px; }
+  #landing.lp-shell .handoff-section { padding: 82px 22px 96px; }
+  #landing.lp-shell .handoff-row { grid-template-columns: 1fr; gap: 8px; }
+  #landing.lp-shell .handoff-tile { width: 32px; height: 32px; }
+  #landing.lp-shell .handoff-tile img { width: 17px; height: 17px; }
+  #landing.lp-shell .handoff-card-body { font-size: 18px; }
+}

@@ -719,6 +719,69 @@ describe("graph edge appearance is derived, not looked up", () => {
 	});
 });
 
+describe("section 2 handoff", () => {
+	it("the handoff fan is measured, not hard-coded", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		const fn = shell.slice(shell.indexOf("function handoffDrawFan()"), shell.indexOf("function handoffLight("));
+		// The tile wall rewraps at every width. A fixed viewBox leaves the
+		// curves pointing at where a tile used to be — which is exactly how the
+		// first render of this section failed.
+		expect(fn).toContain("getBoundingClientRect()");
+		expect(fn).toContain("svg.setAttribute(\"viewBox\"");
+		// Drawing into a display:none overlay yields zero-size rects and a path
+		// full of NaN, so the stacked layout must bail before measuring.
+		expect(fn).toContain("getComputedStyle(svg).display === \"none\"");
+		const init = shell.slice(shell.indexOf("function initHandoff()"), shell.indexOf("function landingTabKeydown"));
+		expect(init).toContain("ResizeObserver");
+		expect(init).toContain("prefers-reduced-motion: reduce");
+	});
+
+	it("boots on a cold load, not only on navigation", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		// The landing is the default view: setMode("public") only runs on a
+		// navigation, so wiring the handoff there alone left it dark on first
+		// paint — which is what the browser check caught.
+		// lastIndexOf: the first </script> belongs to the vis-network tag near
+		// the top of the file, which would slice backwards to nothing.
+		const boot = shell.slice(shell.indexOf("initConnectWidget();"), shell.lastIndexOf("</script>"));
+		expect(boot).toContain("initHandoff();");
+		expect(shell).toContain("initReveal(); initHandoff();");
+	});
+
+	it("lights trios that span different groups", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		const trios = shell.slice(shell.indexOf("const HANDOFF_TRIOS = ["), shell.indexOf("const HANDOFF_NAMES"));
+		// Three lit tiles inside one row would read as "works with three
+		// editors" rather than "works across the whole surface".
+		const CODING = ["claude-code", "codex", "cursor", "opencode", "antigravity"];
+		const WORKFLOW = ["n8n", "dify", "convex"];
+		const rows = [...trios.matchAll(/\[([^\]]+)\]/g)].map((m) =>
+			m[1].split(",").map((x) => x.trim().replace(/"/g, "")));
+		expect(rows.length).toBeGreaterThanOrEqual(3);
+		for (const trio of rows) {
+			expect(trio.length).toBe(3);
+			expect(trio.filter((t) => CODING.includes(t)).length, trio.join("/")).toBeLessThanOrEqual(1);
+			expect(trio.filter((t) => WORKFLOW.includes(t)).length, trio.join("/")).toBeLessThanOrEqual(1);
+		}
+	});
+
+	it("moved the connect card into the hero without cloning its ids", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		// The card changed address, not behaviour: landingSelectSdk and
+		// copyLandingCode still target these ids, so a duplicate would make
+		// querySelector pick the wrong one and the tabs would silently
+		// desynchronise from the panel.
+		expect((shell.match(/id="landingCodeSample"/g) ?? []).length).toBe(1);
+		expect((shell.match(/id="landingCodeAction"/g) ?? []).length).toBe(1);
+		expect((shell.match(/id="landingSdkTab-mcp"/g) ?? []).length).toBe(1);
+		const hero = shell.slice(shell.indexOf('<section class="hero"'), shell.indexOf('<section class="handoff-section'));
+		expect(hero).toContain('class="hero-connect"');
+		expect(hero).toContain('id="landingCodeSample"');
+		// ...and the banner still survives beside it.
+		expect(hero).toContain('class="hero-mono"');
+	});
+});
+
 describe("Huba stays shut until it is asked for", () => {
 	it("does not paint itself open on load", async () => {
 		const shell = (await import("../public/index.html?raw")).default;

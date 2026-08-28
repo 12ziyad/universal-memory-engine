@@ -79,24 +79,44 @@ describe("hero stays uncluttered", () => {
 	});
 });
 
-describe("developer surface states real coverage", () => {
-	const dev = html.slice(html.indexOf('<section class="developer-section'), html.indexOf('<section class="contrast-section'));
+describe("section 2 is the handoff, not a second quickstart", () => {
+	const dev = html.slice(html.indexOf('<section class="handoff-section'), html.indexOf('<section class="contrast-section'));
 
-	it("replaces loose chips with counted, named integration groups", () => {
-		expect(dev).toContain('class="surface-stats"');
-		expect(dev).toContain("supported tools");
-		expect(dev).toContain("documented setup paths");
+	it("shows one memory reaching the whole surface, grouped as it really is", () => {
+		// The connect card moved into the hero, which emptied this slot. A live
+		// audit of twelve dev-tool homepages said the job here is to turn the
+		// hero's claim into evidence carried by one visual — and the two usual
+		// devices for that, a logo wall and testimonials, do not exist here.
+		expect(dev).toContain('class="handoff-card"');
+		expect(dev).toContain("An example memory");
 		for (const group of ["SDKs &amp; API", "AI assistants", "Coding agents", "Agent harnesses", "Agent frameworks", "Workflow automation"]) {
 			expect(dev, `names the ${group} group`).toContain(group);
 		}
-		// The old chip strip put "n8n" beside "Dashboard" with no category.
+		// The quickstart's furniture must not have survived the replacement.
+		expect(dev).not.toContain('class="surface-stats"');
+		expect(dev).not.toContain('class="code-window"');
 		expect(dev).not.toContain('class="surface-list"');
 	});
 
-	it("keeps the stated counts equal to the pinned catalog contract", () => {
-		// test/get_started.spec.js pins exactly 26 products and 38 setup leaves.
-		expect(dev).toContain("<dt>26</dt>");
-		expect(dev).toContain("<dt>38</dt>");
+	it("draws every one of the 26 real integration marks", () => {
+		// get_started.spec.js pins exactly 26 products; this wall is the only
+		// honest substitute for the customer logos the page cannot show, so a
+		// missing mark is a silently shrunken claim.
+		const tiles = dev.match(/class="handoff-tile"/g) ?? [];
+		expect(tiles.length).toBe(26);
+		for (const id of ["python-sdk", "typescript-sdk", "rest-api", "claude", "chatgpt", "claude-code",
+			"codex", "cursor", "opencode", "antigravity", "openclaw", "hermes", "pi", "langchain",
+			"crewai", "autogen", "agno", "llamaindex", "mastra", "vercel-ai", "camel", "google-adk",
+			"openai-agents", "n8n", "dify", "convex"]) {
+			expect(dev, `draws the ${id} mark`).toContain(`data-tool="${id}"`);
+		}
+		// Every tile carries its name for screen readers — the img is decorative.
+		expect((dev.match(/class="sr-only"/g) ?? []).length).toBe(26);
+	});
+
+	it("keeps the 38 setup paths as the section's one outbound link", () => {
+		expect(dev).toContain("All 38 setup paths");
+		expect(dev).toContain('href="/docs/"');
 	});
 });
 

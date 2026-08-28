@@ -505,7 +505,7 @@ describe("product shell routes", () => {
 		// vertical mark, and the developer surface follows immediately.
 		expect(html).toContain('class="hero-mono"');
 		expect(html).toContain('class="hero-mono-jp"');
-		expect(html).toContain('<span>02</span> Developer surface');
+		expect(html).toContain('<span>02</span> One memory, every tool');
 		expect(html).toContain('<span>03</span> The difference');
 		expect(html).toContain("Four moves. One living memory.");
 		expect(html).toContain('data-landing-step="0"');

@@ -2469,14 +2469,35 @@
 
 		<section class="hero" id="top">
 			<div class="hero-copy">
-				<p class="eyebrow"><span>01</span> For the AI tools you already use</p>
-				<h1>The memory layer<br /><em>that sits under<br />your AI tools.</em></h1>
-				<p class="hero-deck">Connect Itsuki once with one key. It extracts structured memories from any of 26 connected tools — assistants, agents, workflows — links each to the words it came from, and serves them back across all the rest.</p>
-				<div class="hero-actions">
-					<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Connect your tools <span aria-hidden="true">→</span></a>
-					<a class="secondary-action" href="/docs/">Read the docs</a>
+				<div class="hero-lede">
+					<p class="eyebrow"><span>01</span> For the AI tools you already use</p>
+					<h1>The memory layer<br /><em>that sits under<br />your AI tools.</em></h1>
+					<p class="hero-deck">Connect once with one key. Itsuki extracts structured memories from any of 26 connected tools and serves them back across all the rest.</p>
+					<div class="hero-actions">
+						<a class="primary-action" href="/signup" onclick="showAuth('signup', event)">Connect your tools <span aria-hidden="true">→</span></a>
+						<a class="secondary-action" href="/docs/">Read the docs</a>
+					</div>
+					<p class="hero-proof">Open source · One key, two minutes · Free during early access</p>
 				</div>
-				<p class="hero-proof">Open source · One key, two minutes · Free during early access</p>
+				<div class="hero-connect">
+					<div class="code-window">
+						<div class="code-topline"><span>connect</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
+							<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
+							<button type="button" id="landingSdkTab-node" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
+							<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
+							<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
+						</div></div>
+						<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-mcp"><code>{
+  "mcpServers": {
+    "itsuki": {
+      "url": "PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI"
+    }
+  }
+}</code></pre>
+						<div class="code-foot"><button type="button" id="landingCodeAction" data-action="create-mcp" onclick="copyLandingCode(this)">Create MCP link</button><a href="/docs/">Complete setup ↗</a></div>
+					</div>
+					<p class="hero-connect-note">One key · 26 tools — assistants, coding agents, workflows</p>
+				</div>
 			</div>
 			<aside class="hero-mono" aria-label="Itsuki, written in Japanese">
 				<span class="hero-mono-jp" lang="ja">イツキ</span>
@@ -2484,42 +2505,51 @@
 			</aside>
 		</section>
 
-		<section class="developer-section reveal" id="developers">
-			<div class="developer-copy">
-				<div class="section-kicker light"><span>02</span> Developer surface</div>
-				<h2>Connected in<br />two minutes.</h2>
-				<p>Paste one MCP config or install the SDK, and the same scoped memory sits under every tool on this list. One key. No per-tool rewrite, no second store to keep in sync.</p>
-				<dl class="surface-stats">
-					<div><dt>26</dt><dd>supported tools</dd></div>
-					<div><dt>38</dt><dd>documented setup paths</dd></div>
-					<div><dt>2</dt><dd>methods to learn</dd></div>
-				</dl>
-				<ul class="surface-groups" aria-label="Integration coverage">
-					<li><b>SDKs &amp; API</b><span>Python · TypeScript · REST</span></li>
-					<li><b>AI assistants</b><span>Claude · ChatGPT</span></li>
-					<li><b>Coding agents</b><span>Claude Code · Codex · Cursor · OpenCode · Antigravity</span></li>
-					<li><b>Agent harnesses</b><span>OpenClaw · Hermes · Pi</span></li>
-					<li><b>Agent frameworks</b><span>LangChain · CrewAI · AutoGen · Agno · LlamaIndex · Mastra · Vercel AI · and 3 more</span></li>
-					<li><b>Workflow automation</b><span>n8n · Dify · Convex</span></li>
-				</ul>
-				<a class="surface-all" href="/docs/">Browse every integration <span aria-hidden="true">↗</span></a>
+		<section class="handoff-section reveal" id="developers" aria-label="One memory across every connected tool">
+			<header class="handoff-head">
+				<div class="section-kicker light"><span>02</span> One memory, every tool</div>
+				<h2>Tell Claude Code.<br /><em>Cursor already knows.</em></h2>
+				<p>One store sits under all twenty-six. Type the fact once, in whichever tool happens to be open, and the next tool to ask gets it back — no export, no re-paste, no second store to keep in sync.</p>
+			</header>
+			<div class="handoff-instrument" id="handoffInstrument">
+				<svg class="handoff-fan" id="handoffFan" aria-hidden="true" focusable="false" preserveAspectRatio="none"></svg>
+				<div class="handoff-origin">
+					<p class="handoff-origin-cap"><img src="/assets/integrations/claude-code.svg" alt="" aria-hidden="true" />Typed once, in Claude Code</p>
+					<article class="handoff-card" id="handoffCard">
+						<p class="handoff-card-tag">An example memory</p>
+						<p class="handoff-card-body">&ldquo;We&rsquo;re on Postgres. No ORM &mdash; raw SQL only.&rdquo;</p>
+						<p class="handoff-card-foot">you typed this once, in whichever tool was open.</p>
+					</article>
+				</div>
+				<div class="handoff-surface">
+						<div class="handoff-row">
+							<span class="handoff-row-label">SDKs &amp; API</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="python-sdk"><img src="/assets/integrations/python-sdk.svg" alt="" /><span class="sr-only">Python SDK</span></li><li class="handoff-tile" data-tool="typescript-sdk"><img src="/assets/integrations/typescript-sdk.svg" alt="" /><span class="sr-only">TypeScript SDK</span></li><li class="handoff-tile" data-tool="rest-api"><img src="/assets/integrations/rest-api.svg" alt="" /><span class="sr-only">REST API</span></li></ul>
+						</div>
+						<div class="handoff-row">
+							<span class="handoff-row-label">AI assistants</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="claude"><img src="/assets/integrations/claude.svg" alt="" /><span class="sr-only">Claude</span></li><li class="handoff-tile" data-tool="chatgpt"><img src="/assets/integrations/chatgpt.svg" alt="" /><span class="sr-only">ChatGPT</span></li></ul>
+						</div>
+						<div class="handoff-row">
+							<span class="handoff-row-label">Coding agents</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="claude-code"><img src="/assets/integrations/claude-code.svg" alt="" /><span class="sr-only">Claude Code</span></li><li class="handoff-tile" data-tool="codex"><img src="/assets/integrations/codex.svg" alt="" /><span class="sr-only">Codex</span></li><li class="handoff-tile" data-tool="cursor"><img src="/assets/integrations/cursor.svg" alt="" /><span class="sr-only">Cursor</span></li><li class="handoff-tile" data-tool="opencode"><img src="/assets/integrations/opencode.svg" alt="" /><span class="sr-only">OpenCode</span></li><li class="handoff-tile" data-tool="antigravity"><img src="/assets/integrations/antigravity.svg" alt="" /><span class="sr-only">Antigravity</span></li></ul>
+						</div>
+						<div class="handoff-row">
+							<span class="handoff-row-label">Agent harnesses</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="openclaw"><img src="/assets/integrations/openclaw.svg" alt="" /><span class="sr-only">OpenClaw</span></li><li class="handoff-tile" data-tool="hermes"><img src="/assets/integrations/hermes.svg" alt="" /><span class="sr-only">Hermes</span></li><li class="handoff-tile" data-tool="pi"><img src="/assets/integrations/pi.svg" alt="" /><span class="sr-only">Pi</span></li></ul>
+						</div>
+						<div class="handoff-row">
+							<span class="handoff-row-label">Agent frameworks</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="langchain"><img src="/assets/integrations/langchain.svg" alt="" /><span class="sr-only">LangChain</span></li><li class="handoff-tile" data-tool="crewai"><img src="/assets/integrations/crewai.svg" alt="" /><span class="sr-only">CrewAI</span></li><li class="handoff-tile" data-tool="autogen"><img src="/assets/integrations/autogen.svg" alt="" /><span class="sr-only">AutoGen</span></li><li class="handoff-tile" data-tool="agno"><img src="/assets/integrations/agno.png" alt="" /><span class="sr-only">Agno</span></li><li class="handoff-tile" data-tool="llamaindex"><img src="/assets/integrations/llamaindex.svg" alt="" /><span class="sr-only">LlamaIndex</span></li><li class="handoff-tile" data-tool="mastra"><img src="/assets/integrations/mastra.svg" alt="" /><span class="sr-only">Mastra</span></li><li class="handoff-tile" data-tool="vercel-ai"><img src="/assets/integrations/vercel-ai.svg" alt="" /><span class="sr-only">Vercel AI</span></li><li class="handoff-tile" data-tool="camel"><img src="/assets/integrations/camel.png" alt="" /><span class="sr-only">CAMEL</span></li><li class="handoff-tile" data-tool="google-adk"><img src="/assets/integrations/google-adk.svg" alt="" /><span class="sr-only">Google ADK</span></li><li class="handoff-tile" data-tool="openai-agents"><img src="/assets/integrations/openai-agents.svg" alt="" /><span class="sr-only">OpenAI Agents</span></li></ul>
+						</div>
+						<div class="handoff-row">
+							<span class="handoff-row-label">Workflow automation</span>
+							<ul class="handoff-tiles"><li class="handoff-tile" data-tool="n8n"><img src="/assets/integrations/n8n.svg" alt="" /><span class="sr-only">n8n</span></li><li class="handoff-tile" data-tool="dify"><img src="/assets/integrations/dify.svg" alt="" /><span class="sr-only">Dify</span></li><li class="handoff-tile" data-tool="convex"><img src="/assets/integrations/convex.svg" alt="" /><span class="sr-only">Convex</span></li></ul>
+						</div>
+					<p class="handoff-available" id="handoffAvailable" role="status"></p>
+				</div>
 			</div>
-			<div class="code-window">
-				<div class="code-topline"><span>quickstart</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
-					<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
-					<button type="button" id="landingSdkTab-node" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
-					<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
-					<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
-				</div></div>
-				<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-mcp"><code>{
-  "mcpServers": {
-    "itsuki": {
-      "url": "PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI"
-    }
-  }
-}</code></pre>
-				<div class="code-foot"><button type="button" id="landingCodeAction" data-action="create-mcp" onclick="copyLandingCode(this)">Create MCP link</button><a href="/docs/">Complete setup ↗</a></div>
-			</div>
+			<a class="surface-all" href="/docs/">All 38 setup paths <span aria-hidden="true">↗</span></a>
 		</section>
 
 		<section class="contrast-section reveal" id="product" aria-label="Raw conversation compared with structured memory">
@@ -3796,7 +3826,9 @@ let revealObserver = null;
 function setMode(mode) {
 	document.body.classList.remove("public-mode", "auth-mode", "app-mode");
 	document.body.classList.add(mode === "app" ? "app-mode" : ["login", "signup", "onboarding", "first-key"].includes(mode) ? "auth-mode" : "public-mode");
-	if (mode === "public") requestAnimationFrame(initReveal);
+	// The landing entry point: reveal animations and the section-2 handoff
+	// both need the DOM laid out, and both are idempotent.
+	if (mode === "public") requestAnimationFrame(() => { initReveal(); initHandoff(); });
 }
 
 function pushUrl(path, { preserveInvite = true } = {}) {
@@ -3945,6 +3977,82 @@ function landingSelectSdk(name) {
 		action.dataset.action = name === "mcp" ? "create-mcp" : "copy";
 		action.textContent = name === "mcp" ? "Create MCP link" : "Copy code";
 	}
+}
+
+/* ---- section 2: the handoff --------------------------------------------
+ * One memory, written in one tool, lighting up in others. The connector
+ * curves are measured from the live DOM rather than hard-coded, because the
+ * tile wall reflows at every width and a fixed viewBox would leave the
+ * curves pointing at empty space — which is exactly how the mockup failed
+ * the first time it was rendered.
+ *
+ * Each trio deliberately spans different integration groups: three lit tiles
+ * in one row would read as "works with three editors" instead of "works
+ * across the whole surface".
+ */
+const HANDOFF_TRIOS = [
+	["cursor", "n8n", "langchain"],
+	["codex", "dify", "mastra"],
+	["chatgpt", "convex", "crewai"],
+	["opencode", "n8n", "vercel-ai"],
+];
+const HANDOFF_NAMES = {
+	cursor: "Cursor", n8n: "n8n", langchain: "LangChain", codex: "Codex", dify: "Dify",
+	mastra: "Mastra", chatgpt: "ChatGPT", convex: "Convex", crewai: "CrewAI",
+	opencode: "OpenCode", "vercel-ai": "Vercel AI",
+};
+
+function handoffDrawFan() {
+	const wrap = document.getElementById("handoffInstrument");
+	const svg = document.getElementById("handoffFan");
+	const card = document.getElementById("handoffCard");
+	if (!wrap || !svg || !card) return;
+	// The stacked layout hides the fan entirely; drawing into a display:none
+	// element yields zero-size rects and a pile of NaNs in the path data.
+	if (getComputedStyle(svg).display === "none") { svg.innerHTML = ""; return; }
+	const lit = [...wrap.querySelectorAll(".handoff-tile.is-lit")];
+	const box = wrap.getBoundingClientRect();
+	const from = card.getBoundingClientRect();
+	if (!box.width || !box.height) return;
+	svg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+	const x1 = from.right - box.left;
+	const y1 = from.top + from.height / 2 - box.top;
+	svg.innerHTML = lit.map((tile) => {
+		const t = tile.getBoundingClientRect();
+		const x2 = t.left - box.left;
+		const y2 = t.top + t.height / 2 - box.top;
+		const mid = x1 + (x2 - x1) * 0.55;
+		return `<path d="M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}" /><circle cx="${x2}" cy="${y2}" r="2.6" />`;
+	}).join("");
+}
+
+function handoffLight(index) {
+	const wrap = document.getElementById("handoffInstrument");
+	if (!wrap) return;
+	const trio = HANDOFF_TRIOS[index % HANDOFF_TRIOS.length];
+	wrap.querySelectorAll(".handoff-tile").forEach((tile) => {
+		tile.classList.toggle("is-lit", trio.includes(tile.dataset.tool));
+	});
+	const line = document.getElementById("handoffAvailable");
+	if (line) line.textContent = "Available in " + trio.map((id) => HANDOFF_NAMES[id] || id).join(" · ");
+	handoffDrawFan();
+}
+
+function initHandoff() {
+	const wrap = document.getElementById("handoffInstrument");
+	if (!wrap || wrap.dataset.ready === "1") return;
+	wrap.dataset.ready = "1";
+	handoffLight(0);
+	// Redraw on reflow: the wall rewraps as the viewport changes, and stale
+	// curves would point at where a tile used to be.
+	if (typeof ResizeObserver === "function") new ResizeObserver(() => handoffDrawFan()).observe(wrap);
+	window.addEventListener("resize", handoffDrawFan);
+	// Logos and webfonts land after first paint and nudge the wall; one more
+	// pass on load stops the curves ending a few pixels short.
+	window.addEventListener("load", handoffDrawFan);
+	if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	let step = 0;
+	setInterval(() => { step += 1; handoffLight(step); }, 3400);
 }
 
 function landingTabKeydown(event, selector, activate) {
@@ -20245,6 +20353,9 @@ initConnectWidget();
 initHeroReel();
 installKeyGuard();
 initShell();
+// The landing is the default view on a cold load — setMode() only runs on a
+// navigation, so booting the handoff there alone left it dark on first paint.
+initHandoff();
 </script>
 </body>
 </html>

@@ -64,7 +64,7 @@ describe("dashboard script", () => {
 		// inspector at 03, and no section repeating another's argument. The
 		// redundant surface band and positioning spread are gone for good.
 		expect(html).toContain('class="hero-mono"');
-		expect(html.indexOf('<span>02</span> Developer surface'))
+		expect(html.indexOf('<span>02</span> One memory, every tool'))
 			.toBeLessThan(html.indexOf('<span>03</span> The difference'));
 		expect(html.indexOf('<span>03</span> The difference'))
 			.toBeLessThan(html.indexOf('<span>04</span> How it works'));
@@ -91,8 +91,11 @@ describe("dashboard script", () => {
 		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
 		expect(html).toContain('location.href = "/app#install"');
 		expect(html).toContain("landingSelectSdk");
-		expect(html).toContain("Connected in");
-		expect(html).toContain("two minutes.");
+		// Section 2 stopped being a quickstart when the connect card moved into
+		// the hero; it is now the handoff.
+		expect(html).toContain("Tell Claude Code.");
+		expect(html).toContain("Cursor already knows.");
+		expect(html).toContain('id="handoffInstrument"');
 		expect(html).toContain("actually yours.");
 		expect(html).toContain("Delete actually deletes");
 		expect(html).toContain("Every write leaves a receipt");
