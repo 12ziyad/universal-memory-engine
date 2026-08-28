@@ -190,9 +190,15 @@ export function scrubMechanismTalk(reply) {
 		[new RegExp(`\\bit (is|'s) not (visible|available|shown|included) here\\b[^.!?\\n]*[.!?]?`, "gi"), ""],
 		// "see the **X** section" / "as detailed in the X section": the reader
 		// cannot open a section, only a page. Keep the name, drop the framing.
-		[/\b(as )?(detailed|described|explained|shown|outlined|covered)\s+(in|under)\s+(the\s+)?/gi, "see "],
-		[/\bsee\s+see\b/gi, "see"],
-		[/\s+section\b/gi, " page"],
+		// Both rules REQUIRE the word "section" to follow — an earlier version
+		// rewrote every "shown in" and turned "no relationships shown in edge
+		// types" into "no relationships see edge types".
+		[/\b(as\s+)?(detailed|described|explained|shown|outlined|covered)\s+(in|under)\s+(the\s+)?([^.!?\n]{0,60}?)\s+sections?\b/gi, "on the $5 page"],
+		[/\bsee\s+(the\s+)?([^.!?\n]{0,60}?)\s+sections?\b/gi, "see the $2 page"],
+		[/\s+sections?\b/gi, " page"],
+		// A markdown link the renderer does not render, and whose target the
+		// model invented anyway — keep the words, drop the dead link.
+		[/\[([^\]\n]+)\]\((?:#|https?:\/\/[^)\s]*)?\)/g, "$1"],
 	];
 	for (const [pattern, replacement] of rewrites) text = text.replace(pattern, replacement);
 	return text

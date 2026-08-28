@@ -230,6 +230,12 @@ describe("Huba AI", () => {
 		// Real API field names people legitimately ask about must survive.
 		const apiField = "Each receipt carries `saved_total` and `outcome`.";
 		expect(scrubMechanismTalk(apiField)).toBe(apiField);
+		// A dead markdown link keeps its words and loses the link.
+		expect(scrubMechanismTalk("Use the [JavaScript SDK](#) for direct calls."))
+			.toBe("Use the JavaScript SDK for direct calls.");
+		// The section rewrite must not maul ordinary prose that says "shown in".
+		const prose = "No relationships are shown in this view yet.";
+		expect(scrubMechanismTalk(prose)).toBe(prose);
 	});
 
 	it("chat door requires a session", async () => {
