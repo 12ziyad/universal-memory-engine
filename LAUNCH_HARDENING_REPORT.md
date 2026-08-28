@@ -976,3 +976,139 @@ breathe after them. Reduced motion freezes it fully drawn.
 |---|---|
 | `ca624c90` | scope fix, gpt-oss-120b, procedural edges, layout, caps, icon |
 | **`cecf8a8e`** | **live** — receipts signature, two-section coverage |
+
+---
+
+# Fifth pass — 2026-08-28
+
+Owner: *"the edges now only work when the mouse pointer touches it to
+highlight — can you make it always like that, visible and neat."*
+
+Correct, and it was my doing. The fourth pass muted two kinds of edge at rest
+to fight the hairball, and muted is too weak a word for what it actually did:
+
+```js
+const dim = edgeHsla(family.hue, family.sat, 66, 0.07);   // 7% alpha
+const mutedAtRest = edge._weak || edge._cross;
+if (focusId == null) wanted = mutedAtRest ? edge._dim : edge._base;
+```
+
+Every cross-cluster edge — every line between one bubble and another — and
+the whole `related_to` family rested at **7% alpha**. That is not "de-
+emphasised", that is invisible, and it is why the graph read as floating dots
+until the cursor found something. The connections were being drawn the whole
+time; you just couldn't see them.
+
+**Nothing is hidden at rest now.** The resting branch is unconditional:
+
+```js
+if (focusId == null) wanted = edge._base;
+```
+
+and the resting palette was raised to match, since a line that is *drawn* is
+not the same as a line you can *trace* on a near-black canvas:
+
+| | before | after |
+|---|---|---|
+| cross-cluster & loose relations, at rest | **0.07** | **0.48 – 0.71** |
+| loose association (`related_to`) | 0.30, dotted `[2,7]` | 0.58, dashed `[5,5]` |
+| strong families (identity, people, causal…) | 0.66 – 0.80 | 0.76 – 0.86 |
+| stroke lightness | 66% | 70% |
+| minimum stroke width | 1.0px | 1.5px |
+
+Verified by computing the resting colour for every relation family against
+real production relation names: **the faintest edge in the graph now rests at
+0.48 alpha**, against 0.07 before.
+
+Two things were kept, because "visible" and "neat" are both in the request:
+
+- **Cross-cluster edges rest one shade softer** — `alpha × 0.82`, floored at
+  0.42 — so the dense in-cluster structure still reads first. They are plainly
+  visible; they are just not louder than the clusters they connect.
+- **The hover spotlight still works.** Focus a node and its edges go fully
+  lit. What changed is the other half: unrelated edges recede to **0.16**
+  instead of 0.07, so focusing something no longer blacks out the rest of the
+  picture.
+
+Density is handled where it belongs — the per-cluster cap, the cluster
+separation pass, and the softer cross-stroke — rather than by making
+connections disappear.
+
+**Tests:** the old contract was pinned (`expect(shell).toContain("const
+mutedAtRest = …")`), so it had to be inverted rather than deleted. Three
+assertions now hold the opposite line: every family rests at ≥ 0.5 alpha, the
+resting branch is unconditional and the string `mutedAtRest` is gone from the
+function, and the receded state stays above 0.1.
+
+## …and then it still flickered
+
+Owner, on the deploy: *"it's like bugging — sometimes it's getting dimmed, or
+when I open the graph at first it's dimmed then goes to the bright one."*
+
+Raising the resting alpha fixed what was invisible; it did not fix the
+*dimming*, which had two separate causes and one shared root — the spotlight
+was still allowed to darken edges it wasn't focused on.
+
+**Cause 1 — the opening fit.** `graphFit(450)` animates every node into place
+while the cursor sits exactly where the user left it. vis-network reads that
+as the pointer entering and leaving node after node as they slide underneath,
+so `hoverNode`/`blurNode` fired repeatedly and the entire edge set was
+restyled on each one: dim, bright, dim, bright, for the whole opening
+animation. Nobody moved the mouse; the graph moved under it.
+
+**Cause 2 — it stuck.** Clicking a node dimmed everything unconnected and left
+it that way, because the only thing that restored it was clicking empty space.
+A graph that stays dark after a click reads as broken, not as focused.
+
+**The fix is that nothing dims any more.**
+
+```js
+const wanted = focusId != null && isConnected ? edge._lit : edge._base;
+```
+
+Two states, not three. Focused edges light; everything else holds its resting
+colour. The focused subset is still unmistakable without darkening its
+surroundings — full alpha against 0.48–0.86, +22 saturation, brighter, and a
+wider stroke. `_dim` is computed but no code path renders it, and a test
+asserts the function cannot reach it.
+
+The animation churn is separately guarded, because restyling every edge on
+every frame of the fit was wasteful even once it stopped being visible:
+
+```js
+if (S.graphSettling && focusId != null) return;
+```
+
+armed when the network is built and released 520ms after the fit starts, at
+which point whatever the cursor is genuinely over gets its highlight.
+
+## Huba opened itself on every load
+
+```css
+#hubaPanel { … display: flex; … }   /* 1-0-0 */
+```
+
+`hidden` is not a property — it is enforced by the UA stylesheet rule
+`[hidden] { display: none }`, specificity **0-1-0**. An ID selector is
+**1-0-0** and outranks it. So `initHuba()` appended a panel carrying the
+`hidden` attribute and the browser drew it anyway, fully opaque, on every
+single app load. It only went away once something set `data-collapsed`, which
+in practice meant the user closing a panel they never opened.
+
+The author rule has to opt back out of what the author rule broke:
+
+```css
+#hubaPanel[hidden] { display: none; }
+```
+
+placed after the rule it undoes, with `data-collapsed="true"` also in the
+initial markup so there is no painted frame between the node being appended
+and the first toggle. It is now opened by exactly one thing: the button.
+
+## Named
+
+It said **"Ask about Itsuki"**, which describes an action and never tells you
+what the thing is. It now says **Huba AI**, next to the same mark, with the
+header reading `Huba AI` to match. Under 700px the label is `display: none`,
+so the button also carries `aria-label="Huba AI"` and a title — otherwise it
+is an unlabelled icon on every phone. Both pinned by tests.

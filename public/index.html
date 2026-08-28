@@ -2400,6 +2400,10 @@
 		   top-right corner — so closing reads as putting it away rather than
 		   as the panel blinking out. */
 		transform-origin: top right; transition: opacity 170ms ease, transform 170ms cubic-bezier(.4, 0, .2, 1); }
+	/* MUST come after the display:flex above. The hidden attribute is enforced
+	   by the UA sheet at specificity 0-1-0, which an ID selector outranks — so
+	   without this the panel ignored [hidden] and opened by itself on load. */
+	#hubaPanel[hidden] { display: none; }
 	#hubaPanel[data-collapsed="true"] { opacity: 0; transform: scale(.94) translateY(-10px); pointer-events: none; }
 	#hubaPanel header { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border); font-size: 13px; }
 	#hubaLog { flex: 1; overflow-y: auto; padding: 13px; display: flex; flex-direction: column; gap: 10px; }
@@ -2735,9 +2739,9 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	<!-- Huba replaces the theme quick-cycle here: appearance already lives in
 	     the profile menu, and a live way in is worth the slot. The mark
 	     breathes so it reads as something you can talk to. -->
-	<button class="huba-omni" id="hubaOmni" type="button" onclick="toggleHuba()" aria-haspopup="dialog" aria-expanded="false" aria-controls="hubaPanel">
+	<button class="huba-omni" id="hubaOmni" type="button" onclick="toggleHuba()" aria-haspopup="dialog" aria-expanded="false" aria-controls="hubaPanel" aria-label="Huba AI" title="Huba AI — ask about Itsuki or this account">
 		<span class="huba-omni-mark" aria-hidden="true"><svg viewBox="0 0 22 18" width="18" height="15"><line class="hg-e hg-e1" x1="4" y1="13" x2="11" y2="5"/><line class="hg-e hg-e2" x1="11" y1="5" x2="18" y2="11"/><line class="hg-e hg-e3" x1="4" y1="13" x2="18" y2="11"/><circle class="hg-n hg-n1" cx="4" cy="13" r="2.3"/><circle class="hg-n hg-n2" cx="11" cy="5" r="2.6"/><circle class="hg-n hg-n3" cx="18" cy="11" r="2"/></svg></span>
-		<span class="huba-omni-label">Ask about Itsuki</span>
+		<span class="huba-omni-label">Huba AI</span>
 	</button>
 	<div class="profile-menu-wrap" id="profileMenuWrap" hidden>
 		<button class="profile-trigger" id="profileTrigger" type="button" onclick="toggleProfileMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">
@@ -14159,10 +14163,10 @@ function initHuba() {
 	const bar = el("div");
 	bar.id = "hubaBar";
 	bar.innerHTML = `
-		<section id="hubaPanel" hidden role="dialog" aria-label="Huba">
+		<section id="hubaPanel" hidden data-collapsed="true" role="dialog" aria-label="Huba AI">
 			<header>
 				<span class="huba-mark" aria-hidden="true"><svg viewBox="0 0 22 18" width="17" height="14"><line class="hg-e hg-e1" x1="4" y1="13" x2="11" y2="5"/><line class="hg-e hg-e2" x1="11" y1="5" x2="18" y2="11"/><line class="hg-e hg-e3" x1="4" y1="13" x2="18" y2="11"/><circle class="hg-n hg-n1" cx="4" cy="13" r="2.3"/><circle class="hg-n hg-n2" cx="11" cy="5" r="2.6"/><circle class="hg-n hg-n3" cx="18" cy="11" r="2"/></svg></span>
-				<b>Huba</b>
+				<b>Huba AI</b>
 				<span style="flex:1"></span>
 				<span id="hubaUsage" class="help"></span>
 				<button id="hubaThreadsToggle" type="button" class="huba-icon" title="Recent conversations" aria-label="Recent conversations" aria-expanded="false">☰</button>
@@ -18567,42 +18571,42 @@ const EDGE_FAMILIES = [
 	{
 		id: "weak", label: "Loose association",
 		test: (t) => t === "RELATED_TO" || t === "RELATES_TO" || t === "ASSOCIATED_WITH" || t === "SIMILAR_TO",
-		hue: 215, sat: 12, alpha: 0.30, dashes: [2, 7], weak: true,
+		hue: 215, sat: 26, alpha: 0.58, dashes: [5, 5], weak: true,
 	},
 	{
 		id: "relationship", label: "People",
 		test: (t) => /^(MARRIED_TO|DATING|ENGAGED_TO|FRIENDS_WITH|SISTER_OF|BROTHER_OF|PARENT_OF|CHILD_OF|MOTHER_OF|FATHER_OF|COLLEAGUE_OF|REPORTS_TO|MANAGED_BY|KNOWS|ADVISES|INTRODUCED|MENTORS|SIBLING_OF|SPOUSE_OF|PARTNER_OF)$/.test(t),
-		hue: 322, sat: 62, alpha: 0.72, dashes: false,
+		hue: 322, sat: 62, alpha: 0.80, dashes: false,
 	},
 	{
 		id: "identity", label: "Identity & place",
 		test: (t) => /^(WORKS_AT|EMPLOYED_BY|LIVES_IN|BASED_IN|LOCATED_IN|LOCATED_AT|BORN_IN|STUDIED_AT|STUDIES_AT|MEMBER_OF|WORKS_ON|WORKS_FOR|FROM)$/.test(t) || /_(AT|IN)$/.test(t),
-		hue: 199, sat: 80, alpha: 0.72, dashes: false,
+		hue: 199, sat: 80, alpha: 0.80, dashes: false,
 	},
 	{
 		id: "dependency", label: "Depends on",
 		test: (t) => /^(USES|USED_BY|DEPENDS_ON|REQUIRES|NEEDS|ROUTED_THROUGH|HOSTED_ON|RUNS_ON|BUILT_ON|POWERED_BY|INTEGRATES_WITH|CONNECTS_TO)$/.test(t),
-		hue: 142, sat: 58, alpha: 0.68, dashes: [8, 6],
+		hue: 142, sat: 58, alpha: 0.78, dashes: [8, 6],
 	},
 	{
 		id: "structural", label: "Part of",
 		test: (t) => /^(PART_OF|HAS_PART|CONTAINS|BELONGS_TO|INSTANCE_OF|TYPE_OF|SPECIES|CATEGORY_OF|DOCUMENTS|DESCRIPTION_OF)$/.test(t) || /^HAS_/.test(t),
-		hue: 268, sat: 60, alpha: 0.66, dashes: false,
+		hue: 268, sat: 60, alpha: 0.76, dashes: false,
 	},
 	{
 		id: "causal", label: "Causes & effects",
 		test: (t) => /^(CAUSED|CAUSES|DRIVES|IMPROVES|BLOCKED_BY|BLOCKS|PREVENTS|ENABLES|LED_TO|RESULTED_IN|TRIGGERED|AFFECTS|SUPPORTS)$/.test(t),
-		hue: 32, sat: 88, alpha: 0.80, dashes: false,
+		hue: 32, sat: 88, alpha: 0.86, dashes: false,
 	},
 	{
 		id: "lifecycle", label: "Superseded",
 		test: (t) => /^(REPLACED_BY|REPLACES|SUPERSEDED_BY|DEPRECATED_BY|MIGRATED_TO|RENAMED_TO|LEFT|ENDED)$/.test(t),
-		hue: 220, sat: 8, alpha: 0.50, dashes: [10, 7],
+		hue: 220, sat: 22, alpha: 0.66, dashes: [10, 7],
 	},
 	{
 		id: "activity", label: "Actions & events",
 		test: (t) => /^(CREATED|BUILT|WROTE|VISITED|ATTENDED|ACHIEVED|COMPLETED|STARTED|PLAYS|PLAYS_WITH|PRACTICES|EXPERIENCED|EXPERIENCING|LOVES|LIKES|PREFERS|INTERESTED_IN|SHARED_WITH|READ|WATCHED|GOODBYE)$/.test(t),
-		hue: 48, sat: 78, alpha: 0.70, dashes: false,
+		hue: 48, sat: 78, alpha: 0.78, dashes: false,
 	},
 ];
 
@@ -18626,7 +18630,7 @@ function edgeFamilyFor(rawType) {
 	if (family) return { ...family, type };
 	return {
 		id: "other", label: "Other relations", type,
-		hue: edgeHashHue(type), sat: 46, alpha: 0.55, dashes: false, weak: false,
+		hue: edgeHashHue(type), sat: 58, alpha: 0.72, dashes: false, weak: false,
 	};
 }
 
@@ -18640,14 +18644,19 @@ function edgeStyle(e, i) {
 		to: nodeKey(e.to_node),
 		label: family.type.replace(/_/g, " ").toLowerCase(),
 		arrows: "to",
-		width: Math.max(1, Math.min(4, 1.2 + Number(e.weight || 1) * .4)),
+		width: Math.max(1.5, Math.min(4.2, 1.6 + Number(e.weight || 1) * .4)),
 		selectionWidth: 2.8,
 		smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
 		font: { color: "#cbd5e1", size: 10, face: GRAPH_FONT_FACE, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
 	};
-	const rest = edgeHsla(family.hue, family.sat, 66, family.alpha);
-	const lit = edgeHsla(family.hue, Math.min(100, family.sat + 22), 72, 1);
-	const dim = edgeHsla(family.hue, family.sat, 66, 0.07);
+	// 70% lightness, not 66: on the near-black canvas the extra four points is
+	// the difference between a line you can trace and a line you can only find
+	// by hovering it.
+	const rest = edgeHsla(family.hue, family.sat, 70, family.alpha);
+	const lit = edgeHsla(family.hue, Math.min(100, family.sat + 22), 76, 1);
+	// Kept for the console-inspection surface only: no code path renders it.
+	// Edges are either resting or lit — see highlightConnectedEdges.
+	const dim = edgeHsla(family.hue, family.sat, 70, 0.16);
 	return {
 		...base,
 		dashes: family.dashes,
@@ -18655,15 +18664,22 @@ function edgeStyle(e, i) {
 		_base: rest,
 		_lit: lit,
 		_dim: dim,
+		// Kept raw so drawGraph can re-derive a resting colour once it knows
+		// whether the edge crosses clusters — it cannot know that here.
+		_hue: family.hue,
+		_sat: family.sat,
+		_alpha: family.alpha,
 		_baseWidth: base.width,
 		// Remembered so the zoom pass can drop to solid when the view is far
 		// out and restore the family's own dash pattern when it comes back.
 		_baseDashes: family.dashes ?? false,
 		_family: family.id,
 		_familyLabel: family.label,
-		// The weakest family is hidden until something is selected: it is the
-		// most numerous relation and the least informative, and it is what
-		// turned a readable graph into spaghetti.
+		// Marks the loosest relation ("related_to" and friends). Nothing in the
+		// renderer branches on it any more — it is dashed and a little cooler
+		// like any other family, and always drawn. Kept because the graph is
+		// inspectable from the console via window.S, where filtering the loose
+		// links out of a busy cluster is the first thing you want to do.
 		_weak: family.weak === true,
 	};
 }
@@ -18723,12 +18739,32 @@ function clampGraphZoom() {
 }
 
 /**
- * The connected-subset spotlight: focus a node and its edges go fully lit
- * while every other edge dims; focus nothing and everything returns to the
- * resting (always-visible) alpha. One batched DataSet update per change.
+ * The connected-subset spotlight. Focus a node and its edges go fully lit.
+ * Everything else STAYS AT ITS RESTING COLOUR — the graph never dims.
+ *
+ * Dimming the unfocused remainder is the conventional move and it was wrong
+ * here twice over. It made the picture flicker dark-then-bright while the
+ * opening fit animation slid nodes under a stationary cursor (every hover and
+ * blur repainted the whole edge set), and after a click it left the graph
+ * dimmed until you thought to click empty space — which reads as the graph
+ * having broken. The focused subset is already unmistakable without it: full
+ * alpha against 0.48-0.86, +22 saturation, brighter, and a wider stroke.
+ *
+ * This used to hide two kinds of edge until you hovered them: the weak
+ * "related_to" family, and any edge whose ends sat in different clusters.
+ * The intent was less spaghetti; the effect was a graph whose links only
+ * existed while the mouse was on them, so the resting picture read as
+ * floating dots. Density is handled where it belongs instead — per-cluster
+ * caps, cluster separation, and a slightly softer stroke on the long
+ * cross-cluster lines — and every edge is drawn at rest.
  */
 function highlightConnectedEdges(focusId) {
 	if (!S.network || !S.graphEdgesDs) return;
+	// While the opening fit animates, the nodes travel under a cursor that
+	// has not moved, so vis fires hoverNode/blurNode over and over and the
+	// edge set was being restyled on every frame. Ignore focus until the view
+	// has settled; the first real mouse move after that lands normally.
+	if (S.graphSettling && focusId != null) return;
 	const connected = new Set(focusId != null ? S.network.getConnectedEdges(focusId) : []);
 	const updates = [];
 	// Width here must respect the zoom compensation above, or highlighting
@@ -18737,18 +18773,8 @@ function highlightConnectedEdges(focusId) {
 	for (const edge of S.graphEdgesDs.get()) {
 		if (edge._base == null) continue; // guide edges keep their own styling
 		const isConnected = connected.has(edge.id);
-		// Two kinds of edge are hidden at rest and revealed only when they
-		// are relevant to what you are looking at:
-		//   _weak  — "related_to", the most numerous and least informative
-		//            relation, and the single biggest source of spaghetti;
-		//   _cross — a link between two different clusters, which is what
-		//            draws a line straight across the whole canvas.
-		// Both come back the moment their node is hovered or selected, so
-		// nothing is lost — it is just not shouted at rest.
-		const mutedAtRest = edge._weak || edge._cross;
-		let wanted;
-		if (focusId == null) wanted = mutedAtRest ? edge._dim : edge._base;
-		else wanted = isConnected ? edge._lit : edge._dim;
+		// Lit when focused, resting otherwise. There is no third, darker state.
+		const wanted = focusId != null && isConnected ? edge._lit : edge._base;
 		const base = edge._baseWidth ?? 1.5;
 		const zoomed = Math.min(6, Math.max(base, base / scale));
 		const wantedWidth = focusId != null && isConnected ? Math.min(7, zoomed + 1) : zoomed;
@@ -19551,15 +19577,20 @@ function drawGraph() {
 		}
 		S.clusterHulls = computeClusterHulls(visualNodes, S.data?.clusters || []);
 		const vn = new vis.DataSet(dedupeById([...visualNodes, ...clusterHullAnchors(S.clusterHulls)]));
-		// An edge is "cross" when its ends sit in different clusters. Those are
-		// the long lines that cut across the whole canvas, so they rest dim and
-		// light up only when one of their nodes is the focus.
+		// An edge is "cross" when its ends sit in different clusters: the long
+		// lines that travel the width of the canvas. They are drawn at rest
+		// like every other edge, just a shade softer, so the eye reads the
+		// dense in-cluster structure first and still sees every connection.
 		const clusterOfNode = new Map(visualNodes.map((n) => [n.id, n.cluster || "general_memory"]));
 		const styledEdges = graphEdges.map((e, i) => {
 			const styled = edgeStyle(e, i);
 			const from = clusterOfNode.get(styled.from);
 			const to = clusterOfNode.get(styled.to);
 			styled._cross = Boolean(from && to && from !== to);
+			if (styled._cross) {
+				styled._base = edgeHsla(styled._hue, styled._sat, 70, Math.max(0.42, styled._alpha * 0.82));
+				styled.color = { ...styled.color, color: styled._base };
+			}
 			return styled;
 		});
 		const ve = new vis.DataSet(dedupeById([...styledEdges, ...guideEdges]));
@@ -19604,7 +19635,17 @@ function drawGraph() {
 		S.network.on("zoom", () => clampGraphZoom());
 		S.network.on("dragEnd", () => applyGraphZoomStyling());
 		S.graphEdgeScale = null;
-		S.network.once("afterDrawing", () => setTimeout(() => graphFit(450), 20));
+		// Armed here, cleared once the opening fit has finished moving things.
+		S.graphSettling = true;
+		if (S.graphSettleTimer) clearTimeout(S.graphSettleTimer);
+		S.network.once("afterDrawing", () => setTimeout(() => {
+			graphFit(450);
+			S.graphSettleTimer = setTimeout(() => {
+				S.graphSettling = false;
+				// Whatever the cursor is genuinely over now gets its highlight.
+				highlightConnectedEdges(S.network?.getSelectedNodes?.()[0] ?? null);
+			}, 520);
+		}, 20));
 		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
 		startHullPulse();

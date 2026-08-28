@@ -646,10 +646,27 @@ describe("graph edge appearance is derived, not looked up", () => {
 		}
 	});
 
-	it("mutes only the weakest family at rest", () => {
-		expect(edgeFamilyFor("RELATED_TO").weak).toBe(true);
+	it("marks the loosest family, but still gives it a visible alpha", () => {
+		const weak = edgeFamilyFor("RELATED_TO");
+		expect(weak.weak).toBe(true);
+		// It is dashed and cooler than the rest, but it is NOT a ghost: it
+		// used to sit at 0.30 and be hidden outright until hover.
+		expect(weak.alpha).toBeGreaterThanOrEqual(0.5);
 		for (const strong of ["WORKS_AT", "USES", "CAUSED", "SISTER_OF", "PART_OF"]) {
 			expect(edgeFamilyFor(strong).weak, strong).not.toBe(true);
+		}
+	});
+
+	it("gives every family a resting alpha you can actually see", () => {
+		// The complaint that started this: edges only appeared under the
+		// cursor. Any family resting below 0.5 alpha reads as absent on the
+		// near-black canvas, so the floor is a contract, not a preference.
+		const names = [
+			"RELATED_TO", "WORKS_AT", "USES", "CAUSED", "SISTER_OF", "PART_OF",
+			"REPLACED_BY", "CREATED", "SOMETHING_UNNAMED", "HAS_SIBLING",
+		];
+		for (const name of names) {
+			expect(edgeFamilyFor(name).alpha, name).toBeGreaterThanOrEqual(0.5);
 		}
 	});
 
@@ -663,9 +680,74 @@ describe("graph edge appearance is derived, not looked up", () => {
 		// Per-cluster cap with an expandable marker.
 		expect(draw).toContain("capClusterMembers(");
 		expect(draw).toContain("clusterMoreNode(");
-		// Cross-cluster edges are marked so they can rest dim.
+		// Cross-cluster edges are still identified, but only to soften them a
+		// shade — they are drawn at rest, not hidden until hover.
 		expect(draw).toContain("styled._cross =");
-		expect(shell).toContain("const mutedAtRest = edge._weak || edge._cross;");
+		expect(draw).toContain("Math.max(0.42, styled._alpha * 0.82)");
+	});
+
+	it("draws every edge at rest — nothing waits for the cursor", () => {
+		// The regression this pins: highlightConnectedEdges used to swap in a
+		// near-invisible colour for weak and cross-cluster edges whenever
+		// nothing was focused, so the resting graph looked like loose dots.
+		const fn = shell.slice(
+			shell.indexOf("function highlightConnectedEdges("),
+			shell.indexOf("function graphEdgeLegend("),
+		);
+		expect(fn).toContain("focusId != null && isConnected ? edge._lit : edge._base");
+		expect(fn).not.toContain("mutedAtRest");
+		// There is no darker third state: nothing may render _dim.
+		expect(fn).not.toContain("edge._dim");
+		expect(shell).not.toContain("edgeHsla(family.hue, family.sat, 66, 0.07)");
+	});
+
+	it("ignores hover focus until the opening fit has settled", () => {
+		// The flicker: graphFit animates nodes under a cursor that has not
+		// moved, so vis fires hoverNode/blurNode every frame and the whole
+		// edge set was restyled dark-then-bright while the graph opened.
+		const fn = shell.slice(
+			shell.indexOf("function highlightConnectedEdges("),
+			shell.indexOf("function graphEdgeLegend("),
+		);
+		expect(fn).toContain("if (S.graphSettling && focusId != null) return;");
+		const start = shell.indexOf("S.network.on(\"dragEnd\", () => applyGraphZoomStyling());");
+		expect(start, "anchor").toBeGreaterThan(0);
+		const draw = shell.slice(start, start + 1000);
+		expect(draw).toContain("S.graphSettling = true;");
+		// ...and it must be released again, or hover would never work at all.
+		expect(draw).toContain("S.graphSettling = false;");
+	});
+});
+
+describe("Huba stays shut until it is asked for", () => {
+	it("does not paint itself open on load", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		// The bug: the hidden attribute is enforced by the UA sheet at
+		// specificity 0-1-0, and "#hubaPanel { display: flex }" is 1-0-0, so the
+		// panel outranked its own hidden attribute and opened by itself every
+		// time the app loaded. The author rule has to opt back out.
+		expect(shell).toContain("#hubaPanel[hidden] { display: none; }");
+		const optOut = shell.indexOf("#hubaPanel[hidden] { display: none; }");
+		const display = shell.indexOf("#hubaPanel { position: fixed;");
+		expect(display, "the opt-out must come after the rule it undoes").toBeLessThan(optOut);
+		// And the markup starts collapsed, so there is no painted frame between
+		// appending the node and the first toggle.
+		expect(shell).toContain('<section id="hubaPanel" hidden data-collapsed="true"');
+		// Nothing may open it on boot — only the button, and only on click.
+		const boot = shell.slice(
+			shell.indexOf("async function openAuthenticatedApp()"),
+			shell.indexOf("checkFailedSaves();"),
+		);
+		expect(boot).toContain("initHuba();");
+		expect(boot).not.toContain("toggleHuba(true)");
+	});
+
+	it("is named so people know what it is", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		expect(shell).toContain('<span class="huba-omni-label">Huba AI</span>');
+		// That label is display:none under 700px, so the button needs its own
+		// accessible name or it is an unlabelled icon on every phone.
+		expect(shell).toContain('aria-label="Huba AI"');
 	});
 });
 
