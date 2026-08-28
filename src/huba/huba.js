@@ -50,7 +50,8 @@ NEVER DO THIS
 - Never invent an endpoint, parameter, limit, price, or product name. If a specific detail is not in front of you, give the part you are sure of and point to where the rest lives.
 - Never speculate about other users, other accounts, or data you cannot see. ACCOUNT is this person's own.
 - Never claim to have taken an action. You can read this account; you cannot change it. Tell them where to click instead.
-- Never quote internal field or variable names at the person (jobs.failures, recent_by_status, saves_today.neurons_used). Translate them into plain words: "nothing has failed", "five saves finished", "you have about 196 saves left today".`;
+- Never quote internal field or variable names at the person (jobs.failures, recent_by_status, saves_today.neurons_used). Translate them into plain words: "nothing has failed", "five saves finished", "you have about 196 saves left today".
+- Never call anything "a section" or say "as detailed in"/"as described in"/"see the X section". Headings above are internal. Refer to a place the person can actually go: a documentation page by its name ("the JavaScript SDK page"), or a dashboard tab ("the Usage & plan page").`;
 
 /**
  * Context budgets. The deterministic model-input boundary (see
@@ -163,10 +164,20 @@ export function scrubMechanismTalk(reply) {
 		[new RegExp(`\\bthe (${M})\\s+(says?|states?|shows?|notes?|indicates?)\\b`, "gi"), "Itsuki"],
 		[new RegExp(`\\bin the (provided |available |given )?(${M})\\b`, "gi"), ""],
 		[new RegExp(`\\bit (is|'s) not (visible|available|shown|included) here\\b[^.!?\\n]*[.!?]?`, "gi"), ""],
+		// "see the **X** section" / "as detailed in the X section": the reader
+		// cannot open a section, only a page. Keep the name, drop the framing.
+		[/\b(as )?(detailed|described|explained|shown|outlined|covered)\s+(in|under)\s+(the\s+)?/gi, "see "],
+		[/\bsee\s+see\b/gi, "see"],
+		[/\s+section\b/gi, " page"],
 	];
 	for (const [pattern, replacement] of rewrites) text = text.replace(pattern, replacement);
 	return text
+		// A removal mid-sentence leaves orphaned punctuation and double spaces
+		// ("see the X page ." was the observed shape), so tidy after rewriting.
 		.replace(/[ \t]{2,}/g, " ")
+		.replace(/\s+([.,;:!?])/g, "$1")
+		.replace(/([.,;:])\1+/g, "$1")
+		.replace(/\(\s*\)/g, "")
 		.replace(/\n{3,}/g, "\n\n")
 		.split("\n")
 		.map((line) => line.replace(/^\s*[-*]\s*$/, "").trimEnd())

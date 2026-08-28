@@ -205,9 +205,20 @@ describe("Huba AI", () => {
 			const cleaned = scrubMechanismTalk(slip);
 			expect(cleaned, slip).not.toMatch(/\b(docs|documentation|provided context|ACCOUNT data)\b/i);
 		}
+		// Observed in production: a partial removal left orphaned punctuation
+		// ("see the TypeScript frameworks section ."), and "section" is a place
+		// the reader cannot open. Both are cleaned up.
+		const sectioned = scrubMechanismTalk("For details, see the TypeScript frameworks section .");
+		expect(sectioned).not.toMatch(/\bsection\b/);
+		expect(sectioned).not.toMatch(/\s\./);
+		expect(scrubMechanismTalk("As detailed in the JavaScript SDK section, install it with npm."))
+			.not.toMatch(/as detailed in|\bsection\b/i);
+
 		// It must not mangle an ordinary answer.
 		const normal = "You have about 100 saves left today. It resets at 00:00 UTC.";
 		expect(scrubMechanismTalk(normal)).toBe(normal);
+		const code = "Run `npm install itsuki`, then call memory.add({ text }).";
+		expect(scrubMechanismTalk(code)).toBe(code);
 	});
 
 	it("chat door requires a session", async () => {
