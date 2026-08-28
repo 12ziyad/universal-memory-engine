@@ -3964,12 +3964,22 @@ const routes = {
 	 * plus this account's own snapshot — never model knowledge.
 	 */
 	"POST /v1/huba/chat": async (request, env) => {
-		const auth = await getSessionUser(env, request);
-		if (!auth) return json({ error: "unauthorized" }, 401);
+		// Resolved through the SAME door every other memory view uses, because
+		// the account id and the memory-space id are NOT the same thing. A
+		// managed project stores its memories under memoryOwnerUserId (a
+		// `mem_…` id); reading them with the account id returns nothing, which
+		// is exactly why Huba once reported an empty history to an account
+		// with thousands of receipts.
+		const context = await requireSessionProject(request, env, "project.memory.read");
+		if (context.response) return context.response;
+		const auth = context.auth;
+		const memoryUserId = context.memoryOwnerUserId ?? auth.userId;
 		if (!(await allowRate(env.SAVE_LIMITER, `huba:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/huba/chat");
 		if (parsed.response) return parsed.response;
 		const body = parsed.body;
+		// Quota and keys are ACCOUNT-scoped; memories, jobs and receipts are
+		// MEMORY-SPACE scoped. Both ids travel so each fetcher uses its own.
 		const identity = { accountUserId: auth.userId, userId: auth.userId };
 		let quotaState;
 		try {
@@ -4020,9 +4030,10 @@ const routes = {
 		}
 
 		const result = await hubaTurn(env, {
-			userId: auth.userId,
+			userId: memoryUserId,
 			accountUserId: auth.userId,
 			isAdmin: auth.user?.role === "admin",
+			managedProjectId: context.project?.id ?? null,
 		}, {
 			message: body.message,
 			history,

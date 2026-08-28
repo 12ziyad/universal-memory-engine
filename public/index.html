@@ -2326,6 +2326,8 @@
 	.rm-card { width: min(480px, 100%); max-height: 85vh; overflow: auto; padding: 20px 22px; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
 	.rm-card select, .rm-card textarea { width: 100%; margin-top: 4px; }
 
+	.legend-split { width: 1px; height: 12px; background: var(--border); opacity: .8; }
+	.legend-edge { display: inline-block; width: 14px; height: 3px; margin-right: 6px; border-radius: 2px; vertical-align: middle; }
 	.tab .fail-dot { display: inline-block; width: 8px; height: 8px; margin-left: 7px; border-radius: 50%; background: var(--red); vertical-align: middle; }
 
 	/* ---- History ---- */
@@ -2352,12 +2354,30 @@
 	/* Three bars that breathe — a thing you can talk to, not a dead glyph.
 	   Deliberately tiny and slow: an ornament at this size reads as presence,
 	   and anything faster becomes a distraction in a header you look at all day. */
-	.huba-omni-mark, .huba-mark { display: inline-flex; align-items: center; gap: 2px; height: 14px; }
-	.huba-omni-mark i, .huba-mark i { display: block; width: 2px; height: 5px; border-radius: 1px; background: var(--accent);
-		animation: hubaPulse 1900ms ease-in-out infinite; }
-	.huba-omni-mark i:nth-child(2), .huba-mark i:nth-child(2) { animation-delay: 220ms; }
-	.huba-omni-mark i:nth-child(3), .huba-mark i:nth-child(3) { animation-delay: 440ms; }
-	@keyframes hubaPulse { 0%, 100% { height: 5px; opacity: .55; } 50% { height: 13px; opacity: 1; } }
+	/* A memory graph in miniature: three nodes, three links. The edges draw
+	   themselves in and the nodes breathe after them, so it reads as a graph
+	   assembling — the thing the product actually does — rather than as the
+	   level meter of a voice assistant. */
+	.huba-omni-mark, .huba-mark { display: inline-flex; align-items: center; }
+	.huba-omni-mark svg, .huba-mark svg { overflow: visible; }
+	.hg-e { stroke: var(--accent); stroke-width: 1.3; stroke-linecap: round; opacity: .55;
+		stroke-dasharray: 18; stroke-dashoffset: 18; animation: hubaDraw 4200ms ease-in-out infinite; }
+	.hg-e2 { animation-delay: 320ms; }
+	.hg-e3 { animation-delay: 640ms; }
+	.hg-n { fill: var(--accent); animation: hubaNode 4200ms ease-in-out infinite; }
+	.hg-n2 { animation-delay: 320ms; }
+	.hg-n3 { animation-delay: 640ms; }
+	@keyframes hubaDraw {
+		0% { stroke-dashoffset: 18; opacity: .18; }
+		28%, 74% { stroke-dashoffset: 0; opacity: .62; }
+		100% { stroke-dashoffset: 0; opacity: .18; }
+	}
+	@keyframes hubaNode {
+		0% { opacity: .35; transform: scale(.72); }
+		30%, 74% { opacity: 1; transform: scale(1); }
+		100% { opacity: .35; transform: scale(.72); }
+	}
+	.hg-n { transform-box: fill-box; transform-origin: center; }
 	.huba-omni-label { white-space: nowrap; }
 
 	/* Recent conversations */
@@ -2410,7 +2430,7 @@
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.usage-bar > i, #hubaPanel, .huba-omni { transition: none !important; }
-		.huba-omni-mark i, .huba-mark i { animation: none !important; height: 9px; opacity: .85; }
+		.hg-e, .hg-n { animation: none !important; stroke-dashoffset: 0 !important; opacity: .85 !important; transform: none !important; }
 	}
 </style>
 <link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=8" />
@@ -2716,7 +2736,7 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	     the profile menu, and a live way in is worth the slot. The mark
 	     breathes so it reads as something you can talk to. -->
 	<button class="huba-omni" id="hubaOmni" type="button" onclick="toggleHuba()" aria-haspopup="dialog" aria-expanded="false" aria-controls="hubaPanel">
-		<span class="huba-omni-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+		<span class="huba-omni-mark" aria-hidden="true"><svg viewBox="0 0 22 18" width="18" height="15"><line class="hg-e hg-e1" x1="4" y1="13" x2="11" y2="5"/><line class="hg-e hg-e2" x1="11" y1="5" x2="18" y2="11"/><line class="hg-e hg-e3" x1="4" y1="13" x2="18" y2="11"/><circle class="hg-n hg-n1" cx="4" cy="13" r="2.3"/><circle class="hg-n hg-n2" cx="11" cy="5" r="2.6"/><circle class="hg-n hg-n3" cx="18" cy="11" r="2"/></svg></span>
 		<span class="huba-omni-label">Ask about Itsuki</span>
 	</button>
 	<div class="profile-menu-wrap" id="profileMenuWrap" hidden>
@@ -2965,6 +2985,7 @@ const S = {
 	installCatalogId: null, installRouteId: null, installCategory: "all", installQuery: "",
 	installStepIndex: 0, installExpanded: false,
 	graphMode: "clean",
+	expandedClusters: new Set(),
 	focusCluster: "",
 	me: null, tokens: [], tokensError: "", oneTimeToken: null, oneTimeVisible: true,
 	onboardKeyBusy: false, onboardKeyMutationId: 0, onboardKeyMutation: null,
@@ -14140,7 +14161,7 @@ function initHuba() {
 	bar.innerHTML = `
 		<section id="hubaPanel" hidden role="dialog" aria-label="Huba">
 			<header>
-				<span class="huba-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+				<span class="huba-mark" aria-hidden="true"><svg viewBox="0 0 22 18" width="17" height="14"><line class="hg-e hg-e1" x1="4" y1="13" x2="11" y2="5"/><line class="hg-e hg-e2" x1="11" y1="5" x2="18" y2="11"/><line class="hg-e hg-e3" x1="4" y1="13" x2="18" y2="11"/><circle class="hg-n hg-n1" cx="4" cy="13" r="2.3"/><circle class="hg-n hg-n2" cx="11" cy="5" r="2.6"/><circle class="hg-n hg-n3" cx="18" cy="11" r="2"/></svg></span>
 				<b>Huba</b>
 				<span style="flex:1"></span>
 				<span id="hubaUsage" class="help"></span>
@@ -18480,56 +18501,170 @@ function startHullPulse() {
 	}, 180);
 }
 
+/**
+ * The legend, in two halves: which clusters exist, and which KINDS of
+ * relation are on screen. The relation half is derived from what was actually
+ * drawn, so an open vocabulary needs no maintenance here — a family appears
+ * the first time one of its relations does. Cluster counts and category rings
+ * are kept from the previous legend because they still answer "what am I
+ * looking at" faster than anything else.
+ */
+function renderGraphLegend(present, projectCategories, styledEdges, counts) {
+	const legend = $("#legend");
+	if (!legend) return;
+	if (styledEdges) S.graphLegendEdges = styledEdges;
+	if (counts) S.graphLegendCounts = counts;
+	const clusterCounts = S.graphLegendCounts ?? counts ?? new Map();
+	const families = graphEdgeLegend(S.graphLegendEdges ?? []);
+	legend.innerHTML = [
+		...(present ?? []).map((c) => `<span title="Cluster grouping"><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.label)} (${clusterCounts.get(c.id) ?? 0})</span>`),
+		...(projectCategories ?? []).map((category) => `<span title="Project category accent; cluster grouping is unchanged"><span class="category-ring-key"
+			style="--project-category-color:${categoryTokenColor(category.color_token)}" aria-hidden="true"></span>${esc(category.name)}${category.status === "archived" ? " (archived)" : ""}</span>`),
+		...(families.length ? [`<span class="legend-split" aria-hidden="true"></span>`] : []),
+		...families.map((family) => `<span title="${esc(family.label)} — ${family.count} link${family.count === 1 ? "" : "s"}"><span class="legend-edge" style="background:${esc(family.color)}"></span>${esc(family.label)} (${family.count})</span>`),
+	].join("");
+	// The category explanation is load-bearing for screen readers: a ring and
+	// a filled dot are the same shape to anyone not seeing colour.
+	legend.setAttribute("aria-label", [
+		"Filled cluster markers and hulls show graph clusters.",
+		projectCategories?.length ? "Outlined rings show project categories." : "",
+		families.length ? "Coloured bars show the kinds of relation on screen." : "",
+	].filter(Boolean).join(" "));
+}
+
+/* ---- edge appearance, derived rather than looked up ----------------------
+ *
+ * The v3 engine's relation vocabulary is OPEN by design: any
+ * SCREAMING_SNAKE_CASE name is valid (gates.js, V2_RELATION_RE), which is what
+ * lets the graph say WORKS_AT or SISTER_OF instead of flattening everything
+ * into "related_to". Production carries 708 distinct relation names across
+ * 3,586 edges.
+ *
+ * This renderer used to style from a hardcoded table of the TEN lowercase v1
+ * types. Everything else — 2,650 edges from the engine that is actually
+ * running — fell through to the faintest fallback. The graph did not look
+ * like a hairball of many colours; it looked like a hairball of ONE colour,
+ * because three quarters of it was unrecognised.
+ *
+ * So appearance is now DERIVED from the relation name:
+ *   1. normalise for display only (uses === USES; the rows are untouched),
+ *   2. match a family by meaning, so related relations look related,
+ *   3. and for anything unmatched, hash the name into a stable hue — an
+ *      unknown relation gets its own consistent identity for ever, instead of
+ *      being anonymous grey.
+ */
+
+/** Display-only normalisation. Never written back to the row. */
+function edgeTypeKey(type) {
+	return String(type ?? "related_to").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+/**
+ * Families, in priority order. Each is a predicate over the normalised name,
+ * so a relation invented tomorrow still lands somewhere sensible.
+ */
+const EDGE_FAMILIES = [
+	{
+		id: "weak", label: "Loose association",
+		test: (t) => t === "RELATED_TO" || t === "RELATES_TO" || t === "ASSOCIATED_WITH" || t === "SIMILAR_TO",
+		hue: 215, sat: 12, alpha: 0.30, dashes: [2, 7], weak: true,
+	},
+	{
+		id: "relationship", label: "People",
+		test: (t) => /^(MARRIED_TO|DATING|ENGAGED_TO|FRIENDS_WITH|SISTER_OF|BROTHER_OF|PARENT_OF|CHILD_OF|MOTHER_OF|FATHER_OF|COLLEAGUE_OF|REPORTS_TO|MANAGED_BY|KNOWS|ADVISES|INTRODUCED|MENTORS|SIBLING_OF|SPOUSE_OF|PARTNER_OF)$/.test(t),
+		hue: 322, sat: 62, alpha: 0.72, dashes: false,
+	},
+	{
+		id: "identity", label: "Identity & place",
+		test: (t) => /^(WORKS_AT|EMPLOYED_BY|LIVES_IN|BASED_IN|LOCATED_IN|LOCATED_AT|BORN_IN|STUDIED_AT|STUDIES_AT|MEMBER_OF|WORKS_ON|WORKS_FOR|FROM)$/.test(t) || /_(AT|IN)$/.test(t),
+		hue: 199, sat: 80, alpha: 0.72, dashes: false,
+	},
+	{
+		id: "dependency", label: "Depends on",
+		test: (t) => /^(USES|USED_BY|DEPENDS_ON|REQUIRES|NEEDS|ROUTED_THROUGH|HOSTED_ON|RUNS_ON|BUILT_ON|POWERED_BY|INTEGRATES_WITH|CONNECTS_TO)$/.test(t),
+		hue: 142, sat: 58, alpha: 0.68, dashes: [8, 6],
+	},
+	{
+		id: "structural", label: "Part of",
+		test: (t) => /^(PART_OF|HAS_PART|CONTAINS|BELONGS_TO|INSTANCE_OF|TYPE_OF|SPECIES|CATEGORY_OF|DOCUMENTS|DESCRIPTION_OF)$/.test(t) || /^HAS_/.test(t),
+		hue: 268, sat: 60, alpha: 0.66, dashes: false,
+	},
+	{
+		id: "causal", label: "Causes & effects",
+		test: (t) => /^(CAUSED|CAUSES|DRIVES|IMPROVES|BLOCKED_BY|BLOCKS|PREVENTS|ENABLES|LED_TO|RESULTED_IN|TRIGGERED|AFFECTS|SUPPORTS)$/.test(t),
+		hue: 32, sat: 88, alpha: 0.80, dashes: false,
+	},
+	{
+		id: "lifecycle", label: "Superseded",
+		test: (t) => /^(REPLACED_BY|REPLACES|SUPERSEDED_BY|DEPRECATED_BY|MIGRATED_TO|RENAMED_TO|LEFT|ENDED)$/.test(t),
+		hue: 220, sat: 8, alpha: 0.50, dashes: [10, 7],
+	},
+	{
+		id: "activity", label: "Actions & events",
+		test: (t) => /^(CREATED|BUILT|WROTE|VISITED|ATTENDED|ACHIEVED|COMPLETED|STARTED|PLAYS|PLAYS_WITH|PRACTICES|EXPERIENCED|EXPERIENCING|LOVES|LIKES|PREFERS|INTERESTED_IN|SHARED_WITH|READ|WATCHED|GOODBYE)$/.test(t),
+		hue: 48, sat: 78, alpha: 0.70, dashes: false,
+	},
+];
+
+/** Stable hue for a relation the families do not name. Same name, same colour, for ever. */
+function edgeHashHue(type) {
+	let hash = 2166136261;
+	for (let index = 0; index < type.length; index++) {
+		hash ^= type.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+	// Skip the 90-160 band so an unnamed relation is never mistaken at a
+	// glance for the green "depends on" family.
+	const raw = Math.abs(hash) % 300;
+	return raw < 90 ? raw : raw + 70;
+}
+
+/** Everything the renderer needs to know about one relation name. */
+function edgeFamilyFor(rawType) {
+	const type = edgeTypeKey(rawType);
+	const family = EDGE_FAMILIES.find((candidate) => candidate.test(type));
+	if (family) return { ...family, type };
+	return {
+		id: "other", label: "Other relations", type,
+		hue: edgeHashHue(type), sat: 46, alpha: 0.55, dashes: false, weak: false,
+	};
+}
+
+function edgeHsla(h, s, l, a) { return "hsla(" + h + ", " + s + "%, " + l + "%, " + a + ")"; }
+
 function edgeStyle(e, i) {
-	const type = e.type || "related_to";
+	const family = edgeFamilyFor(e.type);
 	const base = {
 		id: e.id,
 		from: nodeKey(e.from_node),
 		to: nodeKey(e.to_node),
-		label: type.replace(/_/g," "),
+		label: family.type.replace(/_/g, " ").toLowerCase(),
 		arrows: "to",
 		width: Math.max(1, Math.min(4, 1.2 + Number(e.weight || 1) * .4)),
 		selectionWidth: 2.8,
 		smooth: { enabled: true, type: i % 2 ? "curvedCW" : "curvedCCW", roundness: .18 },
 		font: { color: "#cbd5e1", size: 10, face: GRAPH_FONT_FACE, strokeWidth: 4, strokeColor: "rgba(9,13,19,.9)", background: "rgba(13,17,23,.66)" },
 	};
-	// Every edge stays visible at rest (alpha floor .45 — the owner explicitly
-	// does not want hover-only edges); hover/selection brightens the connected
-	// subset and dims the rest, so a dense graph reads as structure instead of
-	// a hairball. _lit/_dim are precomputed so the hover handler only swaps
-	// strings instead of parsing colors per frame.
-	const styles = {
-		part_of: { dashes: false, color: "rgba(210,168,255,.62)" },
-		uses: { dashes: false, color: "rgba(126,231,135,.66)" },
-		depends_on: { dashes: [8,6], color: "rgba(121,192,255,.64)" },
-		supports: { dashes: false, color: "rgba(63,185,80,.66)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
-		drives: { dashes: false, color: "rgba(242,204,96,.78)" },
-		improves: { dashes: false, color: "rgba(86,211,100,.75)" },
-		blocked_by: { dashes: [4,4], color: "rgba(248,81,73,.8)" },
-		caused: { dashes: false, color: "rgba(255,123,114,.8)" },
-		replaced_by: { dashes: [10,7], color: "rgba(139,148,158,.66)" },
-		// `related_to` is the most common edge by far, so its resting alpha
-		// sets whether the graph reads as a structure or as loose dots. It
-		// was .28, then .45; at .62 it is legible without becoming a hairball
-		// (the hover spotlight is what separates one subgraph from the rest).
-		related_to: { dashes: [2,7], color: "rgba(148,163,184,.62)" },
-	};
-	const s = styles[type] || styles.related_to;
-	const rgb = /rgba\((\d+),(\d+),(\d+),/.exec(s.color);
-	const lit = rgb ? `rgba(${rgb[1]},${rgb[2]},${rgb[3]},1)` : s.color;
-	const dim = rgb ? `rgba(${rgb[1]},${rgb[2]},${rgb[3]},.12)` : s.color;
+	const rest = edgeHsla(family.hue, family.sat, 66, family.alpha);
+	const lit = edgeHsla(family.hue, Math.min(100, family.sat + 22), 72, 1);
+	const dim = edgeHsla(family.hue, family.sat, 66, 0.07);
 	return {
 		...base,
-		dashes: s.dashes,
-		smooth: s.smooth || base.smooth,
-		color: { color: s.color, highlight: lit, hover: lit },
-		_base: s.color,
+		dashes: family.dashes,
+		color: { color: rest, highlight: lit, hover: lit },
+		_base: rest,
 		_lit: lit,
 		_dim: dim,
 		_baseWidth: base.width,
 		// Remembered so the zoom pass can drop to solid when the view is far
-		// out and restore the type's own dash pattern when it comes back.
-		_baseDashes: s.dashes ?? false,
+		// out and restore the family's own dash pattern when it comes back.
+		_baseDashes: family.dashes ?? false,
+		_family: family.id,
+		_familyLabel: family.label,
+		// The weakest family is hidden until something is selected: it is the
+		// most numerous relation and the least informative, and it is what
+		// turned a readable graph into spaghetti.
+		_weak: family.weak === true,
 	};
 }
 
@@ -18601,15 +18736,154 @@ function highlightConnectedEdges(focusId) {
 	const scale = Math.max(0.05, graphScale());
 	for (const edge of S.graphEdgesDs.get()) {
 		if (edge._base == null) continue; // guide edges keep their own styling
-		const wanted = focusId == null ? edge._base : connected.has(edge.id) ? edge._lit : edge._dim;
+		const isConnected = connected.has(edge.id);
+		// Two kinds of edge are hidden at rest and revealed only when they
+		// are relevant to what you are looking at:
+		//   _weak  — "related_to", the most numerous and least informative
+		//            relation, and the single biggest source of spaghetti;
+		//   _cross — a link between two different clusters, which is what
+		//            draws a line straight across the whole canvas.
+		// Both come back the moment their node is hovered or selected, so
+		// nothing is lost — it is just not shouted at rest.
+		const mutedAtRest = edge._weak || edge._cross;
+		let wanted;
+		if (focusId == null) wanted = mutedAtRest ? edge._dim : edge._base;
+		else wanted = isConnected ? edge._lit : edge._dim;
 		const base = edge._baseWidth ?? 1.5;
 		const zoomed = Math.min(6, Math.max(base, base / scale));
-		const wantedWidth = focusId != null && connected.has(edge.id) ? Math.min(7, zoomed + 1) : zoomed;
+		const wantedWidth = focusId != null && isConnected ? Math.min(7, zoomed + 1) : zoomed;
 		if (edge.color?.color !== wanted || edge.width !== wantedWidth) {
 			updates.push({ id: edge.id, color: { ...edge.color, color: wanted }, width: wantedWidth });
 		}
 	}
 	if (updates.length) S.graphEdgesDs.update(updates);
+}
+
+/**
+ * Which relation families are actually present, for the legend. Counted from
+ * what is drawn rather than from a fixed list, because the vocabulary is open
+ * — a relation invented tomorrow appears here without a code change.
+ */
+function graphEdgeLegend(edges) {
+	const families = new Map();
+	for (const edge of edges) {
+		if (!edge._family) continue;
+		const entry = families.get(edge._family)
+			?? { id: edge._family, label: edge._familyLabel, color: edge._lit, count: 0 };
+		entry.count += 1;
+		families.set(edge._family, entry);
+	}
+	return [...families.values()].sort((a, b) => b.count - a.count);
+}
+
+/* ---- cluster-level layout -----------------------------------------------
+ * The Playground graph reads well for one reason this one did not: it places
+ * the CLUSTERS first, pushes them apart until their bubbles cannot touch, and
+ * only then arranges nodes inside them. This graph drew hulls but never
+ * separated them, so clusters overlapped and every inter-cluster edge cut
+ * straight across the picture.
+ *
+ * Same idea here, applied to the already-positioned nodes: measure each
+ * cluster, repel the clusters as whole bodies, then translate their members
+ * by the amount the cluster moved. Membership is untouched, so the hulls
+ * computed afterwards still describe exactly the same groups.
+ */
+function separateGraphClusters(visualNodes, { gap = 90, sweeps = 260 } = {}) {
+	const groups = new Map();
+	for (const node of visualNodes) {
+		if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+		const key = node.cluster || "general_memory";
+		if (!groups.has(key)) groups.set(key, { key, members: [], x: 0, y: 0, r: 0 });
+		groups.get(key).members.push(node);
+	}
+	if (groups.size < 2) return visualNodes;
+
+	for (const group of groups.values()) {
+		group.x = group.members.reduce((sum, n) => sum + n.x, 0) / group.members.length;
+		group.y = group.members.reduce((sum, n) => sum + n.y, 0) / group.members.length;
+		// Radius covers the members plus their own size, so two hulls that
+		// merely touch still leave a readable gap between their outermost
+		// nodes rather than between their centres.
+		group.r = Math.max(60, ...group.members.map((n) =>
+			Math.hypot(n.x - group.x, n.y - group.y) + (n.size ?? 18)));
+	}
+
+	const list = [...groups.values()];
+	for (let sweep = 0; sweep < sweeps; sweep++) {
+		let moved = false;
+		for (let a = 0; a < list.length; a++) {
+			for (let b = a + 1; b < list.length; b++) {
+				const A = list[a], B = list[b];
+				let dx = B.x - A.x, dy = B.y - A.y;
+				let distance = Math.hypot(dx, dy);
+				const want = A.r + B.r + gap;
+				if (distance >= want) continue;
+				if (distance < 0.01) { dx = 1; dy = a % 2 ? 1 : -1; distance = 1.4; }
+				const push = ((want - distance) / 2) * 0.5;
+				const ux = dx / distance, uy = dy / distance;
+				A.x -= ux * push; A.y -= uy * push;
+				B.x += ux * push; B.y += uy * push;
+				moved = true;
+			}
+		}
+		if (!moved) break;
+	}
+
+	for (const group of list) {
+		const dx = group.x - group.members.reduce((sum, n) => sum + n.x, 0) / group.members.length;
+		const dy = group.y - group.members.reduce((sum, n) => sum + n.y, 0) / group.members.length;
+		if (!dx && !dy) continue;
+		for (const node of group.members) { node.x += dx; node.y += dy; }
+	}
+	return visualNodes;
+}
+
+/**
+ * How many nodes a cluster shows before it becomes a wall.
+ *
+ * One cluster in production holds 49 of 128 memories; drawn in full it buries
+ * everything around it. The most important members stay visible and the rest
+ * collapse into a single "+N more" marker that expands on click, so the graph
+ * opens as a map and becomes detailed where you look.
+ */
+const CLUSTER_NODE_CAP = 14;
+
+function capClusterMembers(group, clusterId) {
+	const expanded = S.expandedClusters?.has(clusterId);
+	if (expanded || group.length <= CLUSTER_NODE_CAP) return { shown: group, hidden: 0 };
+	// nodeScore already ranks by importance/heat, and the groups arrive
+	// sorted by it, so the head of the list is the part worth showing.
+	return { shown: group.slice(0, CLUSTER_NODE_CAP), hidden: group.length - CLUSTER_NODE_CAP };
+}
+
+/** The "+N more" marker: one node that stands for everything folded away. */
+function clusterMoreNode(clusterId, hidden, sample) {
+	const color = clusterColor(clusterId) || "#8b949e";
+	return {
+		id: `more:${clusterId}`,
+		cluster: clusterId,
+		clusterLabel: sample?.clusterLabel ?? clusterId,
+		clusterColor: color,
+		visualKind: "more",
+		hullRadius: 26,
+		label: `+${hidden} more`,
+		title: `${hidden} more in this cluster — click to show them`,
+		shape: "dot",
+		size: 15,
+		borderWidth: 2,
+		shapeProperties: { borderDashes: [4, 3] },
+		color: { background: "rgba(0,0,0,0)", border: color, highlight: { background: "#1f2937", border: "#f8fafc" }, hover: { background: "#172033", border: color } },
+		font: { color: "#cbd5e1", size: 12, face: GRAPH_FONT_FACE, strokeWidth: 5, strokeColor: "rgba(9,13,19,.92)" },
+		x: sample?.x ?? 0,
+		y: (sample?.y ?? 0) + 46,
+	};
+}
+
+function toggleClusterExpansion(clusterId) {
+	if (!S.expandedClusters) S.expandedClusters = new Set();
+	if (S.expandedClusters.has(clusterId)) S.expandedClusters.delete(clusterId);
+	else S.expandedClusters.add(clusterId);
+	drawGraph();
 }
 
 /**
@@ -19228,14 +19502,7 @@ function drawGraph() {
 		.filter((item) => projectCategoryToken(item) && item.project_category?.id)
 		.map((item) => [item.project_category.id, item.project_category])).values()];
 	const legend = $("#legend");
-	legend.innerHTML = [
-		...present.map(c=>`<span title="Cluster grouping"><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.label)} (${counts.get(c.id)})</span>`),
-		...projectCategories.map((category) => `<span title="Project category accent; cluster grouping is unchanged"><span class="category-ring-key"
-			style="--project-category-color:${categoryTokenColor(category.color_token)}" aria-hidden="true"></span>${esc(category.name)}${category.status === "archived" ? " (archived)" : ""}</span>`),
-	].join("");
-	legend.setAttribute("aria-label", projectCategories.length
-		? "Filled cluster markers and hulls show graph clusters. Outlined rings show project categories."
-		: "Graph cluster legend.");
+	renderGraphLegend(present, projectCategories, null, counts);
 	if (!nodes.length && !pages.length && !candidates.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use Save or Connect to add your first memory.</span></div>`); return; }
 	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
 	try {
@@ -19263,16 +19530,42 @@ function drawGraph() {
 			candidateGroups.get(key).push(c);
 		}
 		const graphNodes = [];
-		for (const group of clusterGroups.values()) group.forEach((n, i) => graphNodes.push(graphNode(n, i, group.length, hasEdges)));
+		const moreNodes = [];
+		for (const [clusterId, group] of clusterGroups) {
+			const { shown, hidden } = capClusterMembers(group, clusterId);
+			shown.forEach((n, i) => graphNodes.push(graphNode(n, i, shown.length, hasEdges)));
+			if (hidden > 0) moreNodes.push({ clusterId, hidden });
+		}
 		const pageNodes = [];
 		for (const group of pageGroups.values()) group.forEach((p, i) => pageNodes.push(graphPage(p, i, group.length)));
 		const candidateNodes = [];
 		for (const group of candidateGroups.values()) group.forEach((c, i) => candidateNodes.push(graphCandidate(c, i, group.length)));
-		const visualNodes = separateGraphNodes([...pageNodes, ...graphNodes, ...candidateNodes]);
+		// Clusters are pushed apart as whole bodies FIRST, then nodes are
+		// separated within the space that opened up — the order matters, or
+		// node-level nudging just fights the overlap it cannot see.
+		const positioned = separateGraphClusters([...pageNodes, ...graphNodes, ...candidateNodes]);
+		const visualNodes = separateGraphNodes(positioned);
+		for (const { clusterId, hidden } of moreNodes) {
+			const sample = visualNodes.filter((n) => (n.cluster || "general_memory") === clusterId).pop();
+			visualNodes.push(clusterMoreNode(clusterId, hidden, sample));
+		}
 		S.clusterHulls = computeClusterHulls(visualNodes, S.data?.clusters || []);
 		const vn = new vis.DataSet(dedupeById([...visualNodes, ...clusterHullAnchors(S.clusterHulls)]));
-		const ve = new vis.DataSet(dedupeById([...graphEdges.map((e, i) => edgeStyle(e, i)), ...guideEdges]));
+		// An edge is "cross" when its ends sit in different clusters. Those are
+		// the long lines that cut across the whole canvas, so they rest dim and
+		// light up only when one of their nodes is the focus.
+		const clusterOfNode = new Map(visualNodes.map((n) => [n.id, n.cluster || "general_memory"]));
+		const styledEdges = graphEdges.map((e, i) => {
+			const styled = edgeStyle(e, i);
+			const from = clusterOfNode.get(styled.from);
+			const to = clusterOfNode.get(styled.to);
+			styled._cross = Boolean(from && to && from !== to);
+			return styled;
+		});
+		const ve = new vis.DataSet(dedupeById([...styledEdges, ...guideEdges]));
 		S.graphEdgesDs = ve;
+		renderGraphLegend(present, projectCategories, styledEdges);
+
 		S.network = new vis.Network(cont, { nodes: vn, edges: ve }, {
 			autoResize: true,
 			layout: { improvedLayout: false },
@@ -19295,6 +19588,9 @@ function drawGraph() {
 			const id = p?.nodes?.[0];
 			if (id != null) {
 				if (String(id).startsWith("hull:")) return;
+				// The "+N more" marker is an affordance, not a memory: clicking
+				// it unfolds the rest of that cluster in place.
+				if (String(id).startsWith("more:")) return toggleClusterExpansion(String(id).slice(5));
 				if (String(id).startsWith("candidate:")) return toast("This is a suggestion, not a saved memory yet. Open Memories to keep or drop it.");
 				return select(id);
 			}

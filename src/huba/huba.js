@@ -139,7 +139,7 @@ export async function hubaTurn(env, identity, input = {}, { quota = null } = {})
 	];
 
 	// 3. ANSWER
-	const model = env.HUBA_MODEL || env.LLM_MODEL || "@cf/qwen/qwen3-30b-a3b-fp8";
+	const model = env.HUBA_MODEL || "@cf/openai/gpt-oss-120b";
 	return withFlushedAiMeter(env, "huba_chat", {
 		userId: identity.userId,
 		scopeId: `huba_${crypto.randomUUID()}`,
@@ -152,6 +152,9 @@ export async function hubaTurn(env, identity, input = {}, { quota = null } = {})
 				max_tokens: Number(env.HUBA_MAX_TOKENS ?? 1024),
 			}, undefined, { task: "huba_chat", capability: "chat" });
 			const reply = scrubMechanismTalk(String(responseText(response) ?? "").trim());
+			if (!reply && response?.choices?.[0]?.finish_reason === "length") {
+				console.warn("huba answer truncated before any content was produced");
+			}
 			if (!reply) {
 				return { ok: false, reason: "empty_reply", message: "I couldn't put that together — try asking it a different way." };
 			}
@@ -187,6 +190,9 @@ export function scrubMechanismTalk(reply) {
 		neurons_used: "neurons used", neurons_limit: "the daily limit", this_month: "this month",
 		custom_limits_granted: "a custom limit", recall_is_metered: "recall metering",
 		"jobs.failures": "failed saves", memory_search: "a search of your memories",
+		"writes_this_month": "writes this month", "writes_this_month.used": "writes this month",
+		"quota.saves_today.limit_neurons": "the daily limit", "saves_today.neurons_used": "neurons used today",
+		"most_recent_memories": "your most recent memories", "inventory.counts": "your totals",
 	};
 	for (const [key, plain] of Object.entries(INTERNAL_KEYS)) {
 		text = text.replace(new RegExp(`[\`*]{0,2}${key.replace(".", "\\.")}[\`*]{0,2}`, "g"), plain);

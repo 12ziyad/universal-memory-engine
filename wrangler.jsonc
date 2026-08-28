@@ -168,8 +168,18 @@
 		// (scope huba_chat), its own message allowance. The model is the
 		// proven extraction MoE — high instruction-following for the
 		// grounding/refusal contract at ~3B active parameters of cost.
-		"HUBA_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
-		"HUBA_MAX_TOKENS": "1024",
+		// Chosen by measurement, not by parameter count. Benchmarked against
+		// the current qwen3-30b (3B active), llama-3.3-70b and nemotron-120b on
+		// fifteen real questions with known-true answers: qwen scored 2/5 and
+		// returned EMPTY content on one (reasoning exhausted the token budget),
+		// llama got the arithmetic wrong, nemotron hallucinated an npm package
+		// that does not exist. gpt-oss-120b scored 4.5/5 — right package, right
+		// arithmetic, working shown — at ~147 neurons against qwen's ~33.
+		// Affordable because huba_chat no longer draws on the save allowance.
+		"HUBA_MODEL": "@cf/openai/gpt-oss-120b",
+		// Headroom: a reasoning model that runs out mid-thought returns null
+		// content, which is exactly how the previous model failed.
+		"HUBA_MAX_TOKENS": "1400",
 		"HUBA_FIRST_DAY_MESSAGES": "50",
 		"HUBA_DAILY_MESSAGES": "20",
 		// Upgrade-request notifications (usage page "Request more" → owner).

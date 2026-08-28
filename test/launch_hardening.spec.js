@@ -41,6 +41,7 @@ import {
 import { HUBA_CHUNKS, HUBA_PAGES, HUBA_CORPUS_DOCS_HASH } from "../src/huba/corpus.generated.js";
 import { runReconciliationSweep } from "../src/pipeline/sweep.js";
 import docsHtml from "../public/docs/index.html?raw";
+import shellHtml from "../public/index.html?raw";
 
 async function request(path, init = {}) {
 	const req = new Request(`http://example.com${path}`, init);
@@ -274,11 +275,28 @@ describe("Huba AI", () => {
 		expect(body.usage).toMatchObject({ used: 2, limit: 2, unit: "messages" });
 	});
 
-	it("huba spend counts against the daily neuron dimension (no unmetered hole)", async () => {
+	it("huba spend is capped by its own message allowance, not the save allowance", async () => {
+		// Huba has an independent per-message daily cap (checkHubaBudget), so
+		// charging its neurons to the save allowance too would cap it twice —
+		// and on a larger model that second cap would quietly eat a third of a
+		// person's saves for asking a few questions.
 		const user = await signedUpUser();
 		await seedCalls(user.id, 4, { scope: "huba_chat", neurons: 25 });
-		expect(await neuronsSpentTodayForAccount(env, { accountUserId: user.id })).toBeCloseTo(100, 5);
+		expect(await neuronsSpentTodayForAccount(env, { accountUserId: user.id })).toBe(0);
+		// It is still metered and still counted — by messages.
+		expect(await hubaMessagesToday(env, { accountUserId: user.id })).toBe(4);
+		// And saves remain fully available after a day of asking questions.
+		expect(await checkAiBudget(env, { accountUserId: user.id, userId: user.id })).toBeNull();
 	});
+
+	it("the exemption list stays an exclusion list, so a new scope cannot leak", async () => {
+		// Anything NOT named is charged. A scope invented tomorrow is billed by
+		// default rather than free by omission.
+		const user = await signedUpUser();
+		await seedCalls(user.id, 3, { scope: "some_future_scope", neurons: 100 });
+		expect(await neuronsSpentTodayForAccount(env, { accountUserId: user.id })).toBeCloseTo(300, 5);
+	});
+;
 });
 
 describe("upgrade requests", () => {
@@ -544,6 +562,81 @@ describe("Huba stays on Itsuki (deterministic, not a prompt rule)", () => {
 
 	it("keeps a mixed question, because refusing a real one is the worse error", () => {
 		expect(classifyTopic("save this to memory and also write me a poem").allowed).toBe(true);
+	});
+});
+
+describe("graph edge appearance is derived, not looked up", () => {
+	// The v3 relation vocabulary is OPEN (gates.js, V2_RELATION_RE): production
+	// carries 708 distinct names across 3,586 edges. The renderer used to style
+	// from a hardcoded table of the ten lowercase v1 types, so 2,650 edges from
+	// the engine that is actually running fell through to the faintest
+	// fallback — the graph was not a hairball of many colours, it was a
+	// hairball of ONE. These pin the derivation.
+	const shell = shellHtml;
+	const block = shell.slice(shell.indexOf("function edgeTypeKey(type)"), shell.indexOf("function edgeStyle(e, i)"));
+	const { edgeFamilyFor, edgeTypeKey, edgeHashHue } = new Function(
+		`${block}; return { edgeFamilyFor, edgeTypeKey, edgeHashHue };`,
+	)();
+
+	it("treats the two engines' spelling of one relation as one relation", () => {
+		// `uses` (659 rows, retired v1) and `USES` (519 rows, live engine) are
+		// the same thing and must not be drawn two different ways.
+		expect(edgeTypeKey("uses")).toBe(edgeTypeKey("USES"));
+		expect(edgeFamilyFor("uses").hue).toBe(edgeFamilyFor("USES").hue);
+		expect(edgeFamilyFor("part_of").id).toBe(edgeFamilyFor("PART_OF").id);
+	});
+
+	it("puts real production relation names in the family a reader would expect", () => {
+		const expected = {
+			WORKS_AT: "identity", LIVES_IN: "identity", BASED_IN: "identity",
+			SISTER_OF: "relationship", FRIENDS_WITH: "relationship", ADVISES: "relationship",
+			USES: "dependency", DEPENDS_ON: "dependency", ROUTED_THROUGH: "dependency", HOSTED_ON: "dependency",
+			PART_OF: "structural", HAS_PROPERTY: "structural", DOCUMENTS: "structural", SPECIES: "structural",
+			CAUSED: "causal", BLOCKED_BY: "causal", DRIVES: "causal",
+			REPLACED_BY: "lifecycle",
+			VISITED: "activity", LOVES: "activity", ACHIEVED: "activity", SHARED_WITH: "activity",
+			RELATED_TO: "weak",
+		};
+		for (const [type, family] of Object.entries(expected)) {
+			expect(edgeFamilyFor(type).id, type).toBe(family);
+		}
+	});
+
+	it("gives a relation it has never seen its own stable identity, not grey", () => {
+		const first = edgeFamilyFor("NEGOTIATED_WITH");
+		const second = edgeFamilyFor("NEGOTIATED_WITH");
+		expect(first.id).toBe("other");
+		// Same name, same colour, for ever — across renders and across accounts.
+		expect(first.hue).toBe(second.hue);
+		// And distinguishable from another unknown.
+		expect(edgeFamilyFor("SPONSORED_BY").hue).not.toBe(first.hue);
+		// Never lands in the green band that means "depends on".
+		for (const name of ["NEGOTIATED_WITH", "SPONSORED_BY", "ZZZ_ODD", "ATE_LUNCH_WITH"]) {
+			const hue = edgeHashHue(name);
+			expect(hue < 90 || hue > 160, name).toBe(true);
+		}
+	});
+
+	it("mutes only the weakest family at rest", () => {
+		expect(edgeFamilyFor("RELATED_TO").weak).toBe(true);
+		for (const strong of ["WORKS_AT", "USES", "CAUSED", "SISTER_OF", "PART_OF"]) {
+			expect(edgeFamilyFor(strong).weak, strong).not.toBe(true);
+		}
+	});
+
+	it("the renderer wires cluster separation, caps and cross-cluster muting", () => {
+		// Clusters are pushed apart as whole bodies BEFORE nodes are nudged
+		// inside them — the order is what stops hulls overlapping.
+		const draw = shell.slice(shell.indexOf("const graphNodes = [];"), shell.indexOf("S.graphDs = vn;"));
+		expect(draw).toContain("separateGraphClusters(");
+		expect(draw).toContain("separateGraphNodes(positioned)");
+		expect(draw.indexOf("separateGraphClusters(")).toBeLessThan(draw.indexOf("separateGraphNodes(positioned)"));
+		// Per-cluster cap with an expandable marker.
+		expect(draw).toContain("capClusterMembers(");
+		expect(draw).toContain("clusterMoreNode(");
+		// Cross-cluster edges are marked so they can rest dim.
+		expect(draw).toContain("styled._cross =");
+		expect(shell).toContain("const mutedAtRest = edge._weak || edge._cross;");
 	});
 });
 

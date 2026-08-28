@@ -1266,8 +1266,11 @@ describe("Stage 3 enterprise Settings UI", () => {
 		expect(fnSource("projectCategoryToken")).toContain("CATEGORY_TOKEN_COLORS");
 		expect(fnSource("projectCategoryColor")).toContain("categoryTokenColor(token)");
 		expect(fnSource("projectCategoryBadge")).not.toContain("item.project_category.color");
-		expect(fnSource("drawGraph")).toContain("Outlined rings show project categories");
-		expect(fnSource("drawGraph")).toContain("Project category accent; cluster grouping is unchanged");
+		// The legend moved out of drawGraph into its own renderer when relation
+		// families joined it; the contract is unchanged — clusters keep their
+		// identity and the category accent stays bounded and explained.
+		expect(fnSource("renderGraphLegend")).toContain("Outlined rings show project categories");
+		expect(fnSource("renderGraphLegend")).toContain("Project category accent; cluster grouping is unchanged");
 		// The Memories workspace surfaces the category as a real Overview field
 		// and a server-owned filter rather than a client-side search facet.
 		expect(fnSource("mwInspPanel")).toContain("detail.project_category?.name");

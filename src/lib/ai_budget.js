@@ -47,7 +47,16 @@ export const QUOTA_SCOPES = Object.freeze(["save", "playground_chat"]);
  * hole by omission. recall: a capped user must still read everything they
  * stored (and one query embedding is ~1–3 neurons). provider_health /
  * shadow_extract: operator-synthetic, not user work. */
-export const DAILY_NEURON_EXEMPT_SCOPES = Object.freeze(["recall", "provider_health", "shadow_extract"]);
+export const DAILY_NEURON_EXEMPT_SCOPES = Object.freeze([
+	"recall",
+	// Huba is capped independently, by MESSAGES per day (checkHubaBudget), so
+	// charging its neurons to the save allowance too would cap it twice — and
+	// on a larger model that second cap would quietly eat a third of the
+	// day's saves for someone who only asked a few questions.
+	"huba_chat",
+	"provider_health",
+	"shadow_extract",
+]);
 
 export function aiBudget(env) {
 	const monthly = Number(env?.AI_MONTHLY_WRITES ?? DEFAULT_MONTHLY_WRITES);
