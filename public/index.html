@@ -2353,7 +2353,12 @@
 	#hubaBar { display: none; }
 	body.app-mode #hubaBar { display: block; font-family: var(--font-ui); }
 	.huba-mark { color: var(--accent); font-size: 15px; }
-	#hubaPanel { position: fixed; right: 16px; top: calc(var(--header-h, 58px) + 8px); z-index: 330; width: min(430px, calc(100vw - 24px)); height: min(620px, calc(100vh - var(--header-h, 58px) - 28px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
+	#hubaPanel { position: fixed; right: 16px; top: calc(var(--header-h, 58px) + 8px); z-index: 330; width: min(430px, calc(100vw - 24px)); height: min(620px, calc(100vh - var(--header-h, 58px) - 28px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg);
+		/* Collapses toward the ask bar it came from, in the header above its
+		   top-right corner — so closing reads as putting it away rather than
+		   as the panel blinking out. */
+		transform-origin: top right; transition: opacity 170ms ease, transform 170ms cubic-bezier(.4, 0, .2, 1); }
+	#hubaPanel[data-collapsed="true"] { opacity: 0; transform: scale(.94) translateY(-10px); pointer-events: none; }
 	#hubaPanel header { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border); font-size: 13px; }
 	#hubaLog { flex: 1; overflow-y: auto; padding: 13px; display: flex; flex-direction: column; gap: 10px; }
 	.huba-msg { display: flex; flex-direction: column; max-width: 92%; }
@@ -14119,18 +14124,61 @@ function hubaOmniSubmit(event) {
 	return false;
 }
 
+/**
+ * Open and collapse the panel.
+ *
+ * Closing used to flip `hidden` and the panel simply blinked out of
+ * existence, which reads as a glitch rather than as a thing you put away.
+ * It now collapses toward the ask bar it came from — the panel's transform
+ * origin is its top-right corner, under the bar in the header — and only
+ * becomes `hidden` once that has finished, so it leaves the accessibility
+ * tree exactly as before. Opening plays the same motion in reverse.
+ *
+ * `prefers-reduced-motion` removes the transition (see the stylesheet), and
+ * because the state flip does not depend on the transition ever firing, the
+ * panel still opens and closes correctly when it is suppressed.
+ */
 function toggleHuba(force) {
 	initHuba();
 	const panel = $("#hubaPanel");
 	if (!panel) return;
 	HUBA.open = typeof force === "boolean" ? force : panel.hidden;
-	panel.hidden = !HUBA.open;
 	document.getElementById("hubaOmni")?.classList.toggle("active", HUBA.open);
+	if (HUBA.collapseTimer) { clearTimeout(HUBA.collapseTimer); HUBA.collapseTimer = null; }
+
 	if (HUBA.open) {
+		panel.hidden = false;
+		// Start collapsed, force a synchronous style flush, then expand — the
+		// two states have to be separated by a layout read or the browser
+		// coalesces them and no transition runs. Deliberately NOT
+		// requestAnimationFrame: rAF is throttled to nothing in a backgrounded
+		// or non-compositing tab, which left the panel open but permanently
+		// invisible. Reading offsetHeight always flushes.
+		panel.dataset.collapsed = "true";
+		void panel.offsetHeight;
+		panel.dataset.collapsed = "false";
 		if (!HUBA.history.length) {
 			hubaAppend("assistant", "I'm Huba. Ask me anything about Itsuki or about this account — how saving works, what a receipt means, how much of today's allowance is left, who's on your team.");
 		}
 		$("#hubaInput")?.focus();
+		return;
+	}
+
+	panel.dataset.collapsed = "true";
+	// Hide after the collapse finishes. A timeout rather than transitionend
+	// alone: if the transition is suppressed or interrupted, transitionend
+	// never fires and the panel would stay in the tree, invisible but
+	// focusable.
+	HUBA.collapseTimer = setTimeout(() => {
+		if (!HUBA.open) panel.hidden = true;
+		HUBA.collapseTimer = null;
+	}, 190);
+	// Focus must not stay inside something on its way out — a hidden element
+	// holding focus is a keyboard trap. Blur as well as re-focus: focus()
+	// silently no-ops when the window itself is not focused.
+	if (panel.contains(document.activeElement)) {
+		document.activeElement.blur?.();
+		$("#hubaOmniInput")?.focus();
 	}
 }
 

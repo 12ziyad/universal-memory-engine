@@ -428,6 +428,32 @@ describe("terminal-job pruning", () => {
 	});
 });
 
+describe("the Huba panel collapses rather than blinking out", () => {
+	it("animates to a collapsed state and only then leaves the accessibility tree", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		// The two visual states, and the transition between them.
+		expect(shell).toContain('#hubaPanel[data-collapsed="true"]');
+		expect(shell).toMatch(/#hubaPanel\s*\{[^}]*transform-origin:\s*top right/);
+		expect(shell).toMatch(/#hubaPanel\s*\{[^}]*transition:[^;]*opacity[^;]*transform/);
+		// Reduced motion must still be honoured.
+		expect(shell).toMatch(/prefers-reduced-motion[\s\S]{0,200}#hubaPanel[^}]*transition: none/);
+
+		const toggle = shell.slice(shell.indexOf("function toggleHuba(force)"), shell.indexOf("function hubaAppend"));
+		// Expansion must NOT depend on requestAnimationFrame: rAF is throttled
+		// to nothing in a backgrounded tab, which would open the panel
+		// permanently invisible. A forced reflow always flushes.
+		// (the comment in that function names rAF to explain the choice, so
+		// assert on an actual CALL, not a mention)
+		expect(toggle).not.toMatch(/requestAnimationFrame\s*\(/);
+		expect(toggle).toContain("void panel.offsetHeight");
+		// `hidden` is applied after the collapse, not instead of it.
+		expect(toggle).toContain("HUBA.collapseTimer");
+		expect(toggle).toMatch(/if \(!HUBA\.open\) panel\.hidden = true/);
+		// A hidden element must never keep focus.
+		expect(toggle).toContain("document.activeElement.blur?.()");
+	});
+});
+
 describe("query plans (the 0058/0060 indexes actually serve the hot queries)", () => {
 	async function plan(sql) {
 		const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`).all();
