@@ -26,12 +26,12 @@ describe("landing hero and narrative", () => {
 		// pass. The H1 is the one claim no competitor can sign — user-side,
 		// cross-TOOL memory, with real tools named (Mem0/Zep/Letta/Supermemory
 		// all speak in category nouns; none names a tool a human recognizes).
-		expect(html).toContain("What you told Claude,<br /><em>Cursor already knows.</em>");
+		expect(html).toContain("<h1>The memory layer<br /><em>that sits under<br />your AI tools.</em></h1>");
 		// The sub carries mechanism + believability, not a restatement: what it
 		// is (open-source memory service, 26 tools), how it works (extraction,
 		// source-linked), and the verifiable properties.
-		expect(html).toContain("versioned, reversible, receipted");
-		expect(html).toContain("open-source memory service linking 26 AI tools");
+		expect(html).toContain("links each to the words it came from");
+		expect(html).toContain("any of 26 connected tools — assistants, agents, workflows");
 		// The CTA continues the H1's promise (value over action), and the
 		// proof line beneath it is the objection-killing microcopy.
 		expect(html).toContain("Connect your tools <span aria-hidden=\"true\">→</span>");
@@ -58,8 +58,15 @@ describe("hero stays uncluttered", () => {
 	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<section class="developer-section'));
 
 	it("carries only the eyebrow, headline, deck, and two actions", () => {
-		expect(hero).toContain("Cursor already knows.");
+		expect(hero).toContain("that sits under");
+		// The Japanese vertical banner on the right of the hero is owner-protected:
+		// it must survive every copy change to this section.
+		expect(hero).toContain("イツキ");
 		expect(hero).toContain('class="hero-actions"');
+		const headline = hero.slice(hero.indexOf("<h1>"), hero.indexOf("</h1>"));
+		for (const tool of ["Claude", "Cursor", "ChatGPT", "MCP", "Codex"]) {
+			expect(headline, `headline stays tool-agnostic: ${tool}`).not.toContain(tool);
+		}
 		// Furniture that used to crowd this panel must stay out.
 		for (const clutter of ["fact-row", "flow-rail", "flow-status", "system-inputs", "surface-band"]) {
 			expect(hero, `hero stays free of ${clutter}`).not.toContain(clutter);

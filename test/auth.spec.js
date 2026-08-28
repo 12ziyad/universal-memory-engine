@@ -496,10 +496,10 @@ describe("product shell routes", () => {
 	it("public landing page is present in the static shell", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
-		expect(html).toContain("One memory, every AI tool");
-		expect(html).toContain("Cursor already knows.");
-		expect(html).toContain("<em>Cursor already knows.</em>");
-		expect(html).toContain("Itsuki is an open-source memory service linking 26 AI tools");
+		expect(html).toContain("For the AI tools you already use");
+		expect(html).toContain("that sits under");
+		expect(html).toContain("<em>that sits under<br />your AI tools.</em>");
+		expect(html).toContain("Connect Itsuki once with one key.");
 		expect(html).toContain("イツキ");
 		// The decongested hero: copy takes 70%, the right third is one calm
 		// vertical mark, and the developer surface follows immediately.
@@ -520,7 +520,7 @@ describe("product shell routes", () => {
 		expect(html).toContain('name === "mcp" ? "create-mcp" : "copy"');
 		expect(html).toContain('location.href = "/app#install"');
 		expect(html).toContain("actually yours.");
-		expect(html).toContain("Tell it once.");
+		expect(html).toContain("Put one memory under");
 		expect(html).toContain("showAuth('login', event)");
 		expect(html).toContain("showAuth('signup', event)");
 		expect(html).toContain('href="/privacy"');

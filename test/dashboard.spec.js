@@ -55,10 +55,10 @@ describe("dashboard script", () => {
 	it("renders the public Itsuki platform landing shell", () => {
 		const publicLanding = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<div id="authView"'));
 		expect(html).toContain('id="landing" class="public-shell lp-shell"');
-		expect(html).toContain("One memory, every AI tool");
-		expect(html).toContain("Cursor already knows.");
-		expect(html).toContain("<em>Cursor already knows.</em>");
-		expect(html).toContain("Itsuki is an open-source memory service linking 26 AI tools");
+		expect(html).toContain("For the AI tools you already use");
+		expect(html).toContain("that sits under");
+		expect(html).toContain("<em>that sits under<br />your AI tools.</em>");
+		expect(html).toContain("Connect Itsuki once with one key.");
 		expect(html).toContain("イツキ");
 		// Section order is the product story: code surface at 02, the live
 		// inspector at 03, and no section repeating another's argument. The
@@ -97,7 +97,7 @@ describe("dashboard script", () => {
 		expect(html).toContain("Delete actually deletes");
 		expect(html).toContain("Every write leaves a receipt");
 		expect(html).toContain("No training on your data");
-		expect(html).toContain("Tell it once.");
+		expect(html).toContain("Put one memory under");
 		expect(html).toContain("memory that carries forward");
 		expect(html).toContain("showAuth('signup', event)");
 		expect(html).toContain("showAuth('login', event)");
@@ -127,6 +127,10 @@ describe("dashboard script", () => {
 			"Seamlessly",
 			"Itsuki saves every message",
 			"Tell it once. Every AI remembers.",
+			// Supermemory ships "What you teach one AI, every AI remembers" —
+			// this shape is theirs now, whatever nouns we swap in.
+			"Tell it once. Every tool remembers.",
+			"every AI remembers",
 			"Save once, recall everywhere.",
 		]) {
 			expect(html).not.toContain(forbidden);
