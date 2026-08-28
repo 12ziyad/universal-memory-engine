@@ -2352,21 +2352,18 @@
 	   toggle used to sit, and a panel that expands beneath it. */
 	.huba-omni { position: relative; display: none; align-items: center; gap: 9px; height: 34px; padding: 0 14px 0 11px;
 		overflow: hidden; isolation: isolate;
-		border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
-		background:
-			linear-gradient(120deg,
-				color-mix(in srgb, var(--accent) 13%, transparent),
-				color-mix(in srgb, var(--accent) 4%, transparent) 46%,
-				transparent 78%),
-			var(--input-bg);
-		color: var(--text); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
-		transition: border-color 160ms ease, color 160ms ease, box-shadow 220ms ease, transform 160ms ease; }
+		border: 1px solid color-mix(in srgb, var(--accent) 72%, black);
+		background: var(--accent); color: var(--on-accent); font: 600 12.5px/1 var(--font-ui); cursor: pointer;
+		/* The letterpress shadow the primary actions wear — this is the one
+		   live control in a header of switchers, and it should look like one. */
+		box-shadow: 3px 3px 0 color-mix(in srgb, var(--text) 55%, transparent);
+		transition: box-shadow 160ms ease, transform 160ms ease, filter 160ms ease; }
 	/* The sheen. A pseudo-element rather than an animated background-position:
 	   compositing a transform is cheap, animating a gradient's position is not,
 	   and this sits in a header that repaints on every route change. */
 	.huba-omni::after {
 		position: absolute; z-index: -1; top: 0; bottom: 0; left: -60%; width: 46%; content: "";
-		background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
+		background: linear-gradient(100deg, transparent, rgb(255 255 255 / 22%), transparent);
 		animation: hubaSheen 26s cubic-bezier(.4, 0, .2, 1) infinite;
 	}
 	@keyframes hubaSheen {
@@ -2374,10 +2371,11 @@
 		94%, 100% { transform: translateX(360%); }
 	}
 	.huba-omni:hover, .huba-omni:focus-visible {
-		border-color: var(--accent); transform: translateY(-1px);
-		box-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 30%, transparent);
+		transform: translate(-1px, -1px); filter: brightness(1.06);
+		box-shadow: 4px 4px 0 color-mix(in srgb, var(--text) 55%, transparent);
 	}
-	.huba-omni.active { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent); }
+	.huba-omni:active { transform: translate(1px, 1px); box-shadow: 2px 2px 0 color-mix(in srgb, var(--text) 55%, transparent); }
+	.huba-omni.active { box-shadow: 2px 2px 0 color-mix(in srgb, var(--text) 55%, transparent); }
 	.huba-omni.active::after { animation-play-state: paused; }
 	body.app-mode .huba-omni { display: inline-flex; }
 	.huba-omni:hover, .huba-omni:focus-visible, .huba-omni.active { border-color: var(--accent); color: var(--accent); }
@@ -2449,7 +2447,8 @@
 	.huba-code { margin: 7px 0 2px; padding: 9px 10px; border: 1px solid var(--border); background: var(--panel2); overflow-x: auto; }
 	.huba-code code { border: 0; padding: 0; background: transparent; white-space: pre; }
 	.huba-thinking { color: var(--muted); font-style: italic; }
-	#hubaForm { display: flex; gap: 7px; padding: 11px 13px; border-top: 1px solid var(--border); }
+	#hubaForm { display: flex; gap: 7px; padding: 11px 13px 6px; border-top: 1px solid var(--border); }
+	.huba-caveat { margin: 0; padding: 0 13px 9px; color: var(--faint); font-size: 10.5px; text-align: center; }
 	#hubaInput { flex: 1; min-width: 0; }
 	.huba-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; }
 	.huba-icon:hover { color: var(--accent); border-color: var(--accent); }
@@ -2540,6 +2539,7 @@
 }</code></pre>
 						</div>
 						<p class="code-result"><b aria-hidden="true">&rarr;</b> recalled in Cursor <span>&mdash; &ldquo;raw SQL only, no ORM&rdquo;, saved from Claude Code on Monday</span></p>
+						<p class="code-installs" aria-label="SDK install commands"><code>npm install itsuki</code><code>pip install itsuki</code></p>
 						<div class="code-foot"><button type="button" id="landingCodeAction" data-action="create-mcp" onclick="copyLandingCode(this)">Create MCP link</button><a href="/docs/">Complete setup ↗</a></div>
 					</div>
 					<p class="hero-connect-note">One key · 26 tools — assistants, coding agents, workflows</p>
@@ -2686,7 +2686,7 @@
 				<dl>
 					<div><dt>Delete actually deletes</dt><dd>One pass removes the memory, its sources, its vectors, and its graph edges. No soft-delete residue.</dd></div>
 					<div><dt>Every write leaves a receipt</dt><dd>An audit trail records what was saved, where it came from, and why &mdash; open to inspection any time.</dd></div>
-					<div><dt>Versioned and reversible</dt><dd>Updates keep history. Any memory rolls back to any earlier revision, and everything exports as JSON.</dd></div>
+					<div><dt>Versioned and reversible</dt><dd>Updates keep history. Any memory rolls back to any earlier revision, and your memory space exports as JSON.</dd></div>
 					<div><dt>No training on your data</dt><dd>Your memories personalize your tools. They never train anyone&rsquo;s models.</dd></div>
 				</dl>
 			</div>
@@ -2705,7 +2705,7 @@
 			<ul class="oss-facts" aria-label="Open source facts">
 				<li><b>Apache 2.0</b><span>Permissive license, commercial use included.</span></li>
 				<li><b>Full history</b><span>Every migration and commit is public, not a snapshot drop.</span></li>
-				<li><b>No lock-in</b><span>Export every memory, source, and revision as JSON at any time.</span></li>
+				<li><b>No lock-in</b><span>Export your memory space — memories, sources, and revisions — as JSON at any time.</span></li>
 			</ul>
 		</section>
 
@@ -5005,14 +5005,16 @@ function isNoiseError(message) {
 let clientErrorBudget = 3;
 let noiseErrorBudget = 2;
 
+/** Returns whether a report was actually sent, so callers can tell the
+ * truth about it — "it's been reported" is a lie once the budget is spent. */
 function reportClientError(scope, message) {
 	const noise = isNoiseError(message);
 	if (noise) {
-		if (noiseErrorBudget <= 0) return;
+		if (noiseErrorBudget <= 0) return false;
 		noiseErrorBudget--;
 		scope = `noise:${scope}`;
 	} else {
-		if (clientErrorBudget <= 0) return;
+		if (clientErrorBudget <= 0) return false;
 		clientErrorBudget--;
 	}
 	try {
@@ -5024,6 +5026,7 @@ function reportClientError(scope, message) {
 			body: JSON.stringify({ scope: String(scope).slice(0, 120), message: String(message ?? "").slice(0, 400) }),
 		}).catch(() => {});
 	} catch {}
+	return true;
 }
 
 /** Map an HTTP failure to what a user should read. Intentional server messages
@@ -7047,7 +7050,9 @@ function mwRowMenuItems(item) {
 		items.push({ id: "copy", label: "Copy text", icon: MW_ICONS.copy });
 		items.push({ id: "copyid", label: "Copy memory ID", icon: "M7 12h10M7 8h10M7 16h6" });
 		if (item.source) items.push({ id: "opensrc", label: "Open source", icon: MW_ICONS.open });
-		if (item.kind === "node") items.push({ id: "graph", label: "Open in Graph", icon: MW_ICONS.graph });
+		// Archived memories are excluded from the graph payload, so it can never
+		// show them — offering the jump would be a guaranteed dead end.
+		if (item.kind === "node" && item.lifecycle !== "archived") items.push({ id: "graph", label: "Open in Graph", icon: MW_ICONS.graph });
 		if (mwCanDelete() && (item.kind === "node" || item.kind === "page")) {
 			items.push({ id: "archive", label: "Archive", icon: MW_ICONS.archive });
 		}
@@ -7244,7 +7249,14 @@ function mwOpenMemoryFromSource(memoryId) {
 }
 
 function mwOpenInGraph(nodeId) {
+	// This module deliberately never reads the graph payload (its test pins
+	// that boundary), so the jump only records intent: clear any leftover
+	// focus filter and ask the graph to reveal the selection. The graph module
+	// owns the data and resolves what "reveal" means — see drawGraph.
 	select(nodeId, "node");
+	S.graphMode = "clean";
+	S.focusCluster = "";
+	S.graphRevealSelected = true;
 	setView("graph");
 }
 
@@ -12884,6 +12896,7 @@ function viewExports(v) {
 		<div class="rq-controls">
 			<button onclick="createExportJob()" ${EX.creating ? "disabled" : ""}>${EX.creating ? "Starting…" : "Create export"}</button>
 			<button class="ghost" onclick="loadExports()">${EX.loading ? "Refreshing…" : "Refresh"}</button>
+			<button class="ghost" onclick="downloadExport()" title="Streams the same memory space directly — no job, no size ceiling.">Download directly</button>
 		</div>
 		<div class="box" style="max-width:none;padding:0;overflow:hidden">
 			<div class="keys-table-wrap"><table class="keys-table">
@@ -13387,9 +13400,9 @@ function viewHelp(v) {
 		["ChatGPT-style/custom assistants", "Use connectors, MCP, tools, or API actions when available. If not, connect through your own app or agent."],
 		["How tokens work", "Tokens identify one account and one tool. The full token is shown once, then only a masked version remains."],
 		["Rotate or revoke", "Generate a new token to rotate. Revoke stops that tool immediately."],
-		["Project deletion", "Project-wide memory deletion is unavailable until the convergent lifecycle cleanup can prove every project storage space is removed."],
+		["Project deletion", "Project-wide memory deletion and project deletion are self-serve in Settings — preview first, typed confirmation, verified across every project storage space. The default project can only be emptied, never deleted."],
 		["Troubleshooting", "For signup or login issues, try again with a valid email and an 8+ character password. For connectors, check that the URL and token are pasted into the right fields and that the token has not been revoked."],
-		["Contact", "For help, production feedback, or partnership: founder@itsuki.app or ejziyad@gmail.com."],
+		["Contact", "For help, production feedback, or partnership: founder@itsuki.app."],
 	];
 	const grid = el("div","help-grid");
 	for (const [h,p] of topics) grid.appendChild(el("div","action-box", `<h3>${esc(h)}</h3><div class="help">${esc(p)}</div>`));
@@ -13412,7 +13425,7 @@ function viewProfile(v) {
 }
 
 // ---- Full legal pages (/terms, /privacy) ----------------------------------
-const LEGAL_EFFECTIVE_DATE = "August 27, 2026";
+const LEGAL_EFFECTIVE_DATE = "August 29, 2026";
 const LEGAL_INITIAL_DATE = "July 31, 2026";
 const LEGAL_PAGES = {
 	terms: {
@@ -13461,11 +13474,11 @@ const LEGAL_PAGES = {
 				<li>You grant Itsuki only the limited, non-exclusive license necessary to operate the Service for you: hosting, storing, processing, indexing, backing up, and returning Your Content to you and to the tools you connect. This license ends when you delete the content or your account, except for short-lived infrastructure backups.</li>
 				<li>We do not sell Your Content, do not use it for advertising, and do not use it to train AI models.</li>
 				<li>You are responsible for Your Content and must have the necessary rights to store it. Avoid storing sensitive or regulated data (for example medical records or payment card data) unless you have confirmed the Service is appropriate for that use.</li>
-				<li>You can export the memory space resolved by your current project and session as JSON. A confirmed API request can erase one resolved memory space. Project-wide deletion is available in Settings through the verified lifecycle workflow: preview-first, typed confirmation, and convergent verification across the primary space and every registered SDK subtenant, index, queue, artifact, and retry path before completion is ever reported.</li>
+				<li>You can export the memory space resolved by your current project and session as JSON. A confirmed API request can erase one resolved memory space. Project-wide deletion is available in Settings through the verified lifecycle workflow: preview-first, typed confirmation, and convergent verification across the primary space and every registered SDK subtenant, index, queue, artifact, and retry path before completion is ever reported. The default project carries the account's root memory identity and cannot be archived, transferred, or deleted &mdash; its memory can still be emptied.</li>
 			</ul>
 
 			<h2>7. AI-generated output</h2>
-			<p>The Service uses AI models to extract, organize, summarize, and recall memory. AI output can be inaccurate, incomplete, or outdated. The Service shows a receipt for every write so you can verify what was stored. Do not rely on stored memory or recalled context for medical, legal, financial, or other consequential decisions without independently verifying it. The Service is not a system of record for regulated data.</p>
+			<p>The Service uses AI models to extract, organize, summarize, and recall memory, and to answer questions inside the product (the Huba assistant). AI output &mdash; including assistant answers &mdash; can be inaccurate, incomplete, or outdated. The Service shows a receipt for every write so you can verify what was stored. Do not rely on stored memory, recalled context, or assistant answers for medical, legal, financial, or other consequential decisions without independently verifying them. The Service is not a system of record for regulated data.</p>
 
 			<h2>8. Third-party tools and services</h2>
 			<p>Tools you connect (for example Claude, MCP-capable editors, or your own applications) are third-party services governed by their own terms and privacy policies. What a connected tool sends to Itsuki, and what it does with recalled context, is between you and that tool. Itsuki is not responsible for third-party services.</p>
@@ -13484,7 +13497,7 @@ const LEGAL_PAGES = {
 
 			<h2>13. Suspension and termination</h2>
 			<ul>
-				<li>You may stop using the Service at any time, erase one resolved memory space through the confirmed API workflow, and request account deletion (see the Privacy Policy). Settings does not currently expose project-wide memory deletion.</li>
+				<li>You may stop using the Service at any time, erase one resolved memory space through the confirmed API workflow, and request account deletion (see the Privacy Policy). Project-wide memory deletion and project deletion are available in Settings through the verified lifecycle workflow described in Section 6; the default project cannot be deleted, only emptied.</li>
 				<li>We may suspend or terminate your access if you materially violate these Terms, create risk or legal exposure for us or other users, or where required by law. Where practical, we will give notice and an opportunity to export Your Content.</li>
 				<li>Sections that by their nature should survive termination (including 6 (license end and ownership), 12, 14, and 15) survive.</li>
 			</ul>
@@ -13515,8 +13528,8 @@ const LEGAL_PAGES = {
 				<li><b>Who is responsible?</b> Itsuki, operated by Ziyad Ej, India, is the data controller ("data fiduciary" under India's DPDP Act). Contact: <a href="mailto:founder@itsuki.app">founder@itsuki.app</a>.</li>
 				<li><b>What is collected?</b> Your account details (email, optional name, password hash), the memory content you deliberately store, security logs (hashed IPs), and receipts of every memory write. Operational account activity — sign-ins, save/recall counts, and errors your browser reports — is visible to the operator for support and abuse prevention; the content of your memories is not.</li>
 				<li><b>What for?</b> One purpose: operating your memory service. No advertising, no profiling for third parties, no model training.</li>
-				<li><b>Who processes it?</b> Cloudflare (hosting, database, AI inference), on our behalf. No analytics SDKs, ad networks, or social pixels.</li>
-				<li><b>How long?</b> According to the active project retention policy, or until an authorized confirmed API request erases the resolved memory space. Project-wide deletion is not yet self-serve; account-erasure requests are handled through support after ownership and shared-organization safety checks.</li>
+				<li><b>Who processes it?</b> Carefully selected infrastructure and AI service providers acting on our behalf &mdash; today that is Cloudflare for hosting, database, and AI inference. The <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessors page</a> is always the current list. No analytics SDKs, ad networks, or social pixels.</li>
+				<li><b>How long?</b> According to the active project retention policy, or until an authorized confirmed API request erases the resolved memory space. Project-wide deletion is self-serve in Settings (preview-first, typed confirmation, convergent verification); account-erasure requests are handled through support after ownership and shared-organization safety checks.</li>
 				<li><b>Your rights?</b> Access, export, correction, deletion, consent withdrawal, complaint — detailed below.</li>
 			</ul>
 
@@ -13533,13 +13546,14 @@ const LEGAL_PAGES = {
 			<ul>
 				<li><b>Security logs:</b> login events with a one-way <i>hashed</i> IP address and browser user-agent, and session records. We deliberately store IPs only as hashes — enough to detect abuse, not to track you.</li>
 				<li><b>Receipts:</b> a record of every memory write (what was saved, updated, or refused, from which connection, and when), kept so you can audit your own memory.</li>
-				<li><b>What we deliberately do not collect:</b> no advertising identifiers, no cross-site trackers, no fingerprinting, no precise location, no contact-list uploads, no email-open pixels.</li>
+				<li><b>Aggregate visit counting:</b> a first-party beacon counts page visits in aggregate. It sets no cookie and stores no identifier &mdash; a daily number, not a profile.</li>
+					<li><b>What we deliberately do not collect:</b> no advertising identifiers, no cross-site trackers, no fingerprinting, no precise location, no contact-list uploads, no email-open pixels.</li>
 			</ul>
 
 			<h2>3. How we use your information</h2>
 			<ul>
 				<li><b>Operating the Service:</b> storing, organizing, and recalling your memory; maintaining your account and sessions; showing you your own data and receipts.</li>
-				<li><b>AI processing:</b> extraction, organization, and an administrator's optional no-write category preview run on AI models hosted on our infrastructure provider (Cloudflare Workers AI). Content passes through these models only to operate the requested memory or preview feature. Preview samples are not written to Itsuki memory, receipts, usage rows, or the graph. Content is not used to train models — neither by us nor, per their inference terms, by our provider.</li>
+				<li><b>AI processing:</b> extraction, organization, and an administrator's optional no-write category preview run on AI models hosted by our infrastructure providers (today, Cloudflare Workers AI). Content passes through these models only to operate the requested memory or preview feature. Preview samples are not written to Itsuki memory, receipts, usage rows, or the graph. Content is not used to train models — neither by us nor, per their inference terms, by our providers.</li>
 				<li><b>Security and abuse prevention:</b> rate limiting, detecting unauthorized access, protecting the Service and other users.</li>
 				<li><b>Service communications:</b> messages about your account or important changes (security alerts, policy updates). We do not send marketing email.</li>
 				<li><b>Legal compliance:</b> where processing is required by applicable law.</li>
@@ -13550,7 +13564,7 @@ const LEGAL_PAGES = {
 
 			<h2>5. Who we share data with</h2>
 			<ul>
-				<li><b>Infrastructure processor:</b> the Service runs entirely on <b>Cloudflare</b> (Workers compute, D1 database, Vectorize index, Workers AI inference). Cloudflare processes data on our behalf under its enterprise data-protection commitments.</li>
+				<li><b>Infrastructure processors:</b> today the Service runs on <b>Cloudflare</b> (Workers compute, D1 database, Vectorize index, Workers AI inference), which processes data on our behalf under its enterprise data-protection commitments. If we ever add an infrastructure or AI provider, it is named on the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessors page</a> before any customer content reaches it.</li>
 				<li><b>Sign-in providers:</b> if you sign in with Google or GitHub, <b>Google LLC</b> or <b>GitHub, Inc.</b> processes your name, email address, and account identifier to authenticate you. They never receive memory content. The complete, dated list of every company that processes data for us is the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">Subprocessors page</a>.</li>
 				<li><b>Tools you connect:</b> your memory is returned to the tools you explicitly authorize via tokens you create and can revoke. Those tools are third-party services under their own policies.</li>
 				<li><b>Authorities:</b> only if legally compelled, and we will tell you unless legally prohibited from doing so.</li>
@@ -13565,7 +13579,7 @@ const LEGAL_PAGES = {
 			<ul>
 				<li><b>Access &amp; portability:</b> <i>Export current memory space</i> downloads machine-readable JSON for the memory space resolved by the current project and session. It does not aggregate sibling SDK subtenant spaces.</li>
 				<li><b>Correction:</b> edit, supersede, or archive any memory from the dashboard or your connected tools.</li>
-				<li><b>Erasure:</b> Project-wide deletion is not yet available because every project storage space must be removed together. For account-deletion requests, contact support.</li>
+				<li><b>Erasure:</b> Project-wide memory deletion and project deletion are self-serve in Settings, verified across every project storage space before completion is reported. For whole-account deletion, contact support &mdash; we check ownership and shared-organization safety first.</li>
 				<li><b>Withdraw consent:</b> at any time, by deleting your data and account.</li>
 				<li><b>Complain:</b> EU/UK users may complain to their local supervisory authority; users in India may approach the Data Protection Board of India. We would appreciate the chance to resolve concerns first — most are fixed in a day.</li>
 				<li><b>Nominate (DPDP):</b> users in India may nominate another person to exercise these rights in case of death or incapacity, by emailing us.</li>
@@ -13589,10 +13603,10 @@ const LEGAL_PAGES = {
 			<p>Measures include: TLS encryption for all data in transit; encryption at rest on our infrastructure provider; salted PBKDF2 password hashing; session tokens and connection tokens stored only as SHA-256 hashes; IP addresses stored only as hashes; strict per-account data isolation (every query is scoped to your account, with per-account compute isolation and per-account vector namespaces); scoped, revocable connection tokens shown only once; and role-restricted operator access. No internet service can guarantee absolute security, but we designed the Service so that a minimum of sensitive material exists to lose.</p>
 
 			<h2>10. Breach notification</h2>
-			<p>If a personal data breach affects you, we will notify you and the relevant authority (including the Data Protection Board of India where applicable, and EU/UK authorities where GDPR applies) within <b>72 hours</b> of confirming the breach, describing what happened, what data was involved, and what we are doing about it.</p>
+			<p>If a personal data breach affects you, we will notify you and the relevant authority (including the Data Protection Board of India where applicable, and EU/UK authorities where GDPR applies) where and within the time required by applicable law, describing what happened, what data was involved, and what we are doing about it.</p>
 
 			<h2>11. International data transfers</h2>
-			<p>The Service is operated from India and runs on Cloudflare's global network, which stores and processes data in data centers in multiple countries. Wherever your data is processed, it remains protected by this policy and by our processor's data-protection commitments.</p>
+			<p>The Service is operated from India and runs on our infrastructure providers' global networks (today, Cloudflare's), which store and process data in data centers in multiple countries. Wherever your data is processed, it remains protected by this policy and by our processors' data-protection commitments.</p>
 
 			<h2>12. Children</h2>
 			<p>The Service is not directed at children under 13, and we do not knowingly collect their data. If you believe a child has created an account, contact us and we will delete it.</p>
@@ -13668,7 +13682,7 @@ const LEGAL_PAGES = {
 		<p>Memory is some of the most personal data an application can hold, so this page does not deal in vague assurances. It describes the actual mechanisms &mdash; and because the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">engine is open source</a>, every claim here can be checked against the code that enforces it.</p>
 
 		<h2>1. Architecture: one provider, small surface</h2>
-		<p>The entire Service runs inside <b>Cloudflare's network</b>: Workers (compute), D1 (database), Vectorize (vector index), Workers AI (inference), and Cloudflare Email (transactional mail). There is no second cloud, no third-party analytics service, and no advertising or tracking script anywhere in the product. Fewer parties means fewer places your data can leak; the complete list of companies that touch customer data has <a href="/subprocessors" onclick="showLegal('subprocessors', event)">three entries</a>.</p>
+		<p>Today the entire Service runs inside <b>Cloudflare's network</b>: Workers (compute), D1 (database), Vectorize (vector index), Workers AI (inference), and Cloudflare Email (transactional mail). There is no third-party analytics service and no advertising or tracking script anywhere in the product. Fewer parties means fewer places your data can leak; the complete, always-current list of companies that touch customer data lives on the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessors page</a>, and any new provider is named there before customer content reaches it.</p>
 
 		<h2>2. Encryption</h2>
 		<ul>
@@ -13706,7 +13720,7 @@ const LEGAL_PAGES = {
 		<h2>7. How the software itself is kept honest</h2>
 		<ul>
 			<li>The repository is <b>public</b>, including every schema migration &mdash; with a checksum manifest that makes migration history append-only.</li>
-			<li>Around <b>3,000 automated tests</b> run against the real Worker, including suites that specifically prove tenant isolation, credential revocation, role enforcement, and deletion residue removal.</li>
+			<li>An automated suite of <b>over 2,400 tests</b> runs against the real Worker on every change, including suites that specifically prove tenant isolation, credential revocation, role enforcement, and deletion residue removal.</li>
 			<li>Architecture gates are tests too: source-level census checks fail the build if code touches the AI layer or writes memory outside the fenced paths.</li>
 			<li>All AI inference runs through a metered, budget-capped dispatch layer &mdash; see <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</li>
 		</ul>
@@ -13715,7 +13729,7 @@ const LEGAL_PAGES = {
 		<p>None yet, and we will not pretend otherwise: Itsuki is an early-stage service and has not completed a third-party audit framework. What we offer instead is unusual in this market &mdash; the code that enforces every claim on this page is public, the test suites that prove the security properties run on every change, and this page states dates and mechanisms rather than badges. When a formal audit happens, its report will be linked here.</p>
 
 		<h2>9. Incident response</h2>
-		<p>If an incident affects your data: we assess and contain it, fix the cause, and notify you and the relevant authority within <b>72 hours</b> of confirming a personal-data breach, as committed in the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. The notice states plainly what happened and what we did &mdash; not a lawyer's fog.</p>
+		<p>If an incident affects your data: we assess and contain it, fix the cause, and notify you and the relevant authority where and within the time required by applicable law, as committed in the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. The notice states plainly what happened and what we did &mdash; not a lawyer's fog.</p>
 
 		<h2>10. Reporting a vulnerability</h2>
 		<p>Found a weakness? We want it: <a href="/disclosure" onclick="showLegal('disclosure', event)">Responsible Disclosure Policy</a>. Good-faith research is welcome and safe here, and <a href="/.well-known/security.txt">security.txt</a> is published.</p>
@@ -13728,7 +13742,7 @@ const LEGAL_PAGES = {
 		title: "Subprocessors",
 		body: `
 		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
-		<p>A subprocessor is any company that processes customer or account data on our behalf. Itsuki has <b>three</b>. That number is a design decision: the Service was built on a single infrastructure provider precisely so this page would stay short, and comparable products commonly list twelve to twenty.</p>
+		<p>A subprocessor is any company that processes customer or account data on our behalf. Itsuki keeps this list deliberately short. That is a design decision: the Service was built on a single infrastructure provider precisely so this page would stay short, and comparable products commonly list twelve to twenty.</p>
 
 		<table>
 			<thead><tr><th>Provider</th><th>Purpose</th><th>Data involved</th><th>Location</th><th>Terms</th></tr></thead>
@@ -13758,7 +13772,7 @@ const LEGAL_PAGES = {
 		</table>
 
 		<h2>Generative AI providers</h2>
-		<p>All AI inference &mdash; memory extraction, embeddings, reranking, previews &mdash; runs on <b>Cloudflare Workers AI</b>, inside the same Cloudflare network that hosts the database. No separate AI vendor receives your content. The models, what each one does, and our training commitments are documented on <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</p>
+		<p>Today, all AI inference &mdash; memory extraction, embeddings, reranking, previews &mdash; runs on <b>Cloudflare Workers AI</b>, inside the same Cloudflare network that hosts the database, and no separate AI vendor receives your content. If an additional AI provider is ever enabled, it appears in the table above before any customer content reaches it. The models, what each one does, and our training commitments are documented on <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</p>
 
 		<h2>What is deliberately absent</h2>
 		<p>No analytics vendor, no advertising or tracking service, no marketing-email platform, no third-party error-reporting service, and no payment processor (the Service is currently free). If any of these is ever added, it appears in the table above first.</p>
@@ -13780,7 +13794,7 @@ const LEGAL_PAGES = {
 		<p><b>Your memory is never used to train AI models &mdash; not ours, not anyone's, on any plan, free or paid.</b> Content sent for inference is used to produce the response you asked for and for nothing else. This is not a tier feature or a toggle; it is how the Service works. (For contrast, it is common in this market for free-tier content to carry a training license. Read any provider's terms &mdash; including ours &mdash; before trusting them with memory.)</p>
 
 		<h2>2. Where inference runs</h2>
-		<p>Every AI call the Service makes runs on <b>Cloudflare Workers AI</b> &mdash; models hosted inside Cloudflare's own network, the same infrastructure that runs the database. Your content is not sent to any separate AI company. Cloudflare's <a href="https://www.cloudflare.com/service-specific-terms-developer-platform/" target="_blank" rel="noopener">developer platform terms</a> govern that processing, and under those terms inference inputs and outputs are not used to train Cloudflare's models.</p>
+		<p>Today, every AI call the Service makes runs on <b>Cloudflare Workers AI</b> &mdash; models hosted inside Cloudflare's own network, the same infrastructure that runs the database &mdash; and your content is not sent to any separate AI company. Cloudflare's <a href="https://www.cloudflare.com/service-specific-terms-developer-platform/" target="_blank" rel="noopener">developer platform terms</a> govern that processing, and under those terms inference inputs and outputs are not used to train Cloudflare's models. Any future provider is held to the same no-training commitment and is named on the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessor list</a> first.</p>
 
 		<h2>3. What each model does</h2>
 		<table>
@@ -13893,7 +13907,7 @@ const LEGAL_PAGES = {
 
 		<h2>5. What we commit to</h2>
 		<ul>
-			<li><b>Acknowledgment within 72 hours</b> &mdash; usually much faster; reports go directly to the operator.</li>
+			<li><b>Acknowledgment, usually within a few days</b> &mdash; often much faster; reports go directly to the operator.</li>
 			<li>An assessment and expected-fix timeline once triaged; critical issues are fixed with priority over feature work.</li>
 			<li>A heads-up before any public disclosure on our side, and credit here or in release notes if you want it (or anonymity if you prefer).</li>
 		</ul>
@@ -14379,6 +14393,7 @@ function initHuba() {
 				<input id="hubaInput" type="text" autocomplete="off" maxlength="2000" placeholder="Ask about anything in Itsuki…" aria-label="Ask Huba" />
 				<button type="submit" class="btn huba-send">Ask</button>
 			</form>
+			<p class="huba-caveat">Huba can make mistakes — check important answers.</p>
 		</section>`;
 	document.body.appendChild(bar);
 	$("#hubaClose").addEventListener("click", () => toggleHuba(false));
@@ -15452,7 +15467,7 @@ const POLICY_CONTENT = {
 	},
 	support: {
 		title: "Support and Reports",
-		body: `<p>For support, reports, or production feedback, contact <a href="mailto:founder@itsuki.app">founder@itsuki.app</a> or <a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a>.</p>
+		body: `<p>For support, reports, or production feedback, contact <a href="mailto:founder@itsuki.app">founder@itsuki.app</a>.</p>
 			<ul class="policy-list">
 				<li>For connection issues, include the tool name, token label, and setup path. Do not send full tokens or private MCP URLs.</li>
 				<li>For privacy or safety reports, include enough detail to reproduce the issue without exposing secrets.</li>
@@ -15563,7 +15578,7 @@ const SET_SECTIONS = [
 		["org-members", "Members & invitations"],
 	] },
 	{ group: "Personal", items: [
-		["personal-account", "Profile & security"],
+		["personal-account", "Account"],
 		["personal-usage", "Usage & plan"],
 		["personal-appearance", "Appearance"],
 	] },
@@ -16176,7 +16191,7 @@ function setDangerZone() {
 			<div class="set-danger-row">
 				<div><b>Delete project</b>
 					<span>Permanently deletes the project: all memory, keys, members and settings. A content-free tombstone remains. This cannot be undone.</span></div>
-				<button class="danger" onclick="lcStartAction('project_delete')"
+				${lc.project?.is_default ? `<div class="help" style="margin:2px 0 8px">The default project carries the account's root memory identity — it can be emptied with <b>Delete memory…</b>, but never archived, transferred, or deleted.</div>` : ""}<button class="danger" onclick="lcStartAction('project_delete')"
 					${busy || !caps.project_delete ? " disabled" : ""}
 					title="${caps.project_delete ? "Preview permanent deletion." : lc.project?.is_default ? "The default project cannot be deleted." : "Only the organization owner can delete a project."}">Delete project…</button>
 			</div>
@@ -18504,8 +18519,8 @@ async function downloadAuditCsv() {
 }
 
 function setPersonalAccount() {
-	return `<div class="set-head"><div><h3>Profile & security</h3>
-		<div class="set-sub">Your account identity, sessions, password and privacy controls.</div></div></div>
+	return `<div class="set-head"><div><h3>Account</h3>
+		<div class="set-sub">Sessions, password, connections, data and support — the controls that live nowhere else.</div></div></div>
 		<div id="setPersonalMount"></div>`;
 }
 
@@ -18611,7 +18626,7 @@ function viewSettingsMain(v) {
 		</div>
 		<div class="action-box settings-section"><h3>Support</h3>
 			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
-			<p><a href="mailto:founder@itsuki.app">founder@itsuki.app</a><br><a href="mailto:ejziyad@gmail.com">ejziyad@gmail.com</a></p>
+			<p><a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
 			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('support')">Support / report issue</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Legal / Terms</h3>
@@ -19941,7 +19956,7 @@ function drawGraph() {
 	const legend = $("#legend");
 	renderGraphLegend(present, projectCategories, null, counts);
 	if (!nodes.length && !pages.length && !candidates.length) { showErr(`<div class="graph-empty"><b>No memories yet</b><br><span class="help">Use Save or Connect to add your first memory.</span></div>`); return; }
-	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Table and Cards tabs.</span></div>`); return; }
+	if (typeof vis === "undefined" || !vis.Network) { showErr(`<div>Graph library couldn't load (offline?).<br><span class="help">Your memories are still visible in the Memories tab.</span></div>`); return; }
 	try {
 		const byId = Object.fromEntries(nodes.map(n=>[n.id,n.label]));
 		const graphEdges = edges.filter(e=>byId[e.from_node]&&byId[e.to_node]);
@@ -19965,6 +19980,26 @@ function drawGraph() {
 			const key = c.cluster || "general_memory";
 			if (!candidateGroups.has(key)) candidateGroups.set(key, []);
 			candidateGroups.get(key).push(c);
+		}
+		// A jump from Memories asked for this selection to be VISIBLE, not just
+		// selected: the per-cluster cap hides nodes ranked 15th+ behind the
+		// "+N more" marker, which is exactly where a crash used to live. Expand
+		// the target's cluster before capping; if the graph payload doesn't
+		// carry the node at all (archived, or newer than the last load), say so
+		// instead of selecting a ghost.
+		if (S.graphRevealSelected) {
+			S.graphRevealSelected = false;
+			const revealTarget = S.selected ? nodes.find((n) => nodeKey(n.id) === S.selected) : null;
+			if (revealTarget) {
+				if (!S.expandedClusters) S.expandedClusters = new Set();
+				S.expandedClusters.add(revealTarget.cluster || "general_memory");
+				for (const [clusterId, group] of clusterGroups) {
+					if (group.includes(revealTarget)) S.expandedClusters.add(clusterId);
+				}
+			} else if (S.selected) {
+				toast("That memory isn't in the graph yet — it may be archived or still processing.");
+				S.selected = null;
+			}
 		}
 		const graphNodes = [];
 		const moreNodes = [];
@@ -20058,11 +20093,15 @@ function drawGraph() {
 			}, 520);
 		}, 20));
 		bindGraphResize($("#graphWrap"));
-		if (S.selected) S.network.selectNodes([S.selected]);
+		// vis throws RangeError for an id that isn't in the DataSet — and the
+		// cluster cap, focus filters, and archived memories all legitimately
+		// remove ids that are still perfectly selectable in the Memories list.
+		// A selection that can't be shown is not an error.
+		if (S.selected && vn.get(S.selected)) S.network.selectNodes([S.selected]);
 		startHullPulse();
 	} catch (e) {
-		reportClientError("graph-render", e.message);
-		showErr(`<div>The graph couldn't be drawn right now — it's been reported.<br><span class="help">Your memories are safe; use the Memory tab to see them.</span></div>`);
+		const reported = reportClientError("graph-render", e.message);
+		showErr(`<div>The graph couldn't be drawn right now${reported ? " — it's been reported" : ""}.<br><span class="help">Your memories are safe; open Memories to see them.</span></div>`);
 	}
 }
 function graphReset() {

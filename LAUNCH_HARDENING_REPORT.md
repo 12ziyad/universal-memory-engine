@@ -1372,3 +1372,105 @@ One note for whoever reads the screenshots: a faint vertical line appears in
 headless captures at some widths and is **a capture artifact** — no element or
 pseudo-element accounts for it, `elementFromPoint` finds nothing there, and it
 does not appear in a real browser.
+
+---
+
+# Ninth pass — 2026-08-29: Phase 1 of the trust & truthfulness campaign
+
+Owner supplied a security-hardening brief plus legal advice, and reported the graph
+crash, the export message, and several UI asks. Phase 1 (bugs + truth + UI) is below;
+Phase 2 (Trust & Safety center) and Phase 3 (adversarial evidence) are planned and
+deliberately NOT started.
+
+## Two pre-existing security bugs, found by inspection and fixed
+
+1. **Five write doors failed OPEN on a rate-limiter outage.** Six call sites wrote
+   `allowRate(binding, managedActorRateKey("save", auth, { fail: "closed" }))` — but
+   `managedActorRateKey` takes two parameters, so the option was silently swallowed
+   and `allowRate` used its fail-open default on /v1/save, /v1/ingest, /v1/turn,
+   /v1/mcp/choose and bulk delete: the exact inverse of the documented policy, on the
+   paths that spend inference and mutate data. The paren moved; a test now asserts
+   both that no such call shape exists and that a throwing binding actually blocks a
+   fail-closed key ([limits.spec.js](test/limits.spec.js)).
+2. **Server error reports stored raw error messages.** An extraction failure can quote
+   the payload that broke it, so `error_reports` could accumulate memory text or
+   credentials. Messages now pass through the same scrubber the model inputs use
+   ([report.js](src/lib/report.js)) — and the behavioral test caught my own first
+   attempt (scrubText returns `{text}`, not a string), which is what tests are for.
+
+## The graph crash: my cluster cap, one function away from its own fix
+
+"Open in graph" set `S.selected` and hoped. `drawGraph`'s second-to-last line then
+called `S.network.selectNodes([S.selected])` — and vis-network THROWS RangeError for
+an id not in the DataSet. Three ways the id was legitimately missing: the per-cluster
+cap (14) hides nodes ranked 15th+ behind "+N more"; a leftover Focus-cluster filter
+from an earlier visit; archived/new memories that /v1/graph does not carry. That is
+why it "sometimes worked" — precisely when the memory ranked top-14 of its cluster.
+`graphFocus()` had wrapped the identical call in try/catch all along.
+
+Fixed at both ends: `mwOpenInGraph` now resets the filters, expands the target's
+cluster so the node is actually revealed, and refuses to select what /v1/graph never
+sent (toast, not crash); the draw guard mirrors the loader's existing guard. Archived
+rows no longer offer the jump they could never complete. And the error copy stops
+lying twice — "use the Memory tab" named a tab that doesn't exist ("Memories"), and
+"it's been reported" was false once the 3-report budget was spent (the reporter now
+returns whether it sent, and the message adapts).
+
+## The export that pointed at a control that does not exist
+
+A failed export said: use "Export everything" in Settings. No such label exists
+anywhere in the product — the real control is "Export current memory space", which
+would genuinely have worked (the direct download has no size ceiling). Also, the
+stored blob was pretty-printed JSON in a D1 TEXT column with a ~2MB row cap, which is
+how a 2.9MB pretty payload blew a 1.5MB limit its compact form likely fits. Fixed:
+compact storage, a truthful pointer naming the real control and its real location,
+a "Download directly" button on the exports page, and the landing's "everything
+exports as JSON" claims narrowed to the per-space truth every other page states.
+
+## Legal pages: aligned with reality, in both directions
+
+- **The self-imposed 72-hour breach clock is gone** (privacy §10, security §9) —
+  replaced with "where and within the time required by applicable law". A solo
+  operator should not sign a contractual deadline the law does not impose. The
+  disclosure acknowledgment softened to "usually within a few days"; SECURITY.md too.
+- **Provider-exclusive wording became truthful-today wording**: "runs entirely on
+  Cloudflare" and "no second cloud" are now "today … runs on Cloudflare", with the
+  subprocessors page named as the always-current list and the existing promise made
+  operative everywhere: any new provider is named there BEFORE customer content
+  reaches it. The subprocessor-count boast ("three entries … a design decision")
+  became a durable statement that cannot silently go numerically false.
+- **The deletion story contradicted itself in four places.** Terms §6 described the
+  shipped lifecycle; Terms §13, the Privacy summary, Privacy §7 and the Help panel
+  all still said project-wide deletion "is not yet available" — the feature went live
+  on 19 August. All four now tell the same story, including the default-project
+  carve-out (can be emptied, never deleted), which the danger zone now states in
+  visible text rather than a hover tooltip.
+- **Small honesty items**: the first-party aggregate visit beacon is now disclosed in
+  Privacy §2 (docs already disclosed it; Privacy didn't); "around 3,000 automated
+  tests" became "over 2,400" (the real number); Terms §7 now covers the in-product
+  assistant explicitly, not just extraction and recall.
+- The 7-day grievance promise stays — Phase 2 builds the tracked queue behind it.
+
+## Huba tells the truth about itself
+
+A quiet, always-visible line under the input: "Huba can make mistakes — check
+important answers." The docs guide had promised the opposite ("never from model
+guesswork") — softened to what grounding actually buys: it narrows what the
+assistant can be wrong about; it does not make it infallible. The button itself is
+now clay with the letterpress shadow the primary actions wear — the one live control
+in a header of switchers should look like one.
+
+## The rest of Phase 1
+
+- Hero console: `npm install itsuki` / `pip install itsuki` as chips INSIDE the black
+  box, between the result line and the footer.
+- Settings "Profile & security" → **"Account"**, slimmed to the controls that exist
+  nowhere else (password, log-out-all-sessions, connections, export, support/legal).
+- The personal gmail address is out of every UI surface; founder@itsuki.app is the
+  single public contact.
+- Huba corpus regenerated (docs changed; the hash gate enforces this).
+
+## Phase 2 & 3: planned, specified, NOT started
+The full design (three D1 tables, module layout, door signatures, storm-suppression
+algorithm, step-up confirmation, maintenance mode, build order, test plan) lives in
+the campaign plan. Nothing of it exists in the tree yet, by explicit owner instruction.

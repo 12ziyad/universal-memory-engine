@@ -5,6 +5,8 @@
  * report without importing the router.
  */
 
+import { scrubText } from "../pipeline/scrub.js";
+
 /** Best-effort. Logs always; the D1 write may fail silently, never throws. */
 export async function reportServerError(env, scope, error, userId = null, { reportId = null } = {}) {
 	console.error(`unhandled error scope=${scope}:`, error?.stack ?? error?.message ?? error);
@@ -17,7 +19,10 @@ export async function reportServerError(env, scope, error, userId = null, { repo
 			reportId ?? `err_${crypto.randomUUID()}`,
 			userId,
 			String(scope ?? "unknown").slice(0, 120),
-			String(error?.message ?? error ?? "unknown").slice(0, 400),
+			// Scrubbed before it lands: an extraction or parse failure can quote
+			// the payload that broke it, and this table must never become a copy
+			// of memory text or a credential. Same scrubber the model inputs use.
+			scrubText(String(error?.message ?? error ?? "unknown")).text.slice(0, 400),
 			Date.now(),
 		).run();
 	} catch (writeError) {

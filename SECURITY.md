@@ -8,7 +8,7 @@ Please do **not** open a public issue for a security vulnerability.
 - use [GitHub private vulnerability reporting](https://github.com/12ziyad/universal-memory-engine/security) on this repository.
 
 Include what you found, where, reproduction steps, and the impact as you
-understand it. You will get an acknowledgment within 72 hours — reports go
+understand it. You will get an acknowledgment, usually within a few days and often much faster — reports go
 directly to the operator.
 
 ## Scope and rules

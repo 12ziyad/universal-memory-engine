@@ -127,13 +127,20 @@ export async function runExport(env, userId, exportId) {
 			objectCount += rows.length;
 		});
 
-		const data = JSON.stringify(payload, null, 2);
+		// Compact, not pretty-printed: the blob lives in a D1 TEXT column with a
+		// hard ~2MB row ceiling, and indentation on row-heavy JSON was inflating
+		// real exports past the limit (a 2.9MB pretty payload is ~1.5MB compact).
+		// The direct download pretty-prints its own copy; this one is storage.
+		const data = JSON.stringify(payload);
 		const bytes = new TextEncoder().encode(data).length;
 		const max = exportMaxBytes(env);
 		if (bytes > max) {
 			// Never truncate a person's memory and call it an export.
 			await failExport(env, userId, exportId,
-				`This memory is ${(bytes / 1_000_000).toFixed(1)} MB — larger than an export job can hold here. Use "Export everything" in Settings for the full file.`);
+				// The pointer must name a control that actually exists, by its real
+				// label — the previous text sent people hunting for an "Export
+				// everything" button that was never built.
+				`This memory is ${(bytes / 1_000_000).toFixed(1)} MB — larger than an export job can hold here. Use "Export current memory space" in Settings → Account → Data & Privacy for the full file.`);
 			return { ok: false, reason: "too_large", bytes };
 		}
 

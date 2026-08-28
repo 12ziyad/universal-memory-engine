@@ -719,6 +719,55 @@ describe("graph edge appearance is derived, not looked up", () => {
 	});
 });
 
+describe("open-in-graph cannot crash the canvas", () => {
+	async function shell() {
+		return (await import("../public/index.html?raw")).default;
+	}
+
+	it("selection is guarded against ids the DataSet does not hold", async () => {
+		// vis-network THROWS RangeError for a missing id, and three things
+		// legitimately remove ids that the Memories list still shows: the
+		// per-cluster cap ("+N more"), a leftover focus filter, and archived
+		// memories the graph payload never carries. An unguarded selectNodes
+		// here was the whole crash.
+		const html = await shell();
+		expect(html).toContain("if (S.selected && vn.get(S.selected)) S.network.selectNodes([S.selected]);");
+		expect(html).not.toContain("if (S.selected) S.network.selectNodes([S.selected]);");
+	});
+
+	it("the jump records intent; the graph module resolves the reveal", async () => {
+		// The workspace module may not read the graph payload (its own test
+		// pins that boundary), so mwOpenInGraph only clears filters and sets
+		// the reveal flag — drawGraph expands the target cluster or reports
+		// an absent node instead of selecting a ghost.
+		const html = await shell();
+		const jump = html.slice(html.indexOf("function mwOpenInGraph"), html.indexOf("function mwOpenInGraph") + 800);
+		expect(jump).toContain('S.graphMode = "clean";');
+		expect(jump).toContain('S.focusCluster = "";');
+		expect(jump).toContain("S.graphRevealSelected = true;");
+		expect(html).toContain("if (S.graphRevealSelected) {");
+		expect(html).toContain("S.expandedClusters.add(revealTarget.cluster");
+		expect(html).toContain("That memory isn't in the graph yet");
+	});
+
+	it("archived rows do not offer a jump that cannot land", async () => {
+		const html = await shell();
+		expect(html).toContain(
+			'if (item.kind === "node" && item.lifecycle !== "archived") items.push({ id: "graph"',
+		);
+	});
+
+	it("the error copy stays honest about reporting and names real tabs", async () => {
+		const html = await shell();
+		// reportClientError has a 3-per-page budget; once it is spent,
+		// "it's been reported" would be a lie — so the copy adapts.
+		expect(html).toContain('const reported = reportClientError("graph-render", e.message);');
+		expect(html).toContain("${reported ? \" — it's been reported\" : \"\"}");
+		expect(html).not.toContain("use the Memory tab");
+		expect(html).not.toContain("Table and Cards tabs");
+	});
+});
+
 describe("the console highlighter", () => {
 	async function load() {
 		const shell = (await import("../public/index.html?raw")).default;

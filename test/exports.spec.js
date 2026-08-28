@@ -167,7 +167,9 @@ describe("export jobs", () => {
 		expect(result.reason).toBe("too_large");
 		const row = (await listFor(userId)).find((r) => r.id === job.id);
 		expect(row.status).toBe("failed");
-		expect(row.error).toContain("Export everything");
+		// The pointer names the real control by its real label.
+		expect(row.error).toContain("Export current memory space");
+		expect(row.error).not.toContain("Export everything");
 		const download = await request(`/v1/exports/download?userId=${userId}&id=${job.id}`, KEY);
 		expect(download.status).toBe(409);
 	});

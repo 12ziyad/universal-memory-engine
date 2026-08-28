@@ -2445,7 +2445,7 @@ const routes = {
 		// Bulk import is legitimate burst traffic (workspace files, backfills):
 		// it gets the roomy IMPORT bucket, keyed to the credential+project so a
 		// rotated body.userId cannot buy a fresh bucket.
-		if (!(await allowRate(env.IMPORT_LIMITER, managedActorRateKey("ingest", auth, { fail: "closed" })))) return tooManyFor("import");
+		if (!(await allowRate(env.IMPORT_LIMITER, managedActorRateKey("ingest", auth), { fail: "closed" }))) return tooManyFor("import");
 		const capped = await refuseWriteOverAiBudget(env, auth);
 		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
@@ -2558,7 +2558,7 @@ const routes = {
 			requiredCapability: "project.chooser.use",
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth, { fail: "closed" })))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("mcp-choose", auth), { fail: "closed" }))) return tooManyFor("save");
 
 		// AutoChoose is a read-only host adapter. It selects and validates an
 		// action, but the selected MCP tool remains responsible for its own
@@ -2742,7 +2742,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth, { fail: "closed" })))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth), { fail: "closed" }))) return tooManyFor("save");
 		const capped = await refuseWriteOverAiBudget(env, auth);
 		if (capped) return capped;
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
@@ -3868,7 +3868,7 @@ const routes = {
 			requiredScope: MEMORY_WRITE_SCOPE,
 		});
 		if (auth.response) return auth.response;
-		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("turn", auth, { fail: "closed" })))) return tooManyFor("save");
+		if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("turn", auth), { fail: "closed" }))) return tooManyFor("save");
 		const ungatedSourceTime = refuseUngatedSourceTime(env, auth.userId, body, auth.memoryScope);
 		if (ungatedSourceTime) return ungatedSourceTime;
 		const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -6159,7 +6159,7 @@ async function handleMemoryUpdateRoutes(request, env, ctx, url) {
 		requiredCapability: "project.memory.write",
 	});
 	if (auth.response) return auth.response;
-	if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth, { fail: "closed" })))) return tooManyFor("save");
+	if (!(await allowRate(env.SAVE_LIMITER, managedActorRateKey("save", auth), { fail: "closed" }))) return tooManyFor("save");
 
 	// Precondition: If-Match strong ETag "rN" and/or body expectedRevision.
 	const ifMatch = request.headers.get("if-match");
@@ -6280,7 +6280,7 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 	if (auth.response) return auth.response;
 	// Destructive work gets the tighter DELETE bucket: a loop that deletes is
 	// worse than a loop that saves.
-	if (!(await allowRate(env.DELETE_LIMITER, managedActorRateKey("del", auth, { fail: "closed" })))) return tooManyFor("delete");
+	if (!(await allowRate(env.DELETE_LIMITER, managedActorRateKey("del", auth), { fail: "closed" }))) return tooManyFor("delete");
 	const by = auth.auth?.type === "token" ? `token:${auth.auth.token?.id ?? "unknown"}` : auth.auth?.type ?? "session";
 
 	const id = url.pathname === "/v1/memories" ? null : decodeURIComponent(url.pathname.slice("/v1/memories/".length));

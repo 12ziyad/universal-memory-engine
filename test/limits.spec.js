@@ -153,3 +153,27 @@ describe("managedActorRateKey", () => {
 		expect(managedActorRateKey("save", {})).toBe("save:legacy:configured:project:unmanaged");
 	});
 });
+
+describe("the fail-closed option actually reaches allowRate", () => {
+	it("write doors pass the option to allowRate, not to the key helper", async () => {
+		// The bug this pins: six call sites wrote
+		//   allowRate(binding, managedActorRateKey("save", auth, { fail: "closed" }))
+		// managedActorRateKey takes two parameters, so the option was silently
+		// discarded and allowRate defaulted to fail-OPEN on /v1/save, /v1/ingest,
+		// /v1/turn, /v1/mcp/choose and bulk delete — the exact inverse of the
+		// documented policy, on the paths that spend inference and mutate data.
+		const src = (await import("../src/index.js?raw")).default;
+		expect(src).not.toMatch(/managedActorRateKey\([^)]*\{\s*fail:/);
+		// And the write-shaped doors carry it at the right argument.
+		expect(src).toContain('managedActorRateKey("ingest", auth), { fail: "closed" }');
+		expect(src).toContain('managedActorRateKey("mcp-choose", auth), { fail: "closed" }');
+		expect(src).toContain('managedActorRateKey("turn", auth), { fail: "closed" }');
+		expect(src).toContain('managedActorRateKey("del", auth), { fail: "closed" }');
+	});
+
+	it("a throwing binding blocks a fail-closed key and admits a fail-open one", async () => {
+		const broken = { limit: async () => { throw new Error("limiter outage"); } };
+		expect(await allowRate(broken, "k", { fail: "closed" })).toBe(false);
+		expect(await allowRate(broken, "k")).toBe(true);
+	});
+});

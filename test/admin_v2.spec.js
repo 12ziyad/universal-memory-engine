@@ -409,3 +409,21 @@ describe("the operator ledger", () => {
 		expect(body.next_before).toBe(null);
 	});
 });
+
+describe("error reports are scrubbed before they persist", () => {
+	it("a secret quoted in an error message never reaches the table", async () => {
+		// An extraction failure can quote the payload that broke it. Without
+		// scrubbing, error_reports becomes a copy of whatever secret or memory
+		// text happened to be in that payload — the one table the census can
+		// delete but nothing sanitised on the way in.
+		const { reportServerError } = await import("../src/lib/report.js");
+		const leaky = new Error('parse failed near "sk-proj-Abc123456789012345678901234567890123456789"');
+		await reportServerError(env, "test-scrub", leaky, null, { reportId: "err_scrub_pin" });
+		const row = await env.DB.prepare(
+			"SELECT message FROM error_reports WHERE id = ?",
+		).bind("err_scrub_pin").first();
+		expect(row).toBeTruthy();
+		expect(row.message).not.toContain("sk-proj-Abc12345");
+		expect(row.message).toContain("parse failed");
+	});
+});

@@ -3743,7 +3743,7 @@ ${prereq([
 <p>Four commitments, and the mechanism that makes each one more than a sentence.</p>
 <table>
 <tr><th>Commitment</th><th>What stands behind it</th></tr>
-<tr><td><b>Your memory is not training data.</b></td><td>Every AI call ${PRODUCT.name} makes — extraction, embeddings, reranking, previews — runs on Cloudflare Workers AI, inside the same network that hosts the database. No separate AI vendor receives your content, and under Cloudflare's developer-platform terms inference inputs and outputs are not used to train their models.</td></tr>
+<tr><td><b>Your memory is not training data.</b></td><td>Today, every AI call ${PRODUCT.name} makes — extraction, embeddings, reranking, previews — runs on Cloudflare Workers AI, inside the same network that hosts the database, and no separate AI vendor receives your content. Under Cloudflare's developer-platform terms, inference inputs and outputs are not used to train their models — and any provider ever added is named on the subprocessors page first, held to the same commitment.</td></tr>
 <tr><td><b>No selling, no ads, no profiling for third parties.</b></td><td>One purpose: operating your memory service. There is no advertising surface and no third-party data recipient to sell into.</td></tr>
 <tr><td><b>No third-party trackers.</b></td><td>Visit counting is first-party and aggregate-only. It sets no cookie and stores no identifier — the mechanism is below, in full.</td></tr>
 <tr><td><b>Memory content is not browsed.</b></td><td>Operational account activity — sign-ins, save and recall counts, errors, and security logs holding hashed IPs — is visible to the operator for support and abuse prevention. The content of your memories is not part of that. The <a href="#/operate/observability">operator endpoints available to <i>you</i></a> return counts, states and timings only, never content.</td></tr>
@@ -9813,7 +9813,7 @@ ${nextSteps([
 
 PAGES["/guides/huba"] = { title: "Huba AI", html: `
 <h1>Huba AI</h1>
-<p class="lede">The assistant in the dashboard header. Ask it about Itsuki or about your own account and it answers from the product and your live data — never from model guesswork, and never about anything else.</p>
+<p class="lede">The assistant in the dashboard header. Ask it about Itsuki or about your own account and it answers from the product's documentation and your live data — never about anything else. Like any AI assistant it can still get things wrong, so check important answers.</p>
 
 ${prereq([
 	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. Huba is a dashboard surface — there is no way to reach it with an API key or over MCP.`,
@@ -9821,13 +9821,13 @@ ${prereq([
 ])}
 
 <h2>Where the answers come from</h2>
-<p>Huba never answers from model knowledge. Every answer is grounded in two things and nothing else:</p>
+<p>Huba is grounded in two sources and nothing else — though grounding narrows what it can be wrong about, it does not make it infallible:</p>
 <ul>
 <li><b>Itsuki's own reference material</b> — every page of this documentation, indexed by section, so a question spanning two subjects can draw on both.</li>
 <li><b>Your account's live state</b> — read at the moment you ask, server-side. It can look at your usage and allowance, your memories, your recent saves and receipts, the write queue and any failures, your graph's shape, your API key metadata, your webhooks, your exports, your extraction rules, and your organization's members and projects.</li>
 </ul>
 <p>Which of those it reads depends on the question, and on which tab you asked from — the same question on the Graph page and the Requests page gets answered from different data. That is why "what does this page show me?" works anywhere in the dashboard.</p>
-<p>When it genuinely cannot answer, it says what it does know and names the page that covers the rest. An assistant that invents plausible product behaviour is worse than none.</p>
+<p>When it genuinely cannot answer, it says what it does know and names the page that covers the rest — an assistant that invents plausible product behaviour is worse than none. Even so, treat its answers like any AI output: verify anything you are about to act on, and use the receipts and pages it cites as the source of truth.</p>
 
 <h2>It only ever sees your account</h2>
 <p>Every read runs server-side against the identity in your session cookie, the same way every dashboard view resolves who you are. No account id, project id, or role is ever taken from the question, so there is nothing to point somewhere else. Reads are read-only: Huba cannot save, delete, or change a setting on your behalf, and it will tell you where to click instead.</p>

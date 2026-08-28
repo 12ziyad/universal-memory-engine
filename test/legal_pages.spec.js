@@ -29,7 +29,7 @@ describe("the document set", () => {
 		expect(legalBlock.match(/title: "/g)).toHaveLength(8);
 		// Every document opens with the effective-date meta line.
 		expect(legalBlock.match(/class="legal-meta"/g).length).toBeGreaterThanOrEqual(8);
-		expect(html).toContain('const LEGAL_EFFECTIVE_DATE = "August 27, 2026"');
+		expect(html).toContain('const LEGAL_EFFECTIVE_DATE = "August 29, 2026"');
 	});
 
 	it("keeps a changelog on every document", () => {
@@ -48,7 +48,9 @@ describe("truthfulness rules", () => {
 			expect(sub).toContain(`<b>${vendor}</b>`);
 		}
 		expect(sub.match(/Never memory content\./g)).toHaveLength(2);
-		expect(sub).toContain("has <b>three</b>");
+		// The count claim was replaced with a durable design statement: adding a
+		// provider must not make the page numerically false before anyone edits it.
+		expect(sub).toContain("keeps this list deliberately short");
 		// The change promise: page updates before data flows.
 		expect(sub).toContain("before any customer data reaches it");
 	});
@@ -71,7 +73,10 @@ describe("truthfulness rules", () => {
 		expect(vdp).toContain("Safe harbor");
 		expect(vdp).toContain("<b>authorized</b>");
 		expect(vdp).toContain("Test only against your own data.");
-		expect(vdp).toContain("Acknowledgment within 72 hours");
+		// The self-imposed 72h clock was removed on purpose — a solo operator
+		// should not sign a contractual deadline the law does not require.
+		expect(vdp).toContain("Acknowledgment, usually within a few days");
+		expect(vdp).not.toContain("72 hours");
 		expect(vdp).toContain("github.com/12ziyad/universal-memory-engine/security");
 	});
 
