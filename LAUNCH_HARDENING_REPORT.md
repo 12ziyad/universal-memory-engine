@@ -852,3 +852,127 @@ a foreign id and a nonexistent one answer identically.
 |---|---|
 | `7b9801fd` | animated entry, threads, topic gate, Settings usage, single request button |
 | **`beb11a9f`** | **live** — honest no-op thread delete |
+
+---
+
+# Fourth pass — 2026-08-28
+
+Owner: "the AI is too weak… tell me how many saves in dashboard, it's saying
+something wrong", plus a graph that "looks so bad", plus the icon reading as a
+voice agent.
+
+## Huba was not weak — it was reading an empty database
+
+The single most important finding of this pass. Memories, receipts, jobs and
+the graph are keyed by the **memory-space id** (`mem_…` for any managed
+project). Huba resolved identity with `getSessionUser`, which returns the
+**account** id. Every memory-scoped fetcher queried a key with nothing under
+it:
+
+```
+receipts by user_id:  mem_8e70b854…  5,968     nodes: mem_abdb39d1…  128
+                      mem_2dafc133…  2,109            mem_1ac4037f…  124
+```
+
+That is why it reported an empty history to an account with thousands of
+receipts. The route now resolves through `requireSessionProject` — the same
+door every other memory view uses — and carries both ids, so account-scoped
+reads (quota, keys, members) and memory-scoped reads (history, inventory,
+jobs, graph, search) each use the right one.
+
+**Two more defects surfaced only after that fix, in production:**
+
+- `getUserReceipts(env, userId, limit)` takes a **number**; the fetcher passed
+  `{ limit: 10 }`, which bound an object as the SQL LIMIT. The query threw,
+  the `.catch` swallowed it, and history came back empty *again* — same
+  symptom, different cause, which is exactly why it survived the first fix.
+- Retrieval surfaced `/sdk/js` but only its **intro**, which says "Install the
+  client…" without the command; `npm install itsuki` lives under the next
+  heading. Handed a page that merely talks about installing, the model
+  invented `itsuki-sdk`. Coverage now takes **two sections per canonical
+  page**, so the command travels with the page that promises it.
+
+## The model, chosen by measurement
+
+Benchmarked four candidates on real questions with known-true answers, same
+prompt and same retrieved sections, measuring neurons and latency:
+
+| model | correct | notable failure | neurons |
+|---|---|---|---|
+| qwen3-30b-a3b (was live) | 2/5 | returned **empty content** on one — reasoning exhausted the token budget; wrong newest memory; wrong SDK package | 33 |
+| llama-3.3-70b | 3/5 | arithmetic wrong: "196 saves left", truth 98 | 111 |
+| nemotron-3-120b | 3.5/5 | **hallucinated** `npm install @itsuki/js-sdk`, which does not exist | 226 |
+| **gpt-oss-120b** | **4.5/5** | right package, right arithmetic, working shown | 147 |
+
+Switched to `@cf/openai/gpt-oss-120b` with headroom on `max_tokens` (a
+reasoning model that runs out mid-thought returns null content — precisely how
+the previous one failed). `huba_chat` is now **exempt from the daily neuron
+allowance**: it is already capped by messages per day, and charging a larger
+model to the save budget as well would quietly eat a third of someone's saves
+for asking a few questions.
+
+## The graph: the edges were already procedural — the renderer wasn't
+
+I corrected myself mid-investigation and it changed the whole plan. The v3
+relation vocabulary is **open by design**:
+
+```js
+// SCREAMING_SNAKE_CASE — the v2 edge vocabulary is open but shaped.
+const V2_RELATION_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+```
+
+Production carries **708 distinct relation names across 3,586 edges** — two
+engines' worth: 2,650 `SCREAMING_SNAKE` from the live engine (one written
+today) and 936 lowercase fossils from the v1 engine retired on 15 Aug. The
+renderer styled from a hardcoded table of the **ten lowercase v1 types**, so
+roughly **74% of every edge fell through to the faintest grey fallback**. The
+graph was not a hairball of many colours; it was a hairball of *one*.
+
+So nothing changed in the data. Appearance is now **derived**:
+
+- display-only normalisation, so `uses` (659) and `USES` (519) stop being
+  drawn as two different relations;
+- eight families matched by meaning — identity, people, dependency,
+  structural, causal, lifecycle, activity, weak;
+- and a **stable hashed hue** for anything unnamed, so `SISTER_OF` gets its
+  own colour for ever instead of anonymous grey. Verified across every real
+  production relation name.
+
+Layout, ported from what makes the Playground graph read well: clusters are
+pushed apart **as whole bodies** before nodes are nudged within them (measured
+456px minimum gap between hulls, no overlap); each cluster shows its most
+important members with a clickable **"+N more"** for the rest (one production
+cluster holds 49 of 128); and cross-cluster edges — the long lines that cut
+across the canvas — rest dim and light on focus. `related_to`, the most
+numerous and least informative relation, is muted at rest.
+
+## Icon
+
+Three bars read as a voice assistant. Replaced with a miniature memory graph:
+three nodes and three links whose edges draw themselves in and whose nodes
+breathe after them. Reduced motion freezes it fully drawn.
+
+## Verification
+
+- **188 files / 2,394 tests green.** New tests pin: every real production
+  relation name landing in the right family, `uses` ≡ `USES`, unknown
+  relations getting a stable hue outside the "depends on" band, the layout
+  ordering (clusters before nodes), caps and cross-muting, the receipts
+  signature asserted against the real helper, and the install command being
+  present in context rather than merely the page that mentions installing.
+- One pre-existing test legitimately broke: the legend's screen-reader
+  explanation of category rings was pinned inside `drawGraph`, and the legend
+  moved to its own renderer. The explanation was restored and the test
+  repointed — the contract is unchanged.
+- **Production smoke, after the fixes**: history now answers with the real
+  receipt table, memories with the real count and newest label, saves with
+  correct arithmetic, the SDK question with `npm install itsuki`, off-topic
+  still refused at zero cost, and Huba's messages counted separately from the
+  neuron allowance.
+
+## Deploys
+
+| version | carried |
+|---|---|
+| `ca624c90` | scope fix, gpt-oss-120b, procedural edges, layout, caps, icon |
+| **`cecf8a8e`** | **live** — receipts signature, two-section coverage |
