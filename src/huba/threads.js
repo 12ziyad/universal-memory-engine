@@ -86,14 +86,16 @@ export async function appendExchange(env, userId, { threadId, question, answer }
 export async function deleteThread(env, userId, threadId) {
 	// Messages first: the FK cascade covers it, but D1 does not enforce
 	// foreign keys by default, so the child rows are removed explicitly.
-	await env.DB.batch([
+	const [, threads] = await env.DB.batch([
 		env.DB.prepare("DELETE FROM huba_messages WHERE thread_id = ? AND user_id = ?").bind(threadId, userId),
 		env.DB.prepare("DELETE FROM huba_threads WHERE id = ? AND user_id = ?").bind(threadId, userId),
 	]);
-	const still = await env.DB.prepare(
-		"SELECT 1 AS present FROM huba_threads WHERE id = ? AND user_id = ?",
-	).bind(threadId, userId).first();
-	return { deleted: !still };
+	// Report what actually happened, not whether the row is absent: an id
+	// belonging to someone else is absent FOR THIS USER either way, and
+	// answering "deleted" to a no-op is a small lie that would also hand a
+	// prober a way to distinguish "never existed" from "not yours". Row count
+	// says the same thing to both.
+	return { deleted: Number(threads?.meta?.changes ?? 0) > 0 };
 }
 
 /** Keep the list bounded; oldest threads fall off the end. Best-effort. */

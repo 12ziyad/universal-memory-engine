@@ -31,7 +31,13 @@ import { isCapacityError } from "../src/pipeline/llm.js";
 import { retrieve, scrubMechanismTalk } from "../src/huba/huba.js";
 import { routeFetchers } from "../src/huba/fetchers.js";
 import { classifyTopic } from "../src/huba/topic.js";
-import { titleFromQuestion } from "../src/huba/threads.js";
+import {
+	titleFromQuestion,
+	appendExchange as appendHubaExchange,
+	readThread as readHubaThread,
+	listThreads as listHubaThreads,
+	deleteThread as deleteHubaThread,
+} from "../src/huba/threads.js";
 import { HUBA_CHUNKS, HUBA_PAGES, HUBA_CORPUS_DOCS_HASH } from "../src/huba/corpus.generated.js";
 import { runReconciliationSweep } from "../src/pipeline/sweep.js";
 import docsHtml from "../public/docs/index.html?raw";
@@ -427,6 +433,55 @@ describe("terminal-job pruning", () => {
 			"SELECT id FROM memory_jobs WHERE user_id = ? ORDER BY id",
 		).bind(user.id).all();
 		expect(results.map((row) => row.id)).toEqual(["job_prune_fresh"]);
+	});
+});
+
+describe("Huba conversation threads", () => {
+	it("titles a thread from its first question", () => {
+		expect(titleFromQuestion("  how do i   rotate an api key  ")).toBe("how do i rotate an api key");
+		expect(titleFromQuestion("")).toBe("New conversation");
+		expect(titleFromQuestion("x".repeat(200)).length).toBeLessThanOrEqual(70);
+	});
+
+	it("keeps threads private, and reports a no-op delete honestly", async () => {
+		const owner = await signedUpUser();
+		const other = await signedUpUser();
+		const threadId = await appendHubaExchange(env, owner.id, {
+			threadId: null, question: "how do i rotate an api key", answer: "Create a new key, then revoke the old one.",
+		});
+
+		// The owner sees it; nobody else does.
+		expect((await readHubaThread(env, owner.id, threadId))?.messages).toHaveLength(2);
+		expect(await readHubaThread(env, other.id, threadId)).toBeNull();
+		expect((await listHubaThreads(env, other.id)).length).toBe(0);
+
+		// Deleting someone else's thread changes nothing AND says so — an
+		// honest false here also stops it doubling as an existence oracle.
+		expect((await deleteHubaThread(env, other.id, threadId)).deleted).toBe(false);
+		expect((await readHubaThread(env, owner.id, threadId))?.messages).toHaveLength(2);
+
+		// The owner's delete really deletes, and is not idempotently "true".
+		expect((await deleteHubaThread(env, owner.id, threadId)).deleted).toBe(true);
+		expect(await readHubaThread(env, owner.id, threadId)).toBeNull();
+		expect((await deleteHubaThread(env, owner.id, threadId)).deleted).toBe(false);
+	});
+
+	it("continues an existing thread, and ignores an id that is not yours", async () => {
+		const owner = await signedUpUser();
+		const other = await signedUpUser();
+		const first = await appendHubaExchange(env, owner.id, { threadId: null, question: "how do i save", answer: "Use POST /v1/save." });
+		const same = await appendHubaExchange(env, owner.id, { threadId: first, question: "and recall?", answer: "POST /v1/recall." });
+		expect(same).toBe(first);
+		expect((await readHubaThread(env, owner.id, first)).messages).toHaveLength(4);
+		// Someone else's id is not adopted — it starts a fresh thread instead.
+		const hijack = await appendHubaExchange(env, other.id, { threadId: first, question: "hello", answer: "hi" });
+		expect(hijack).not.toBe(first);
+		expect((await readHubaThread(env, owner.id, first)).messages).toHaveLength(4);
+	});
+
+	it("the HTTP doors require a session", async () => {
+		expect((await request("/v1/huba/threads")).status).toBe(401);
+		expect((await request("/v1/huba/threads/hthr_whatever", { method: "DELETE" })).status).toBe(401);
 	});
 });
 
