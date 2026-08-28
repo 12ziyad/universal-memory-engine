@@ -1285,3 +1285,90 @@ columns 559/548, card right edge 1252 against the banner's left edge at 1309,
 three fan paths with zero `NaN`, the trio cycling, 26 tiles. At a true 375px:
 `scrollWidth === clientWidth`, hero stacked, fan disabled with zero paths, and
 the availability line still correct.
+
+---
+
+# Eighth pass — 2026-08-28: the banner retires, the console earns the fold
+
+Owner: *"remove the itsuki japanese written banner on right side, make the
+black box bigger and more attractive, and find a place to write itsuki in
+Japanese."* Chosen from a two-board visual set: console treatment **C**, and
+the mark on a **chapter rule**.
+
+## The mark moved, it did not go
+
+The イツキ band ran down the right of the hero and was pinned by a test as
+owner-protected. That rule is now reversed — deliberately, and the tests flip
+with it rather than being deleted. The mark now appears twice, both outside
+the hero:
+
+- **Centred on a chapter rule**, a full-width ink band on the seam where the
+  cream page turns dark before section 2. It marks a transition the page
+  genuinely has, so it earns its place instead of decorating one.
+- **Signing off the footer** at display size, as the last thing on the page.
+
+A test pins both, and pins the rule's position between the hero and section 2
+— that seam is the entire reason it works.
+
+## Removing the band exposed a leftover
+
+`.hero::before` is a 34% ink panel with a 1px left border: the surface the
+band used to stand on. An older rule hides it below 1280px, so it was still
+painting **on wide screens only** — which is why an earlier check at 1213px
+reported it absent. Left alone it would have put a bare vertical rule and a
+tonal seam two thirds across an otherwise plain cream fold. Hidden at every
+width now.
+
+## The console
+
+Treatment C, the one that answers back:
+
+- **Line numbers in a gutter that shares one CSS grid with the source.** A
+  float or an absolute would drift out of step the moment a sample scrolls
+  horizontally.
+- **Syntax colour**, a **live dot**, and a **result line** — "recalled in
+  Cursor — 'raw SQL only, no ORM', saved from Claude Code on Monday" — so the
+  fold shows a memory coming back rather than a config file waiting to be
+  pasted.
+- The `min-height: 420px` inherited from the old full-height column is capped,
+  but not to zero: switching to the longer Node sample would otherwise make
+  the whole fold jump.
+
+**The highlighter is a scanner, not chained regex replaces.** Chained replaces
+re-process the markup they just inserted and end up colouring the class names
+inside their own spans. Two properties are pinned by tests because both are
+load-bearing:
+
+1. **It escapes each token last**, so nothing can inject markup through
+   `innerHTML`. The samples are static constants today; the escape is what
+   keeps that true if one ever becomes dynamic.
+2. **It never changes what gets copied.** "Create MCP link" reads
+   `textContent`, and the test strips the highlighted markup back and asserts
+   it equals the original sample byte for byte.
+
+The initial paint runs through `landingSelectSdk("mcp")` — the same code path
+a click uses — so the markup can stay plain and greppable for the tests while
+the rendered console is coloured and numbered.
+
+## A test that had gone blind
+
+`product_experience.spec.js` sliced the hero as *from `<section class="hero">`
+to `<section class="developer-section">`*. That second section stopped
+existing in the seventh pass, when section 2 became the handoff. `indexOf`
+returned **-1**, so the slice ran to the end of the document — and every
+assertion of the form "the hero does not contain X" had been silently passing
+against the whole page. Re-anchored to the chapter rule.
+
+## Verified
+
+**188 files / 2,410 tests green.** Live in the browser: the gutter line count
+tracks the sample (7 lines for MCP, 10 for Node), the copied text contains no
+markup, both marks render, the banner is gone, and there is no horizontal
+scroll at 1440 or at a true 375. At 375 the hero stacks, the gutter survives,
+and the result line's detail clause hides rather than becoming a paragraph of
+9px mono.
+
+One note for whoever reads the screenshots: a faint vertical line appears in
+headless captures at some widths and is **a capture artifact** — no element or
+pseudo-element accounts for it, `elementFromPoint` finds nothing there, and it
+does not appear in a real browser.
