@@ -227,6 +227,26 @@ export const CENSUS = {
 		accountErase: "delete",
 		why: "quota requests (kind, note, usage snapshot) cascade with the owning account; no memory content",
 	},
+	huba_threads: {
+		kind: "account",
+		accountErase: "delete",
+		why: "Huba conversation index (titles, counts) is account-scoped; deleted explicitly at erasure and by the users cascade",
+	},
+	huba_messages: {
+		kind: "account",
+		accountErase: "delete",
+		why: "Huba Q&A transcripts are account-scoped content; deleted explicitly at erasure and by the users cascade",
+	},
+	trust_cases: {
+		kind: "account",
+		accountErase: "scrub",
+		why: "grievance/security cases stay as content-free accountability skeletons (kind, severity, clock); the message, notes and account link are scrubbed at erasure",
+	},
+	admin_action_confirmations: {
+		kind: "account",
+		accountErase: "delete",
+		why: "hashed single-use step-up tokens; expire within minutes and are deleted at erasure for both actor and target",
+	},
 	user_scope_preferences: {
 		kind: "account",
 		accountErase: "delete",
@@ -252,6 +272,11 @@ export const CENSUS = {
 	visit_dims: { kind: "global" },
 	visit_uniques: { kind: "global" },
 	ai_daily_totals: { kind: "global", why: "account-day aggregate counters; content-free billing evidence" },
+	security_events: {
+		kind: "global",
+		accountErase: "scrub",
+		why: "storm-suppressed operational security signals; details are allowlisted counts/enums by construction, and account references live in columns severed at erasure",
+	},
 	fence_guard: { kind: "mechanism" },
 
 	// ——— provider routing / spend control (0053) — global, with bounded

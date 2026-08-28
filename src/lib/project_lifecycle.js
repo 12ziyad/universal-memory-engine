@@ -28,6 +28,7 @@
  */
 
 import { newId } from "./ids.js";
+import { recordSecurityEvent } from "./security_events.js";
 import { writeAudit } from "./audit.js";
 import { capabilityGuardStatement, can, resolveMembership } from "./organizations.js";
 import { discoverProjectMemorySpaces } from "./retention.js";
@@ -693,6 +694,7 @@ export async function stepLifecycleRun(env, runId) {
 				attempts: Number(run.attempts) + 1,
 				...(retryable ? {} : { completedAt: Date.now() }),
 			});
+			await emitLifecycleRunFailed(env, run, error, retryable);
 			return publicLifecycleRun(await loadRun(env, runId));
 		}
 	} finally {
@@ -748,9 +750,30 @@ async function driveLifecycleRunLeased(env, { runId, startedAt, budgetMs }) {
 				attempts: Number(run.attempts) + 1,
 				...(retryable ? {} : { completedAt: Date.now() }),
 			}) ?? await loadRun(env, runId);
+			await emitLifecycleRunFailed(env, run, error, retryable);
 		}
 	}
 	return publicLifecycleRun(run ?? await loadRun(env, runId));
+}
+
+/**
+ * A lifecycle run failing is a deletion/archive promise not being kept on
+ * schedule — high severity, deduped per run by group key so a retry loop is
+ * one escalating row, not a feed of identical ones. Never throws.
+ */
+async function emitLifecycleRunFailed(env, run, error, retryable) {
+	await recordSecurityEvent(env, {
+		kind: "lifecycle_run_failed",
+		severity: "high",
+		groupKey: `lifecycle_run_failed:${run?.id ?? "unknown"}`,
+		details: {
+			run_id: run?.id,
+			action: run?.action,
+			phase: run?.phase,
+			code: error?.code ?? "lifecycle_step_failed",
+			retryable,
+		},
+	});
 }
 
 async function transitionProject(env, run, project, { fromStatus, fromStates, toStatus, toState, expectEpoch, bumpEpoch = true, extraSet = "" }) {

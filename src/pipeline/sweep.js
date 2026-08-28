@@ -15,6 +15,7 @@
  */
 
 import { reportServerError } from "../lib/report.js";
+import { recordSecurityEvent } from "../lib/security_events.js";
 import { updateMemoryJob } from "../lib/db.js";
 import { settleStagedText } from "./staged_text.js";
 
@@ -126,6 +127,12 @@ export async function runReconciliationSweep(env) {
 				new Error(`RED ALERT: ${total} job(s) had NO durable work behind them and were failed rather than kicked forever — ${result.orphaned.map((o) => `${o.userId}(${o.count})`).join("; ").slice(0, 250)}`),
 				null,
 			);
+			await recordSecurityEvent(env, {
+				kind: "sweep_orphaned_jobs",
+				severity: "high",
+				groupKey: "sweep_orphaned_jobs",
+				details: { total, users: result.orphaned.length },
+			});
 		}
 	} catch (error) {
 		result.errors.push(`rescue query: ${error?.message ?? error}`);
@@ -174,6 +181,12 @@ export async function runReconciliationSweep(env) {
 				new Error(`RED ALERT: ${result.orphanReceipts} accepted/staged receipt(s) have NO job row — a write was promised with nothing responsible for it`),
 				null,
 			);
+			await recordSecurityEvent(env, {
+				kind: "sweep_receipt_without_job",
+				severity: "critical",
+				groupKey: "sweep_receipt_without_job",
+				details: { count: result.orphanReceipts },
+			});
 		}
 	} catch (error) {
 		result.errors.push(`invariant query: ${error?.message ?? error}`);

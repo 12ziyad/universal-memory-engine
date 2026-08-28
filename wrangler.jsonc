@@ -214,7 +214,14 @@
 		// AI_ROUTING_KILL="1" hard-stops non-default admission for pins and health
 		// probes too. The previous Worker version is the final code rollback. Google
 		// also requires the GCP_SERVICE_ACCOUNT secret and GCP_PROJECT_ID var.
-		"AI_ROUTING": "off"
+		"AI_ROUTING": "off",
+		// Maintenance switch. "on": non-admin API/MCP/OAuth answer 503 with a
+		// Retry-After while the landing page, docs, legal pages, .well-known
+		// and the auth doors keep serving; admin sessions pass everything.
+		// An env var, not D1, on purpose: zero hot-path cost, flipping it
+		// requires Cloudflare-account trust, and it works when D1 is down.
+		// Rollback is the flag flip (edit + redeploy).
+		"MAINTENANCE_MODE": "off"
 		// NOTE: EVAL_MODE stays OUT of production. Set it here only for the
 		// duration of a benchmark run (it enables the /eval/llm pass-through in
 		// src/index.js), then remove it and redeploy.

@@ -270,6 +270,9 @@ import {
 	pruneThreads as pruneHubaThreads,
 } from "./huba/threads.js";
 import { createUpgradeRequest, processUpgradeRequestNotifications, listUpgradeRequests, grantEntitlementStatements, dismissUpgradeRequest } from "./lib/upgrade_requests.js";
+import { createTrustCase, listTrustCasesForUser, readTrustCase, adminTrustOverview, trustCaseActionPlan, processTrustCaseNotifications } from "./lib/trust_cases.js";
+import { recordSecurityEvent, processSecurityEventNotifications } from "./lib/security_events.js";
+import { mintAdminConfirmation, consumeAdminConfirmation, purgeExpiredAdminConfirmations, STEP_UP_ACTIONS } from "./lib/admin_confirmation.js";
 
 function clientIp(request) {
 	return request.headers.get("cf-connecting-ip") ?? "local";
@@ -3111,6 +3114,40 @@ const routes = {
 		return json({ ok: true, users: results ?? [] });
 	},
 
+	/**
+	 * Step-up minting for the destructive admin actions. The response carries
+	 * the single-use token and the exact text to type (the target's email);
+	 * the action door verifies both, and the token's bindings — actor,
+	 * session, action, target, target-state — are re-proved at consumption.
+	 */
+	"POST /v1/admin/users/confirm": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		if (!(await allowRate(env.AUTH_LIMITER, `admin-confirm:${auth.userId}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/v1/admin/users/confirm");
+		if (parsed.response) return parsed.response;
+		const targetId = String(parsed.body.userId ?? "").trim();
+		const action = String(parsed.body.action ?? "").trim();
+		if (!targetId) return json({ error: "userId is required" }, 400);
+		if (!STEP_UP_ACTIONS.has(action)) return json({ error: "unknown action" }, 400);
+		const target = await env.DB.prepare("SELECT id, email, role, status FROM users WHERE id = ?").bind(targetId).first();
+		if (!target) return json({ error: "user not found" }, 404);
+		if (target.id === auth.userId && ["delete", "demote"].includes(action)) {
+			return json({ error: "You cannot do that to your own admin account." }, 400);
+		}
+		const minted = await mintAdminConfirmation(env, {
+			actorUserId: auth.userId, sessionId: auth.session?.id, action, target,
+		});
+		if (minted.error) return json({ error: minted.error }, minted.status ?? 400);
+		return json({
+			ok: true, action,
+			target: { id: target.id, email: target.email },
+			confirm_text: target.email,
+			token: minted.token,
+			expires_at: minted.expiresAt,
+		});
+	},
 	"POST /v1/admin/users/action": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
@@ -3130,6 +3167,31 @@ const routes = {
 		const now = Date.now();
 		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete", "grant_entitlement", "dismiss_upgrade_request"].includes(action)) {
 			return json({ error: "unknown action" }, 400);
+		}
+		// Step-up: the destructive actions require a server-minted single-use
+		// confirmation (POST /v1/admin/users/confirm) plus the target's email
+		// typed back. A browser confirm() is a habit, not a control.
+		if (STEP_UP_ACTIONS.has(action)) {
+			const confirmationToken = String(body.confirmation_token ?? "").trim();
+			const typed = String(body.confirm_text ?? "").trim();
+			if (!confirmationToken) {
+				return json({
+					error: "confirmation_required",
+					message: "This action needs a typed confirmation. Mint one at POST /v1/admin/users/confirm and retry with confirmation_token and confirm_text.",
+					confirm: { action, mint: "/v1/admin/users/confirm" },
+				}, 428);
+			}
+			if (typed !== String(target.email ?? "")) {
+				return json({
+					error: "confirmation_text_mismatch",
+					message: "Type the target account's email exactly to confirm.",
+				}, 403);
+			}
+			const consumed = await consumeAdminConfirmation(env, {
+				token: confirmationToken, actorUserId: auth.userId, sessionId: auth.session?.id,
+				action, targetId: target.id, targetRole: target.role, targetStatus: target.status, now,
+			});
+			if (!consumed.ok) return json({ error: consumed.error, message: consumed.message }, 409);
 		}
 		const auditDetails = {
 			actorUserId: auth.userId,
@@ -3230,6 +3292,12 @@ const routes = {
 						.bind(now, target.id, target.role, target.status),
 				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND role = 'admin'", [target.id])],
 				{ ok: true }), () => ({ metadata: { role: { from: target.role, to: "admin" } } }));
+				await recordSecurityEvent(env, {
+					kind: "admin_role_change", severity: "high",
+					groupKey: `admin_role_change:${target.id}`,
+					details: { action: "promote" },
+					actorUserId: auth.userId, targetUserId: target.id,
+				});
 				return json({ ok: true, action, role: "admin" });
 			}
 			case "demote": {
@@ -3238,6 +3306,12 @@ const routes = {
 						.bind(now, target.id, target.role, target.status),
 				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND role = 'user'", [target.id])],
 				{ ok: true }), () => ({ metadata: { role: { from: target.role, to: "user" } } }));
+				await recordSecurityEvent(env, {
+					kind: "admin_role_change", severity: "high",
+					groupKey: `admin_role_change:${target.id}`,
+					details: { action: "demote" },
+					actorUserId: auth.userId, targetUserId: target.id,
+				});
 				return json({ ok: true, action, role: "user" });
 			}
 			case "delete": {
@@ -3247,6 +3321,14 @@ const routes = {
 						(intent) => deleteAccountCompletely(env, target.id, { auditIntent: intent }),
 						(deleted) => ({ metadata: { status: { from: target.status, to: deleted.deleted ? "deleted" : target.status } } }),
 					);
+					// No target reference on purpose: erasure just severed every
+					// stable identifier for that account, including in this table.
+					await recordSecurityEvent(env, {
+						kind: "admin_account_delete", severity: "critical",
+						groupKey: "admin_account_delete",
+						details: { outcome: result.deleted ? "deleted" : "already_deleted" },
+						actorUserId: auth.userId,
+					});
 					return json({ ok: true, action, deleted: result.deleted, already_deleted: result.already_deleted ?? false });
 				} catch (error) {
 					if (error?.code === "organization_transfer_required") {
@@ -3691,6 +3773,110 @@ const routes = {
 	},
 
 	/** The upgrade queue: who asked, their usage snapshot, their note. */
+	/** The Trust & Safety tab in one trip: due-clock meta, cases, events. */
+	"GET /v1/admin/trust/overview": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		return json({ ok: true, ...(await adminTrustOverview(env)) });
+	},
+
+	/**
+	 * Case lifecycle actions — acknowledge / investigate / resolve / reopen /
+	 * reclassify / note — every one an audited mutation (trust.case.*) with
+	 * the current (status, updated_at) pinned as a precondition, exactly like
+	 * the user-action door: a stale console surfaces as 409, never a
+	 * lost-update.
+	 */
+	"POST /v1/admin/trust/cases/action": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const parsed = await readSmallJsonObject(request, "/v1/admin/trust/cases/action");
+		if (parsed.response) return parsed.response;
+		const body = parsed.body;
+		const caseId = String(body.caseId ?? body.case_id ?? "").trim();
+		const action = String(body.action ?? "").trim();
+		if (!caseId) return json({ error: "caseId is required" }, 400);
+		if (!["acknowledge", "investigate", "resolve", "reopen", "reclassify", "note"].includes(action)) {
+			return json({ error: "unknown action" }, 400);
+		}
+		const row = await readTrustCase(env, caseId);
+		if (!row) return json({ error: "case not found" }, 404);
+		const now = Date.now();
+		const plan = trustCaseActionPlan(env, row, {
+			action,
+			actorUserId: auth.userId,
+			resolution: body.resolution ?? null,
+			note: body.note ?? null,
+			kind: body.kind ?? null,
+			category: body.category ?? null,
+			severity: body.severity ?? null,
+			now,
+		});
+		if (plan.error) return json({ error: plan.error, message: plan.message }, plan.status ?? 400);
+		const auditDetails = {
+			actorUserId: auth.userId,
+			action: `trust.case.${action}`,
+			targetType: "trust_case",
+			targetId: row.id,
+			requestId: auditRequestId(request),
+			waitUntil: waitUntilFrom(ctx),
+			authorizationGuards: [auditInvariantStatement(
+				env,
+				`SELECT 1 FROM users
+				  WHERE id = ? AND role = 'admin' AND status = 'active'
+				    AND NOT EXISTS (SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?)`,
+				[auth.userId, auth.userId],
+			)],
+		};
+		try {
+			await runAuditedMutation(env, auditDetails, async (intent) => {
+				try {
+					await commitAuditedBatch(env, intent, plan.statements, {
+						preconditions: [auditInvariantStatement(
+							env,
+							"SELECT 1 FROM trust_cases WHERE id = ? AND status = ? AND updated_at = ?",
+							[row.id, row.status, row.updated_at],
+						)],
+						postconditions: plan.after.status ? [auditInvariantStatement(
+							env,
+							"SELECT 1 FROM trust_cases WHERE id = ? AND status = ?",
+							[row.id, plan.after.status],
+						)] : [],
+					});
+					return auditedMutationResult({ ok: true }, intent);
+				} catch (error) {
+					if (/fence_guard|violation IS NULL/i.test(String(error?.message ?? error))) {
+						const conflict = new Error("The case changed underneath you. Reload and try again.");
+						conflict.code = "trust_case_state_conflict";
+						conflict.status = 409;
+						throw conflict;
+					}
+					throw error;
+				}
+			}, () => ({ metadata: auditDiff(
+				{ status: row.status, kind: row.kind, category: row.category, severity: row.severity, resolution: row.resolution },
+				{ status: row.status, kind: row.kind, category: row.category, severity: row.severity, resolution: row.resolution, ...plan.after },
+			) }));
+		} catch (error) {
+			if (error?.code === "trust_case_state_conflict") {
+				return json({ error: error.code, message: error.message }, 409);
+			}
+			throw error;
+		}
+		const updated = await readTrustCase(env, caseId);
+		const userRow = updated?.user_id
+			? await env.DB.prepare("SELECT email, name FROM users WHERE id = ?").bind(updated.user_id).first()
+			: null;
+		let notes = [];
+		try { notes = updated.admin_notes ? JSON.parse(updated.admin_notes) : []; } catch { notes = []; }
+		return json({
+			ok: true, action,
+			case: { ...updated, admin_notes: notes, email: userRow?.email ?? null, name: userRow?.name ?? null },
+		});
+	},
+
 	"GET /v1/admin/upgrade-requests": async (request, env) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
@@ -4176,6 +4362,40 @@ const routes = {
 	 * a durable request row plus a best-effort owner email; the admin queue
 	 * (GET /v1/admin/upgrade-requests) is the source of truth.
 	 */
+	/**
+	 * The report door behind Support / privacy requests / security reports.
+	 * Session-only by construction. High-severity kinds email the owner
+	 * immediately (best-effort, via waitUntil); everything lands in the
+	 * Trust & Safety queue with the DPDP 7-day clock where the kind owes one.
+	 */
+	"POST /v1/trust/report": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.AUTH_LIMITER, `trust:${auth.userId}`))) return tooManyFor("auth");
+		const parsed = await readSmallJsonObject(request, "/v1/trust/report");
+		if (parsed.response) return parsed.response;
+		const created = await createTrustCase(env, {
+			userId: auth.userId,
+			kind: parsed.body.kind,
+			category: parsed.body.category,
+			message: parsed.body.message,
+		});
+		if (created.error) return json({ error: created.error, message: created.message }, created.status ?? 400);
+		if ((created.severity === "high" || created.severity === "critical") && ctx) {
+			ctx.waitUntil(processTrustCaseNotifications(env, { limit: 3 }).catch((error) => {
+				console.warn("trust notification drain failed:", error?.message ?? error);
+			}));
+		}
+		return json({ ok: true, case: created }, 201);
+	},
+
+	/** A reporter's own cases — status and due clock, never operator notes. */
+	"GET /v1/trust/cases": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		return json({ ok: true, cases: await listTrustCasesForUser(env, auth.userId) });
+	},
+
 	"POST /v1/upgrade-requests": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
@@ -4940,6 +5160,15 @@ export default {
 		ctx.waitUntil(processUpgradeRequestNotifications(env, { limit: 10 }).catch((error) => {
 			console.warn("upgrade-request notification drain failed:", error?.message ?? error);
 		}));
+		ctx.waitUntil(processTrustCaseNotifications(env, { limit: 10 }).catch((error) => {
+			console.warn("trust case notification drain failed:", error?.message ?? error);
+		}));
+		ctx.waitUntil(processSecurityEventNotifications(env, { limit: 10 }).catch((error) => {
+			console.warn("security event notification drain failed:", error?.message ?? error);
+		}));
+		ctx.waitUntil(purgeExpiredAdminConfirmations(env).catch((error) => {
+			console.warn("admin confirmation purge failed:", error?.message ?? error);
+		}));
 		ctx.waitUntil(purgeExpiredEmailChallenges(env, {
 			now: Number(controller?.scheduledTime) || Date.now(),
 			limit: 250,
@@ -5101,6 +5330,35 @@ async function handleRequestInner(request, env, ctx, url) {
 			const auth = await getSessionUser(env, request);
 			if (url.pathname === "/app") return redirectTo(request, auth ? "/?app=1" : "/?view=login");
 			return redirectTo(request, auth ? "/?app=1" : `/?view=${url.pathname.slice(1)}`);
+		}
+
+		// Maintenance mode: an env var, not a D1 row, on purpose — it costs the
+		// hot path one string compare, flipping it requires Cloudflare-account
+		// trust, and it still works when D1 itself is the outage. The landing
+		// page, docs, legal pages (already redirected above), .well-known and
+		// the SIGN-IN doors keep serving so people can read what is happening
+		// and admins can get in; admins pass entirely. Everything else — the
+		// API, MCP, OAuth, and the /auth WRITE doors (tokens, projects,
+		// organizations, password, onboarding — exactly the writes maintenance
+		// exists to quiesce) — answers 503 with a Retry-After.
+		if (env.MAINTENANCE_MODE === "on") {
+			const path = url.pathname;
+			const signInDoors = new Set([
+				"/auth/login", "/auth/signup", "/auth/logout", "/auth/logout-all",
+				"/auth/me", "/auth/bootstrap", "/auth/email/start", "/auth/email/verify",
+				"/auth/google/start", "/auth/google/callback", "/auth/github", "/auth/github/callback",
+			]);
+			const stillServes = path === "/" || path === "/docs" || path.startsWith("/docs/")
+				|| path.startsWith("/.well-known/") || signInDoors.has(path);
+			if (!stillServes) {
+				const auth = await getSessionUser(env, request).catch(() => null);
+				if (auth?.user?.role !== "admin") {
+					return json({
+						error: "maintenance",
+						message: "Itsuki is briefly down for maintenance. Nothing is lost — try again shortly.",
+					}, 503, { "retry-after": "600" });
+				}
+			}
 		}
 
 		// MCP door for supported clients. Prefer Bearer auth on /mcp; generated

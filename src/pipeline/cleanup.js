@@ -1224,6 +1224,47 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 		env.DB.prepare(
 			"DELETE FROM login_events WHERE user_id = ? OR email_normalized = ?",
 		).bind(userId, user.email_normalized),
+		// Huba transcripts are account-scoped content. The users FK cascade
+		// covers them too, but content-bearing tables are deleted explicitly —
+		// the same belt-and-braces the thread delete door uses.
+		env.DB.prepare("DELETE FROM huba_messages WHERE user_id = ?").bind(userId),
+		env.DB.prepare("DELETE FROM huba_threads WHERE user_id = ?").bind(userId),
+		// Trust cases stay as content-free accountability skeletons: the case
+		// existed, had a kind/severity, and met (or missed) its clock — but the
+		// message, the operator notes, and the account link are gone.
+		env.DB.prepare(
+			"UPDATE trust_cases SET user_id = NULL, message = '[erased]', admin_notes = NULL, updated_at = ? WHERE user_id = ?",
+		).bind(Date.now(), userId),
+		// The erased person may also have been the ACTING admin on other
+		// reporters' cases: sever that provenance too, the same way every other
+		// actor column in this batch is severed. The note rewrite is a targeted
+		// string replace — note objects serialize as {"at":…,"by":"<id>",…}
+		// and ids never contain quotes, so the match is exact.
+		env.DB.prepare("UPDATE trust_cases SET resolved_by = NULL WHERE resolved_by = ?").bind(userId),
+		env.DB.prepare(
+			`UPDATE trust_cases SET admin_notes = REPLACE(admin_notes, '"by":' || json_quote(?), '"by":null')
+			  WHERE admin_notes LIKE '%' || ? || '%'`,
+		).bind(userId, userId),
+		// Security events keep their counts and enums; the stable account
+		// references live in columns exactly so this one sweep can sever them.
+		env.DB.prepare("UPDATE security_events SET actor_user_id = NULL WHERE actor_user_id = ?").bind(userId),
+		env.DB.prepare("UPDATE security_events SET target_user_id = NULL WHERE target_user_id = ?").bind(userId),
+		// Group keys can embed the id too (admin_role_change:<account id>,
+		// vector_*:<memory id>). Rewriting them to the row's own unique id
+		// keeps UNIQUE(group_key, bucket_at) intact while removing the last
+		// stable identifier this table could hold for the erased account.
+		env.DB.prepare(
+			"UPDATE security_events SET group_key = 'erased:' || id WHERE group_key = 'admin_role_change:' || ?",
+		).bind(userId),
+		...[...memoryIds].map((memoryId) => env.DB.prepare(
+			`UPDATE security_events
+			    SET group_key = 'erased:' || id,
+			        details_json = json_remove(details_json, '$.memory_user_id')
+			  WHERE group_key = 'vector_scope_drop:' || ? OR group_key = 'vector_deleted_residue:' || ?`,
+		).bind(memoryId, memoryId)),
+		env.DB.prepare(
+			"DELETE FROM admin_action_confirmations WHERE actor_user_id = ? OR target_user_id = ?",
+		).bind(userId, userId),
 		...[...memoryIds].map((memoryId) => env.DB.prepare(
 			"DELETE FROM error_reports WHERE user_id = ?",
 		).bind(memoryId)),

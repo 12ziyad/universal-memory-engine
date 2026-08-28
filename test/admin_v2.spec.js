@@ -288,7 +288,21 @@ describe("admin users + actions", () => {
 		const loginEnabled = await request("/auth/login", jsonInit({ email: victim.email, password: "correct-horse" }));
 		expect(loginEnabled.status).toBe(200);
 
-		const del = await request("/v1/admin/users/action", jsonInit({ userId: victim.user.id, action: "delete" }, admin.cookie));
+		// Deletion is step-up gated: a bare request must refuse with 428, and
+		// succeed only with a minted token plus the target's email typed back.
+		const bare = await request("/v1/admin/users/action", jsonInit({ userId: victim.user.id, action: "delete" }, admin.cookie));
+		expect(bare.status).toBe(428);
+		expect((await bare.json()).error).toBe("confirmation_required");
+
+		const mint = await request("/v1/admin/users/confirm", jsonInit({ userId: victim.user.id, action: "delete" }, admin.cookie));
+		expect(mint.status).toBe(200);
+		const confirmation = await mint.json();
+		expect(confirmation.confirm_text).toBe(victim.email);
+
+		const del = await request("/v1/admin/users/action", jsonInit({
+			userId: victim.user.id, action: "delete",
+			confirmation_token: confirmation.token, confirm_text: victim.email,
+		}, admin.cookie));
 		expect(del.status).toBe(200);
 		const gone = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(victim.user.id).first();
 		expect(gone).toBeNull();

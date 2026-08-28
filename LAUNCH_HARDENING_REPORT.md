@@ -1474,3 +1474,139 @@ in a header of switchers should look like one.
 The full design (three D1 tables, module layout, door signatures, storm-suppression
 algorithm, step-up confirmation, maintenance mode, build order, test plan) lives in
 the campaign plan. Nothing of it exists in the tree yet, by explicit owner instruction.
+
+# Tenth pass — 2026-08-29: Phase 2, the Trust & Safety center
+
+Phase 2 of the campaign, built to the spec frozen in the campaign plan on owner
+go-ahead. The theme of Phase 1 was making the words true; the theme of Phase 2 is
+making the promises MECHANICAL — the 7-day grievance answer gets a clock, security
+signals get a severity and an inbox, and the destructive admin actions get a
+control instead of a habit.
+
+## Migration 0062 — three tables
+
+- **`trust_cases`** — privacy requests / security reports / abuse reports /
+  support, with a status ladder (received → acknowledged → investigating →
+  resolved + resolution) and, for the two DPDP-facing kinds, `response_due_at =
+  received + 7 days`. Deliberately NO one-open-case unique index (two security
+  reports are two facts); the abuse valve is an app-side cap of 3 cases per user
+  per 24h. Messages pass the same secret scrubber every save door uses BEFORE
+  storage. The reporter link is nullable ON PURPOSE with no users FK: account
+  erasure keeps the content-free skeleton (kind, severity, clock — accountability
+  evidence) while scrubbing message, notes, and identity.
+- **`security_events`** — append-only and storm-suppressed:
+  `UNIQUE(group_key, bucket_at)` with 10-minute buckets, so a 10k-row storm is
+  ONE row whose `count` carries the volume — and volume escalates (≥10 in a
+  bucket +1 severity step, ≥100 +2, capped at critical). `details_json` passes a
+  hard allowlist (counts, enums, opaque ids, ip-hash prefixes — structurally no
+  memory text, secrets, or addresses); account references ride in dedicated
+  columns so erasure severs them with one UPDATE.
+- **`admin_action_confirmations`** — hashed single-use step-up tokens, 5-minute
+  TTL, bound to actor + session + action + target + the target's (role, status)
+  at mint time.
+
+Census entries for all three (`scrub`/`scrub`/`delete`) plus erasure statements
+in `deleteAccountCompletely`. Found in passing: **the census was already broken
+on this branch** — `huba_threads`/`huba_messages` (0061) were never classified,
+so `schema_census.spec.js` failed in the unit lane. Both are now classified
+(`account`/`accountErase: delete` — Huba threads key on the ACCOUNT id) with
+explicit content-table deletes in the erasure batch, belt-and-braces over the
+users-FK cascade.
+
+## The doors
+
+- `POST /v1/trust/report` (session, AUTH_LIMITER `trust:` key) and
+  `GET /v1/trust/cases` (own cases with status and due date — never
+  `admin_notes`, not even as an empty field).
+- `GET /v1/admin/trust/overview` — meta strip + case queue + event feed in one
+  trip.
+- `POST /v1/admin/trust/cases/action` — acknowledge / investigate / resolve /
+  reopen / reclassify / note, every one a `runAuditedMutation` (`trust.case.*`)
+  with the case's (status, updated_at) pinned as a batch precondition: a stale
+  console gets 409, never a lost update. Reclassifying INTO a due-bearing kind
+  anchors the clock to RECEIPT, not to the reclassification.
+  `AUDITABLE_FIELDS` gains exactly: severity, category, kind, resolution.
+- `POST /v1/admin/users/confirm` mints the step-up; delete/promote/demote in
+  `/v1/admin/users/action` now demand the token AND the target's email typed
+  back — 428 without a token, 403 on a typed-text mismatch, 409 on
+  replay/expiry/stale-target/foreign-actor, consumption CAS-guarded, the audited
+  batch unchanged after. TOTP/passkeys remain flagged backlog.
+
+## Owner email, wired through the 0059 outbox pattern
+
+High/critical trust cases email immediately (inline drain via waitUntil, cron
+retry behind it); medium/low collapse into one digest per drain after a
+30-minute delay. Security events email only at high/critical, one email per
+group per hour, at most 10 event emails per hour globally — deferred, never
+dropped: the admin tab is always the record, email is a courtesy. Also fixed in
+passing: the upgrade-request email's button passed `href:` where the renderer
+reads `url:` — the owner-email button had rendered empty since 0059.
+
+## Eight signals wired
+
+vector scope drops (recall, split — see below), lifecycle run failures (both
+driver catches, deduped per run), sweep orphaned jobs (high) and
+receipt-without-job (critical — both still land in error_reports too), failed-
+password bursts ≥10/15min per ip-hash (high, truncated hash prefix only), admin
+role changes (high), admin account deletes (critical, deliberately target-free —
+erasure just severed every identifier), and audited-actions-denied (medium, at
+the one choke point in audit.js every governed mutation passes).
+
+## The adversarial pass — six real defects found and fixed before commit
+
+A four-lens review (SQL/concurrency, authorization, pipeline/erasure, SPA) with
+independent refutation of every claim confirmed six, zero refuted:
+
+1. **Erased ids survived in `security_events.group_key`** —
+   `admin_role_change:<account id>` and `vector_*:<memory id>` outlived the
+   erasure that nulls the id columns, contradicting the module's own contract.
+   The erasure batch now rewrites those group keys to `erased:<row id>`
+   (preserving the UNIQUE constraint) and strips `memory_user_id` from details.
+2. **`trust_cases.resolved_by` and note `by:` ids survived erasure of the
+   ACTING admin** on other reporters' cases. Both severed now, matching the
+   eight sibling actor-column scrubs in the same batch.
+3. **The maintenance gate exempted ALL of `/auth/*`** — including token minting,
+   org/project creation, password change: exactly the writes maintenance exists
+   to quiesce. Narrowed to the twelve sign-in/session doors.
+4. **`vector_scope_drop` conflated routine deleted-vector residue with foreign
+   hits** — async vector cleanup means soft-deleted nodes' vectors linger
+   legitimately, which would have stormed the owner with false high-severity
+   emails. Drops are now classified with one bounded query: still-owned-but-
+   deleted → `vector_deleted_residue` (low, quiet), truly unknown →
+   `vector_scope_drop` (medium). The false-positive path no longer desensitizes
+   the real signal.
+5. **The step-up modal could double-submit** its single-use token (Enter twice /
+   double-click), producing "Done: delete." followed by "already used" — an
+   in-flight guard now pins one flight (the CAS always kept execution
+   exactly-once; the defect was contradictory operator feedback).
+6. **A failed Trust-tab load stranded "Loading…" forever** — now an explicit
+   failure state with a Retry button.
+
+## Maintenance mode
+
+`MAINTENANCE_MODE` env var ("off" default, wrangler.jsonc): non-admin API, MCP,
+OAuth, and /auth write doors answer 503 + `Retry-After: 600`; landing, docs,
+legal, `.well-known`, and the sign-in doors keep serving; admin sessions pass
+everything. An env var and not a D1 row on purpose: zero hot-path cost, flipping
+it requires Cloudflare-account trust, and it works when D1 itself is the outage.
+
+## The console and the report door
+
+Admin gains the **Trust & Safety** tab: meta strip (open / overdue / due-48h /
+events-24h), the case queue with due-countdown chips (>2d plain → ≤2d warn →
+≤24h urgent → OVERDUE red), a case pane (message, timeline, notes, audited
+actions), and the security-event feed with severity×count chips, low collapsed
+behind a toggle. The Settings "Support / report issue" mailto sheet became the
+tracked report form (kind, privacy-request category, 2000-char message) that
+files straight into the queue and shows the reporter their own cases and due
+dates; signed-out keeps the founder@ sheet. delete/promote/demote in the console
+now walk through the typed-confirmation modal.
+
+## Verification
+
+Full Workers-pool suite green on the final tree — **193 files / 2,464 tests**
+(suite9.log) — plus the node lane **43 files / 666 passed / 1 skipped**
+(unit9.log; includes the census and append-only migration gates). New specs:
+trust_cases (10), security_events (11), admin_step_up (6), maintenance_mode (5),
+trust_ui (10); admin_v2 updated for the step-up flow. Deployed and
+live-verified — see the deployment note below.

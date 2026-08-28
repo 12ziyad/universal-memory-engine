@@ -4,6 +4,8 @@
  * an optimization for the shortlist, not a source of truth.
  */
 
+import { recordSecurityEvent } from "./security_events.js";
+
 
 /* ---------------------------------------------------------------------------
  * Revision-qualified vector ids.
@@ -122,13 +124,53 @@ export async function queryNodeVectors(env, config, { userId, values, topK }) {
 	}
 
 	const best = new Map();
+	const droppedIds = new Set();
 	for (const entry of parsed) {
 		const head = heads.get(entry.objectId);
-		if (head === undefined) continue;                 // deleted or foreign
+		if (head === undefined) { droppedIds.add(entry.objectId); continue; } // deleted or foreign
 		if (!entry.legacy && entry.revision !== head) continue; // superseded vector
 		const existing = best.get(entry.objectId);
 		if (!existing || (entry.score ?? 0) > (existing.score ?? 0)) {
 			best.set(entry.objectId, { id: entry.objectId, score: entry.score });
+		}
+	}
+	// The silent drop above is the isolation working — but silence is also how
+	// a namespace-confusion bug would hide. Classify before alarming: a
+	// soft-deleted node whose vector has not been cleaned up yet is ROUTINE
+	// deletion lag (low — visible, collapsed, never emailed), while an id with
+	// no row for this user at all is another tenant's vector or content that
+	// should not exist — the actual namespace-confusion signal (medium).
+	// Without the split, ordinary post-delete residue would storm the owner
+	// with false high-severity alerts and bury the one that matters.
+	if (droppedIds.size) {
+		let ownedEver = new Set();
+		try {
+			const ids = [...droppedIds].slice(0, 200);
+			const marks = ids.map(() => "?").join(",");
+			const { results } = await env.DB.prepare(
+				`SELECT id FROM nodes WHERE user_id = ? AND id IN (${marks})`,
+			).bind(userId, ...ids).all();
+			ownedEver = new Set((results ?? []).map((row) => row.id));
+		} catch {
+			ownedEver = new Set(droppedIds); // classification is best-effort; default to residue
+		}
+		const foreign = [...droppedIds].filter((id) => !ownedEver.has(id)).length;
+		const residue = droppedIds.size - foreign;
+		if (foreign) {
+			await recordSecurityEvent(env, {
+				kind: "vector_scope_drop",
+				severity: "medium",
+				groupKey: `vector_scope_drop:${userId}`,
+				details: { memory_user_id: userId, dropped: foreign },
+			});
+		}
+		if (residue) {
+			await recordSecurityEvent(env, {
+				kind: "vector_deleted_residue",
+				severity: "low",
+				groupKey: `vector_deleted_residue:${userId}`,
+				details: { memory_user_id: userId, dropped: residue },
+			});
 		}
 	}
 	return [...best.values()];

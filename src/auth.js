@@ -1,4 +1,5 @@
 import { newId } from "./lib/ids.js";
+import { recordSecurityEvent } from "./lib/security_events.js";
 import { stampEarlyAccess } from "./lib/ai_budget.js";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { resolveVerifiedIdentity } from "./lib/auth_identity.js";
@@ -406,9 +407,29 @@ export async function googleAuthCallback(env, request) {
 export async function recordLoginEvent(env, request, userId, outcome, email = null) {
 	try {
 		const ip = request.headers.get("cf-connecting-ip") ?? "";
+		const ipHash = ip ? await sha256Hex(ip) : null;
+		const at = now();
 		await env.DB.prepare(
 			"INSERT INTO login_events (id, user_id, email_normalized, outcome, created_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?)",
-		).bind(newId("login"), userId, email, outcome, now(), ip ? await sha256Hex(ip) : null).run();
+		).bind(newId("login"), userId, email, outcome, at, ipHash).run();
+		// Ten failed passwords from one address inside fifteen minutes is a
+		// credential-stuffing shape, not a fat finger. The event dedupes per
+		// ip-hash prefix and escalates with volume; only the truncated hash
+		// ever leaves this function.
+		if (outcome === "password_failed" && ipHash) {
+			const windowMs = 15 * 60 * 1000;
+			const burst = await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM login_events WHERE outcome = 'password_failed' AND ip_hash = ? AND created_at > ?",
+			).bind(ipHash, at - windowMs).first("n");
+			if (Number(burst ?? 0) >= 10) {
+				await recordSecurityEvent(env, {
+					kind: "login_failed_burst",
+					severity: "high",
+					groupKey: `login_failed_burst:${ipHash.slice(0, 12)}`,
+					details: { ip_hash_prefix: ipHash.slice(0, 12), count: Number(burst), window_ms: windowMs, threshold: 10 },
+				});
+			}
+		}
 	} catch (error) {
 		console.warn("login event record failed:", error?.message ?? error);
 	}

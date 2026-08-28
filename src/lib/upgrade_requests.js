@@ -93,7 +93,7 @@ export async function processUpgradeRequestNotifications(env, { limit = 10, now 
 					{ type: "paragraph", text: `Account: ${user?.email ?? "unknown"} (${row.user_id})` },
 					{ type: "paragraph", text: `Usage at request time — ${usageLine}` },
 					...(row.note ? [{ type: "note", text: `Their note: ${row.note}` }] : []),
-					{ type: "button", label: "Open the admin queue", href: "https://itsuki.app/app#admin" },
+					{ type: "button", label: "Open the admin queue", url: "https://itsuki.app/app#admin" },
 				],
 				footnote: "Grant or dismiss from the admin portal. This email is a notification only — the request lives in the queue either way.",
 			});

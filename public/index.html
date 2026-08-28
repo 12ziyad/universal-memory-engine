@@ -2863,6 +2863,8 @@
 <div id="keyModal" class="modal-backdrop" hidden></div>
 <div id="mwEditModal" class="modal-backdrop" hidden></div>
 <div id="policyModal" class="modal-backdrop" hidden></div>
+<div id="trustReportModal" class="modal-backdrop" hidden></div>
+<div id="stepUpModal" class="modal-backdrop" hidden></div>
 <div id="projectModal" class="modal-backdrop" hidden></div>
 <div id="inviteModal" class="modal-backdrop" hidden></div>
 <div id="settingsModal" class="modal-backdrop" hidden></div>
@@ -14623,6 +14625,7 @@ const ADMIN_TABS = [
 	["activity", "Saves", "Latest writes across all accounts"],
 	["errors", "Errors", "Reported failures"],
 	["requests", "Requests", "Upgrade requests"],
+	["trust", "Trust & Safety", "Cases with due clocks, and security events"],
 	["spend", "Spend", "AI cost by day"],
 	["health", "Health", "System and routing"],
 ];
@@ -14664,7 +14667,163 @@ function adminTab(name) {
 	if (name === "users" && !S.adminUsers) refreshAdminUsers();
 	if (name === "errors" && !S.adminErrors) refreshAdminErrors();
 	if (name === "requests" && !S.adminUpgradeRequests) refreshAdminUpgradeRequests();
+	if (name === "trust" && !S.adminTrust) refreshAdminTrust();
 	if (name === "spend" && !S.adminSpend) refreshAdminSpend();
+}
+
+async function refreshAdminTrust() {
+	try {
+		let res;
+		try { res = await fetch("/v1/admin/trust/overview", { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		S.adminTrust = await res.json();
+		S.adminTrustError = false;
+	} catch (err) {
+		S.adminTrust = null;
+		S.adminTrustError = true;
+		toast(err.message, true);
+	}
+	if ((S.adminTab || "overview") === "trust") renderAdminBody();
+}
+
+const TRUST_KIND_LABEL = { privacy_request: "privacy request", security_report: "security report", abuse_report: "abuse report", support: "support" };
+
+function trustSeverityChip(severity, count) {
+	const cls = severity === "critical" || severity === "high" ? "mw-chip mw-chip-err"
+		: severity === "medium" ? "mw-chip mw-chip-warn" : "mw-chip";
+	return `<span class="${cls}">${esc(severity)}${count > 1 ? ` ×${count}` : ""}</span>`;
+}
+
+/** The due ladder: >2d plain, ≤2d warn, ≤24h urgent, past due OVERDUE red. */
+function trustDueChip(c) {
+	if (!c.response_due_at) return "";
+	if (c.status === "resolved") {
+		const met = !c.resolved_at || c.resolved_at <= c.response_due_at;
+		return `<span class="mw-chip${met ? " mw-chip-ok" : " mw-chip-warn"}">${met ? "answered in time" : "answered late"}</span>`;
+	}
+	const left = c.response_due_at - Date.now();
+	if (left < 0) return `<span class="badge state-inactive">OVERDUE</span>`;
+	const hours = Math.ceil(left / 3600000);
+	if (hours <= 24) return `<span class="mw-chip mw-chip-err">due in ${hours}h</span>`;
+	const days = Math.ceil(left / 86400000);
+	return `<span class="mw-chip${days <= 2 ? " mw-chip-warn" : ""}">due in ${days}d</span>`;
+}
+
+function adminTrustView() {
+	const data = S.adminTrust;
+	// A failed fetch must not strand the tab on "Loading…" — say so, offer retry.
+	if (!data) return `<div class="box" style="max-width:1100px"><h3>Trust &amp; Safety</h3>
+		<div class="help">${S.adminTrustError ? "The overview could not be loaded." : "Loading…"}</div>
+		${S.adminTrustError ? `<div class="section-actions"><button class="ghost mini" onclick="refreshAdminTrust()">Retry</button></div>` : ""}</div>`;
+	const meta = data.meta || {};
+	const stat = (label, value, bad) =>
+		`<div class="ops-stat"><b${bad && value > 0 ? ' style="color:var(--red)"' : ""}>${esc(String(value ?? 0))}</b><span>${esc(label)}</span></div>`;
+	const cases = data.cases || [];
+	const selected = cases.find((c) => c.id === S.adminTrustCase) || null;
+	const events = data.events || [];
+	const lows = events.filter((e) => (e.severity_rank ?? 0) === 0);
+	const shown = S.adminTrustShowLow ? events : events.filter((e) => (e.severity_rank ?? 0) > 0);
+	return `<div class="box" style="max-width:1100px"><h3>Trust &amp; Safety</h3>
+		<div class="help">Reports with their 7-day clocks, and the security-event feed. A storm is one row with a count — email is a courtesy, this table is the record.</div>
+		<div class="ops-stats">
+			${stat("open cases", meta.open)}
+			${stat("overdue", meta.overdue, true)}
+			${stat("due in 48h", meta.due_48h)}
+			${stat("events, 24h", meta.events_24h)}
+		</div>
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;gap:8px">
+			<h4 class="ops-h" style="margin:0">Cases</h4>
+			<button class="ghost mini" onclick="S.adminTrust=null;refreshAdminTrust()">Refresh</button>
+		</div>
+		${cases.length ? `<div class="ops-scroll" style="margin-top:8px"><table class="ops-table">
+			<thead><tr><th>Received</th><th>Who</th><th>Kind</th><th>Severity</th><th>Status</th><th>Due</th></tr></thead>
+			<tbody>${cases.map((c) => `<tr style="cursor:pointer" onclick="adminTrustSelect('${esc(c.id)}')">
+				<td class="ops-when" title="${esc(new Date(c.received_at).toISOString())}">${esc(ago(c.received_at))}</td>
+				<td class="ops-actor">${esc(c.email || (c.user_id ? String(c.user_id).slice(0, 12) : "erased account"))}</td>
+				<td>${esc(TRUST_KIND_LABEL[c.kind] || c.kind)}${c.category ? ` <span class="help">${esc(c.category)}</span>` : ""}</td>
+				<td>${trustSeverityChip(c.severity, 1)}</td>
+				<td><span class="badge ${c.status === "resolved" ? "state-completed" : c.status === "received" ? "state-paused" : "state-active"}">${esc(c.status)}</span></td>
+				<td>${trustDueChip(c)}</td>
+			</tr>`).join("")}</tbody>
+		</table></div>` : `<div class="help" style="margin-top:8px">No cases yet. Reports filed from Settings → Support land here with their clocks running.</div>`}
+		${selected ? adminTrustCaseDetail(selected) : ""}
+		<div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;flex-wrap:wrap;gap:8px">
+			<h4 class="ops-h" style="margin:0">Security events</h4>
+			${lows.length ? `<button class="ghost mini" onclick="adminTrustToggleLow()">${S.adminTrustShowLow ? "Hide" : "Show"} ${lows.length} low</button>` : ""}
+		</div>
+		${shown.length ? `<div class="ops-scroll" style="margin-top:8px"><table class="ops-table">
+			<thead><tr><th>Last seen</th><th>Severity</th><th>Kind</th><th>Group</th><th>Details</th></tr></thead>
+			<tbody>${shown.map((e) => `<tr class="${(e.severity_rank ?? 0) >= 2 ? "ops-row-bad" : ""}">
+				<td class="ops-when" title="${esc(new Date(e.last_at).toISOString())}">${esc(ago(e.last_at))}</td>
+				<td>${trustSeverityChip(e.severity, e.count)}</td>
+				<td><code class="ops-action">${esc(e.kind)}</code></td>
+				<td class="ops-target">${esc(String(e.group_key || "").slice(0, 44))}</td>
+				<td class="help">${esc(e.details ? Object.entries(e.details).map(([k, v]) => `${k}: ${v}`).join(" · ").slice(0, 90) : "")}</td>
+			</tr>`).join("")}</tbody>
+		</table></div>` : `<div class="help" style="margin-top:8px">${events.length ? "Only low-severity events in the window." : "No security events recorded. Quiet is the good state."}</div>`}
+	</div>`;
+}
+
+function adminTrustCaseDetail(c) {
+	const open = c.status !== "resolved";
+	const timeline = [["received", c.received_at], ["acknowledged", c.acknowledged_at], ["resolved", c.resolved_at]]
+		.filter(([, at]) => at);
+	return `<div class="action-box" style="margin-top:10px">
+		<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+			<div><b>${esc(TRUST_KIND_LABEL[c.kind] || c.kind)}</b> <span class="help">${esc(c.id)}</span> ${trustSeverityChip(c.severity, 1)} ${trustDueChip(c)}</div>
+			<button class="ghost mini" onclick="adminTrustSelect('')">Close</button>
+		</div>
+		<div class="help" style="margin-top:4px">${esc(c.email || "erased account")}${c.resolution ? ` · resolution: ${esc(c.resolution)}` : ""}</div>
+		<div style="margin-top:8px;white-space:pre-wrap;font-size:13px;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--panel2)">${esc(c.message || "")}</div>
+		<div class="help" style="margin-top:8px">${timeline.map(([label, at]) => `${label} ${ago(at)}`).join(" → ")}</div>
+		${(c.admin_notes || []).length ? `<div style="margin-top:8px">${c.admin_notes.map((n) => `<div class="kv"><span style="opacity:.7">${esc(new Date(n.at).toISOString().slice(0, 16).replace("T", " "))}</span> ${esc(n.text)}</div>`).join("")}</div>` : ""}
+		<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+			${c.status === "received" ? `<button class="ghost mini" onclick="adminTrustAction('${esc(c.id)}','acknowledge')">Acknowledge</button>` : ""}
+			${open && c.status !== "investigating" ? `<button class="ghost mini" onclick="adminTrustAction('${esc(c.id)}','investigate')">Investigate</button>` : ""}
+			${open ? `<select id="trustResolution" style="width:120px">${["answered", "fixed", "no_action", "duplicate", "spam"].map((r) => `<option value="${r}">${r.replace(/_/g, " ")}</option>`).join("")}</select>
+			<button class="ghost mini" onclick="adminTrustAction('${esc(c.id)}','resolve')">Resolve</button>` : `<button class="ghost mini" onclick="adminTrustAction('${esc(c.id)}','reopen')">Reopen</button>`}
+			<input id="trustNote" placeholder="note for the file" style="flex:1;min-width:160px" />
+			<button class="ghost mini" onclick="adminTrustAction('${esc(c.id)}','note')">Add note</button>
+		</div>
+	</div>`;
+}
+
+function adminTrustSelect(caseId) {
+	S.adminTrustCase = caseId || null;
+	renderAdminBody();
+}
+
+function adminTrustToggleLow() {
+	S.adminTrustShowLow = !S.adminTrustShowLow;
+	renderAdminBody();
+}
+
+async function adminTrustAction(caseId, action) {
+	const payload = { caseId, action };
+	if (action === "resolve") payload.resolution = $("#trustResolution")?.value || "answered";
+	if (action === "note") {
+		payload.note = $("#trustNote")?.value?.trim();
+		if (!payload.note) { toast("Write the note first.", true); return; }
+	}
+	try {
+		let res;
+		try {
+			res = await fetch("/v1/admin/trust/cases/action", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+		} catch { throw new Error(FRIENDLY_NETWORK); }
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		toast(`Done: ${action}.`);
+		S.adminTrust = null;
+		await refreshAdminTrust();
+	} catch (err) {
+		toast(`Action failed: ${err.message}`, true);
+	}
 }
 
 async function refreshAdminErrors() {
@@ -14873,12 +15032,14 @@ async function toggleUserJourney(userId) {
 }
 
 async function adminUserAction(userId, action) {
+	// The destructive three need the server-minted typed confirmation, not a
+	// browser confirm(): a habit is not a control.
+	if (["delete", "promote", "demote"].includes(action)) {
+		return openAdminConfirmModal(userId, action);
+	}
 	const labels = {
 		disable: "Disable this account? The user is logged out everywhere and cannot log in.",
-		delete: "PERMANENTLY delete this account and ALL of its memory? This cannot be undone.",
 		revoke_sessions: "Log this user out of all devices?",
-		promote: "Give this account full admin access?",
-		demote: "Remove admin access from this account?",
 	};
 	if (labels[action] && !confirm(labels[action])) return;
 	try {
@@ -14899,7 +15060,103 @@ async function adminUserAction(userId, action) {
 		await refreshAdminUsers();
 		refreshAdminData();
 	} catch (err) {
-		toast(`Action failed: ${err.message}`);
+		toast(`Action failed: ${err.message}`, true);
+	}
+}
+
+const STEP_UP_COPY = {
+	delete: { title: "Delete this account permanently", warn: "Everything this account owns — memory, projects, sessions — is erased. This cannot be undone." },
+	promote: { title: "Grant full admin access", warn: "Admins can read operator metadata, change roles, and delete accounts." },
+	demote: { title: "Remove admin access", warn: "The account keeps its data but loses the operator console." },
+};
+
+/**
+ * Step-up for delete / promote / demote: mint a single-use token bound to
+ * this admin, session, action and target-state, then require the target's
+ * email typed back. The server re-proves all of it at consumption.
+ */
+async function openAdminConfirmModal(userId, action) {
+	let minted;
+	try {
+		let res;
+		try {
+			res = await fetch("/v1/admin/users/confirm", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ userId, action }),
+			});
+		} catch { throw new Error(FRIENDLY_NETWORK); }
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		minted = body;
+	} catch (err) {
+		toast(`Could not start the confirmation: ${err.message}`, true);
+		return;
+	}
+	const modal = $("#stepUpModal");
+	if (!modal) return;
+	const copy = STEP_UP_COPY[action] || { title: action, warn: "" };
+	rememberModalOpener("stepUpModal");
+	modal.hidden = false;
+	modal.onclick = closeStepUpModal;
+	modal.innerHTML = `<section class="policy-modal" role="dialog" aria-modal="true" aria-labelledby="stepUpTitle" onclick="event.stopPropagation()">
+		<header><div><h2 id="stepUpTitle">${esc(copy.title)}</h2><div class="help">${esc(copy.warn)}</div></div><button class="ghost mini" onclick="closeStepUpModal()">Cancel</button></header>
+		<p style="margin-top:10px">Type <b>${esc(minted.confirm_text)}</b> to confirm. The confirmation expires in 5 minutes.</p>
+		<div class="form-row"><input id="stepUpTyped" placeholder="${esc(minted.confirm_text)}" autocomplete="off" spellcheck="false" /></div>
+		<div class="section-actions"><button class="danger" id="stepUpGo">Confirm ${esc(action)}</button></div>
+	</section>`;
+	const go = () => submitAdminConfirm(userId, action, minted.token, minted.confirm_text);
+	$("#stepUpGo").onclick = go;
+	$("#stepUpTyped").addEventListener("keydown", (event) => { if (event.key === "Enter") go(); });
+	requestAnimationFrame(() => $("#stepUpTyped")?.focus());
+}
+
+function closeStepUpModal() {
+	const modal = $("#stepUpModal");
+	if (!modal) return;
+	modal.hidden = true;
+	modal.innerHTML = "";
+	restoreModalOpener("stepUpModal");
+}
+
+let stepUpBusy = false;
+
+async function submitAdminConfirm(userId, action, token, expected) {
+	const typed = $("#stepUpTyped")?.value?.trim() ?? "";
+	if (typed !== expected) {
+		toast("The text does not match — type the account's email exactly.", true);
+		return;
+	}
+	// One flight only: the token is single-use, so a double-click's second
+	// request would 409 "already used" right after the first one's "Done" —
+	// contradictory feedback on a destructive action.
+	if (stepUpBusy) return;
+	stepUpBusy = true;
+	const goButton = $("#stepUpGo");
+	if (goButton) goButton.disabled = true;
+	try {
+		let res;
+		try {
+			res = await fetch("/v1/admin/users/action", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ userId, action, confirmation_token: token, confirm_text: typed }),
+			});
+		} catch { throw new Error(FRIENDLY_NETWORK); }
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		closeStepUpModal();
+		toast(`Done: ${action.replace(/_/g, " ")}.`);
+		await refreshAdminUsers();
+		refreshAdminData();
+	} catch (err) {
+		toast(`Action failed: ${err.message}`, true);
+		const retryButton = $("#stepUpGo");
+		if (retryButton) retryButton.disabled = false;
+	} finally {
+		stepUpBusy = false;
 	}
 }
 
@@ -15308,6 +15565,11 @@ function renderAdminBody() {
 		return;
 	}
 
+	if (tab === "trust") {
+		body.innerHTML = adminTrustView();
+		return;
+	}
+
 	if (tab === "spend") {
 		const rows = S.adminSpend;
 		const byDay = new Map();
@@ -15496,6 +15758,111 @@ function closePolicyModal() {
 	modal.hidden = true;
 	modal.innerHTML = "";
 	restoreModalOpener("policyModal");
+}
+
+/**
+ * The tracked report door. Signed-in reports become trust cases with a
+ * status the reporter can see and — for privacy requests and security
+ * reports — a 7-day response clock. Signed out falls back to the founder@
+ * support sheet, which stays the always-available path.
+ */
+function openTrustReportModal() {
+	if (!S.me?.user) { openPolicyModal("support"); return; }
+	const modal = $("#trustReportModal");
+	if (!modal) return;
+	rememberModalOpener("trustReportModal");
+	modal.hidden = false;
+	modal.onclick = closeTrustReportModal;
+	modal.innerHTML = `<section class="policy-modal" role="dialog" aria-modal="true" aria-labelledby="trustReportTitle" onclick="event.stopPropagation()">
+		<header><div><h2 id="trustReportTitle">Support &amp; reports</h2><div class="help">Reports land in a tracked queue, not a mailbox. Privacy requests and security reports get a response within 7 days.</div></div><button class="ghost mini" onclick="closeTrustReportModal()">Close</button></header>
+		<div class="form-row" style="margin-top:10px">
+			<label class="help" for="trustKind">What is this about?</label>
+			<select id="trustKind" onchange="$('#trustCategoryRow').style.display = this.value === 'privacy_request' ? '' : 'none'">
+				<option value="support">Support — something is broken or confusing</option>
+				<option value="privacy_request">Privacy request — my data, my rights</option>
+				<option value="security_report">Security report — a vulnerability or suspicious behavior</option>
+				<option value="abuse_report">Abuse report — misuse of Itsuki</option>
+			</select>
+		</div>
+		<div class="form-row" id="trustCategoryRow" style="display:none">
+			<label class="help" for="trustCategory">Privacy request type</label>
+			<select id="trustCategory">
+				<option value="question">Question</option>
+				<option value="access">Access my data</option>
+				<option value="export">Export my data</option>
+				<option value="correction">Correct my data</option>
+				<option value="deletion">Delete my data</option>
+			</select>
+		</div>
+		<div class="form-row">
+			<label class="help" for="trustMessage">What happened? Include enough to reproduce — never full tokens or private MCP URLs.</label>
+			<textarea id="trustMessage" rows="5" maxlength="2000" placeholder="A person reads this."></textarea>
+		</div>
+		<div class="section-actions">
+			<button onclick="submitTrustReport()">Send report</button>
+			<span class="help">Prefer email? <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></span>
+		</div>
+		<div id="trustOwnCases" class="help" style="margin-top:12px"></div>
+	</section>`;
+	loadOwnTrustCases();
+	requestAnimationFrame(() => $("#trustKind")?.focus());
+}
+
+function closeTrustReportModal() {
+	const modal = $("#trustReportModal");
+	if (!modal) return;
+	modal.hidden = true;
+	modal.innerHTML = "";
+	restoreModalOpener("trustReportModal");
+}
+
+async function loadOwnTrustCases() {
+	const host = $("#trustOwnCases");
+	if (!host) return;
+	try {
+		const res = await fetch("/v1/trust/cases", { credentials: "include" });
+		if (!res.ok) throw new Error();
+		const cases = (await res.json()).cases || [];
+		if (!cases.length) return;
+		host.innerHTML = `<b style="color:var(--text)">Your reports</b>` + cases.slice(0, 8).map((c) => {
+			const due = c.response_due_at && c.status !== "resolved"
+				? (c.response_due_at < Date.now()
+					? " · response overdue — nudge founder@itsuki.app"
+					: ` · response due ${new Date(c.response_due_at).toISOString().slice(0, 10)}`)
+				: "";
+			return `<div class="kv" style="margin-top:4px">${esc(c.kind.replace(/_/g, " "))} · ${esc(c.status)}${esc(due)} <span style="opacity:.7">(${ago(c.received_at)})</span></div>`;
+		}).join("");
+	} catch {
+		host.textContent = "";
+	}
+}
+
+async function submitTrustReport() {
+	const kind = $("#trustKind")?.value || "support";
+	const message = $("#trustMessage")?.value?.trim() ?? "";
+	if (!message) { toast("Describe the issue first.", true); return; }
+	const payload = { kind, message };
+	if (kind === "privacy_request") payload.category = $("#trustCategory")?.value || "question";
+	try {
+		let res;
+		try {
+			res = await fetch("/v1/trust/report", {
+				method: "POST",
+				credentials: "include",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+		} catch { throw new Error(FRIENDLY_NETWORK); }
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, body));
+		const due = body.case?.response_due_at
+			? ` We will respond by ${new Date(body.case.response_due_at).toISOString().slice(0, 10)}.`
+			: "";
+		closeTrustReportModal();
+		toast(`Report received.${due}`);
+	} catch (err) {
+		toast(`Could not send the report: ${err.message}`, true);
+	}
 }
 
 /**
@@ -18627,11 +18994,11 @@ function viewSettingsMain(v) {
 		<div class="action-box settings-section"><h3>Support</h3>
 			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
 			<p><a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
-			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('support')">Support / report issue</button></div>
+			<div class="section-actions"><button class="ghost mini" onclick="openTrustReportModal()">Support / report issue</button></div>
 		</div>
 		<div class="action-box settings-section"><h3>Legal / Terms</h3>
 			<div class="help">Early-product terms, privacy, responsible-use guidance, token responsibility, and third-party tool notices.</div>
-			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('terms')">Terms</button><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy</button><button class="ghost mini" onclick="openPolicyModal('support')">Support</button></div>
+			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('terms')">Terms</button><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy</button><button class="ghost mini" onclick="openTrustReportModal()">Support</button></div>
 		</div>
 	</div>`;
 	v.appendChild(wrap);
@@ -20674,6 +21041,8 @@ window.addEventListener("keydown", (event) => {
 	if (modal?.id === "projectModal") { event.preventDefault(); closeProjectModal(); return; }
 	if (modal?.id === "settingsModal") { event.preventDefault(); closeSettingsModal(); return; }
 	if (modal?.id === "policyModal") { event.preventDefault(); closePolicyModal(); return; }
+	if (modal?.id === "trustReportModal") { event.preventDefault(); closeTrustReportModal(); return; }
+	if (modal?.id === "stepUpModal") { event.preventDefault(); closeStepUpModal(); return; }
 	if (modal?.id === "keyModal") {
 		event.preventDefault();
 		if (webhookSecretVisible()) closeWebhookSecret();

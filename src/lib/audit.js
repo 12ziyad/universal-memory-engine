@@ -17,6 +17,7 @@
  */
 
 import { newId } from "./ids.js";
+import { recordSecurityEvent } from "./security_events.js";
 
 /**
  * The only fields that may appear in a before/after diff. Everything here is
@@ -36,6 +37,8 @@ export const AUDITABLE_FIELDS = new Set([
 	// Safe memory updates: revision numbers, the operation kind, and the NAMES
 	// of edited schema fields are structural, never memory content.
 	"revision", "memory_action", "edited_fields", "rolled_back_to",
+	// Trust & Safety cases: classification enums, never the report text.
+	"severity", "category", "kind", "resolution",
 ]);
 
 // Names and descriptions are user-authored text. The audit trail may record
@@ -678,11 +681,24 @@ export async function runAuditedMutation(env, details, mutate, finish = null) {
 		result = await mutate(intent);
 		if (!hasAuditCommitProof(result, intent)) throw new AuditUnavailableError();
 	} catch (error) {
+		const outcome = intent.committed ? "failed_partial" : auditErrorOutcome(error);
+		// A governed mutation that was refused mid-flight (401/403 after the
+		// door already let the request in) is a security signal, not just an
+		// audit outcome. Best-effort by construction — the emit never throws.
+		if (outcome === "denied") {
+			await recordSecurityEvent(env, {
+				kind: "audited_action_denied",
+				severity: "medium",
+				groupKey: `audited_denied:${details?.action ?? "unknown"}`,
+				details: { action: details?.action, target_type: details?.targetType },
+				actorUserId: details?.actorUserId ?? null,
+			});
+		}
 		await finalizeAuditIntent(env, intent, {
 			// A multi-step operation may fail after its authoritative first batch
 			// committed. Retrying that as though nothing happened is ambiguous and
 			// can double-apply work, so retain the exact partial-success truth.
-			outcome: intent.committed ? "failed_partial" : auditErrorOutcome(error),
+			outcome,
 			reason: safeCode(error?.code, "operation_failed"),
 			waitUntil: details?.waitUntil,
 		});
