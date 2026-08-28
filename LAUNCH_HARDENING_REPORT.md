@@ -1,5 +1,16 @@
 # Launch Hardening Report — 2026-08-28
 
+> **Second pass (same day).** After reviewing the first deploy the owner
+> reported Huba answering *"The docs don't mention a TypeScript SDK"* — about
+> an SDK that exists. That turned out to be a real retrieval defect, not a
+> prompt problem, and the investigation into it drove a second round of work:
+> Huba rebuilt (retrieval + live account access + voice rules), Huba moved
+> into the header, voice removed, the graph's zoom and edge visibility fixed,
+> History redesigned, webhooks audited and two defects fixed, and the
+> pre-launch data cleared. That work is recorded in **Second pass** at the
+> bottom of this report; everything above it describes the first deploy and
+> still stands.
+
 One pass over Itsuki before the public launch: the silent-write-loss bug, the
 D1 read amplification, per-user quotas with a usage page, Huba AI, the admin
 portal, the memory graph, a public-repo security audit, the docs, and a
@@ -478,3 +489,222 @@ raw JSON evidence per check ran from this machine against itsuki.app):
 The smoke account (`user_8da66464…`, `smoke-1787870203230@example.com`) was
 demoted, disabled, and its sessions revoked; its dismissed upgrade request
 and a 1-message Huba entitlement remain as inert rows on a disabled account.
+
+---
+
+# Second pass — 2026-08-28
+
+Triggered by one observed bad answer. Chasing it properly turned up a genuine
+retrieval defect, and the fix widened into the work below.
+
+## The Huba defect, diagnosed
+
+A user asked, verbatim:
+
+> typscript sdk how to connect it and what all plugin methode itsuki providing?
+
+and Huba replied **"The docs don't mention a TypeScript SDK."** It does exist.
+Reproducing the scorer against the corpus showed two independent bugs:
+
+| query | what retrieval returned |
+|---|---|
+| as typed (with the typo) | `/install/plugin`, `/install/claude-code`, `/install/claude` — no SDK page at all |
+| **spelled correctly** | `/integrations/typescript`, `/install/plugin`, `/sdk/python` — **`/sdk/js` still absent** |
+
+So: (1) "typscript" matched nothing, because there was no typo tolerance; and
+(2) even spelled correctly the actual SDK page was unreachable, because it is
+titled *"JavaScript SDK"* and the word "typescript" appears nowhere in its
+title or route. Huba was not being evasive — it had genuinely never seen the
+page, and then narrated its own blind spot at the user.
+
+## Huba rebuilt
+
+**Retrieval** ([retrieval.js](src/huba/retrieval.js), new):
+
+- **Typo tolerance** — bounded Levenshtein against a vocabulary built from the
+  corpus itself, bucketed by first letter and length so a lookup compares
+  against dozens of candidates rather than tens of thousands.
+- **Equivalence groups** — 33 of them, encoding what the product calls a thing
+  versus what a person types. `typescript = ts = javascript = js = node = npm`
+  is the one that mattered here; there are groups for keys, quotas, deletion,
+  webhooks, members, and the rest.
+- **Section-level chunks** — the corpus is now 71 pages into **674 sections**
+  split at h2/h3. One 8 KB page used to eat the entire context budget;
+  sections let a question that spans two subjects carry both.
+- **Guaranteed topic coverage** — 17 rules mapping question shapes to
+  canonical pages. Asking about SDKs pulls in *every* SDK page whatever the
+  scores say, which is the "look at all of them before answering" behaviour
+  the owner asked for.
+- **Whole-question bonus** — a section matching both "typescript" and "sdk"
+  now outranks one repeating "sdk" six times.
+- **Intent vs. matching, kept separate** — topic routing fires only on words
+  the person actually typed (plus spelling repairs and plural forms), never on
+  synonym expansions. Without that split, repairing "typscript" to
+  "typescript" reached its sibling "node" and dragged the whole memory-graph
+  topic into a question about SDKs. Found by testing, pinned by a test.
+
+Result, same query: `/sdk/js` is now the **top** hit and the answer carries
+the real `npm install itsuki` command and real client code.
+
+**Live account access** ([fetchers.js](src/huba/fetchers.js), new). Huba
+previously saw one small fixed snapshot. It now has twelve read-only fetchers,
+one per area of the app — usage, inventory, memory search (the account's own
+recall), history, jobs, graph, API keys, webhooks, exports, members, rules,
+and an admin view. Per message: **route, fetch (max 3), ground, answer**.
+Routing is deterministic term matching plus the tab you asked from, so "what
+does this page show me?" answers differently on Graph than on Requests.
+
+Invariants: every fetcher runs on the identity resolved from the **session**
+(no id is ever read from the request body); all are read-only; **API key
+values and webhook signing secrets are never selected**; admin data requires
+`role='admin'` on the session, not a claim in the question.
+
+**Voice rules.** The system prompt forbids mentioning documentation, sources,
+context, or the internal blocks, and forbids declaring a feature missing.
+Because prompt rules hold *almost* always, `scrubMechanismTalk()` is a second
+line of defence that rewrites the residue. Live-verified across the tabs with
+zero leaks; one leak found during testing ("the provided ACCOUNT data") and
+closed.
+
+**Two more defects found while testing this:**
+
+- The `memory_search` fetcher read the wrong fields off recall (`results` /
+  `memories`), so Huba reported it could not see any memory content. Recall
+  actually returns `context` / `items` / `nodes`. Fixed — "what do you know
+  about me" now answers from real memories.
+- Context assembly exceeded the deterministic model-input boundary (24,576
+  bytes) and the call was **blocked**, surfacing to the user as "I couldn't
+  reach the model". Budgets resized (reference 10.5 KB, account 3.8 KB, page
+  index spent only when retrieval is empty). The boundary is a good rail; the
+  fix was to fit inside it.
+
+## Huba UI
+
+- The **Ask Huba** bar replaces the Dark/Light button in the header —
+  appearance already lives in the profile menu, so the slot was better spent.
+  Type, press Enter, the panel opens with the answer already running.
+- **Voice removed entirely** (mic, read-aloud, and all Web Speech code).
+- The close control collapses back to the bar, keeping the conversation.
+- Source chips and the "answers from the docs..." subtitle are gone — both
+  were mechanism the reader never needed.
+- Answers render markdown properly now (fenced code, inline code, lists).
+  The code-block placeholder is a non-collidable sentinel: an earlier version
+  used a bare number, which would have swallowed digits in ordinary prose.
+
+## Graph
+
+The screenshots showed the real cause: vis-network scales edge width with the
+view, so a 1.5px line at scale 0.3 paints under half a pixel and vanishes.
+
+- **Zoom-compensated widths** — recomputed against live scale so an edge keeps
+  constant on-screen thickness at any zoom. Measured: 5.71px at scale 0.28 and
+  2.92px at 0.549 both render as **1.6 screen px**. Dashes go solid when far
+  out, since dashed lines disintegrate first.
+- **Zoom clamped 0.22 to 2.4** — verified by trying 0.05 and 9.0. No more
+  shrinking the graph into an unreadable speck.
+- **Opening view is medium** — fits every cluster with padding, floored at the
+  readability limit.
+- **Toolbar moved to the top-left.**
+- `related_to` (by far the most common edge) raised .28, then .45, now **.62**.
+
+## History
+
+Rebuilt from a flat list into: a summary strip (writes, memories created,
+recalls, needs-attention), outcome filters with counts, day grouping, and a
+verdict badge per row before its detail. A defect fixed while testing: recalls
+are **reads**, and judging them by "did it save anything" labelled every
+lookup "nothing new" — they are now counted and labelled separately.
+
+## Webhooks — audited, three defects fixed
+
+- **Silent delivery loss (medium).** Deleting a webhook is a hard DELETE and
+  the dispatch query inner-joins it, so a delivery still `pending` at that
+  moment was never sent, never failed, and never swept again. Now
+  dead-lettered by the sweep. *(Same class of bug as the capacity defect in
+  pass one: work promised, then quietly abandoned.)*
+- **SSRF wall bypass (low).** The private-address check was hostname-string
+  matching, so `::ffff:127.0.0.1` — which the URL parser serializes to
+  `::ffff:7f00:1` — passed, as did NAT64. Now decodes IPv6 groups properly and
+  judges the embedded v4 address. (`global_fetch_strictly_public` was the
+  backstop that made this low rather than high.)
+- **Unbounded retry.** `attempts` counts within one dispatch run, and the
+  sweep's reclaim reset it, so a delivery dying mid-flight retried forever.
+  Added a 24-hour wall-clock ceiling — it cannot be reset by a reclaim, and it
+  leaves the per-run attempt semantics the existing specs pin exactly as they
+  were.
+- New `test/webhook_delivery_contract.spec.js` (8 tests); 30 webhook tests
+  green. Four suspected defects were investigated and **disproved**: numeric
+  IP encodings (the URL parser normalises them), secret exposure, save-path
+  blocking, and cross-account leakage.
+
+## Launch data reset
+
+Backed up first to `tmp/launch-reset-backup-2026-08-28.json` (182 KB, local
+only — it contains user emails and must never enter the public repo).
+
+**A real finding: production had 9 genuine user signups** from 31 July
+(including `ben@allison-audio.com` and `paulo.nuin@gmail.com`) mixed in with
+the test accounts. Those were **not** touched. Only unambiguously synthetic
+accounts were removed: `%@example.com`, `%@itsuki-canary.invalid`, and the
+owner's own `kayotenetwork+<tag>@gmail.com` test addresses.
+
+| | before | after |
+|---|---|---|
+| accounts | 53 | **12** (all real) |
+| login_events | 183 | 0 |
+| site_visits / uniques / dims | 47 / 46 / 387 | 0 / 0 / 0 |
+| error_reports | 253 | 0 |
+| ai_calls | 95,314 | today's only |
+
+All 41 synthetic accounts went through the product's own audited
+`deleteAccountCompletely` path, not raw SQL. Six initially refused with
+`organization_transfer_required` — the product's own guard, correctly firing
+because they owned organizations with members; they were removed on a second
+pass once their counterparts were gone. Real users' memories, receipts and
+jobs are untouched.
+
+## Documentation
+
+`/guides/huba` rewritten to match what shipped: the header ask bar (not a
+bottom-right panel), the full list of what it can read from the account, the
+"only ever your account" guarantees including the two things it can never
+retrieve, and the voice section replaced with where to find it. Corpus
+rebuilt and re-pinned; structure gate green (71 nav entries, 71 pages, every
+internal link resolves).
+
+## Verification (second pass)
+
+1. **Full suite** — `npx vitest run --no-file-parallelism`: **188 files
+   passed, 2,377 tests passed, 0 failed** (up from 187/2,365 — the new webhook
+   delivery-contract spec plus the Huba retrieval, routing and scrubber
+   tests). Node-env config: **43 files, 666 passed, 1 skipped**. Pins updated
+   deliberately because behaviour genuinely changed: the History lede, the
+   removed `themeQuick` button (the test now asserts the Huba bar exists AND
+   the theme button is gone, with appearance still in the profile menu), and
+   the corpus export shape.
+2. **The regression is pinned.** The exact failing question is now a test: it
+   must reach `/sdk/js` from the typo, from correct spelling, and asking about
+   SDKs must pull in every SDK page. A separate test pins that a repaired term
+   cannot drag in an unrelated topic.
+3. **Live Huba, against real Workers AI** in the dev worker:
+   - the original failing question now answers with `npm install itsuki` and
+     real client code, citing `/sdk/js`;
+   - "how many saves do I have left today" → **196 left of 30,000 neurons**,
+     from live data;
+   - "who is on my team and what roles" → the real organization, project and
+     owner role;
+   - "what do you actually know about me so far" → actual stored memories;
+   - "what does this page show me" on Graph → the account's real clusters and
+     edge types.
+   Zero mechanism leaks across the set (checked by regex on every reply).
+4. **Graph measured, not eyeballed**: edge widths 5.71px at scale 0.28 and
+   2.92px at 0.549 both paint **1.6 screen px**; zoom clamped at 0.22 and 2.4
+   when driven to 0.05 and 9.0; toolbar at `left: 14px`.
+5. **History** exercised live: summary tiles, five filters with counts, day
+   grouping, verdict badges, filter transitions, and the empty state.
+6. **Light and dark on every new surface**, and **375px mobile with zero
+   horizontal scroll** on the header bar (collapses to an icon), the Huba
+   panel (full-width sheet), History, and Graph.
+7. **Webhooks**: 30 tests green across three suites after the three fixes.
+8. `AI_ROUTING` still `"off"`; the provider-adapter lane untouched.
+

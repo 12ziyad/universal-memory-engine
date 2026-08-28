@@ -3996,9 +3996,18 @@ const routes = {
 		} catch (error) {
 			console.warn("huba quota snapshot unavailable:", error?.message ?? error);
 		}
-		const result = await hubaTurn(env, { userId: auth.userId, accountUserId: auth.userId }, {
+		// Identity is resolved HERE, from the session, and is the only identity
+		// the fetchers ever see — `view` is the one thing taken from the client
+		// and it is a UI hint (which tab they are on), never an authorization
+		// input. `isAdmin` comes from the session's own user row.
+		const result = await hubaTurn(env, {
+			userId: auth.userId,
+			accountUserId: auth.userId,
+			isAdmin: auth.user?.role === "admin",
+		}, {
 			message: body.message,
 			history: body.history,
+			view: body.view,
 		}, { quota: quotaSnapshot });
 		return json({
 			...result,

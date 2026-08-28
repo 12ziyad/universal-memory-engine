@@ -53,7 +53,12 @@ describe("app appearance themes", () => {
 		expect(appScript).toContain('addEventListener("change"');
 		expect(appScript).toContain("function applyTheme(");
 		expect(appScript).toContain("function cycleTheme()");
-		expect(html).toContain('id="themeQuick"');
+		// The header quick-cycle button was replaced by the Huba ask bar; the
+		// full Light/Dark/System control lives in the profile menu, which is
+		// where the appearance group has always been.
+		expect(html).toContain('id="hubaOmni"');
+		expect(html).not.toContain('id="themeQuick"');
+		expect(appScript).toContain('class="profile-theme"');
 		expect(appScript).toContain("Appearance");
 	});
 

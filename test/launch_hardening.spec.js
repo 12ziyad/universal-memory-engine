@@ -28,8 +28,9 @@ import {
 	listUpgradeRequests,
 } from "../src/lib/upgrade_requests.js";
 import { isCapacityError } from "../src/pipeline/llm.js";
-import { retrieveDocs } from "../src/huba/huba.js";
-import { HUBA_CORPUS, HUBA_CORPUS_DOCS_HASH } from "../src/huba/corpus.generated.js";
+import { retrieve, scrubMechanismTalk } from "../src/huba/huba.js";
+import { routeFetchers } from "../src/huba/fetchers.js";
+import { HUBA_CHUNKS, HUBA_PAGES, HUBA_CORPUS_DOCS_HASH } from "../src/huba/corpus.generated.js";
 import { runReconciliationSweep } from "../src/pipeline/sweep.js";
 import docsHtml from "../public/docs/index.html?raw";
 
@@ -135,19 +136,78 @@ describe("Huba AI", () => {
 		const digest = await crypto.subtle.digest("SHA-256", bytes);
 		const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 		expect(hex, "docs changed without `node scripts/build-huba-corpus.mjs`").toBe(HUBA_CORPUS_DOCS_HASH);
-		expect(HUBA_CORPUS.length).toBeGreaterThanOrEqual(69);
-		for (const page of HUBA_CORPUS) {
-			expect(page.route.startsWith("/")).toBe(true);
-			expect(page.text.length).toBeGreaterThan(0);
+		expect(HUBA_PAGES.length).toBeGreaterThanOrEqual(69);
+		expect(HUBA_CHUNKS.length).toBeGreaterThan(HUBA_PAGES.length); // sections, not pages
+		for (const chunk of HUBA_CHUNKS) {
+			expect(chunk.route.startsWith("/")).toBe(true);
+			expect(chunk.text.length).toBeGreaterThan(0);
+			expect(typeof chunk.heading).toBe("string");
 		}
 	});
 
-	it("lexical retrieval surfaces the obviously right pages", () => {
-		const saveHits = retrieveDocs("how do I save a memory with curl").map((h) => h.page.route);
+	it("retrieval surfaces the obviously right pages", () => {
+		const saveHits = retrieve("how do I save a memory with curl").routes;
 		expect(saveHits.some((route) => ["/guides/save", "/api/save", "/quickstart"].includes(route))).toBe(true);
-		const limitHits = retrieveDocs("what are the rate limits and quotas").map((h) => h.page.route);
-		expect(limitHits).toContain("/api/limits");
-		expect(retrieveDocs("")).toEqual([]);
+		expect(retrieve("what are the rate limits and quotas").routes).toContain("/api/limits");
+		expect(retrieve("").chunks).toEqual([]);
+	});
+
+	/**
+	 * The regression that motivated the retrieval rewrite. A user asked this
+	 * verbatim — typos and all — and Huba answered "The docs don't mention a
+	 * TypeScript SDK". The SDK page exists; retrieval had never seen it,
+	 * because it is titled "JavaScript SDK" and "typscript" matched nothing.
+	 */
+	it("finds the TypeScript SDK page despite the typo and the different name", () => {
+		const misspelled = retrieve("typscript sdk how to connect it and what all plugin methode itsuki providing?");
+		expect(misspelled.routes, "the JS/TS SDK page must be reachable from a typo").toContain("/sdk/js");
+		expect(misspelled.topics).toContain("sdk");
+		// Spelled correctly it must also be there — the old scorer missed it
+		// even then, because "typescript" is absent from that page's title.
+		expect(retrieve("typescript sdk connect").routes).toContain("/sdk/js");
+		// Asking about SDKs pulls in EVERY SDK page, not just the best match.
+		const both = retrieve("which sdks do you have").routes;
+		expect(both).toContain("/sdk/js");
+		expect(both).toContain("/sdk/python");
+	});
+
+	it("a repaired term cannot drag in an unrelated topic", () => {
+		// "typscript" repairs to "typescript", whose sibling alias is "node" —
+		// which must NOT trigger the memory-graph topic.
+		expect(retrieve("typscript sdk").topics).not.toContain("graph");
+		// A real graph question still does.
+		expect(retrieve("how do graph clusters and edges work").topics).toContain("graph");
+	});
+
+	it("routes questions to the right live-data fetchers, and gates admin", () => {
+		expect(routeFetchers("how many saves do i have left today")).toContain("usage");
+		expect(routeFetchers("did any of my saves fail")).toContain("jobs");
+		expect(routeFetchers("who is on my team")).toContain("members");
+		expect(routeFetchers("what are my api keys")).toContain("api_keys");
+		// The tab in front of them is a signal when the words are ambiguous.
+		expect(routeFetchers("what does this show", { view: "graph" })).toContain("graph");
+		// Admin data is unreachable without an admin session, whatever is typed.
+		expect(routeFetchers("show me all users and signups", { isAdmin: false })).not.toContain("admin");
+		expect(routeFetchers("show me all users and signups", { isAdmin: true })).toContain("admin");
+		// Never more than the bounded number of fetches per turn.
+		expect(routeFetchers("usage jobs members keys graph webhooks exports rules history").length).toBeLessThanOrEqual(3);
+	});
+
+	it("never narrates its own machinery, even if the model slips", () => {
+		const slips = [
+			"The docs don't mention a TypeScript SDK.",
+			"Based on the provided context, you have 40 saves left.",
+			"No details are available in the documentation.",
+			"The ACCOUNT data does not include your memory content.",
+			"That is not documented in the docs.",
+		];
+		for (const slip of slips) {
+			const cleaned = scrubMechanismTalk(slip);
+			expect(cleaned, slip).not.toMatch(/\b(docs|documentation|provided context|ACCOUNT data)\b/i);
+		}
+		// It must not mangle an ordinary answer.
+		const normal = "You have about 100 saves left today. It resets at 00:00 UTC.";
+		expect(scrubMechanismTalk(normal)).toBe(normal);
 	});
 
 	it("chat door requires a session", async () => {

@@ -9813,7 +9813,7 @@ ${nextSteps([
 
 PAGES["/guides/huba"] = { title: "Huba AI", html: `
 <h1>Huba AI</h1>
-<p class="lede">The assistant bar pinned to the bottom-right of the signed-in dashboard. Ask it about Itsuki and it answers from this documentation and your own account's state — never from model guesswork.</p>
+<p class="lede">The ask bar in the dashboard header. Ask it about Itsuki or about your own account, and it answers from the product and your live data — never from model guesswork.</p>
 
 ${prereq([
 	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. Huba is a dashboard surface — there is no way to reach it with an API key or over MCP.`,
@@ -9821,15 +9821,17 @@ ${prereq([
 ])}
 
 <h2>Where the answers come from</h2>
-<p>Huba never answers from model knowledge. Every answer is grounded in two sources and nothing else:</p>
+<p>Huba never answers from model knowledge. Every answer is grounded in two things and nothing else:</p>
 <ul>
-<li><b>This documentation</b> — the same pages you are reading now.</li>
-<li><b>Your account's own state</b> — a snapshot the server builds for the signed-in account: recent saves, job health, and where your quotas stand. That is what lets it answer "did my last save land?" about your account specifically, not in general.</li>
+<li><b>Itsuki's own reference material</b> — every page of this documentation, indexed by section, so a question spanning two subjects can draw on both.</li>
+<li><b>Your account's live state</b> — read at the moment you ask, server-side. It can look at your usage and allowance, your memories, your recent saves and receipts, the write queue and any failures, your graph's shape, your API key metadata, your webhooks, your exports, your extraction rules, and your organization's members and projects.</li>
 </ul>
-<p>When it cannot find the answer in either, it says so and points at the closest docs page instead of guessing. An assistant that invents plausible product behaviour is worse than none, so honest "I don't know, look here" is a designed outcome, not a failure.</p>
+<p>Which of those it reads depends on the question, and on which tab you asked from — the same question on the Graph page and the Requests page gets answered from different data. That is why "what does this page show me?" works anywhere in the dashboard.</p>
+<p>When it genuinely cannot answer, it says what it does know and names the page that covers the rest. An assistant that invents plausible product behaviour is worse than none.</p>
 
 <h2>It only ever sees your account</h2>
-<p>The snapshot is built server-side from your session, the same way every dashboard view resolves who you are. Nothing another account stored is reachable — not through a clever question, not through anything. There is no cross-account surface for a prompt to leak.</p>
+<p>Every read runs server-side against the identity in your session cookie, the same way every dashboard view resolves who you are. No account id, project id, or role is ever taken from the question, so there is nothing to point somewhere else. Reads are read-only: Huba cannot save, delete, or change a setting on your behalf, and it will tell you where to click instead.</p>
+<p>Two things it can never retrieve, by construction: <b>API key values</b> (it sees only labels, creation and last-used dates — key material is unrecoverable after creation for everyone, including Huba) and <b>webhook signing secrets</b>. Operator-only data requires an operator session; asking for it as an ordinary user returns nothing.</p>
 
 <h2>The allowance</h2>
 <table>
@@ -9841,8 +9843,8 @@ ${prereq([
 </table>
 <p>When the day's messages are spent, the bar says so and shows a <b>Request more</b> link — the same flow as saves: the request goes to the owner with your usage attached, grants are manual, and a temporary grant lapses on its own. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
 
-<h2>Voice</h2>
-<p>The microphone and read-aloud buttons use the browser's own Web Speech API. The audio is processed by your browser, not sent to Itsuki's models, and costs no neurons. Where a browser does not support speech, the buttons are absent and the text box always works — typing is never the degraded path.</p>
+<h2>Where to find it</h2>
+<p>The <b>Ask Huba</b> bar sits in the dashboard header, to the left of your profile avatar. Type a question and press Enter: the panel opens with the answer already running. Closing it with <b>×</b> collapses it back to the bar; the conversation is still there when you reopen it. Escape closes it too.</p>
 
 <h2>A dashboard surface, not an API</h2>
 <p>There is no public Huba endpoint. API keys cannot call it, MCP clients cannot list it as a tool, and nothing you build on the API depends on it. If you want an assistant of your own answering from memory, that is what <a href="#/api/recall">POST /v1/recall</a> and <a href="#/api/turn">POST /v1/turn</a> are for.</p>

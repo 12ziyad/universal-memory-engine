@@ -196,7 +196,7 @@ describe("dashboard script", () => {
 		expect(script).toContain('class="setup-guide-section');
 		expect(script).not.toContain('class="install-project-scope"');
 		expect(script).toContain("x-itsuki-project");
-		expect(script).toContain("A plain record of everything Itsuki saved, updated, or skipped");
+		expect(script).toContain("Every write Itsuki accepted, what it made of it, and when");
 		// The Rules tab is a working form wired to /v1/rules.
 		for (const marker of [
 			"Custom instructions",

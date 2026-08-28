@@ -35,6 +35,10 @@ const MAX_WEBHOOKS_PER_USER = 10;
 const ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [0, 5000, 15000];
 const DELIVERY_TIMEOUT_MS = 10000;
+// The outer bound on how long an undelivered event may keep costing sweeps.
+// A day of five-minute retries is a generous window for an endpoint to come
+// back; past it the delivery is a dead letter, not a pending one.
+const DELIVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|.*\.localhost)$/i;
 
@@ -109,9 +113,51 @@ function isPrivateIpv4(host) {
 	return false;
 }
 
+/** The eight 16-bit groups of an IPv6 literal, or null if it does not parse. */
+function ipv6Groups(raw) {
+	const h = raw.replace(/^\[|\]$/g, "").toLowerCase();
+	if (!h.includes(":") || !/^[0-9a-f:.]+$/.test(h)) return null;
+	const halves = h.split("::");
+	if (halves.length > 2) return null;
+	// A trailing dotted quad occupies the last two groups.
+	const expand = (part) => {
+		const list = part ? part.split(":") : [];
+		const last = list[list.length - 1];
+		const quad = last ? /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(last) : null;
+		if (!quad) return list;
+		const n = quad.slice(1).map(Number);
+		if (n.some((v) => v > 255)) return list;
+		return [...list.slice(0, -1), (((n[0] << 8) | n[1]) >>> 0).toString(16), (((n[2] << 8) | n[3]) >>> 0).toString(16)];
+	};
+	const left = expand(halves[0]);
+	const right = halves.length === 2 ? expand(halves[1]) : [];
+	const groups = halves.length === 2
+		? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right]
+		: left;
+	if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+	return groups.map((g) => parseInt(g, 16));
+}
+
 function isPrivateIpv6(host) {
 	const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-	return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80");
+	if (h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80")) return true;
+	const groups = ipv6Groups(h);
+	if (!groups) return false;
+	if (groups.every((g, i) => g === (i === 7 ? 1 : 0))) return true; // ::1, however spelled
+	if (groups.every((g) => g === 0)) return true;
+	if ((groups[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+	if ((groups[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+	// IPv4-mapped (::ffff:0:0/96), IPv4-compatible (::/96) and NAT64
+	// (64:ff9b::/96) all carry a v4 address in the low 32 bits, and the URL
+	// parser serializes them back as hex — `::ffff:127.0.0.1` becomes
+	// `::ffff:7f00:1`, which no dotted-quad check would ever recognise. Judge
+	// the embedded address exactly as if it had been written as v4.
+	const [g0, g1, g2, g3, g4, g5] = groups;
+	const zeroTop = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
+	const carriesIpv4 = (zeroTop && (g5 === 0xffff || g5 === 0))
+		|| (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0);
+	if (!carriesIpv4) return false;
+	return isPrivateIpv4([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join("."));
 }
 
 /**
@@ -541,6 +587,35 @@ export async function retryPendingWebhookDeliveries(env, waitUntil, { limit = 50
 		 SET status = 'pending', updated_at = ?
 		 WHERE status = 'dispatching' AND updated_at < ?`,
 	).bind(now, now - 2 * 60 * 1000).run();
+	// An absolute age ceiling on undelivered work. `attempts` records the
+	// attempt index WITHIN one dispatch run, so a delivery that dies mid-flight
+	// every time is reclaimed and retried by each sweep indefinitely — slow,
+	// but unbounded. Wall-clock age is the ceiling that cannot be reset by a
+	// reclaim, and it leaves the per-run attempt semantics (which the recovery
+	// spec pins) exactly as they are.
+	await env.DB.prepare(
+		`UPDATE webhook_deliveries
+		 SET status = 'failed', error = COALESCE(error, 'delivery_expired'), updated_at = ?
+		 WHERE status IN ('pending', 'dispatching') AND created_at < ?`,
+	).bind(now, now - DELIVERY_MAX_AGE_MS).run();
+	// Dead-letter what nothing can ever deliver. The dispatch query below is an
+	// INNER JOIN on webhooks, and deleting a webhook is a hard DELETE, so a row
+	// still pending when its webhook goes away would otherwise sit non-terminal
+	// forever: never sent, never failed, never swept again. Every delivery must
+	// reach a terminal state.
+	await env.DB.prepare(
+		`UPDATE webhook_deliveries
+		 SET status = 'failed', error = 'webhook_deleted', updated_at = ?
+		 WHERE id IN (
+		   SELECT d.id FROM webhook_deliveries d
+		    WHERE d.status = 'pending'
+		      AND NOT EXISTS (
+		        SELECT 1 FROM webhooks w
+		         WHERE w.id = d.webhook_id AND w.user_id = d.user_id AND w.status = 'active'
+		      )
+		    ORDER BY d.created_at ASC LIMIT ?
+		 )`,
+	).bind(now, Math.max(1, Math.min(200, Number(limit) || 50))).run();
 	const { results } = await env.DB.prepare(
 		`SELECT d.id AS delivery_id, d.payload_json, w.*
 		 FROM webhook_deliveries d

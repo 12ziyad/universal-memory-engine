@@ -2088,7 +2088,7 @@
 			linear-gradient(90deg, rgba(0,0,0,.38), transparent 22%, transparent 78%, rgba(0,0,0,.32));
 	}
 	#graph { position: absolute; inset: 0; z-index: 1; min-height: 520px; }
-	.graph-tools { position: absolute; top: 14px; right: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; z-index: 5; max-width: min(760px, calc(100% - 28px)); }
+	.graph-tools { position: absolute; top: 14px; left: 14px; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 7px; z-index: 5; max-width: min(760px, calc(100% - 28px)); }
 	/* ---- landing v2 ---- */
 	.section-kicker { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
 		color: var(--accent); background: rgba(132,233,255,.08); border: 1px solid rgba(132,233,255,.22);
@@ -2328,37 +2328,61 @@
 
 	.tab .fail-dot { display: inline-block; width: 8px; height: 8px; margin-left: 7px; border-radius: 50%; background: var(--red); vertical-align: middle; }
 
+	/* ---- History ---- */
+	.receipt-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; margin: 14px 0 12px; border: 1px solid var(--border); background: var(--border); }
+	.receipt-summary > div { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--panel); }
+	.receipt-summary b { font: 600 20px/1.1 var(--font-ui); }
+	.receipt-summary span { color: var(--muted); font-size: 11.5px; }
+	.receipt-summary-bad b { color: var(--red); }
+	.receipt-filters { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; }
+	.receipt-day { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; font: 600 12px/1 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+	.receipt-day i { flex: 1; height: 1px; background: var(--border); }
+	.receipt .r-top { display: flex; align-items: center; gap: 8px; }
+	.receipt-bad { border-left: 2px solid var(--red); padding-left: 10px; }
+	.r-ref { margin-top: 5px; color: var(--faint); font: 400 11px/1.4 var(--font-mono); word-break: break-all; }
+
+	/* Huba lives in the header: an always-there ask bar where the theme
+	   toggle used to sit, and a panel that expands beneath it. */
+	.huba-omni { display: none; align-items: center; gap: 8px; min-width: 210px; max-width: 320px; padding: 0 11px; height: 34px; border: 1px solid var(--border); background: var(--input-bg); transition: border-color 140ms ease; }
+	body.app-mode .huba-omni { display: flex; }
+	.huba-omni:focus-within, .huba-omni.active { border-color: var(--accent); }
+	.huba-omni-mark { color: var(--accent); font-size: 14px; line-height: 1; }
+	.huba-omni input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--text); font: 400 13px/1 var(--font-ui); outline: none; }
+	.huba-omni input::-webkit-search-cancel-button { display: none; }
+
 	#hubaBar { display: none; }
-	body.app-mode #hubaBar { display: block; position: fixed; right: 18px; bottom: 18px; z-index: 330; font-family: var(--font-ui); }
-	#hubaFab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--border2); background: var(--panel); color: var(--text); font: 600 13px/1 var(--font-ui); cursor: pointer; box-shadow: var(--shadow-md); }
-	#hubaFab:hover { border-color: var(--accent); color: var(--accent); }
-	#hubaFab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-	.huba-mark { font-size: 15px; color: var(--accent); }
-	#hubaPanel { position: fixed; right: 18px; bottom: 74px; width: min(400px, calc(100vw - 24px)); height: min(560px, calc(100vh - 120px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
+	body.app-mode #hubaBar { display: block; font-family: var(--font-ui); }
+	.huba-mark { color: var(--accent); font-size: 15px; }
+	#hubaPanel { position: fixed; right: 16px; top: calc(var(--header-h, 58px) + 8px); z-index: 330; width: min(430px, calc(100vw - 24px)); height: min(620px, calc(100vh - var(--header-h, 58px) - 28px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg); }
 	#hubaPanel header { display: flex; align-items: center; gap: 8px; padding: 11px 13px; border-bottom: 1px solid var(--border); font-size: 13px; }
 	#hubaLog { flex: 1; overflow-y: auto; padding: 13px; display: flex; flex-direction: column; gap: 10px; }
-	.huba-msg { display: flex; flex-direction: column; max-width: 88%; }
+	.huba-msg { display: flex; flex-direction: column; max-width: 92%; }
 	.huba-user { align-self: flex-end; align-items: flex-end; }
 	.huba-assistant { align-self: flex-start; }
-	.huba-bubble { padding: 9px 12px; border: 1px solid var(--border); background: var(--panel3); font-size: 13px; line-height: 1.55; word-break: break-word; }
+	.huba-bubble { padding: 9px 12px; border: 1px solid var(--border); background: var(--panel3); font-size: 13px; line-height: 1.6; word-break: break-word; }
 	.huba-user .huba-bubble { background: var(--panel2); }
+	.huba-bubble ul { margin: 6px 0 2px; padding-left: 18px; }
+	.huba-bubble li { margin: 2px 0; }
+	.huba-bubble code { padding: 1px 4px; border: 1px solid var(--border); background: var(--panel2); font: 400 12px/1.4 var(--font-mono); }
+	.huba-code { margin: 7px 0 2px; padding: 9px 10px; border: 1px solid var(--border); background: var(--panel2); overflow-x: auto; }
+	.huba-code code { border: 0; padding: 0; background: transparent; white-space: pre; }
 	.huba-thinking { color: var(--muted); font-style: italic; }
-	.huba-srcs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
-	.huba-src { font: 500 11px/1 var(--font-mono); padding: 4px 8px; border: 1px solid var(--border); color: var(--muted); text-decoration: none; }
-	.huba-src:hover { color: var(--accent); border-color: var(--accent); }
 	#hubaForm { display: flex; gap: 7px; padding: 11px 13px; border-top: 1px solid var(--border); }
 	#hubaInput { flex: 1; min-width: 0; }
-	.huba-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
-	.huba-icon:hover, .huba-icon.active { color: var(--accent); border-color: var(--accent); }
+	.huba-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; }
+	.huba-icon:hover { color: var(--accent); border-color: var(--accent); }
 	.huba-icon:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 	.huba-send { padding: 0 14px; }
 	.huba-more { border: 0; background: transparent; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+	@media (max-width: 860px) {
+		.huba-omni { min-width: 44px; max-width: 44px; padding: 0 10px; }
+		.huba-omni input { display: none; }
+	}
 	@media (max-width: 640px) {
-		body.app-mode #hubaBar { right: 12px; bottom: 12px; }
-		#hubaPanel { right: 0; left: 0; bottom: 64px; width: 100vw; height: min(70vh, 520px); border-left: 0; border-right: 0; }
+		#hubaPanel { right: 0; left: 0; top: auto; bottom: 0; width: 100vw; height: min(78vh, 560px); border-left: 0; border-right: 0; border-bottom: 0; }
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.usage-bar > i, #hubaPanel, #hubaFab { transition: none !important; }
+		.usage-bar > i, #hubaPanel, .huba-omni { transition: none !important; }
 	}
 </style>
 <link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=8" />
@@ -2660,9 +2684,12 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	<button class="ghost dev-only" id="copyMcp">Copy legacy MCP URL</button>
 	<div class="spacer"></div>
 	<div class="stats dev-only" id="stats"></div>
-	<button class="ghost theme-quick" id="themeQuick" type="button" onclick="cycleTheme()" aria-label="Change appearance theme" title="Change appearance theme">
-		<span class="theme-quick-icon" id="themeQuickIcon" aria-hidden="true">&#9680;</span><span id="themeQuickLabel">System</span>
-	</button>
+	<!-- Huba replaces the theme quick-cycle here: appearance already lives in
+	     the profile menu, and an always-present ask bar is worth the slot. -->
+	<form class="huba-omni" id="hubaOmni" role="search" onsubmit="return hubaOmniSubmit(event)">
+		<span class="huba-omni-mark" aria-hidden="true">羽</span>
+		<input id="hubaOmniInput" type="search" autocomplete="off" placeholder="Ask Huba anything…" aria-label="Ask Huba about Itsuki" />
+	</form>
 	<div class="profile-menu-wrap" id="profileMenuWrap" hidden>
 		<button class="profile-trigger" id="profileTrigger" type="button" onclick="toggleProfileMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">
 			<span class="avatar" id="profileAvatar" aria-hidden="true"></span>
@@ -12730,28 +12757,124 @@ async function createExportJob() {
 	}
 }
 
+/* ---- History -----------------------------------------------------------
+ * A flat list of every receipt, newest first, told you nothing at a glance:
+ * no shape to the day, no way to see only what went wrong, and the outcome
+ * buried inside prose. Now: a summary strip, outcome filters, day grouping,
+ * and each row states its own verdict before its detail. */
+
+const RECEIPT_FILTERS = [
+	{ id: "all", label: "All" },
+	{ id: "saved", label: "Saved", match: (r) => (r.saved_total || 0) > 0 },
+	{ id: "recalled", label: "Recalls", match: receiptIsRecall },
+	{ id: "nothing", label: "Nothing new", match: (r) => (r.saved_total || 0) === 0 && !receiptFailed(r) && !receiptIsRecall(r) },
+	{ id: "failed", label: "Problems", match: receiptFailed },
+];
+
+function receiptFailed(receipt) {
+	return ["llm_failed", "llm_capacity", "db_write_failed", "internal_error"].includes(receipt.outcome);
+}
+
+/** A recall is a READ. Judging it by "did it save anything" made every lookup
+ *  read as "nothing new" — a verdict about a question nobody asked. */
+function receiptIsRecall(receipt) {
+	return receipt.source === "recall" || receipt.outcome === "recalled";
+}
+
+function receiptVerdict(receipt) {
+	if (receiptIsRecall(receipt)) {
+		return { label: "recalled", tone: "", why: "" };
+	}
+	if (receiptFailed(receipt)) {
+		return receipt.outcome === "llm_capacity"
+			? { label: "retrying", tone: "state-paused", why: "the model provider was busy; this one is queued to try again" }
+			: { label: "failed", tone: "state-inactive", why: "this write did not complete" };
+	}
+	if ((receipt.saved_total || 0) > 0) {
+		return { label: `saved ${receipt.saved_total}`, tone: "state-active", why: "" };
+	}
+	if (receipt.outcome === "cancelled_by_delete" || receipt.outcome === "cancelled_by_retention") {
+		return { label: "cancelled", tone: "state-paused", why: "a deletion covered this write before it finished" };
+	}
+	return { label: "nothing new", tone: "", why: "nothing here was worth keeping as its own memory" };
+}
+
+function setReceiptFilter(id) {
+	S.receiptFilter = id;
+	renderView();
+}
+
 function viewReceipts(v) {
 	markReceiptsSeen();
 	const wrap = el("div");
+	const all = S.receipts || [];
+	const active = S.receiptFilter || "all";
+	const filter = RECEIPT_FILTERS.find((entry) => entry.id === active) ?? RECEIPT_FILTERS[0];
+	const rows = filter.match ? all.filter(filter.match) : all;
+	const counts = Object.fromEntries(RECEIPT_FILTERS.map((entry) =>
+		[entry.id, entry.match ? all.filter(entry.match).length : all.length]));
+	const savedTotal = all.reduce((sum, receipt) => sum + (receipt.saved_total || 0), 0);
+
 	wrap.innerHTML = `<div class="page-head">
 		<h2 class="page-title">History</h2>
-		<p class="page-sub">A plain record of everything Itsuki saved, updated, or skipped — and when.</p>
-	</div>`;
-	if (!S.receipts.length) {
-		wrap.appendChild(el("div","empty","Receipts will show what Itsuki saved, updated, or ignored — with source and timestamp."));
+		<p class="page-sub">Every write Itsuki accepted, what it made of it, and when.</p>
+	</div>
+	${all.length ? `<div class="receipt-summary">
+		<div><b>${all.length - counts.recalled}</b><span>write${all.length - counts.recalled === 1 ? "" : "s"} recorded</span></div>
+		<div><b>${savedTotal}</b><span>memories created</span></div>
+		<div><b>${counts.recalled}</b><span>recalls</span></div>
+		<div class="${counts.failed ? "receipt-summary-bad" : ""}"><b>${counts.failed}</b><span>needed attention</span></div>
+	</div>
+	<div class="receipt-filters" role="group" aria-label="Filter history">
+		${RECEIPT_FILTERS.map((entry) => `<button class="ghost mini${entry.id === active ? " admin-tab-active" : ""}" onclick="setReceiptFilter('${entry.id}')">${entry.label} <span class="help">${counts[entry.id]}</span></button>`).join("")}
+	</div>` : ""}`;
+
+	if (!all.length) {
+		wrap.appendChild(el("div", "empty", "Nothing yet. When a connected tool or the API saves something, the record of it appears here — what was kept, what was skipped, and why."));
 		v.appendChild(wrap);
 		return;
 	}
-	for (const r of S.receipts) {
-		const zero = (r.saved_total||0) === 0;
-		let detail = {};
-		try { detail = JSON.parse(r.detail || "{}"); } catch {}
-		const runId = r.extraction_run_id || detail.extraction_run_id || "";
-		const row = el("div","receipt" + (zero ? " zero" : ""));
-		row.innerHTML = `<div class="r-top"><span class="r-src">${esc(r.source || "memory")}</span><span class="r-when">${fmtDate(r.created_at)}</span></div>
-			<div class="r-sum">${esc(receiptDisplaySummary(r))}</div>
-			${runId ? `<div class="kv" style="font-size:11px;margin-top:4px">run <b>${esc(runId)}</b></div>` : ""}`;
-		wrap.appendChild(row);
+	if (!rows.length) {
+		const empty = el("div", "empty", `No writes match “${filter.label}”.`);
+		wrap.appendChild(empty);
+		v.appendChild(wrap);
+		return;
+	}
+
+	// Group by day so a busy afternoon reads as one block instead of twenty
+	// undifferentiated rows.
+	const byDay = new Map();
+	for (const receipt of rows) {
+		const day = new Date(Number(receipt.created_at)).toISOString().slice(0, 10);
+		if (!byDay.has(day)) byDay.set(day, []);
+		byDay.get(day).push(receipt);
+	}
+	const today = new Date().toISOString().slice(0, 10);
+	const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+	for (const [day, dayRows] of byDay) {
+		const heading = el("div", "receipt-day");
+		const dayLabel = day === today ? "Today" : day === yesterday ? "Yesterday" : fmtDate(new Date(`${day}T00:00:00Z`).getTime()).split(",")[0];
+		heading.innerHTML = `<span>${esc(dayLabel)}</span><i></i><span class="help">${dayRows.length} write${dayRows.length === 1 ? "" : "s"}</span>`;
+		wrap.appendChild(heading);
+		for (const receipt of dayRows) {
+			const verdict = receiptVerdict(receipt);
+			let detail = {};
+			try { detail = JSON.parse(receipt.detail || "{}"); } catch { detail = {}; }
+			const runId = receipt.extraction_run_id || detail.extraction_run_id || "";
+			const time = new Date(Number(receipt.created_at)).toISOString().slice(11, 16);
+			const row = el("div", "receipt" + ((receipt.saved_total || 0) === 0 ? " zero" : "") + (receiptFailed(receipt) ? " receipt-bad" : ""));
+			row.innerHTML = `<div class="r-top">
+					<span class="r-src">${esc(receipt.source || "memory")}</span>
+					<span class="badge ${verdict.tone}">${esc(verdict.label)}</span>
+					<span style="flex:1"></span>
+					<span class="r-when">${esc(time)} UTC</span>
+				</div>
+				<div class="r-sum">${esc(receiptDisplaySummary(receipt))}</div>
+				${verdict.why ? `<div class="help" style="margin-top:3px">${esc(verdict.why)}</div>` : ""}
+				${runId ? `<div class="r-ref">run <b>${esc(runId)}</b></div>` : ""}`;
+			wrap.appendChild(row);
+		}
 	}
 	v.appendChild(wrap);
 }
@@ -13829,7 +13952,7 @@ function openRequestMore(kind) {
 			});
 			toast("Request sent — the owner will take a look.");
 			closeRequestMore();
-			if (S.view === "usage") setView("usage", { updateHash: false }) || render();
+			if (S.view === "usage") renderView();
 		} catch (err) {
 			toast(err.message, true);
 			button.disabled = false;
@@ -13950,76 +14073,93 @@ function showFailedSavesReport(jobs) {
    this account's own state, assembled server-side); voice in and out via the
    browser's Web Speech API — zero neurons, no audio ever leaves the page
    except as the text it recognized. */
-const HUBA = { open: false, history: [], speaking: false, tts: false, busy: false, usage: null };
+const HUBA = { open: false, history: [], busy: false, usage: null };
 
 function initHuba() {
 	if (document.getElementById("hubaBar")) return;
 	const bar = el("div");
 	bar.id = "hubaBar";
-	const speechIn = "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
-	const speechOut = "speechSynthesis" in window;
 	bar.innerHTML = `
-		<button id="hubaFab" type="button" aria-expanded="false" aria-controls="hubaPanel" title="Huba AI — ask anything about Itsuki">
-			<span class="huba-mark" aria-hidden="true">羽</span> Huba
-		</button>
-		<section id="hubaPanel" hidden aria-label="Huba AI">
+		<section id="hubaPanel" hidden aria-label="Huba">
 			<header>
-				<b>Huba</b><span class="help">answers from the docs and your account — nothing else</span>
+				<span class="huba-mark" aria-hidden="true">羽</span>
+				<b>Huba</b>
 				<span style="flex:1"></span>
 				<span id="hubaUsage" class="help"></span>
-				${speechOut ? `<button id="hubaTts" type="button" class="huba-icon" aria-pressed="false" title="Read answers aloud">🔊</button>` : ""}
-				<button id="hubaClose" type="button" class="huba-icon" title="Close" aria-label="Close Huba">×</button>
+				<button id="hubaClose" type="button" class="huba-icon" title="Collapse" aria-label="Collapse Huba">×</button>
 			</header>
 			<div id="hubaLog" role="log" aria-live="polite"></div>
 			<form id="hubaForm">
-				${speechIn ? `<button id="hubaMic" type="button" class="huba-icon" title="Speak your question" aria-label="Speak your question">🎙</button>` : ""}
-				<input id="hubaInput" type="text" autocomplete="off" maxlength="2000" placeholder="Ask Huba about Itsuki…" aria-label="Ask Huba about Itsuki" />
+				<input id="hubaInput" type="text" autocomplete="off" maxlength="2000" placeholder="Ask about anything in Itsuki…" aria-label="Ask Huba" />
 				<button type="submit" class="btn huba-send">Ask</button>
 			</form>
 		</section>`;
 	document.body.appendChild(bar);
-	$("#hubaFab").addEventListener("click", () => toggleHuba());
 	$("#hubaClose").addEventListener("click", () => toggleHuba(false));
 	$("#hubaForm").addEventListener("submit", (event) => { event.preventDefault(); sendHuba(); });
 	document.addEventListener("keydown", (event) => {
 		if (event.key === "Escape" && HUBA.open) toggleHuba(false);
 	});
-	const tts = $("#hubaTts");
-	if (tts) tts.addEventListener("click", () => {
-		HUBA.tts = !HUBA.tts;
-		tts.setAttribute("aria-pressed", String(HUBA.tts));
-		tts.classList.toggle("active", HUBA.tts);
-		if (!HUBA.tts) window.speechSynthesis?.cancel();
-	});
-	const mic = $("#hubaMic");
-	if (mic) mic.addEventListener("click", () => hubaListen(mic));
+}
+
+/** The header ask bar is the way in: typing a question opens the panel with
+ *  that question already running. */
+function hubaOmniSubmit(event) {
+	event.preventDefault();
+	const omni = $("#hubaOmniInput");
+	const question = String(omni?.value ?? "").trim();
+	initHuba();
+	toggleHuba(true);
+	if (question) {
+		const input = $("#hubaInput");
+		if (input) input.value = question;
+		if (omni) omni.value = "";
+		sendHuba();
+	}
+	return false;
 }
 
 function toggleHuba(force) {
+	initHuba();
 	const panel = $("#hubaPanel");
-	const fab = $("#hubaFab");
-	if (!panel || !fab) return;
+	if (!panel) return;
 	HUBA.open = typeof force === "boolean" ? force : panel.hidden;
 	panel.hidden = !HUBA.open;
-	fab.setAttribute("aria-expanded", String(HUBA.open));
+	document.getElementById("hubaOmni")?.classList.toggle("active", HUBA.open);
 	if (HUBA.open) {
-		if (!HUBA.history.length) hubaAppend("assistant", "Hi — I'm Huba. Ask me anything about Itsuki: how saving works, what a receipt means, where your usage stands. I only answer from the documentation and your own account, so if I don't know, I'll say so.", []);
+		if (!HUBA.history.length) {
+			hubaAppend("assistant", "I'm Huba. Ask me anything about Itsuki or about this account — how saving works, what a receipt means, how much of today's allowance is left, who's on your team.");
+		}
 		$("#hubaInput")?.focus();
-	} else {
-		window.speechSynthesis?.cancel();
 	}
 }
 
-function hubaAppend(role, text, sources) {
+function hubaAppend(role, text) {
 	const log = $("#hubaLog");
 	if (!log) return;
 	const row = el("div");
 	row.className = `huba-msg huba-${role}`;
-	const sourceChips = (sources || []).map((s) =>
-		`<a class="huba-src" href="/docs/#${esc(s.route)}" target="_blank" rel="noopener">${esc(s.title)}</a>`).join("");
-	row.innerHTML = `<div class="huba-bubble">${esc(text).replace(/\n/g, "<br />")}</div>${sourceChips ? `<div class="huba-srcs">${sourceChips}</div>` : ""}`;
+	row.innerHTML = `<div class="huba-bubble">${hubaFormat(text)}</div>`;
 	log.appendChild(row);
 	log.scrollTop = log.scrollHeight;
+	return row;
+}
+
+/** Minimal, escape-first rendering: fenced code, inline code, bold, lists. */
+function hubaFormat(text) {
+	const blocks = [];
+	let source = String(text).replace(/```[a-z]*\n?([\s\S]*?)```/g, (_, code) => {
+		blocks.push(code.replace(/\n$/, ""));
+		return `zzhubacodezz${blocks.length - 1}zz`;
+	});
+	source = esc(source)
+		.replace(/`([^`\n]+)`/g, (_, code) => `<code>${code}</code>`)
+		.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+		.replace(/^\s*[-*]\s+(.*)$/gm, "<li>$1</li>")
+		.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>")
+		.replace(/\n/g, "<br />");
+	return source.replace(/zzhubacodezz(\d+)zz/g, (_, index) =>
+		`<pre class="huba-code"><code>${esc(blocks[Number(index)] ?? "")}</code></pre>`);
 }
 
 async function sendHuba() {
@@ -14027,77 +14167,48 @@ async function sendHuba() {
 	const message = String(input?.value ?? "").trim();
 	if (!message || HUBA.busy) return;
 	input.value = "";
-	hubaAppend("user", message, []);
+	hubaAppend("user", message);
 	HUBA.history.push({ role: "user", content: message });
 	HUBA.busy = true;
 	const log = $("#hubaLog");
 	const thinking = el("div");
 	thinking.className = "huba-msg huba-assistant";
-	thinking.innerHTML = `<div class="huba-bubble huba-thinking">Looking that up…</div>`;
+	thinking.innerHTML = `<div class="huba-bubble huba-thinking">Checking…</div>`;
 	log?.appendChild(thinking);
+	if (log) log.scrollTop = log.scrollHeight;
 	try {
 		const res = await fetch("/v1/huba/chat", {
 			method: "POST",
 			credentials: "include",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ message, history: HUBA.history.slice(-6) }),
+			// `view` tells Huba which tab the question was asked from, so
+			// "how does this work?" on the Graph page reads the graph.
+			body: JSON.stringify({ message, history: HUBA.history.slice(-6), view: S.view }),
 		});
 		const body = await res.json().catch(() => ({}));
 		thinking.remove();
 		if (res.status === 429) {
-			hubaAppend("assistant", body.message || "Huba has answered today's allowance of questions. It resets at 00:00 UTC.", []);
+			hubaAppend("assistant", body.message || "That's today's allowance of questions. It resets at 00:00 UTC.");
 			const usage = $("#hubaUsage");
-			if (usage) usage.innerHTML = `out of messages · <button class="huba-more" onclick="openRequestMore('huba')">request more</button>`;
+			if (usage) usage.innerHTML = `none left today · <button class="huba-more" onclick="openRequestMore('huba')">request more</button>`;
 			return;
 		}
 		if (!res.ok || !body.ok) {
-			hubaAppend("assistant", body.message || "Something went wrong on my side — try again in a minute, or check /docs/.", []);
+			hubaAppend("assistant", body.message || "Something went wrong on my side — give it a minute and ask again.");
 			return;
 		}
 		HUBA.history.push({ role: "assistant", content: body.reply });
-		hubaAppend("assistant", body.reply, body.sources || []);
+		hubaAppend("assistant", body.reply);
 		if (body.usage) {
 			HUBA.usage = body.usage;
 			const usage = $("#hubaUsage");
 			if (usage) usage.textContent = `${Math.max(0, body.usage.limit - body.usage.used)} left today`;
 		}
-		if (HUBA.tts && "speechSynthesis" in window) {
-			try {
-				window.speechSynthesis.cancel();
-				window.speechSynthesis.speak(new SpeechSynthesisUtterance(body.reply));
-			} catch { /* voice is a convenience, never an error */ }
-		}
 	} catch {
 		thinking.remove();
-		hubaAppend("assistant", "I couldn't reach the server. The docs at /docs/ have everything I know.", []);
+		hubaAppend("assistant", "I couldn't reach the server just then. Try again in a moment.");
 	} finally {
 		HUBA.busy = false;
-	}
-}
-
-function hubaListen(button) {
-	const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-	if (!Recognition) return;
-	if (HUBA.listening) { HUBA.listening.stop(); return; }
-	try {
-		const recognition = new Recognition();
-		recognition.lang = document.documentElement.lang || "en-US";
-		recognition.interimResults = false;
-		recognition.maxAlternatives = 1;
-		HUBA.listening = recognition;
-		button.classList.add("active");
-		recognition.onresult = (event) => {
-			const text = event.results?.[0]?.[0]?.transcript ?? "";
-			const input = $("#hubaInput");
-			if (input && text) { input.value = text; sendHuba(); }
-		};
-		recognition.onerror = () => toast("Voice input isn't available right now — the text box always works.", true);
-		recognition.onend = () => { button.classList.remove("active"); HUBA.listening = null; };
-		recognition.start();
-	} catch {
-		button.classList.remove("active");
-		HUBA.listening = null;
-		toast("Voice input isn't available in this browser — the text box always works.", true);
 	}
 }
 
@@ -18095,9 +18206,14 @@ function graphFit(duration = 450) {
 		S.network.fit({
 			nodes: ids,
 			animation: { duration, easingFunction: "easeInOutCubic" },
-			minZoomLevel: .18,
+			// The opening view is deliberately MEDIUM: every cluster on
+			// screen, but never so far out that nodes become specks and
+			// edges stop reading. The floor is the readability limit.
+			minZoomLevel: GRAPH_MIN_SCALE,
 			maxZoomLevel: 1.12,
 		});
+		// fit() animates, so restyle once it has settled on its final scale.
+		setTimeout(() => { S.graphEdgeScale = null; clampGraphZoom(); }, duration + 60);
 	} catch {}
 }
 
@@ -18184,13 +18300,17 @@ function edgeStyle(e, i) {
 		part_of: { dashes: false, color: "rgba(210,168,255,.62)" },
 		uses: { dashes: false, color: "rgba(126,231,135,.66)" },
 		depends_on: { dashes: [8,6], color: "rgba(121,192,255,.64)" },
-		supports: { dashes: false, color: "rgba(63,185,80,.5)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
-		drives: { dashes: false, color: "rgba(242,204,96,.75)" },
-		improves: { dashes: false, color: "rgba(86,211,100,.72)" },
-		blocked_by: { dashes: [4,4], color: "rgba(248,81,73,.78)" },
-		caused: { dashes: false, color: "rgba(255,123,114,.78)" },
-		replaced_by: { dashes: [10,7], color: "rgba(139,148,158,.52)" },
-		related_to: { dashes: [2,7], color: "rgba(148,163,184,.45)" },
+		supports: { dashes: false, color: "rgba(63,185,80,.66)", smooth: { enabled: true, type: "curvedCW", roundness: .28 } },
+		drives: { dashes: false, color: "rgba(242,204,96,.78)" },
+		improves: { dashes: false, color: "rgba(86,211,100,.75)" },
+		blocked_by: { dashes: [4,4], color: "rgba(248,81,73,.8)" },
+		caused: { dashes: false, color: "rgba(255,123,114,.8)" },
+		replaced_by: { dashes: [10,7], color: "rgba(139,148,158,.66)" },
+		// `related_to` is the most common edge by far, so its resting alpha
+		// sets whether the graph reads as a structure or as loose dots. It
+		// was .28, then .45; at .62 it is legible without becoming a hairball
+		// (the hover spotlight is what separates one subgraph from the rest).
+		related_to: { dashes: [2,7], color: "rgba(148,163,184,.62)" },
 	};
 	const s = styles[type] || styles.related_to;
 	const rgb = /rgba\((\d+),(\d+),(\d+),/.exec(s.color);
@@ -18205,7 +18325,64 @@ function edgeStyle(e, i) {
 		_lit: lit,
 		_dim: dim,
 		_baseWidth: base.width,
+		// Remembered so the zoom pass can drop to solid when the view is far
+		// out and restore the type's own dash pattern when it comes back.
+		_baseDashes: s.dashes ?? false,
 	};
+}
+
+/* ---- graph zoom behaviour ------------------------------------------------
+ * Two things went wrong at low zoom and both are fixed here.
+ *
+ * 1. EDGES VANISHED. vis-network scales edge width with the view, so a 1.5px
+ *    line at scale .3 paints under half a pixel and disappears — which is why
+ *    a zoomed-out graph looked like floating dots with a couple of green
+ *    strands. Widths are now recomputed against the live scale so an edge
+ *    keeps a constant on-screen thickness at any zoom, and dashes (which
+ *    disintegrate first) become solid once the view is small.
+ * 2. IT COULD BE SHRUNK TO NOTHING. There was no lower bound, so a scroll
+ *    gesture could bury the whole graph in a corner. Scale is now clamped.
+ */
+const GRAPH_MIN_SCALE = 0.22;
+const GRAPH_MAX_SCALE = 2.4;
+/** Below this the graph is "far": dashes stop reading, so go solid. */
+const GRAPH_SOLID_BELOW = 0.55;
+
+function graphScale() {
+	try { return S.network?.getScale?.() ?? 1; } catch { return 1; }
+}
+
+/**
+ * Keep edges optically constant. Widths are divided by the current scale so
+ * zooming out thickens the stroke in graph-space, which cancels out to the
+ * same on-screen line. Clamped so a deep zoom-in doesn't produce ribbons.
+ */
+function applyGraphZoomStyling() {
+	if (!S.graphEdgesDs) return;
+	const scale = Math.max(0.05, graphScale());
+	if (S.graphEdgeScale && Math.abs(S.graphEdgeScale - scale) < 0.04) return;
+	S.graphEdgeScale = scale;
+	const far = scale < GRAPH_SOLID_BELOW;
+	const updates = [];
+	for (const edge of S.graphEdgesDs.get()) {
+		if (edge._base == null) continue;
+		const base = edge._baseWidth ?? 1.5;
+		const width = Math.min(6, Math.max(base, base / scale));
+		const dashes = far ? false : (edge._baseDashes ?? false);
+		if (edge.width !== width || edge.dashes !== dashes) updates.push({ id: edge.id, width, dashes });
+	}
+	if (updates.length) S.graphEdgesDs.update(updates);
+}
+
+/** Clamp the view so the graph can never be shrunk into an unreadable speck. */
+function clampGraphZoom() {
+	if (!S.network) return;
+	const scale = graphScale();
+	const clamped = Math.min(GRAPH_MAX_SCALE, Math.max(GRAPH_MIN_SCALE, scale));
+	if (clamped !== scale) {
+		try { S.network.moveTo({ scale: clamped }); } catch { /* view is mid-gesture */ }
+	}
+	applyGraphZoomStyling();
 }
 
 /**
@@ -18217,12 +18394,15 @@ function highlightConnectedEdges(focusId) {
 	if (!S.network || !S.graphEdgesDs) return;
 	const connected = new Set(focusId != null ? S.network.getConnectedEdges(focusId) : []);
 	const updates = [];
+	// Width here must respect the zoom compensation above, or highlighting
+	// would silently undo it and the edges would thin out again.
+	const scale = Math.max(0.05, graphScale());
 	for (const edge of S.graphEdgesDs.get()) {
 		if (edge._base == null) continue; // guide edges keep their own styling
 		const wanted = focusId == null ? edge._base : connected.has(edge.id) ? edge._lit : edge._dim;
-		const wantedWidth = focusId != null && connected.has(edge.id)
-			? Math.min(5, (edge._baseWidth ?? 1.5) + 1)
-			: (edge._baseWidth ?? 1.5);
+		const base = edge._baseWidth ?? 1.5;
+		const zoomed = Math.min(6, Math.max(base, base / scale));
+		const wantedWidth = focusId != null && connected.has(edge.id) ? Math.min(7, zoomed + 1) : zoomed;
 		if (edge.color?.color !== wanted || edge.width !== wantedWidth) {
 			updates.push({ id: edge.id, color: { ...edge.color, color: wanted }, width: wantedWidth });
 		}
@@ -18921,6 +19101,11 @@ function drawGraph() {
 			pickCluster(p?.pointer?.canvas ? clusterHullAt(p.pointer.canvas) : null);
 		});
 		S.network.on("doubleClick", () => { if (!S.clusterDrag) graphFit(); });
+		// Zoom is where edge visibility is won or lost, so restyle on every
+		// view change (and clamp, so it can't be shrunk into a speck).
+		S.network.on("zoom", () => clampGraphZoom());
+		S.network.on("dragEnd", () => applyGraphZoomStyling());
+		S.graphEdgeScale = null;
 		S.network.once("afterDrawing", () => setTimeout(() => graphFit(450), 20));
 		bindGraphResize($("#graphWrap"));
 		if (S.selected) S.network.selectNodes([S.selected]);
