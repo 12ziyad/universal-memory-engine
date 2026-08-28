@@ -2343,16 +2343,38 @@
 
 	/* Huba lives in the header: an always-there ask bar where the theme
 	   toggle used to sit, and a panel that expands beneath it. */
-	.huba-omni { display: none; align-items: center; gap: 8px; min-width: 210px; max-width: 320px; padding: 0 11px; height: 34px; border: 1px solid var(--border); background: var(--input-bg); transition: border-color 140ms ease; }
-	body.app-mode .huba-omni { display: flex; }
-	.huba-omni:focus-within, .huba-omni.active { border-color: var(--accent); }
-	.huba-omni-mark { color: var(--accent); font-size: 14px; line-height: 1; }
-	.huba-omni input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--text); font: 400 13px/1 var(--font-ui); outline: none; }
-	.huba-omni input::-webkit-search-cancel-button { display: none; }
+	.huba-omni { display: none; align-items: center; gap: 9px; height: 34px; padding: 0 13px 0 10px;
+		border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
+		font: 600 12.5px/1 var(--font-ui); cursor: pointer; transition: border-color 140ms ease, color 140ms ease; }
+	body.app-mode .huba-omni { display: inline-flex; }
+	.huba-omni:hover, .huba-omni:focus-visible, .huba-omni.active { border-color: var(--accent); color: var(--accent); }
+	.huba-omni:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+	/* Three bars that breathe — a thing you can talk to, not a dead glyph.
+	   Deliberately tiny and slow: an ornament at this size reads as presence,
+	   and anything faster becomes a distraction in a header you look at all day. */
+	.huba-omni-mark, .huba-mark { display: inline-flex; align-items: center; gap: 2px; height: 14px; }
+	.huba-omni-mark i, .huba-mark i { display: block; width: 2px; height: 5px; border-radius: 1px; background: var(--accent);
+		animation: hubaPulse 1900ms ease-in-out infinite; }
+	.huba-omni-mark i:nth-child(2), .huba-mark i:nth-child(2) { animation-delay: 220ms; }
+	.huba-omni-mark i:nth-child(3), .huba-mark i:nth-child(3) { animation-delay: 440ms; }
+	@keyframes hubaPulse { 0%, 100% { height: 5px; opacity: .55; } 50% { height: 13px; opacity: 1; } }
+	.huba-omni-label { white-space: nowrap; }
+
+	/* Recent conversations */
+	#hubaThreads { max-height: 210px; overflow-y: auto; border-bottom: 1px solid var(--border); background: var(--panel2); }
+	.huba-thread { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+	.huba-thread:last-child { border-bottom: 0; }
+	.huba-thread.active { background: var(--panel3); box-shadow: inset 2px 0 0 var(--accent); }
+	.huba-thread-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 9px 12px;
+		border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+	.huba-thread-open span { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+	.huba-thread-open small { color: var(--muted); font-size: 11px; }
+	.huba-thread-open:hover { color: var(--accent); }
+	.huba-thread-del { align-self: center; margin-right: 8px; border-color: transparent; }
+	.huba-thread-del:hover { color: var(--red); border-color: var(--red); }
 
 	#hubaBar { display: none; }
 	body.app-mode #hubaBar { display: block; font-family: var(--font-ui); }
-	.huba-mark { color: var(--accent); font-size: 15px; }
 	#hubaPanel { position: fixed; right: 16px; top: calc(var(--header-h, 58px) + 8px); z-index: 330; width: min(430px, calc(100vw - 24px)); height: min(620px, calc(100vh - var(--header-h, 58px) - 28px)); display: flex; flex-direction: column; border: 1px solid var(--border2); background: var(--panel); box-shadow: var(--shadow-lg);
 		/* Collapses toward the ask bar it came from, in the header above its
 		   top-right corner — so closing reads as putting it away rather than
@@ -2380,14 +2402,15 @@
 	.huba-send { padding: 0 14px; }
 	.huba-more { border: 0; background: transparent; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
 	@media (max-width: 860px) {
-		.huba-omni { min-width: 44px; max-width: 44px; padding: 0 10px; }
-		.huba-omni input { display: none; }
+		.huba-omni { padding: 0 10px; }
+		.huba-omni-label { display: none; }
 	}
 	@media (max-width: 640px) {
 		#hubaPanel { right: 0; left: 0; top: auto; bottom: 0; width: 100vw; height: min(78vh, 560px); border-left: 0; border-right: 0; border-bottom: 0; }
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.usage-bar > i, #hubaPanel, .huba-omni { transition: none !important; }
+		.huba-omni-mark i, .huba-mark i { animation: none !important; height: 9px; opacity: .85; }
 	}
 </style>
 <link rel="stylesheet" href="/assets/landing-editorial-v1.css?v=8" />
@@ -2690,11 +2713,12 @@ const { context } = await memory.search("When is the review?");</code></pre>
 	<div class="spacer"></div>
 	<div class="stats dev-only" id="stats"></div>
 	<!-- Huba replaces the theme quick-cycle here: appearance already lives in
-	     the profile menu, and an always-present ask bar is worth the slot. -->
-	<form class="huba-omni" id="hubaOmni" role="search" onsubmit="return hubaOmniSubmit(event)">
-		<span class="huba-omni-mark" aria-hidden="true">羽</span>
-		<input id="hubaOmniInput" type="search" autocomplete="off" placeholder="Ask Huba anything…" aria-label="Ask Huba about Itsuki" />
-	</form>
+	     the profile menu, and a live way in is worth the slot. The mark
+	     breathes so it reads as something you can talk to. -->
+	<button class="huba-omni" id="hubaOmni" type="button" onclick="toggleHuba()" aria-haspopup="dialog" aria-expanded="false" aria-controls="hubaPanel">
+		<span class="huba-omni-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+		<span class="huba-omni-label">Ask about Itsuki</span>
+	</button>
 	<div class="profile-menu-wrap" id="profileMenuWrap" hidden>
 		<button class="profile-trigger" id="profileTrigger" type="button" onclick="toggleProfileMenu()" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu">
 			<span class="avatar" id="profileAvatar" aria-hidden="true"></span>
@@ -13860,23 +13884,23 @@ function usageCountdownText(resetsAt) {
 	return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-async function viewUsage(v) {
-	const wrap = el("div");
-	wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">Loading your usage…</div></div>`;
-	v.appendChild(wrap);
-	let usage;
-	try { usage = await api("/v1/usage?range=7d"); }
-	catch (err) { wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">${esc(err.message)}</div></div>`; return; }
-	let myRequests = [];
-	try { myRequests = (await api("/v1/upgrade-requests")).requests || []; } catch { myRequests = []; }
-	const openRequest = (kind) => myRequests.find((r) => r.status === "open" && r.kind === kind);
+/**
+ * The usage panel body, rendered from a /v1/usage payload.
+ *
+ * Extracted from viewUsage so Settings can host exactly the same thing —
+ * one implementation, two doorways, no chance of the two drifting apart.
+ * `Request more` used to appear twice inline (once per allowance); it is now
+ * a single action in the page header, because a person asking for headroom
+ * is asking about the account, not about one bar.
+ */
+function usagePanelBody(usage, myRequests) {
+	const openRequest = (myRequests || []).find((request) => request.status === "open");
 	const daily = usage.quota_daily;
 	const monthly = usage.quota;
 	const huba = usage.huba;
 	const recent = (usage.by_day || []).slice(-7).reverse();
 	const ratio = daily && daily.limit > 0 ? daily.used / daily.limit : 0;
-	wrap.innerHTML = `<div class="box" style="max-width:860px">
-		<h3>Usage &amp; plan</h3>
+	return `
 		<div class="help">What this account has used, what remains, and when it resets. Recall is never metered — a full allowance never locks you out of reading your own memory.</div>
 		${daily ? `<div class="action-box" style="margin-top:12px">
 			<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
@@ -13886,11 +13910,8 @@ async function viewUsage(v) {
 			${usageBar(daily.used, daily.limit)}
 			<div class="kv" style="margin-top:6px"><b>${daily.used.toLocaleString()}</b> of <b>${daily.limit.toLocaleString()}</b> neurons used · about <b>${daily.approx_saves_remaining}</b> saves left today</div>
 			${ratio >= 1 ? `<div class="help" style="color:var(--red);margin-top:4px">Today's allowance is used up. Saves resume at 00:00 UTC; recall keeps working.</div>`
-				: ratio >= 0.8 ? `<div class="help" style="color:var(--amber);margin-top:4px">Over 80% used — if today is a heavy day, request more below before you hit the wall.</div>` : ""}
+				: ratio >= 0.8 ? `<div class="help" style="color:var(--amber);margin-top:4px">Over 80% used — if today is a heavy day, ask for more headroom before you hit the wall.</div>` : ""}
 			<div class="help" style="margin-top:6px">A direct save costs ~150 neurons; a long conversation save costs proportionally more. ${daily.early_access ? `<span class="badge state-active" style="opacity:.8">early access</span>` : ""}</div>
-			<div style="margin-top:10px">${openRequest("saves")
-				? `<span class="help">Request sent ${ago(openRequest("saves").created_at)} — the owner reviews these personally.</span>`
-				: `<button class="ghost mini" onclick="openRequestMore('saves')">Request more</button>`}</div>
 		</div>` : `<div class="help" style="margin-top:12px">Daily usage is unavailable right now.</div>`}
 		${monthly ? `<div class="action-box" style="margin-top:10px">
 			<h3 style="margin:0 0 6px">This month's plan</h3>
@@ -13903,23 +13924,52 @@ async function viewUsage(v) {
 				<span class="help">resets at 00:00 UTC</span>
 			</div>
 			${usageBar(huba.used, huba.limit)}
-			<div class="kv" style="margin-top:6px"><b>${huba.used}</b> of <b>${huba.limit}</b> messages today</div>
-			<div style="margin-top:10px">${openRequest("huba")
-				? `<span class="help">Request sent ${ago(openRequest("huba").created_at)}.</span>`
-				: `<button class="ghost mini" onclick="openRequestMore('huba')">Request more</button>`}</div>
+			<div class="kv" style="margin-top:6px"><b>${huba.used}</b> of <b>${huba.limit}</b> questions today</div>
 		</div>` : ""}
 		<div class="action-box" style="margin-top:10px">
 			<h3 style="margin:0 0 6px">Recent activity</h3>
 			${recent.map((row) => `<div class="kv">${esc(row.day)}: <b>${row.saves}</b> save(s) · <b>${row.recalls}</b> recall(s)${row.memories_added ? ` · ${row.memories_added} memories added` : ""}</div>`).join("") || `<div class="help">Nothing in the last 7 days.</div>`}
 		</div>
-		<div class="help" style="margin-top:10px">There is no checkout and no card on file — "Request more" sends a note to the owner, who grants limits by hand while Itsuki is in early access.</div>
-	</div>`;
+		${openRequest
+			? `<div class="help" style="margin-top:10px">Request sent ${ago(openRequest.created_at)} — the owner reviews these personally.</div>`
+			: `<div class="help" style="margin-top:10px">There is no checkout and no card on file — asking for more sends a note to the owner, who grants limits by hand while Itsuki is in early access.</div>`}`;
+}
+
+/** Both doorways need the same two reads, so they share this one. */
+async function loadUsagePanel() {
+	const usage = await api("/v1/usage?range=7d");
+	let requests = [];
+	try { requests = (await api("/v1/upgrade-requests")).requests || []; } catch { requests = []; }
+	return { usage, requests };
+}
+
+/** Tick the reset countdown while the panel is on screen. */
+function startUsageCountdown(resetsAt, stillVisible) {
 	if (S.usageTimer) clearInterval(S.usageTimer);
 	S.usageTimer = setInterval(() => {
-		if (S.view !== "usage") { clearInterval(S.usageTimer); S.usageTimer = null; return; }
 		const span = $("#usageCountdown");
-		if (span && daily) span.textContent = usageCountdownText(daily.resets_at);
+		if (!span || !stillVisible()) { clearInterval(S.usageTimer); S.usageTimer = null; return; }
+		span.textContent = usageCountdownText(resetsAt);
 	}, 1000);
+}
+
+async function viewUsage(v) {
+	const wrap = el("div");
+	wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">Loading your usage…</div></div>`;
+	v.appendChild(wrap);
+	let loaded;
+	try { loaded = await loadUsagePanel(); }
+	catch (err) { wrap.innerHTML = `<div class="box" style="max-width:860px"><h3>Usage &amp; plan</h3><div class="help">${esc(err.message)}</div></div>`; return; }
+	const { usage, requests } = loaded;
+	const hasOpen = requests.some((request) => request.status === "open");
+	wrap.innerHTML = `<div class="box" style="max-width:860px">
+		<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+			<h3 style="margin:0">Usage &amp; plan</h3>
+			<button class="ghost mini" ${hasOpen ? "disabled title=\"You already have a request waiting\"" : ""} onclick="openRequestMore('saves')">Request more access</button>
+		</div>
+		${usagePanelBody(usage, requests)}
+	</div>`;
+	startUsageCountdown(usage.quota_daily?.resets_at, () => S.view === "usage");
 }
 
 function openRequestMore(kind) {
@@ -14078,21 +14128,27 @@ function showFailedSavesReport(jobs) {
    this account's own state, assembled server-side); voice in and out via the
    browser's Web Speech API — zero neurons, no audio ever leaves the page
    except as the text it recognized. */
-const HUBA = { open: false, history: [], busy: false, usage: null };
+const HUBA = { open: false, history: [], busy: false, usage: null, threadId: null, threads: [], collapseTimer: null };
+// Visible on window for the same reason S is: this app has no build step,
+// and reachable state is what makes a live smoke check honest.
+window.HUBA = HUBA;
 
 function initHuba() {
 	if (document.getElementById("hubaBar")) return;
 	const bar = el("div");
 	bar.id = "hubaBar";
 	bar.innerHTML = `
-		<section id="hubaPanel" hidden aria-label="Huba">
+		<section id="hubaPanel" hidden role="dialog" aria-label="Huba">
 			<header>
-				<span class="huba-mark" aria-hidden="true">羽</span>
+				<span class="huba-mark" aria-hidden="true"><i></i><i></i><i></i></span>
 				<b>Huba</b>
 				<span style="flex:1"></span>
 				<span id="hubaUsage" class="help"></span>
+				<button id="hubaThreadsToggle" type="button" class="huba-icon" title="Recent conversations" aria-label="Recent conversations" aria-expanded="false">☰</button>
+				<button id="hubaNew" type="button" class="huba-icon" title="New conversation" aria-label="New conversation">+</button>
 				<button id="hubaClose" type="button" class="huba-icon" title="Collapse" aria-label="Collapse Huba">×</button>
 			</header>
+			<div id="hubaThreads" hidden aria-label="Recent conversations"></div>
 			<div id="hubaLog" role="log" aria-live="polite"></div>
 			<form id="hubaForm">
 				<input id="hubaInput" type="text" autocomplete="off" maxlength="2000" placeholder="Ask about anything in Itsuki…" aria-label="Ask Huba" />
@@ -14101,49 +14157,104 @@ function initHuba() {
 		</section>`;
 	document.body.appendChild(bar);
 	$("#hubaClose").addEventListener("click", () => toggleHuba(false));
+	$("#hubaNew").addEventListener("click", () => hubaNewThread());
+	$("#hubaThreadsToggle").addEventListener("click", () => hubaToggleThreads());
 	$("#hubaForm").addEventListener("submit", (event) => { event.preventDefault(); sendHuba(); });
 	document.addEventListener("keydown", (event) => {
 		if (event.key === "Escape" && HUBA.open) toggleHuba(false);
 	});
 }
 
-/** The header ask bar is the way in: typing a question opens the panel with
- *  that question already running. */
-function hubaOmniSubmit(event) {
-	event.preventDefault();
-	const omni = $("#hubaOmniInput");
-	const question = String(omni?.value ?? "").trim();
-	initHuba();
-	toggleHuba(true);
-	if (question) {
-		const input = $("#hubaInput");
-		if (input) input.value = question;
-		if (omni) omni.value = "";
-		sendHuba();
-	}
-	return false;
+/* ---- threads ---- */
+function hubaNewThread() {
+	HUBA.threadId = null;
+	HUBA.history = [];
+	const log = $("#hubaLog");
+	if (log) log.innerHTML = "";
+	hubaAppend("assistant", "New conversation. Ask me anything about Itsuki — how saving works, what a receipt means, where your usage stands, who's on your team.");
+	hubaCloseThreads();
+	$("#hubaInput")?.focus();
 }
 
-/**
- * Open and collapse the panel.
- *
- * Closing used to flip `hidden` and the panel simply blinked out of
- * existence, which reads as a glitch rather than as a thing you put away.
- * It now collapses toward the ask bar it came from — the panel's transform
- * origin is its top-right corner, under the bar in the header — and only
- * becomes `hidden` once that has finished, so it leaves the accessibility
- * tree exactly as before. Opening plays the same motion in reverse.
- *
- * `prefers-reduced-motion` removes the transition (see the stylesheet), and
- * because the state flip does not depend on the transition ever firing, the
- * panel still opens and closes correctly when it is suppressed.
- */
+function hubaCloseThreads() {
+	const list = $("#hubaThreads");
+	if (list) list.hidden = true;
+	$("#hubaThreadsToggle")?.setAttribute("aria-expanded", "false");
+}
+
+async function hubaToggleThreads() {
+	const list = $("#hubaThreads");
+	if (!list) return;
+	if (!list.hidden) return hubaCloseThreads();
+	list.hidden = false;
+	$("#hubaThreadsToggle")?.setAttribute("aria-expanded", "true");
+	list.innerHTML = `<div class="help" style="padding:10px 13px">Loading…</div>`;
+	try {
+		const res = await fetch("/v1/huba/threads", { credentials: "include" });
+		const body = await res.json();
+		HUBA.threads = body.threads || [];
+	} catch {
+		list.innerHTML = `<div class="help" style="padding:10px 13px">Couldn't load your conversations.</div>`;
+		return;
+	}
+	renderHubaThreads();
+}
+
+function renderHubaThreads() {
+	const list = $("#hubaThreads");
+	if (!list) return;
+	const threads = HUBA.threads || [];
+	list.innerHTML = threads.length
+		? threads.map((thread) => `<div class="huba-thread${thread.id === HUBA.threadId ? " active" : ""}">
+				<button type="button" class="huba-thread-open" onclick="hubaOpenThread('${esc(thread.id)}')" title="${esc(thread.title || "Conversation")}">
+					<span>${esc(thread.title || "Conversation")}</span>
+					<small>${ago(thread.updated_at)} · ${Math.floor((thread.message_count || 0) / 2)} question${Math.floor((thread.message_count || 0) / 2) === 1 ? "" : "s"}</small>
+				</button>
+				<button type="button" class="huba-icon huba-thread-del" title="Delete this conversation" aria-label="Delete conversation" onclick="hubaDeleteThread('${esc(thread.id)}')">×</button>
+			</div>`).join("")
+		: `<div class="help" style="padding:10px 13px">No conversations yet.</div>`;
+}
+
+async function hubaOpenThread(threadId) {
+	const log = $("#hubaLog");
+	if (!log) return;
+	log.innerHTML = `<div class="help">Loading…</div>`;
+	hubaCloseThreads();
+	try {
+		const res = await fetch(`/v1/huba/threads?id=${encodeURIComponent(threadId)}`, { credentials: "include" });
+		if (!res.ok) throw new Error("gone");
+		const body = await res.json();
+		HUBA.threadId = threadId;
+		HUBA.history = (body.thread?.messages || []).map((m) => ({ role: m.role, content: m.content }));
+		log.innerHTML = "";
+		for (const message of body.thread?.messages || []) hubaAppend(message.role, message.content);
+	} catch {
+		log.innerHTML = "";
+		hubaAppend("assistant", "That conversation isn't available any more.");
+	}
+}
+
+async function hubaDeleteThread(threadId) {
+	try {
+		const res = await fetch(`/v1/huba/threads/${encodeURIComponent(threadId)}`, { method: "DELETE", credentials: "include" });
+		if (!res.ok) throw new Error("failed");
+		HUBA.threads = (HUBA.threads || []).filter((thread) => thread.id !== threadId);
+		if (HUBA.threadId === threadId) hubaNewThread();
+		renderHubaThreads();
+		toast("Conversation deleted.");
+	} catch {
+		toast("Couldn't delete that conversation.", true);
+	}
+}
+
 function toggleHuba(force) {
 	initHuba();
 	const panel = $("#hubaPanel");
 	if (!panel) return;
 	HUBA.open = typeof force === "boolean" ? force : panel.hidden;
-	document.getElementById("hubaOmni")?.classList.toggle("active", HUBA.open);
+	const omni = document.getElementById("hubaOmni");
+	omni?.classList.toggle("active", HUBA.open);
+	omni?.setAttribute("aria-expanded", String(HUBA.open));
 	if (HUBA.collapseTimer) { clearTimeout(HUBA.collapseTimer); HUBA.collapseTimer = null; }
 
 	if (HUBA.open) {
@@ -14160,6 +14271,7 @@ function toggleHuba(force) {
 		if (!HUBA.history.length) {
 			hubaAppend("assistant", "I'm Huba. Ask me anything about Itsuki or about this account — how saving works, what a receipt means, how much of today's allowance is left, who's on your team.");
 		}
+		hubaCloseThreads();
 		$("#hubaInput")?.focus();
 		return;
 	}
@@ -14178,7 +14290,7 @@ function toggleHuba(force) {
 	// silently no-ops when the window itself is not focused.
 	if (panel.contains(document.activeElement)) {
 		document.activeElement.blur?.();
-		$("#hubaOmniInput")?.focus();
+		document.getElementById("hubaOmni")?.focus();
 	}
 }
 
@@ -14230,8 +14342,11 @@ async function sendHuba() {
 			credentials: "include",
 			headers: { "content-type": "application/json" },
 			// `view` tells Huba which tab the question was asked from, so
-			// "how does this work?" on the Graph page reads the graph.
-			body: JSON.stringify({ message, history: HUBA.history.slice(-6), view: S.view }),
+			// "how does this work?" on the Graph page reads the graph. The
+			// thread id is all the client sends of the conversation — the
+			// server replays the real history, so a tampered client cannot
+			// invent one.
+			body: JSON.stringify({ message, threadId: HUBA.threadId, view: S.view }),
 		});
 		const body = await res.json().catch(() => ({}));
 		thinking.remove();
@@ -14246,6 +14361,7 @@ async function sendHuba() {
 			return;
 		}
 		HUBA.history.push({ role: "assistant", content: body.reply });
+		if (body.thread_id) HUBA.threadId = body.thread_id;
 		hubaAppend("assistant", body.reply);
 		if (body.usage) {
 			HUBA.usage = body.usage;
@@ -15012,6 +15128,7 @@ const SET_SECTIONS = [
 	] },
 	{ group: "Personal", items: [
 		["personal-account", "Profile & security"],
+		["personal-usage", "Usage & plan"],
 		["personal-appearance", "Appearance"],
 	] },
 ];
@@ -15395,10 +15512,12 @@ function renderSettingsSection() {
 		"org-general": setOrgGeneral,
 		"org-members": setOrgMembers,
 		"personal-account": setPersonalAccount,
+		"personal-usage": setPersonalUsage,
 		"personal-appearance": setPersonalAppearance,
 	}[SET.section];
 	box.innerHTML = render ? render() : `<div class="set-empty">Nothing here.</div>`;
 	if (SET.section === "personal-account") mountPersonalAccount(box);
+	if (SET.section === "personal-usage") mountPersonalUsage(box);
 	if (SET.section === "personal-appearance") syncThemeControls();
 	if (SET.section === "project-audit" && !SET.audit && !SET.auditLoading && !SET.auditError) loadAuditPage();
 	if (SET.section === "project-retention" && !SET.retention && !SET.retentionLoading && !SET.retentionError) loadRetentionSettings();
@@ -17967,6 +18086,41 @@ function setAppearancePicker() {
 			<span class="theme-preview preview-system" aria-hidden="true"></span><b>System</b>
 		</button>
 	</div>`;
+}
+
+/**
+ * Usage & plan, inside Settings.
+ *
+ * The same panel the top-level Usage page renders — one implementation, two
+ * doorways. It renders a placeholder synchronously (the settings dispatcher
+ * assigns innerHTML from a return value) and fills it in from mount, which
+ * is where the async read is allowed to live.
+ */
+function setPersonalUsage() {
+	return `<div class="set-section">
+		<div class="set-section-head">
+			<div><h3>Usage &amp; plan</h3>
+				<p>What this account has used today and this month, and how to ask for more.</p></div>
+			<button class="ghost mini" id="setUsageRequest" onclick="openRequestMore('saves')">Request more access</button>
+		</div>
+		<div id="setUsageBody"><div class="help">Loading your usage…</div></div>
+	</div>`;
+}
+
+async function mountPersonalUsage(box) {
+	const body = box.querySelector("#setUsageBody");
+	if (!body) return;
+	try {
+		const { usage, requests } = await loadUsagePanel();
+		body.innerHTML = usagePanelBody(usage, requests);
+		if (requests.some((request) => request.status === "open")) {
+			const button = box.querySelector("#setUsageRequest");
+			if (button) { button.disabled = true; button.title = "You already have a request waiting"; }
+		}
+		startUsageCountdown(usage.quota_daily?.resets_at, () => S.view === "settings" && SET.section === "personal-usage");
+	} catch (error) {
+		body.innerHTML = `<div class="help">${esc(error.message || "Usage is unavailable right now.")}</div>`;
+	}
 }
 
 function setPersonalAppearance() {

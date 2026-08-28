@@ -260,6 +260,15 @@ import { allowRate, managedActorRateKey, RATE_BUCKETS } from "./lib/rate.js";
 import { LIMITS_SCHEMA, RATE_LIMITS_DOC } from "./lib/limits_contract.mjs";
 import { aiBudget, aiLimitsDocument, checkAiBudget, checkHubaBudget, countWritesThisMonth, derivedNeurons, loadEntitlements, neuronsSpentTodayForAccount, hubaMessagesToday, startOfNextUtcMonth, startOfNextUtcDay, startOfUtcDay } from "./lib/ai_budget.js";
 import { hubaTurn } from "./huba/huba.js";
+// Aliased: the Playground already exports listThreads/deleteThread for its
+// own conversations, and these are a different kind of thread entirely.
+import {
+	listThreads as listHubaThreads,
+	readThread as readHubaThread,
+	appendExchange as appendHubaExchange,
+	deleteThread as deleteHubaThread,
+	pruneThreads as pruneHubaThreads,
+} from "./huba/threads.js";
 import { createUpgradeRequest, processUpgradeRequestNotifications, listUpgradeRequests, grantEntitlementStatements, dismissUpgradeRequest } from "./lib/upgrade_requests.js";
 
 function clientIp(request) {
@@ -4000,23 +4009,67 @@ const routes = {
 		// the fetchers ever see — `view` is the one thing taken from the client
 		// and it is a UI hint (which tab they are on), never an authorization
 		// input. `isAdmin` comes from the session's own user row.
+		// Continuing a thread replays it from the server rather than trusting
+		// the browser's copy — the client cannot smuggle in an invented
+		// history, and a thread id that is not this user's is simply ignored.
+		let history = [];
+		const requestedThreadId = typeof body.threadId === "string" ? body.threadId.slice(0, 64) : null;
+		if (requestedThreadId) {
+			const thread = await readHubaThread(env, auth.userId, requestedThreadId).catch(() => null);
+			history = (thread?.messages ?? []).slice(-6).map((message) => ({ role: message.role, content: message.content }));
+		}
+
 		const result = await hubaTurn(env, {
 			userId: auth.userId,
 			accountUserId: auth.userId,
 			isAdmin: auth.user?.role === "admin",
 		}, {
 			message: body.message,
-			history: body.history,
+			history,
 			view: body.view,
 		}, { quota: quotaSnapshot });
+
+		let threadId = requestedThreadId;
+		if (result.ok) {
+			try {
+				threadId = await appendHubaExchange(env, auth.userId, {
+					threadId: requestedThreadId,
+					question: body.message,
+					answer: result.reply,
+				});
+				if (ctx) ctx.waitUntil(pruneHubaThreads(env, auth.userId));
+			} catch (error) {
+				// A conversation that cannot be filed is still a conversation:
+				// answer now, lose only the history.
+				console.warn("huba thread persist failed:", error?.message ?? error);
+			}
+		}
 		return json({
 			...result,
+			thread_id: threadId ?? null,
 			usage: {
-				used: quotaState.used + (result.ok ? 1 : 0),
+				// An off-topic refusal is answered from code with no model
+				// call, so it costs no neurons and must not read as a used
+				// message — the real counter is the ai_calls ledger.
+				used: quotaState.used + (result.ok && !result.offTopic ? 1 : 0),
 				limit: quotaState.limit,
 				resets_at: quotaState.resetsAt,
 			},
 		});
+	},
+
+	/** The panel's recent-conversation list. */
+	"GET /v1/huba/threads": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const url = new URL(request.url);
+		const threadId = url.searchParams.get("id");
+		if (threadId) {
+			const thread = await readHubaThread(env, auth.userId, threadId);
+			if (!thread) return json({ error: "not_found" }, 404);
+			return json({ ok: true, thread });
+		}
+		return json({ ok: true, threads: await listHubaThreads(env, auth.userId) });
 	},
 
 	/**
@@ -5062,6 +5115,19 @@ async function handleRequestInner(request, env, ctx, url) {
 
 		if (url.pathname === "/v1/candidates" || url.pathname.startsWith("/v1/candidates/")) {
 			return handleCandidateRoutes(request, env, url, ctx);
+		}
+
+		// Deleting one Huba conversation. Session-only and scoped to the owner
+		// inside the delete itself, so an id from another account matches
+		// nothing rather than erroring informatively.
+		if (request.method === "DELETE" && url.pathname.startsWith("/v1/huba/threads/")) {
+			const auth = await getSessionUser(env, request);
+			if (!auth) return json({ error: "unauthorized" }, 401);
+			if (!(await allowRate(env.DELETE_LIMITER, `huba-thread:${auth.userId}`, { fail: "closed" }))) return tooManyFor("delete");
+			const threadId = decodeURIComponent(url.pathname.slice("/v1/huba/threads/".length));
+			if (!threadId) return json({ error: "thread_id_required" }, 400);
+			const result = await deleteHubaThread(env, auth.userId, threadId);
+			return json({ ok: true, ...result });
 		}
 
 		// Real delete for API keys (Part 3). Sessions keep full power; Bearer

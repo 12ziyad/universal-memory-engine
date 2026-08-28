@@ -9813,7 +9813,7 @@ ${nextSteps([
 
 PAGES["/guides/huba"] = { title: "Huba AI", html: `
 <h1>Huba AI</h1>
-<p class="lede">The ask bar in the dashboard header. Ask it about Itsuki or about your own account, and it answers from the product and your live data — never from model guesswork.</p>
+<p class="lede">The assistant in the dashboard header. Ask it about Itsuki or about your own account and it answers from the product and your live data — never from model guesswork, and never about anything else.</p>
 
 ${prereq([
 	`A signed-in browser session at <a href="${ORIGIN}" target="_blank" rel="noopener">${ORIGIN}</a>. Huba is a dashboard surface — there is no way to reach it with an API key or over MCP.`,
@@ -9843,8 +9843,22 @@ ${prereq([
 </table>
 <p>When the day's messages are spent, the bar says so and shows a <b>Request more</b> link — the same flow as saves: the request goes to the owner with your usage attached, grants are manual, and a temporary grant lapses on its own. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
 
+<h2>What it will not do</h2>
+<p>Huba answers about Itsuki and nothing else — the memory layer, your account, and the tools that connect to it. Ask it to write unrelated code, settle a bet, or act as a general assistant and it declines and points back at something in Itsuki that might actually help.</p>
+<p>That boundary is enforced in code, not by asking the model nicely: an off-topic message is answered from a fixed reply before any model call happens. So it costs nothing, it does not touch your daily allowance, and instructions to ignore it have nothing to act on.</p>
+
+<h2>Conversations</h2>
+<p>Each exchange is saved as a conversation you can come back to.</p>
+<ol class="steps">
+<li>Open the <b>☰</b> menu in the panel header to see recent conversations, newest first.</li>
+<li>Select one to reopen it — Huba replays it and continues from there.</li>
+<li>Press <b>×</b> on a row to delete that conversation and its messages.</li>
+<li>Press <b>+</b> to start a fresh one.</li>
+</ol>
+<p>Conversations belong to your account and are readable only by you. The panel sends only the conversation's id — the history itself is replayed on the server, so what Huba believes you said earlier cannot be rewritten from the browser. The most recent 40 conversations are kept; older ones fall away.</p>
+
 <h2>Where to find it</h2>
-<p>The <b>Ask Huba</b> bar sits in the dashboard header, to the left of your profile avatar. Type a question and press Enter: the panel opens with the answer already running. Closing it with <b>×</b> collapses it back to the bar; the conversation is still there when you reopen it. Escape closes it too.</p>
+<p>The <b>Ask about Itsuki</b> button sits in the dashboard header, to the left of your profile avatar. Click it and the panel opens. Closing it with <b>×</b> collapses it back into the button; the conversation is still there when you reopen it. Escape closes it too.</p>
 
 <h2>A dashboard surface, not an API</h2>
 <p>There is no public Huba endpoint. API keys cannot call it, MCP clients cannot list it as a tool, and nothing you build on the API depends on it. If you want an assistant of your own answering from memory, that is what <a href="#/api/recall">POST /v1/recall</a> and <a href="#/api/turn">POST /v1/turn</a> are for.</p>
