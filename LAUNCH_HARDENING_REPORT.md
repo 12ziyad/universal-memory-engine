@@ -1608,5 +1608,38 @@ Full Workers-pool suite green on the final tree — **193 files / 2,464 tests**
 (suite9.log) — plus the node lane **43 files / 666 passed / 1 skipped**
 (unit9.log; includes the census and append-only migration gates). New specs:
 trust_cases (10), security_events (11), admin_step_up (6), maintenance_mode (5),
-trust_ui (10); admin_v2 updated for the step-up flow. Deployed and
-live-verified — see the deployment note below.
+trust_ui (10); admin_v2 updated for the step-up flow.
+
+## Deployment and live verification
+
+Commit `3668b54`. Migration 0062 applied remotely BEFORE the worker deploy
+(the first attempt hit the known stale-OAuth 7403; `wrangler whoami` refreshed
+the token and the retry applied cleanly — 13 commands, tmp/migrate0062b.log).
+`npx wrangler deploy` → version `14cacf04-05be-493d-b901-7200c82d8252`
+(tmp/deploy8.log), `MAINTENANCE_MODE ("off")` visible in the binding list.
+
+**The live walk from the plan, scripted (28 checks, all pass):** throwaway
+reporter files a security report → 201 with `response_due_at` exactly
+received + 7 days (verified in D1: 604,800,000 ms); the reporter sees their own
+case with no notes field; the admin overview lists it with the clock; acknowledge
+→ note → resolve(no_action) all land, a second acknowledge is refused 409, and
+`/v1/admin/audit-feed` carries all three `trust.case.*` rows; step-up promote:
+bare request 428, wrong typed text 403, minted token + typed email 200, replay
+409, fresh demote 200; both role changes collapse into ONE storm-suppressed
+`security_events` row (count 2, high); step-up delete erases the throwaway
+target and leaves NO stable identifier in security_events (group keys included)
+while the erased reporter's case survives as a scrubbed skeleton
+(`user_id NULL, message '[erased]', status resolved`); the live page carries the
+Trust & Safety tab, both modals, the due-chip ladder, the double-submit guard,
+and none of the old browser-confirm strings. The smoke admin was demoted and
+disabled afterward; the walk deliberately left one resolved test case in the
+queue and sent the owner inbox its first real trust/security notification
+emails — the pipe, demonstrated.
+
+**Maintenance smoke, live:** `wrangler deploy --var MAINTENANCE_MODE:on`
+(transient version `2ae41d1f`, window ≈90 seconds) — 10/10: `/v1/limits` and
+`/mcp` and `POST /auth/tokens` all 503 with `Retry-After: 600` and the
+maintenance body; the landing page, security.txt, and the legal redirect kept
+serving; the login door answered 401, not 503. Restored by a plain redeploy —
+final live version **`b710ba0d-7140-4299-a993-c32246823b5b`** (identical code
+to `14cacf04`), `/v1/limits` 200 and `/` 200 confirmed after.
