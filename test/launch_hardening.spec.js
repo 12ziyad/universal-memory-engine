@@ -214,11 +214,22 @@ describe("Huba AI", () => {
 		expect(scrubMechanismTalk("As detailed in the JavaScript SDK section, install it with npm."))
 			.not.toMatch(/as detailed in|\bsection\b/i);
 
+		// Observed in production: emphasis marks let the machinery vocabulary
+		// slip past a word-boundary match, and internal field names got quoted.
+		const backticked = scrubMechanismTalk("The current `ACCOUNT` data shows only your direct memory users.");
+		expect(backticked).not.toMatch(/ACCOUNT/);
+		const fieldy = scrubMechanismTalk("No edges exist between them (`edges_by_type` is empty).");
+		expect(fieldy).not.toMatch(/edges_by_type/);
+		expect(fieldy).toMatch(/edge types/);
+
 		// It must not mangle an ordinary answer.
 		const normal = "You have about 100 saves left today. It resets at 00:00 UTC.";
 		expect(scrubMechanismTalk(normal)).toBe(normal);
 		const code = "Run `npm install itsuki`, then call memory.add({ text }).";
 		expect(scrubMechanismTalk(code)).toBe(code);
+		// Real API field names people legitimately ask about must survive.
+		const apiField = "Each receipt carries `saved_total` and `outcome`.";
+		expect(scrubMechanismTalk(apiField)).toBe(apiField);
 	});
 
 	it("chat door requires a session", async () => {

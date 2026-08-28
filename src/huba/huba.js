@@ -152,7 +152,28 @@ export async function hubaTurn(env, identity, input = {}, { quota = null } = {})
  * hold almost always; this catches the almost.
  */
 export function scrubMechanismTalk(reply) {
-	let text = reply;
+	// Formatting marks first: the model likes to write `ACCOUNT` or **the
+	// docs**, and a word-boundary match against the raw string sails straight
+	// past the backticks. Strip the emphasis around the machinery vocabulary
+	// (and only there) so the rules below actually see it.
+	let text = String(reply).replace(/[`*_]{1,2}(ACCOUNT|REFERENCE|docs|documentation|context)[`*_]{1,2}/gi, "$1");
+
+	// Internal field names, rewritten to what a person would say. The prompt
+	// forbids quoting them; this is what catches the times it does anyway.
+	// Narrow and explicit — a blanket snake_case rule would also eat the real
+	// API field names people legitimately ask about (saved_total, scope_json).
+	const INTERNAL_KEYS = {
+		recent_by_status: "recent jobs", edges_by_type: "edge types", saves_today: "today's saves",
+		huba_messages_today: "today's questions", most_recent_memories: "your most recent memories",
+		recalled_text: "what I found", nothing_matched: "no match", approx_saves_left: "saves left",
+		neurons_used: "neurons used", neurons_limit: "the daily limit", this_month: "this month",
+		custom_limits_granted: "a custom limit", recall_is_metered: "recall metering",
+		"jobs.failures": "failed saves", memory_search: "a search of your memories",
+	};
+	for (const [key, plain] of Object.entries(INTERNAL_KEYS)) {
+		text = text.replace(new RegExp(`[\`*]{0,2}${key.replace(".", "\\.")}[\`*]{0,2}`, "g"), plain);
+	}
+
 	// The vocabulary of the machinery: every word that, said out loud, tells
 	// the reader about our retrieval instead of answering their question.
 	const M = "docs|documentation|reference|context|excerpts?|sources?|account data|ACCOUNT|REFERENCE|readings?|metadata|provided data|the system";
@@ -163,6 +184,9 @@ export function scrubMechanismTalk(reply) {
 		[new RegExp(`\\b(is|are) not (mentioned|documented|covered|specified|included|available|visible|stored) (in|anywhere in|here in) (the\\s+)?(${M})\\b[^.!?\\n]*[.!?]?`, "gi"), ""],
 		[new RegExp(`\\bthe (${M})\\s+(says?|states?|shows?|notes?|indicates?)\\b`, "gi"), "Itsuki"],
 		[new RegExp(`\\bin the (provided |available |given )?(${M})\\b`, "gi"), ""],
+		// Affirmative references too — "the current ACCOUNT data shows…" names
+		// the machinery just as plainly as a denial does.
+		[/\b(the\s+)?(current\s+|provided\s+|available\s+)?(ACCOUNT|REFERENCE)(\s+data)?\b/g, "what I can see"],
 		[new RegExp(`\\bit (is|'s) not (visible|available|shown|included) here\\b[^.!?\\n]*[.!?]?`, "gi"), ""],
 		// "see the **X** section" / "as detailed in the X section": the reader
 		// cannot open a section, only a page. Keep the name, drop the framing.
@@ -182,7 +206,9 @@ export function scrubMechanismTalk(reply) {
 		.split("\n")
 		.map((line) => line.replace(/^\s*[-*]\s*$/, "").trimEnd())
 		.join("\n")
-		.trim();
+		.trim()
+		// A rewrite at the head of a sentence can leave it lowercase.
+		.replace(/^([a-z])/, (letter) => letter.toUpperCase());
 }
 
 export { retrieve } from "./retrieval.js";
