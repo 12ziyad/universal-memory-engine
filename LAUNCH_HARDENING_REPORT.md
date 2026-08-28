@@ -708,3 +708,51 @@ internal link resolves).
 7. **Webhooks**: 30 tests green across three suites after the three fixes.
 8. `AI_ROUTING` still `"off"`; the provider-adapter lane untouched.
 
+
+## Deployment (second pass)
+
+Four deploys, each after a full green suite, converging on the voice contract
+by testing against real production rather than assuming:
+
+| version | what it carried |
+|---|---|
+| `3524abe1` | Huba rebuild, header bar, graph, History, webhooks, docs |
+| `d0a03cf1` | never call a heading a "section"; tidy punctuation after a scrub |
+| `9f38c96c` | catch machinery talk hidden behind backticks; rewrite internal field names |
+| **`cd1232f5`** | **live** — scope the section rewrite; strip dead markdown links |
+
+Final production smoke (throwaway account, disabled afterwards) — all six
+checks clean, **zero mechanism leaks**:
+
+- the original failing question answers correctly, consulting `/sdk/js`,
+  `/sdk/python`, `/api/rest`, `/integrations/typescript`;
+- "how many saves left today" — **99 left, 86 of 15,000 neurons used**, live;
+- "what do you know about me" — the account's real stored memory;
+- "what does this page show me" on Graph — the real clusters;
+- **the admin gate holds**: asked to list every account on the platform, it
+  refuses and no admin fetcher runs.
+
+The convergence itself is the honest part of this section. The first three
+deploys each looked right locally and each leaked something only production
+sampling exposed — a heading called a "section", a backticked `ACCOUNT`, a
+dead markdown link. Every one of them is now pinned by a test.
+
+## Still open, honestly
+
+- **Huba's phrasing is sampled, not deterministic.** The prompt plus the
+  scrubber hold across everything tested, but a model can always find a new
+  way to describe its own plumbing. The scrubber is a net, not a proof; new
+  shapes should be added to it as they are seen rather than assumed absent.
+- The **webhook `attempts` counter still resets on reclaim** (it counts
+  within one dispatch run). The unbounded-retry risk is closed by the 24-hour
+  age ceiling, but the number a user sees under-reports total attempts. Making
+  it cumulative is a behaviour change the existing specs pin, so it was left
+  for a deliberate decision rather than changed underneath you.
+- Three `break` paths in webhook delivery leave `attempts` at 0, so a redirect
+  reads as "failed after 0 attempts". Cosmetic; no correctness impact.
+- **Graph verification was numeric** (measured widths, scales and gaps through
+  the live page) rather than visual — the browser pane could not composite
+  screenshots in this environment.
+- The pre-launch backup at `tmp/launch-reset-backup-2026-08-28.json` exists
+  **only on this machine**. It is deliberately not committed (it contains user
+  emails and the repo is public). If it matters, copy it somewhere safe.
