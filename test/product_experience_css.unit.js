@@ -55,7 +55,10 @@ describe("landing editorial sheet", () => {
 		// narrow absolute band on the right edge.
 		expect(landingCss).toContain("#landing.lp-shell .hero { position: relative; grid-template-columns: 1fr;");
 		expect(landingCss).toContain("width: clamp(58px, 7vw, 104px)");
-		expect(landingCss).toContain(".hero-mono-jp");
+		// .hero-mono-jp styling is retained but the element is gone from the
+		// hero; the mark is styled by these two rules now.
+		expect(landingCss).toContain(".chapter-rule-mark");
+		expect(landingCss).toContain(".footer-japanese-mark");
 		expect(landingCss).toContain("writing-mode: vertical-rl");
 	});
 

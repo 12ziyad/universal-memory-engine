@@ -55,13 +55,19 @@ describe("landing hero and narrative", () => {
 });
 
 describe("hero stays uncluttered", () => {
-	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<section class="developer-section'));
+	// The hero now ends at the chapter rule, not at a section that no longer
+	// exists — indexOf returned -1 and this slice silently ran to the end of
+	// the page, so every "the hero does not contain X" assertion was passing
+	// against the whole document.
+	const hero = html.slice(html.indexOf('<section class="hero"'), html.indexOf('<div class="chapter-rule"'));
 
 	it("carries only the eyebrow, headline, deck, and two actions", () => {
 		expect(hero).toContain("that sits under");
-		// The Japanese vertical banner on the right of the hero is owner-protected:
-		// it must survive every copy change to this section.
-		expect(hero).toContain("イツキ");
+		// The banner used to run down the right of the hero and was pinned here
+		// as owner-protected. The owner removed it so the console could have the
+		// fold; the mark moved to the chapter rule and the footer instead. The
+		// guard now lives at page scope — see "the mark keeps a home" below.
+		expect(hero).not.toContain("イツキ");
 		expect(hero).toContain('class="hero-actions"');
 		const headline = hero.slice(hero.indexOf("<h1>"), hero.indexOf("</h1>"));
 		for (const tool of ["Claude", "Cursor", "ChatGPT", "MCP", "Codex"]) {
@@ -73,9 +79,25 @@ describe("hero stays uncluttered", () => {
 		}
 	});
 
-	it("keeps the mark as the right-edge sliver beside the centered copy", () => {
-		expect(hero).toContain('class="hero-mono"');
-		expect(hero).toContain('lang="ja"');
+	it("gives the fold to the console, not to a band", () => {
+		expect(hero).not.toContain('class="hero-mono"');
+		// What replaced it: a console that shows the product answering rather
+		// than a config file waiting to be pasted.
+		expect(hero).toContain('id="landingCodeGutter"');
+		expect(hero).toContain('class="code-result"');
+		expect(hero).toContain("recalled in Cursor");
+	});
+
+	it("the mark keeps a home: centred on the seam, and signing the footer", () => {
+		// Two placements, both outside the hero. If either disappears the brand
+		// name is gone from the page entirely, which is what this pins.
+		expect(html).toContain('class="chapter-rule-mark" lang="ja">イツキ<');
+		expect(html).toContain('class="footer-japanese-mark" lang="ja">イツキ<');
+		// The rule sits between the hero and section 2 — that seam is the whole
+		// reason it works, so the order is part of the contract.
+		const rule = html.indexOf('class="chapter-rule"');
+		expect(rule).toBeGreaterThan(html.indexOf('<section class="hero"'));
+		expect(rule).toBeLessThan(html.indexOf('<section class="handoff-section'));
 	});
 });
 

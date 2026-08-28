@@ -1040,3 +1040,91 @@ html { scroll-behavior: smooth; }
   #landing.lp-shell .handoff-tile img { width: 17px; height: 17px; }
   #landing.lp-shell .handoff-card-body { font-size: 18px; }
 }
+
+/* ===========================================================================
+   Landing v6 — the banner leaves the hero, the console earns the fold.
+
+   The イツキ band that ran down the right of the hero is gone. The mark is
+   centred on the chapter rule instead, on the seam where the cream page
+   turns to ink, and signs off the footer. The fold is now only copy and
+   console — so the console has to be worth looking at: line numbers, syntax
+   colour, a live dot, and a result line that shows the thing working rather
+   than waiting to be configured.
+   ======================================================================== */
+
+/* ---- the hero reclaims the banner's column ---- */
+#landing.lp-shell .hero-copy { padding-right: 5.6vw; }
+#landing.lp-shell .hero-mono { display: none; }
+/* The 34% ink panel the banner used to stand on. It is hidden below 1280px
+   by an older rule, so with the banner gone it survived only on wide screens
+   — a bare vertical rule and a tonal seam two thirds across an otherwise
+   plain cream fold. Hidden at every width now. */
+#landing.lp-shell .hero::before { display: none; }
+
+/* ---- console ---- */
+#landing.lp-shell .hero-connect .code-window { border-color: #241f1a; background: #0b0a08; }
+#landing.lp-shell .hero-connect .code-topline { border-bottom-color: #241f1a; }
+#landing.lp-shell .code-live { display: inline-flex; align-items: center; gap: 8px; }
+#landing.lp-shell .code-live::before {
+  width: 6px; height: 6px; border-radius: 50%; background: #6fbf7a; content: "";
+  box-shadow: 0 0 0 3px rgb(111 191 122 / 16%);
+}
+/* Gutter and source share one grid so the numbers cannot drift out of step
+   with the lines they label — a float or an absolute would desynchronise the
+   moment the sample scrolls horizontally. */
+#landing.lp-shell .hero-connect .code-body { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+#landing.lp-shell .code-gutter {
+  min-height: 236px; margin: 0; padding: 20px 12px 20px 18px; border-right: 1px solid #1c1814;
+  color: #3f3931; font: 400 13px/1.8 var(--mono); text-align: right; user-select: none;
+}
+#landing.lp-shell .hero-connect pre#landingCodeSample { padding-left: 18px; }
+#landing.lp-shell .tok-key { color: #9fc7a8; }
+#landing.lp-shell .tok-string { color: #e6a877; }
+#landing.lp-shell .tok-comment { color: #5f574e; }
+/* The console answers back: one line proving the config does something. */
+#landing.lp-shell .code-result {
+  display: flex; align-items: baseline; gap: 9px; margin: 0; padding: 12px 18px;
+  border-top: 1px solid #241f1a; background: #17140f;
+  color: #9fc7a8; font: 400 11px/1.6 var(--mono); letter-spacing: .04em;
+}
+#landing.lp-shell .code-result b { color: var(--clay); font-weight: 400; }
+#landing.lp-shell .code-result span { color: #6f665c; }
+
+/* ---- chapter rule: the mark, centred, on the cream-to-ink seam ---- */
+#landing.lp-shell .chapter-rule {
+  display: flex; align-items: center; justify-content: center; gap: clamp(20px, 4vw, 54px);
+  padding: 30px 5.6vw; background: var(--ink); border-bottom: 1px solid rgb(251 248 241 / 10%);
+}
+#landing.lp-shell .chapter-rule-line { display: block; width: clamp(60px, 16vw, 220px); height: 1px; background: #3a332c; }
+#landing.lp-shell .chapter-rule-mark {
+  /* padding-left balances the trailing letter-space, which would otherwise
+     shift the mark left of true centre by half a letter. */
+  padding-left: .42em; color: var(--porcelain);
+  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif;
+  font-size: clamp(22px, 2.6vw, 34px); letter-spacing: .42em; line-height: 1;
+}
+
+/* ---- footer signature ---- */
+#landing.lp-shell .footer-japanese { display: flex; flex-direction: column; gap: 10px; }
+#landing.lp-shell .footer-japanese-mark {
+  padding-left: .3em; color: var(--porcelain); opacity: .92;
+  font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'Noto Serif JP', serif;
+  font-size: clamp(34px, 4vw, 52px); letter-spacing: .3em; line-height: 1;
+}
+#landing.lp-shell .footer-japanese-gloss { color: var(--ink-soft); font-size: 12px; }
+
+@media (max-width: 1100px) {
+  #landing.lp-shell .hero-copy { padding-right: 5.6vw; }
+}
+
+@media (max-width: 760px) {
+  #landing.lp-shell .hero-copy { padding: 58px 22px 50px; }
+  #landing.lp-shell .code-gutter { min-height: 0; padding: 16px 9px 16px 12px; font-size: 11px; }
+  #landing.lp-shell .hero-connect pre#landingCodeSample { padding-left: 12px; font-size: 11px; }
+  #landing.lp-shell .code-result { font-size: 9.5px; padding: 10px 12px; }
+  /* Two lines of mono at 9.5px is still a paragraph on a phone; the gloss
+     carries the same fact, so the detail clause goes. */
+  #landing.lp-shell .code-result span { display: none; }
+  #landing.lp-shell .chapter-rule { padding: 22px; gap: 16px; }
+  #landing.lp-shell .chapter-rule-line { width: 42px; }
+}

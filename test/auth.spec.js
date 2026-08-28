@@ -503,8 +503,9 @@ describe("product shell routes", () => {
 		expect(html).toContain("イツキ");
 		// The decongested hero: copy takes 70%, the right third is one calm
 		// vertical mark, and the developer surface follows immediately.
-		expect(html).toContain('class="hero-mono"');
-		expect(html).toContain('class="hero-mono-jp"');
+		// The hero band was removed; the mark lives on the chapter rule now.
+		expect(html).toContain('class="chapter-rule-mark"');
+		expect(html).toContain('class="footer-japanese-mark"');
 		expect(html).toContain('<span>02</span> One memory, every tool');
 		expect(html).toContain('<span>03</span> The difference');
 		expect(html).toContain("Four moves. One living memory.");

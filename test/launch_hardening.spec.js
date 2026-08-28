@@ -719,6 +719,65 @@ describe("graph edge appearance is derived, not looked up", () => {
 	});
 });
 
+describe("the console highlighter", () => {
+	async function load() {
+		const shell = (await import("../public/index.html?raw")).default;
+		const src = shell.slice(shell.indexOf("function landingHighlight"), shell.indexOf("function landingSelectSdk"));
+		expect(src.length, "highlighter source found").toBeGreaterThan(100);
+		return new Function(src + "; return landingHighlight;")();
+	}
+
+	it("escapes markup before it reaches innerHTML", async () => {
+		const highlight = await load();
+		// The samples are static constants today, but this runs through
+		// innerHTML — so the escape is the difference between a highlighter and
+		// an injection point if a sample ever becomes dynamic.
+		const out = highlight('{ "url": "https://x/<script>alert(1)</script>" }');
+		expect(out).not.toContain("<script>");
+		expect(out).toContain("&lt;script&gt;");
+	});
+
+	it("colours object keys and strings differently", async () => {
+		const highlight = await load();
+		const out = highlight('{ "mcpServers": { "url": "https://itsuki.app" } }');
+		// A quoted string followed by a colon is a key, whatever the language.
+		expect(out).toContain('<span class="tok-key">"mcpServers"</span>');
+		expect(out).toContain('<span class="tok-key">"url"</span>');
+		expect(out).toContain('<span class="tok-string">"https://itsuki.app"</span>');
+	});
+
+	it("marks comments in the SDK samples", async () => {
+		const highlight = await load();
+		expect(highlight("# pip install itsuki")).toContain('class="tok-comment"');
+		expect(highlight("// a note")).toContain('class="tok-comment"');
+	});
+
+	it("never changes what gets copied", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		const highlight = await load();
+		// copyLandingCode() reads textContent, so the highlighted markup must
+		// strip back to the exact source. Stripping tags and unescaping is what
+		// the browser does when it computes textContent.
+		const sample = '{\n  "url": "https://x/<k>"\n}';
+		const text = highlight(sample)
+			.replace(/<[^>]+>/g, "")
+			.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+		expect(text).toBe(sample);
+		expect(shell).toContain('const code = document.querySelector("#landingCodeSample code")');
+		expect(shell).toContain("code.innerHTML = landingHighlight(sample)");
+	});
+
+	it("paints the gutter from the same sample the body uses", async () => {
+		const shell = (await import("../public/index.html?raw")).default;
+		// One source of truth: numbering a different string than the one being
+		// displayed is how gutters drift out of step.
+		expect(shell).toContain('const gutter = document.getElementById("landingCodeGutter");');
+		expect(shell).toContain("sample.split");
+		// ...and the initial paint goes through the same handler as a click.
+		expect(shell).toContain('landingSelectSdk("mcp");');
+	});
+});
+
 describe("section 2 handoff", () => {
 	it("the handoff fan is measured, not hard-coded", async () => {
 		const shell = (await import("../public/index.html?raw")).default;
@@ -777,8 +836,6 @@ describe("section 2 handoff", () => {
 		const hero = shell.slice(shell.indexOf('<section class="hero"'), shell.indexOf('<section class="handoff-section'));
 		expect(hero).toContain('class="hero-connect"');
 		expect(hero).toContain('id="landingCodeSample"');
-		// ...and the banner still survives beside it.
-		expect(hero).toContain('class="hero-mono"');
 	});
 });
 

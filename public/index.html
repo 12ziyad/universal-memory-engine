@@ -2481,29 +2481,45 @@
 				</div>
 				<div class="hero-connect">
 					<div class="code-window">
-						<div class="code-topline"><span>connect</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
+						<div class="code-topline"><span class="code-live">connect</span><div class="sdk-tabs" role="tablist" aria-label="SDK language">
 							<button type="button" id="landingSdkTab-mcp" role="tab" aria-selected="true" aria-controls="landingCodeSample" tabindex="0" class="active" data-landing-sdk="mcp" onclick="landingSelectSdk('mcp')">MCP</button>
 							<button type="button" id="landingSdkTab-node" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="node" onclick="landingSelectSdk('node')">Node</button>
 							<button type="button" id="landingSdkTab-python" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="python" onclick="landingSelectSdk('python')">Python</button>
 							<button type="button" id="landingSdkTab-rest" role="tab" aria-selected="false" aria-controls="landingCodeSample" tabindex="-1" data-landing-sdk="rest" onclick="landingSelectSdk('rest')">REST</button>
 						</div></div>
-						<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-mcp"><code>{
+						<div class="code-body">
+							<pre class="code-gutter" id="landingCodeGutter" aria-hidden="true">1
+2
+3
+4
+5
+6
+7</pre>
+							<pre id="landingCodeSample" role="tabpanel" tabindex="0" aria-labelledby="landingSdkTab-mcp"><code>{
   "mcpServers": {
     "itsuki": {
       "url": "PASTE_THE_PRIVATE_URL_CREATED_IN_ITSUKI"
     }
   }
 }</code></pre>
+						</div>
+						<p class="code-result"><b aria-hidden="true">&rarr;</b> recalled in Cursor <span>&mdash; &ldquo;raw SQL only, no ORM&rdquo;, saved from Claude Code on Monday</span></p>
 						<div class="code-foot"><button type="button" id="landingCodeAction" data-action="create-mcp" onclick="copyLandingCode(this)">Create MCP link</button><a href="/docs/">Complete setup ↗</a></div>
 					</div>
 					<p class="hero-connect-note">One key · 26 tools — assistants, coding agents, workflows</p>
 				</div>
 			</div>
-			<aside class="hero-mono" aria-label="Itsuki, written in Japanese">
-				<span class="hero-mono-jp" lang="ja">イツキ</span>
-				<span class="hero-mono-tag" aria-hidden="true">ITSUKI</span>
-			</aside>
 		</section>
+
+		<!-- The mark used to be a black band down the right of the hero. It is
+		     centred here instead, on the seam where the cream page turns to
+		     ink — so it reads as a chapter break the page actually needed,
+		     rather than a stripe the fold had to work around. -->
+		<div class="chapter-rule">
+			<span class="chapter-rule-line" aria-hidden="true"></span>
+			<span class="chapter-rule-mark" lang="ja">イツキ</span>
+			<span class="chapter-rule-line" aria-hidden="true"></span>
+		</div>
 
 		<section class="handoff-section reveal" id="developers" aria-label="One memory across every connected tool">
 			<header class="handoff-head">
@@ -2679,7 +2695,7 @@
 				<div class="footer-brand">
 					<a class="wordmark footer-mark" href="/" onclick="showPublic(event)"><img class="brand-mark" src="/assets/brand/itsuki-bonsai-mark.svg?v=1" alt="" aria-hidden="true" /><span>itsuki</span></a>
 					<p>Structured memory for applications, assistants, agents, and workflows.</p>
-					<p class="footer-japanese"><span lang="ja">イツキ</span><span aria-hidden="true"> · </span>&ldquo;five trees&rdquo; · memory that carries forward</p>
+					<p class="footer-japanese"><span class="footer-japanese-mark" lang="ja">イツキ</span><span class="footer-japanese-gloss">&ldquo;five trees&rdquo; · memory that carries forward</span></p>
 					<ul class="footer-trust" aria-label="How Itsuki handles data">
 						<li>Tenant-isolated</li>
 						<li>Source-backed</li>
@@ -3959,6 +3975,54 @@ function landingSelectStep(index) {
 	}
 }
 
+/**
+ * Minimal highlighter for the hero console. A scanner rather than a chain of
+ * regex replaces, because chained replaces re-process the markup they just
+ * inserted — colouring the class names inside their own spans.
+ *
+ * The escape happens LAST, on each token's text, so a sample containing < or
+ * & cannot inject markup. Only three token kinds exist: a quoted string used
+ * as an object key, any other quoted string, and a to-end-of-line comment.
+ */
+function landingHighlight(source) {
+	const text = String(source ?? "");
+	const escape = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	const parts = [];
+	let plain = "";
+	const flush = () => { if (plain) { parts.push(escape(plain)); plain = ""; } };
+	let index = 0;
+	while (index < text.length) {
+		const char = text[index];
+		if (char === "#" || (char === "/" && text[index + 1] === "/")) {
+			let stop = text.indexOf("\n", index);
+			if (stop < 0) stop = text.length;
+			flush();
+			parts.push('<span class="tok-comment">' + escape(text.slice(index, stop)) + "</span>");
+			index = stop;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			let cursor = index + 1;
+			while (cursor < text.length && text[cursor] !== char) {
+				if (text[cursor] === "\\") cursor += 1;
+				cursor += 1;
+			}
+			const raw = text.slice(index, Math.min(cursor + 1, text.length));
+			// A string followed by a colon is a key, whatever the language.
+			let after = cursor + 1;
+			while (text[after] === " ") after += 1;
+			flush();
+			parts.push('<span class="' + (text[after] === ":" ? "tok-key" : "tok-string") + '">' + escape(raw) + "</span>");
+			index = cursor + 1;
+			continue;
+		}
+		plain += char;
+		index += 1;
+	}
+	flush();
+	return parts.join("");
+}
+
 function landingSelectSdk(name) {
 	const sample = LANDING_CODE_SAMPLES[name];
 	if (!sample) return;
@@ -3969,7 +4033,12 @@ function landingSelectSdk(name) {
 		button.tabIndex = active ? 0 : -1;
 	});
 	const code = document.querySelector("#landingCodeSample code");
-	if (code) code.textContent = sample;
+	// innerHTML, not textContent, so the sample can be coloured — but the
+	// element's textContent is still exactly the raw sample, which is what
+	// copyLandingCode() copies. Highlighting must never change what is copied.
+	if (code) code.innerHTML = landingHighlight(sample);
+	const gutter = document.getElementById("landingCodeGutter");
+	if (gutter) gutter.textContent = sample.split("\n").map((_, line) => line + 1).join("\n");
 	const panel = document.getElementById("landingCodeSample");
 	if (panel) panel.setAttribute("aria-labelledby", `landingSdkTab-${name}`);
 	const action = document.getElementById("landingCodeAction");
@@ -20356,6 +20425,10 @@ initShell();
 // The landing is the default view on a cold load — setMode() only runs on a
 // navigation, so booting the handoff there alone left it dark on first paint.
 initHandoff();
+// The console ships with plain markup so the sample stays greppable and the
+// tests can pin it; one pass through the normal tab handler paints the line
+// numbers and the syntax colour, from the same code path a click uses.
+landingSelectSdk("mcp");
 </script>
 </body>
 </html>
