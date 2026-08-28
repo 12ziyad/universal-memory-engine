@@ -1205,3 +1205,83 @@ Local static preview, measured not eyeballed: H1 wraps to exactly 2 lines at
 1920 and 1280, 4 at 375; no horizontal scroll at any width; all fonts and
 assets 200; MCP default tab, code panel, and action button agree; tab
 switching round-trips. 72 landing tests green, full suite run before deploy.
+
+---
+
+# Seventh pass — 2026-08-28: hero D and the handoff
+
+## The hero holds the proof now
+
+Option D, picked from a twelve-option visual board: copy left, the connect
+card beside it, the イツキ banner untouched on the right. The card is the
+**same element** that lived in section 2 — same ids — so `landingSelectSdk`
+and `copyLandingCode` needed no changes at all. It changed address, not
+behaviour. A test now fails if `#landingCodeSample`, `#landingCodeAction` or
+`#landingSdkTab-mcp` ever appear twice, because a duplicate would make
+`querySelector` pick the wrong node and the tabs would silently desynchronise
+from the panel they control.
+
+## Which emptied section 2
+
+Moving the card left section 2 as a quickstart with nothing to quickstart.
+A live audit of **twelve dev-tool homepages** (Stripe, Vercel, Linear,
+Supabase, Clerk, Resend, Neon, Railway, Sentry, Tailscale, PlanetScale,
+Cloudflare) and **five memory rivals** found the consensus job of that slot:
+turn the hero's claim into **evidence, carried by one visual, in about one
+screen**. The two devices everyone uses for it — a customer logo wall and
+testimonials — are both closed here, because neither exists.
+
+The sharpest finding was about the competition. Mem0, Zep, Letta, Supermemory
+and Cognee all sell memory *into* one agent the reader is building, so their
+connectors point inward; if any of them named Claude Code and Cursor it would
+demote them to a plugin. For a layer that sits *underneath*, the same names
+read as **coverage**. It is a sentence only this product can write — and it
+is why the tool-naming line that failed as an H1 succeeds here, one section
+below a hero that has already established universality.
+
+So section 2 is now **the handoff**: one memory typed in one tool, arriving
+in the others, over all 26 real integration marks grouped as they actually
+are — SDKs & API, assistants, coding agents, harnesses, frameworks, workflow
+automation.
+
+## What the build had to get right
+
+- **Trios always span different groups.** Three lit tiles inside one row
+  would read as "works with three editors" rather than "works across the
+  whole surface". A test parses `HANDOFF_TRIOS` and fails if any trio holds
+  more than one coding agent or more than one workflow tool.
+- **The connector curves are measured from the live DOM**, not hard-coded.
+  The tile wall rewraps at every width; a fixed viewBox would leave the
+  curves pointing at where a tile used to be — which is exactly how the first
+  render of the mockup failed, and it is pinned by a test.
+- **They bail out when hidden.** Below 1100px the overlay is `display: none`
+  and the layout stacks; measuring a hidden element yields zero-size rects
+  and a path full of `NaN`. The draw returns early, and the availability line
+  carries the same information as text for anyone who never sees the curves.
+- Tiles are **porcelain on ink** so the brand marks keep their own colours,
+  and the two PNG marks need no recolouring. Each carries its name in an
+  `.sr-only` span; the `<img>` is decorative.
+
+## Two defects the browser caught that review would not have
+
+1. **It booted dark.** `initHandoff` was wired into `setMode("public")` —
+   but the landing is the *default* view, and `setMode` only runs on a
+   navigation. Nothing lit until you navigated away and came back. It now
+   boots in the main sequence as well, pinned by a test.
+2. **The card was a tall empty box.** `.code-window pre` carries
+   `min-height: 420px`, sized for the old full-height section-2 column. In
+   the fold that left a well of dead space under six lines of JSON. Capped —
+   but not to zero, or switching to the longer Node sample would make the
+   whole fold jump.
+
+Also changed: the note under the card reads "One key · 26 tools — assistants,
+coding agents, workflows" rather than listing MCP clients, so the fold cannot
+be read as MCP-only.
+
+## Verified
+
+**188 files / 2,404 tests green.** Measured in a real browser at 1440: hero
+columns 559/548, card right edge 1252 against the banner's left edge at 1309,
+three fan paths with zero `NaN`, the trio cycling, 26 tiles. At a true 375px:
+`scrollWidth === clientWidth`, hero stacked, fan disabled with zero paths, and
+the availability line still correct.
