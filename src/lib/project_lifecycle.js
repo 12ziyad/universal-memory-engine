@@ -39,6 +39,7 @@ import {
 } from "../ai/provider_budget.js";
 import { ERASED_SOURCE_CONTENT_HASH } from "../pipeline/source.js";
 import { PURGE_SPACE_TABLES, residualSpaceCounts, residualTotal } from "./lifecycle_census.js";
+import { enqueueMail, memoryPurgedMail, projectDeletedMail } from "./mail.js";
 
 export class LifecycleError extends Error {
 	constructor(code, message, status = 400, extra = {}) {
@@ -82,7 +83,22 @@ async function sha256Hex(value) {
 	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function projectRevision(row) {
+/** The open ownership offer for a project, if there is one. */
+async function pendingTransfer(env, projectId) {
+	const row = await env.DB.prepare(
+		`SELECT t.id, t.to_user_id, t.created_at, t.expires_at, u.email, u.name
+		   FROM project_ownership_transfers t LEFT JOIN users u ON u.id = t.to_user_id
+		  WHERE t.project_id = ? AND t.status = 'pending'`,
+	).bind(projectId).first();
+	return row ? {
+		id: row.id,
+		to: { id: row.to_user_id, email: row.email, name: row.name },
+		created_at: Number(row.created_at),
+		expires_at: Number(row.expires_at),
+	} : null;
+}
+
+export async function projectRevision(row) {
 	return `prv1.${await sha256Hex(`itsuki:project:revision:v1:${row.id}:${row.created_at}:${row.updated_at}`)}`;
 }
 
@@ -761,6 +777,37 @@ async function driveLifecycleRunLeased(env, { runId, startedAt, budgetMs }) {
  * schedule — high severity, deduped per run by group key so a retry loop is
  * one escalating row, not a feed of identical ones. Never throws.
  */
+/**
+ * Tell the person who asked that it is done — and only ever from a call site
+ * that has already VERIFIED it is done.
+ *
+ * Deliberately best-effort and never throwing: a purge that genuinely
+ * completed must not be recorded as failed because the email about it could
+ * not be queued. The run is the truth; the email is the courtesy.
+ *
+ * Dedupe is keyed on the run id, so the retries and resumptions this driver
+ * is built around cannot mail somebody twice about one deletion.
+ */
+async function notifyLifecycleComplete(env, run, project, kind, facts) {
+	try {
+		const actor = await env.DB.prepare("SELECT email FROM users WHERE id = ?").bind(run.actor_user_id).first();
+		if (!actor?.email) return;
+		const projectName = project?.name ?? "your project";
+		const content = kind === "project_memory_purged"
+			? memoryPurgedMail(env, { projectName, verified: facts })
+			: projectDeletedMail(env, { projectName });
+		await enqueueMail(env, {
+			kind,
+			to: actor.email,
+			toUserId: run.actor_user_id,
+			dedupeKey: `${kind}:${run.id}`,
+			...content,
+		});
+	} catch (error) {
+		console.warn("lifecycle completion mail failed:", error?.message ?? error);
+	}
+}
+
 async function emitLifecycleRunFailed(env, run, error, retryable) {
 	await recordSecurityEvent(env, {
 		kind: "lifecycle_run_failed",
@@ -1070,6 +1117,14 @@ async function advanceDestructive(env, run, project, checkpoint, inventory) {
 				epoch: Number(run.lifecycle_epoch) + 1,
 			},
 		});
+		// Only here. The verify phase above re-scanned every space for residue
+		// and refused to advance while any remained, so by this line "your
+		// memory is deleted" is a fact, not an intention. That ordering is the
+		// whole reason this call sits where it does and nowhere earlier.
+		await notifyLifecycleComplete(env, run, project, "project_memory_purged", {
+			spaces: (checkpoint.spaces ?? []).length,
+			residual: 0,
+		});
 		return saveRun(env, run, { status: "completed", phase: "done", checkpoint, completedAt: Date.now(), attempts: Number(run.attempts) + 1 });
 	}
 
@@ -1155,6 +1210,9 @@ async function advanceDestructive(env, run, project, checkpoint, inventory) {
 				deleted: checkpoint.deleted ?? 0, vectors_deleted: checkpoint.vectors_deleted ?? 0,
 			},
 		});
+		// Same rule as the purge: the deleted state was re-read and proved
+		// a few lines above, so the confirmation is true when it is sent.
+		await notifyLifecycleComplete(env, run, project, "project_deleted", {});
 		return saveRun(env, run, { status: "completed", phase: "done", checkpoint, completedAt: Date.now(), attempts: Number(run.attempts) + 1 });
 	}
 
@@ -1192,6 +1250,12 @@ export async function lifecycleStatus(env, { actorUserId, projectId }) {
 		})),
 		transfer_allowed: can("project.transfer", membership) && Number(row.is_default) !== 1
 			&& row.status === "active" && ["active"].includes(state),
+		// A transfer now waits on the recipient, so the settings page has to be
+		// able to say "offered, not yet accepted" instead of showing a control
+		// that would silently create a second offer. Queried inline rather than
+		// imported: ownership_transfer.js already imports THIS module, and a
+		// cycle between the two would be a needless fragility.
+		pending_transfer: await pendingTransfer(env, row.id),
 		active_run: publicLifecycleRun(active),
 		recent_runs: (runs.results ?? []).map(publicLifecycleRun),
 	};

@@ -42,10 +42,16 @@ describe("Settings containment", () => {
 	it("keeps Personal account personal and has one memory-policy editor", () => {
 		expect(script).not.toContain('["personal-memory", "What to remember"]');
 		expect(script).not.toContain("function setPersonalMemory(");
-		const personal = fnSource("viewSettingsMain");
-		expect(personal).not.toContain("managedProjectName");
-		expect(personal).not.toContain("Memory Controls");
-		expect(personal).not.toContain("viewReset(");
+		// The Personal "Account" section was removed outright — it duplicated
+		// identity already in the profile menu and offered a password box that
+		// makes no sense for accounts that sign in with Google. That is a
+		// stronger form of "keeps Personal personal" than auditing its markup.
+		expect(script).not.toContain('["personal-account", "Account"]');
+		expect(script).not.toContain("function viewSettingsMain(");
+		expect(script).not.toContain("function setPersonalAccount(");
+		// Personal keeps exactly the two sections that are genuinely personal.
+		expect(script).toContain('["personal-usage", "Usage & plan"]');
+		expect(script).toContain('["personal-appearance", "Appearance"]');
 	});
 
 	it("uses the capability belonging to each membership table", () => {
@@ -328,11 +334,13 @@ describe("Settings containment", () => {
 		for (const name of ["loadExports", "createExportJob", "downloadPreparedExport", "downloadExport"]) {
 			expect(fnSource(name), name).toContain('requireProjectCapability("project.export"');
 		}
-		const personal = fnSource("viewSettingsMain");
-		expect(personal).toContain('projectCan("project.export")');
-		expect(personal).toContain('projectCapabilityActionCopy("project.export"');
-		expect(personal).toContain('onclick="downloadExport()"');
-		expect(personal).toContain('disabled title=');
+		// The Settings Account card carried a second export button; it is gone
+		// with the card. The surviving surfaces are the ones asserted above —
+		// and `downloadExport` itself still gates on the capability, so the
+		// remaining "Download directly" control on the exports page fails
+		// closed exactly as the removed one did.
+		expect(script).not.toContain("function viewSettingsMain(");
+		expect(fnSource("downloadExport")).toContain('requireProjectCapability("project.export"');
 	});
 
 	it("does not offer or fetch Audit history without audit capability", () => {
@@ -962,7 +970,7 @@ describe("Stage 3 enterprise Settings UI", () => {
 	it("separates Appearance and presents integrations from the real project APIs", () => {
 		expect(script).toContain('["project-integrations", "Integrations"]');
 		expect(script).toContain('["personal-appearance", "Appearance"]');
-		expect(fnSource("viewSettingsMain")).not.toContain("Appearance theme");
+		expect(script).not.toContain("function viewSettingsMain(");
 		expect(fnSource("setPersonalAppearance")).toContain("setAppearancePicker()");
 		const render = fnSource("setProjectIntegrations");
 		expect(render).toContain('setCan("project.keys.view")');

@@ -344,6 +344,11 @@ export async function runFetchers(env, identity, ids, { question = "" } = {}) {
 	await Promise.all((ids ?? []).map(async (id) => {
 		const fetcher = FETCHERS[id];
 		if (!fetcher) return;
+		// The admin gate lives in routeFetchers, which chooses what to run. It
+		// is re-proved HERE, at the point of execution, so a future refactor of
+		// the routing cannot quietly hand operator aggregates to a normal
+		// account. Two cheap checks beat one clever one.
+		if (fetcher.adminOnly && identity?.isAdmin !== true) return;
 		try {
 			out[id] = await fetcher.run(env, identity, { question });
 		} catch (error) {

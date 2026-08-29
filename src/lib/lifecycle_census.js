@@ -266,6 +266,18 @@ export const CENSUS = {
 	account_erasure_tombstones: { kind: "account" },
 	login_events: { kind: "account" },
 	invitation_email_outbox: { kind: "account", why: "org-scoped; project delete clears the invitation's project grant only" },
+	project_ownership_transfers: {
+		kind: "project",
+		purge: "retain",
+		projectDelete: "delete",
+		archive: "retain",
+		why: "content-free offer records (who offered ownership to whom, and when); they die with the project they concern",
+	},
+	mail_outbox: {
+		kind: "account",
+		accountErase: "scrub",
+		why: "transactional mail. The row is SCRUBBED not deleted, because an account-deletion confirmation must be able to reach a person after their account row is gone; the address and body are cleared once it has been sent or abandoned",
+	},
 
 	// ——— global aggregates / mechanisms ————————————————————————————————
 	site_visits: { kind: "global" },

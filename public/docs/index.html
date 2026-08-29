@@ -1349,7 +1349,7 @@ ${codeBlock(`hermes mcp add ${PRODUCT.name.toLowerCase()}`)}
 <li><b>Tools missing</b> — restart Hermes after editing <code>config.yaml</code>, and check the YAML indentation.</li>
 <li><b>401 unauthorized</b> — the link is revoked or was an API key; create a fresh MCP link from <b>Get started</b>. Hermes also supports header auth: url <code>${ORIGIN}/mcp</code> with a <code>headers:</code> mapping carrying <code>Authorization: Bearer</code> and an API key.</li>
 </ul>
-<div class="note">A native ${PRODUCT.name} memory provider for Hermes's external-provider ecosystem is planned — prefetch before each response, background sync after it. The MCP route above stays supported either way.</div>
+<div class="note">The native provider above is the recommended route: it prefetches before each response and syncs in the background. The MCP route stays supported either way, and both can be installed side by side.</div>
 ` };
 
 PAGES["/install/pi"] = { title: "Pi Agent", html: `
@@ -1360,7 +1360,7 @@ PAGES["/install/pi"] = { title: "Pi Agent", html: `
 ${codeBlock(`pi install npm:pi-itsuki`)}
 <p>Open <b>API Keys</b>, click <b>Create API key</b>, and copy it — it is shown once. Set it as <code>ITSUKI_API_KEY</code> in your environment and restart pi. The key is read from the environment only: the extension refuses keys placed in config files, and it travels only as an <code>Authorization</code> header.</p>
 <div class="note"><b>An API key, not an MCP link.</b> The extension validates the credential's shape before it makes a request, so a <code>${ORIGIN}/mcp/…</code> URL is rejected outright.</div>
-${codeBlock(`export ITSUKI_API_KEY=YOUR_MCP_KEY`)}
+${codeBlock(`export ITSUKI_API_KEY=YOUR_API_KEY`)}
 <p>Then, inside pi:</p>
 ${codeBlock(`/itsuki status`)}
 <p><code>/itsuki doctor</code> shows the connection, spool depth, last receipt, and circuit-breaker state — never the key. <code>/itsuki recall &lt;query&gt;</code> does a one-off lookup, and the model itself gets <code>itsuki_recall</code> and <code>itsuki_save</code> tools. There is deliberately no delete tool: nothing in the extension can destroy memory.</p>
@@ -6319,7 +6319,7 @@ ratelimit-limit: 60
 }</code></pre>
 <p>The same doors degrade the same way they do for the monthly quota: <code>POST /v1/turn</code> stays <code>200</code> and answers from recall while <code>collect</code> reports the cap, and the MCP save tools return a soft tool result carrying the same error code rather than tearing down the connection. Nothing already saved is affected.</p>
 <h3>Getting more</h3>
-<p>The Usage page in the dashboard — profile menu, top right, <b>Usage &amp; plan</b> — has a <b>Request more</b> button. There is no self-serve payment: the owner grants limits manually, and a grant can be temporary — it lapses on its own when it expires. Per-account overrides exist server-side, so an individual account's real limits can be higher than the defaults on this page; <code>GET /v1/usage</code> always reports your account's actual limits, not the published defaults. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
+<p>The Usage page in the dashboard — profile menu, top right, <b>Usage &amp; plan</b> — has a <b>Request more access</b> button. There is no self-serve payment: the owner grants limits manually, and a grant can be temporary — it lapses on its own when it expires. Per-account overrides exist server-side, so an individual account's real limits can be higher than the defaults on this page; <code>GET /v1/usage</code> always reports your account's actual limits, not the published defaults. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
 
 <h2>The monthly AI write quota</h2>
 <p>Rate buckets bound requests per minute and the daily allowance bounds compute per day. The AI write quota bounds <b>inference per month</b>, because inference is the part that scales with use. It is checked <i>after</i> the daily allowance — a write must clear both — and its refusal carries the same <code>usage</code> object, with <code>capped: "monthly_ai"</code>.</p>
@@ -8803,7 +8803,7 @@ ${outputBlock(`{
 <p>The <code>huba</code> block has the same shape over messages instead of neurons: <a href="#/guides/huba">Huba AI</a> answers are counted per UTC day (50 on an account&rsquo;s first day, 20 per day after), and the neurons each answer spends — roughly 20&ndash;35 — come out of the same daily allowance that <code>quota_daily</code> reports.</p>
 
 <h2>The usage dashboard</h2>
-<p>The same numbers render in the dashboard: profile menu, top right, <b>Usage &amp; plan</b>. Each allowance is a filling bar that turns into a warning at 80%, with a countdown to the 00:00 UTC reset, and a <b>Request more</b> button when an allowance runs out — the request goes to the owner with your usage attached and is granted manually; a temporary grant lapses on its own. The walkthrough is <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
+<p>The same numbers render in the dashboard: profile menu, top right, <b>Usage &amp; plan</b>. Each allowance is a filling bar that turns into a warning at 80%, with a countdown to the 00:00 UTC reset, and a <b>Request more access</b> button when an allowance runs out — the request goes to the owner with your usage attached and is granted manually; a temporary grant lapses on its own. The walkthrough is <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
 
 <div class="warn"><b><code>quota</code>, <code>quota_daily</code> and <code>huba</code> ignore <code>range</code>, and <code>userId</code> does not move them.</b> The quotas are always the current UTC month or day, whatever window you asked for. <code>ai</code> and all three quota blocks are attributed to the authenticated account, not to the memory space being read — so passing a sub-tenant <code>userId</code> narrows the activity half of the response while these blocks keep reporting the account&rsquo;s figures.</div>
 
@@ -9760,7 +9760,7 @@ ${prereq([
 <h2>Open the Usage page</h2>
 <ol class="steps">
 <li><b>Open the profile menu.</b><p>Top right of the dashboard.</p></li>
-<li><b>Choose Usage &amp; plan.</b><p>What you should see: three filling bars — today's saves, this month's plan, and Huba messages — each with its numbers, and a countdown to the next 00:00 UTC reset on the daily ones.</p></li>
+<li><b>Choose Usage &amp; plan.</b><p>What you should see: three filling bars — today's saves, this month's plan, and Huba messages — each with its numbers, and a countdown to the next 00:00 UTC reset under today's saves.</p></li>
 </ol>
 
 <h2>The three bars</h2>
@@ -9773,7 +9773,7 @@ ${prereq([
 
 <div class="note"><b>Why the daily unit is compute, not a save count.</b> A long conversation save honestly costs proportionally more of the day than a one-line note, so a flat "saves per day" number would either overcharge small saves or hide big ones. The ~100-saves figure is an estimate at the measured average, not a second limit.</div>
 
-<p>Each bar warns once it passes 80%, so the first sign of a heavy day is a colour change, not a refusal. The countdown under the daily bars is the answer to "when do I get it back": 00:00 UTC, every day, no action needed.</p>
+<p>Each bar warns once it passes 80%, so the first sign of a heavy day is a colour change, not a refusal. The countdown under today’s saves is the answer to "when do I get it back": 00:00 UTC, every day, no action needed.</p>
 
 <h2>What happens at the wall</h2>
 <p>When today's allowance is spent, write endpoints refuse with <code>429</code> and a <code>retry-after</code> header:</p>

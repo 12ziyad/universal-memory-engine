@@ -4207,6 +4207,14 @@ function renderAppUser() {
 	renderProfileTrigger();
 	if (!user) { wrap.innerHTML = ""; return; }
 	wrap.innerHTML = `<span class="avatar">${esc(initials(user))}</span><span>${esc(user.name || user.email)}</span>`;
+	// A transfer link lands here from an email, so it is handled once the
+	// signed-in identity is known — the offer is bound to a specific account
+	// and the server refuses to describe it to anyone else.
+	const transfer = /(?:^|[#&])transfer=([^&]+)/.exec(location.hash || "");
+	if (transfer && !S.transferHandled) {
+		S.transferHandled = true;
+		openTransferAccept(decodeURIComponent(transfer[1]));
+	}
 }
 
 /* Header account menu. Mirrors the scope-switcher popover contract exactly:
@@ -4236,8 +4244,9 @@ function renderProfileMenu() {
 		<div class="profile-theme" role="group" aria-label="Appearance">${themeBtn("light", "Light")}${themeBtn("dark", "Dark")}${themeBtn("system", "System")}</div>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('usage');">Usage &amp; plan</button>
 		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); setView('settings');">Settings</button>
-		<a role="menuitem" href="mailto:founder@itsuki.app">Support</a>
-		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutNow();">Log out</button>`;
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); openTrustReportModal();">Support &amp; reports</button>
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutNow();">Log out</button>
+		<button type="button" role="menuitem" onclick="toggleProfileMenu(false); logoutAllNow();">Log out all sessions</button>`;
 }
 
 function toggleProfileMenu(force) {
@@ -14510,7 +14519,11 @@ function toggleHuba(force) {
 		panel.dataset.collapsed = "true";
 		void panel.offsetHeight;
 		panel.dataset.collapsed = "false";
-		if (!HUBA.history.length) {
+		// The greeting is DOM-only — hubaAppend does not touch HUBA.history —
+		// so guarding on history.length re-added it on every single open, and
+		// the panel filled up with copies of itself. Ask the log what is
+		// actually on screen instead.
+		if (!HUBA.history.length && !$("#hubaLog")?.children.length) {
 			hubaAppend("assistant", "I'm Huba. Ask me anything about Itsuki or about this account — how saving works, what a receipt means, how much of today's allowance is left, who's on your team.");
 		}
 		hubaCloseThreads();
@@ -15354,9 +15367,13 @@ function renderAdminBody() {
 	const tab = S.adminTab || "overview";
 
 	if (tab === "overview") {
+		// Rebuilt as five labelled sections. It used to be ten cards of equal
+		// weight with two different signup funnels, three different time
+		// windows and no grouping — so the number you wanted was always in the
+		// card you were not looking at. Headline numbers are stat tiles; the
+		// day-by-day detail stays, but underneath the thing it explains.
 		const t = stats.totals || {};
 		const visits = stats.visits_by_day || [];
-		const totalVisits = visits.reduce((sum, row) => sum + Number(row.count || 0), 0);
 		const today = new Date().toISOString().slice(0, 10);
 		const todayVisits = visits.filter((row) => row.day === today).reduce((sum, row) => sum + Number(row.count || 0), 0);
 		const visitDays = new Map();
@@ -15384,49 +15401,77 @@ function renderAdminBody() {
 		};
 		const funnel = Object.fromEntries(dimRows("funnel", 10));
 		const activation = stats.activation || {};
-		const failedByDay = stats.failed_logins_by_day || [];
-		const failedTotal = failedByDay.reduce((sum, row) => sum + Number(row.n || 0), 0);
-		body.innerHTML = `<div class="panel-grid">
-			<div class="action-box"><h3>Visitors</h3>
-				<div class="kv">Today: <b>~${uniqueDays.get(today) ?? 0} people</b> <span class="help">· ${todayVisits} page loads</span></div>
-				${[...visitDays.entries()].map(([day, entry]) =>
-					`<div class="kv">${esc(day)}: <b>~${uniqueDays.get(day) ?? "?"} people</b> <span class="help">(${entry.landing + entry.app + entry.legal + entry.other} loads · ${entry.landing} landing · ${entry.app} app)</span></div>`).join("") || `<div class="help">No visits recorded yet.</div>`}
-				<div class="help" style="margin-top:6px">People ≈ distinct visitors (daily-rotating hash, nothing stored). Known bots and admin app-loads are excluded from this deploy on.</div>
+		const failedTotal = (stats.failed_logins_by_day || []).reduce((sum, row) => sum + Number(row.n || 0), 0);
+		const sevenDaySaves = [...saveDays.values()].reduce((sum, entry) => sum + Object.values(entry).reduce((a, b) => a + b, 0), 0);
+
+		const tile = (label, value, hint, bad) =>
+			`<div class="ops-stat"><b${bad && Number(value) > 0 ? ' style="color:var(--red)"' : ""}>${esc(String(value ?? 0))}</b><span>${esc(label)}</span>${hint ? `<i>${esc(hint)}</i>` : ""}</div>`;
+		const section = (title, note) =>
+			`<h4 class="ops-h" style="margin:22px 0 0">${esc(title)}</h4>${note ? `<div class="help" style="margin-top:2px">${esc(note)}</div>` : ""}`;
+		const list = (rows, empty) => rows.length
+			? rows.map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("")
+			: `<div class="help">${esc(empty)}</div>`;
+
+		body.innerHTML = `<div class="box" style="max-width:1100px">
+			${section("Traffic", "Who is arriving, and from where.")}
+			<div class="ops-stats">
+				${tile("people today", uniqueDays.get(today) ?? 0, `${todayVisits} page loads`)}
+				${tile("countries", dimRows("country", 99).length)}
+				${tile("referrers", dimRows("ref", 99).length)}
 			</div>
-			<div class="action-box"><h3>Where from</h3>
-				${dimRows("ref").map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("") || `<div class="help">Referrer counting starts with this deploy.</div>`}
+			<div class="panel-grid" style="margin-top:14px">
+				<div class="action-box"><h3>Where from</h3>${list(dimRows("ref"), "Referrer counting starts with this deploy.")}</div>
+				<div class="action-box"><h3>Audience</h3>${list(dimRows("country", 5), "Country counting starts with this deploy.")}
+					<div style="margin-top:6px">${dimRows("device", 2).map(([value, n]) => `<span class="badge state-active" style="margin-right:6px">${esc(value)}: ${n}</span>`).join("")}</div>
+				</div>
+				<div class="action-box"><h3>Visits by day</h3>
+					${[...visitDays.entries()].map(([day, entry]) =>
+						`<div class="kv">${esc(day)}: <b>~${uniqueDays.get(day) ?? "?"}</b> <span class="help">(${entry.landing + entry.app + entry.legal + entry.other} loads)</span></div>`).join("") || `<div class="help">No visits recorded yet.</div>`}
+					<div class="help" style="margin-top:6px">People ≈ distinct visitors, counted with a hash that changes daily. Bots and admin loads are excluded.</div>
+				</div>
 			</div>
-			<div class="action-box"><h3>Funnel (14 days)</h3>
-				<div class="kv">Signup screen viewed: <b>${funnel.signup_view ?? 0}</b></div>
-				<div class="kv">Signed up: <b>${funnel.signup_done ?? 0}</b></div>
-				<div class="kv">Accounts with ≥1 memory: <b>${activation.with_memories ?? 0}</b> / ${activation.accounts ?? "?"}</div>
+
+			${section("Accounts", "One funnel, one window — signup through to a first memory.")}
+			<div class="ops-stats">
+				${tile("saw signup", funnel.signup_view ?? 0, "14 days")}
+				${tile("signed up", stats.users ?? 0, "all time")}
+				${tile("activated", activation.with_memories ?? 0, `of ${activation.accounts ?? "?"} accounts`)}
+				${tile("accepted terms", stats.consented_users ?? 0)}
+				${tile("active sessions", stats.active_sessions_users ?? 0)}
 			</div>
-			<div class="action-box"><h3>Signed up → activated → errored</h3>
-				<div class="kv">Signed up (all time): <b>${stats.funnel?.signed_up ?? "?"}</b></div>
-				<div class="kv">Activated (saved something): <b>${stats.funnel?.activated ?? 0}</b></div>
-				<div class="kv">Hit a failed save (14d): <b>${stats.funnel?.errored_jobs_14d ?? 0}</b></div>
-				<div class="kv">Hit a reported error (14d): <b>${stats.funnel?.errored_reports_14d ?? 0}</b></div>
+			<div class="panel-grid" style="margin-top:14px">
+				<div class="action-box"><h3>Signups by day</h3>${adminDayRows(stats.signups_by_day, (row) => row.n, "signups")}</div>
+				<div class="action-box"><h3>Logins by day</h3>${adminDayRows(stats.logins_by_day, (row) => row.n, "successful logins")}</div>
 			</div>
-			<div class="action-box"><h3>Users</h3>
-				<div class="kv">Total accounts: <b>${stats.users}</b></div>
-				<div class="kv">Accepted terms: <b>${stats.consented_users}</b></div>
-				<div class="kv">Active sessions (users): <b>${stats.active_sessions_users}</b></div></div>
-			<div class="action-box"><h3>Memory totals</h3>
-				<div class="kv">Nodes: <b>${t.nodes ?? 0}</b> · Pages: <b>${t.pages ?? 0}</b></div>
-				<div class="kv">Slices: <b>${t.slices ?? 0}</b> · Events: <b>${t.events ?? 0}</b></div>
-				<div class="kv">Receipts: <b>${t.receipts ?? 0}</b> · Active tokens: <b>${t.active_tokens ?? 0}</b></div></div>
-			<div class="action-box"><h3>Saves (14 days)</h3>
-				${[...saveDays.entries()].map(([day, entry]) =>
-					`<div class="kv">${esc(day)}: <b>${Object.values(entry).reduce((a, b) => a + b, 0)}</b> <span class="help">(${Object.entries(entry).map(([source, n]) => `${n} ${esc(source)}`).join(" · ")})</span></div>`).join("") || `<div class="help">No saves in the last 14 days.</div>`}
+
+			${section("Memory", "What the system is actually holding.")}
+			<div class="ops-stats">
+				${tile("nodes", t.nodes ?? 0)}
+				${tile("pages", t.pages ?? 0)}
+				${tile("slices", t.slices ?? 0)}
+				${tile("events", t.events ?? 0)}
+				${tile("receipts", t.receipts ?? 0)}
+				${tile("saves", sevenDaySaves, "14 days")}
 			</div>
-			<div class="action-box"><h3>Signups (14 days)</h3>${adminDayRows(stats.signups_by_day, (row) => row.n, "signups")}</div>
-			<div class="action-box"><h3>Logins (successful)</h3>
-				${adminDayRows(stats.logins_by_day, (row) => row.n, "successful logins")}
-				${failedTotal ? `<div class="kv" style="margin-top:6px">Failed attempts: <b>${failedTotal}</b> <span class="help">· security signal, not logins</span></div>` : ""}
+			<div class="panel-grid" style="margin-top:14px">
+				<div class="action-box"><h3>Saves by day</h3>
+					${[...saveDays.entries()].map(([day, entry]) =>
+						`<div class="kv">${esc(day)}: <b>${Object.values(entry).reduce((a, b) => a + b, 0)}</b> <span class="help">(${Object.entries(entry).map(([source, n]) => `${n} ${esc(source)}`).join(" · ")})</span></div>`).join("") || `<div class="help">No saves in the last 14 days.</div>`}
+				</div>
 			</div>
-			<div class="action-box"><h3>Audience</h3>
-				${dimRows("country", 5).map(([value, n]) => `<div class="kv">${esc(value)}: <b>${n}</b></div>`).join("") || `<div class="help">Country counting starts with this deploy.</div>`}
-				<div style="margin-top:6px">${dimRows("device", 2).map(([value, n]) => `<span class="badge state-active" style="margin-right:6px">${esc(value)}: ${n}</span>`).join("")}</div>
+
+			${section("Health", "Everything that means something is wrong, in one place.")}
+			<div class="ops-stats">
+				${tile("failed saves", stats.funnel?.errored_jobs_14d ?? 0, "14 days", true)}
+				${tile("reported errors", stats.funnel?.errored_reports_14d ?? 0, "14 days", true)}
+				${tile("failed logins", failedTotal, "security signal", true)}
+				${tile("active tokens", t.active_tokens ?? 0)}
+			</div>
+			<div class="section-actions" style="margin-top:12px">
+				<button class="ghost mini" onclick="adminTab('errors')">Open errors</button>
+				<button class="ghost mini" onclick="adminTab('trust')">Trust &amp; Safety</button>
+				<button class="ghost mini" onclick="adminTab('spend')">Spend</button>
+				<button class="ghost mini" onclick="adminTab('health')">System &amp; routing</button>
 			</div>
 		</div>`;
 		return;
@@ -15973,7 +16018,6 @@ const SET_SECTIONS = [
 		["org-members", "Members & invitations"],
 	] },
 	{ group: "Personal", items: [
-		["personal-account", "Account"],
 		["personal-usage", "Usage & plan"],
 		["personal-appearance", "Appearance"],
 	] },
@@ -16357,12 +16401,10 @@ function renderSettingsSection() {
 		"project-audit": setProjectAudit,
 		"org-general": setOrgGeneral,
 		"org-members": setOrgMembers,
-		"personal-account": setPersonalAccount,
 		"personal-usage": setPersonalUsage,
 		"personal-appearance": setPersonalAppearance,
 	}[SET.section];
 	box.innerHTML = render ? render() : `<div class="set-empty">Nothing here.</div>`;
-	if (SET.section === "personal-account") mountPersonalAccount(box);
 	if (SET.section === "personal-usage") mountPersonalUsage(box);
 	if (SET.section === "personal-appearance") syncThemeControls();
 	if (SET.section === "project-audit" && !SET.audit && !SET.auditLoading && !SET.auditError) loadAuditPage();
@@ -16569,8 +16611,8 @@ function setDangerZone() {
 						${transferTargets.map((m) => `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`).join("")}
 					</select>
 					<button onclick="lcTransferOwnership()"
-						${busy || !lc.transfer_allowed ? " disabled" : ""}
-						title="${lc.transfer_allowed ? "Transfer this project." : "Only the organization owner can transfer an active, non-default project."}">Transfer</button>
+						${busy || !lc.transfer_allowed || !transferTargets.length || lc.pending_transfer ? " disabled" : ""}
+						title="${!transferTargets.length ? "Invite someone to this organization first." : lc.pending_transfer ? "A transfer is already waiting to be accepted." : "Send a transfer offer."}">Offer transfer</button>
 				</div>
 			</div>
 		</div>
@@ -16745,16 +16787,17 @@ async function lcTransferOwnership() {
 	if (SET.lcBusy) return;
 	const recipient = $("#lcTransferTo")?.value;
 	if (!recipient) { toast("Choose the new owner first.", true); return; }
-	const revision = SET.lifecycle?.project?.revision;
-	if (!revision) { toast("Reload Settings before transferring.", true); return; }
 	SET.lcBusy = true;
 	renderSettingsSection();
 	try {
-		await api("/v1/settings/lifecycle/transfer", {
+		const offered = await api("/v1/settings/lifecycle/transfer", {
 			method: "POST",
-			body: JSON.stringify({ projectId: S.projectId, recipientUserId: recipient, expectedRevision: revision }),
+			body: JSON.stringify({ projectId: S.projectId, recipientUserId: recipient }),
 		});
-		toast("Ownership transferred. You keep admin access.");
+		// Nothing has moved yet, and saying otherwise would be the same class
+		// of lie this campaign has been removing: the project changes hands
+		// when they accept, not when we send the invitation.
+		toast(`Offer sent to ${offered?.offer?.to?.email || "them"}. Ownership moves when they accept.`);
 		await refreshProjects().catch(() => {});
 		await loadSettings();
 		await loadLifecycle();
@@ -16765,6 +16808,89 @@ async function lcTransferOwnership() {
 		if (S.view === "settings") renderSettingsSection();
 	}
 }
+
+/** The owner changes their mind before the recipient answers. */
+async function lcCancelTransfer(offerId) {
+	if (SET.lcBusy) return;
+	SET.lcBusy = true;
+	renderSettingsSection();
+	try {
+		await api("/v1/settings/lifecycle/transfer/close", {
+			method: "POST",
+			body: JSON.stringify({ offerId, outcome: "cancelled" }),
+		});
+		toast("Transfer offer withdrawn.");
+		await loadLifecycle();
+	} catch (error) {
+		toast(error?.message || "The offer could not be withdrawn.", true);
+	} finally {
+		SET.lcBusy = false;
+		renderSettingsSection();
+	}
+}
+
+/**
+ * The recipient followed the link in their email. Shows what they are being
+ * given BEFORE they agree to it — the accept button is the first moment
+ * anything changes.
+ */
+async function openTransferAccept(raw) {
+	const [offerId, token] = String(raw || "").split(".");
+	if (!offerId || !token) return;
+	let offer;
+	try {
+		const res = await api(`/v1/settings/lifecycle/transfer?id=${encodeURIComponent(offerId)}&token=${encodeURIComponent(token)}`, { projectBound: false });
+		offer = res.offer;
+	} catch (error) {
+		toast(error?.message || "That transfer link is not valid.", true);
+		return;
+	}
+	const modal = $("#policyModal");
+	if (!modal) return;
+	rememberModalOpener("policyModal");
+	modal.hidden = false;
+	modal.onclick = closePolicyModal;
+	modal.innerHTML = `<section class="policy-modal" role="dialog" aria-modal="true" aria-labelledby="xferTitle" onclick="event.stopPropagation()">
+		<header><div><h2 id="xferTitle">Accept ownership of ${esc(offer.project?.name || "this project")}?</h2>
+		<div class="help">${esc(offer.from?.email || "The current owner")} offered it to you. Nothing changes until you accept.</div></div>
+		<button class="ghost mini" onclick="closePolicyModal()">Close</button></header>
+		<p style="margin-top:10px">Taking ownership makes you responsible for this project&rsquo;s settings, members and lifecycle &mdash; including the ability to purge or delete its memory. The stored memory itself does not move: the memory-space and vector identities stay exactly as they are.</p>
+		<p class="help">${esc(offer.from?.email || "The current owner")} keeps administrator access, so nothing they run today stops working.</p>
+		<div class="section-actions">
+			<button onclick="acceptTransfer('${esc(offerId)}','${esc(token)}')">Accept ownership</button>
+			<button class="ghost" onclick="declineTransfer('${esc(offerId)}')">Decline</button>
+		</div>
+	</section>`;
+}
+
+async function acceptTransfer(offerId, token) {
+	try {
+		await api("/v1/settings/lifecycle/transfer/accept", {
+			method: "POST", projectBound: false,
+			body: JSON.stringify({ offerId, token }),
+		});
+		closePolicyModal();
+		toast("Ownership accepted. The project is yours.");
+		await refreshProjects().catch(() => {});
+		await loadSettings().catch(() => {});
+	} catch (error) {
+		toast(error?.message || "The transfer could not be completed.", true);
+	}
+}
+
+async function declineTransfer(offerId) {
+	try {
+		await api("/v1/settings/lifecycle/transfer/close", {
+			method: "POST", projectBound: false,
+			body: JSON.stringify({ offerId, outcome: "declined" }),
+		});
+		closePolicyModal();
+		toast("Transfer declined.");
+	} catch (error) {
+		toast(error?.message || "Could not decline the transfer.", true);
+	}
+}
+
 
 async function saveProjectGeneral() {
 	if (SET.busy || !setCan("project.edit")) return;
@@ -18913,12 +19039,6 @@ async function downloadAuditCsv() {
 	}
 }
 
-function setPersonalAccount() {
-	return `<div class="set-head"><div><h3>Account</h3>
-		<div class="set-sub">Sessions, password, connections, data and support — the controls that live nowhere else.</div></div></div>
-		<div id="setPersonalMount"></div>`;
-}
-
 function setAppearancePicker() {
 	const appearanceTheme = themePreference();
 	return `<div class="theme-picker" role="group" aria-label="Appearance theme">
@@ -18976,63 +19096,6 @@ function setPersonalAppearance() {
 }
 
 /** Personal Account owns personal controls only; project controls live above. */
-function mountPersonalAccount(box) {
-	const mount = box.querySelector("#setPersonalMount");
-	if (mount) viewSettingsMain(mount);
-}
-
-function viewSettingsMain(v) {
-	const u = S.me?.user || {};
-	const activeTokens = S.tokens.filter(t => !t.revoked_at && t.status !== "revoked").length;
-	const revokedTokens = Math.max(0, S.tokens.length - activeTokens);
-	const canViewKeys = projectCan("project.keys.view");
-	const keyAccessCopy = projectCapabilityActionCopy("project.keys.view", "Your role cannot view project keys.");
-	const canExport = projectCan("project.export");
-	const exportAccessCopy = projectCapabilityActionCopy("project.export", "Your role cannot export memory from this project.");
-	const wrap = el("div");
-	wrap.innerHTML = `<div class="settings-grid">
-		<div class="action-box settings-section"><h3>Account</h3>
-			<div class="app-user" style="margin-bottom:12px"><span class="avatar">${esc(initials(u))}</span><span>${esc(u.name || u.email || "Itsuki user")}</span></div>
-			<div class="kv">Name: <b>${esc(u.name || "")}</b></div>
-			<div class="kv">Email: <b>${esc(u.email || "")}</b></div>
-			<div class="kv">Account ID: <b>${esc(u.id || S.userId || "")}</b></div>
-			<div class="kv">Created: <b>${fmtDate(u.created_at)}</b></div>
-			<div class="section-actions"><button class="ghost" onclick="logoutNow()">Log out</button></div>
-		</div>
-		<div class="action-box settings-section"><h3>Security</h3>
-			<div class="help">Browser sessions use HttpOnly cookies. Tokens and private MCP URLs should be treated like passwords.</div>
-			<div class="kv" style="margin-top:8px">Active connections: <b>${activeTokens}</b></div>
-			<div class="kv">Revoked connections: <b>${revokedTokens}</b></div>
-			<div class="section-actions"><button class="ghost mini" onclick="logoutAllNow()">Log out all sessions</button><button class="ghost mini" onclick="setOpenIntegrationSurface('keys','project.keys.view','Your role cannot view project keys.')"${canViewKeys ? "" : ` disabled title="${esc(keyAccessCopy)}"`}>Open API keys</button></div>
-			<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
-				<h3 style="font-size:14px">Change password</h3>
-				<div class="form-row" style="margin-top:8px"><input id="pwCurrent" type="password" autocomplete="current-password" placeholder="Current password (empty if you signed up with Google)" /></div>
-				<div class="form-row" style="margin-top:8px"><input id="pwNew" type="password" autocomplete="new-password" minlength="8" placeholder="New password (min 8 characters)" /></div>
-				<div class="section-actions" style="margin-top:10px"><button class="ghost mini" onclick="changePasswordNow()">Update password</button><span id="pwStatus" class="help"></span></div>
-			</div>
-		</div>
-		<div class="action-box settings-section"><h3>Connections</h3>
-			<div class="help">${canViewKeys ? `${S.tokens.length} total connection(s). Create one MCP URL or API token/key per tool so access can be revoked cleanly.` : esc(keyAccessCopy)}</div>
-			<div class="section-actions"><button class="ghost mini" onclick="setOpenIntegrationSurface('install','project.keys.view','Your role cannot view project connections.')"${canViewKeys ? "" : ` disabled title="${esc(keyAccessCopy)}"`}>Open Get started</button></div>
-		</div>
-		<div class="action-box settings-section"><h3>Data &amp; Privacy</h3>
-			<div class="help">You own your account memory. Itsuki does not sell user data, does not train on it, and does not use it for unrelated purposes.${canExport ? " Export the memory space resolved by this project and session as JSON; sibling SDK subtenant spaces are separate." : ` ${esc(exportAccessCopy)}`}</div>
-			<div class="section-actions"><button class="ghost mini" onclick="downloadExport()"${canExport ? "" : ` disabled title="${esc(exportAccessCopy)}"`}>Export current memory space</button><button class="ghost mini" onclick="showLegal('privacy', event)">Privacy Policy</button><button class="ghost mini" onclick="showLegal('terms', event)">Terms</button></div>
-		</div>
-		<div class="action-box settings-section"><h3>Support</h3>
-			<div class="help">Report an issue, ask for setup help, or flag safety/privacy concerns.</div>
-			<p><a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
-			<div class="section-actions"><button class="ghost mini" onclick="openTrustReportModal()">Support / report issue</button></div>
-		</div>
-		<div class="action-box settings-section"><h3>Legal / Terms</h3>
-			<div class="help">Early-product terms, privacy, responsible-use guidance, token responsibility, and third-party tool notices.</div>
-			<div class="section-actions"><button class="ghost mini" onclick="openPolicyModal('terms')">Terms</button><button class="ghost mini" onclick="openPolicyModal('privacy')">Privacy</button><button class="ghost mini" onclick="openTrustReportModal()">Support</button></div>
-		</div>
-	</div>`;
-	v.appendChild(wrap);
-	syncThemeControls();
-}
-
 function viewGraph(v) {
 	if (S.network) { try { S.network.destroy(); } catch {} S.network = null; }
 	if (S.resizeObserver) { try { S.resizeObserver.disconnect(); } catch {} S.resizeObserver = null; }

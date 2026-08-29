@@ -219,6 +219,8 @@ import {
 	getExport,
 	listExports,
 	prepareExportRows,
+	readExportBody,
+	recordDirectExport,
 } from "./pipeline/exports.js";
 import {
 	changePassword,
@@ -274,6 +276,15 @@ import { createTrustCase, listTrustCasesForUser, readTrustCase, adminTrustOvervi
 import { recordSecurityEvent, processSecurityEventNotifications } from "./lib/security_events.js";
 import { filterOwnedMemorySpaces, scopedMemoryUserId, sanitizeClientScopeInput } from "./lib/egress_ownership.js";
 import { buildReviewBundle, assertBundleIsSanitized } from "./lib/review_bundle.js";
+import { processMailOutbox, enqueueMail, privacyCaseResolvedMail } from "./lib/mail.js";
+import {
+	offerProjectOwnership,
+	describeTransferOffer,
+	acceptProjectOwnership,
+	closeTransferOffer,
+	pendingTransferFor,
+	expireStaleTransfers,
+} from "./lib/ownership_transfer.js";
 import { mintAdminConfirmation, consumeAdminConfirmation, purgeExpiredAdminConfirmations, STEP_UP_ACTIONS } from "./lib/admin_confirmation.js";
 
 function clientIp(request) {
@@ -2094,22 +2105,70 @@ const routes = {
 		} catch (error) { return lifecycleFailure(error); }
 	},
 
-	"POST /v1/settings/lifecycle/transfer": async (request, env) => {
+	/**
+	 * Offer ownership. Ownership used to change the instant this was called —
+	 * no acceptance, no notice — so a person could be handed responsibility
+	 * for a project's memory, keys and deletion controls without ever agreeing
+	 * to it. Now it creates an offer and emails the recipient; the swap itself
+	 * happens on accept.
+	 */
+	"POST /v1/settings/lifecycle/transfer": async (request, env, ctx) => {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
 		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/transfer");
 		if (parsed.response) return parsed.response;
-		try {
-			const result = await transferProjectOwnership(env, {
-				actorUserId: auth.userId,
-				projectId: parsed.body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
-				recipientUserId: parsed.body.recipientUserId,
-				expectedRevision: parsed.body.expectedRevision ?? request.headers.get("if-match"),
-				requestId: auditRequestId(request),
-			});
-			return json({ ok: true, ...result });
-		} catch (error) { return lifecycleFailure(error); }
+		const result = await offerProjectOwnership(env, {
+			actorUserId: auth.userId,
+			projectId: parsed.body.projectId ?? request.headers.get(MANAGED_PROJECT_HEADER),
+			recipientUserId: parsed.body.recipientUserId,
+		});
+		if (result.error) return json({ error: result.error, message: result.message }, result.status ?? 400);
+		if (ctx) ctx.waitUntil(processMailOutbox(env, { limit: 5 }).catch(() => {}));
+		return json({ ok: true, ...result });
+	},
+
+	/** What the recipient sees on the transfer link, before deciding. */
+	"GET /v1/settings/lifecycle/transfer": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const url = new URL(request.url);
+		const result = await describeTransferOffer(env, {
+			offerId: url.searchParams.get("id"),
+			token: url.searchParams.get("token"),
+			viewerUserId: auth.userId,
+		});
+		if (result.error) return json({ error: result.error, message: result.message }, result.status ?? 400);
+		return json({ ok: true, ...result });
+	},
+
+	/** Accept — the point at which ownership actually moves. */
+	"POST /v1/settings/lifecycle/transfer/accept": async (request, env, ctx) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (!(await allowRate(env.SAVE_LIMITER, `lifecycle:${auth.userId}`, { fail: "closed" }))) return tooManyFor("save");
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/transfer/accept");
+		if (parsed.response) return parsed.response;
+		const result = await acceptProjectOwnership(env, {
+			offerId: parsed.body.offerId,
+			token: parsed.body.token,
+			accepterUserId: auth.userId,
+		});
+		if (result.error) return json({ error: result.error, message: result.message }, result.status ?? 400);
+		if (ctx) ctx.waitUntil(processMailOutbox(env, { limit: 5 }).catch(() => {}));
+		return json(result);
+	},
+
+	/** Withdraw (owner) or decline (recipient). */
+	"POST /v1/settings/lifecycle/transfer/close": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		const parsed = await readSmallJsonObject(request, "/v1/settings/lifecycle/transfer/close");
+		if (parsed.response) return parsed.response;
+		const outcome = parsed.body.outcome === "declined" ? "declined" : "cancelled";
+		const result = await closeTransferOffer(env, { offerId: parsed.body.offerId, actorUserId: auth.userId, outcome });
+		if (result.error) return json({ error: result.error, message: result.message }, result.status ?? 400);
+		return json(result);
 	},
 
 	/**
@@ -3444,7 +3503,19 @@ const routes = {
 				() => ({ metadata: { format: "json" } }),
 			)).payload
 			: await buildPayload();
-		return new Response(JSON.stringify(payload, null, 2), {
+		const serialized = JSON.stringify(payload, null, 2);
+		// A direct download is a real export, and it used to leave no trace at
+		// all for a personal account — so the history page showed only the
+		// failures, and "did it work?" had nowhere to look. Recorded, but never
+		// at the cost of the download itself.
+		const objectCount = EXPORT_TABLES.reduce((total, table) => total + (payload[table]?.length ?? 0), 0);
+		const record = recordDirectExport(env, auth.userId, {
+			objectCount,
+			bytes: new TextEncoder().encode(serialized).length,
+			entity: auth.managedProject ? "Direct download · project" : "Direct download",
+		});
+		if (ctx) ctx.waitUntil(record); else await record;
+		return new Response(serialized, {
 			headers: {
 				"content-type": "application/json; charset=utf-8",
 				"content-disposition": `attachment; filename="uml-export-${new Date().toISOString().slice(0, 10)}.json"`,
@@ -3960,6 +4031,27 @@ const routes = {
 		const userRow = updated?.user_id
 			? await env.DB.prepare("SELECT email, name FROM users WHERE id = ?").bind(updated.user_id).first()
 			: null;
+		// The other half of the 7-day promise: they were told we received it,
+		// so they get told what we decided. Only on resolve, only once.
+		if (action === "resolve" && userRow?.email) {
+			const notes = Array.isArray(updated.admin_notes) ? updated.admin_notes : (() => {
+				try { return JSON.parse(updated.admin_notes ?? "[]"); } catch { return []; }
+			})();
+			await enqueueMail(env, {
+				kind: "privacy_case_resolved",
+				to: userRow.email,
+				toUserId: updated.user_id,
+				dedupeKey: `case_resolved:${caseId}`,
+				...privacyCaseResolvedMail(env, {
+					caseId,
+					resolution: updated.resolution,
+					// The operator's last note is the human answer. Nothing else
+					// from the file is sent — internal notes stay internal.
+					note: notes.length ? notes[notes.length - 1]?.text : null,
+				}),
+			});
+			if (ctx) ctx.waitUntil(processMailOutbox(env, { limit: 5 }).catch(() => {}));
+		}
 		let notes = [];
 		try { notes = updated.admin_notes ? JSON.parse(updated.admin_notes) : []; } catch { notes = []; }
 		return json({
@@ -4671,10 +4763,19 @@ const routes = {
 				message: "This export was discarded because the memory it contained was deleted. Create a new export to download what remains.",
 			}, 410);
 		}
-		if (row.status !== "complete" || !row.data) {
+		if (row.status !== "complete") {
 			return json({ error: "not_ready", message: "This export is still being built. Refresh in a moment." }, 409);
 		}
-		return new Response(row.data, {
+		const body = await readExportBody(env, row);
+		if (!body) {
+			// Complete row, no bytes: retention scrubbed it, or the object is
+			// gone. Either way, saying "still building" would be a lie.
+			return json({
+				error: "export_unavailable",
+				message: "The file for this export is no longer stored. Create a new export, or use Download directly.",
+			}, 410);
+		}
+		return new Response(body, {
 			headers: {
 				"content-type": "application/json; charset=utf-8",
 				"content-disposition": `attachment; filename="${exportFileName(row)}"`,
@@ -5267,6 +5368,12 @@ export default {
 		}));
 		ctx.waitUntil(purgeExpiredAdminConfirmations(env).catch((error) => {
 			console.warn("admin confirmation purge failed:", error?.message ?? error);
+		}));
+		ctx.waitUntil(processMailOutbox(env, { limit: 25 }).catch((error) => {
+			console.warn("mail outbox drain failed:", error?.message ?? error);
+		}));
+		ctx.waitUntil(expireStaleTransfers(env).catch((error) => {
+			console.warn("transfer expiry sweep failed:", error?.message ?? error);
 		}));
 		ctx.waitUntil(purgeExpiredEmailChallenges(env, {
 			now: Number(controller?.scheduledTime) || Date.now(),

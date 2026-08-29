@@ -221,9 +221,14 @@ describe("dashboard script", () => {
 		]) {
 			expect(script).toContain(marker);
 		}
-		for (const section of ["Account", "Security", "Connections", "Memory Controls", "Data &amp; Privacy", "Support", "Legal / Terms", "Delete project memory"]) {
+		// The Settings "Account" card is gone: it duplicated identity that the
+		// profile menu already shows and offered a password box that makes no
+		// sense for Google sign-in. What it uniquely held moved rather than
+		// disappeared — asserted in test/trust_ui.spec.js.
+		for (const section of ["Connections", "Memory Controls", "Delete project memory"]) {
 			expect(script).toContain(section);
 		}
+		expect(script).not.toContain("function viewSettingsMain(");
 	});
 
 	it("keeps the pending-suggestion count on the Memories tab", () => {
@@ -252,7 +257,10 @@ describe("dashboard script", () => {
 		expect(script).toContain("Do not use Itsuki for abuse, unsafe automation");
 		expect(script).toContain("function openPolicyModal(");
 		expect(script).toContain("function closePolicyModal()");
-		expect(script).toContain("Support / report issue");
+		// The support doorway moved from the removed Settings card into the
+		// profile menu; the tracked modal is still the thing it opens.
+		expect(script).toContain("Support &amp; reports");
+		expect(script).toContain("openTrustReportModal()");
 	});
 
 	it("offers one action per key, and it deletes", () => {

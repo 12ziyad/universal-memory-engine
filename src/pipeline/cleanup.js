@@ -11,6 +11,7 @@ import {
 import { normalizeLabel } from "../lib/text.js";
 import { deleteNodeVectors } from "../lib/vectorize.js";
 import { invalidateStoredExports } from "./exports.js";
+import { enqueueMail, accountDeletionDoneMail } from "../lib/mail.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
 import { fallbackSummary } from "./pass2.js";
 import { suppressPageKey } from "./pages.js";
@@ -1402,6 +1403,20 @@ export async function deleteAccountCompletely(env, userId, options = {}) {
 	// can legitimately report more than one affected row. Zero still proves that
 	// the disabled-state CAS did not linearize.
 	if (Number(deleted?.meta?.changes ?? 0) < 1) throw new Error("account deletion lost its final state transition");
+	// The account row is gone and every space has been swept and checked, so
+	// this is the moment the sentence "your account has been deleted" becomes
+	// true. The address was captured BEFORE the erasure precisely so that the
+	// confirmation can still reach a person whose account no longer exists —
+	// and mail_outbox is scrubbed rather than deleted for the same reason.
+	if (user?.email) {
+		await enqueueMail(env, {
+			kind: "account_deletion_done",
+			to: user.email,
+			toUserId: null,
+			dedupeKey: `account_deleted:${userId}`,
+			...accountDeletionDoneMail(env, { email: user.email }),
+		});
+	}
 	const result = { deleted: true, memory: memoryResults[0], memory_spaces: memoryResults.length };
 	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
 }

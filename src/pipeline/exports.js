@@ -53,6 +53,19 @@ export const EXPORT_REVISION_LIMIT = 50_000;
  */
 export async function invalidateStoredExports(env, userId, reason = "memory_deleted", { purge = false } = {}) {
 	try {
+		// The bytes live in R2 now, so clearing the row is no longer enough —
+		// a deleted memory whose export object survived in the bucket would be
+		// exactly the breach this function was written to close, just moved.
+		if (env.EXPORTS) {
+			const { results: stored } = await env.DB.prepare(
+				"SELECT r2_key FROM memory_exports WHERE user_id = ? AND r2_key IS NOT NULL",
+			).bind(userId).all();
+			for (const row of stored ?? []) {
+				await env.EXPORTS.delete(row.r2_key).catch((error) => {
+					console.warn("export object delete failed:", error?.message ?? error);
+				});
+			}
+		}
 		// A full erasure removes the job rows outright — the census classifies
 		// memory_exports as a memory-space table with purge: "delete", and
 		// someone who asked for everything to be gone should not still see a
@@ -63,8 +76,8 @@ export async function invalidateStoredExports(env, userId, reason = "memory_dele
 			? await env.DB.prepare("DELETE FROM memory_exports WHERE user_id = ?").bind(userId).run()
 			: await env.DB.prepare(
 				`UPDATE memory_exports
-				    SET data = NULL, status = 'expired', size_bytes = 0, error = ?
-				  WHERE user_id = ? AND (data IS NOT NULL OR status IN ('queued', 'running', 'complete'))`,
+				    SET data = NULL, r2_key = NULL, status = 'expired', size_bytes = 0, error = ?
+				  WHERE user_id = ? AND (data IS NOT NULL OR r2_key IS NOT NULL OR status IN ('queued', 'running', 'complete'))`,
 			).bind(reason, userId).run();
 		return { invalidated: Number(done.meta?.changes ?? 0) };
 	} catch (error) {
@@ -106,13 +119,65 @@ export function exportFileName(row) {
 	return `itsuki-export-${new Date(Number(row?.created_at ?? Date.now())).toISOString().slice(0, 10)}.json`;
 }
 
+/** Where an export's bytes live in the bucket. Namespaced by owner. */
+export function r2KeyFor(userId, exportId) {
+	return `exports/${userId}/${exportId}.json`;
+}
+
+/**
+ * The bytes of a finished export, wherever they were put — R2 for anything
+ * made since the bucket landed, the legacy inline column for older rows.
+ * Returns null when there is nothing to serve, so the caller can answer
+ * honestly instead of sending an empty file.
+ */
+export async function readExportBody(env, row) {
+	if (!row) return null;
+	if (row.r2_key && env.EXPORTS) {
+		try {
+			const object = await env.EXPORTS.get(row.r2_key);
+			if (object) return await object.text();
+			// The row says complete and the object is missing: say so rather
+			// than serving nothing and calling it a download.
+			console.warn("export object missing:", row.r2_key);
+			return null;
+		} catch (error) {
+			console.warn("export fetch failed:", error?.message ?? error);
+			return null;
+		}
+	}
+	return row.data ?? null;
+}
+
 export async function listExports(env, userId, limit = 50) {
 	const { results } = await env.DB.prepare(
-		`SELECT id, status, format, entity, object_count, size_bytes, error,
+		`SELECT id, status, format, entity, kind, object_count, size_bytes, delivered_bytes, error,
 			created_at, started_at, completed_at
 		 FROM memory_exports WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
 	).bind(userId, limit).all();
 	return results ?? [];
+}
+
+/**
+ * Record a direct download. It streams and stores nothing, which meant that
+ * for a personal account it left NO trace at all — so "did my export work?"
+ * had no answer, and the history page silently showed only the failures.
+ * A direct download is a real export; it belongs in the list.
+ */
+export async function recordDirectExport(env, userId, { objectCount = null, bytes = null, entity = "Direct download", now = Date.now() } = {}) {
+	try {
+		const id = newId("export");
+		await env.DB.prepare(
+			`INSERT INTO memory_exports
+			   (id, user_id, status, format, entity, kind, object_count, size_bytes, delivered_bytes,
+			    created_at, started_at, completed_at)
+			 VALUES (?, ?, 'complete', 'json', ?, 'direct', ?, ?, ?, ?, ?, ?)`,
+		).bind(id, userId, String(entity).slice(0, 80), objectCount, bytes, bytes, now, now, now).run();
+		return { id };
+	} catch (error) {
+		// Never fail someone's download because we could not file the receipt.
+		console.warn("direct export record failed:", error?.message ?? error);
+		return null;
+	}
 }
 
 export async function getExport(env, userId, id) {
@@ -166,28 +231,47 @@ export async function runExport(env, userId, exportId) {
 			objectCount += rows.length;
 		});
 
-		// Compact, not pretty-printed: the blob lives in a D1 TEXT column with a
-		// hard ~2MB row ceiling, and indentation on row-heavy JSON was inflating
-		// real exports past the limit (a 2.9MB pretty payload is ~1.5MB compact).
-		// The direct download pretty-prints its own copy; this one is storage.
+		// Compact, not pretty-printed — this copy is storage. The direct
+		// download pretty-prints its own.
 		const data = JSON.stringify(payload);
 		const bytes = new TextEncoder().encode(data).length;
-		const max = exportMaxBytes(env);
-		if (bytes > max) {
-			// Never truncate a person's memory and call it an export.
-			await failExport(env, userId, exportId,
-				// The pointer must name a control that actually exists, by its real
-				// label — the previous text sent people hunting for an "Export
-				// everything" button that was never built.
-				`This memory is ${(bytes / 1_000_000).toFixed(1)} MB — larger than an export job can hold here. Use "Export current memory space" in Settings → Account → Data & Privacy for the full file.`);
-			return { ok: false, reason: "too_large", bytes };
+
+		// R2 holds the bytes now. This used to be a D1 TEXT column with a hard
+		// ~2MB row ceiling, which is why a 2.7MB memory space could never
+		// finish an export while the direct download — which streams and
+		// stores nothing — always worked. Refusing to export someone's own
+		// memory because of where WE chose to put the file was never their
+		// problem to solve.
+		if (env.EXPORTS) {
+			const key = r2KeyFor(userId, exportId);
+			await env.EXPORTS.put(key, data, {
+				httpMetadata: { contentType: "application/json; charset=utf-8" },
+				// Enough to re-associate an object with its row if the two ever
+				// disagree, and nothing that is not already in the row.
+				customMetadata: { userId, exportId },
+			});
+			await env.DB.prepare(
+				`UPDATE memory_exports SET status = 'complete', r2_key = ?, data = NULL, object_count = ?, size_bytes = ?,
+					completed_at = ?, error = NULL WHERE id = ? AND user_id = ?`,
+			).bind(key, objectCount, bytes, Date.now(), exportId, userId).run();
+			return { ok: true, objectCount, bytes, storage: "r2" };
 		}
 
+		// No bucket bound (local tests, or a deploy before the binding lands):
+		// fall back to the old inline column, which still carries its ceiling.
+		// Stating the real reason beats inventing a limit the product does not
+		// actually have any more.
+		const max = exportMaxBytes(env);
+		if (bytes > max) {
+			await failExport(env, userId, exportId,
+				`This export is ${(bytes / 1_000_000).toFixed(1)} MB and file storage is not available on this deployment, so it could not be saved. Use "Download directly" — it streams and has no size limit.`);
+			return { ok: false, reason: "too_large", bytes };
+		}
 		await env.DB.prepare(
 			`UPDATE memory_exports SET status = 'complete', data = ?, object_count = ?, size_bytes = ?,
 				completed_at = ?, error = NULL WHERE id = ? AND user_id = ?`,
 		).bind(data, objectCount, bytes, Date.now(), exportId, userId).run();
-		return { ok: true, objectCount, bytes };
+		return { ok: true, objectCount, bytes, storage: "d1" };
 	} catch (error) {
 		console.warn(`export failed user=${userId} export=${exportId}:`, error?.message ?? error);
 		await failExport(env, userId, exportId, "Something went wrong building this export. It has been reported — start another one and it will usually go through.");

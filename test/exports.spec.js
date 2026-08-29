@@ -157,21 +157,40 @@ describe("export jobs", () => {
 		expect((await res.json()).message).toContain("still being built");
 	});
 
-	it("fails loudly rather than truncating a graph it cannot hold", async () => {
+	it("has no size ceiling once the bucket is bound — the old D1 row cap is gone", async () => {
+		// This test used to assert the opposite, because the file was stored in
+		// a D1 TEXT column with a ~2MB row limit and a real 2.7MB memory space
+		// simply could not be exported. The bytes live in R2 now, so a ceiling
+		// that would once have failed the job is irrelevant to it.
 		const userId = `ex-big-${crypto.randomUUID()}`;
 		await seed(userId);
 		const job = await createFor(userId);
-		// Re-run the same job under a ceiling nothing can fit under.
 		const result = await runExport({ ...env, EXPORT_MAX_BYTES: "10" }, userId, job.id);
+		expect(result.ok).toBe(true);
+		expect(result.storage).toBe("r2");
+		const row = (await listFor(userId)).find((r) => r.id === job.id);
+		expect(row.status).toBe("complete");
+		const download = await request(`/v1/exports/download?userId=${userId}&id=${job.id}`, KEY);
+		expect(download.status).toBe(200);
+		expect(JSON.parse(await download.text()).format).toBe("itsuki-export");
+	});
+
+	it("still refuses to truncate when there is no bucket to put the file in", async () => {
+		// The fallback path keeps its ceiling — but it now says the true reason
+		// (storage unavailable) and points at the control that always works,
+		// instead of blaming the size of someone's own memory.
+		const userId = `ex-nobucket-${crypto.randomUUID()}`;
+		await seed(userId);
+		const job = await createFor(userId);
+		const noBucket = { ...env, EXPORT_MAX_BYTES: "10" };
+		delete noBucket.EXPORTS;
+		const result = await runExport(noBucket, userId, job.id);
 		expect(result.ok).toBe(false);
 		expect(result.reason).toBe("too_large");
 		const row = (await listFor(userId)).find((r) => r.id === job.id);
 		expect(row.status).toBe("failed");
-		// The pointer names the real control by its real label.
-		expect(row.error).toContain("Export current memory space");
+		expect(row.error).toContain("Download directly");
 		expect(row.error).not.toContain("Export everything");
-		const download = await request(`/v1/exports/download?userId=${userId}&id=${job.id}`, KEY);
-		expect(download.status).toBe(409);
 	});
 
 	it("reads a sane ceiling from env", () => {

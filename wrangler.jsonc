@@ -87,6 +87,18 @@
 			"index_name": "uml-node-embeddings"
 		}
 	],
+	// Prepared export files. They used to live in a D1 TEXT column, which caps a
+	// row at ~2MB — so a 2.7MB memory space could never finish an export job at
+	// all, while the direct download (which streams and stores nothing) worked
+	// fine. That was the whole bug. R2 has no such ceiling, so the job path can
+	// finally hold what the direct path could always produce. D1 keeps the job
+	// ROW (status, size, timestamps); R2 holds the bytes.
+	"r2_buckets": [
+		{
+			"binding": "EXPORTS",
+			"bucket_name": "itsuki-exports"
+		}
+	],
 	"vars": {
 		"USE_VECTORS": "true",
 		"ENABLE_PASS2": "true",

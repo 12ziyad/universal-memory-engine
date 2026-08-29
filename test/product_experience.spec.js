@@ -284,8 +284,15 @@ describe("header profile menu", () => {
 			expect(menu).toContain(`themeBtn(${t})`);
 		}
 		expect(menu).toContain("setView('settings')");
-		expect(menu).toContain("mailto:founder@itsuki.app");
+		// Support in the menu is now the TRACKED report modal rather than a
+		// mailto — a signed-in person's report should get a case id and a
+		// clock, not disappear into an inbox. founder@ remains the signed-out
+		// fallback (POLICY_CONTENT.support) and the landing footer path.
+		expect(menu).toContain("openTrustReportModal()");
+		expect(html).toContain("mailto:founder@itsuki.app");
 		expect(menu).toContain("logoutNow()");
+		// Log out all sessions lived only in the removed Settings card.
+		expect(menu).toContain("logoutAllNow()");
 		expect(html).not.toContain('id="logoutBtn"');
 	});
 

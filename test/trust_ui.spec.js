@@ -30,7 +30,11 @@ describe("the report modal", () => {
 	it("replaces the mailto sheet for signed-in users and keeps founder@ as the signed-out fallback", () => {
 		expect(html).toContain("function openTrustReportModal()");
 		expect(html).toContain('if (!S.me?.user) { openPolicyModal("support"); return; }');
-		expect(html).toContain('onclick="openTrustReportModal()">Support / report issue</button>');
+		// The doorway moved out of the Settings "Account" card (which was
+		// removed — it was mostly duplicated identity plus a password box that
+		// makes no sense for Google sign-in) and into the profile menu, where
+		// people already look for account-level things.
+		expect(html).toContain('openTrustReportModal();">Support &amp; reports</button>');
 		expect(html).toContain('fetch("/v1/trust/report"');
 		// The signed-out sheet and the landing footer keep the email path.
 		expect(html).toContain('mailto:founder@itsuki.app">founder@itsuki.app');
@@ -43,6 +47,22 @@ describe("the report modal", () => {
 
 	it("states the 7-day promise where the reporter files", () => {
 		expect(html).toContain("Privacy requests and security reports get a response within 7 days.");
+	});
+});
+
+describe("the removed Account section left nothing stranded", () => {
+	it("keeps log-out-all-sessions and the support doorway reachable", () => {
+		// These two lived ONLY in the deleted card. Everything else it held was
+		// duplicated elsewhere (identity in the profile menu, the export button
+		// on the Memory exports page as "Download directly").
+		expect(html).toContain("logoutAllNow();\">Log out all sessions</button>");
+		expect(html).toContain("openTrustReportModal();\">Support &amp; reports</button>");
+	});
+
+	it("no longer offers a password box to accounts that sign in with Google", () => {
+		expect(html).not.toContain('id="pwCurrent"');
+		expect(html).not.toContain("Current password (empty if you signed up with Google)");
+		expect(html).not.toContain('"personal-account"');
 	});
 });
 

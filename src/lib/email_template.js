@@ -46,6 +46,25 @@ function blockHtml(block) {
 			return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px"><tr><td style="background:${CLAY};border-radius:2px"><a href="${escapeHtml(block.url)}" style="display:inline-block;padding:13px 22px;color:${PORCELAIN};font-family:${FONT_UI};font-size:15px;font-weight:700;text-decoration:none">${escapeHtml(block.label)}</a></td></tr></table>`;
 		case "note":
 			return `<p style="margin:24px 0 0;color:${INK_SOFT};font-family:${FONT_UI};font-size:13px;line-height:1.5">${escapeHtml(block.text)}</p>`;
+		// The three below exist for the longer transactional messages — a
+		// completed deletion, a privacy-case response, an ownership handover.
+		// Those need to say several things in order without becoming a wall of
+		// paragraphs, which is how a careful message starts reading as spam.
+		case "heading":
+			return `<h2 style="margin:28px 0 12px;font-family:${FONT_SERIF};font-size:19px;font-weight:400;color:${INK}">${escapeHtml(block.text)}</h2>`;
+		case "list":
+			return `<ul style="margin:0 0 18px;padding-left:20px;color:${INK};font-family:${FONT_UI};font-size:15px;line-height:1.7">${
+				(block.items ?? []).map((item) => `<li style="margin:0 0 6px">${escapeHtml(item)}</li>`).join("")
+			}</ul>`;
+		case "facts":
+			// A key/value summary — "what exactly happened", in a form someone
+			// can forward to their own compliance people without rewriting it.
+			return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 18px;border:1px solid ${HAIRLINE};background:#ffffff">${
+				(block.rows ?? []).map(([label, value]) => `<tr>
+					<td style="padding:9px 14px;border-bottom:1px solid ${HAIRLINE};color:${INK_SOFT};font-family:${FONT_UI};font-size:13px;white-space:nowrap">${escapeHtml(label)}</td>
+					<td style="padding:9px 14px;border-bottom:1px solid ${HAIRLINE};color:${INK};font-family:${FONT_MONO};font-size:13px">${escapeHtml(value)}</td>
+				</tr>`).join("")
+			}</table>`;
 		default:
 			return "";
 	}
@@ -63,6 +82,12 @@ function blockText(block) {
 			return block.label ? `${block.label} ${block.value}` : String(block.value ?? "");
 		case "button":
 			return `${block.label}:\n${block.url}`;
+		case "heading":
+			return `\n${String(block.text ?? "")}\n${"-".repeat(String(block.text ?? "").length)}`;
+		case "list":
+			return (block.items ?? []).map((item) => `  - ${item}`).join("\n");
+		case "facts":
+			return (block.rows ?? []).map(([label, value]) => `  ${label}: ${value}`).join("\n");
 		default:
 			return "";
 	}

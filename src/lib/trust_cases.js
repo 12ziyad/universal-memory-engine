@@ -20,6 +20,7 @@
 
 import { renderEmail } from "./email_template.js";
 import { scrubText } from "../pipeline/scrub.js";
+import { enqueueMail, privacyCaseReceivedMail, privacyCaseResolvedMail } from "./mail.js";
 
 export const TRUST_KINDS = ["privacy_request", "security_report", "abuse_report", "support"];
 export const PRIVACY_CATEGORIES = ["question", "access", "export", "correction", "deletion"];
@@ -112,6 +113,23 @@ export async function createTrustCase(env, { userId, kind, category = null, mess
 		id, userId, cleanKind, cleanCategory, severity, scrubbed, now, responseDueAt, now,
 		severity === "high" || severity === "critical" ? null : now + DIGEST_DELAY_MS,
 	).run();
+	// Acknowledge to the reporter, with the case id and the date we owe them
+	// an answer by. A privacy request that vanishes into a queue is how the
+	// 7-day promise stops being believed even when it is being kept.
+	const reporter = await env.DB.prepare("SELECT email FROM users WHERE id = ?").bind(userId).first();
+	if (reporter?.email && DUE_KINDS.has(cleanKind)) {
+		await enqueueMail(env, {
+			kind: "privacy_case_received",
+			to: reporter.email,
+			toUserId: userId,
+			dedupeKey: `case_received:${id}`,
+			...privacyCaseReceivedMail(env, {
+				caseId: id,
+				kind: cleanKind,
+				dueLabel: responseDueAt ? new Date(responseDueAt).toISOString().slice(0, 10) : null,
+			}),
+		});
+	}
 	return publicCase({
 		id, kind: cleanKind, category: cleanCategory, severity, status: "received",
 		resolution: null, message: scrubbed, received_at: now, acknowledged_at: null,
