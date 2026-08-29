@@ -15002,7 +15002,8 @@ async function refreshAdminUsers(query = S.adminUserQuery || "") {
 	S.adminUserQuery = query;
 	try {
 		let res;
-		try { res = await fetch(`/v1/admin/users?query=${encodeURIComponent(query)}`, { credentials: "include" }); }
+		const vaultParam = S.adminVaultView ? "&vault=1" : "";
+		try { res = await fetch(`/v1/admin/users?query=${encodeURIComponent(query)}${vaultParam}`, { credentials: "include" }); }
 		catch { throw new Error(FRIENDLY_NETWORK); }
 		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
 		S.adminUsers = (await res.json()).users || [];
@@ -15011,6 +15012,19 @@ async function refreshAdminUsers(query = S.adminUserQuery || "") {
 		toast(err.message, true);
 	}
 	if ((S.adminTab || "overview") === "users") renderAdminBody();
+}
+
+/**
+ * The vault view. Vaulted accounts are shelved, not deleted: they keep every
+ * memory and key, and any sign-in or API call wakes them on its own. This
+ * switch is the operator's way to look at (and restore) what is shelved.
+ */
+function adminToggleVaultView() {
+	S.adminVaultView = !S.adminVaultView;
+	S.adminPerson = null;
+	S.adminUsers = null;
+	renderAdminBody();
+	refreshAdminUsers();
 }
 
 async function toggleUserJourney(userId) {
@@ -15075,6 +15089,8 @@ async function adminUserAction(userId, action) {
 		return openAdminConfirmModal(userId, action);
 	}
 	const labels = {
+		vault: "Move this account to the vault? It keeps every memory and key, leaves the console, and wakes automatically the next time they sign in or use an API key.",
+		unvault: "Restore this account to the active console?",
 		disable: "Disable this account? The user is logged out everywhere and cannot log in.",
 		revoke_sessions: "Log this user out of all devices?",
 	};
@@ -15484,6 +15500,10 @@ function renderAdminBody() {
 				<div class="ops-dir-search">
 					<input id="adminUserSearch" placeholder="Search email or name…" value="${esc(S.adminUserQuery || "")}"
 						onkeydown="if(event.key==='Enter') refreshAdminUsers(this.value)" />
+					<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px">
+						<span class="help">${S.adminVaultView ? "Showing the vault" : `${Number(S.adminStats?.vaulted_users ?? 0)} in the vault`}</span>
+						<button class="ghost mini" onclick="adminToggleVaultView()">${S.adminVaultView ? "Back to active" : "Open vault"}</button>
+					</div>
 				</div>
 				<div class="ops-dir-list">${adminPeopleDirectory(S.adminUsers, S.adminPerson)}</div>
 			</aside>
@@ -15532,7 +15552,10 @@ function renderAdminBody() {
 						${u.status === "disabled"
 							? `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','enable')">Enable</button>`
 							: `<button class="ghost mini" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','disable')">Disable</button>`}
-						<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','revoke_sessions')">Revoke sessions</button>
+						${u.status === "dormant"
+						? `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','unvault')">Restore from vault</button>`
+						: `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','vault')">Move to vault</button>`}
+					<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','revoke_sessions')">Revoke sessions</button>
 						${u.role === "admin"
 							? `<button class="ghost mini" ${isSelf ? "disabled" : ""} onclick="adminUserAction('${esc(u.id)}','demote')">Remove admin</button>`
 							: `<button class="ghost mini" onclick="adminUserAction('${esc(u.id)}','promote')">Make admin</button>`}

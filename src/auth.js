@@ -1,5 +1,6 @@
 import { newId } from "./lib/ids.js";
 import { recordSecurityEvent } from "./lib/security_events.js";
+import { wakeDormantAccount, VAULT_STATUS } from "./lib/account_vault.js";
 import { stampEarlyAccess } from "./lib/ai_budget.js";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { resolveVerifiedIdentity } from "./lib/auth_identity.js";
@@ -190,6 +191,8 @@ export async function issueAuthenticatedSession(env, request, userId, outcome, e
 	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ? LIMIT 1").bind(userId).first();
 	if (!user) return { error: "account_not_found", status: 401 };
 	if (user.status === "disabled") return { error: "account_disabled", status: 403 };
+	// A vaulted account wakes the moment its owner proves they are back.
+	await wakeDormantAccount(env, user, { via: outcome || "signin" });
 	const session = await createSession(env, request, user.id);
 	await recordLoginEvent(env, request, user.id, outcome, email);
 	return { user: publicUser(user), session, status: 200 };
@@ -279,6 +282,7 @@ export async function login(env, request, body) {
 		await recordLoginEvent(env, request, row?.id ?? null, "password_failed", valid.email);
 		return { error: "Invalid email or password", status: 401 };
 	}
+	await wakeDormantAccount(env, row, { via: "password_login" });
 	const session = await createSession(env, request, row.id);
 	await recordLoginEvent(env, request, row.id, "password_login");
 	return { user: publicUser(row), session, status: 200 };
@@ -804,12 +808,19 @@ export async function resolveConnectionToken(env, token, { allowedTypes = ["api"
 		 FROM connection_tokens t
 		 JOIN users u ON u.id = t.user_id
 		 WHERE t.token_hash = ? AND t.revoked_at IS NULL AND COALESCE(t.status, 'active') = 'active'
-		   AND COALESCE(u.status, 'active') = 'active'
+		   AND COALESCE(u.status, 'active') IN ('active', 'dormant')
 		 LIMIT 1`,
 	)
 		.bind(tokenHash)
 		.first();
 	if (!row || !allowedTypes.includes(row.type)) return null;
+	// Using an API/MCP key is proof the account is in use, so it wakes the
+	// vault too. Without this a shelved account's integrations would fail
+	// silently with no door that could ever bring them back.
+	if (row.user_status === VAULT_STATUS) {
+		await wakeDormantAccount(env, { id: row.user_id, status: VAULT_STATUS }, { via: "api_key" });
+		row.user_status = "active";
+	}
 	await env.DB.prepare("UPDATE connection_tokens SET last_used_at = ? WHERE id = ?")
 		.bind(now(), row.token_id)
 		.run();

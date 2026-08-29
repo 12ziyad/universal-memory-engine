@@ -3206,8 +3206,13 @@ const routes = {
 		const auth = await getSessionUser(env, request);
 		if (!auth) return json({ error: "unauthorized" }, 401);
 		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
-		const query = String(new URL(request.url).searchParams.get("query") ?? "").trim().toLocaleLowerCase("en-US");
+		const url = new URL(request.url);
+		const query = String(url.searchParams.get("query") ?? "").trim().toLocaleLowerCase("en-US");
 		const like = `%${query.replace(/[%_]/g, "")}%`;
+		// Vaulted accounts are shelved, not hidden: they are excluded from the
+		// default view so the console reflects the live product, and listed on
+		// demand with ?vault=1. The count is always reported in /v1/admin/stats.
+		const vaultOnly = url.searchParams.get("vault") === "1";
 		const { results } = await env.DB.prepare(
 			`WITH account_spaces(account_user_id, memory_user_id) AS (
 				SELECT id, id FROM users
@@ -3231,9 +3236,11 @@ const routes = {
 				(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen_at
 			 FROM users u
 			 WHERE (? = '' OR lower(u.email) LIKE ? OR lower(COALESCE(u.name,'')) LIKE ?)
+			   AND (CASE WHEN ? = 1 THEN COALESCE(u.status,'active') = 'dormant'
+			             ELSE COALESCE(u.status,'active') != 'dormant' END)
 			 ORDER BY u.created_at DESC LIMIT 100`,
-		).bind(query, like, like).all();
-		return json({ ok: true, users: results ?? [] });
+		).bind(query, like, like, vaultOnly ? 1 : 0).all();
+		return json({ ok: true, users: results ?? [], vault: vaultOnly });
 	},
 
 	/**
@@ -3255,7 +3262,7 @@ const routes = {
 		if (!STEP_UP_ACTIONS.has(action)) return json({ error: "unknown action" }, 400);
 		const target = await env.DB.prepare("SELECT id, email, role, status FROM users WHERE id = ?").bind(targetId).first();
 		if (!target) return json({ error: "user not found" }, 404);
-		if (target.id === auth.userId && ["delete", "demote"].includes(action)) {
+		if (target.id === auth.userId && ["delete", "demote", "vault"].includes(action)) {
 			return json({ error: "You cannot do that to your own admin account." }, 400);
 		}
 		const minted = await mintAdminConfirmation(env, {
@@ -3283,11 +3290,11 @@ const routes = {
 		const target = await env.DB.prepare("SELECT id, email, role, status FROM users WHERE id = ?").bind(targetId).first();
 		if (!target) return json({ error: "user not found" }, 404);
 		// Lockout protection: the admin cannot delete or demote their own account.
-		if (target.id === auth.userId && ["delete", "demote", "disable"].includes(action)) {
+		if (target.id === auth.userId && ["delete", "demote", "disable", "vault"].includes(action)) {
 			return json({ error: "You cannot do that to your own admin account." }, 400);
 		}
 		const now = Date.now();
-		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete", "grant_entitlement", "dismiss_upgrade_request"].includes(action)) {
+		if (!["disable", "enable", "revoke_sessions", "promote", "demote", "delete", "grant_entitlement", "dismiss_upgrade_request", "vault", "unvault"].includes(action)) {
 			return json({ error: "unknown action" }, 400);
 		}
 		// Step-up: the destructive actions require a server-minted single-use
@@ -3382,6 +3389,26 @@ const routes = {
 				const result = await dismissUpgradeRequest(env, { requestId, resolvedBy: auth.userId });
 				if (!result.dismissed) return json({ error: "request not open" }, 409);
 				return json({ ok: true, action, request_id: requestId });
+			}
+			// Shelve an account without touching a byte of its data. Its sessions
+			// stop resolving and it leaves the console's default view; any sign-in
+			// or API-key use wakes it back to active on its own.
+			case "vault": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET status = 'dormant', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+					env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").bind(now, target.id),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND status = 'dormant'", [target.id])],
+				{ ok: true }), () => ({ metadata: { status: { from: target.status, to: "dormant" } } }));
+				return json({ ok: true, action, status: "dormant" });
+			}
+			case "unvault": {
+				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
+					env.DB.prepare("UPDATE users SET status = 'active', updated_at = ? WHERE id = ? AND role = ? AND status = ?")
+						.bind(now, target.id, target.role, target.status),
+				], [auditInvariantStatement(env, "SELECT 1 FROM users WHERE id = ? AND status = 'active'", [target.id])],
+				{ ok: true }), () => ({ metadata: { status: { from: target.status, to: "active" } } }));
+				return json({ ok: true, action, status: "active" });
 			}
 			case "disable": {
 				await runAuditedMutation(env, auditDetails, (intent) => auditedAdminBatch(intent, [
@@ -3532,8 +3559,8 @@ const routes = {
 		const dayMs = 24 * 60 * 60 * 1000;
 		const since14 = now - 14 * dayMs;
 		const [users, verifiedUsers, sessionsActive, logins14, signups14, totals, topUsers, visits14, receipts14, failures, activity] = await env.DB.batch([
-			env.DB.prepare("SELECT COUNT(*) AS n FROM users"),
-			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE terms_accepted_at IS NOT NULL"),
+			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE COALESCE(status,'active') != 'dormant'"),
+			env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE terms_accepted_at IS NOT NULL AND COALESCE(status,'active') != 'dormant'"),
 			env.DB.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE revoked_at IS NULL AND expires_at > ?").bind(now),
 			// Logins = successes only. Failures are a security signal, not logins,
 			// and are reported separately below.
@@ -3653,7 +3680,7 @@ const routes = {
 				UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
 			)
 			 SELECT
-				(SELECT COUNT(*) FROM users) AS accounts,
+				(SELECT COUNT(*) FROM users WHERE COALESCE(status,'active') != 'dormant') AS accounts,
 				(SELECT COUNT(DISTINCT s.account_user_id) FROM nodes n
 				 JOIN account_spaces s ON s.memory_user_id = n.user_id
 				 WHERE n.deleted_at IS NULL) AS with_memories`,
@@ -3667,7 +3694,7 @@ const routes = {
 				UNION SELECT owner_user_id, memory_owner_user_id FROM managed_projects WHERE status = 'active'
 			)
 			 SELECT
-				(SELECT COUNT(*) FROM users) AS signed_up,
+				(SELECT COUNT(*) FROM users WHERE COALESCE(status,'active') != 'dormant') AS signed_up,
 				(SELECT COUNT(DISTINCT s.account_user_id) FROM receipts r
 				 JOIN account_spaces s ON s.memory_user_id = r.user_id) AS activated,
 				(SELECT COUNT(DISTINCT s.account_user_id) FROM memory_jobs j
@@ -3678,6 +3705,9 @@ const routes = {
 				 WHERE er.created_at > ?1 AND er.scope NOT LIKE 'noise:%') AS errored_reports_14d`,
 		).bind(since14).all().catch(() => ({ results: [{}] }));
 		// Part 2.4 — the queue-health numbers the cron sweep alerts on.
+		const vaulted = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM users WHERE COALESCE(status,'active') = 'dormant'",
+		).all().catch(() => ({ results: [{ n: 0 }] }));
 		const queue = await queueCounters(env).catch((error) => {
 			console.warn("queue counters failed:", error?.message ?? error);
 			return null;
@@ -3705,6 +3735,9 @@ const routes = {
 			dims: dims.results ?? [],
 			failed_logins_by_day: failedLogins.results ?? [],
 			activation: activation.results?.[0] ?? {},
+			// Vaulted accounts are excluded from every count above; the console
+			// still states how many are shelved, so they are never simply hidden.
+			vaulted_users: Number(vaulted.results?.[0]?.n ?? 0),
 		});
 	},
 
