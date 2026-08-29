@@ -186,6 +186,26 @@ export async function createSession(env, request, userId) {
 	return { id, token, expiresAt, cookie: sessionCookie(request, token, expiresAt) };
 }
 
+/**
+ * Every sign-in door renders "By continuing, you agree to the Terms of
+ * Service and Privacy Policy" beside its buttons, and the Terms state that
+ * using the Service constitutes acceptance. So a successful sign-in IS an
+ * acceptance event, and an account created before consent stamping existed
+ * gets its stamp the next time its owner walks through a door — recorded at
+ * the moment it actually happened, never fabricated retroactively.
+ */
+async function stampTermsAcceptance(env, user) {
+	if (!user || user.terms_accepted_at) return;
+	try {
+		await env.DB.prepare(
+			"UPDATE users SET terms_accepted_at = ?, updated_at = ? WHERE id = ? AND terms_accepted_at IS NULL",
+		).bind(now(), now(), user.id).run();
+		user.terms_accepted_at = now();
+	} catch (error) {
+		console.warn("terms acceptance stamp failed:", error?.message ?? error);
+	}
+}
+
 /** Shared final door for every interactive identity provider. */
 export async function issueAuthenticatedSession(env, request, userId, outcome, email = null) {
 	const user = await env.DB.prepare("SELECT * FROM users WHERE id = ? LIMIT 1").bind(userId).first();
@@ -193,6 +213,7 @@ export async function issueAuthenticatedSession(env, request, userId, outcome, e
 	if (user.status === "disabled") return { error: "account_disabled", status: 403 };
 	// A vaulted account wakes the moment its owner proves they are back.
 	await wakeDormantAccount(env, user, { via: outcome || "signin" });
+	await stampTermsAcceptance(env, user);
 	const session = await createSession(env, request, user.id);
 	await recordLoginEvent(env, request, user.id, outcome, email);
 	return { user: publicUser(user), session, status: 200 };
@@ -283,6 +304,7 @@ export async function login(env, request, body) {
 		return { error: "Invalid email or password", status: 401 };
 	}
 	await wakeDormantAccount(env, row, { via: "password_login" });
+	await stampTermsAcceptance(env, row);
 	const session = await createSession(env, request, row.id);
 	await recordLoginEvent(env, request, row.id, "password_login");
 	return { user: publicUser(row), session, status: 200 };
