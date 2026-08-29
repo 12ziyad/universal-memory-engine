@@ -1842,3 +1842,97 @@ this entire campaign, so `9f9bfa7` — like the two commits before it — is
 LOCAL ONLY. Production runs it; the public repository does not have it yet.
 That gap is now disclosed in SECURITY.md and on the security page rather than
 contradicted by them.
+
+# Twelfth pass — 2026-08-29: the export that could not export
+
+Owner-reported, and every one of them turned out to be a real defect rather
+than a misunderstanding.
+
+## Exports
+
+Phase 1 fixed the WORDING of the export failure. The mechanism was still
+broken: the job stored the whole file in a D1 TEXT column with a ~2MB row
+ceiling, so a 2.7MB memory space failed every time while "Download directly"
+(which streams and stores nothing) always worked. Telling someone their
+memory is too large when the truth is that we chose a container too small for
+it is the same class of untruth this campaign exists to remove.
+
+The bytes moved to R2 (bucket `itsuki-exports`, binding `EXPORTS`). Proven by
+size, not by configuration: `test/export_storage_ui.spec.js` builds ~3MB of
+real rows, exports them, and reads the file back whole. Deletion still
+reaches them — every invalidation path deletes the R2 objects too, so an
+erased memory cannot survive as a prepared file in a bucket.
+
+And a direct download used to leave NO trace for a personal account, so the
+history page showed only the failures. Direct downloads are recorded as real
+rows now (`kind='direct'`), and a complete row whose bytes are gone answers
+410 with the reason instead of claiming to still be building.
+
+## Huba
+
+The panel filled with copies of its own greeting: the guard tested
+`HUBA.history.length`, but the greeting is appended to the DOM and never
+enters history, so every open added another one. On the access worry: Huba
+has no tool calling, reads no source or env, and every fetcher is scoped
+server-side to the session — it cannot reach another account, the admin
+console, or any credential value. The adminOnly gate is now re-proved at
+execution as well as at routing.
+
+## Settings and the console
+
+The Settings "Account" section is gone. It duplicated identity the profile
+menu already shows and offered a password box that makes no sense for Google
+sign-in. Exactly two controls lived there alone — "Log out all sessions" and
+the tracked support report — and both moved to the profile menu rather than
+being lost. (Export was never orphaned: the exports page's "Download
+directly" is the same function.)
+
+The admin Overview was ten cards of equal weight carrying TWO different
+signup funnels over three unlabelled time windows, so the number you wanted
+was always in the card you were not looking at. Rebuilt as five labelled
+sections — Traffic, Accounts, Memory, Health, with links out to Spend and
+System — using the stat-tile vocabulary already on the Trust tab.
+
+## Ownership transfer
+
+It completed the instant the owner clicked: no acceptance, no notice, no
+email. Someone could become responsible for a project's memory, keys and
+deletion controls without ever agreeing to it. It is an OFFER now — offered,
+emailed, accepted, and only then does the existing atomic swap run, after
+which BOTH parties are told. Offers are single-use, account-bound, expire on
+their own, and can be withdrawn or declined. The empty "Choose a member"
+dropdown was never a bug: a project can only be handed to an existing member,
+so it now says so and links to the invite flow.
+
+## Email
+
+One shared outbox (`mail_outbox`) instead of what would have been a sixth
+bespoke sender, with claim/CAS, backoff, stale-send recovery and dedupe. The
+list of things that earn an email is closed and test-pinned: invitations,
+transfer offer and completion, verified memory purge, verified project
+deletion, account deletion, privacy cases, material security incidents,
+serious account-security events, credential changes, and billing later.
+Nothing for saving a memory, an ordinary login, a webhook, or routine API
+use.
+
+The rule that mattered most: **a completion email is enqueued only from a
+path that has already verified completion.** The purge and delete mails sit
+after the residual scan that refuses to advance while any row remains; the
+account-deletion mail sits after the guarded users-row delete, using an
+address captured beforehand so it can still reach someone whose account no
+longer exists.
+
+Found while testing: `ON CONFLICT` against a PARTIAL unique index needs the
+same `WHERE` clause, so every deduped email was silently failing to enqueue.
+Its own test caught it before it ever ran in production.
+
+## Verification
+
+Suite 205 files / 2,624 tests green; node lane 666 passed / 1 skipped.
+Migration 0063 applied to production, commits `c04d387` / `848e8b0` /
+`0ec5206`, worker version `43d2a189-174e-4f47-8167-0375b5baa850`. Live: 21/22
+checks — a real export created, completed, downloaded, and then made
+undownloadable by erasure; a direct download appearing in history; and all
+seven changed console surfaces present on itsuki.app. The one non-pass was a
+miscalibrated assertion in the smoke script itself (it checked live node
+count; the 2.7MB came mostly from 635 receipts), not a product failure.
