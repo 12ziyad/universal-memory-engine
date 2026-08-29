@@ -9,6 +9,7 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { describe, it, expect } from "vitest";
 import worker from "../src";
 import html from "../public/index.html?raw";
+import securityMd from "../SECURITY.md?raw";
 
 async function request(path, init = {}) {
 	const req = new Request(`http://example.com${path}`, init);
@@ -139,8 +140,19 @@ describe("discoverability", () => {
 	});
 
 	it("SECURITY.md points researchers at the published policy", async () => {
-		// Source-of-truth check is the repo file; the spec pins the disclosure
-		// URL that both security.txt and SECURITY.md advertise.
+		// This used to assert against the LEGAL block in index.html — so a test
+		// named for SECURITY.md never opened SECURITY.md, and the file could
+		// have said anything. It is read for real now.
+		expect(securityMd).toContain("/.well-known/security.txt");
+		expect(securityMd).toContain("founder@itsuki.app");
 		expect(legalBlock).toContain("/.well-known/security.txt");
+	});
+
+	it("SECURITY.md does not claim the public repository matches production", () => {
+		// Commits reach the hosted service before they reach GitHub, so a
+		// promise that itsuki.app "always runs the latest master" would send a
+		// researcher to code that is not what they are testing against.
+		expect(securityMd).not.toMatch(/always runs the latest/i);
+		expect(securityMd).toMatch(/ahead of what is published/i);
 	});
 });

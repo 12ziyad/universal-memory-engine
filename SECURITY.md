@@ -24,5 +24,10 @@ policy is authorized — we will not pursue legal action for it.
 
 ## Supported versions
 
-The hosted service at itsuki.app always runs the latest `master`. Security
-fixes land there first; there are no maintained older release lines.
+The hosted service at itsuki.app runs the current development line, which is
+often AHEAD of what is published to the public repository — a fix can be live
+in production before the commit that carries it is visible on GitHub. Security
+fixes land in the hosted service first; there are no maintained older release
+lines. If you are checking a claim against the source and the code you can see
+does not match the behaviour you observe, the published tree is behind: say so
+in your report and we will confirm what is deployed.

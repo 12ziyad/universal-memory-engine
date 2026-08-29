@@ -36,6 +36,7 @@ import { reportServerError } from "../lib/report.js";
 import { emitWebhookEvent, webhookDataFromReceipt } from "../pipeline/webhooks.js";
 import { settleStagedText } from "../pipeline/staged_text.js";
 import { sourceContextIdentity, sourceMeta } from "../pipeline/source.js";
+import { isOwnedMemorySpace, scopedMemoryUserId } from "../lib/egress_ownership.js";
 import {
 	neutralizeReservedSourcePrefix,
 	persistedSourceEventFromMessage,
@@ -473,7 +474,30 @@ export class UserMemory extends DurableObject {
 	async #assertManagedLifecycleActive(scope) {
 		const accountUserId = String(scope?.accountUserId ?? "").trim() || null;
 		const managedProjectId = String(scope?.managedProjectId ?? "").trim() || null;
-		if (!accountUserId && !managedProjectId) return;
+		// The legacy operator lane carries no accountUserId, so this check used
+		// to early-return for it and never read the tombstone table. That made
+		// erasure defeatable: an operator-key write naming an erased account's
+		// id repopulated its namespace, and because the users row was already
+		// gone, re-running the erasure reported "already deleted" and left the
+		// new rows behind forever. The memory-space id is the right key to fall
+		// back to — for that lane it IS the account id, and for derived spaces
+		// no tombstone exists, so nothing else changes.
+		// Falls back to the Durable Object's OWN identity, which is the memory
+		// space being written to. That id comes from the routing key, not from
+		// request input, so it cannot be spoofed by the caller.
+		const scopeMemoryId = String(scope?.memoryUserId ?? "").trim() || null;
+		const ownIdentity = String((await this.ctx.storage.get("userId")) ?? "").trim() || null;
+		const erasureKey = accountUserId ?? scopeMemoryId ?? ownIdentity;
+		if (!erasureKey && !managedProjectId) return;
+		if (!accountUserId && erasureKey) {
+			const erased = await this.env.DB.prepare(
+				"SELECT EXISTS(SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?) AS erased",
+			).bind(erasureKey).first();
+			if (Number(erased?.erased ?? 0) === 1) {
+				throw codedError("ACCOUNT_ERASED", "account is no longer writable");
+			}
+			if (!managedProjectId) return;
+		}
 
 		const row = await this.env.DB.prepare(
 			`SELECT
@@ -2947,8 +2971,19 @@ export class UserMemory extends DurableObject {
 		// no configuration of its own.
 		const targets = new Set([userId]);
 		try {
-			const owner = JSON.parse(result.receipt.scope_json ?? "{}")?.owner_user_id;
-			if (owner && owner !== "legacy") targets.add(owner);
+			const scope = JSON.parse(result.receipt.scope_json ?? "{}");
+			const owner = scope?.owner_user_id;
+			// The owner claim is only honoured if this space actually DERIVES
+			// from it. Provenance is written from request-shaped input, and an
+			// unverified claim here would let one account push its own write
+			// events — labels included — into another account's configured
+			// endpoint and delivery log. The sub-tenant id is a hash of the
+			// owner id, so proving the link is one derivation.
+			if (owner && owner !== "legacy" && await isOwnedMemorySpace(
+				scopedMemoryUserId, owner, userId, scope?.external_user_id,
+			)) {
+				targets.add(owner);
+			}
 		} catch {}
 		for (const target of targets) {
 			try {

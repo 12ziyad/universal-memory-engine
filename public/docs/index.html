@@ -6071,7 +6071,7 @@ GET /v1/settings/lifecycle?projectId=proj_...</code></pre>
 <tr><td>Unscoped confirmed delete</td><td>Everything live in that memory space, plus accepted-but-uncommitted work.</td><td>The erasure barrier, deletion records, job and receipt history.</td></tr>
 <tr><td>Project purge / delete</td><td>Every registered memory space in the project, verified by a residual scan.</td><td>Lifecycle run records and the audit trail.</td></tr>
 </table>
-<p>What is kept in every case is bookkeeping, not content: deletion records, job and receipt history, and timestamps. That trail carries no memory content, and it is precisely what lets a later preview answer "nothing left" honestly rather than optimistically.</p>
+<p>What is kept in every case is bookkeeping, not content: deletion records, job and receipt history, and timestamps. After an unscoped erasure that trail carries no memory content: the receipt rows stay as evidence that a write happened, but their summaries and details &mdash; which name what was written &mdash; are cleared in the same pass. It is precisely what lets a later preview answer "nothing left" honestly rather than optimistically.</p>
 <p>Related: <a href="#/concepts/delete">Delete &amp; erasure</a> · <a href="#/privacy">Privacy &amp; limits</a> · <a href="#/guides/projects">Projects, organizations, and teams</a>.</p>
 ` };
 

@@ -2684,7 +2684,7 @@
 			<div class="control-spread">
 				<div class="control-principle"><span class="quote-mark" aria-hidden="true">“</span><p>Move fast without turning memory into a black box.</p><small>The Itsuki principle</small></div>
 				<dl>
-					<div><dt>Delete actually deletes</dt><dd>One pass removes the memory, its sources, its vectors, and its graph edges. No soft-delete residue.</dd></div>
+					<div><dt>Delete actually deletes</dt><dd>One pass removes the memory from recall, export and the graph, and clears its vectors and sources &mdash; and repeating it converges rather than finding more. Rows are tombstoned first and purged by the space or retention sweep, so nothing deleted is ever served again.</dd></div>
 					<div><dt>Every write leaves a receipt</dt><dd>An audit trail records what was saved, where it came from, and why &mdash; open to inspection any time.</dd></div>
 					<div><dt>Versioned and reversible</dt><dd>Updates keep history. Any memory rolls back to any earlier revision, and your memory space exports as JSON.</dd></div>
 					<div><dt>No training on your data</dt><dd>Your memories personalize your tools. They never train anyone&rsquo;s models.</dd></div>
@@ -13548,7 +13548,7 @@ const LEGAL_PAGES = {
 			<ul>
 				<li><b>Security logs:</b> login events with a one-way <i>hashed</i> IP address and browser user-agent, and session records. We deliberately store IPs only as hashes — enough to detect abuse, not to track you.</li>
 				<li><b>Receipts:</b> a record of every memory write (what was saved, updated, or refused, from which connection, and when), kept so you can audit your own memory.</li>
-				<li><b>Aggregate visit counting:</b> a first-party beacon counts page visits in aggregate. It sets no cookie and stores no identifier &mdash; a daily number, not a profile.</li>
+				<li><b>Aggregate visit counting:</b> a first-party beacon counts page visits in aggregate. It sets no cookie and never stores your IP address or user agent. To count a repeat visit only once per day it keeps a shortened, one-way fingerprint of those two values, salted with a key that changes daily, so yesterday&rsquo;s fingerprints cannot be matched to today&rsquo;s. Alongside it we keep daily counts by referring domain, country, and device class. Counters and a day-scoped fingerprint &mdash; not a profile, and never linked to your memory.</li>
 					<li><b>What we deliberately do not collect:</b> no advertising identifiers, no cross-site trackers, no fingerprinting, no precise location, no contact-list uploads, no email-open pixels.</li>
 			</ul>
 
@@ -13681,7 +13681,7 @@ const LEGAL_PAGES = {
 		title: "Security at Itsuki",
 		body: `
 		<p class="legal-meta">Effective ${LEGAL_EFFECTIVE_DATE} &middot; Itsuki, operated by Ziyad Ej, India &middot; <a href="mailto:founder@itsuki.app">founder@itsuki.app</a></p>
-		<p>Memory is some of the most personal data an application can hold, so this page does not deal in vague assurances. It describes the actual mechanisms &mdash; and because the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">engine is open source</a>, every claim here can be checked against the code that enforces it.</p>
+		<p>Memory is some of the most personal data an application can hold, so this page does not deal in vague assurances. It describes the actual mechanisms &mdash; and because the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">engine is open source</a>, the mechanisms described here can be read in the code. One caveat worth stating plainly: the hosted service is deployed from the current development line, which runs ahead of what has been published to GitHub, so the newest changes described on this page may not be visible in the repository yet. If a claim here and the published code disagree, the published tree is the one that is behind &mdash; write to founder@itsuki.app and we will confirm what is deployed.</p>
 
 		<h2>1. Architecture: one provider, small surface</h2>
 		<p>Today the entire Service runs inside <b>Cloudflare's network</b>: Workers (compute), D1 (database), Vectorize (vector index), Workers AI (inference), and Cloudflare Email (transactional mail). There is no third-party analytics service and no advertising or tracking script anywhere in the product. Fewer parties means fewer places your data can leak; the complete, always-current list of companies that touch customer data lives on the <a href="/subprocessors" onclick="showLegal('subprocessors', event)">subprocessors page</a>, and any new provider is named there before customer content reaches it.</p>
@@ -14671,6 +14671,30 @@ function adminTab(name) {
 	if (name === "spend" && !S.adminSpend) refreshAdminSpend();
 }
 
+async function downloadReviewBundle() {
+	try {
+		let res;
+		try { res = await fetch("/v1/admin/review-bundle", { credentials: "include" }); }
+		catch { throw new Error(FRIENDLY_NETWORK); }
+		if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.json().catch(() => null)));
+		const blob = await res.blob();
+		const disposition = res.headers.get("content-disposition") || "";
+		const fileName = /filename="([^"]+)"/i.exec(disposition)?.[1]
+			|| `itsuki-review-bundle-${new Date().toISOString().slice(0, 10)}.json`;
+		const href = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = href;
+		link.download = fileName;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(href), 1000);
+		toast("Review bundle downloaded.");
+	} catch (err) {
+		toast(`Could not build the bundle: ${err.message}`, true);
+	}
+}
+
 async function refreshAdminTrust() {
 	try {
 		let res;
@@ -15612,6 +15636,10 @@ function renderAdminBody() {
 	</div>
 	<div class="box" style="margin-top:14px" id="admin-ops-overview"><h3>Account health rollup</h3>
 		<div class="help">Loading /v1/ops/overview…</div>
+	</div>
+	<div class="box" style="margin-top:14px"><h3>AI review bundle</h3>
+		<div class="help">Configuration, governance allowlists, and enum-level counts — what a reviewer or auditor needs to assess Itsuki without being handed anyone's memory. No message text, no email addresses, no account identifiers, no credentials; the server asserts that before it sends the file.</div>
+		<div class="section-actions"><button class="ghost mini" onclick="downloadReviewBundle()">Download review bundle</button></div>
 	</div>
 	<div class="box" style="margin-top:14px"><h3>Recent failures</h3>
 		${(stats.recent_failures || []).map((row) => `<div class="action-box" style="margin-bottom:8px">

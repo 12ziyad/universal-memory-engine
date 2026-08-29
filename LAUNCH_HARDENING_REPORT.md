@@ -1643,3 +1643,175 @@ maintenance body; the landing page, security.txt, and the legal redirect kept
 serving; the login door answered 401, not 503. Restored by a plain redeploy —
 final live version **`b710ba0d-7140-4299-a993-c32246823b5b`** (identical code
 to `14cacf04`), `/v1/limits` 200 and `/` 200 confirmed after.
+
+# Eleventh pass — 2026-08-29: Phase 3, adversarial evidence
+
+Phase 1 made the words true. Phase 2 made the promises mechanical. Phase 3
+tries to **break** what those two passes built, and reports what actually
+broke rather than what was hoped.
+
+Six independent adversarial agents wrote and ran real attack suites against
+the live doors — not reviews, executable attacks with D1 state proofs. They
+ran **124 distinct attacks**. 117 were correctly defended. **7 were confirmed
+breaches.** All seven are fixed and pinned below. A separate truthfulness
+audit re-read **130 public claims** against the code and found **8 false** and
+**29 misleading**.
+
+The honest headline: the isolation primitive held everywhere it was attacked,
+and every breach found was in the machinery *around* it — provenance, derived
+copies, discovery ordering, and one lane that skipped a lifecycle check.
+
+## The seven confirmed breaches, and what closed each
+
+1. **Remote provenance forgery (the root cause).** `body.memoryScope` was
+   spread into the scope object and only its CAMEL-case keys were overridden
+   server-side, while `resolveScope` reads the SNAKE-case key first. So one
+   ordinary authenticated `POST /v1/ingest` carrying
+   `memoryScope: { owner_user_id: <victim> }` wrote rows into
+   `receipts.scope_json` and `source_packets.owner_user_id` naming a victim
+   who never made a request. The "historically client-extensible provenance"
+   the egress guard was built against was *still writable today*.
+   `sanitizeClientScopeInput` now strips the server-owned identity keys at the
+   single boundary every door funnels through (`resolveScopedMemory`), the
+   attempt is recorded as a high-severity `scope_ownership_forgery` event, and
+   the write proceeds under the caller's own identity.
+2. **Cross-tenant webhook fan-out.** The write fan-out added
+   `scope_json.owner_user_id` as a delivery target with no verification, so
+   the forgery above pushed an attacker's own memory events — labels included
+   — into a victim's configured endpoint and delivery log. The claim is now
+   re-derived through `isOwnedMemorySpace` before it becomes a target.
+3. **Discovery-cap eviction.** `/v1/ops/overview` applied its 200-row cap
+   *before* the ownership filter, so a flood of forged rows spent the victim's
+   reporting budget and their real sub-tenants fell off the end: the console
+   answered "you have one tenant" to an account with many. Discovery now
+   over-fetches, filters ownership, then caps — and the root space is never a
+   candidate for eviction. `/v1/graph` had the identical shape and got the
+   identical fix.
+4. **Erasure defeatable through the legacy operator lane.** That lane carries
+   no account identity, so the managed lifecycle gate early-returned and never
+   read `account_erasure_tombstones`. An operator-key write naming an erased
+   account's id repopulated its namespace — and because the `users` row was
+   already gone, re-running the erasure reported "already deleted" and left
+   the new rows behind permanently. A tombstoned space is now closed to
+   writes on every lane (403 `account_erased`), and the Durable Object falls
+   back to its own routing identity for the check.
+5. **Stored exports kept serving deleted content.** `memory_exports.data` is a
+   full server-side snapshot that no deletion path invalidated, so an export
+   prepared before a delete kept serving the deleted memory afterwards —
+   reachable with a credential minted *after* the erasure, which is not "a
+   copy the user already downloaded". Every deletion path now invalidates
+   stored exports; a scoped delete expires them (410 Gone, stating why), a
+   full erasure purges the rows outright as the census requires.
+6. **Erasure left memory labels in the write ledger.** Receipt `summary` and
+   `detail` embed the labels of what was written ("1 node (Aveiro salary
+   negotiation)"), and unscoped erasure never touched them — which is what
+   made the documented promise "that trail carries no memory content" false.
+   The rows survive as deletion evidence; their content is now scrubbed in the
+   same pass.
+7. **Audit metadata could become permanently unreadable.** `metadataBlob` was
+   `JSON.stringify(...).slice(0, 2000)`, which cuts mid-token: the row
+   persisted, the blob no longer parsed, and the audit UI and CSV export both
+   silently showed nothing. Fields are now dropped whole until the object
+   fits, and the blob declares `_truncated_fields`.
+
+## The generalized egress ownership assertion
+
+`src/lib/egress_ownership.js` is the shared answer to "is this discovered
+memory space genuinely ours?" — used by both discovery-based read paths. A
+space qualifies only if it is the owner's own root, or if it **re-derives**
+from the owner id and the row's own external id under the same hash that
+minted it. A `mem_` prefix is a shape, not a proof: every foreign sub-tenant
+id in the system has it too. Unprovable rows are dropped and counted, and the
+count is a security event rather than routine noise.
+
+The memory-space identity primitive (`scopedMemoryUserId`) MOVED into that
+module, beside the assertion that checks it, so minting and proving cannot
+drift apart. It is re-exported from `src/index.js` for its historical
+importers. An earlier version of this change injected the deriver as a
+parameter; a test caught that a caller which forgot it silently lost its
+sub-tenants, so the injection was removed — failing closed is right, failing
+closed *silently* is not.
+
+## Truthfulness re-read — 130 claims
+
+70 TRUE (code does it, a test pins it) · 11 TRUE_UNTESTED · 12 NOT_VERIFIABLE
+(operational promises the codebase cannot prove) · 29 MISLEADING · 8 FALSE.
+The full table is `PROMISE_EVIDENCE_MATRIX.md`. Corrected in this pass:
+
+- **The visit beacon "stores no identifier."** It stores a truncated,
+  daily-salted hash of IP+user-agent so a repeat visit counts once, plus daily
+  referrer/country/device counters. The engineering is genuinely
+  privacy-preserving; the sentence was not. It now describes the mechanism.
+- **"That trail carries no memory content"** — fixed in the CODE (breach 6),
+  and the docs now say when it becomes true.
+- **"No soft-delete residue"** on the landing page. Rows are tombstoned and
+  swept by the space or retention purge. Defensible design, but not "no
+  residue" — the copy now says what actually happens.
+- **"The hosted service always runs the latest master"** (SECURITY.md) and
+  **"every claim here can be checked against the code"** (security page).
+  Production is deployed from a development branch **57 commits ahead of the
+  public repository**, and several modules the security claims rest on —
+  `egress_ownership.js`, `admin_confirmation.js`, `trust_cases.js` — are not
+  public yet, because GitHub pushes have been blocked at the network level for
+  this entire campaign. Both texts now state that production runs ahead of the
+  published tree and tell a researcher what to do when the two disagree.
+- **A test named for SECURITY.md never opened SECURITY.md.** It asserted
+  against the legal block in `index.html`. It reads the real file now.
+
+## What remains open — stated, not resolved
+
+- **29 MISLEADING claims are documented and NOT rewritten.** They are product
+  copy (quota phrasing, integration status, "Request more" controls, export
+  completeness nuance) or legal wording where an engineer's rewrite is the
+  wrong instrument. Each is listed with its verdict and reasoning in
+  `PROMISE_EVIDENCE_MATRIX.md` for an owner and counsel decision.
+- **No MFA or passkeys.** Step-up typed confirmation is not MFA and is not
+  claimed to be. Still backlog.
+- **No technical age verification.** The 13+ gate is a contractual
+  requirement plus "we do not knowingly collect", which is the standard honest
+  formulation — but nothing enforces it. India DPDP under-18 provisions remain
+  a flagged future compliance task.
+- **No self-serve account erasure.** Support-mediated, now with a tracked
+  7-day clock behind it.
+- **Soft deletion is the default mechanism.** Deleted rows are tombstoned and
+  removed from recall, export and the graph immediately, then purged by the
+  space or retention sweep. That is a real design, not a hidden one — but it
+  is not the same as immediate hard deletion, and the copy now says so.
+- **Liability, indemnity and the INR cap remain unreviewed by counsel.**
+- **The legacy `x-api-key` lane is a deployment master key** with raw-id
+  reach by design. Its blast radius is intended and now bounded by the erasure
+  gate; it is not a per-tenant credential and must not be treated as one.
+- **`visit_uniques` is never pruned** by any cron or retention path. Low
+  sensitivity (day-scoped truncated hashes), but it is unbounded growth and
+  is recorded here rather than left unsaid.
+
+## The sanitized AI Review Bundle
+
+`GET /v1/admin/review-bundle` (admin-only, downloadable from the console's
+Health tab) composes configuration, governance allowlists, the provider
+legality matrix, and enum-level counts. Its sanitization is **asserted, not
+promised**: `assertBundleIsSanitized` re-reads the finished bundle and throws
+if a secret binding's value, any email address, any account or memory-space
+identifier, or a content-bearing field name appears. The route runs that check
+before responding, so a future contributor who adds a leaking field gets a 500
+and a failing test rather than a quiet disclosure. The guard is tested by
+being fed violations — a guard that has never refused anything is not a guard.
+
+## Verification
+
+Full suite green on the final tree: Workers pool **202 files / 2,589 tests**
+(`tmp/suite12.log`), node lane **43 files / 666 passed / 1 skipped**
+(`tmp/unit12.log`, including the census, append-only migration and credential-
+scan gates). New in this pass: `adversarial_idor` (15), `adversarial_control_plane`
+(21), `adversarial_vector_egress` (11), `adversarial_credentials` (14),
+`adversarial_export_deletion` (17), `adversarial_audit_injection` (15),
+`egress_ownership` (10), `review_bundle` (14), `truthfulness_matrix` (7).
+
+Two gates caught this pass's own work and were fixed rather than relaxed: the
+credential scanner flagged a literal PEM header in a new test fixture (the
+fixture now assembles the string at runtime), and the Huba corpus rebuild gate
+caught the edited docs (`node scripts/build-huba-corpus.mjs` re-run). One
+regression I introduced was also caught and fixed: the erased-space write check
+initially ran on every legacy request, adding a D1 read to the no-D1 MCP
+chooser path — it is now scoped to write intent, which is both faster and more
+correct, since a read of an erased space returns nothing anyway.

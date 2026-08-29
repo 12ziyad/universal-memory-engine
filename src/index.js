@@ -272,6 +272,8 @@ import {
 import { createUpgradeRequest, processUpgradeRequestNotifications, listUpgradeRequests, grantEntitlementStatements, dismissUpgradeRequest } from "./lib/upgrade_requests.js";
 import { createTrustCase, listTrustCasesForUser, readTrustCase, adminTrustOverview, trustCaseActionPlan, processTrustCaseNotifications } from "./lib/trust_cases.js";
 import { recordSecurityEvent, processSecurityEventNotifications } from "./lib/security_events.js";
+import { filterOwnedMemorySpaces, scopedMemoryUserId, sanitizeClientScopeInput } from "./lib/egress_ownership.js";
+import { buildReviewBundle, assertBundleIsSanitized } from "./lib/review_bundle.js";
 import { mintAdminConfirmation, consumeAdminConfirmation, purgeExpiredAdminConfirmations, STEP_UP_ACTIONS } from "./lib/admin_confirmation.js";
 
 function clientIp(request) {
@@ -666,6 +668,47 @@ async function requireMemoryUser(request, env, explicitUserId, options = {}) {
 				}
 			}
 			const scoped = await resolveScopedMemory(auth, explicitUserId, options.scopeInput, managedProject);
+			if (scoped.forgedScopeKeys?.length) {
+				// The write still proceeds — under the caller's OWN identity,
+				// which is what the stripping guarantees — but a request that
+				// tried to stamp another account as owner is reported.
+				await recordSecurityEvent(env, {
+					kind: "scope_ownership_forgery",
+					severity: "high",
+					groupKey: `scope_ownership_forgery:${auth.userId}`,
+					details: { count: scoped.forgedScopeKeys.length },
+					actorUserId: auth.userId,
+				});
+			}
+			// Erasure has to hold on EVERY lane, including the legacy operator
+			// key. That lane carries no account identity, so the managed
+			// lifecycle gate skipped it entirely: an operator-key write naming
+			// an erased account's id repopulated its namespace — and because
+			// the users row was already gone, re-running the erasure reported
+			// "already deleted" and left the new rows behind permanently.
+			// A tombstoned space is closed to writes, whoever is asking.
+			// Scoped to WRITE intent on purpose: erasure closes a space to new
+			// content, and a read of an erased space returns nothing anyway
+			// because the rows are gone. Keeping reads free of this lookup also
+			// keeps the no-D1 fast paths (the MCP chooser) exactly as they were.
+			if (auth.type === "legacy" && options.requiredScope === MEMORY_WRITE_SCOPE) {
+				const tombstoned = await env.DB.prepare(
+					"SELECT EXISTS(SELECT 1 FROM account_erasure_tombstones WHERE user_id = ?) AS erased",
+				).bind(scoped.userId).first();
+				if (Number(tombstoned?.erased ?? 0) === 1) {
+					await recordSecurityEvent(env, {
+						kind: "erased_space_write_refused",
+						severity: "high",
+						groupKey: "erased_space_write_refused",
+						details: { outcome: "refused" },
+					});
+					return { response: json({
+						error: "account_erased",
+						code: "account_erased",
+						message: "That account was permanently erased. Its memory space cannot be written to again.",
+					}, 403) };
+				}
+			}
 			if (managedProject && options.registerSpace !== false) {
 				await registerProjectMemorySpace(env, {
 					projectId: managedProject.project.id,
@@ -746,17 +789,21 @@ function cleanScopeValue(value, fallback = null) {
 	return text || fallback;
 }
 
-export async function scopedMemoryUserId(ownerUserId, externalUserId) {
-	if (!externalUserId || externalUserId === ownerUserId) return ownerUserId;
-	const digest = await sha256Hex(`uml-memory-scope:v1:${ownerUserId}:${externalUserId}`);
-	return `mem_${digest.slice(0, 32)}`;
-}
+// The memory-space identity primitive moved to src/lib/egress_ownership.js so
+// the routes that DERIVE an id and the assertion that PROVES one live together.
+// Re-exported here because this has been its import path since the beginning.
+export { scopedMemoryUserId };
 
 async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}, managedProject = null) {
-	const input = scopeInput && typeof scopeInput === "object" ? scopeInput : {};
+	// The client picks WHICH sub-tenant it writes as; it never gets to say who
+	// OWNS that space. Stripping the server-owned keys here covers every door
+	// at once, because every door funnels its `body.memoryScope` through this
+	// one function — and the server re-applies its own values below.
+	const { scope: input, rejected: forgedScopeKeys } = sanitizeClientScopeInput(scopeInput);
 	if (auth.type === "legacy") {
 		const externalUserId = cleanScopeValue(explicitUserId, auth.userId);
 		return {
+			forgedScopeKeys,
 			userId: externalUserId,
 			memoryScope: {
 				...input,
@@ -777,6 +824,7 @@ async function resolveScopedMemory(auth, explicitUserId, scopeInput = {}, manage
 		? ownerUserId
 		: await scopedMemoryUserId(ownerUserId, externalUserId);
 	return {
+		forgedScopeKeys,
 		userId: memoryUserId,
 		memoryScope: {
 			...input,
@@ -2615,7 +2663,10 @@ const routes = {
 				   AND sp.external_user_id LIKE 'project:%'
 				 GROUP BY sp.memory_user_id, sp.external_user_id
 				 ORDER BY last_seen_at DESC
-				 LIMIT 100`,
+				 LIMIT 500`,
+				// Over-fetched, then ownership-filtered, then capped to 100
+				// below: applying the cap to unverified rows let forged
+				// provenance evict the account's real sub-tenant inventory.
 			).bind(userId, userId),
 		]);
 
@@ -2686,13 +2737,25 @@ const routes = {
 		const projects = [...projectMap.values()]
 			.map(({ _name_at, ...project }) => project)
 			.sort((a, b) => String(a.project_name ?? a.project_id).localeCompare(String(b.project_name ?? b.project_id)));
-		const legacyProjects = [];
-		for (const row of legacyProjectsResult.results ?? []) {
-			// Source provenance was historically client-extensible. Verify the
-			// deterministic subtenant id before using it to expose aggregate counts,
-			// so a forged pre-fix row cannot point inventory at another account.
-			if (row.memory_user_id !== await scopedMemoryUserId(userId, row.external_user_id)) continue;
-			legacyProjects.push(row);
+		// Source provenance was historically client-extensible. Verify the
+		// deterministic subtenant id before using it to expose aggregate counts,
+		// so a forged pre-fix row cannot point inventory at another account.
+		// Shares one assertion with /v1/ops/overview — the two discovery-based
+		// read paths must not drift apart on what "ours" means.
+		const { owned: provenScopes, dropped: foreignScopeClaims } = await filterOwnedMemorySpaces(
+			scopedMemoryUserId,
+			userId,
+			legacyProjectsResult.results,
+			(row) => ({ memoryUserId: row.memory_user_id, externalUserId: row.external_user_id }),
+		);
+		const legacyProjects = provenScopes.slice(0, 100);
+		if (foreignScopeClaims) {
+			await recordSecurityEvent(env, {
+				kind: "graph_foreign_scope_claim",
+				severity: "medium",
+				groupKey: `graph_foreign_scope_claim:${userId}`,
+				details: { dropped: foreignScopeClaims, memory_user_id: userId },
+			});
 		}
 
 		const config = getConfig(env);
@@ -3773,6 +3836,34 @@ const routes = {
 	},
 
 	/** The upgrade queue: who asked, their usage snapshot, their note. */
+	/**
+	 * The sanitized AI Review Bundle: what a reviewer needs to assess this
+	 * system without being handed anyone's memory. Aggregates and config only,
+	 * and the sanitization is ASSERTED on the way out — a bundle that carries
+	 * a secret, an email, or an account id fails as a 500 rather than leaking.
+	 */
+	"GET /v1/admin/review-bundle": async (request, env) => {
+		const auth = await getSessionUser(env, request);
+		if (!auth) return json({ error: "unauthorized" }, 401);
+		if (auth.user?.role !== "admin") return json({ error: "forbidden" }, 403);
+		const bundle = await buildReviewBundle(env);
+		try {
+			assertBundleIsSanitized(bundle, env);
+		} catch (error) {
+			await reportServerError(env, "review_bundle_sanitization", error, auth.userId);
+			return json({
+				error: "review_bundle_unsafe",
+				message: "The review bundle failed its own sanitization check and was not returned.",
+			}, 500);
+		}
+		return new Response(JSON.stringify(bundle, null, 2), {
+			headers: {
+				"content-type": "application/json; charset=utf-8",
+				"content-disposition": `attachment; filename="itsuki-review-bundle-${new Date().toISOString().slice(0, 10)}.json"`,
+			},
+		});
+	},
+
 	/** The Trust & Safety tab in one trip: due-clock meta, cases, events. */
 	"GET /v1/admin/trust/overview": async (request, env) => {
 		const auth = await getSessionUser(env, request);
@@ -4572,6 +4663,14 @@ const routes = {
 			)).row
 			: await getExport(env, auth.userId, requestedExportId);
 		if (!row) return json({ error: "not_found", message: "That export is gone. Create a new one." }, 404);
+		// An export whose memory was deleted says so, rather than claiming to
+		// still be building — the file is gone BECAUSE the deletion covered it.
+		if (row.status === "expired") {
+			return json({
+				error: "export_expired",
+				message: "This export was discarded because the memory it contained was deleted. Create a new export to download what remains.",
+			}, 410);
+		}
 		if (row.status !== "complete" || !row.data) {
 			return json({ error: "not_ready", message: "This export is still being built. Refresh in a moment." }, 409);
 		}
@@ -6549,7 +6648,16 @@ async function handleMemoryDeleteRoutes(request, env, url) {
 					: id.startsWith("cand") ? "candidate"
 						: null;
 		if (!kind) {
-			return json({ error: "bad_request", message: "Unrecognized memory id — expected a node_, page_, slice_, event_, or candidate id." }, 400);
+			// This message used to list event_ among the accepted prefixes, but
+			// the dispatch above has no event_ arm — so it named a control that
+			// does not exist, to the one person who had already found that out.
+			// An event is deleted with its node, or corrected with PATCH.
+			return json({
+				error: "bad_request",
+				message: id.startsWith("event_")
+					? "An event cannot be deleted on its own. Delete its node to remove it, or correct it with PATCH /v1/memories/:id."
+					: "Unrecognized memory id — expected a node_, page_, slice_, or candidate id.",
+			}, 400);
 		}
 		const table = kind === "page" ? "memory_pages"
 			: kind === "node" ? "nodes"

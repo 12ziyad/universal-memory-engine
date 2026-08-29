@@ -10,6 +10,7 @@ import {
 } from "../lib/audit.js";
 import { normalizeLabel } from "../lib/text.js";
 import { deleteNodeVectors } from "../lib/vectorize.js";
+import { invalidateStoredExports } from "./exports.js";
 import { clusterForMemory, organizeUserClusters } from "./clusters.js";
 import { fallbackSummary } from "./pass2.js";
 import { suppressPageKey } from "./pages.js";
@@ -510,7 +511,22 @@ export async function storeDeletionTombstone(env, userId, {
  * the whole delete instead of letting it land. Callers that have no
  * authenticated actor pass none, exactly as before.
  */
-export async function deleteObject(env, userId, { kind, id, suppress = true, guards = [] }) {
+/**
+ * Delete one object, then invalidate the space's prepared exports.
+ *
+ * The invalidation is a WRAPPER rather than four edits inside the switch
+ * because the inner function has one success return per kind, and a fifth
+ * kind added later would silently reopen the hole this closes: a prepared
+ * export is a server-side copy of the deleted content, still downloadable
+ * from a live door until something drops it.
+ */
+export async function deleteObject(env, userId, options) {
+	const result = await deleteObjectInner(env, userId, options);
+	if (result?.deleted) await invalidateStoredExports(env, userId, "memory_deleted");
+	return result;
+}
+
+async function deleteObjectInner(env, userId, { kind, id, suppress = true, guards = [] }) {
 	const now = Date.now();
 	const fences = (guards ?? []).filter(Boolean);
 	if (kind === "page" || kind === "memory_page") {
@@ -2232,11 +2248,38 @@ export async function bulkDeleteBySource(env, userId, {
 			).bind(now, run.id, userId)));
 	}
 
+	// A prepared export is a derived copy of exactly what was just deleted,
+	// stored server-side and served from a live door. The deletion promise has
+	// to cover it, or "deleted" means only "deleted from the primary tables".
+	const invalidatedExports = await invalidateStoredExports(
+		env, userId,
+		erasure ? "memory_erased" : "memory_deleted",
+		{ purge: erasure },
+	);
+
+	// Receipts are the write ledger, and the ledger is deliberately kept as
+	// deletion evidence — but its `summary` and `detail` embed the LABELS of
+	// what was written ("nodes (Aveiro, Salary)"), which is memory content by
+	// any honest reading. After an unscoped erasure those labels were the one
+	// place the erased text survived, which made "the trail carries no memory
+	// content" false. The row, its id and its timestamps stay; the content
+	// comes out, using the same scrub the retention policy already applies.
+	let receiptsScrubbed = 0;
+	if (erasure) {
+		const scrubbed = await env.DB.prepare(
+			`UPDATE receipts SET summary = NULL, detail = '{}'
+			  WHERE user_id = ? AND (summary IS NOT NULL OR detail NOT IN ('{}', ''))`,
+		).bind(userId).run();
+		receiptsScrubbed = Number(scrubbed.meta?.changes ?? 0);
+	}
+
 	return {
 		ok: true, dry_run: false,
 		// `runs` = runs consumed (marked retired) by this cleanup — the same
 		// number the preview promised. Row totals report what was actually swept.
 		deleted: { runs: counts.runs, ...deletedTotals },
+		exports_invalidated: invalidatedExports.invalidated,
+		...(erasure ? { receipts_scrubbed: receiptsScrubbed } : {}),
 		summaries_regenerated: regenerated,
 		staged_settled: stagedSettled.meta?.changes ?? 0,
 		source_episodes_deleted: episodesDeleted,

@@ -30,12 +30,19 @@
  * account is what makes a tenant row actionable. It is echoed to nobody else.
  */
 
+import { filterOwnedMemorySpaces, scopedMemoryUserId } from "../lib/egress_ownership.js";
+import { recordSecurityEvent } from "../lib/security_events.js";
+
 const RANGE_DAYS = { "1d": 1, "7d": 7, "30d": 30, "90d": 90 };
 const TERMINAL = ["enriched", "failed", "completed"];
 const CANCELLED_PREFIX = "cancelled_by_delete";
 // A job still non-terminal after this long is not "busy", it is a question.
 const STUCK_AFTER_MS = 15 * 60 * 1000;
 const MAX_TENANTS = 200;
+// Discovery reads more rows than it will report, because unverified rows must
+// not be able to crowd out verified ones (see the over-fetch note below).
+const DISCOVERY_OVERFETCH = 5;
+const MAX_DISCOVERY_ROWS = 2000;
 // OPS-03: D1 caps bound parameters per statement, so a `user_id IN (...)` list
 // built from an account's tenants is a query that works until the account
 // grows. Every fan-out below is chunked; 80 leaves headroom for the extra
@@ -87,7 +94,13 @@ export async function operatorOverview(env, ownerUserId, { range = "7d", limit, 
 		  GROUP BY user_id, external_user_id
 		  ORDER BY last_activity_at DESC
 		  LIMIT ?`,
-	).bind(fromMs, ownerUserId, ownerUserId, cap).all();
+		// Over-fetch before the ownership filter. The cap exists to bound the
+		// fan-out, but applying it to UNVERIFIED rows let forged provenance
+		// spend the budget: enough recent rows claiming this owner pushed the
+		// account's own real sub-tenants off the end, so the console answered
+		// "you have one tenant" to someone with many. The filter below decides
+		// what counts, then the cap applies to what survived.
+	).bind(fromMs, ownerUserId, ownerUserId, Math.min(cap * DISCOVERY_OVERFETCH, MAX_DISCOVERY_ROWS)).all();
 
 	// OPS-04: the account's OWN memory must never be crowded out by busier
 	// sub-tenants. Recency ordering plus a cap did exactly that in production —
@@ -99,14 +112,43 @@ export async function operatorOverview(env, ownerUserId, { range = "7d", limit, 
 		rows.push({ user_id: ownerUserId, external_user_id: null, last_activity_at: 0 });
 	}
 
+	// EGRESS OWNERSHIP (Phase 3). Discovery above trusts a stored claim —
+	// `scope_json.owner_user_id` — and source provenance was historically
+	// client-extensible, so a pre-fix row can name an owner it does not belong
+	// to. A `mem_` prefix is only a SHAPE: every foreign subtenant id in the
+	// system has it too. Re-derive each discovered space from the owner id and
+	// the row's own external id, exactly as /v1/graph does before exposing its
+	// per-subtenant inventory, and drop anything that cannot prove itself —
+	// otherwise this route reports another account's node counts, backlogs and
+	// latencies to whoever a forged row names.
+	const { owned: provenRows, dropped: foreignClaims } = await filterOwnedMemorySpaces(
+		scopedMemoryUserId,
+		ownerUserId,
+		rows,
+		(row) => ({ memoryUserId: String(row.user_id), externalUserId: row.external_user_id }),
+	);
+	if (foreignClaims) {
+		// A refused claim is a security signal, not routine noise: it means a
+		// provenance row named this owner for a space that is not theirs.
+		await recordSecurityEvent(env, {
+			kind: "ops_foreign_scope_claim",
+			severity: "medium",
+			groupKey: `ops_foreign_scope_claim:${ownerUserId}`,
+			details: { dropped: foreignClaims, memory_user_id: ownerUserId },
+		});
+	}
+
+	// The cap now applies to VERIFIED rows only, and the root space is never a
+	// candidate for eviction — an account must always be able to see its own
+	// memory in its own console.
+	const rootRows = provenRows.filter((row) => String(row.user_id) === ownerUserId);
+	const subtenantRows = provenRows.filter((row) => String(row.user_id) !== ownerUserId);
+	const cappedRows = [...rootRows, ...subtenantRows.slice(0, Math.max(cap - 1, 0))];
+
 	const tenants = new Map();
-	for (const row of rows) {
+	for (const row of cappedRows) {
 		const id = String(row.user_id);
-		// Belt and braces: the root row is the account itself; every other row
-		// must be a scoped hash. Anything else is not ours and is dropped rather
-		// than reported.
 		const isRoot = id === ownerUserId;
-		if (!isRoot && !id.startsWith("mem_")) continue;
 		const existing = tenants.get(id);
 		if (existing) {
 			existing.external_user_id ??= row.external_user_id ?? null;
@@ -136,7 +178,10 @@ export async function operatorOverview(env, ownerUserId, { range = "7d", limit, 
 		owner_user_id: ownerUserId,
 		range: { days: rangeDays, from: fromMs, to: now },
 		tenants: ids.length,
-		truncated: (discovered ?? []).length >= cap,
+		// Truncation is now about what the caller actually owns, not about how
+		// many rows claimed them — otherwise a flood of forged claims reported
+		// itself as the account's own data being cut short.
+		truncated: subtenantRows.length > Math.max(cap - 1, 0),
 		live_nodes: 0,
 		jobs: emptyJobCounts(),
 		backlog: { depth: 0, oldest_age_ms: null },

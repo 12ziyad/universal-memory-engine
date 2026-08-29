@@ -52,6 +52,8 @@ const AUDIT_METADATA_FIELDS = new Set([
 ]);
 
 const MAX_VALUE_LENGTH = 120;
+/** Storage cap for the serialized metadata blob. Never exceeded, never sliced. */
+const METADATA_BLOB_MAX = 2000;
 const MAX_REQUEST_ID_LENGTH = 80;
 const INTERNAL_REQUEST_ID_HEADER = "x-itsuki-audit-request-id";
 const SAFE_CODE = /^[a-z0-9_.:-]{1,80}$/i;
@@ -191,9 +193,37 @@ function sanitizeAuditMetadata(metadata) {
 	return Object.keys(safe).length ? safe : null;
 }
 
+/**
+ * Serialize audit metadata within the storage cap, ALWAYS as valid JSON.
+ *
+ * This used to be `JSON.stringify(...).slice(0, 2000)`, which cut the string
+ * mid-token whenever the metadata was large: the row persisted, but the blob
+ * no longer parsed, so the audit UI showed `metadata: null` and the CSV
+ * export wrote an empty cell. Evidence that silently becomes unreadable is
+ * worse than evidence that is visibly incomplete — so fields are DROPPED
+ * whole until the object fits, and the blob says that it was truncated.
+ */
 function metadataBlob(metadata) {
 	const safeMetadata = sanitizeAuditMetadata(metadata);
-	return safeMetadata ? JSON.stringify(safeMetadata).slice(0, 2000) : null;
+	if (!safeMetadata) return null;
+	let serialized = JSON.stringify(safeMetadata);
+	if (serialized.length <= METADATA_BLOB_MAX) return serialized;
+
+	// Drop the largest fields first: they are the ones costing the room, and
+	// keeping more small facts beats keeping one big one.
+	const entries = Object.entries(safeMetadata)
+		.sort((a, b) => JSON.stringify(b[1]).length - JSON.stringify(a[1]).length);
+	const kept = Object.fromEntries(entries);
+	let dropped = 0;
+	for (const [key] of entries) {
+		delete kept[key];
+		dropped += 1;
+		serialized = JSON.stringify({ ...kept, _truncated_fields: dropped });
+		if (serialized.length <= METADATA_BLOB_MAX) return serialized;
+	}
+	// Even empty it did not fit (not reachable with the current cap, but the
+	// contract is "valid JSON or nothing", never a broken string).
+	return JSON.stringify({ _truncated_fields: dropped });
 }
 
 function boundedId(value, max = 100) {

@@ -34,6 +34,45 @@ const SOFT_DELETABLE_EXPORT_TABLES = new Set([
  */
 export const EXPORT_REVISION_LIMIT = 50_000;
 
+/**
+ * A prepared export is a DERIVED COPY of memory, stored server-side in
+ * `memory_exports.data` and served from a live door. Deleting memory that no
+ * longer invalidated that copy meant the deletion promise was only true of
+ * the primary tables: an export prepared before the delete kept serving the
+ * deleted content afterwards — reachable with a credential minted after the
+ * erasure, which is not "a copy the user already downloaded".
+ *
+ * So every deletion path calls this. The blob is dropped and the job is
+ * marked `expired`, which is the honest state: the job existed, and its file
+ * is gone because the memory behind it was deleted. Regenerating an export is
+ * cheap; serving erased content is not recoverable.
+ *
+ * Deliberately space-wide rather than per-object: knowing which snapshot
+ * contains which node would mean parsing every blob, and a stale-but-partial
+ * export is exactly the ambiguity this is meant to remove.
+ */
+export async function invalidateStoredExports(env, userId, reason = "memory_deleted", { purge = false } = {}) {
+	try {
+		// A full erasure removes the job rows outright — the census classifies
+		// memory_exports as a memory-space table with purge: "delete", and
+		// someone who asked for everything to be gone should not still see a
+		// list of their old export jobs. A narrower delete keeps the row and
+		// marks it expired, which is the honest state: the job happened, and
+		// its file is gone because the memory behind it was deleted.
+		const done = purge
+			? await env.DB.prepare("DELETE FROM memory_exports WHERE user_id = ?").bind(userId).run()
+			: await env.DB.prepare(
+				`UPDATE memory_exports
+				    SET data = NULL, status = 'expired', size_bytes = 0, error = ?
+				  WHERE user_id = ? AND (data IS NOT NULL OR status IN ('queued', 'running', 'complete'))`,
+			).bind(reason, userId).run();
+		return { invalidated: Number(done.meta?.changes ?? 0) };
+	} catch (error) {
+		console.warn("export invalidation failed:", error?.message ?? error);
+		return { invalidated: 0 };
+	}
+}
+
 /** Prepare the shared live-row selection used by both export surfaces. */
 export function prepareExportRows(env, userId, table) {
 	if (table === "memory_revisions") {
