@@ -59,6 +59,36 @@ describe("the job path", () => {
 		expect(result.storage).toBe("r2");
 	});
 
+	it("exports a space genuinely larger than a D1 row can hold", async () => {
+		// The reported case, reproduced by size rather than by configuration:
+		// ~3MB of real rows, which is what a 2.7MB memory space looks like and
+		// what used to fail with "larger than an export job can hold here".
+		const userId = `huge-${crypto.randomUUID()}`;
+		const now = Date.now();
+		const filler = "x".repeat(3000);
+		for (let batch = 0; batch < 10; batch++) {
+			await env.DB.batch(Array.from({ length: 100 }, (_, i) =>
+				env.DB.prepare(
+					`INSERT INTO nodes (id, user_id, label, category, role, state, summary, created_at, updated_at)
+					 VALUES (?, ?, ?, 'project', NULL, 'active', ?, ?, ?)`,
+				).bind(`node_${batch}_${i}_${crypto.randomUUID().slice(0, 8)}`, userId, `Node ${batch}-${i}`, filler, now, now)));
+		}
+		const job = await createExport(env, userId, {});
+		const result = await runExport(env, userId, job.id);
+
+		expect(result.ok).toBe(true);
+		// Comfortably past the ~2MB D1 row ceiling that used to be the barrier.
+		expect(result.bytes).toBeGreaterThan(2_000_000);
+		const row = await env.DB.prepare("SELECT * FROM memory_exports WHERE id = ?").bind(job.id).first();
+		expect(row.status).toBe("complete");
+		expect(row.error).toBeNull();
+		expect(row.size_bytes).toBeGreaterThan(2_000_000);
+		// And it is really downloadable, not merely marked complete.
+		const body = await readExportBody(env, row);
+		expect(body.length).toBeGreaterThan(2_000_000);
+		expect(JSON.parse(body).nodes.length).toBe(1000);
+	});
+
 	it("answers honestly when a complete row has no bytes behind it", async () => {
 		const userId = `gone-${crypto.randomUUID()}`;
 		await seed(userId);
