@@ -89,7 +89,7 @@ receipts + recall context
 | --- | --- |
 | Routes | `src/index.js` |
 | Auth, tokens, Google OAuth | `src/auth.js` |
-| MCP server (3 tools) | `src/mcp/server.js` |
+| MCP server (11 tools) | `src/mcp/server.js` |
 | Extraction pipeline | `src/pipeline/` |
 | App UI — landing + dashboard, one file, no build step | `public/index.html` |
 | Docs site | `public/docs/index.html` → `/docs/` |
@@ -115,7 +115,7 @@ Signed in at `/app`:
   Per-thread settings feed the account rules system.
 - **Requests** shows every call that reached your memory — type, entities, event, latency,
   status. Metadata only: the query never selects a column that could contain your words.
-- **Memory exports** builds a full JSON copy as a background job in your Durable Object.
+- **Memory exports** builds a JSON copy of one memory space as a background job.
 
 ## MCP tools
 
@@ -124,6 +124,14 @@ Signed in at `/app`:
 | `save_memory` | Save one durable fact in the user's words. |
 | `save_conversation` | Digest a batch of messages, then extract. |
 | `recall_memory` | Return compact, relevant context about the user. |
+| `list_memories` | List stored memories for the resolved space. |
+| `get_memory` | Read one memory by id. |
+| `update_memory` | Revise a memory, keeping its history. |
+| `rollback_memory` | Restore a memory to an earlier revision. |
+| `memory_history` | Show a memory's revision history. |
+| `delete_memory` | Delete one memory. |
+| `delete_all_memories` | Delete every memory in the resolved space. |
+| `whoami` | Report the resolved identity and space. |
 
 Use the stable `/mcp` endpoint with `Authorization: Bearer <key>` when the client supports
 headers. Generated MCP-link URLs keep identity in `/mcp/<token>` for headerless clients.
@@ -147,7 +155,7 @@ the rename (`uml_live_...`) keep working; a rename must never break someone's in
 | `/v1/exports` | `GET` `POST` | List or start an export job. |
 | `/v1/receipts` | `GET` | Recent save receipts. |
 | `/v1/rules` | `GET` `PUT` | What to collect, and what never to. |
-| `/v1/export` | `GET` | Everything you own, streamed as one JSON file. |
+| `/v1/export` | `GET` | One resolved memory space — its live memory objects, receipts, rules and revision history — as one JSON file. Sources, jobs and sibling subtenant spaces are not included. |
 | `/mcp` or `/mcp/<token>` | MCP | Streamable HTTP endpoint; Bearer auth is preferred, path tokens support generated links. |
 | `/auth/projects` | `GET` `POST` | List or create dashboard-managed projects (session auth). |
 | `/auth/projects/<id>` | `PATCH` | Rename a managed project or update its description (session auth). |
@@ -267,7 +275,7 @@ Claude removes plugin data on final uninstall unless its `--keep-data` option is
 
 ## SDKs
 
-This checkout prepares matching Node and Python `0.2.1` source packages. Registry installation
+This checkout prepares the Node SDK `0.3.0` and the Python SDK `0.4.1`. Registry installation
 resolves whatever version is currently published; inspect the exported `VERSION` before relying
 on the packet, jobs, polling, or deletion helpers.
 

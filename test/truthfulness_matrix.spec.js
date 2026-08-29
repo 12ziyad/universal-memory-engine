@@ -107,8 +107,14 @@ describe("erasure leaves no memory content in the write ledger", () => {
 	});
 
 	it("says so in the documentation, in the same terms", () => {
-		expect(docs).toContain("After an unscoped erasure that trail carries no memory content");
+		expect(docs).toContain("After an unscoped erasure the receipt rows are scrubbed");
 		expect(docs).toContain("their summaries and details");
+		// The old wording claimed the whole trail carried no memory content.
+		// The extraction ledger is deliberately retained and still names the
+		// objects each run created, so the docs must say that rather than
+		// generalise from receipts to the entire trail.
+		expect(docs).not.toContain("that trail carries no memory content");
+		expect(docs).toContain("The extraction ledger is retained for audit");
 	});
 });
 

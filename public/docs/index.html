@@ -1379,7 +1379,7 @@ ${codeBlock(`/itsuki status`)}
 
 PAGES["/integrations/native"] = { title: "Native packages", html: `
 <h1>Native packages</h1>
-<p class="lede">Five frameworks can reach ${PRODUCT.name} through their own memory interface instead of MCP: install one package, pass it where the framework expects memory, and the agent gets recall and capture without learning a tool.</p>
+<p class="lede">Five frameworks can reach ${PRODUCT.name} through their own memory interface instead of MCP — Agno, LlamaIndex, CAMEL, the Vercel AI SDK and Mastra: install one package, pass it where the framework expects memory, and the agent gets recall and capture without learning a tool.</p>
 <p>These need an <b>API key</b> from <b>API Keys</b> — a server credential, not an MCP link. Every package reads <code>ITSUKI_API_KEY</code> from the environment.</p>
 <h2 id="native-agno">Agno</h2>
 <p class="lede" style="margin:6px 0 12px"><a href="#/integrations/agno">Full Agno page</a> — the tailored integration, with its own setup, caveats and troubleshooting.</p>
@@ -1983,7 +1983,7 @@ ${nextSteps([
 <tr><td><a href="#/api/receipts"><code>GET /v1/receipts</code></a></td><td>The ledger of what every write actually did.</td></tr>
 <tr><td><a href="#/api/jobs"><code>GET /v1/jobs</code></a></td><td>Follow an accepted write to a terminal state, with packet status.</td></tr>
 <tr><td><a href="#/api/usage"><code>GET /v1/usage</code></a></td><td>Activity rollups, and per-request history.</td></tr>
-<tr><td><a href="#/api/export"><code>GET /v1/export</code></a></td><td>Everything out, as one document or an async job.</td></tr>
+<tr><td><a href="#/api/export"><code>GET /v1/export</code></a></td><td>One memory space out — memories, receipts, rules, revisions — as one document or an async job.</td></tr>
 <tr><td><a href="#/api/limits"><code>GET /v1/limits</code></a></td><td>Every published bound, unauthenticated, generated from the enforcing constants.</td></tr>
 <tr><td><a href="#/api/webhooks"><code>/v1/webhooks</code></a></td><td>Get told when memory changes instead of polling for it.</td></tr>
 <tr><td><a href="#/operate/observability"><code>GET /v1/ops/overview</code></a></td><td>One account-wide health view across every sub-tenant.</td></tr>
@@ -2773,7 +2773,7 @@ ${outputBlock(`enriched False`, "Output")}
 <tr><td><code>status()</code></td><td><code>GET /v1/status</code></td><td>Live counts, as in the verification step above.</td></tr>
 <tr><td><code>receipts(limit=50)</code></td><td><code>GET /v1/receipts</code></td><td><code>limit</code> must be an integer of at least 1.</td></tr>
 <tr><td><code>usage(range="30d")</code></td><td><code>GET /v1/usage</code></td><td><code>range</code> must be exactly <code>"1d"</code>, <code>"7d"</code>, <code>"30d"</code> or <code>"all"</code>.</td></tr>
-<tr><td><code>export_all()</code></td><td><code>GET /v1/export</code></td><td>Everything, in one response.</td></tr>
+<tr><td><code>export_all()</code></td><td><code>GET /v1/export</code></td><td>One resolved memory space, in one response.</td></tr>
 <tr><td><code>get_rules()</code> · <code>set_rules(rules)</code></td><td><code>GET</code> · <code>PUT /v1/rules</code></td><td><code>rules</code> must be a dict.</td></tr>
 </table>
 
@@ -3745,7 +3745,7 @@ ${prereq([
 <tr><th>Commitment</th><th>What stands behind it</th></tr>
 <tr><td><b>Your memory is not training data.</b></td><td>Today, every AI call ${PRODUCT.name} makes — extraction, embeddings, reranking, previews — runs on Cloudflare Workers AI, inside the same network that hosts the database, and no separate AI vendor receives your content. Under Cloudflare's developer-platform terms, inference inputs and outputs are not used to train their models — and any provider ever added is named on the subprocessors page first, held to the same commitment.</td></tr>
 <tr><td><b>No selling, no ads, no profiling for third parties.</b></td><td>One purpose: operating your memory service. There is no advertising surface and no third-party data recipient to sell into.</td></tr>
-<tr><td><b>No third-party trackers.</b></td><td>Visit counting is first-party and aggregate-only. It sets no cookie and stores no identifier — the mechanism is below, in full.</td></tr>
+<tr><td><b>No third-party trackers.</b></td><td>Visit counting is first-party and aggregate-only. It sets no cookie. To count a repeat visit once per day it keeps a shortened, keyed, one-way fingerprint of IP plus user agent, salted with a key that changes daily — the mechanism is below, in full.</td></tr>
 <tr><td><b>Memory content is not browsed.</b></td><td>Operational account activity — sign-ins, save and recall counts, errors, and security logs holding hashed IPs — is visible to the operator for support and abuse prevention. The content of your memories is not part of that. The <a href="#/operate/observability">operator endpoints available to <i>you</i></a> return counts, states and timings only, never content.</td></tr>
 </table>
 
@@ -3764,7 +3764,7 @@ ${prereq([
 <li><b>Dimensions are aggregate.</b> A referrer is reduced to a bare domain and counted; country and a desktop/mobile class are counted. Each is a row of the form day, dimension, value, count. There is no per-visit record to join them back together.</li>
 <li><b>Admin traffic is excluded</b> from app counts, so the number means real usage rather than the operator refreshing a console.</li>
 </ul>
-<p>Signing in does set a session cookie — that is authentication, not analytics, and it is the only cookie in play.</p>
+<p>Signing in does set a session cookie — that is authentication, not analytics. Depending on how you sign in, a short-lived first-party state cookie protects the OAuth or email-code flow as well. No cookie is used for measurement.</p>
 
 <h2>Secrets are removed before anything durable sees them</h2>
 <p>Every save door scrubs incoming text first — before the source row, before the Durable Object's held chunk, before the model, before the vectors. Once a secret reaches a model or an embedding you cannot take it back, so this runs at the front.</p>
@@ -3850,7 +3850,7 @@ ${outputBlock(`{
              "resets_at": "2026-09-01T00:00:00.000Z", "capped": false }
 }`, "Response (trimmed)")}</li>
 
-<li><b>Download everything you own.</b><p><code>GET /v1/export</code> returns the memory space resolved for that request as one JSON body: live memory objects, receipts, rules, and revision history for objects that still exist. It does not aggregate sibling SDK sub-tenant spaces — each of those is its own space and exports separately.</p>
+<li><b>Download one memory space.</b><p><code>GET /v1/export</code> returns the memory space resolved for that request as one JSON body: live memory objects, receipts, rules, and revision history for objects that still exist. It does not aggregate sibling SDK sub-tenant spaces — each of those is its own space and exports separately.</p>
 ${codeBlock(`curl -s -H "authorization: Bearer $ITSUKI_API_KEY" \\
   ${ORIGIN}/v1/export -o itsuki-export.json
 
@@ -3906,7 +3906,7 @@ ${outputBlock(`{ "ok": true, "counts": { "memories": 0, "pages": 0, "slices": 0,
 <tr><td>The account itself</td><td>Not self-serve. Account erasure is requested through support and completed after ownership and shared-organization checks.</td><td>—</td></tr>
 </table>
 
-<div class="note"><b>Two export paths, two filenames.</b> The <b>Memory exports</b> screen builds an export as a background job and hands you <code>itsuki-export-&lt;date&gt;.json</code>. The one-shot <b>Export current memory space</b> button in Settings → Personal → Profile &amp; security → Data &amp; Privacy calls <code>GET /v1/export</code> directly and saves <code>uml-export-&lt;date&gt;.json</code>, with the pre-rename prefix. Same content, different file name — do not let a script key off the name.</div>
+<div class="note"><b>Two export paths, two filenames.</b> The <b>Memory exports</b> screen builds an export as a background job and hands you <code>itsuki-export-&lt;date&gt;.json</code>. The one-shot <b>Download directly</b> button on the same screen calls <code>GET /v1/export</code> directly and saves <code>uml-export-&lt;date&gt;.json</code>, with the pre-rename prefix. Same content, different file name — do not let a script key off the name.</div>
 
 <h2>The limits that apply to you</h2>
 <p>Every enforced bound — the six rate buckets, the input size limits, the recall context budget and the monthly AI write ceiling — lives on <a href="#/api/limits">Rate limits and quotas</a>, and is readable live and unauthenticated from <code>GET /v1/limits</code>. It is generated from the same constants the enforcement path reads, so the published number cannot drift from the enforced one. Reading it beats copying it into your client.</p>
@@ -5939,11 +5939,11 @@ PAGES["/guides/export"] = { title: "Export and delete your memory", html: `
 <p class="lede">Getting a complete copy of stored memory, and the four different removal operations — which one to reach for, what each actually destroys, and what survives on purpose.</p>
 
 <h2>Export and delete are different promises</h2>
-<p>Export answers "give me everything you hold". Delete answers "stop holding it". They are separate surfaces with separate permissions, and it is worth doing them in that order: <b>export before you delete</b>, because none of the deletion paths hand you a copy on the way out.</p>
+<p>Export answers "give me the memory you hold for this space". Delete answers "stop holding it". They are separate surfaces with separate permissions, and it is worth doing them in that order: <b>export before you delete</b>, because none of the deletion paths hand you a copy on the way out.</p>
 <p>Both operate on a <b>memory space</b> — the space resolved for the credential and request you sent. A project can contain a primary space plus registered sub-tenant spaces, and no single-space route silently iterates them all. Project-wide operations are their own flow, covered further down.</p>
 
 <h2>Export now: GET /v1/export</h2>
-<p>One request, one JSON download, everything in that memory space:</p>
+<p>One request, one JSON download of that memory space’s live memory objects, receipts, rules and revision history — see “What an export covers” for what is and is not in the file:</p>
 <pre><button class="copy">Copy</button><code>curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
   https://itsuki.app/v1/export -o itsuki-export.json
 
@@ -5977,7 +5977,7 @@ GET /v1/exports
 
 # 3. Download
 GET /v1/exports/download?id=export_...</code></pre>
-<p>Statuses run <code>queued</code> → <code>running</code> → <code>complete</code> or <code>failed</code>; a failed row carries a sentence you can act on. Downloading before it is ready returns <code>409 not_ready</code>; an expired or unknown id returns <code>404</code>, and the fix is to create a new export.</p>
+<p>Statuses run <code>queued</code> → <code>running</code> → <code>complete</code> or <code>failed</code>; a failed row carries a sentence you can act on. Downloading before it is ready returns <code>409 not_ready</code>. An unknown id returns <code>404</code>; an export whose memory has since been deleted returns <code>410 export_expired</code>; an export whose file is no longer stored returns <code>410 export_unavailable</code>. In every 410 case the fix is to create a new export.</p>
 
 <h2>Deleting one memory</h2>
 <pre><button class="copy">Copy</button><code>curl -X DELETE \\
@@ -6071,7 +6071,7 @@ GET /v1/settings/lifecycle?projectId=proj_...</code></pre>
 <tr><td>Unscoped confirmed delete</td><td>Everything live in that memory space, plus accepted-but-uncommitted work.</td><td>The erasure barrier, deletion records, job and receipt history.</td></tr>
 <tr><td>Project purge / delete</td><td>Every registered memory space in the project, verified by a residual scan.</td><td>Lifecycle run records and the audit trail.</td></tr>
 </table>
-<p>What is kept in every case is bookkeeping, not content: deletion records, job and receipt history, and timestamps. After an unscoped erasure that trail carries no memory content: the receipt rows stay as evidence that a write happened, but their summaries and details &mdash; which name what was written &mdash; are cleared in the same pass. It is precisely what lets a later preview answer "nothing left" honestly rather than optimistically.</p>
+<p>What is kept in every case is bookkeeping, not content: deletion records, job and receipt history, and timestamps. After an unscoped erasure the receipt rows are scrubbed: they stay as evidence that a write happened, but their summaries and details &mdash; which name what was written &mdash; are cleared in the same pass. The extraction ledger is retained for audit and still records the labels of the objects each run created, until a retention policy on operational records clears it. It is precisely what lets a later preview answer "nothing left" honestly rather than optimistically.</p>
 <p>Related: <a href="#/concepts/delete">Delete &amp; erasure</a> · <a href="#/privacy">Privacy &amp; limits</a> · <a href="#/guides/projects">Projects, organizations, and teams</a>.</p>
 ` };
 
@@ -6672,7 +6672,7 @@ PAGES["/faq"] = { title: "FAQ", html: `
 <p>Until you delete it. There is no default expiry. If you want one, retention policies are configurable per class — playground transcripts, source episodes, semantic memory, export blobs, webhook deliveries, operational records — each set independently in days, previewed before it applies. Security audit records are locked and cannot be shortened.</p>
 
 <h3>Can I get everything out?</h3>
-<p>Yes. <code>GET /v1/export</code> streams a complete JSON export of the memory space that credential and request resolve to. Note the boundary: it exports <i>that</i> space, not every sub-tenant space in the project. Keep exports of anything critical.</p>
+<p>Yes. <code>GET /v1/export</code> streams a JSON export of the memory space that credential and request resolve to — its live memory objects, receipts, rules and revision history. Note the boundary: it exports <i>that</i> space, not every sub-tenant space in the project. Keep exports of anything critical.</p>
 
 <h2>Running it</h2>
 
@@ -8800,7 +8800,7 @@ ${outputBlock(`{
 <tr><td><code>early_access</code></td><td><code>true</code> when the account signed up during the early-access window. It records who was here early — it is not itself a limit, and it survives the expiry of any temporary grant.</td></tr>
 </table>
 
-<p>The <code>huba</code> block has the same shape over messages instead of neurons: <a href="#/guides/huba">Huba AI</a> answers are counted per UTC day (50 on an account&rsquo;s first day, 20 per day after), and the neurons each answer spends — roughly 20&ndash;35 — come out of the same daily allowance that <code>quota_daily</code> reports.</p>
+<p>The <code>huba</code> block has the same shape over messages instead of neurons: <a href="#/guides/huba">Huba AI</a> answers are counted per UTC day (50 on an account&rsquo;s first day, 20 per day after), and the neurons each answer spends — roughly 150 — are deliberately excluded from the daily save allowance that <code>quota_daily</code> reports, because Huba is capped by its own message count instead.</p>
 
 <h2>The usage dashboard</h2>
 <p>The same numbers render in the dashboard: profile menu, top right, <b>Usage &amp; plan</b>. Each allowance is a filling bar that turns into a warning at 80%, with a countdown to the 00:00 UTC reset, and a <b>Request more access</b> button when an allowance runs out — the request goes to the owner with your usage attached and is granted manually; a temporary grant lapses on its own. The walkthrough is <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
@@ -8915,7 +8915,7 @@ ${nextSteps([
 
 PAGES["/api/export"] = { title: "GET /v1/export", html: `
 <h1>GET /v1/export</h1>
-<p class="lede">Get everything in one memory space out as JSON — either streamed in the request, or built as a job you poll and download.</p>
+<p class="lede">Get one memory space’s memories, receipts, rules and revision history out as JSON — either streamed in the request, or built as a job you poll and download.</p>
 
 <h2>Two lanes, four routes</h2>
 <p>The one-shot route builds the file while you wait and streams it back. The job lane creates a row, builds the file inside your memory space's Durable Object, and hands you something to poll — so a large graph cannot hold an HTTP response open. They read the same tables and produce nearly the same file, but they are not byte-identical and the differences are called out below.</p>
@@ -9054,7 +9054,7 @@ ${outputBlock(`{
 
 <p>Rows come back newest first, capped at 50. There is no paging and no <code>limit</code> parameter — the 51st-oldest job is simply not addressable through this route, though its id still downloads. The stored file itself is never included in a listing; only <code>GET /v1/exports/download</code> returns it.</p>
 
-<div class="note"><b>The job lane has a size ceiling the one-shot route does not.</b> A finished file larger than the export row can hold (1,500,000 bytes by default) is not stored and not truncated: the job goes to <code>failed</code> with an error naming the size and pointing at the direct download. <code>GET /v1/export</code> streams and has no such bound, so that is the route to use for a large space.</div>
+<div class="note"><b>Neither lane has a size ceiling.</b> The job lane stores the finished file in object storage, so a large memory space exports the same way a small one does. <code>GET /v1/export</code> streams the file instead of storing it; either route works for a large space.</div>
 
 <h2>GET /v1/exports/download</h2>
 ${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
@@ -9084,11 +9084,11 @@ ${codeBlock(`curl -H "authorization: Bearer $ITSUKI_API_KEY" \\
 <h2>Expiry</h2>
 <p>Nothing here expires on a timer. A completed export row and its stored file stay until one of these happens:</p>
 <ul>
-<li>A managed project sets a retention policy for the <code>export_blobs</code> class. When it runs, the stored file is cleared — <code>data</code> removed and <code>size_bytes</code> set to <code>0</code> — and the row survives.</li>
+<li>Retention policies do not currently remove export files held in object storage; the <code>export_blobs</code> class only covers older exports stored inline. A stored export file is removed when the memory it contains is deleted, when the project is purged or deleted, or at account erasure.</li>
 <li>The project is permanently deleted, which removes the rows outright.</li>
 </ul>
 
-<div class="warn"><b>A cleared export still reports <code>status: "complete"</code>.</b> Retention removes the file but leaves the row, and <code>GET /v1/exports/download</code> decides readiness by looking for the stored bytes. So a scrubbed export lists as complete with <code>size_bytes: 0</code>, and downloading it returns <code>409 not_ready</code> with a message about the export still being built. It is not being built; the file is gone. Treat <code>size_bytes: 0</code> on a complete row as "download this again from scratch".</div>
+<div class="warn"><b>A cleared export still reports <code>status: "complete"</code>.</b> Retention removes the file but leaves the row, and <code>GET /v1/exports/download</code> decides readiness by looking for the stored bytes. So a scrubbed export can list as complete while its file is gone, and downloading it returns <code>410 export_unavailable</code> — "The file for this export is no longer stored." Treat that as "create a new export".</div>
 
 <h2>Errors</h2>
 <table>
@@ -9566,7 +9566,7 @@ ${prereq([
 <h2>Delete the memory, or the project</h2>
 <p>Both destructive operations use the same three-part flow: preview, type the project's name, execute. The preview is content-free — it counts, it never returns memory text — and it mints a single-use confirmation that expires after ten minutes.</p>
 <ol class="steps">
-<li><b>Export first if you want a copy.</b><p><b>Settings → Personal → Profile &amp; security → Data &amp; Privacy → Export current memory space</b> saves one space; the <b>Memory exports</b> screen queues a job. Neither covers every sub-tenant space in one file, so export each space you care about. After the purge there is nothing left to export.</p></li>
+<li><b>Export first if you want a copy.</b><p>The <b>Memory exports</b> screen queues an export job, and its <b>Download directly</b> button saves one space immediately. Neither covers every sub-tenant space in one file, so export each space you care about. After the purge there is nothing left to export.</p></li>
 <li><b>In the danger zone, press Delete memory… or Delete project….</b><p><b>Delete project memory</b> reads <i>"Deletes every memory in this project — the root space and every SDK subtenant, including sources, vectors, exports and queued work — then returns the empty project to active. Settings, members and keys survive. Irreversible."</i> <b>Delete project</b> reads <i>"Permanently deletes the project: all memory, keys, members and settings. A content-free tombstone remains. This cannot be undone."</i> Pressing either runs the preview only — nothing is deleted yet.</p></li>
 <li><b>Read the count line that appears.</b><p>A confirmation row opens under the button with the inventory the server just measured, across every memory space it discovered:</p>
 ${outputBlock(`4 memory space(s): 812 facts, 30 pages, 419 source episodes, 2 exports, 1 jobs still processing.`, "What the confirmation row shows")}
@@ -9839,7 +9839,7 @@ ${prereq([
 <tr><td>First day</td><td>50 messages — room to explore while everything is new</td></tr>
 <tr><td>After that</td><td>20 messages per day</td></tr>
 <tr><td>Resets</td><td>00:00 UTC, every day</td></tr>
-<tr><td>Cost</td><td>Roughly 20–35 neurons per answer, metered like everything else — it appears in <a href="#/api/usage">GET /v1/usage</a> under <code>huba</code>, and the neurons come out of the same daily allowance as saves</td></tr>
+<tr><td>Cost</td><td>Roughly 150 neurons per answer. Huba is bounded by its own per-day message allowance, not by the save allowance — it appears in <a href="#/api/usage">GET /v1/usage</a> under <code>huba</code>, and its neurons are deliberately excluded from the daily save quota</td></tr>
 </table>
 <p>When the day's messages are spent, the bar says so and shows a <b>Request more</b> link — the same flow as saves: the request goes to the owner with your usage attached, grants are manual, and a temporary grant lapses on its own. See <a href="#/guides/usage">Usage &amp; the daily allowance</a>.</p>
 
@@ -9858,7 +9858,7 @@ ${prereq([
 <p>Conversations belong to your account and are readable only by you. The panel sends only the conversation's id — the history itself is replayed on the server, so what Huba believes you said earlier cannot be rewritten from the browser. The most recent 40 conversations are kept; older ones fall away.</p>
 
 <h2>Where to find it</h2>
-<p>The <b>Ask about Itsuki</b> button sits in the dashboard header, to the left of your profile avatar. Click it and the panel opens. Closing it with <b>×</b> collapses it back into the button; the conversation is still there when you reopen it. Escape closes it too.</p>
+<p>The <b>Huba AI</b> button sits in the dashboard header, to the left of your profile avatar. Click it and the panel opens. Closing it with <b>×</b> collapses it back into the button; the conversation is still there when you reopen it. Escape closes it too.</p>
 
 <h2>A dashboard surface, not an API</h2>
 <p>There is no public Huba endpoint. API keys cannot call it, MCP clients cannot list it as a tool, and nothing you build on the API depends on it. If you want an assistant of your own answering from memory, that is what <a href="#/api/recall">POST /v1/recall</a> and <a href="#/api/turn">POST /v1/turn</a> are for.</p>

@@ -2696,7 +2696,7 @@
 			<div class="oss-copy">
 				<div class="section-kicker light"><span>07</span> Open architecture</div>
 				<h2>Read the system<br />before you trust it.</h2>
-				<p>Read the extraction engine. Read the admission rules that decide what becomes memory. Read the delete path. Every commit and schema migration is public &mdash; memory infrastructure you cannot inspect is just another black box.</p>
+				<p>Read the extraction engine. Read the admission rules that decide what becomes memory. Read the delete path. The engine, the SDKs and the schema history are published under Apache 2.0 &mdash; memory infrastructure you cannot inspect is just another black box. Publication runs behind deployment: the hosted service is built from a development line, so the newest modules and migrations reach the repository later.</p>
 				<div class="oss-actions">
 					<a class="primary-action oss-cta" href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true" width="17" height="17" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg> View on GitHub</a>
 					<a class="secondary-action light" href="/docs/">Read the architecture</a>
@@ -2704,8 +2704,8 @@
 			</div>
 			<ul class="oss-facts" aria-label="Open source facts">
 				<li><b>Apache 2.0</b><span>Permissive license, commercial use included.</span></li>
-				<li><b>Full history</b><span>Every migration and commit is public, not a snapshot drop.</span></li>
-				<li><b>No lock-in</b><span>Export your memory space — memories, sources, and revisions — as JSON at any time.</span></li>
+				<li><b>Schema history</b><span>The migration history is published in order, not a single snapshot drop — and it lags the deployed service.</span></li>
+				<li><b>No lock-in</b><span>Export one memory space — its memories, receipts, rules and revision history — as JSON at any time.</span></li>
 			</ul>
 		</section>
 
@@ -2985,7 +2985,7 @@ const RETENTION_CLASS_LABELS = Object.freeze({
 	playground_transcripts: "Playground transcripts",
 	source_episodes: "Scrubbed source episodes",
 	semantic_memory: "Semantic memory",
-	export_blobs: "Completed export blobs",
+	export_blobs: "Legacy inline export blobs",
 	webhook_deliveries: "Webhook deliveries",
 	operational_records: "Operational receipts and jobs",
 	security_audit: "Security and audit events",
@@ -13555,7 +13555,7 @@ const LEGAL_PAGES = {
 
 			<h2>2. Information collected automatically</h2>
 			<ul>
-				<li><b>Security logs:</b> login events with a one-way <i>hashed</i> IP address and browser user-agent, and session records. We deliberately store IPs only as hashes — enough to detect abuse, not to track you.</li>
+				<li><b>Security logs:</b> login events with a <i>hashed</i> IP address and browser user agent, and session records. We store the IP as a SHA-256 hash rather than in the clear, and we use it only to group sign-in attempts for abuse detection. Because the space of IP addresses is small, a hash of one is not strong anonymisation — it is a way of not keeping the address itself, not a guarantee that it could never be recovered. We do not use these hashes to build a profile of you.</li>
 				<li><b>Receipts:</b> a record of every memory write (what was saved, updated, or refused, from which connection, and when), kept so you can audit your own memory.</li>
 				<li><b>Aggregate visit counting:</b> a first-party beacon counts page visits in aggregate. It sets no cookie and never stores your IP address or user agent. To count a repeat visit only once per day it keeps a shortened, one-way fingerprint of those two values, salted with a key that changes daily, so yesterday&rsquo;s fingerprints cannot be matched to today&rsquo;s. Alongside it we keep daily counts by referring domain, country, and device class. Counters and a day-scoped fingerprint &mdash; not a profile, and never linked to your memory.</li>
 					<li><b>What we deliberately do not collect:</b> no advertising identifiers, no cross-site trackers, no fingerprinting, no precise location, no contact-list uploads, no email-open pixels.</li>
@@ -13590,7 +13590,7 @@ const LEGAL_PAGES = {
 			<ul>
 				<li><b>Access &amp; portability:</b> <i>Export current memory space</i> downloads machine-readable JSON for the memory space resolved by the current project and session. It does not aggregate sibling SDK subtenant spaces.</li>
 				<li><b>Correction:</b> edit, supersede, or archive any memory from the dashboard or your connected tools.</li>
-				<li><b>Erasure:</b> Project-wide memory deletion and project deletion are self-serve in Settings, verified across every project storage space before completion is reported. For whole-account deletion, contact support &mdash; we check ownership and shared-organization safety first.</li>
+				<li><b>Erasure:</b> Project-wide memory deletion and project deletion are self-serve in Settings, verified across every project storage space before completion is reported. For whole-account deletion, contact support &mdash; we check ownership and shared-organization safety first. Erasure removes your account record, sessions, credentials and memory spaces; a content-free record that the erasure happened is kept, and transactional email we already sent you — including the address it went to — remains in our mail log.</li>
 				<li><b>Withdraw consent:</b> at any time, by deleting your data and account.</li>
 				<li><b>Complain:</b> EU/UK users may complain to their local supervisory authority; users in India may approach the Data Protection Board of India. We would appreciate the chance to resolve concerns first — most are fixed in a day.</li>
 				<li><b>Nominate (DPDP):</b> users in India may nominate another person to exercise these rights in case of death or incapacity, by emailing us.</li>
@@ -13601,7 +13601,7 @@ const LEGAL_PAGES = {
 			<p>The per-class retention table, backup aging, and every deletion flow are documented in full on <a href="/retention" onclick="showLegal('retention', event)">Data Retention &amp; Deletion</a>. In summary:</p>
 			<ul>
 				<li><b>Project data:</b> follows the active policy for its data class. The default is <i>Keep until deleted</i>; an authorized project administrator may activate a shorter policy only after reviewing an exact deletion preview.</li>
-				<li><b>Account data:</b> kept while the account is active. Account-erasure requests are completed through the support process after ownership and shared-organization safety checks.</li>
+				<li><b>Account data:</b> kept while you have an account. An account that has gone unused may be shelved — it stops being listed as active and its sessions stop working, but nothing is deleted and signing in (or using an API key) restores it immediately. Shelving is not erasure. Account-erasure requests are completed through the support process after ownership and shared-organization safety checks.</li>
 				<li><b>Sessions:</b> stop authorizing access when they expire or are revoked. Account erasure removes the account's session records.</li>
 				<li><b>Operational records:</b> receipts and jobs follow the selected project's operational-records policy; the default is <i>Keep until deleted</i>.</li>
 				<li><b>Invitation delivery records:</b> a live pending invitation retains its recipient email. Thirty days after an invitation becomes accepted, revoked, or expired—or its email delivery becomes sent, failed, or suppressed—the recipient email, provider message identifier, delivery error, and any encrypted delivery payload are irreversibly scrubbed. Content-free ids, roles, statuses, and timestamps may remain for organization security history.</li>
@@ -13730,14 +13730,14 @@ const LEGAL_PAGES = {
 
 		<h2>7. How the software itself is kept honest</h2>
 		<ul>
-			<li>The repository is <b>public</b>, including every schema migration &mdash; with a checksum manifest that makes migration history append-only.</li>
+			<li>The repository is <b>public</b>, and the schema migrations published there carry a checksum manifest that makes migration history append-only. Publication lags deployment: migrations already applied to the hosted service can be live before the file that carries them appears in the repository.</li>
 			<li>An automated suite of <b>over 2,400 tests</b> runs against the real Worker on every change, including suites that specifically prove tenant isolation, credential revocation, role enforcement, and deletion residue removal.</li>
 			<li>Architecture gates are tests too: source-level census checks fail the build if code touches the AI layer or writes memory outside the fenced paths.</li>
 			<li>All AI inference runs through a metered, budget-capped dispatch layer &mdash; see <a href="/ai-data" onclick="showLegal('ai-data', event)">AI &amp; your data</a>.</li>
 		</ul>
 
 		<h2>8. Certifications</h2>
-		<p>None yet, and we will not pretend otherwise: Itsuki is an early-stage service and has not completed a third-party audit framework. What we offer instead is unusual in this market &mdash; the code that enforces every claim on this page is public, the test suites that prove the security properties run on every change, and this page states dates and mechanisms rather than badges. When a formal audit happens, its report will be linked here.</p>
+		<p>None yet, and we will not pretend otherwise: Itsuki is an early-stage service and has not completed a third-party audit framework. What we offer instead is unusual in this market &mdash; the engine that enforces these claims is published under Apache 2.0, the test suites that prove the security properties run on every change, and this page states dates and mechanisms rather than badges. Because publication lags deployment, some of the newest enforcement code is not in the public tree yet; write to founder@itsuki.app and we will confirm what is deployed. When a formal audit happens, its report will be linked here.</p>
 
 		<h2>9. Incident response</h2>
 		<p>If an incident affects your data: we assess and contain it, fix the cause, and notify you and the relevant authority where and within the time required by applicable law, as committed in the <a href="/privacy" onclick="showLegal('privacy', event)">Privacy Policy</a>. The notice states plainly what happened and what we did &mdash; not a lawyer's fog.</p>
@@ -13818,7 +13818,7 @@ const LEGAL_PAGES = {
 				<tr><td><b>Rules preview &amp; playground</b></td><td>Sample text you explicitly submit for testing</td><td>A no-write preview &mdash; nothing is stored: no memory, no source, no receipt</td></tr>
 			</tbody>
 		</table>
-		<p>The exact model identifiers are public in the <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">repository configuration</a> &mdash; currently open-weight models from the Qwen, Llama, and BGE families.</p>
+		<p>The model identifiers are declared in the Service configuration &mdash; currently open-weight models from the Qwen, Llama, BGE and OpenAI gpt-oss families, all served through Cloudflare Workers AI. The <a href="https://github.com/12ziyad/universal-memory-engine" target="_blank" rel="noopener">published configuration</a> can lag the deployed one; this page is the current list.</p>
 
 		<h2>4. Retention of inference data</h2>
 		<p>We keep the memory you chose to store, plus content-free metering records (token counts, model name, latency &mdash; never the text). Prompts and raw model outputs are not retained as a separate corpus. Deleting a memory deletes it; there is no shadow copy kept "for model improvement".</p>
@@ -13857,7 +13857,8 @@ const LEGAL_PAGES = {
 				<tr><td><b>Vectors</b> (semantic index)</td><td>While their memory exists</td><td>Purged through a deletion ledger when the memory is deleted</td></tr>
 				<tr><td><b>Operational records</b> (write history, jobs)</td><td>Per the project's operational-records policy</td><td>Project retention policy (admin-set, with an exact deletion preview first) or project deletion</td></tr>
 				<tr><td><b>Audit events</b> (content-free governance log)</td><td>While the organization exists</td><td>Account and organization deletion</td></tr>
-				<tr><td><b>Sessions</b></td><td>Up to 30 days, or until logout or revocation</td><td>Expiry, "log out all sessions", account erasure</td></tr>
+				<tr><td><b>Shelved accounts</b></td><td>Retained in full — shelving removes an unused account from the active list and stops its sessions; it deletes nothing and reverses on next sign-in</td><td>Account erasure</td></tr>
+				<tr><td><b>Sessions</b></td><td>Authorize access for up to 30 days, or until logout or revocation</td><td>Expiry and logout stop a session working immediately; the session record (user agent, hashed IP) is kept as a security log and removed at account erasure</td></tr>
 				<tr><td><b>Sign-in codes</b></td><td>10 minutes, single-use, stored hashed</td><td>Automatic expiry; invalidated on delivery failure</td></tr>
 				<tr><td><b>Invitations</b></td><td>30 days after acceptance, revocation, or expiry</td><td>Automatic purge of the encrypted invitation record</td></tr>
 				<tr><td><b>Internal quality evaluations</b></td><td>At most 30 days, content-minimized</td><td>Automatic purge; honors account erasure immediately</td></tr>
@@ -13878,7 +13879,7 @@ const LEGAL_PAGES = {
 		</ul>
 
 		<h2>4. Backups</h2>
-		<p>The database keeps a point-in-time recovery window of roughly <b>30 days</b> (Cloudflare D1 Time Travel) for disaster recovery. Deleted data ages out of that window on the same clock &mdash; deletion is complete everywhere within about 30 days of the delete, and the recovery window is never used to restore data you deleted.</p>
+		<p>The database keeps a point-in-time recovery window of roughly <b>30 days</b> (Cloudflare D1 Time Travel) for disaster recovery. Deleted data ages out of that window on the same clock. What remains after that is by design and content-free: a permanent record that the deletion happened, plus the monotonic fences that stop deleted content being replayed. It is our policy never to use the recovery window to restore data you deleted.</p>
 
 		<h2>5. Export</h2>
 		<p>You can export your current memory space as machine-readable JSON at any time, before or instead of deleting. No lock-in, no export fee, no waiting period.</p>
@@ -15089,7 +15090,7 @@ async function adminUserAction(userId, action) {
 		return openAdminConfirmModal(userId, action);
 	}
 	const labels = {
-		vault: "Move this account to the vault? It keeps every memory and key, leaves the console, and wakes automatically the next time they sign in or use an API key.",
+		vault: "Move this account to the vault? This is NOT deletion — the account and all of its data remain. It keeps every memory and key, leaves the console, and wakes automatically the next time they sign in or use an API key. Use Delete account to action an erasure request.",
 		unvault: "Restore this account to the active console?",
 		disable: "Disable this account? The user is logged out everywhere and cannot log in.",
 		revoke_sessions: "Log this user out of all devices?",
