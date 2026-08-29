@@ -1936,3 +1936,93 @@ undownloadable by erasure; a direct download appearing in history; and all
 seven changed console surfaces present on itsuki.app. The one non-pass was a
 miscalibrated assertion in the smoke script itself (it checked live node
 count; the 2.7MB came mostly from 635 receipts), not a product failure.
+
+# Thirteenth pass — 2026-08-29: the vault, and a clean console for launch
+
+The owner asked for a fresh operator console before publishing, and — mid-way
+through — changed the instruction in the way that mattered most: the real
+accounts should not be destroyed but "put somewhere safe… if anyone starts to
+use it, automatically to the account". That is a feature, not a data
+operation, so it was built before anything was touched.
+
+## The vault: a third account state
+
+`users.status = 'dormant'` (no migration — the column never carried a CHECK).
+A vaulted account is shelved, not banned and not deleted:
+
+- it leaves the console's DEFAULT view, so a launch starts from a clean slate
+  rather than a graveyard — but it is never simply hidden: `?vault=1` lists
+  the vault, `/v1/admin/stats` always reports `vaulted_users`, and the People
+  tab states the count beside an "Open vault" switch;
+- its live sessions stop resolving (`getSessionUser` demands `active`);
+- **its data is untouched** — memories, projects, keys, history;
+- and it wakes AUTOMATICALLY at every door that proves the person is back:
+  browser sign-in, password sign-in, and **API/MCP key use**.
+
+That last door was the one real defect found while building this.
+`resolveConnectionToken` gated on `status='active'`, so vaulting an account
+with live integrations would have killed them silently with no door that
+could ever bring the account back — three of the eleven real accounts have
+live API keys. A vault you cannot walk out of is just a ban with a nicer
+name, so the token query now admits `dormant` and wakes it on use.
+
+Waking records a LOW `account_woken_from_vault` event (low never emails), so
+an operator can explain why a row absent yesterday is present today.
+`vault`/`unvault` ride the existing audited admin door; self-vaulting is
+refused with the same 400 that protects self-delete, because an admin who
+vaults themselves cannot reach the console to undo it. `disabled` and
+`dormant` stay distinct — a disabled account does NOT wake, and a test pins
+that. `test/account_vault.spec.js` (9 tests). Suite 206 files / 2,634 tests,
+node lane 666. Commit `2ce8bf4`, worker `a9315648`.
+
+Proven in production before a single real account was shelved: created a
+throwaway, vaulted it, confirmed it vanished from the console, appeared in
+the vault view, was counted in stats — then woke it with an API key, and
+again with a password sign-in. 8/8.
+
+## The reset
+
+1. **11 real accounts vaulted** through the audited door — reversible, one
+   column, every byte kept.
+2. **22 test accounts deleted** through the real step-up door rather than
+   SQL, because only that path also reaps Vectorize vectors, R2 export
+   objects and Durable Object state. Paced around the 10-confirms/minute
+   limit. 22/22.
+3. **Console telemetry cleared** — audit, logins, errors, security events,
+   trust cases, upgrade requests, exports, mail outbox, visit counters,
+   `ai_calls`.
+4. **153,801 orphaned rows swept** across 20 tables. This was the surprise:
+   27,317 receipts, 8,348 nodes and 30,489 staged memories belonged to no
+   surviving account at all — residue of canary and test accounts deleted in
+   *earlier* sessions, which had been quietly inflating the console's memory
+   totals. Plus 6 orphaned "Canary Lifecycle" projects.
+
+Two things were deliberately NOT cleared, on the recon's evidence:
+`ai_daily_totals` for **today** (it is the live global AI spend breaker —
+clearing it re-opens the full daily budget), and
+`account_erasure_tombstones` / `deletion_barriers` / `retention_fences` /
+`project_tombstones` (content-free monotonic guards; deleting them can only
+ever re-open a resurrection or re-bootstrap path).
+
+One ordering detail was load-bearing: `audit_event_completions` has **no**
+foreign key to `audit_events`, but the cron drain refuses to delete a
+completion whose parent is missing, and selects oldest-first. Clearing
+`audit_events` alone would have left permanent orphans at the head of that
+queue and wedged the background drain forever. Completions were cleared
+first.
+
+## Result, verified live
+
+The console shows **1 account and 11 in the vault**; ledger, errors, trust
+cases, security events, upgrade requests, exports and visitors all zero;
+memory totals now show only the owner's own 260 nodes / 817 receipts. The
+owner's account, sessions (still signed in), three projects and data are
+untouched. 11/11 live checks passed, including two audited mutations proving
+the audit ledger records correctly *after* the wipe — an empty table is not
+the same as a working one.
+
+**Honest limits.** Every test account is gone irreversibly. The 11 real
+accounts are recoverable by their owners simply by signing in, but if the
+owner later deletes them from the vault that is final. `founder@itsuki.app`
+was confirmed to forward to the owner's inbox, so the transactional emails
+have a real destination.
