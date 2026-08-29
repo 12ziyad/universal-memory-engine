@@ -16603,10 +16603,10 @@ function setDangerZone() {
 			</div>
 			<div class="set-danger-row">
 				<div><b>Transfer ownership</b>
-					<span>Moves governance to another member of this organization. Storage, memory-space and vector identities never change. You keep admin access.</span></div>
+					<span>Offers governance to another member of this organization. They receive an email, and the project moves only once they accept. Storage, memory-space and vector identities never change, and you keep admin access.</span>${transferTargets.length ? "" : `<span class="help" style="display:block;margin-top:6px">There is nobody to transfer to yet — a project can only be handed to someone who is already a member of this organization. <button class="ghost mini" onclick="setSection('org-members')">Invite someone first</button></span>`}${lc.pending_transfer ? `<span class="help" style="display:block;margin-top:6px">Waiting on <b>${esc(lc.pending_transfer.to?.email || "the recipient")}</b> to accept. <button class="ghost mini" onclick="lcCancelTransfer('${esc(lc.pending_transfer.id)}')">Withdraw</button></span>` : ""}</div>
 				<div class="set-danger-confirm">
 					<label class="sr-only" for="lcTransferTo">New owner</label>
-					<select id="lcTransferTo" ${busy || !lc.transfer_allowed ? "disabled" : ""}>
+					<select id="lcTransferTo" ${busy || !lc.transfer_allowed || !transferTargets.length || lc.pending_transfer ? "disabled" : ""}>
 						<option value="">Choose a member…</option>
 						${transferTargets.map((m) => `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`).join("")}
 					</select>
