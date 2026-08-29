@@ -1,5 +1,7 @@
 # Itsuki
 
+**Try it live: [https://itsuki.app](https://itsuki.app)** — free during early access, sign in with Google or GitHub.
+
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **A structured memory service for AI applications and coding agents.**
