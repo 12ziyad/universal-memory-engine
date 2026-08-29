@@ -2026,3 +2026,89 @@ accounts are recoverable by their owners simply by signing in, but if the
 owner later deletes them from the vault that is final. `founder@itsuki.app`
 was confirmed to forward to the owner's inbox, so the transactional emails
 have a real destination.
+
+# Fourteenth pass — 2026-08-29: pre-launch truthfulness audit (copy only)
+
+A copy-only pass against the CURRENTLY DEPLOYED product. No backend, auth,
+lifecycle, schema, export, deletion, security, routing or infrastructure
+behavior was touched. Where a claim could only be kept by changing behavior,
+the claim was narrowed instead — twice that surfaced a real code defect,
+recorded below rather than fixed.
+
+Six auditors checked **118 unique material claims**; 38 were FALSE or
+materially overbroad.
+
+## The worst of it: the open-source claims
+
+The homepage said *"Every commit and schema migration is public"*. Production
+runs **65 commits ahead of `origin/master`** (frozen 2026-08-23): nine
+migrations (0055–0063) and seven modules — `account_vault`, `mail`,
+`trust_cases`, `security_events`, `admin_confirmation`, `review_bundle`,
+`egress_ownership` — exist only in the deployed tree. The security page had
+*already* disclosed the lag honestly; the homepage flatly contradicted it, and
+the security page's own §8 offered "the code that enforces every claim on this
+page is public" **in place of a third-party audit** — the load-bearing
+assurance was the false one. Both now state that the engine, SDKs and schema
+history are published under Apache 2.0 *and* that publication runs behind
+deployment.
+
+## Exports
+
+The export is nine collections scoped to **one** memory space. Copy promised
+"everything you own", "everything in that memory space", and "memories,
+**sources**, and revisions" — but source packets and episodes are not exported,
+and sibling subtenant spaces never are. Nine such claims narrowed. The docs
+additionally still described the **pre-R2 size ceiling** (removed by the twelfth
+pass), the wrong 409/410 error codes, a retention class that no longer matches
+R2-stored files, and a Settings path removed in the twelfth pass.
+
+## Tracking
+
+Docs claimed the beacon *"stores no identifier"* — it keeps a keyed, truncated,
+daily-rotated fingerprint of IP+UA. Docs claimed the session cookie was *"the
+only cookie in play"* — there are four. Privacy said hashed IPs were *"enough to
+detect abuse, not to track you"*; a bare SHA-256 of an IPv4 address is
+reversible by brute force, so the copy now says what hashing actually buys
+rather than implying anonymisation. The beacon's own disclosure was already
+accurate and survives unchanged.
+
+## The vault must never read as deletion
+
+The dormant state preserves everything and wakes on sign-in or API-key use.
+Console copy now leads with **"This is NOT deletion"**; Privacy explains
+shelving and states **"Shelving is not erasure"**; the retention table gains a
+*Shelved accounts* row. Privacy's "kept while the account is active" was also
+inaccurate once shelving existed, and now covers it.
+
+## Deletion
+
+"Deletion is complete everywhere within about 30 days" ignored permanent
+by-design residue (tombstones, barriers, fences). Sessions were described as
+deleted on logout when they are revoked and retained as a security log. Both
+corrected, and Privacy now discloses that the mail log keeps addresses already
+emailed.
+
+## Verification
+
+`test/launch_truthfulness.spec.js` (15) pins every correction — negative
+assertions included, so the flattering wording cannot come back. One existing
+pin moved to the accurate erasure wording. Huba corpus rebuilt (docs hash
+gate). Suite **207 files / 2,649 tests + node 666, zero failures**. Commit
+`9f9e776`, worker **`c3c8a3aa-5c1c-4044-8553-96bc47570f02`**, live-verified
+27/27 against the deployed strings.
+
+**Counts:** 38 corrected · 16 TRUE+PROVEN · 18 TRUE-untested · 43 MISLEADING
+(open, itemised in PROMISE_EVIDENCE_MATRIX.md for counsel) · **0 FALSE** · 3
+NOT-VERIFIABLE.
+
+## Two code defects found, deliberately NOT fixed (out of scope this pass)
+
+1. **The account-deletion confirmation email never sends.** `cleanup.js:1411`
+   guards on `user?.email`, but `user` is selected at `:877` as
+   `SELECT id, email_normalized` — no `email` field, so the guard is always
+   false. No public copy promises the email, so this is an unkept internal
+   commitment, not a false claim.
+2. **`mail_outbox` is never scrubbed at account erasure**, though
+   `lifecycle_census.js` classifies it `scrub`. A plaintext recipient address
+   and rendered body survive erasure. Privacy now discloses this; the durable
+   fix is to scrub the table.
