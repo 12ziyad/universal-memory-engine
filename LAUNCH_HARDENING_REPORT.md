@@ -1815,3 +1815,30 @@ regression I introduced was also caught and fixed: the erased-space write check
 initially ran on every legacy request, adding a D1 read to the no-D1 MCP
 chooser path — it is now scoped to write intent, which is both faster and more
 correct, since a read of an erased space returns nothing anyway.
+
+## Deployment and live verification
+
+Commit `9f9bfa7`. No migration in this phase (0062 remains the tip).
+`npx wrangler deploy` → version **`4e61f90d-2001-4f32-ba86-13e3e2c60f02`**
+(`tmp/deploy9.log`).
+
+**The attacks were re-run against LIVE production, not only the test isolate —
+31 checks, all passing.** A throwaway attacker minted a real Bearer token and
+sent the actual forged-ownership ingest at itsuki.app: it was accepted under
+the attackers own identity (200), and production D1 then showed zero receipts
+and zero source packets naming the victim as owner, one high-severity
+`scope_ownership_forgery` event, and zero webhook deliveries to the victim.
+The victims live ops view and graph contained no trace of the attackers
+space. A real export was prepared and then erased: the download returned 404
+and no memory label survived in the write ledger. The review bundle refused
+anonymous (401) and non-admin (403) callers, served an admin an attachment
+carrying no email address and no account identifier, and reported its own
+schema, governance allowlists and legality matrix. All six corrected public
+sentences are live on itsuki.app. The three smoke accounts were demoted and
+disabled afterwards.
+
+Known-and-stated: GitHub pushes have been blocked at the network level for
+this entire campaign, so `9f9bfa7` — like the two commits before it — is
+LOCAL ONLY. Production runs it; the public repository does not have it yet.
+That gap is now disclosed in SECURITY.md and on the security page rather than
+contradicted by them.
