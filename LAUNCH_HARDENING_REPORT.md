@@ -2115,7 +2115,7 @@ NOT-VERIFIABLE.
 
 ---
 
-# Tenth pass — 2026-08-29: the landing view stops being a leftover
+# Fifteenth pass — 2026-09-04: the landing view stops being a leftover
 
 Owner: *"sometimes it automatically opens Dashboard instead of Get started."*
 
@@ -2157,15 +2157,18 @@ the signature grew parameters, `indexOf` returned -1, and the slice went empty
 — the same dead-anchor failure mode fixed twice already in this campaign. It
 now anchors on the function name only.
 
-## Addendum — the suite baseline is 208 files, not 188
+## Addendum — a correction to this pass's own record
 
-The run that verified this pass reported **208 files / 2,657 tests**, while every
-earlier pass reported 188 / ~2,400. That was not a miscount: the run took 1633s
-against 1049s, with setup time up by half, so it genuinely executed more
-suites. The arithmetic settles which number is right — 235 spec files on disk
-minus the 27 the workers config excludes (host-filesystem suites covered by
-`vitest.unit.config.mjs`) is exactly **208**. The 208-file run is the complete
-eligible set; the earlier "full" runs were partial, cause unknown (most likely
-files that never got collected under load). Treat 208 / 2,657 as the baseline
-from here on. The commit message of `3f9c89a` states the old numbers; this is
-the correction.
+The commit message of `3f9c89a` says "188 files / 2,425 tests green". The run
+that actually verified it reported **208 files / 2,657 tests**. Both numbers
+are real; the smaller one is stale. 188 was the suite size at the ninth pass;
+passes ten through fourteen each added spec files (202 → 205 → 206 → 207), and
+this pass's pins make 208. Arithmetic confirms 208 is the complete workers-pool
+set: 235 spec files on disk minus the 27 the config hands to
+`vitest.unit.config.mjs` (host-filesystem suites) is exactly 208. Nothing was
+partial; the session that wrote the commit message had resumed from a stale
+summary and quoted the ninth-pass figure. Treat 208 / 2,657 as the baseline.
+
+A second correction from the same cause: this section was first committed
+titled "Tenth pass — 2026-08-29", colliding with the real tenth pass (Phase 2)
+above. The title now says what it is: the fifteenth pass, on 4 September.
