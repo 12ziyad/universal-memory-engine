@@ -2156,3 +2156,16 @@ The Huba boot test sliced on the exact old signature `openAuthenticatedApp()`;
 the signature grew parameters, `indexOf` returned -1, and the slice went empty
 — the same dead-anchor failure mode fixed twice already in this campaign. It
 now anchors on the function name only.
+
+## Addendum — the suite baseline is 208 files, not 188
+
+The run that verified this pass reported **208 files / 2,657 tests**, while every
+earlier pass reported 188 / ~2,400. That was not a miscount: the run took 1633s
+against 1049s, with setup time up by half, so it genuinely executed more
+suites. The arithmetic settles which number is right — 235 spec files on disk
+minus the 27 the workers config excludes (host-filesystem suites covered by
+`vitest.unit.config.mjs`) is exactly **208**. The 208-file run is the complete
+eligible set; the earlier "full" runs were partial, cause unknown (most likely
+files that never got collected under load). Treat 208 / 2,657 as the baseline
+from here on. The commit message of `3f9c89a` states the old numbers; this is
+the correction.
