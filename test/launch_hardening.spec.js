@@ -719,6 +719,48 @@ describe("graph edge appearance is derived, not looked up", () => {
 	});
 });
 
+describe("the landing view is a decision, not a leftover", () => {
+	async function shell() {
+		return (await import("../public/index.html?raw")).default;
+	}
+
+	it("a fresh sign-in is decided by account state, never by a stale hash", async () => {
+		// The bug: every path used `hashView() || S.view || "overview"`, so the
+		// landing page was whatever fragment or in-memory view survived the
+		// previous session — Get started one day, Dashboard the next, decided
+		// by whether the tab had been reloaded in between.
+		const html = await shell();
+		const open = html.slice(html.indexOf("async function openAuthenticatedApp("), html.indexOf("async function finishAuthentication("));
+		expect(open).toContain("} else if (fresh) {");
+		expect(open).toContain("await refreshTokens();");
+		expect(open).toContain('S.view = (S.tokens || []).length ? "overview" : "install";');
+		// ...and the URL is rewritten to the decision, so a reload restores it.
+		expect(open).toContain("if (fresh || view) restoreCurrentAppLocation();");
+	});
+
+	it("sign-ins say fresh; a reload of a live session restores", async () => {
+		const html = await shell();
+		expect(html).toContain("await finishAuthentication({ fresh: true });");
+		// initShell: /login with a session (OAuth return) is a sign-in;
+		// a plain /app reload restores the hash view.
+		expect(html).toContain("try { await finishAuthentication({ fresh: true }); }");
+		expect(html).toContain("try { await finishAuthentication({ fresh: false }); }");
+		// No caller may fall back to the ambiguous no-argument form.
+		expect(html).not.toContain("await finishAuthentication();");
+	});
+
+	it("first run hands off to Get started explicitly, and logout forgets the view", async () => {
+		const html = await shell();
+		// First run has just minted a key, so the token count would send a
+		// data-driven landing to Dashboard — the destination must be explicit.
+		expect(html).toContain('await openAuthenticatedApp({ view: "install" });');
+		// Both logout paths reset S.view; the hash is already cleared by
+		// pushUrl("/"), so nothing from this session can leak into the next.
+		const resets = html.match(/S\.scopeRevision = 0; S\.view = "overview";/g) || [];
+		expect(resets.length).toBeGreaterThanOrEqual(2);
+	});
+});
+
 describe("open-in-graph cannot crash the canvas", () => {
 	async function shell() {
 		return (await import("../public/index.html?raw")).default;
@@ -904,7 +946,7 @@ describe("Huba stays shut until it is asked for", () => {
 		expect(shell).toContain('<section id="hubaPanel" hidden data-collapsed="true"');
 		// Nothing may open it on boot — only the button, and only on click.
 		const boot = shell.slice(
-			shell.indexOf("async function openAuthenticatedApp()"),
+			shell.indexOf("async function openAuthenticatedApp("),
 			shell.indexOf("checkFailedSaves();"),
 		);
 		expect(boot).toContain("initHuba();");

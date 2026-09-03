@@ -2112,3 +2112,47 @@ NOT-VERIFIABLE.
    `lifecycle_census.js` classifies it `scrub`. A plaintext recipient address
    and rendered body survive erasure. Privacy now discloses this; the durable
    fix is to scrub the table.
+
+---
+
+# Tenth pass — 2026-08-29: the landing view stops being a leftover
+
+Owner: *"sometimes it automatically opens Dashboard instead of Get started."*
+
+Correct, and there was no rule deciding it. Every authenticated open ran
+
+```js
+S.view = hashView() || S.view || "overview";
+```
+
+so the landing page was whatever survived from the previous session: a stale
+`#install` fragment in the URL — fragments even survive the server's `/login`
+redirect, which is why the owner's own screenshot showed `?view=login#install`
+— or an in-memory `S.view` that neither logout path ever reset. The same
+person got Get started if they had signed out and back in without reloading
+the tab, and Dashboard if they had reloaded. Not a preference; an accident of
+tab lifetime.
+
+## The rule now
+
+`openAuthenticatedApp` takes three explicit cases:
+
+| case | when | lands on |
+|---|---|---|
+| `view` | first run just finished | Get started, explicitly — the first key was just minted, so a token count would have sent them to Dashboard before they connected anything |
+| `fresh` | any completed sign-in (password, code, OAuth return, or arriving at /login with a live session) | decided by **account state**: no connections yet → Get started; otherwise Dashboard |
+| neither | a reload of a live session | restore the view the URL carries |
+
+After a `fresh` or explicit landing the URL is rewritten to the decision, so the
+next reload restores the decision rather than the leftover. Both logout paths
+now reset `S.view`; the hash was already cleared by `pushUrl("/")`. Nothing
+from one session can choose the next one's first page.
+
+`finishAuthentication` forwards `{ fresh }`, and a test forbids the ambiguous
+no-argument call — every caller has to say which case it is.
+
+## Also caught while here
+The Huba boot test sliced on the exact old signature `openAuthenticatedApp()`;
+the signature grew parameters, `indexOf` returned -1, and the slice went empty
+— the same dead-anchor failure mode fixed twice already in this campaign. It
+now anchors on the function name only.

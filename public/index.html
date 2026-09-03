@@ -4515,7 +4515,7 @@ async function submitAuthCode() {
 		}
 		if (AUTH_FLOW.mode === "signup" || body.created) sendFunnelStep("signup_done");
 		Object.assign(AUTH_FLOW, { busy: false, error: "", step: "entry", maskedEmail: "" });
-		await finishAuthentication();
+		await finishAuthentication({ fresh: true });
 		return;
 	} catch (error) {
 		AUTH_FLOW.error = error.message || "The code could not be verified. Try again.";
@@ -4759,10 +4759,34 @@ async function proceedFirstRunKey() {
 	await completeFirstRun();
 }
 
-async function openAuthenticatedApp() {
-	S.view = hashView() || S.view || "overview";
+/**
+ * Which view an authenticated session opens on.
+ *
+ * This used to be `hashView() || S.view || "overview"` on every path, which
+ * made the landing page whatever survived from the last session: a stale
+ * #install fragment (fragments even survive the server's /login redirect),
+ * or an in-memory S.view that logout never reset. So the same person got
+ * Get started one day and Dashboard the next, decided by whether they had
+ * reloaded the tab in between. Now there are three explicit cases:
+ *   view   — an explicit destination (first-run hands off to Get started);
+ *   fresh  — a sign-in: decided by account state, never by leftovers —
+ *            no connections yet means the setup hub, otherwise Dashboard;
+ *   else   — a reload of a live session: restore where they were (hash).
+ */
+async function openAuthenticatedApp({ fresh = false, view = null } = {}) {
+	if (view && APP_VIEWS.has(view)) {
+		S.view = view;
+	} else if (fresh) {
+		await refreshTokens();
+		S.view = (S.tokens || []).length ? "overview" : "install";
+	} else {
+		S.view = hashView() || S.view || "overview";
+	}
 	setMode("app");
 	setView(S.view, { updateHash: false });
+	// The URL must say where we actually landed, or the next reload restores
+	// the leftover instead of the decision.
+	if (fresh || view) restoreCurrentAppLocation();
 	renderAppUser();
 	sendVisitBeacon("app");
 	initHuba();
@@ -4775,7 +4799,7 @@ async function openAuthenticatedApp() {
 	await load();
 }
 
-async function finishAuthentication() {
+async function finishAuthentication({ fresh = false } = {}) {
 	const me = await refreshMe();
 	if (!me?.user?.id) throw new Error("The secure session could not be verified. Please sign in again.");
 	S.userId = me.user.id;
@@ -4794,7 +4818,7 @@ async function finishAuthentication() {
 		renderFirstRun();
 		return false;
 	}
-	await openAuthenticatedApp();
+	await openAuthenticatedApp({ fresh });
 	return true;
 }
 
@@ -4802,7 +4826,10 @@ async function completeFirstRun() {
 	if (FIRST_RUN.busy || FIRST_RUN.key) return;
 	FIRST_RUN.stage = "idle";
 	FIRST_RUN.error = "";
-	await openAuthenticatedApp();
+	// First run just minted the first key, so the token count would send a
+	// data-driven landing to Dashboard — but the person has not connected
+	// anything yet. Get started is the explicit destination.
+	await openAuthenticatedApp({ view: "install" });
 }
 
 function invitationReasonCopy(reason, message = "") {
@@ -4879,7 +4906,7 @@ async function signOutForInvitation() {
 	if (!INVITE_ACCEPT.token || INVITE_ACCEPT.loading || INVITE_ACCEPT.accepting) return;
 	await fetch("/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0; S.view = "overview";
 	resetAuthFlow();
 	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	Object.assign(INVITE_ACCEPT, { loading: false, accepting: false, detail: null, error: "", reason: "", done: false });
@@ -20993,7 +21020,7 @@ async function copyText(t, msg) {
 async function logoutNow() {
 	await fetch("/auth/logout", { method:"POST", credentials:"include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0; S.view = "overview";
 	resetAuthFlow();
 	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	pushUrl("/");
@@ -21004,7 +21031,7 @@ async function logoutAllNow() {
 	if (!confirm("Log out all browser sessions for this account?")) return;
 	await fetch("/auth/logout-all", { method:"POST", credentials:"include" }).catch(() => {});
 	S.projectController?.abort();
-	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0;
+	S.me = null; S.data = null; S.tokens = []; S.oneTimeToken = null; S.projects = []; S.organizations = []; S.organizationsError = ""; S.organizationId = ""; S.projectId = ""; S.projectController = null; S.bootstrap = null; S.scopeRevision = 0; S.view = "overview";
 	resetAuthFlow();
 	Object.assign(FIRST_RUN, { stage: "idle", step: 0, busy: false, error: "", key: null, keyCopied: false });
 	pushUrl("/");
@@ -21027,7 +21054,7 @@ async function initShell() {
 	}
 	if (mode === "login" || mode === "signup") {
 		if (S.me) {
-			try { await finishAuthentication(); }
+			try { await finishAuthentication({ fresh: true }); }
 			catch (projectError) { renderShellLoadError(projectError); }
 			return;
 		}
@@ -21043,7 +21070,8 @@ async function initShell() {
 			sendVisitBeacon("landing");
 			return;
 		}
-		try { await finishAuthentication(); }
+		// A reload of a live session: restore the view the URL carries.
+		try { await finishAuthentication({ fresh: false }); }
 		catch (projectError) { renderShellLoadError(projectError); }
 		return;
 	}
