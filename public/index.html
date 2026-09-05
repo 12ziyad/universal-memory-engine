@@ -3056,7 +3056,10 @@ function stop(e) { e.stopPropagation(); e.preventDefault(); }
 const S = {
 	userId: localStorage.getItem("uml_user") || "",
 	key: localStorage.getItem("uml_key") || "",
-	view: "overview",
+	// `/app` is the product's intentional front door. Explicit hash routes
+	// still open their requested workspace, but a bare visit or refresh starts
+	// in Get started rather than dropping someone into an empty dashboard.
+	view: "install",
 	installCatalogId: null, installRouteId: null, installCategory: "all", installQuery: "",
 	installStepIndex: 0, installExpanded: false,
 	graphMode: "clean",
@@ -4762,25 +4765,18 @@ async function proceedFirstRunKey() {
 /**
  * Which view an authenticated session opens on.
  *
- * This used to be `hashView() || S.view || "overview"` on every path, which
- * made the landing page whatever survived from the last session: a stale
- * #install fragment (fragments even survive the server's /login redirect),
- * or an in-memory S.view that logout never reset. So the same person got
- * Get started one day and Dashboard the next, decided by whether they had
- * reloaded the tab in between. Now there are three explicit cases:
- *   view   — an explicit destination (first-run hands off to Get started);
- *   fresh  — a sign-in: decided by account state, never by leftovers —
- *            no connections yet means the setup hub, otherwise Dashboard;
- *   else   — a reload of a live session: restore where they were (hash).
+ * The bare `/app` route is deliberately Get started. A dashboard, memory, or
+ * other explicit hash route still wins, so bookmarked/deep-linked workspace
+ * URLs continue to work. This avoids turning a fresh visit or a plain refresh
+ * into Dashboard simply because a prior session had data or state.
  */
 async function openAuthenticatedApp({ fresh = false, view = null } = {}) {
 	if (view && APP_VIEWS.has(view)) {
 		S.view = view;
 	} else if (fresh) {
-		await refreshTokens();
-		S.view = (S.tokens || []).length ? "overview" : "install";
+		S.view = "install";
 	} else {
-		S.view = hashView() || S.view || "overview";
+		S.view = hashView() || "install";
 	}
 	setMode("app");
 	setView(S.view, { updateHash: false });
@@ -21101,7 +21097,7 @@ function renderShellLoadError(error) {
 }
 
 function restoreCurrentAppLocation() {
-	const view = APP_VIEWS.has(S.view) ? S.view : "overview";
+	const view = APP_VIEWS.has(S.view) ? S.view : "install";
 	history.replaceState(null, "", `/app#${view}`);
 }
 
@@ -21123,7 +21119,7 @@ function handlePopState() {
 		renderInvitationModal();
 	}
 	const mode = routeMode();
-	const targetView = mode === "app" ? (hashView() || "overview") : "";
+	const targetView = mode === "app" ? (hashView() || "install") : "";
 	if ((mode !== "app" || targetView !== S.view) && blockProjectCreateNavigation("leaving the creation form")) {
 		restoreCurrentAppLocation();
 		return;
