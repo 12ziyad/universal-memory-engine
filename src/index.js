@@ -8,6 +8,7 @@
  */
 
 import { createMcpHandler } from "agents/mcp";
+import { handleAvenBridge } from "./aven/bridge.js";
 
 import { CATEGORIES, getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
@@ -5606,6 +5607,8 @@ async function handleRequestInner(request, env, ctx, url) {
 		// OAuth 2.1 for the MCP server: discovery metadata, authorization,
 		// consent, token, revocation, registration. Returns null for anything
 		// that is not an OAuth path, so the rest of the table is untouched.
+		const avenResponse = await handleAvenBridge(request, env, ctx, url);
+		if (avenResponse) return avenResponse;
 		const oauthResponse = await handleOAuthRoutes(request, env, ctx, url);
 		if (oauthResponse) return oauthResponse;
 

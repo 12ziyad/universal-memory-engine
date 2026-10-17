@@ -527,12 +527,18 @@ export async function deleteObject(env, userId, options) {
 	return result;
 }
 
-async function deleteObjectInner(env, userId, { kind, id, suppress = true, guards = [] }) {
+async function deleteObjectInner(env, userId, { kind, id, suppress = true, guards = [], auditIntent = null, transactionStatements = [] }) {
 	const now = Date.now();
 	const fences = (guards ?? []).filter(Boolean);
+	// A first-party adapter can keep dedupe and the canonical cascade in the
+	// same governed transaction. Existing deletion callers retain their path.
+	const commit = (statements) => auditIntent
+		? commitAuditedBatch(env, auditIntent, [...statements, ...transactionStatements])
+		: env.DB.batch(statements);
+	const settled = (result) => auditIntent ? auditedMutationResult(result, auditIntent) : result;
 	if (kind === "page" || kind === "memory_page") {
 		if (suppress) await suppressPage(env, userId, id, "delete_selected");
-		await env.DB.batch([
+		await commit([
 			...fences,
 			advanceManualPageWriteEpoch(env, userId, now),
 			env.DB.prepare("DELETE FROM manual_page_identities WHERE user_id = ? AND page_id = ?").bind(userId, id),
@@ -547,7 +553,7 @@ async function deleteObjectInner(env, userId, { kind, id, suppress = true, guard
 			...versionResidueStatements(env, userId, [id]),
 		]);
 		await deleteManualSearchObjects(env, getConfig(env), userId, { pageIds: [id] });
-		return { deleted: true, kind: "memory_page", id };
+		return settled({ deleted: true, kind: "memory_page", id });
 	}
 	if (kind === "node") {
 		const { results: touchingEdges } = await env.DB.prepare(
@@ -559,7 +565,7 @@ async function deleteObjectInner(env, userId, { kind, id, suppress = true, guard
 			 UNION ALL SELECT id FROM events WHERE user_id = ? AND node_id = ? AND deleted_at IS NULL`,
 		).bind(userId, id, userId, id).all();
 		if (suppress) await suppressNode(env, userId, id, "delete_selected");
-		await env.DB.batch([
+		await commit([
 			...fences,
 			env.DB.prepare("DELETE FROM manual_node_identities WHERE user_id = ? AND node_id = ?").bind(userId, id),
 			env.DB.prepare("DELETE FROM manual_fact_identities WHERE user_id = ? AND (owner_node_id = ? OR related_node_id = ?)")
@@ -598,7 +604,7 @@ async function deleteObjectInner(env, userId, { kind, id, suppress = true, guard
 			[id, ...(dyingRows ?? []).map((r) => r.id)],
 			neighbourIds,
 		);
-		return { deleted: true, kind: "node", id };
+		return settled({ deleted: true, kind: "node", id });
 	}
 	// One wrong fact inside an otherwise-good node. Before this, the smallest
 	// deletable unit was the whole node, so removing a single bad slice meant
@@ -610,7 +616,7 @@ async function deleteObjectInner(env, userId, { kind, id, suppress = true, guard
 		).bind(id, userId).first();
 		if (!row) return { deleted: false, kind: "slice", id, reason: "not_found" };
 		const nodeId = row.node_id ?? null;
-		await env.DB.batch([
+		await commit([
 			...fences,
 			// The same fact-identity cleanup the bulk path does for slices, so the
 			// canonical key is freed and re-saving that fact later counts as new.
@@ -624,14 +630,14 @@ async function deleteObjectInner(env, userId, { kind, id, suppress = true, guard
 			await refreshManualSearchProfiles(env, getConfig(env), userId, { nodeIds: [nodeId] });
 			await regenerateDirtySummaries(env, userId, [id], [nodeId]);
 		}
-		return { deleted: true, kind: "slice", id, node_id: nodeId };
+		return settled({ deleted: true, kind: "slice", id, node_id: nodeId });
 	}
 	if (kind === "candidate") {
 		const statement = env.DB.prepare("UPDATE candidates SET deleted_at = ?, suppressed_at = ? WHERE id = ? AND user_id = ?")
 			.bind(now, suppress ? now : null, id, userId);
-		if (fences.length) await env.DB.batch([...fences, statement]);
+		if (auditIntent || fences.length) await commit([...fences, statement]);
 		else await statement.run();
-		return { deleted: true, kind: "candidate", id };
+		return settled({ deleted: true, kind: "candidate", id });
 	}
 	return { deleted: false, reason: "unsupported kind" };
 }
