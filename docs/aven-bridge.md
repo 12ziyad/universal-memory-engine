@@ -59,6 +59,12 @@ Private requests carrying an Origin header are refused. There are no CORS grants
 
 ## Operations
 
+### Background delegation (migration 0065)
+
+`POST /background-grants` requires a live interactive bridge session and the private service secret. It accepts `id`, `tokenHash` (SHA-256 hex), `projectId`, `purpose` (`automation` or `github_connection`) and `resourceId`. The client generates and encrypts the high-entropy `abg_` token; Itsuki receives only its hash. Issuance is audited and fenced against session, membership and project changes. Identical registration is idempotent; conflicting or revoked registration fails.
+
+Background grants survive logout and original session expiry. Every use checks the active account, erasure state, active project and current required membership capability. `/session` returns `expiresAt: null`, background grant metadata and only the scoped project. Automation grants can read that project's knowledge and check authorization; GitHub grants can check authorization only. Neither can create grants, mutate memory, enumerate unrelated projects or access normal browser routes. `POST /background-grants/revoke` accepts the grant itself with the private service secret and remains available after membership loss so cleanup can complete. Account or hard-project deletion cascades the grant; archive and capability removal deny it immediately. Aven handles routine pause/revision fences and orphan-grant cleanup.
+
 | Method | Path relative to `/internal/aven` | Contract |
 |---|---|---|
 | GET | `/session` | Current principal, expiry and accessible projects; no token echoed. `?projects=0` skips project enumeration for authentication middleware. |

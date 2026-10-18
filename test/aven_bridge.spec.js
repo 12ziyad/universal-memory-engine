@@ -2,6 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { describe, expect, it } from "vitest";
 import worker from "../src/index.js";
 import { avenPkce } from "../src/aven/bridge.js";
+import { randomSecret, sha256Hex } from "../src/auth.js";
 
 const settings = { ...env, AVEN_BRIDGE_SECRET: "test-only-aven-bridge-shared-secret-at-least-32-characters", AVEN_ALLOWED_ORIGINS: "https://aven.example" };
 const callback = "https://aven.example/auth/callback";
@@ -39,6 +40,54 @@ async function project(session, name = "Atlas") {
 async function teach(session, projectId, text = "Use the approved architecture.", extra = {}) {
   return request(`/internal/aven/projects/${projectId}/knowledge`, { method: "POST", headers: bridgeHeaders(session.token), body: JSON.stringify({ title: "Architecture", text, kind: "decision", idempotencyKey: key(), ...extra }) });
 }
+async function background(session, projectId, purpose = "automation") {
+  const token = `abg_${randomSecret(32)}`;
+  const body = { id: crypto.randomUUID(), tokenHash: await sha256Hex(token), projectId, purpose, resourceId: key() };
+  const response = await request("/internal/aven/background-grants", { method: "POST", headers: bridgeHeaders(session.token), body: JSON.stringify(body) });
+  return { token, body, response };
+}
+describe("Aven durable background authorization", () => {
+  it("survives Aven logout, source-session revocation and expiry without widening project access", async () => {
+    const session = await login(), atlas = await project(session), other = await project(session, "Other");
+    await teach(session, atlas.id);
+    const grant = await background(session, atlas.id); expect(grant.response.status).toBe(201);
+    await request("/internal/aven/session/revoke", { method: "POST", headers: bridgeHeaders(session.token) });
+    await env.DB.prepare("UPDATE sessions SET revoked_at=?,expires_at=1 WHERE user_id=?").bind(Date.now(), session.principal.actorId).run();
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(401);
+    const active = await request("/internal/aven/session", { headers: bridgeHeaders(grant.token) });
+    expect(active.status).toBe(200); const result = await active.json();
+    expect(result.expiresAt).toBeNull(); expect(result.projects.map(p => p.id)).toEqual([atlas.id]);
+    expect((await request(`/internal/aven/projects/${atlas.id}/knowledge`, { headers: bridgeHeaders(grant.token) })).status).toBe(200);
+    expect((await request(`/internal/aven/projects/${other.id}/knowledge`, { headers: bridgeHeaders(grant.token) })).status).toBe(403);
+    expect((await teach({token:grant.token}, atlas.id)).status).toBe(403);
+    expect((await request("/internal/aven/background-grants", { method:"POST",headers:bridgeHeaders(grant.token),body:JSON.stringify(grant.body) })).status).toBe(403);
+    expect((await request("/internal/aven/projects", { headers:bridgeHeaders(grant.token) })).status).toBe(403);
+  });
+  it("rechecks membership and account status and allows idempotent revocation after access loss", async () => {
+    const owner = await login(), member = await login(), atlas = await project(owner), actor=member.principal.actorId, at=Date.now();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO organization_members(id,org_id,user_id,role,created_at,updated_at) VALUES(?,?,?,'member',?,?)").bind(key(),atlas.organizationId,actor,at,at),
+      env.DB.prepare("INSERT INTO project_members(id,project_id,org_id,user_id,role,created_at,updated_at) VALUES(?,?,?,?,'member',?,?)").bind(key(),atlas.id,atlas.organizationId,actor,at,at),
+    ]);
+    const grant = await background(member, atlas.id); expect(grant.response.status).toBe(201);
+    await env.DB.prepare("UPDATE project_members SET role='viewer' WHERE project_id=? AND user_id=?").bind(atlas.id,actor).run();
+    expect((await request("/internal/aven/session",{headers:bridgeHeaders(grant.token)})).status).toBe(403);
+    await env.DB.prepare("UPDATE users SET status='disabled' WHERE id=?").bind(actor).run();
+    expect((await request("/internal/aven/session",{headers:bridgeHeaders(grant.token)})).status).toBe(401);
+    for (let n=0;n<2;n++) expect((await request("/internal/aven/background-grants/revoke",{method:"POST",headers:bridgeHeaders(grant.token),body:"{}"})).status).toBe(200);
+    await env.DB.prepare("UPDATE users SET status='active' WHERE id=?").bind(actor).run();
+    expect((await request("/internal/aven/session",{headers:bridgeHeaders(grant.token)})).status).toBe(401);
+  });
+  it("limits GitHub grants to authorization checks and refuses archived projects", async () => {
+    const session=await login(), atlas=await project(session), grant=await background(session,atlas.id,"github_connection");
+    expect(grant.response.status).toBe(201);
+    const result=await (await request("/internal/aven/session",{headers:bridgeHeaders(grant.token)})).json();
+    expect(result.projects[0].capabilities).toEqual(["project.integrations.manage"]);
+    expect((await request(`/internal/aven/projects/${atlas.id}/knowledge`,{headers:bridgeHeaders(grant.token)})).status).toBe(403);
+    await env.DB.prepare("UPDATE managed_projects SET status='archived' WHERE id=?").bind(atlas.id).run();
+    expect((await request("/internal/aven/session",{headers:bridgeHeaders(grant.token)})).status).toBe(404);
+  });
+});
 describe("Aven private identity and memory bridge", () => {
   it("is disabled without deployment configuration and refuses unknown redirects before signing in", async () => {
     const disabled = await request("/internal/aven/session", {}, env); expect(disabled.status).toBe(404);

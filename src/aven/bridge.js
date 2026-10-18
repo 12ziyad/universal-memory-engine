@@ -61,6 +61,17 @@ function bridgeSessionGuard(env, auth) {
 }
 async function resolveSession(env, request) {
   const token = request.headers.get("x-aven-session") ?? "";
+  if (/^abg_[A-Za-z0-9_-]{43}$/.test(token)) {
+    const auth = await env.DB.prepare(`SELECT g.*, u.name, u.email FROM aven_background_grants g
+      JOIN users u ON u.id=g.user_id WHERE g.token_hash=? AND g.revoked_at IS NULL AND u.status='active'
+      AND NOT EXISTS(SELECT 1 FROM account_erasure_tombstones t WHERE t.user_id=u.id)`)
+      .bind(await sha256Hex(token)).first();
+    if (!auth) fail("background_access_revoked", 401);
+    auth.background = true;
+    // Neither a service secret nor a stored grant bypasses current membership.
+    await scopeFor(env, auth, auth.project_id, auth.purpose === "automation" ? "project.memory.write" : "project.integrations.manage");
+    return auth;
+  }
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) fail("unauthorized", 401);
   const auth = await env.DB.prepare(`SELECT a.*, u.name, u.email FROM aven_bridge_sessions a
     JOIN sessions s ON s.id = a.source_session_id AND s.user_id = a.user_id
@@ -77,12 +88,19 @@ async function safeProject(env, auth, project) {
     status: project.status, revision: project.revision, capabilities: membership.capabilities, createdAt: project.created_at, updatedAt: project.updated_at };
 }
 async function sessionResult(env, auth, includeProjects = true) {
-  const base = { ok: true, expiresAt: auth.expires_at, principal: { actorId: auth.user_id, name: auth.name ?? "", email: auth.email ?? "" } };
+  const base = { ok: true, expiresAt: auth.background ? null : auth.expires_at, principal: { actorId: auth.user_id, name: auth.name ?? "", email: auth.email ?? "" } };
   if (!includeProjects) return base;
+  if (auth.background) {
+    const scope = await scopeFor(env, auth, auth.project_id, auth.purpose === "automation" ? "project.memory.write" : "project.integrations.manage");
+    const project = await safeProject(env, auth, scope.project);
+    project.capabilities = project.capabilities.filter((cap) => (auth.purpose === "automation" ? ["project.memory.read", "project.memory.write"] : ["project.integrations.manage"]).includes(cap));
+    return { ...base, projects: [project], background: { id: auth.id, purpose: auth.purpose, resourceId: auth.resource_id } };
+  }
   const projects = await listManagedProjects(env, auth.user_id);
   return { ...base, projects: await Promise.all(projects.map((project) => safeProject(env, auth, project))) };
 }
 async function scopeFor(env, auth, projectId, capability = "project.memory.read") {
+  if (auth.background && auth.project_id !== projectId) fail("not_found", 404);
   const req = new Request("https://itsuki.internal/", { headers: { "x-itsuki-project": projectId } });
   const scope = await resolveManagedProject(env, req, { type: "session", userId: auth.user_id });
   const membership = await resolveMembership(env, { userId: auth.user_id, project: scope.project });
@@ -232,8 +250,33 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     // No CORS, no browser cookies, no caller-selected actor or owner id.
     if (request.headers.has("origin")) fail("browser_access_forbidden", 403);
     if (url.pathname === "/internal/aven/session" && request.method === "POST") return await exchange(request, env);
+    // Possession permits only self-revocation, even after membership is removed.
+    if (url.pathname === "/internal/aven/background-grants/revoke" && request.method === "POST") {
+      const token = request.headers.get("x-aven-session") ?? "";
+      if (!/^abg_[A-Za-z0-9_-]{43}$/.test(token)) fail("unauthorized", 401);
+      await env.DB.prepare("UPDATE aven_background_grants SET revoked_at=COALESCE(revoked_at,?) WHERE token_hash=?").bind(Date.now(), await sha256Hex(token)).run();
+      return json({ ok: true });
+    }
     const auth = await resolveSession(env, request);
     if (!await allowRate(request.method === "GET" ? env.READ_LIMITER : env.SAVE_LIMITER, `aven:${auth.user_id}:${request.method}`, { fail: "closed" })) fail("rate_limited", 429);
+    if (auth.background && !(request.method === "GET" && (url.pathname === "/internal/aven/session" || (auth.purpose === "automation" && url.pathname.startsWith(`/internal/aven/projects/${auth.project_id}/knowledge`))))) fail("background_scope_forbidden", 403);
+    if (url.pathname === "/internal/aven/background-grants" && request.method === "POST") {
+      const body = await bodyOf(request);
+      onlyFields(body, ["id", "tokenHash", "projectId", "purpose", "resourceId"]);
+      if (!/^[A-Za-z0-9_-]{16,100}$/.test(body.id ?? "") || !/^proj_[A-Za-z0-9_-]{8,80}$/.test(body.projectId ?? "") || !/^[a-f0-9]{64}$/.test(body.tokenHash ?? "") || !["automation", "github_connection"].includes(body.purpose) || typeof body.resourceId !== "string" || body.resourceId.length < 1 || body.resourceId.length > 160) fail("invalid_background_grant");
+      const capability = body.purpose === "automation" ? "project.memory.write" : "project.integrations.manage";
+      const scope = await scopeFor(env, auth, body.projectId, capability);
+      const prior = await env.DB.prepare("SELECT * FROM aven_background_grants WHERE id=?").bind(body.id).first();
+      if (prior) {
+        if (prior.user_id !== auth.user_id || prior.project_id !== body.projectId || prior.purpose !== body.purpose || prior.resource_id !== body.resourceId || prior.token_hash !== body.tokenHash || prior.revoked_at !== null) fail("grant_conflict", 409);
+        return json({ ok: true, id: prior.id });
+      }
+      await runAuditedMutation(env, auditDetails(env, request, ctx, auth, scope, capability, "aven.background.authorized", "background_grant", body.id, body.id), async (intent) => {
+        await commitAuditedBatch(env, intent, [env.DB.prepare("INSERT INTO aven_background_grants(id,token_hash,user_id,project_id,purpose,resource_id,created_at) VALUES(?,?,?,?,?,?,?)").bind(body.id, body.tokenHash, auth.user_id, body.projectId, body.purpose, body.resourceId, Date.now())]);
+        return auditedMutationResult({ id: body.id }, intent);
+      });
+      return json({ ok: true, id: body.id }, 201);
+    }
     if (url.pathname === "/internal/aven/session" && request.method === "GET") return json(await sessionResult(env, auth, url.searchParams.get("projects") !== "0"));
     if (url.pathname === "/internal/aven/session/revoke" && request.method === "POST") {
       await env.DB.prepare("UPDATE aven_bridge_sessions SET revoked_at = ? WHERE id = ? AND user_id = ?").bind(Date.now(), auth.id, auth.user_id).run(); return json({ ok: true });
