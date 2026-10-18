@@ -9,6 +9,11 @@ import { getMemory, listMemories, parseInventoryListOptions } from "../lib/memor
 import { applyMemoryChange, contentHash, credentialFenceStatement, listMemoryHistory, runProjections, snapshotFor, validateIdempotencyKey, validatePatch, versionErrorResponse } from "../lib/memory_versions.js";
 import { projectMemorySpaceRegistrationStatement, retentionFenceGuardStatement } from "../lib/retention.js";
 import { deleteObject } from "../pipeline/cleanup.js";
+import { stageMcpConversation } from "../pipeline/mcp_engine.js";
+import { getMemoryRules } from "../pipeline/rules.js";
+import { checkAiBudget } from "../lib/ai_budget.js";
+import { runRecallCommand } from "../pipeline/commands.js";
+import { activeCategoryRules } from "../lib/project_categories.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
 const CODE_TTL = 60_000;
@@ -286,11 +291,55 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       }
       return json({ ok: true, project: await safeProject(env, auth, updated.project), changed: updated.changed });
     }
-    const match = /^\/internal\/aven\/projects\/(proj_[A-Za-z0-9_-]{8,80})\/(knowledge|graph)(?:\/((?:page|node|slice|event)_[A-Za-z0-9_-]{8,100}))?(\/history)?$/.exec(url.pathname);
+    const match = /^\/internal\/aven\/projects\/(proj_[A-Za-z0-9_-]{8,80})\/(knowledge|graph|capture|recall)(?:\/((?:page|node|slice|event)_[A-Za-z0-9_-]{8,100}))?(\/history)?$/.exec(url.pathname);
     if (!match) fail("not_found", 404);
     const [, projectId, resource, memoryId, history] = match;
-    const write = request.method !== "GET";
+    const write = request.method !== "GET" && resource !== "recall";
     const scope = await scopeFor(env, auth, projectId, request.method === "DELETE" ? "project.memory.delete" : write ? "project.memory.write" : "project.memory.read");
+    if(resource === "recall" && request.method === "POST" && !memoryId){
+      const body=await bodyOf(request);onlyFields(body,["query"]);
+      if(typeof body.query!=="string" || !body.query.trim() || body.query.length>500) fail("invalid_query");
+      const result=await runRecallCommand(env,scope.memoryOwnerUserId,body.query,{recallScope:"project_only",memoryScope:{authType:"session",memoryUserId:scope.memoryOwnerUserId,ownerUserId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId,managedProjectId:scope.project.id,managedProjectName:scope.project.name,projectId:scope.project.id,externalUserId:scope.accountUserId}});
+      return json(result);
+    }
+    if(resource === "capture" && request.method === "GET" && !memoryId){
+      const receiptId=url.searchParams.get("receiptId");
+      if(!receiptId || receiptId.length>160) fail("invalid_receipt");
+      const job=await env.DB.prepare("SELECT status FROM memory_jobs WHERE user_id=? AND receipt_id=? ORDER BY created_at DESC LIMIT 1").bind(scope.memoryOwnerUserId,receiptId).first();
+      if(!job) return json({ok:true,state:"unknown"});
+      return json({ok:true,state:job.status});
+    }
+    if (resource === "capture" && request.method === "POST" && !memoryId) {
+      const body = await bodyOf(request);
+      onlyFields(body, ["messages", "conversationId", "idempotencyKey"]);
+      const idempotencyKey = validateIdempotencyKey(body.idempotencyKey);
+      if (typeof body.conversationId !== "string" || body.conversationId.length < 1 || body.conversationId.length > 160) fail("invalid_conversation");
+      if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 16) fail("invalid_messages");
+      let total = 0;
+      const messages = body.messages.map((message) => {
+        if (!message || typeof message !== "object") fail("invalid_message");
+        onlyFields(message,["role","content"]);
+        if (!["user","assistant"].includes(message.role) || typeof message.content !== "string" || message.content.length > 12000) fail("invalid_message");
+        total += message.content.length;
+        return {role:message.role,content:message.content};
+      });
+      if (total > 24000) fail("capture_too_large",413);
+      const rules = await getMemoryRules(env,scope.memoryOwnerUserId,{failClosed:true});
+      rules.projectCategories = await activeCategoryRules(env,{projectId:scope.project.id,memoryOwnerUserId:scope.memoryOwnerUserId,legacy:rules.customCategories ?? []});
+      const cap = await checkAiBudget(env,{userId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId});
+      if (cap) return json({ok:true,state:"paused",summary:cap.message,receiptId:null});
+      // Admission is audited and fenced to the current actor before durable staging.
+      await runAuditedMutation(env,auditDetails(env,request,ctx,auth,scope,"project.memory.write","project.memory.capture_requested","project",projectId,idempotencyKey),async(intent)=>{
+        await commitAuditedBatch(env,intent,[]);
+        return auditedMutationResult({accepted:true},intent);
+      });
+      const result = await stageMcpConversation(env,ctx,scope.memoryOwnerUserId,{
+        messages,conversationId:`aven:${body.conversationId}`,idempotencyKey,
+        rules,managedPolicy:true,credentialRules:null,projectCategories:rules.projectCategories ?? [],
+        memoryScope:{authType:"session",memoryUserId:scope.memoryOwnerUserId,ownerUserId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId,managedProjectId:scope.project.id,managedProjectName:scope.project.name,externalUserId:scope.accountUserId},
+      });
+      return json({ok:true,state:result.ok === false ? "failed" : result.processing ? "staged" : "completed",summary:result.summary ?? "Capture received.",receiptId:result.receipt_id ?? result.receipt?.id ?? null});
+    }
     if (resource === "graph" && request.method === "GET" && !memoryId) {
       const inventory = await listMemories(env, scope.memoryOwnerUserId, { limit: 200 });
       const ids = new Set(inventory.items.map((item) => item.id));
