@@ -238,6 +238,12 @@ describe("Aven project capture and recall",()=>{
     if(receipt.state==='staged'){
       expect(receipt.receiptId).toBeTruthy();
       const status=await request(`/internal/aven/projects/${atlas.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)});expect(status.status).toBe(200);
+      if(receipt.receiptId.startsWith('receipt_mcp_stage_job_')){
+        const jobId=receipt.receiptId.slice('receipt_mcp_stage_'.length);
+        await env.DB.prepare("UPDATE memory_jobs SET status='enriched',receipt_id='receipt_fixture_final' WHERE id=?").bind(jobId).run();
+        const final=await (await request(`/internal/aven/projects/${atlas.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)})).json();expect(final.state).toBe('enriched');
+        const scoped=await (await request(`/internal/aven/projects/${beta.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)})).json();expect(scoped.state).toBe('unknown');
+      }
       const other=await (await request(`/internal/aven/projects/${beta.id}/knowledge`,{headers:bridgeHeaders(session.token)})).json();expect(other.items).toHaveLength(0);
     }
     const recall=await request(`/internal/aven/projects/${atlas.id}/recall`,{method:'POST',headers:bridgeHeaders(session.token),body:JSON.stringify({query:'Cloudflare'})});expect(recall.status).toBe(200);

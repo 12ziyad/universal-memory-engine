@@ -305,7 +305,10 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     if(resource === "capture" && request.method === "GET" && !memoryId){
       const receiptId=url.searchParams.get("receiptId");
       if(!receiptId || receiptId.length>160) fail("invalid_receipt");
-      const job=await env.DB.prepare("SELECT status FROM memory_jobs WHERE user_id=? AND receipt_id=? ORDER BY created_at DESC LIMIT 1").bind(scope.memoryOwnerUserId,receiptId).first();
+      // The engine replaces its staging receipt when enrichment finishes.
+      // Resolve the stable job identity only inside this project's namespace.
+      const stagedJobId=/^receipt_mcp_stage_job_[A-Za-z0-9-]+$/.test(receiptId) ? receiptId.slice("receipt_mcp_stage_".length) : "";
+      const job=await env.DB.prepare("SELECT status FROM memory_jobs WHERE user_id=? AND (receipt_id=? OR id=?) ORDER BY created_at DESC LIMIT 1").bind(scope.memoryOwnerUserId,receiptId,stagedJobId).first();
       if(!job) return json({ok:true,state:"unknown"});
       return json({ok:true,state:job.status});
     }
