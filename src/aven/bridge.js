@@ -383,7 +383,8 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       const result = await stageMcpConversation(env,ctx,scope.memoryOwnerUserId,{
         messages,conversationId:`aven:${body.conversationId}`,idempotencyKey,aiProfile:AVEN_MODEL_PROFILE,
         rules,managedPolicy:true,credentialRules:null,projectCategories:rules.projectCategories ?? [],
-        memoryScope:{authType:"session",memoryUserId:scope.memoryOwnerUserId,ownerUserId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId,managedProjectId:scope.project.id,managedProjectName:scope.project.name,externalUserId:scope.accountUserId},
+        // projectId tags the captured rows; Aven recall filters on it (project_only).
+        memoryScope:{authType:"session",memoryUserId:scope.memoryOwnerUserId,ownerUserId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId,managedProjectId:scope.project.id,managedProjectName:scope.project.name,projectId:scope.project.id,externalUserId:scope.accountUserId},
       });
       return json({ok:true,state:result.ok === false ? "failed" : result.processing ? "staged" : "completed",summary:result.summary ?? "Capture received.",receiptId:result.receipt_id ?? result.receipt?.id ?? null});
     }

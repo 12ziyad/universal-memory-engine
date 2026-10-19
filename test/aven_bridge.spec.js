@@ -297,6 +297,10 @@ describe("Aven project capture and recall",()=>{
       const other=await (await request(`/internal/aven/projects/${beta.id}/knowledge`,{headers:bridgeHeaders(session.token)})).json();expect(other.items).toHaveLength(0);
     }
     const recall=await request(`/internal/aven/projects/${atlas.id}/recall`,{method:'POST',headers:bridgeHeaders(session.token),body:JSON.stringify({query:'Cloudflare'})});expect(recall.status).toBe(200);
+    // A capture must be findable by the same project's recall, and only there.
+    expect(JSON.stringify(await recall.json())).toContain('Cloudflare Workers');
+    const otherRecall=await request(`/internal/aven/projects/${beta.id}/recall`,{method:'POST',headers:bridgeHeaders(session.token),body:JSON.stringify({query:'Cloudflare'})});
+    expect(JSON.stringify(await otherRecall.json())).not.toContain('Cloudflare Workers');
     const outsider=await login();
     const denied=await request(`/internal/aven/projects/${atlas.id}/capture`,{method:'POST',headers:bridgeHeaders(outsider.token),body:JSON.stringify({...payload,idempotencyKey:key()})});expect([403,404]).toContain(denied.status);
   });
