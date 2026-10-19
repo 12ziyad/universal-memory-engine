@@ -289,6 +289,7 @@ describe("Aven project capture and recall",()=>{
       const status=await request(`/internal/aven/projects/${atlas.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)});expect(status.status).toBe(200);
       if(receipt.receiptId.startsWith('receipt_mcp_stage_job_')){
         const jobId=receipt.receiptId.slice('receipt_mcp_stage_'.length);
+        const stagedJob=await env.DB.prepare('SELECT payload_json FROM memory_jobs WHERE id=?').bind(jobId).first();expect(JSON.parse(stagedJob.payload_json).aiProfile).toBe('aven-glm-5.3-flash-v1');
         await env.DB.prepare("UPDATE memory_jobs SET status='enriched',receipt_id='receipt_fixture_final' WHERE id=?").bind(jobId).run();
         const final=await (await request(`/internal/aven/projects/${atlas.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)})).json();expect(final.state).toBe('enriched');
         const scoped=await (await request(`/internal/aven/projects/${beta.id}/capture?receiptId=${receipt.receiptId}`,{headers:bridgeHeaders(session.token)})).json();expect(scoped.state).toBe('unknown');

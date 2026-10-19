@@ -37,6 +37,18 @@ export const cloudflareProvider = {
 		return { ok: Boolean(env?.AI) };
 	},
 	async invoke(env, call) {
+		// GLM-5.3 always reasons. Its default is max; use an explicit low effort
+		// for memory jobs and leave room for both reasoning and the actual JSON.
+		// Other model inputs retain their existing byte-for-byte forwarding.
+		if (call.model === "@cf/zai-org/glm-5.3-flash") {
+			const { max_tokens, ...inputs } = call.inputs;
+			call = { ...call, inputs: {
+				...inputs,
+				reasoning_effort: inputs.reasoning_effort ?? "low",
+				max_completion_tokens: inputs.max_completion_tokens ?? Math.max(Number(max_tokens) || 2048, 2048),
+				chat_template_kwargs: { ...inputs.chat_template_kwargs, clear_thinking: true },
+			} };
+		}
 		return call.options === undefined
 			? env.AI.run(call.model, call.inputs)
 			: env.AI.run(call.model, call.inputs, call.options);

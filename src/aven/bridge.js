@@ -14,6 +14,7 @@ import { getMemoryRules } from "../pipeline/rules.js";
 import { checkAiBudget } from "../lib/ai_budget.js";
 import { runRecallCommand } from "../pipeline/commands.js";
 import { activeCategoryRules } from "../lib/project_categories.js";
+import { AVEN_MODEL_PROFILE } from "./model-profile.js";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
 const CODE_TTL = 60_000;
@@ -380,7 +381,7 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
         return auditedMutationResult({accepted:true},intent);
       });
       const result = await stageMcpConversation(env,ctx,scope.memoryOwnerUserId,{
-        messages,conversationId:`aven:${body.conversationId}`,idempotencyKey,
+        messages,conversationId:`aven:${body.conversationId}`,idempotencyKey,aiProfile:AVEN_MODEL_PROFILE,
         rules,managedPolicy:true,credentialRules:null,projectCategories:rules.projectCategories ?? [],
         memoryScope:{authType:"session",memoryUserId:scope.memoryOwnerUserId,ownerUserId:scope.memoryOwnerUserId,accountUserId:scope.accountUserId,managedProjectId:scope.project.id,managedProjectName:scope.project.name,externalUserId:scope.accountUserId},
       });
