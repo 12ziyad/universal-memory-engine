@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
 import { avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
 import { randomSecret, sha256Hex } from "../src/auth.js";
@@ -376,5 +376,80 @@ describe("Aven's own sign-in door", () => {
     expect(forged.redirect).toBe("/?app=1");
     const plain = { redirect: "/?app=1", cookies: ["x"] };
     expect(avenOAuthReturn(new Request("https://itsuki.app/auth/google/callback"), settings, plain)).toBe(plain);
+  });
+});
+describe("Aven email codes and passwords", () => {
+  const person = { "x-aven-client-ip": "203.0.113.9", "x-aven-user-agent": "Aven test browser" };
+  const mailer = () => {
+    const send = vi.fn(async () => ({ messageId: "msg_aven" }));
+    return { send, bindings: { ...settings, EMAIL: { send } } };
+  };
+  const post = (path, body, bindings = settings, token) => request(`/internal/aven${path}`, { method: "POST", headers: { ...bridgeHeaders(token), ...person }, body: JSON.stringify(body) }, bindings);
+  const codeFrom = (send, call = 0) => send.mock.calls[call][0].text.match(/verification code is: (\d{6})/)[1];
+  const email = () => `code-${crypto.randomUUID()}@example.com`;
+  it("sends an Aven-branded code and signs in, creating the account when it is new", async () => {
+    const { send, bindings } = mailer();
+    const address = email();
+    const started = await post("/auth/email/start", { email: address }, bindings);
+    expect(started.status).toBe(200);
+    const start = await started.json();
+    expect(start.challenge).toMatch(/^emc_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
+    expect(start.email).not.toBe(address);
+    expect(started.headers.get("set-cookie")).toBeNull();
+    const mail = send.mock.calls[0][0];
+    expect(mail.subject).toBe("Your Aven sign-in code");
+    expect(mail.from.name).toBe("Aven");
+    expect(`${mail.subject} ${mail.text} ${mail.html}`).not.toMatch(/itsuki/i);
+    const wrong = await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send) === "000000" ? "111111" : "000000" }, bindings);
+    expect(wrong.status).toBe(401);
+    expect((await wrong.json()).error.code).toBe("invalid_email_code");
+    const verified = await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send) }, bindings);
+    expect(verified.status).toBe(200);
+    const session = await verified.json();
+    expect(session).toMatchObject({ created: true, passwordReset: false, principal: { email: address } });
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(200);
+    // A code works once.
+    expect((await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send) }, bindings)).status).toBe(401);
+  });
+  it("resets a forgotten password with a code and closes every other session", async () => {
+    const { send, bindings } = mailer();
+    const address = email();
+    const first = await (await post("/auth/signup", { email: address, password: "old-password", acceptTerms: true })).json();
+    const start = await (await post("/auth/email/start", { email: address }, bindings)).json();
+    // A short password is refused before the code is spent.
+    const short = await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send), newPassword: "short" }, bindings);
+    expect(short.status).toBe(400);
+    const reset = await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send), newPassword: "new-password" }, bindings);
+    expect(reset.status).toBe(200);
+    const session = await reset.json();
+    expect(session).toMatchObject({ created: false, passwordReset: true });
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(200);
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(first.token) })).status).toBe(401);
+    expect((await post("/auth/login", { email: address, password: "old-password" })).status).toBe(401);
+    expect((await post("/auth/login", { email: address, password: "new-password" })).status).toBe(200);
+  });
+  it("changes or sets a password for a signed-in Aven session", async () => {
+    const address = email();
+    const signed = await (await post("/auth/signup", { email: address, password: "first-password", acceptTerms: true })).json();
+    const wrong = await post("/account/password", { currentPassword: "not-it", newPassword: "second-password" }, settings, signed.token);
+    expect(wrong.status).toBe(400);
+    expect((await wrong.json()).error.message).toBe("Current password is incorrect");
+    expect((await post("/account/password", { currentPassword: "first-password", newPassword: "second-password" }, settings, signed.token)).status).toBe(200);
+    expect((await post("/auth/login", { email: address, password: "second-password" })).status).toBe(200);
+    // An account opened with a code has no password yet and can set one.
+    const { send, bindings } = mailer();
+    const codeOnly = email();
+    const start = await (await post("/auth/email/start", { email: codeOnly }, bindings)).json();
+    const opened = await (await post("/auth/email/verify", { challenge: start.challenge, code: codeFrom(send) }, bindings)).json();
+    expect((await post("/account/password", { newPassword: "chosen-password" }, settings, opened.token)).status).toBe(200);
+    expect((await post("/auth/login", { email: codeOnly, password: "chosen-password" })).status).toBe(200);
+    expect((await post("/account/password", { newPassword: "x".repeat(20) })).status).toBe(401);
+  });
+  it("refuses forged challenges, unknown fields and browsers", async () => {
+    const { bindings } = mailer();
+    expect((await post("/auth/email/verify", { challenge: "emc_x.y", code: "123456" }, bindings)).status).toBe(400);
+    expect((await post("/auth/email/start", { email: email(), next: "/" }, bindings)).status).toBe(400);
+    const browser = await request("/internal/aven/auth/email/start", { method: "POST", headers: { ...bridgeHeaders(), origin: "https://aven.example" }, body: JSON.stringify({ email: email() }) }, bindings);
+    expect(browser.status).toBe(403);
   });
 });

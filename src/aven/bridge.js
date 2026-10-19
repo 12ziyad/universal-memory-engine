@@ -1,5 +1,6 @@
 /** First-party, versioned Aven facade; never trusts caller-supplied identities. */
-import { getSessionUser, googleAuthStart, login, parseCookies, randomSecret, sha256Hex, signup, timingSafeEqualString } from "../auth.js";
+import { changePasswordForUser, getSessionUser, googleAuthStart, login, parseCookies, randomSecret, resetPasswordAfterEmailProof, sha256Hex, signup, timingSafeEqualString } from "../auth.js";
+import { EMAIL_CHALLENGE_COOKIE, startEmailChallenge, verifyEmailChallenge } from "../lib/passwordless_auth.js";
 import { githubAuthStart } from "../lib/github_auth.js";
 import { newId } from "../lib/ids.js";
 import { allowRate } from "../lib/rate.js";
@@ -288,13 +289,13 @@ function personRequest(request) {
   if (agent) headers["user-agent"] = agent;
   return new Request("https://itsuki.internal/", { headers });
 }
-async function directSession(env, userId, source) {
+async function directSession(env, userId, source, extra = {}) {
   const token = randomSecret(32), at = Date.now(), expiresAt = Math.min(at + SESSION_TTL, Number(source.expiresAt));
   await env.DB.prepare("INSERT INTO aven_bridge_sessions (id, token_hash, user_id, source_session_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(`${DIRECT_PREFIX}${crypto.randomUUID()}`, await sha256Hex(token), userId, source.id, expiresAt, at).run();
   const auth = await resolveSession(env, new Request("https://itsuki.internal/", { headers: { "x-aven-session": token } }));
   await ensureDefaultOrganization(env, auth.user_id);
-  return json({ ...(await sessionResult(env, auth)), token });
+  return json({ ...(await sessionResult(env, auth)), token, ...extra });
 }
 const DIRECT_ERRORS = { 400: "invalid_request", 401: "invalid_credentials", 403: "account_disabled", 409: "signup_failed" };
 /** Email and password sign-in or sign-up from Aven's own page; Aven passes the password through and never stores it. */
@@ -308,6 +309,55 @@ async function directSignIn(request, env, kind) {
   const result = kind === "signup" ? await signup(env, person, body) : await login(env, person, body);
   if (result.error) return json({ ok: false, error: { code: DIRECT_ERRORS[result.status] ?? "sign_in_failed", message: result.error } }, result.status);
   return directSession(env, result.user.id, result.session);
+}
+
+const CHALLENGE = /^emc_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/;
+const EMAIL_ERRORS = {
+  email_code_recently_sent: [429, "A code was just sent. Wait a minute before asking for another."],
+  invalid_email_code: [401, "That code is not valid."],
+  email_code_expired: [401, "That code expired. Ask for a new one."],
+  account_disabled: [403, "This account is disabled."],
+};
+const refuse = (code, status, message) => json({ ok: false, error: { code, message } }, status);
+const emailFailure = (error) => {
+  const known = EMAIL_ERRORS[error];
+  return known ? refuse(error, known[0], known[1]) : refuse("email_unavailable", 503, "The code could not be sent or checked. Try again shortly.");
+};
+/** Email a one-time code for Aven's page. The browser binding goes back to Aven, which keeps it in its own cookie. */
+async function emailCodeStart(request, env) {
+  const body = await bodyOf(request);
+  onlyFields(body, ["email"]);
+  if (typeof body.email !== "string") fail("invalid_request");
+  const person = personRequest(request);
+  const who = person.headers.get("cf-connecting-ip") || `email:${await sha256Hex(body.email.trim().toLowerCase())}`;
+  if (!await allowRate(env.AUTH_LIMITER, `aven:email-start:${who}`, { fail: "closed" })) fail("rate_limited", 429);
+  const result = await startEmailChallenge(env, person, body, { brand: "aven" });
+  if (result.status === 400) return refuse("invalid_request", 400, "Enter a valid email address.");
+  if (result.error) return emailFailure(result.error);
+  return json({ ok: true, email: result.body.email, expiresAt: result.body.expires_at, resendAt: result.body.resend_at, challenge: result.challenge });
+}
+/** Check the code. With `newPassword` it also replaces the password and closes every other session. */
+async function emailCodeVerify(request, env, ctx) {
+  const body = await bodyOf(request);
+  onlyFields(body, ["challenge", "code", "newPassword"]);
+  if (typeof body.challenge !== "string" || !CHALLENGE.test(body.challenge) || typeof body.code !== "string") fail("invalid_request");
+  const resetting = body.newPassword !== undefined;
+  // Checked before the code, so a short password never spends the code.
+  if (resetting && (typeof body.newPassword !== "string" || body.newPassword.length < 8 || body.newPassword.length > 1024)) return refuse("invalid_request", 400, "Password must be at least 8 characters");
+  const person = personRequest(request);
+  const who = person.headers.get("cf-connecting-ip") || body.challenge.split(".")[0];
+  if (!await allowRate(env.AUTH_LIMITER, `aven:email-verify:${who}`, { fail: "closed" })) fail("rate_limited", 429);
+  const headers = new Headers(person.headers);
+  headers.set("cookie", `${EMAIL_CHALLENGE_COOKIE}=${encodeURIComponent(body.challenge)}`);
+  const result = await verifyEmailChallenge(env, new Request(person.url, { headers }), { code: body.code });
+  if (result.error) return emailFailure(result.error);
+  if (resetting) {
+    const reset = await runAuditedMutation(env, { actorUserId: result.user.id, actorType: "user", action: "account.password.reset", targetType: "user", targetId: result.user.id,
+      requestId: request.headers.get("x-request-id"), waitUntil: ctx?.waitUntil ? (p) => ctx.waitUntil(p) : null },
+    (intent) => resetPasswordAfterEmailProof(env, person, result.user.id, result.session.id, body.newPassword, { auditIntent: intent }));
+    if (reset.error) return refuse("account_disabled", 403, "This account is disabled.");
+  }
+  return directSession(env, result.user.id, result.session, { created: Boolean(result.created), passwordReset: resetting });
 }
 
 export async function handleAvenBridge(request, env, ctx, url = new URL(request.url)) {
@@ -324,6 +374,8 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     if (url.pathname === "/internal/aven/session" && request.method === "POST") return await exchange(request, env);
     if (url.pathname === "/internal/aven/auth/login" && request.method === "POST") return await directSignIn(request, env, "login");
     if (url.pathname === "/internal/aven/auth/signup" && request.method === "POST") return await directSignIn(request, env, "signup");
+    if (url.pathname === "/internal/aven/auth/email/start" && request.method === "POST") return await emailCodeStart(request, env);
+    if (url.pathname === "/internal/aven/auth/email/verify" && request.method === "POST") return await emailCodeVerify(request, env, ctx);
     // Possession permits only self-revocation, even after membership is removed.
     if (url.pathname === "/internal/aven/background-grants/revoke" && request.method === "POST") {
       const token = request.headers.get("x-aven-session") ?? "";
@@ -352,6 +404,18 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       return json({ ok: true, id: body.id }, 201);
     }
     if (url.pathname === "/internal/aven/session" && request.method === "GET") return json(await sessionResult(env, auth, url.searchParams.get("projects") !== "0"));
+    if (url.pathname === "/internal/aven/account/password" && request.method === "POST") {
+      const body = await bodyOf(request);
+      onlyFields(body, ["currentPassword", "newPassword"]);
+      if ((body.currentPassword !== undefined && typeof body.currentPassword !== "string") || typeof body.newPassword !== "string") fail("invalid_request");
+      if (!await allowRate(env.AUTH_LIMITER, `aven:password:${auth.user_id}`, { fail: "closed" })) fail("rate_limited", 429);
+      const changed = await runAuditedMutation(env, { actorUserId: auth.user_id, actorType: "user", action: "account.password.changed", targetType: "user", targetId: auth.user_id,
+        requestId: request.headers.get("x-request-id"), waitUntil: ctx?.waitUntil ? (p) => ctx.waitUntil(p) : null,
+        authorizationGuards: [originalSessionGuard(env, auth), bridgeSessionGuard(env, auth)] },
+      (intent) => changePasswordForUser(env, personRequest(request), auth.user_id, body, { auditIntent: intent }));
+      if (changed.error) return refuse({ 401: "unauthorized", 409: "password_conflict" }[changed.status] ?? "invalid_request", changed.status ?? 400, changed.error);
+      return json({ ok: true });
+    }
     if (url.pathname === "/internal/aven/session/revoke" && request.method === "POST") {
       const at = Date.now();
       const closing = [env.DB.prepare("UPDATE aven_bridge_sessions SET revoked_at = ? WHERE id = ? AND user_id = ?").bind(at, auth.id, auth.user_id)];
