@@ -1,5 +1,6 @@
 /** First-party, versioned Aven facade; never trusts caller-supplied identities. */
-import { getSessionUser, randomSecret, sha256Hex, timingSafeEqualString } from "../auth.js";
+import { getSessionUser, googleAuthStart, login, parseCookies, randomSecret, sha256Hex, signup, timingSafeEqualString } from "../auth.js";
+import { githubAuthStart } from "../lib/github_auth.js";
 import { newId } from "../lib/ids.js";
 import { allowRate } from "../lib/rate.js";
 import { createManagedProject, getManagedProjectForUser, listManagedProjects, resolveManagedProject, updateManagedProject } from "../lib/managed_projects.js";
@@ -19,6 +20,9 @@ import { AVEN_MODEL_PROFILE } from "./model-profile.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
 const CODE_TTL = 60_000;
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
+// Sessions opened at Aven's own sign-in door exist only for Aven and close with it.
+const DIRECT_PREFIX = "aven_direct_";
+const RETURN_COOKIE = "uml_aven_return";
 class BridgeError extends Error {
   constructor(code, status = 400) { super(code); this.code = code; this.status = status; }
 }
@@ -193,18 +197,21 @@ async function createKnowledge(env, request, ctx, auth, scope, body) {
   return { ok: true, item: (await oneKnowledge(env, scope, id)).item };
 }
 
-function signInPage(request) {
-  const nonce = randomSecret(18);
-  // Remains on Itsuki's origin and uses the existing sign-in UI unchanged.
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continue to Aven</title><style nonce="${nonce}">body{font:16px system-ui;background:#101011;color:#eee;max-width:440px;margin:18vh auto;padding:24px}a,button{display:inline-block;background:#eee;color:#111;padding:12px 18px;border:0;border-radius:9px;font:inherit;text-decoration:none;margin:12px 8px 12px 0}p{line-height:1.6;color:#aaa}</style><h1>Continue to Aven</h1><p>Sign in with your existing Itsuki account. This page will continue automatically after you sign in.</p><a href="/?view=login" target="_blank" rel="noopener noreferrer">Sign in</a><button id="continue">Continue</button><p id="status" role="status">Your projects and permissions stay with your account.</p><script nonce="${nonce}">let busy=false;async function check(){if(busy)return;busy=true;try{const r=await fetch('/aven/login-status',{cache:'no-store'});if(r.ok&&(await r.json()).signedIn)location.reload();else document.getElementById('status').textContent='Sign in, then return to this tab.'}catch{document.getElementById('status').textContent='Could not check sign-in. Try Continue again.'}finally{busy=false}}document.getElementById('continue').onclick=check;setInterval(check,4000);</script></html>`, { headers: { ...JSON_HEADERS, "content-type": "text/html; charset=utf-8", "content-security-policy": `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'` } });
+function authorizeParams(env, params) {
+  const redirectUri = allowedRedirect(env, params.get("redirect_uri"));
+  const state = params.get("state") ?? "", challenge = params.get("code_challenge") ?? "";
+  if (!redirectUri || !/^[A-Za-z0-9_-]{16,200}$/.test(state) || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) return null;
+  const query = new URLSearchParams({ redirect_uri: redirectUri, state, code_challenge: challenge }).toString();
+  return { redirectUri, state, challenge, query, origin: new URL(redirectUri).origin };
 }
 async function authorize(request, env, url) {
-  const redirectUri = allowedRedirect(env, url.searchParams.get("redirect_uri"));
-  const state = url.searchParams.get("state") ?? "", challenge = url.searchParams.get("code_challenge") ?? "";
-  if (!redirectUri || !/^[A-Za-z0-9_-]{16,200}$/.test(state) || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) fail("invalid_authorization_request");
+  const params = authorizeParams(env, url.searchParams);
+  if (!params) fail("invalid_authorization_request");
+  const { redirectUri, state, challenge } = params;
   if (!await allowRate(env.AUTH_LIMITER, `aven:authorize:${request.headers.get("cf-connecting-ip") ?? "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
   const auth = await getSessionUser(env, request);
-  if (!auth) return signInPage(request);
+  // Aven has its own sign-in page; an unsigned visitor goes back there, never to an Itsuki screen.
+  if (!auth) return new Response(null, { status: 302, headers: { ...JSON_HEADERS, location: `${params.origin}/signin` } });
   const code = randomSecret(32), at = Date.now();
   await env.DB.prepare("INSERT INTO aven_authorization_codes (code_hash,user_id,session_id,redirect_uri,code_challenge,expires_at,created_at) VALUES(?,?,?,?,?,?,?)")
     .bind(await sha256Hex(code), auth.userId, auth.session.id, redirectUri, challenge, at + CODE_TTL, at).run();
@@ -240,17 +247,83 @@ async function exchange(request, env) {
   return json({ ...(await sessionResult(env, auth)), token });
 }
 
+function returnCookie(request, value, maxAge) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${RETURN_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge}`;
+}
+/** Google and GitHub start here when the person pressed the button on Aven's page. */
+async function oauthStart(request, env, url, provider) {
+  const params = authorizeParams(env, url.searchParams);
+  if (!params) fail("invalid_authorization_request");
+  if (!await allowRate(env.AUTH_LIMITER, `aven:${provider}:${request.headers.get("cf-connecting-ip") ?? "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
+  const result = provider === "google" ? googleAuthStart(env, request) : await githubAuthStart(env, request);
+  // An unconfigured provider returns no state cookie; say so on Aven's page instead.
+  if (!result.cookie) return new Response(null, { status: 302, headers: { ...JSON_HEADERS, location: `${params.origin}/signin?error=${provider}_unavailable` } });
+  const headers = new Headers({ ...JSON_HEADERS, location: new URL(result.redirect, request.url).toString() });
+  headers.append("set-cookie", result.cookie);
+  headers.append("set-cookie", returnCookie(request, params.query, 600));
+  return new Response(null, { status: 302, headers });
+}
+/**
+ * After a Google or GitHub callback, a person who started on Aven continues to
+ * Aven: success goes through /aven/authorize (which hands Aven a code), and a
+ * failure returns to Aven's sign-in page with the reason. Others are untouched.
+ */
+export function avenOAuthReturn(request, env, result) {
+  const raw = parseCookies(request).get(RETURN_COOKIE);
+  if (!raw || !env.AVEN_BRIDGE_SECRET) return result;
+  const cookies = [...(result.cookies ?? []), returnCookie(request, "", 0)];
+  const params = authorizeParams(env, new URLSearchParams(raw));
+  if (!params) return { ...result, cookies };
+  if (!String(result.redirect).startsWith("/login")) return { redirect: `/aven/authorize?${params.query}`, cookies };
+  const reason = new URL(result.redirect, request.url).searchParams.get("error") ?? "sign_in_failed";
+  return { redirect: `${params.origin}/signin?error=${encodeURIComponent(reason.replace(/[^a-z0-9_]/gi, "").slice(0, 60))}`, cookies };
+}
+/** The person's address and browser, as Aven's Worker saw them, for rate limits and session records. */
+function personRequest(request) {
+  const ip = (request.headers.get("x-aven-client-ip") ?? "").trim().slice(0, 64);
+  const agent = (request.headers.get("x-aven-user-agent") ?? "").slice(0, 500);
+  const headers = {};
+  if (ip) headers["cf-connecting-ip"] = ip;
+  if (agent) headers["user-agent"] = agent;
+  return new Request("https://itsuki.internal/", { headers });
+}
+async function directSession(env, userId, source) {
+  const token = randomSecret(32), at = Date.now(), expiresAt = Math.min(at + SESSION_TTL, Number(source.expiresAt));
+  await env.DB.prepare("INSERT INTO aven_bridge_sessions (id, token_hash, user_id, source_session_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(`${DIRECT_PREFIX}${crypto.randomUUID()}`, await sha256Hex(token), userId, source.id, expiresAt, at).run();
+  const auth = await resolveSession(env, new Request("https://itsuki.internal/", { headers: { "x-aven-session": token } }));
+  await ensureDefaultOrganization(env, auth.user_id);
+  return json({ ...(await sessionResult(env, auth)), token });
+}
+const DIRECT_ERRORS = { 400: "invalid_request", 401: "invalid_credentials", 403: "account_disabled", 409: "signup_failed" };
+/** Email and password sign-in or sign-up from Aven's own page; Aven passes the password through and never stores it. */
+async function directSignIn(request, env, kind) {
+  const body = await bodyOf(request);
+  onlyFields(body, kind === "signup" ? ["email", "password", "name", "acceptTerms"] : ["email", "password"]);
+  if (typeof body.email !== "string" || typeof body.password !== "string" || (body.name !== undefined && typeof body.name !== "string")) fail("invalid_request");
+  const person = personRequest(request);
+  const who = person.headers.get("cf-connecting-ip") || `email:${await sha256Hex(body.email.trim().toLowerCase())}`;
+  if (!await allowRate(env.AUTH_LIMITER, `aven:${kind}:${who}`, { fail: "closed" })) fail("rate_limited", 429);
+  const result = kind === "signup" ? await signup(env, person, body) : await login(env, person, body);
+  if (result.error) return json({ ok: false, error: { code: DIRECT_ERRORS[result.status] ?? "sign_in_failed", message: result.error } }, result.status);
+  return directSession(env, result.user.id, result.session);
+}
+
 export async function handleAvenBridge(request, env, ctx, url = new URL(request.url)) {
   if (!url.pathname.startsWith("/aven/") && !url.pathname.startsWith("/internal/aven/")) return null;
   if (!env.AVEN_BRIDGE_SECRET || String(env.AVEN_BRIDGE_SECRET).length < 32) return json({ error: "not_found" }, 404);
   try {
     if (url.pathname === "/aven/authorize" && request.method === "GET") return await authorize(request, env, url);
-    if (url.pathname === "/aven/login-status" && request.method === "GET") return json({ signedIn: Boolean(await getSessionUser(env, request)) });
+    if (url.pathname === "/aven/oauth/google" && request.method === "GET") return await oauthStart(request, env, url, "google");
+    if (url.pathname === "/aven/oauth/github" && request.method === "GET") return await oauthStart(request, env, url, "github");
     if (!url.pathname.startsWith("/internal/aven/")) fail("not_found", 404);
     if (!await timingSafeEqualString(request.headers.get("authorization") ?? "", `Bearer ${env.AVEN_BRIDGE_SECRET}`)) fail("unauthorized", 401);
     // No CORS, no browser cookies, no caller-selected actor or owner id.
     if (request.headers.has("origin")) fail("browser_access_forbidden", 403);
     if (url.pathname === "/internal/aven/session" && request.method === "POST") return await exchange(request, env);
+    if (url.pathname === "/internal/aven/auth/login" && request.method === "POST") return await directSignIn(request, env, "login");
+    if (url.pathname === "/internal/aven/auth/signup" && request.method === "POST") return await directSignIn(request, env, "signup");
     // Possession permits only self-revocation, even after membership is removed.
     if (url.pathname === "/internal/aven/background-grants/revoke" && request.method === "POST") {
       const token = request.headers.get("x-aven-session") ?? "";
@@ -280,7 +353,10 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     }
     if (url.pathname === "/internal/aven/session" && request.method === "GET") return json(await sessionResult(env, auth, url.searchParams.get("projects") !== "0"));
     if (url.pathname === "/internal/aven/session/revoke" && request.method === "POST") {
-      await env.DB.prepare("UPDATE aven_bridge_sessions SET revoked_at = ? WHERE id = ? AND user_id = ?").bind(Date.now(), auth.id, auth.user_id).run(); return json({ ok: true });
+      const at = Date.now();
+      const closing = [env.DB.prepare("UPDATE aven_bridge_sessions SET revoked_at = ? WHERE id = ? AND user_id = ?").bind(at, auth.id, auth.user_id)];
+      if (String(auth.id).startsWith(DIRECT_PREFIX)) closing.push(env.DB.prepare("UPDATE sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND user_id = ?").bind(at, auth.source_session_id, auth.user_id));
+      await env.DB.batch(closing); return json({ ok: true });
     }
     if (url.pathname === "/internal/aven/projects" && request.method === "GET") return json({ ok: true, projects: (await sessionResult(env, auth)).projects });
     if (url.pathname === "/internal/aven/projects" && request.method === "POST") {
