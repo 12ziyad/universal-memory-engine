@@ -24,6 +24,20 @@ const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 // Sessions opened at Aven's own sign-in door exist only for Aven and close with it.
 const DIRECT_PREFIX = "aven_direct_";
 const RETURN_COOKIE = "uml_aven_return";
+// What an unattended grant may do, by purpose. "automation" reads memory for routines,
+// "agent" is an AI tool's key: it may also search, add and capture, never edit, delete or manage.
+const grantCapability = (purpose) => purpose === "github_connection" ? "project.integrations.manage" : "project.memory.write";
+const grantCapabilities = (purpose) => purpose === "github_connection" ? ["project.integrations.manage"] : ["project.memory.read", "project.memory.write"];
+function backgroundAllowed(auth, request, url) {
+  if (request.method === "GET" && url.pathname === "/internal/aven/session") return true;
+  const base = `/internal/aven/projects/${auth.project_id}`;
+  if (auth.purpose === "automation") return request.method === "GET" && url.pathname.startsWith(`${base}/knowledge`);
+  if (auth.purpose === "agent") {
+    if (request.method === "GET" && url.pathname.startsWith(`${base}/knowledge`)) return true;
+    return request.method === "POST" && [`${base}/recall`, `${base}/knowledge`, `${base}/capture`].includes(url.pathname);
+  }
+  return false;
+}
 class BridgeError extends Error {
   constructor(code, status = 400) { super(code); this.code = code; this.status = status; }
 }
@@ -59,10 +73,15 @@ async function bodyOf(request) {
   return body;
 }
 function onlyFields(body, fields) { if (Object.keys(body).some((key) => !fields.includes(key))) fail("unknown_field"); }
+/** The credential behind a request: the browser session for a handoff, the grant for an unattended key. */
+function credentialOf(auth) {
+  return auth.background ? { kind: "aven_grant", id: auth.id, projectId: auth.project_id } : { kind: "session", id: auth.source_session_id };
+}
 function originalSessionGuard(env, auth) {
-  return credentialFenceStatement(env, { credential: { kind: "session", id: auth.source_session_id }, actorUserId: auth.user_id });
+  return credentialFenceStatement(env, { credential: credentialOf(auth), actorUserId: auth.user_id });
 }
 function bridgeSessionGuard(env, auth) {
+  if (auth.background) return auditInvariantStatement(env, "SELECT 1 FROM aven_background_grants WHERE id = ? AND user_id = ? AND revoked_at IS NULL", [auth.id, auth.user_id]);
   return auditInvariantStatement(env, "SELECT 1 FROM aven_bridge_sessions WHERE id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?", [auth.id, auth.user_id, Date.now()]);
 }
 async function resolveSession(env, request) {
@@ -75,7 +94,7 @@ async function resolveSession(env, request) {
     if (!auth) fail("background_access_revoked", 401);
     auth.background = true;
     // Neither a service secret nor a stored grant bypasses current membership.
-    await scopeFor(env, auth, auth.project_id, auth.purpose === "automation" ? "project.memory.write" : "project.integrations.manage");
+    await scopeFor(env, auth, auth.project_id, grantCapability(auth.purpose));
     return auth;
   }
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) fail("unauthorized", 401);
@@ -97,9 +116,9 @@ async function sessionResult(env, auth, includeProjects = true) {
   const base = { ok: true, expiresAt: auth.background ? null : auth.expires_at, principal: { actorId: auth.user_id, name: auth.name ?? "", email: auth.email ?? "" } };
   if (!includeProjects) return base;
   if (auth.background) {
-    const scope = await scopeFor(env, auth, auth.project_id, auth.purpose === "automation" ? "project.memory.write" : "project.integrations.manage");
+    const scope = await scopeFor(env, auth, auth.project_id, grantCapability(auth.purpose));
     const project = await safeProject(env, auth, scope.project);
-    project.capabilities = project.capabilities.filter((cap) => (auth.purpose === "automation" ? ["project.memory.read", "project.memory.write"] : ["project.integrations.manage"]).includes(cap));
+    project.capabilities = project.capabilities.filter((cap) => grantCapabilities(auth.purpose).includes(cap));
     return { ...base, projects: [project], background: { id: auth.id, purpose: auth.purpose, resourceId: auth.resource_id } };
   }
   const projects = await listManagedProjects(env, auth.user_id);
@@ -385,12 +404,12 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     }
     const auth = await resolveSession(env, request);
     if (!await allowRate(request.method === "GET" ? env.READ_LIMITER : env.SAVE_LIMITER, `aven:${auth.user_id}:${request.method}`, { fail: "closed" })) fail("rate_limited", 429);
-    if (auth.background && !(request.method === "GET" && (url.pathname === "/internal/aven/session" || (auth.purpose === "automation" && url.pathname.startsWith(`/internal/aven/projects/${auth.project_id}/knowledge`))))) fail("background_scope_forbidden", 403);
+    if (auth.background && !backgroundAllowed(auth, request, url)) fail("background_scope_forbidden", 403);
     if (url.pathname === "/internal/aven/background-grants" && request.method === "POST") {
       const body = await bodyOf(request);
       onlyFields(body, ["id", "tokenHash", "projectId", "purpose", "resourceId"]);
-      if (!/^[A-Za-z0-9_-]{16,100}$/.test(body.id ?? "") || !/^proj_[A-Za-z0-9_-]{8,80}$/.test(body.projectId ?? "") || !/^[a-f0-9]{64}$/.test(body.tokenHash ?? "") || !["automation", "github_connection"].includes(body.purpose) || typeof body.resourceId !== "string" || body.resourceId.length < 1 || body.resourceId.length > 160) fail("invalid_background_grant");
-      const capability = body.purpose === "automation" ? "project.memory.write" : "project.integrations.manage";
+      if (!/^[A-Za-z0-9_-]{16,100}$/.test(body.id ?? "") || !/^proj_[A-Za-z0-9_-]{8,80}$/.test(body.projectId ?? "") || !/^[a-f0-9]{64}$/.test(body.tokenHash ?? "") || !["automation", "github_connection", "agent"].includes(body.purpose) || typeof body.resourceId !== "string" || body.resourceId.length < 1 || body.resourceId.length > 160) fail("invalid_background_grant");
+      const capability = grantCapability(body.purpose);
       const scope = await scopeFor(env, auth, body.projectId, capability);
       const prior = await env.DB.prepare("SELECT * FROM aven_background_grants WHERE id=?").bind(body.id).first();
       if (prior) {
@@ -586,7 +605,7 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
         if (found.kind === "page" && typeof body.text === "string") patch.short_summary = body.text.slice(0, 1000);
       }
       const result = await runAuditedMutation(env, auditDetails(env, request, ctx, auth, scope, "project.memory.write", "project.memory.updated", "memory_object", memoryId, body.idempotencyKey),
-        (intent) => applyMemoryChange(env, ctx, { userId: scope.memoryOwnerUserId, project: { id: projectId }, actor: { userId: auth.user_id, type: "session", capability: "project.memory.write", orgId: scope.membership.orgId, credential: { kind: "session", id: auth.source_session_id } }, actorClass: "user", actorRef: auth.user_id,
+        (intent) => applyMemoryChange(env, ctx, { userId: scope.memoryOwnerUserId, project: { id: projectId }, actor: { userId: auth.user_id, type: "session", capability: "project.memory.write", orgId: scope.membership.orgId, credential: credentialOf(auth) }, actorClass: "user", actorRef: auth.user_id,
           id: memoryId, mode: "update", patch, expectedRevision: body.expectedRevision, idempotencyKey: body.idempotencyKey, reason: body.reason, auditIntent: intent }));
       return json({ ok: true, item: (await oneKnowledge(env, scope, memoryId)).item, replayed: Boolean(result.replayed) });
     }

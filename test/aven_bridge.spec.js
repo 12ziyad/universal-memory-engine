@@ -63,6 +63,22 @@ describe("Aven durable background authorization", () => {
     expect((await request("/internal/aven/background-grants", { method:"POST",headers:bridgeHeaders(grant.token),body:JSON.stringify(grant.body) })).status).toBe(403);
     expect((await request("/internal/aven/projects", { headers:bridgeHeaders(grant.token) })).status).toBe(403);
   });
+  it("an AI tool key can read, search, add and capture memory, but never edit, delete or manage", async () => {
+    const session = await login(), atlas = await project(session), other = await project(session, "Other");
+    const grant = await background(session, atlas.id, "agent"); expect(grant.response.status).toBe(201);
+    const headers = bridgeHeaders(grant.token);
+    expect((await request(`/internal/aven/projects/${atlas.id}/knowledge`, { headers })).status).toBe(200);
+    const taught = await teach({ token: grant.token }, atlas.id, "Agent keys may add memory.");
+    if (![200, 201].includes(taught.status)) throw new Error(`teach ${taught.status}: ${await taught.text()}`);
+    const item = (await taught.json()).item;
+    expect((await request(`/internal/aven/projects/${atlas.id}/recall`, { method: "POST", headers, body: JSON.stringify({ query: "agent keys" }) })).status).toBe(200);
+    const capture = await request(`/internal/aven/projects/${atlas.id}/capture`, { method: "POST", headers, body: JSON.stringify({ conversationId: "agent-fixture", idempotencyKey: key(), messages: [{ role: "user", content: "We decided to keep agent keys scoped to one project." }] }) });
+    expect(capture.status).toBe(200);
+    expect((await request(`/internal/aven/projects/${atlas.id}/knowledge/${item.id}`, { method: "DELETE", headers, body: JSON.stringify({ expectedRevision: item.revision }) })).status).toBe(403);
+    expect((await request(`/internal/aven/projects/${other.id}/knowledge`, { headers })).status).toBe(403);
+    expect((await request("/internal/aven/projects", { headers })).status).toBe(403);
+    expect((await request("/internal/aven/background-grants", { method: "POST", headers, body: JSON.stringify(grant.body) })).status).toBe(403);
+  });
   it("rechecks membership and account status and allows idempotent revocation after access loss", async () => {
     const owner = await login(), member = await login(), atlas = await project(owner), actor=member.principal.actorId, at=Date.now();
     await env.DB.batch([
