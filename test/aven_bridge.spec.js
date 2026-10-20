@@ -327,6 +327,20 @@ describe("Aven's own sign-in door", () => {
   const person = { "x-aven-client-ip": "203.0.113.7", "x-aven-user-agent": "Aven test browser" };
   const door = (kind, body, headers = {}) => request(`/internal/aven/auth/${kind}`, { method: "POST", headers: { ...bridgeHeaders(), ...person, ...headers }, body: JSON.stringify(body) });
   const email = () => `door-${crypto.randomUUID()}@example.com`;
+  it("erases the account from Aven's own door, with the email typed back, never from a key", async () => {
+    const address = email();
+    const session = await (await door("signup", { email: address, password: "correct-horse", acceptTerms: true })).json();
+    const erase = (headers, body) => request("/internal/aven/account/erase", { method: "POST", headers: { ...bridgeHeaders(headers), "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await erase(session.token, { confirmation: "someone@else.example" })).status).toBe(400);
+    const atlas = await project(session, "To erase");
+    const grant = await background(session, atlas.id, "agent"); expect(grant.response.status).toBe(201);
+    expect((await erase(grant.token, { confirmation: address })).status).toBe(403);
+    const done = await erase(session.token, { confirmation: address.toUpperCase() });
+    expect(done.status).toBe(200); expect(await done.json()).toMatchObject({ ok: true, deleted: true });
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(401);
+    expect((await door("login", { email: address, password: "correct-horse" })).status).toBe(401);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE email_normalized = ?").bind(address.toLowerCase()).first("n")).toBe(0);
+  });
   it("signs up and signs in with a password, returning a working Aven session and no password", async () => {
     const address = email();
     const created = await door("signup", { name: "Door builder", email: address, password: "correct-horse", acceptTerms: true });

@@ -10,7 +10,7 @@ import { auditedMutationResult, auditInvariantStatement, commitAuditedBatch, run
 import { getMemory, listMemories, parseInventoryListOptions } from "../lib/memory_inventory.js";
 import { applyMemoryChange, contentHash, credentialFenceStatement, listMemoryHistory, runProjections, snapshotFor, validateIdempotencyKey, validatePatch, versionErrorResponse } from "../lib/memory_versions.js";
 import { projectMemorySpaceRegistrationStatement, retentionFenceGuardStatement } from "../lib/retention.js";
-import { deleteObject } from "../pipeline/cleanup.js";
+import { deleteAccountCompletely, deleteObject } from "../pipeline/cleanup.js";
 import { stageMcpConversation } from "../pipeline/mcp_engine.js";
 import { getMemoryRules } from "../pipeline/rules.js";
 import { checkAiBudget } from "../lib/ai_budget.js";
@@ -434,6 +434,22 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       (intent) => changePasswordForUser(env, personRequest(request), auth.user_id, body, { auditIntent: intent }));
       if (changed.error) return refuse({ 401: "unauthorized", 409: "password_conflict" }[changed.status] ?? "invalid_request", changed.status ?? 400, changed.error);
       return json({ ok: true });
+    }
+    // Self-service erasure from Aven: the person's own session, their own
+    // email typed back, every memory space and the account itself. Never a key.
+    if (url.pathname === "/internal/aven/account/erase" && request.method === "POST") {
+      if (auth.background) fail("background_scope_forbidden", 403);
+      const body = await bodyOf(request); onlyFields(body, ["confirmation"]);
+      if (typeof body.confirmation !== "string" || body.confirmation.trim().toLowerCase() !== String(auth.email ?? "").toLowerCase()) fail("confirmation_mismatch", 400);
+      try {
+        const result = await runAuditedMutation(env, { actorUserId: auth.user_id, actorType: "user", action: "account.erased", targetType: "user", targetId: auth.user_id,
+          requestId: request.headers.get("x-request-id"), waitUntil: ctx?.waitUntil ? (p) => ctx.waitUntil(p) : null },
+        (intent) => deleteAccountCompletely(env, auth.user_id, { auditIntent: intent }));
+        return json({ ok: true, deleted: Boolean(result.deleted), alreadyDeleted: Boolean(result.already_deleted) });
+      } catch (error) {
+        if (error?.code === "organization_transfer_required") return json({ ok: false, error: { code: error.code, message: error.message } }, 409);
+        throw error;
+      }
     }
     if (url.pathname === "/internal/aven/session/revoke" && request.method === "POST") {
       const at = Date.now();
