@@ -101,6 +101,7 @@
 	],
 	"vars": {
 		"AVEN_ALLOWED_ORIGINS": "https://aven-workspace-90i.pages.dev",
+		"AVEN_GOOGLE_CLIENT_ID": "338433061587-sshbgn6ne1sj4cgg6frp68hlr2rdkaoq.apps.googleusercontent.com",
 		"USE_VECTORS": "true",
 		"ENABLE_PASS2": "true",
 		"LLM_PROVIDER": "workers-ai",
