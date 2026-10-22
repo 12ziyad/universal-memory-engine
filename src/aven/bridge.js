@@ -1,7 +1,7 @@
 /** First-party, versioned Aven facade; never trusts caller-supplied identities. */
 import { changePasswordForUser, getSessionUser, googleAuthStart, issueAuthenticatedSession, login, parseCookies, randomSecret, resetPasswordAfterEmailProof, resolveGoogleUser, sha256Hex, signup, timingSafeEqualString, verifyGoogleIdToken } from "../auth.js";
 import { EMAIL_CHALLENGE_COOKIE, startEmailChallenge, verifyEmailChallenge } from "../lib/passwordless_auth.js";
-import { githubAuthStart } from "../lib/github_auth.js";
+import { githubAuthStart, resolveGithubUser } from "../lib/github_auth.js";
 import { newId } from "../lib/ids.js";
 import { allowRate } from "../lib/rate.js";
 import { createManagedProject, getManagedProjectForUser, listManagedProjects, resolveManagedProject, updateManagedProject } from "../lib/managed_projects.js";
@@ -406,6 +406,34 @@ export async function avenGoogleSignIn(env, person, body, { exchange = googleTok
   if (signedIn.error) return signedIn.status === 403 ? refuse("account_disabled", 403, "This account is disabled.") : failed();
   return directSession(env, resolved.user.id, signedIn.session, { created: Boolean(resolved.created) });
 }
+/**
+ * GitHub sign-in through Aven's own GitHub App, so GitHub's screen names Aven.
+ * Aven exchanges the code with its App and passes the person's token; this
+ * side asks GitHub itself who it belongs to and which email is verified, and
+ * never stores the token.
+ */
+export async function avenGitHubSignIn(env, person, body, { fetchImpl = fetch } = {}) {
+  const headers = { accept: "application/vnd.github+json", authorization: `Bearer ${body.accessToken}`, "x-github-api-version": "2022-11-28", "user-agent": "Itsuki-Aven" };
+  const failed = (code = "github_failed", message = "GitHub sign-in did not complete. Try again.") => refuse(code, 401, message);
+  let profile, emails;
+  try {
+    const [p, e] = await Promise.all([
+      fetchImpl("https://api.github.com/user", { headers, signal: AbortSignal.timeout(15000) }),
+      fetchImpl("https://api.github.com/user/emails", { headers, signal: AbortSignal.timeout(15000) }),
+    ]);
+    if (!p.ok) return failed();
+    if (!e.ok) return failed("github_verified_email_required", "Aven could not read a verified email from GitHub.");
+    profile = await p.json(); emails = await e.json();
+  } catch (error) {
+    console.warn("aven github sign-in failed:", error?.message ?? error);
+    return failed();
+  }
+  const resolved = await resolveGithubUser(env, profile, emails);
+  if (resolved.error) return resolved.error === "account_disabled" ? refuse("account_disabled", 403, "This account is disabled.") : failed("github_verified_email_required", "Your GitHub account needs a verified primary email.");
+  const signedIn = await issueAuthenticatedSession(env, person, resolved.user.id, resolved.created ? "github_signup" : "github_login");
+  if (signedIn.error) return signedIn.status === 403 ? refuse("account_disabled", 403, "This account is disabled.") : failed();
+  return directSession(env, resolved.user.id, signedIn.session, { created: Boolean(resolved.created), github: { id: profile.id, login: profile.login } });
+}
 async function googleTokenExchange({ clientId, clientSecret, code, redirectUri }) {
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -434,6 +462,13 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     if (url.pathname === "/internal/aven/auth/signup" && request.method === "POST") return await directSignIn(request, env, "signup");
     if (url.pathname === "/internal/aven/auth/email/start" && request.method === "POST") return await emailCodeStart(request, env);
     if (url.pathname === "/internal/aven/auth/email/verify" && request.method === "POST") return await emailCodeVerify(request, env, ctx);
+    if (url.pathname === "/internal/aven/auth/github" && request.method === "POST") {
+      const body = await bodyOf(request); onlyFields(body, ["accessToken"]);
+      if (typeof body.accessToken !== "string" || !/^[A-Za-z0-9_]{20,255}$/.test(body.accessToken)) fail("invalid_request");
+      const person = personRequest(request);
+      if (!await allowRate(env.AUTH_LIMITER, `aven:github:${person.headers.get("cf-connecting-ip") || "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
+      return await avenGitHubSignIn(env, person, body);
+    }
     if (url.pathname === "/internal/aven/auth/google" && request.method === "POST") {
       const body = await bodyOf(request); onlyFields(body, ["code", "nonce", "redirectUri"]);
       if (typeof body.code !== "string" || !body.code || body.code.length > 2048 || typeof body.nonce !== "string" || !/^[A-Za-z0-9_-]{32,64}$/.test(body.nonce) || typeof body.redirectUri !== "string") fail("invalid_request");

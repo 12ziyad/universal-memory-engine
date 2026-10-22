@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
-import { avenGoogleSignIn, avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
+import { avenGitHubSignIn, avenGoogleSignIn, avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
 import { generateKeyPair, SignJWT } from "jose";
 import { randomSecret, sha256Hex } from "../src/auth.js";
 
@@ -341,6 +341,33 @@ describe("Aven's own sign-in door", () => {
     expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(401);
     expect((await door("login", { email: address, password: "correct-horse" })).status).toBe(401);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE email_normalized = ?").bind(address.toLowerCase()).first("n")).toBe(0);
+  });
+  it("signs in with a GitHub token from Aven's own GitHub App, by GitHub id and verified email", async () => {
+    const address = email(), id = Math.floor(Math.random() * 1e9);
+    const visitor = new Request("https://itsuki.internal/", { headers: { "cf-connecting-ip": "203.0.113.10" } });
+    const asked = [];
+    const github = (emails, userStatus = 200) => async (url, init) => {
+      asked.push([url, init.headers.authorization]);
+      if (url.endsWith("/user")) return new Response(JSON.stringify({ id, login: "octo-aven" }), { status: userStatus });
+      return new Response(JSON.stringify(emails), { status: 200 });
+    };
+    const verified = [{ email: "other@example.com", primary: false, verified: true }, { email: address, primary: true, verified: true }];
+    const ok = await avenGitHubSignIn(settings, visitor, { accessToken: "ghu_" + "a".repeat(36) }, { fetchImpl: github(verified) });
+    expect(ok.status).toBe(200);
+    const session = await ok.json();
+    expect(session.principal.email).toBe(address);
+    expect(session.created).toBe(true);
+    expect(session.github).toEqual({ id, login: "octo-aven" });
+    expect(asked.map(([u]) => u).sort()).toEqual(["https://api.github.com/user", "https://api.github.com/user/emails"]);
+    expect(asked.every(([, a]) => a === "Bearer ghu_" + "a".repeat(36))).toBe(true);
+    const again = await (await avenGitHubSignIn(settings, visitor, { accessToken: "ghu_" + "b".repeat(36) }, { fetchImpl: github(verified) })).json();
+    expect(again.principal.actorId).toBe(session.principal.actorId);
+    // No verified primary email, or a token GitHub refuses, opens nothing.
+    expect((await avenGitHubSignIn(settings, visitor, { accessToken: "ghu_" + "c".repeat(36) }, { fetchImpl: github([{ email: email(), primary: true, verified: false }]) })).status).toBe(401);
+    expect((await avenGitHubSignIn(settings, visitor, { accessToken: "ghu_" + "d".repeat(36) }, { fetchImpl: github(verified, 401) })).status).toBe(401);
+    const route = (payload) => request("/internal/aven/auth/github", { method: "POST", headers: { ...bridgeHeaders(), ...person }, body: JSON.stringify(payload) });
+    expect((await route({ accessToken: "short" })).status).toBe(400);
+    expect((await route({ accessToken: "ghu_" + "e".repeat(36), extra: 1 })).status).toBe(400);
   });
   it("signs in with Google through Aven's own address and Aven's own Google app", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
