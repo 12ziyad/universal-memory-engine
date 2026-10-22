@@ -1,5 +1,5 @@
 /** First-party, versioned Aven facade; never trusts caller-supplied identities. */
-import { changePasswordForUser, getSessionUser, googleAuthStart, login, parseCookies, randomSecret, resetPasswordAfterEmailProof, sha256Hex, signup, timingSafeEqualString } from "../auth.js";
+import { changePasswordForUser, getSessionUser, googleAuthStart, issueAuthenticatedSession, login, parseCookies, randomSecret, resetPasswordAfterEmailProof, resolveGoogleUser, sha256Hex, signup, timingSafeEqualString, verifyGoogleIdToken } from "../auth.js";
 import { EMAIL_CHALLENGE_COOKIE, startEmailChallenge, verifyEmailChallenge } from "../lib/passwordless_auth.js";
 import { githubAuthStart } from "../lib/github_auth.js";
 import { newId } from "../lib/ids.js";
@@ -379,6 +379,45 @@ async function emailCodeVerify(request, env, ctx) {
   return directSession(env, result.user.id, result.session, { created: Boolean(result.created), passwordReset: resetting });
 }
 
+/**
+ * Google sign-in that returns to Aven's own address, so Google's screen names
+ * Aven and never this service. Aven keeps the state and the nonce; this side
+ * holds Aven's Google client secret, exchanges the code, checks the ID token
+ * against Aven's client and opens the account like any other door.
+ */
+export async function avenGoogleSignIn(env, person, body, { exchange = googleTokenExchange, keyResolver = null } = {}) {
+  if (!env.AVEN_GOOGLE_CLIENT_ID || !env.AVEN_GOOGLE_CLIENT_SECRET) return refuse("google_unavailable", 503, "Google sign-in is not set up yet.");
+  let redirect = null;
+  try { redirect = new URL(body.redirectUri); } catch { /* refused below */ }
+  const allowed = String(env.AVEN_ALLOWED_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (!redirect || redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.pathname !== "/auth/google/callback" || redirect.search || redirect.hash || !allowed.includes(redirect.origin)) fail("invalid_redirect_uri");
+  const failed = () => refuse("google_failed", 401, "Google sign-in did not complete. Try again.");
+  let profile;
+  try {
+    const idToken = await exchange({ clientId: env.AVEN_GOOGLE_CLIENT_ID, clientSecret: env.AVEN_GOOGLE_CLIENT_SECRET, code: body.code, redirectUri: redirect.href });
+    profile = await verifyGoogleIdToken({ ...env, GOOGLE_CLIENT_ID: env.AVEN_GOOGLE_CLIENT_ID }, idToken, { nonce: body.nonce, keyResolver });
+  } catch (error) {
+    console.warn("aven google sign-in failed:", error?.message ?? error);
+    return failed();
+  }
+  const resolved = await resolveGoogleUser(env, profile);
+  if (resolved.error) return resolved.error === "account_disabled" ? refuse("account_disabled", 403, "This account is disabled.") : failed();
+  const signedIn = await issueAuthenticatedSession(env, person, resolved.user.id, resolved.created ? "google_signup" : "google_login");
+  if (signedIn.error) return signedIn.status === 403 ? refuse("account_disabled", 403, "This account is disabled.") : failed();
+  return directSession(env, resolved.user.id, signedIn.session, { created: Boolean(resolved.created) });
+}
+async function googleTokenExchange({ clientId, clientSecret, code, redirectUri }) {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, grant_type: "authorization_code", redirect_uri: redirectUri }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const token = await response.json().catch(() => ({}));
+  if (!response.ok || !token.id_token) throw new Error(token.error ?? `token exchange failed (${response.status})`);
+  return token.id_token;
+}
+
 export async function handleAvenBridge(request, env, ctx, url = new URL(request.url)) {
   if (!url.pathname.startsWith("/aven/") && !url.pathname.startsWith("/internal/aven/")) return null;
   if (!env.AVEN_BRIDGE_SECRET || String(env.AVEN_BRIDGE_SECRET).length < 32) return json({ error: "not_found" }, 404);
@@ -395,6 +434,13 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     if (url.pathname === "/internal/aven/auth/signup" && request.method === "POST") return await directSignIn(request, env, "signup");
     if (url.pathname === "/internal/aven/auth/email/start" && request.method === "POST") return await emailCodeStart(request, env);
     if (url.pathname === "/internal/aven/auth/email/verify" && request.method === "POST") return await emailCodeVerify(request, env, ctx);
+    if (url.pathname === "/internal/aven/auth/google" && request.method === "POST") {
+      const body = await bodyOf(request); onlyFields(body, ["code", "nonce", "redirectUri"]);
+      if (typeof body.code !== "string" || !body.code || body.code.length > 2048 || typeof body.nonce !== "string" || !/^[A-Za-z0-9_-]{32,64}$/.test(body.nonce) || typeof body.redirectUri !== "string") fail("invalid_request");
+      const person = personRequest(request);
+      if (!await allowRate(env.AUTH_LIMITER, `aven:google:${person.headers.get("cf-connecting-ip") || "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
+      return await avenGoogleSignIn(env, person, body);
+    }
     // Possession permits only self-revocation, even after membership is removed.
     if (url.pathname === "/internal/aven/background-grants/revoke" && request.method === "POST") {
       const token = request.headers.get("x-aven-session") ?? "";

@@ -1,7 +1,8 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
-import { avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
+import { avenGoogleSignIn, avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
+import { generateKeyPair, SignJWT } from "jose";
 import { randomSecret, sha256Hex } from "../src/auth.js";
 
 const settings = { ...env, AVEN_BRIDGE_SECRET: "test-only-aven-bridge-shared-secret-at-least-32-characters", AVEN_ALLOWED_ORIGINS: "https://aven.example" };
@@ -340,6 +341,40 @@ describe("Aven's own sign-in door", () => {
     expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(401);
     expect((await door("login", { email: address, password: "correct-horse" })).status).toBe(401);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE email_normalized = ?").bind(address.toLowerCase()).first("n")).toBe(0);
+  });
+  it("signs in with Google through Aven's own address and Aven's own Google app", async () => {
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const address = email(), nonce = "n".repeat(43), at = Math.floor(Date.now() / 1000);
+    const sign = (claims = {}) => new SignJWT({ iss: "https://accounts.google.com", aud: "aven-google-client", sub: `g-${address}`, email: address, email_verified: true, nonce, iat: at, exp: at + 300, ...claims })
+      .setProtectedHeader({ alg: "RS256" }).sign(privateKey);
+    const google = { ...settings, AVEN_GOOGLE_CLIENT_ID: "aven-google-client", AVEN_GOOGLE_CLIENT_SECRET: "test-only-google-secret" };
+    const visitor = new Request("https://itsuki.internal/", { headers: { "cf-connecting-ip": "203.0.113.9" } });
+    const body = { code: "google-code", nonce, redirectUri: "https://aven.example/auth/google/callback" };
+    let sent = null;
+    const ok = await avenGoogleSignIn(google, visitor, body, { exchange: async (x) => { sent = x; return sign(); }, keyResolver: publicKey });
+    expect(ok.status).toBe(200);
+    const session = await ok.json();
+    expect(session.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(session.principal.email).toBe(address);
+    expect(session.created).toBe(true);
+    expect(sent).toEqual({ clientId: "aven-google-client", clientSecret: "test-only-google-secret", code: "google-code", redirectUri: "https://aven.example/auth/google/callback" });
+    expect((await request("/internal/aven/session", { headers: bridgeHeaders(session.token) })).status).toBe(200);
+    // The same Google account signs in to the same person the second time.
+    const again = await (await avenGoogleSignIn(google, visitor, body, { exchange: () => sign(), keyResolver: publicKey })).json();
+    expect(again.principal.actorId).toBe(session.principal.actorId);
+    expect(again.created).toBe(false);
+    // A token for another client or another browser's nonce opens nothing.
+    expect((await avenGoogleSignIn(google, visitor, body, { exchange: () => sign({ aud: "itsuki-google-client" }), keyResolver: publicKey })).status).toBe(401);
+    expect((await avenGoogleSignIn(google, visitor, { ...body, nonce: "m".repeat(43) }, { exchange: () => sign(), keyResolver: publicKey })).status).toBe(401);
+    expect((await avenGoogleSignIn(google, visitor, body, { exchange: () => sign({ email_verified: false }), keyResolver: publicKey })).status).toBe(401);
+    // Only Aven's own callback address, and nothing until both settings exist.
+    await expect(avenGoogleSignIn(google, visitor, { ...body, redirectUri: "https://evil.example/auth/google/callback" }, { exchange: () => sign(), keyResolver: publicKey })).rejects.toThrow();
+    await expect(avenGoogleSignIn(google, visitor, { ...body, redirectUri: "https://aven.example/auth/callback" }, { exchange: () => sign(), keyResolver: publicKey })).rejects.toThrow();
+    expect((await avenGoogleSignIn(settings, visitor, body)).status).toBe(503);
+    const route = (payload, bindings = google) => request("/internal/aven/auth/google", { method: "POST", headers: { ...bridgeHeaders(), ...person }, body: JSON.stringify(payload) }, bindings);
+    expect((await route({ ...body, extra: 1 })).status).toBe(400);
+    expect((await route({ ...body, nonce: "short" })).status).toBe(400);
+    expect((await route(body, settings)).status).toBe(503);
   });
   it("signs up and signs in with a password, returning a working Aven session and no password", async () => {
     const address = email();
