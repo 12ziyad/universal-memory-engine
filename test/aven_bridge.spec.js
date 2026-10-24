@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
-import { avenGitHubSignIn, avenGoogleSignIn, avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
+import { avenGitHubClaim, avenGitHubSignIn, avenGoogleSignIn, avenOAuthReturn, avenPkce } from "../src/aven/bridge.js";
 import { generateKeyPair, SignJWT } from "jose";
 import { randomSecret, sha256Hex } from "../src/auth.js";
 
@@ -368,6 +368,45 @@ describe("Aven's own sign-in door", () => {
     const route = (payload) => request("/internal/aven/auth/github", { method: "POST", headers: { ...bridgeHeaders(), ...person }, body: JSON.stringify(payload) });
     expect((await route({ accessToken: "short" })).status).toBe(400);
     expect((await route({ accessToken: "ghu_" + "e".repeat(36), extra: 1 })).status).toBe(400);
+  });
+  it("opens a guest account with no email, keeps it alive on visits, and lets GitHub claim it once", async () => {
+    const guest = await (await door("guest", {}, { "x-aven-client-ip": `198.51.100.${Math.floor(Math.random() * 200)}` })).json();
+    expect(guest).toMatchObject({ ok: true, guest: true, created: true, principal: { name: "Guest", email: "" } });
+    expect(guest.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Longer than a normal 7-day session, because a guest can't sign in again.
+    expect(guest.expiresAt - Date.now()).toBeGreaterThan(30 * 24 * 3600 * 1000);
+    // A guest works like any account: it can make a project.
+    const atlas = await project(guest, "Guest project");
+    expect(atlas.id).toMatch(/^proj_/);
+    const renewed = await (await request("/internal/aven/auth/guest/renew", { method: "POST", headers: bridgeHeaders(guest.token), body: "{}" })).json();
+    expect(renewed).toMatchObject({ ok: true, renewed: true });
+    expect((await door("guest", { extra: 1 })).status).toBe(400);
+    // GitHub proves who they are; the guest account takes that sign-in and keeps its project.
+    const address = email(), id = Math.floor(Math.random() * 1e9);
+    const github = (emails, userId = id) => async (url) =>
+      url.endsWith("/user") ? new Response(JSON.stringify({ id: userId, login: "octo-guest", name: "Octo Guest" })) : new Response(JSON.stringify(emails));
+    const auth = (token) => env.DB.prepare(`SELECT a.*, u.email FROM aven_bridge_sessions a JOIN users u ON u.id=a.user_id WHERE a.token_hash=?`).bind(token).first();
+    const row = await auth(await sha256Hex(guest.token));
+    const claim = await avenGitHubClaim(settings, row, { accessToken: "ghu_" + "g".repeat(36), sessionToken: guest.token }, { fetchImpl: github([{ email: address, primary: true, verified: true }]) });
+    expect(claim.status).toBe(200);
+    const claimed = await claim.json();
+    expect(claimed).toMatchObject({ claimed: true, principal: { actorId: guest.principal.actorId, email: address, name: "Octo Guest" } });
+    expect(claimed.projects.map((p) => p.id)).toContain(atlas.id);
+    // Signing in with the same GitHub later lands in the same account.
+    const visitor = new Request("https://itsuki.internal/", { headers: { "cf-connecting-ip": "203.0.113.44" } });
+    const back = await (await avenGitHubSignIn(settings, visitor, { accessToken: "ghu_" + "h".repeat(36) }, { fetchImpl: github([{ email: address, primary: true, verified: true }]) })).json();
+    expect(back.principal.actorId).toBe(guest.principal.actorId);
+    // A second claim, or a GitHub account that already has an account, changes nothing.
+    const again = await avenGitHubClaim(settings, await auth(await sha256Hex(guest.token)), { accessToken: "ghu_" + "i".repeat(36), sessionToken: guest.token }, { fetchImpl: github([{ email: email(), primary: true, verified: true }], id + 1) });
+    expect(again.status).toBe(409);
+    const other = await (await door("guest", {}, { "x-aven-client-ip": `198.51.100.${Math.floor(Math.random() * 200)}` })).json();
+    const taken = await avenGitHubClaim(settings, await auth(await sha256Hex(other.token)), { accessToken: "ghu_" + "j".repeat(36), sessionToken: other.token }, { fetchImpl: github([{ email: address, primary: true, verified: true }]) });
+    expect(taken.status).toBe(409);
+    expect((await taken.json()).error.code).toBe("github_account_exists");
+    // A guest erases by typing "delete": there is no email to type back.
+    const erase = (body) => request("/internal/aven/account/erase", { method: "POST", headers: bridgeHeaders(other.token), body: JSON.stringify(body) });
+    expect((await erase({ confirmation: "" })).status).toBe(400);
+    expect((await erase({ confirmation: "DELETE" })).status).toBe(200);
   });
   it("signs in with Google through Aven's own address and Aven's own Google app", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");

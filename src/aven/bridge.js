@@ -2,6 +2,7 @@
 import { changePasswordForUser, getSessionUser, googleAuthStart, issueAuthenticatedSession, login, parseCookies, randomSecret, resetPasswordAfterEmailProof, resolveGoogleUser, sha256Hex, signup, timingSafeEqualString, verifyGoogleIdToken } from "../auth.js";
 import { EMAIL_CHALLENGE_COOKIE, startEmailChallenge, verifyEmailChallenge } from "../lib/passwordless_auth.js";
 import { githubAuthStart, resolveGithubUser } from "../lib/github_auth.js";
+import { claimGuestIdentity, createGuestUser } from "../lib/auth_identity.js";
 import { newId } from "../lib/ids.js";
 import { allowRate } from "../lib/rate.js";
 import { createManagedProject, getManagedProjectForUser, listManagedProjects, resolveManagedProject, updateManagedProject } from "../lib/managed_projects.js";
@@ -309,7 +310,9 @@ function personRequest(request) {
   return new Request("https://itsuki.internal/", { headers });
 }
 async function directSession(env, userId, source, extra = {}) {
-  const token = randomSecret(32), at = Date.now(), expiresAt = Math.min(at + SESSION_TTL, Number(source.expiresAt));
+  // A guest has no password to sign in again with, so their session lasts longer and is renewed on visits.
+  const ttl = extra.guest ? GUEST_TTL : SESSION_TTL;
+  const token = randomSecret(32), at = Date.now(), expiresAt = Math.min(at + ttl, Number(source.expiresAt));
   await env.DB.prepare("INSERT INTO aven_bridge_sessions (id, token_hash, user_id, source_session_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(`${DIRECT_PREFIX}${crypto.randomUUID()}`, await sha256Hex(token), userId, source.id, expiresAt, at).run();
   const auth = await resolveSession(env, new Request("https://itsuki.internal/", { headers: { "x-aven-session": token } }));
@@ -434,6 +437,64 @@ export async function avenGitHubSignIn(env, person, body, { fetchImpl = fetch } 
   if (signedIn.error) return signedIn.status === 403 ? refuse("account_disabled", 403, "This account is disabled.") : failed();
   return directSession(env, resolved.user.id, signedIn.session, { created: Boolean(resolved.created), github: { id: profile.id, login: profile.login } });
 }
+/** How long a guest's session lasts from its last visit; Aven renews it while the person keeps coming back. */
+const GUEST_TTL = 60 * 24 * 60 * 60 * 1000;
+/**
+ * Aven without signing in first: a guest account and its session. Rate
+ * limited per address; the person can later keep the account by attaching
+ * GitHub (see avenGitHubClaim).
+ */
+export async function avenGuest(env, person) {
+  const { id } = await createGuestUser(env);
+  const signedIn = await issueAuthenticatedSession(env, person, id, "guest_signup");
+  if (signedIn.error) return refuse("guest_failed", 503, "Aven couldn't start. Try again.");
+  const until = Date.now() + GUEST_TTL;
+  await env.DB.prepare("UPDATE sessions SET expires_at = MAX(expires_at, ?) WHERE id = ? AND user_id = ?").bind(until, signedIn.session.id, id).run();
+  return directSession(env, id, { ...signedIn.session, expiresAt: until }, { created: true, guest: true });
+}
+/** Keeps a returning guest signed in: their session runs another GUEST_TTL from now. */
+async function renewGuest(env, auth) {
+  if (auth.background || auth.email) return json({ ok: true, renewed: false, expiresAt: auth.expires_at });
+  const until = Date.now() + GUEST_TTL;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE aven_bridge_sessions SET expires_at = MAX(expires_at, ?) WHERE id = ? AND user_id = ? AND revoked_at IS NULL").bind(until, auth.id, auth.user_id),
+    env.DB.prepare("UPDATE sessions SET expires_at = MAX(expires_at, ?) WHERE id = ? AND user_id = ? AND revoked_at IS NULL").bind(until, auth.source_session_id, auth.user_id),
+  ]);
+  return json({ ok: true, renewed: true, expiresAt: until });
+}
+/**
+ * A guest keeps their account by signing in with GitHub: GitHub proves who
+ * they are and which email is theirs, and that becomes the account's sign-in.
+ * If that GitHub account already has an account, nothing changes and Aven
+ * says so; accounts are never merged.
+ */
+export async function avenGitHubClaim(env, auth, body, { fetchImpl = fetch } = {}) {
+  if (auth.background) fail("background_scope_forbidden", 403);
+  if (auth.email) return refuse("not_a_guest", 409, "This account already has a sign-in.");
+  const headers = { accept: "application/vnd.github+json", authorization: `Bearer ${body.accessToken}`, "x-github-api-version": "2022-11-28", "user-agent": "Itsuki-Aven" };
+  let profile, emails;
+  try {
+    const [p, e] = await Promise.all([
+      fetchImpl("https://api.github.com/user", { headers, signal: AbortSignal.timeout(15000) }),
+      fetchImpl("https://api.github.com/user/emails", { headers, signal: AbortSignal.timeout(15000) }),
+    ]);
+    if (!p.ok) return refuse("github_failed", 401, "GitHub sign-in did not complete. Try again.");
+    if (!e.ok) return refuse("github_verified_email_required", 401, "Aven could not read a verified email from GitHub.");
+    profile = await p.json(); emails = await e.json();
+  } catch (error) {
+    console.warn("aven github claim failed:", error?.message ?? error);
+    return refuse("github_failed", 401, "GitHub sign-in did not complete. Try again.");
+  }
+  const primary = Array.isArray(emails) ? emails.find((m) => m?.primary === true && m?.verified === true) : null;
+  if (!profile?.id || !primary?.email) return refuse("github_verified_email_required", 401, "Your GitHub account needs a verified primary email.");
+  const claimed = await claimGuestIdentity(env, auth.user_id, {
+    provider: "github", subject: String(profile.id), email: primary.email, name: profile.name || profile.login, verifiedAt: Date.now(),
+  });
+  if (claimed.error === "identity_taken") return refuse("github_account_exists", 409, "This GitHub account already has an Aven account.");
+  if (claimed.error) return refuse("claim_failed", 409, "Aven couldn't attach GitHub to this account. Try again.");
+  const fresh = await resolveSession(env, new Request("https://itsuki.internal/", { headers: { "x-aven-session": body.sessionToken } }));
+  return json({ ...(await sessionResult(env, fresh)), claimed: true, github: { id: profile.id, login: profile.login } });
+}
 async function googleTokenExchange({ clientId, clientSecret, code, redirectUri }) {
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -468,6 +529,12 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       const person = personRequest(request);
       if (!await allowRate(env.AUTH_LIMITER, `aven:github:${person.headers.get("cf-connecting-ip") || "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
       return await avenGitHubSignIn(env, person, body);
+    }
+    if (url.pathname === "/internal/aven/auth/guest" && request.method === "POST") {
+      const body = await bodyOf(request); onlyFields(body, []);
+      const person = personRequest(request);
+      if (!await allowRate(env.AUTH_LIMITER, `aven:guest:${person.headers.get("cf-connecting-ip") || "unknown"}`, { fail: "closed" })) fail("rate_limited", 429);
+      return await avenGuest(env, person);
     }
     if (url.pathname === "/internal/aven/auth/google" && request.method === "POST") {
       const body = await bodyOf(request); onlyFields(body, ["code", "nonce", "redirectUri"]);
@@ -504,6 +571,13 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
       return json({ ok: true, id: body.id }, 201);
     }
     if (url.pathname === "/internal/aven/session" && request.method === "GET") return json(await sessionResult(env, auth, url.searchParams.get("projects") !== "0"));
+    if (url.pathname === "/internal/aven/auth/guest/renew" && request.method === "POST") return await renewGuest(env, auth);
+    if (url.pathname === "/internal/aven/auth/github/claim" && request.method === "POST") {
+      const body = await bodyOf(request); onlyFields(body, ["accessToken"]);
+      if (typeof body.accessToken !== "string" || !/^[A-Za-z0-9_]{20,255}$/.test(body.accessToken)) fail("invalid_request");
+      if (!await allowRate(env.AUTH_LIMITER, `aven:claim:${auth.user_id}`, { fail: "closed" })) fail("rate_limited", 429);
+      return await avenGitHubClaim(env, auth, { ...body, sessionToken: request.headers.get("x-aven-session") ?? "" });
+    }
     if (url.pathname === "/internal/aven/account/password" && request.method === "POST") {
       const body = await bodyOf(request);
       onlyFields(body, ["currentPassword", "newPassword"]);
@@ -521,7 +595,8 @@ export async function handleAvenBridge(request, env, ctx, url = new URL(request.
     if (url.pathname === "/internal/aven/account/erase" && request.method === "POST") {
       if (auth.background) fail("background_scope_forbidden", 403);
       const body = await bodyOf(request); onlyFields(body, ["confirmation"]);
-      if (typeof body.confirmation !== "string" || body.confirmation.trim().toLowerCase() !== String(auth.email ?? "").toLowerCase()) fail("confirmation_mismatch", 400);
+      const expected = auth.email ? String(auth.email).toLowerCase() : "delete";
+      if (typeof body.confirmation !== "string" || body.confirmation.trim().toLowerCase() !== expected) fail("confirmation_mismatch", 400);
       try {
         const result = await runAuditedMutation(env, { actorUserId: auth.user_id, actorType: "user", action: "account.erased", targetType: "user", targetId: auth.user_id,
           requestId: request.headers.get("x-request-id"), waitUntil: ctx?.waitUntil ? (p) => ctx.waitUntil(p) : null },
