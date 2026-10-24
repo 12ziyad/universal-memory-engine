@@ -813,6 +813,23 @@ function credentialGuardStatement(env, { credential, actorUserId, now = Date.now
 			...scopeLiterals,
 		);
 	}
+	if (credential.kind === "aven_grant") {
+		// An unattended Aven key: the grant is live, the account active, and the
+		// grant still bound to the project being written.
+		if (!credential.id) return null;
+		return env.DB.prepare(
+			`INSERT INTO fence_guard (violation)
+			 SELECT 1 WHERE NOT EXISTS (
+			   SELECT 1 FROM aven_background_grants g
+			    JOIN users u ON u.id = g.user_id
+			    WHERE g.id = ?
+			      AND g.user_id = ?
+			      AND g.revoked_at IS NULL
+			      AND COALESCE(u.status, 'active') = 'active'
+			      AND (? IS NULL OR g.project_id = ?)
+			 )`,
+		).bind(credential.id, actorUserId, credential.projectId ?? null, credential.projectId ?? null);
+	}
 	if (credential.kind === "session") {
 		if (!credential.id) return null;
 		return env.DB.prepare(
@@ -886,6 +903,16 @@ async function credentialStillValid(env, { credential, actorUserId }) {
 			if (row.user_status !== "active" || row.erased) return false;
 			if (credential.projectId && row.project_id !== credential.projectId) return false;
 			return carriesScope(row.scopes_json);
+		}
+		if (credential.kind === "aven_grant") {
+			const grant = await env.DB.prepare(
+				`SELECT g.revoked_at, g.project_id, u.status AS user_status
+				   FROM aven_background_grants g JOIN users u ON u.id = g.user_id
+				  WHERE g.id = ? AND g.user_id = ? LIMIT 1`,
+			).bind(credential.id, actorUserId).first();
+			if (!grant || grant.revoked_at != null) return false;
+			if ((grant.user_status ?? "active") !== "active") return false;
+			return !credential.projectId || grant.project_id === credential.projectId;
 		}
 		const row = await env.DB.prepare(
 			"SELECT revoked_at, expires_at FROM sessions WHERE id = ? AND user_id = ? LIMIT 1",

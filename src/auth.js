@@ -472,12 +472,18 @@ export async function changePassword(env, request, body, options = {}) {
 		const result = { error: "unauthorized", status: 401 };
 		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
 	}
+	return changePasswordForUser(env, request, auth.userId, body, options);
+}
+
+/** The same change for an identity the caller already proved (Aven's bridge session). */
+export async function changePasswordForUser(env, request, userId, body, options = {}) {
+	const auditIntent = options?.auditIntent ?? null;
 	const newPassword = String(body?.newPassword ?? "");
 	if (newPassword.length < 8) {
 		const result = { error: "New password must be at least 8 characters", status: 400 };
 		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
 	}
-	const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.userId).first();
+	const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(userId).first();
 	if (!row) {
 		const result = { error: "unauthorized", status: 401 };
 		return auditIntent ? commitAuditedNoop(env, auditIntent, result) : result;
@@ -513,6 +519,38 @@ export async function changePassword(env, request, body, options = {}) {
 	await recordLoginEvent(env, request, row.id, row.password_hash ? "password_changed" : "password_set");
 	const result = { ok: true, status: 200 };
 	return auditIntent ? auditedMutationResult(result, auditIntent) : result;
+}
+
+/**
+ * Set a new password after the person proved the mailbox with a fresh
+ * one-time code. Every other session closes, so whoever knew the old password
+ * loses access; `keepSessionId` is the session that code just opened.
+ */
+export async function resetPasswordAfterEmailProof(env, request, userId, keepSessionId, newPassword, { auditIntent }) {
+	const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(userId).first();
+	if (!row || row.status === "disabled") return commitAuditedNoop(env, auditIntent, { error: "unauthorized", status: 401 });
+	const password = await hashPassword(String(newPassword));
+	const stamp = now();
+	const updatedAt = Math.max(stamp, Number(row.updated_at ?? 0) + 1);
+	await commitAuditedBatch(env, auditIntent, [
+		env.DB.prepare("UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ? AND updated_at IS ?")
+			.bind(password.passwordHash, password.passwordSalt, updatedAt, row.id, row.updated_at ?? null),
+		env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL")
+			.bind(stamp, row.id, keepSessionId),
+	], {
+		preconditions: [auditInvariantStatement(
+			env,
+			"SELECT 1 FROM users WHERE id = ? AND COALESCE(status, 'active') <> 'disabled' AND updated_at IS ?",
+			[row.id, row.updated_at ?? null],
+		)],
+		postconditions: [auditInvariantStatement(
+			env,
+			"SELECT 1 FROM users WHERE id = ? AND password_hash = ? AND updated_at = ?",
+			[row.id, password.passwordHash, updatedAt],
+		)],
+	});
+	await recordLoginEvent(env, request, row.id, "password_reset");
+	return auditedMutationResult({ ok: true, status: 200 }, auditIntent);
 }
 
 export async function logout(env, request) {

@@ -30,6 +30,7 @@
  */
 
 import { getConfig } from "../config.js";
+import { AVEN_MODEL_PROFILE, avenModelEnvironment } from "../aven/model-profile.js";
 import { newId } from "../lib/ids.js";
 import { managedMutationGuardStatement } from "../lib/managed_projects.js";
 import { canonicalMemoryScope, normalizeProjectScope } from "../lib/project_scope.js";
@@ -990,6 +991,7 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 			sourcePacketId: sourcePacket?.id ?? null,
 			payload: {
 				pageId: proposedPageId,
+				aiProfile: input.aiProfile === AVEN_MODEL_PROFILE ? AVEN_MODEL_PROFILE : null,
 				title: proposedTitle,
 				stagedReceiptId: proposedReceiptId,
 				sourceContentHash: sourcePacket?.content_hash ?? null,
@@ -1036,6 +1038,7 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	const ownerPayload = jobClaim.claimed
 		? {
 			pageId: proposedPageId,
+			aiProfile: input.aiProfile === AVEN_MODEL_PROFILE ? AVEN_MODEL_PROFILE : null,
 			title: proposedTitle,
 			stagedReceiptId: proposedReceiptId,
 			sourceContentHash: sourcePacket?.content_hash ?? null,
@@ -1148,6 +1151,7 @@ export async function stageMcpConversation(env, ctx, userId, input = {}) {
 	const { _testMcpFault: _discardMcpFault, ...jobTestOverrides } = input.testOverrides ?? {};
 	const job = {
 		jobId,
+		aiProfile: ownerPayload.aiProfile ?? null,
 		pageId,
 		pageAdvance,
 		conversationKey: ownerPayload.conversationKey ?? null,
@@ -1833,6 +1837,7 @@ export async function announceMcpTerminal(env, userId, job, defer = null) {
  * (the DO retries with backoff, bounded by attempts).
  */
 export async function enrichMcpConversation(env, userId, job, defer = null) {
+	env = avenModelEnvironment(env, job.aiProfile);
 	// REST-lane page followers ride the same queue machinery but never run
 	// extraction themselves — they wait on the ingest lane's durable verdict
 	// and finalize the Conversation Page from it.

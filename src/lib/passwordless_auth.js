@@ -127,13 +127,19 @@ function maskedEmail(email) {
 	return `${visible}${"*".repeat(Math.max(2, Math.min(8, local.length - visible.length)))}@${domain}`;
 }
 
-function mailContent(code) {
+// Aven signs people in through this same challenge; its people never see Itsuki's name.
+const BRANDS = {
+	itsuki: { name: "Itsuki", intro: "Enter this code in the browser where you started signing in." },
+	aven: { name: "Aven", intro: "Enter this code on the Aven page where you asked for it." },
+};
+
+function mailContent(code, brand = BRANDS.itsuki) {
 	return {
-		subject: "Your Itsuki sign-in code",
+		subject: `Your ${brand.name} sign-in code`,
 		...renderEmail({
-			kicker: "Itsuki · secure access",
+			kicker: `${brand.name} · secure access`,
 			heading: "Your sign-in code",
-			intro: "Enter this code in the browser where you started signing in.",
+			intro: brand.intro,
 			blocks: [
 				// The label keeps "Your verification code is: NNNNNN" on one line
 				// in the plain-text body; people and tooling both key on it.
@@ -154,8 +160,13 @@ async function requestFingerprint(env, request) {
 	};
 }
 
-/** Create and synchronously deliver one browser-bound email challenge. */
-export async function startEmailChallenge(env, request, body = {}) {
+/**
+ * Create and synchronously deliver one browser-bound email challenge. The
+ * result's `challenge` is the browser binding; Itsuki puts it in a cookie,
+ * Aven keeps it in its own.
+ */
+export async function startEmailChallenge(env, request, body = {}, { brand = "itsuki" } = {}) {
+	const voice = BRANDS[brand] ?? BRANDS.itsuki;
 	const email = normalizeEmail(body.email);
 	if (!isValidEmail(email)) return { error: "A valid email is required", status: 400 };
 	const secretValue = secret(env);
@@ -213,10 +224,10 @@ export async function startEmailChallenge(env, request, body = {}) {
 		Math.ceil(EMAIL_CHALLENGE_TTL_MS / 1000),
 	);
 	try {
-		const content = mailContent(code);
+		const content = mailContent(code, voice);
 		await env.EMAIL.send({
 			to: email,
-			from: { email: senderAddress(env), name: "Itsuki" },
+			from: { email: senderAddress(env), name: voice.name },
 			subject: content.subject,
 			text: content.text,
 			html: content.html,
@@ -232,6 +243,7 @@ export async function startEmailChallenge(env, request, body = {}) {
 	return {
 		status: 202,
 		cookie,
+		challenge: `${id}.${browserToken}`,
 		body: {
 			ok: true,
 			email: maskedEmail(email),

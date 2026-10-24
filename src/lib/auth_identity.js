@@ -133,3 +133,55 @@ export async function resolveVerifiedIdentity(env, {
 	return { user, created: user.id === id };
 }
 
+
+/**
+ * Someone using Aven before choosing how to sign in: an account with no
+ * email and no password, reachable only through the session that made it.
+ */
+export async function createGuestUser(env) {
+	const id = newId("user");
+	const stamp = Date.now();
+	await env.DB.prepare(
+		`INSERT INTO users
+		 (id, email, email_normalized, password_hash, password_salt, name, created_at, updated_at,
+		  status, role, terms_accepted_at, email_verified_at, google_sub)
+		 VALUES (?, NULL, NULL, NULL, NULL, 'Guest', ?, ?, 'active', 'user', ?, NULL, NULL)`,
+	).bind(id, stamp, stamp, stamp).run();
+	await stampEarlyAccess(env, id, stamp);
+	return { id };
+}
+
+/**
+ * Gives a guest account a proven sign-in (GitHub today), so the work it holds
+ * stays with the person. Refused when that identity or its email already has
+ * an account: two accounts are never merged silently.
+ */
+export async function claimGuestIdentity(env, userId, { provider, subject, email, name = null, verifiedAt = Date.now() }) {
+	provider = String(provider ?? "").trim().toLowerCase();
+	subject = String(subject ?? "").trim();
+	email = String(email ?? "").trim().toLowerCase();
+	if (!PROVIDERS.has(provider) || !subject || !email || !verifiedAt) return { error: "identity_invalid" };
+	const guest = await env.DB.prepare("SELECT * FROM users WHERE id = ? AND email IS NULL AND status = 'active' LIMIT 1")
+		.bind(userId).first();
+	if (!guest) return { error: "not_a_guest" };
+	if (await identityUser(env, provider, subject)) return { error: "identity_taken" };
+	const byEmail = await env.DB.prepare("SELECT id FROM users WHERE email_normalized = ? LIMIT 1").bind(email).first();
+	if (byEmail) return { error: "identity_taken" };
+	const stamp = Date.now();
+	const [, updated] = await env.DB.batch([
+		env.DB.prepare(
+			`INSERT OR IGNORE INTO auth_identities
+			 (id, user_id, provider, provider_subject, provider_email, email_verified_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).bind(newId("aid"), userId, provider, subject, email, verifiedAt, stamp, stamp),
+		env.DB.prepare(
+			`UPDATE users
+			    SET email = ?, email_normalized = ?, email_verified_at = ?, updated_at = ?,
+			        name = CASE WHEN COALESCE(name, '') IN ('', 'Guest') THEN ? ELSE name END
+			  WHERE id = ? AND email IS NULL`,
+		).bind(email, email, verifiedAt, stamp, cleanName(name) ?? "Guest", userId),
+	]);
+	const user = await identityUser(env, provider, subject);
+	if (!user || user.id !== userId || !updated.meta.changes) return { error: "identity_link_failed" };
+	return { user };
+}

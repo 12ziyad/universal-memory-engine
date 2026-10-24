@@ -89,6 +89,13 @@ export const PURGE_SPACE_TABLES = [
 ];
 
 export const CENSUS = {
+	// Aven first-party credentials contain only hashes and canonical identity
+	// references. They are account-scoped, never memory-space content. Session
+	// or account deletion cascades through their declared SQLite foreign keys.
+	aven_authorization_codes: { kind: "account", purge: "retain", projectDelete: "retain", archive: "retain", accountErase: "delete", why: "short-lived hashed login code; FK cascade on source-session or account deletion" },
+	aven_bridge_sessions: { kind: "account", purge: "retain", projectDelete: "retain", archive: "retain", accountErase: "delete", why: "hashed first-party session; current project membership rechecked per request; FK cascade on source-session or account deletion" },
+	aven_background_grants: { kind: "account", purge: "retain", projectDelete: "retain", archive: "retain", accountErase: "delete", why: "hash-only scoped background authorization; archived/deleted projects and current membership checked on every request; hard project/account deletion cascades; paused resources are revoked by Aven reconciliation" },
+	aven_creation_claims: { kind: "account", purge: "retain", projectDelete: "retain", archive: "retain", accountErase: "delete", why: "content-free actor/project operation replay fence; retain after memory/project deletion so retries cannot resurrect objects; FK cascade on account erasure" },
 	// ——— memory-space content: purged and deleted ————————————————————————
 	...Object.fromEntries(PURGE_SPACE_TABLES.map((table) => [table, {
 		kind: "memory_space",

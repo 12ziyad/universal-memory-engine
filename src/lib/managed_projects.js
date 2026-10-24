@@ -345,6 +345,9 @@ export async function getManagedProject(env, ownerUserId, projectId) {
 export async function createManagedProject(env, ownerUserId, input = {}, {
 	organizationId = null,
 	auditIntent = null,
+	// Trusted first-party adapters may atomically attach transport dedupe.
+	// This callback never comes from request data; existing callers add none.
+	transactionStatements = null,
 } = {}) {
 	validateProjectInput(input, { requireName: true });
 	await ensureDefaultManagedProject(env, ownerUserId);
@@ -377,7 +380,9 @@ export async function createManagedProject(env, ownerUserId, input = {}, {
 		);
 		let result;
 		if (auditIntent) {
-			[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+			const attached = transactionStatements ? transactionStatements(id) : [];
+			if (!Array.isArray(attached)) throw new ManagedProjectError("invalid_transaction", "Invalid project transaction.", 500);
+			[result] = await commitAuditedBatch(env, auditIntent, [statement, ...attached], {
 				preconditions: [auditInvariantStatement(
 					env,
 					`SELECT 1 WHERE
@@ -443,6 +448,8 @@ export async function createManagedProject(env, ownerUserId, input = {}, {
 
 export async function updateManagedProject(env, ownerUserId, projectId, input = {}, expectedRevision, options = {}) {
 	const auditIntent = options?.auditIntent ?? null;
+	const attached = options?.transactionStatements ? options.transactionStatements(projectId) : [];
+	if (!Array.isArray(attached)) throw new ManagedProjectError("invalid_transaction", "Invalid project transaction.", 500);
 	validateProjectInput(input);
 	const expected = cleanExpectedRevision(expectedRevision);
 	const current = await getManagedProject(env, ownerUserId, projectId);
@@ -454,6 +461,13 @@ export async function updateManagedProject(env, ownerUserId, projectId, input = 
 		: current.description;
 	if (name === current.name && description === current.description) {
 		const unchanged = { project: current, previousProject: current, changed: false };
+		if (auditIntent && attached.length) {
+			await commitAuditedBatch(env, auditIntent, attached, { preconditions: [auditInvariantStatement(
+				env, "SELECT 1 FROM managed_projects WHERE id = ? AND owner_user_id = ? AND status = 'active' AND created_at = ? AND updated_at = ?",
+				[projectId, ownerUserId, current.created_at, current.updated_at],
+			)] });
+			return auditedMutationResult(unchanged, auditIntent);
+		}
 		return auditIntent ? commitAuditedNoop(env, auditIntent, unchanged) : unchanged;
 	}
 	const updatedAt = Math.max(Date.now(), Number(current.updated_at) + 1);
@@ -475,7 +489,7 @@ export async function updateManagedProject(env, ownerUserId, projectId, input = 
 		);
 		let result;
 		if (auditIntent) {
-			[result] = await commitAuditedBatch(env, auditIntent, [statement], {
+			[result] = await commitAuditedBatch(env, auditIntent, [statement, ...attached], {
 				preconditions: [auditInvariantStatement(
 					env,
 					"SELECT 1 FROM managed_projects WHERE id = ? AND owner_user_id = ? AND status = 'active' AND created_at = ? AND updated_at = ?",

@@ -8,6 +8,7 @@
  */
 
 import { createMcpHandler } from "agents/mcp";
+import { avenOAuthReturn, handleAvenBridge } from "./aven/bridge.js";
 
 import { CATEGORIES, getConfig, LEGACY_HOSTS, PUBLIC_ORIGIN } from "./config.js";
 import { responseText } from "./pipeline/llm.js";
@@ -2474,7 +2475,7 @@ const routes = {
 
 	"GET /auth/google/callback": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, clientIp(request)))) return tooManyFor("auth");
-		const result = await googleAuthCallback(env, request);
+		const result = avenOAuthReturn(request, env, await googleAuthCallback(env, request));
 		const headers = new Headers({ location: new URL(result.redirect, request.url).toString() });
 		for (const cookie of result.cookies ?? []) headers.append("set-cookie", cookie);
 		return new Response(null, { status: 302, headers });
@@ -2493,7 +2494,7 @@ const routes = {
 
 	"GET /auth/github/callback": async (request, env) => {
 		if (!(await allowRate(env.AUTH_LIMITER, `github-callback:${clientIp(request)}`))) return tooManyFor("auth");
-		const result = await githubAuthCallback(env, request);
+		const result = avenOAuthReturn(request, env, await githubAuthCallback(env, request));
 		const headers = new Headers({
 			location: new URL(result.redirect, request.url).toString(),
 			"cache-control": "no-store",
@@ -5606,6 +5607,8 @@ async function handleRequestInner(request, env, ctx, url) {
 		// OAuth 2.1 for the MCP server: discovery metadata, authorization,
 		// consent, token, revocation, registration. Returns null for anything
 		// that is not an OAuth path, so the rest of the table is untouched.
+		const avenResponse = await handleAvenBridge(request, env, ctx, url);
+		if (avenResponse) return avenResponse;
 		const oauthResponse = await handleOAuthRoutes(request, env, ctx, url);
 		if (oauthResponse) return oauthResponse;
 
